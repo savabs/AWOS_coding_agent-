@@ -1,0 +1,46 @@
+{
+  "servers": {
+    "sequential-thinking": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+      "description": "Structured multi-step reasoning. Use for complex decisions, architecture tradeoffs, and any task requiring ordered deductive steps."
+    },
+    "git": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-git", "--repository", "."],
+      "description": "Git operations: status, log, diff, add, commit, branch, show. Use for source control tasks."
+    },
+    "memory": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "description": "Persistent knowledge graph across sessions. Store entities, relations, and observations. Survives context window resets."
+    },
+    "tavily": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "tavily-mcp@0.1.4"],
+      "env": {
+        "TAVILY_API_KEY": "${TAVILY_API_KEY}"
+      },
+      "description": "Internet search. Cost: basic=1cr, advanced=2cr, research=5-20cr. Always prefer fetch_webpage for known URLs. Only use tavily for discovery."
+    },
+    "github": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      },
+      "description": "GitHub: issues, PRs, file contents, branches, commits, search code. Requires GITHUB_TOKEN env var."
+    },
+    "context7": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp@latest"],
+      "description": "Live, version-accurate library documentation. Use before implementing any third-party library to get current API docs instead of relying on training data."
+    }
+  }
+}

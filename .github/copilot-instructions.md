@@ -224,3 +224,130 @@ Checks: all task steps marked done, tests pass, lint clean, checkpoint written, 
 3. Mark completed task steps
 4. If checkpoint count > 30: `python scripts/rotate_checkpoints.py --keep 15`
 5. Recommend fresh chat session
+
+---
+
+## Session Auto-Startup (MANDATORY — execute at the start of EVERY session)
+
+Before responding to ANY user request, the agent MUST complete this cold-start ritual:
+
+**Step 1 — Run the warmup script:**
+```bash
+python scripts/session_warmup.py
+```
+This prints: latest checkpoint, active tasks with step counts, last commits, project snapshot.
+If the script doesn't exist, continue to Step 2 manually.
+
+**Step 2 — Load project state (if warmup script unavailable):**
+1. Read `memories/repo/project_structure.md` — canonical project facts
+2. List `docs/memory/` → read the most recent checkpoint file
+3. List `tasks/active/` → read every active task file
+
+**Step 3 — Discover available tools:**
+Call `tool_search` with `"file read write search terminal web git memory"` to load the full
+tool set. Declare which MCP servers are active (check `.vscode/mcp.json`).
+Refer to `TOOL_MANIFEST.md` for the full capability map.
+
+**Step 4 — Declare operational state** before answering:
+```
+=== SESSION STATE ===
+Project: <name>
+Active task: <file> — Step <N>: <description>
+Last checkpoint: <date> — <one-line summary>
+Next action: <specific next step>
+Tools: file_io ✓ | terminal ✓ | web_free ✓ | tavily ✓/✗ | git ✓/✗ | github ✓/✗
+=====================
+```
+
+**Never skip the cold-start.** A session that skips state-loading diverges from reality within 2–3 turns.
+
+---
+
+## Tool Capability Matrix
+
+| Category | Tool | Cost | When to Use |
+|---|---|---|---|
+| File I/O | read_file, create_file, replace_string_in_file | Free | Always prefer over terminal for file ops |
+| Search | grep_search, file_search, semantic_search | Free | Default for codebase navigation |
+| Terminal | run_in_terminal, get_terminal_output | Free | Tests, scripts, git commands, API probing |
+| Web (free) | fetch_webpage | Free | Known URLs — official docs, GitHub READMEs |
+| Web (1cr) | tavily_search basic, max_results=5 | 1 credit | Discovery when URL is unknown |
+| Web (2cr) | tavily_search advanced | 2 credits | Complex/niche topics only |
+| Web (5-20cr) | tavily_research | 5–20 credits | **User approval required** |
+| Memory | memory tool (view/create/str_replace) | Free | Persistent notes across sessions |
+| Git | mcp_git_* (load via tool_search) | Free | Source control operations |
+| GitHub | mcp_github_* (load via tool_search) | Free | Issues, PRs, remote repo ops |
+| Reasoning | mcp_sequential-th_sequentialthinking | Free | Complex decisions, architecture tradeoffs |
+| Library docs | mcp_context7_* (load via tool_search) | Free | Current API docs for any library |
+
+**Tool discovery:** Call `tool_search("description of what you need")` to load deferred tools.
+Never assume a tool exists — verify first.
+
+**Preferred order for web research:**
+1. Known URL → `fetch_webpage` (free, always first)
+2. Need to find URL → `tavily_search` basic (1 credit)
+3. Read found URL → `fetch_webpage` (free again)
+4. Terminal test → free and ground truth (prefer for API verification)
+5. `tavily_research` → only with explicit user approval
+
+---
+
+## Autonomous Execution Rights
+
+The agent MAY execute the following **without asking for confirmation:**
+
+**Reads (always safe):**
+- Read any file anywhere in the workspace
+- `git status`, `git log`, `git diff` — read-only git
+- `fetch_webpage` for any URL
+- `tavily_search` up to 5 total credits per session
+
+**Writes to designated directories (safe):**
+- `docs/research/`, `docs/specs/`, `docs/memory/` — workflow artifacts
+- `tasks/active/`, `tasks/done/` — task tracking
+- `memories/` — project + session memory
+- `wiki/` — knowledge base pages
+
+**Commands (safe):**
+- Run tests: `pytest`, `python -m pytest`
+- Run lint: `ruff check`, `obsidian_lint.py`, `fact_lint.py`
+- Run automation: `session_warmup.py`, `session_checkpoint.py`, `quality_gate.py`, `rotate_checkpoints.py`
+- `git add`, `git commit` — local commits only
+
+**The agent MUST ask before:**
+- Deleting any file or directory (`rm`, `unlink`, `shutil.rmtree`)
+- `git push`, `git push --force`, `git reset --hard`
+- Modifying implementation files NOT listed in the active spec
+- Spending >5 Tavily credits in one operation
+- Any irreversible action on shared/production systems
+- Amending published commits
+
+---
+
+## Mandatory Pre-Search Rule
+
+**Before implementing ANY of the following, run an internet search first — no exceptions:**
+
+| Trigger | Required Action |
+|---|---|
+| Using a library for the first time this session | Fetch its official docs page |
+| Calling an external API | Verify endpoint, params, auth, rate limits |
+| Implementing a mathematical method | Cite the paper or reference docs |
+| Using an unfamiliar data format | Read the spec |
+| Adding a new dependency | Check current version, license, PyPI page |
+
+**Search workflow:**
+1. Identify the exact concept (be specific — not "yfinance" but "yfinance futures ticker format")
+2. Search with 2–3 keyword variants
+3. Read official docs via `fetch_webpage`
+4. Record verified sources in the research file **before writing code**
+
+**Zero-hallucination policy:** API endpoints, function signatures, ticker symbols, exchange codes,
+response schemas, mathematical properties — never assert these from memory alone.
+Mark as "UNVERIFIED" if you cannot verify. Never guess.
+
+**Terminal probing beats search for verification:**
+```bash
+python -c "import yfinance; print(yfinance.Ticker('GC=F').history(period='1d'))"
+```
+Running the actual call is free, fast, and definitive. Do this before searching.
