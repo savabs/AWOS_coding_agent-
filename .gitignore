@@ -1,0 +1,100 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.env
+
+# Testing
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+*.coveragerc
+
+# IDEs
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*.swa
+.DS_Store
+Thumbs.db
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+
+# Database / cache files
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+.cache/
+*.cache
+
+# Model artifacts (large files — store separately)
+*.pkl
+*.pickle
+*.pt
+*.pth
+*.bin
+*.onnx
+*.h5
+*.hdf5
+models/weights/
+checkpoints/weights/
+
+# Data (raw data should not be in git)
+data/raw/
+data/external/
+
+# Logs
+*.log
+logs/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Node (if any frontend)
+node_modules/
+.npm
+
+# Obsidian workspace state (not configuration)
+.obsidian/workspace
+.obsidian/workspace.json
+.obsidian/cache
+.obsidian/plugins/*/data.json
+
+# Checkpoint archive (large, historical — optional to include)
+# docs/memory/archive/
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db

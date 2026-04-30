@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "myproject-agent"
+version = "0.1.0"
+description = "Agent scaffold built on Agentic OS"
+requires-python = ">=3.10"
+dependencies = [
+    # Add your project dependencies here
+    # "openai>=1.0",
+    # "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "ruff>=0.1",
+]
+
+[project.scripts]
+# Uncomment and adjust for your CLI entry point
+# myproject = "agent.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["scaffold/tests"]
+addopts = "-v"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
