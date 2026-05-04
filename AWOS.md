@@ -27,7 +27,7 @@
 | Version | Date | Change |
 |---|---|---|
 | v1.0 | 2026-04-28 | Initial standalone AWOS, distilled from TirraMind 100+ session history |
-| v1.1 | 2026-05-04 | Added Section 13 — RL/LLM Training Patterns (from entity_ai / research_SLAI project) |
+| v1.1 | 2026-05-04 | Added `protocols/RL_TRAINING_PROTOCOL.md`; Section 13 summary reference in AWOS.md |
 
 ---
 
@@ -631,6 +631,24 @@ Checks:
 - [ ] No new errors in `get_errors` for modified files
 - [ ] Checkpoint has been written
 - [ ] `memories/repo/project_structure.md` is updated with any new metrics
+
+---
+
+## 13. RL / LLM Training Patterns
+
+Full protocol: [[RL_TRAINING_PROTOCOL]] → `protocols/RL_TRAINING_PROTOCOL.md`
+
+Distilled from entity_ai / research_SLAI (Qwen3-1.7B + GRPO, Kaggle, May 2026).
+Apply to any project that fine-tunes an LLM with a reward signal.
+
+| Pattern | One-line rule |
+|---|---|
+| **Staged Reward** | Format → Syntax → Execution levels guarantee variance even when all completions fail execution |
+| **SFT Warm-Up** | SFT on reference solutions before RL so the model knows the output format |
+| **Chat Template Wrapping** | Wrap every RL prompt with `apply_chat_template()` or the model generates free text |
+| **ZPD Curriculum** | Select tasks at 30–70% solve rate — below/above that is near-zero gradient |
+| **Hub-as-Durable-Storage** | Push state after every iteration on ephemeral compute (Kaggle etc.) |
+| **Reward-Collapse Auto-Stop** | Monitor `reward_std`; halt when it collapses — continuing past that corrupts the model |
 
 ---
 
