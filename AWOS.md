@@ -18,7 +18,7 @@
 > mistakes, or any principle the user explicitly calls out as important.
 > Small talk and routine implementation do not trigger an update.
 >
-> Last updated: 2026-04-28 — v1.0 (initial standalone AWOS from TirraMind project)
+> Last updated: 2026-05-04 — v1.1
 
 ---
 
@@ -27,6 +27,7 @@
 | Version | Date | Change |
 |---|---|---|
 | v1.0 | 2026-04-28 | Initial standalone AWOS, distilled from TirraMind 100+ session history |
+| v1.1 | 2026-05-04 | Added Section 13 — RL/LLM Training Patterns (from entity_ai / research_SLAI project) |
 
 ---
 
@@ -697,3 +698,101 @@ When stuck on a bug that has resisted two fix attempts:
 6. **Regress** — add a test that would have caught this bug. Mark it with a comment: `# regression: [issue description]`.
 
 After completing steps 1–4, if the hypothesis is wrong: go back to step 3 with new evidence. Do not guess.
+
+---
+
+## 13. RL / LLM Training Patterns
+
+> Patterns discovered during the entity_ai / research_SLAI project (Kaggle + Qwen3-1.7B + GRPO).
+> Apply to any project that fine-tunes an LLM with RL.
+
+### 13.1 Staged Reward Design (Variance Insurance)
+
+**Problem:** GRPO and other relative-ranking RL algorithms compute advantages from reward *variance* across a group of completions. If all completions produce identical rewards, variance = 0 → advantages = 0 → gradient = 0 → no learning.
+
+**Pattern:** Decompose the reward into levels ordered by difficulty:
+
+```
+Level 1 — Format   (+0.2 / -0.1): did the model output a code fence?
+Level 2 — Syntax   (+0.3):         does the extracted code compile?
+Level 3 — Execution (-0.5 to +1.5): do the tests actually pass?
+```
+
+Levels 1–2 guarantee variance even when all completions fail Level 3. Early in training the model learns format; later it learns correctness. Each level adds separable gradient signal.
+
+**Rule:** Always have at least one reward level that the model can *almost certainly* win or lose in early training. Never start with only a hard end-signal reward (e.g., test pass/fail).
+
+**Why it works:** DeepSeek-R1 used SFT warm-up for the same reason — give the model a foothold before RL shaping begins.
+
+### 13.2 SFT Warm-Up Before GRPO (Format Seeding)
+
+**Problem:** If the model has never seen the expected output format (code fence, correct function signature), every completion in the RL rollout gets the same failure penalty → variance = 0 → no gradient.
+
+**Pattern:** Before running RL, run supervised fine-tuning on reference solutions for 2–3 epochs:
+- Prompt = same chat-template format the RL loop uses
+- Completion = reference solution wrapped in the expected code fence
+- Push the SFT checkpoint; RL loads it as its starting point
+- Gate with `RUN_SFT = False` after first run (saves 10+ min on reruns)
+
+**Rule:** SFT warm-up is mandatory for any model starting from a base checkpoint on a structured-output RL task. Skip it only when loading a checkpoint that already knows the output format.
+
+### 13.3 Chat Template Wrapping in RL Rollouts
+
+**Problem:** Chat-instruction models (e.g., Qwen3, Llama-3-Instruct) generate free text when called without a chat template. RL rollouts without the template produce prose, not code → all completions fail execution → same failure = no variance.
+
+**Rule:** Always wrap prompts with `tokenizer.apply_chat_template()` before rollout. For Qwen3, set `enable_thinking=False` to prevent the `<think>...</think>` budget being spent before any code is written.
+
+```python
+def _apply_chat(prompt: str) -> str:
+    messages = [{"role": "user", "content": prompt}]
+    return tokenizer.apply_chat_template(
+        messages, tokenize=False,
+        add_generation_prompt=True,
+        enable_thinking=False,
+    )
+```
+
+### 13.4 ZPD Curriculum — Learn at the Frontier
+
+**Problem:** Training only on easy tasks (all pass) or hard tasks (none pass) produces zero informative gradient in either direction.
+
+**Pattern:** Zone of Proximal Development (ZPD) — prefer tasks where the current solve rate is 30–70%:
+- Below 30%: too hard — all completions fail → low variance
+- Above 70%: too easy — all completions succeed → low variance
+- 30–70%: the frontier — variance is maximised; gradient is informative
+
+**Implementation:** Track rolling solve rate per task. At each iteration, select frontier tasks first, fill remainder randomly.
+
+**Rule:** Combine with a forgetting detector (spaced repetition) to recheck mastered tasks periodically. Models forget; the curriculum must account for regression.
+
+### 13.5 Hub-as-Durable-Storage (Kaggle / Ephemeral Compute)
+
+**Problem:** Kaggle and many cloud GPU environments wipe the working directory on session restart. A 2-hour training run is lost if the kernel crashes and state was not persisted externally.
+
+**Pattern:** Use HuggingFace Hub dataset repos as durable key-value storage:
+- After each iteration: `upload_file()` for training state JSON, concept graphs, ZPD history
+- On session start: `hf_hub_download()` to restore state before continuing
+- Also cache RL rollouts to disk + push to Hub so rollout generation cost is paid once
+
+```python
+def hub_push(local_path, hub_name):
+    upload_file(path_or_fileobj=str(local_path), path_in_repo=hub_name,
+                repo_id=HF_STATE_REPO, repo_type="dataset", token=HF_TOKEN)
+
+def hub_pull(hub_name, local_path):
+    src = hf_hub_download(repo_id=HF_STATE_REPO, filename=hub_name,
+                          repo_type="dataset", token=HF_TOKEN)
+    shutil.copy(src, local_path)
+```
+
+**Rule:** On ephemeral compute, push state after *every* iteration, not just at the end. The last successful push is the only durable recovery point.
+
+### 13.6 Reward-Collapse Auto-Stop
+
+**Pattern:** Monitor `reward_std` across the group at each iteration. If it stays below a threshold (e.g., 0.002) for N consecutive iterations, stop training automatically:
+- Log a diagnostic (all completions identical → degenerate model output)
+- Suggest: check for NaN/Inf in parameters, lower temperature, or reset from last good checkpoint
+
+**Why:** Continuing to train past reward collapse burns compute and corrupts the model — you are gradient-descending on noise.
+
+**Rule:** Tighten the threshold when using a staged reward (format/syntax levels already provide variance) — the threshold should reflect that variance-from-format is expected and variance-from-execution is what matters.
