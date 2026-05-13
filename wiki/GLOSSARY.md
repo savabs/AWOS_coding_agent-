@@ -110,8 +110,52 @@ After 2 unsuccessful fixes on the same problem, mandatory switch to the debug pr
 
 ---
 
+## Agent Architecture Terms
+
+**ReAct**
+Agent loop that interleaves Thought → Action → Observation. Default for single-agent task execution. See [[AGENTIC_CONCEPTS]] §1.1.
+
+**Plan-and-Execute**
+Architecture separating a planner (task graph) from executors (run each step). Maps to the Research → Spec → Task triad. See [[AGENTIC_CONCEPTS]] §1.2.
+
+**Reflexion**
+Post-attempt self-critique written to episodic memory, prepended on retry. Operationalised by [[DEBUG_PROTOCOL]]. See [[AGENTIC_CONCEPTS]] §1.3.
+
+**LATS (Language Agent Tree Search)**
+Monte Carlo Tree Search over the agent action space. High compute cost — never run locally (P1). See [[AGENTIC_CONCEPTS]] §1.4.
+
+**Critic-Actor**
+Two-role pattern: Actor generates; Critic scores with structured feedback. Actor never self-approves. See [[AGENTIC_CONCEPTS]] §1.5.
+
+**Orchestrator-Worker**
+One orchestrator manages the plan; stateless workers run subtasks. Workers communicate only through orchestrator. See [[AGENTIC_CONCEPTS]] §6.1.
+
+**Tool Result Envelope**
+Standard wrapper for all tool returns: `{success, text, data, error, latency_ms}`. Normalise non-conforming results before processing.
+
+**Context Budget**
+Token allocation across system prompt, instructions, retrieved knowledge, tool results, reasoning trace, and output buffer. See [[AGENTIC_CONCEPTS]] §7.1.
+
+**Ratchet State**
+Persisted record of the best-known metric; blocks any checkpoint regressing it. Canonical file: `data/ratchet_state.json`. See [[AGENTIC_CONCEPTS]] §5.5.
+
+**Evaluation Gate**
+Boolean criterion blocking stage progression until a falsifiable metric threshold is met. Defined before training, never adjusted post-hoc. See [[AGENTIC_CONCEPTS]] §5.4.
+
+**Chain-of-Thought (CoT)**
+Reasoning pattern: step-by-step reasoning written before the final answer. Required for all non-trivial decisions; results must be checkpointed (Write-Gate).
+
+**Tree-of-Thought (ToT)**
+Reasoning pattern: generate + evaluate multiple candidate thoughts at each step; prune weak branches. Cost O(k^d) — use selectively.
+
+**Procedural Memory**
+Numbered, atomic, executable instructions for recurring tasks. Canonical files: `protocols/*.md`, `docs/<platform>_runbook.md`.
+
+---
+
 ## Related
 
 - [[AWOS]] — full doctrine
 - [[SCHEMA]] — wiki page creation rules
+- [[AGENTIC_CONCEPTS]] — agent architecture and pattern reference
 - [[log]] — activity log

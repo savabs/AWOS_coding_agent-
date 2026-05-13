@@ -18,7 +18,7 @@
 > mistakes, or any principle the user explicitly calls out as important.
 > Small talk and routine implementation do not trigger an update.
 >
-> Last updated: 2026-05-13 — v1.3
+> Last updated: 2026-05-13 — v1.4
 
 ---
 
@@ -30,6 +30,7 @@
 | v1.1 | 2026-05-04 | Added `protocols/RL_TRAINING_PROTOCOL.md`; Section 13 summary reference in AWOS.md |
 | v1.2 | 2026-05-13 | Added "Research First / No Guessing" rule: `DEBUG_PROTOCOL.md §Step 0`, updated §4.4 in AWOS.md, added research-first reminder to `RL_TRAINING_PROTOCOL.md §7` |
 | v1.3 | 2026-05-13 | Added §5.7 HTML-First Artifacts — replace Markdown output with HTML + thin .md stub; migration policy for existing .md files |
+| v1.4 | 2026-05-13 | Added `wiki/AGENTIC_CONCEPTS.md` — project-agnostic reference covering 8 topic areas: agent architectures (ReAct, Plan-and-Execute, Reflexion, LATS, Critic-Actor, Self-Ask), tool use patterns, memory systems, reasoning patterns, evaluation & self-improvement, multi-agent patterns, context window management, and task decomposition strategies |
 
 ---
 
@@ -880,3 +881,26 @@ def hub_pull(hub_name, local_path):
 **Why:** Continuing to train past reward collapse burns compute and corrupts the model — you are gradient-descending on noise.
 
 **Rule:** Tighten the threshold when using a staged reward (format/syntax levels already provide variance) — the threshold should reflect that variance-from-format is expected and variance-from-execution is what matters.
+
+---
+
+## 14. Agentic Workflow Concepts (Reference)
+
+> Full reference: [[AGENTIC_CONCEPTS]] — `wiki/AGENTIC_CONCEPTS.md`
+
+Project-agnostic vocabulary and decision guide for agent architectures, tool use,
+memory systems, reasoning patterns, evaluation, multi-agent coordination, context
+window management, and task decomposition.
+
+**Quick selection guide:**
+
+| Need | Go to |
+|---|---|
+| Choose an agent loop architecture | §1 (ReAct, Plan-and-Execute, LATS, Reflexion...) |
+| Design tool calls and error recovery | §2 |
+| Decide where a fact should live | §3 (Memory Systems) |
+| Pick a reasoning strategy | §4 (CoT, ToT, Scratchpad...) |
+| Set up eval gates or reward shaping | §5 |
+| Coordinate multiple agents | §6 |
+| Manage a long context window | §7 |
+| Break down a task correctly | §8 |
