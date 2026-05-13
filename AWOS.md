@@ -18,7 +18,7 @@
 > mistakes, or any principle the user explicitly calls out as important.
 > Small talk and routine implementation do not trigger an update.
 >
-> Last updated: 2026-05-13 — v1.2
+> Last updated: 2026-05-13 — v1.3
 
 ---
 
@@ -29,6 +29,7 @@
 | v1.0 | 2026-04-28 | Initial standalone AWOS, distilled from TirraMind 100+ session history |
 | v1.1 | 2026-05-04 | Added `protocols/RL_TRAINING_PROTOCOL.md`; Section 13 summary reference in AWOS.md |
 | v1.2 | 2026-05-13 | Added "Research First / No Guessing" rule: `DEBUG_PROTOCOL.md §Step 0`, updated §4.4 in AWOS.md, added research-first reminder to `RL_TRAINING_PROTOCOL.md §7` |
+| v1.3 | 2026-05-13 | Added §5.7 HTML-First Artifacts — replace Markdown output with HTML + thin .md stub; migration policy for existing .md files |
 
 ---
 
@@ -393,6 +394,69 @@ Create a new wiki page only when:
 - A topic is central to a single source but needs to be referenced from many places
 
 Do not create wiki pages speculatively. Orphan pages add noise without signal.
+
+### 5.7 HTML-First Artifacts
+
+**All new output artifacts are HTML files, not Markdown.** This applies to: research notes, specs, checkpoints, task files, ADRs, wiki pages, reports.
+
+**Why HTML beats Markdown for AI-generated documents:**
+- **Information density** — tables, SVG diagrams, CSS layout, annotated code, color. Everything Markdown fakes with ASCII, HTML does natively.
+- **Readability** — nobody reads a 100+ line Markdown file. HTML with tabs, color, and visual hierarchy gets read and shared.
+- **Shareability** — upload to S3, share a URL. Markdown requires attachments.
+- **Two-way interaction** — sliders, knobs, copy-to-prompt buttons. The artifact talks back.
+- **Custom editing interfaces** — throwaway HTML tools (ticket triagers, config editors, param tuners) always ending with a "Copy as prompt" or "Copy as JSON" export button.
+
+**The hybrid model — HTML content + MD stub:**
+
+Every artifact = two files:
+
+| File | Purpose |
+|---|---|
+| `docs/research/feature.html` | Canonical content — rich HTML you read and share |
+| `docs/research/feature.md` | Navigation stub — Obsidian frontmatter + wiki links only |
+
+The `.html` is what you open. The `.md` is what Obsidian indexes.
+
+**Stub template:**
+
+```yaml
+---
+title: <title>
+tags:
+  - doc/<type>
+  - phase/<N>
+  - topic/<slug>
+  - status/<state>   # task files only
+---
+
+> **Content:** [<filename>.html](<filename>.html) — open in browser.
+
+## Related
+- [[linked_research_or_spec]]
+- [[linked_task]]
+```
+
+**HTML document conventions:**
+- Include header (title, phase, date) and tab/sidebar navigation for long docs
+- Use SVG/CSS diagrams — never ASCII art
+- Interactive tools must end with a **"Copy as prompt"** or **"Copy as JSON"** button
+- Code snippets use `<pre><code>` with syntax highlighting
+
+**When plain Markdown is still OK (no HTML companion needed):**
+- The `.md` navigation stubs themselves
+- `README.md` at project root
+- Append-only log files (`wiki/log.md`)
+- Code comments and docstrings
+
+**Migration policy for existing `.md` files:**
+
+| File state | Action |
+|---|---|
+| `tasks/done/*.md` or inactive research/specs | Leave untouched — historical record |
+| `tasks/active/*.md` currently being worked on | Create `.html` companion → it becomes primary. Add `> Legacy reference. Primary doc: [[<name>.html]]` at top of the `.md`. Stop updating the `.md`. |
+| Any new artifact created today or later | `.html` + thin `.md` stub from the start |
+
+**Why this works:** HTML is 2–4× more tokens but the model with a 1M context window produces documents that actually get read. A spec that gets read beats a spec nobody opens. The Obsidian graph stays intact because stubs serve the same indexing role the old `.md` content files did.
 
 ---
 
