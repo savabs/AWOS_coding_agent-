@@ -30,6 +30,7 @@ COPY_ITEMS = [
     "scripts",
     "protocols",
     "AWOS.md",
+    "AGENT_INDEX.md",
     "QUICK_START.md",
 ]
 
@@ -310,12 +311,15 @@ Next steps:
   1. cd {dest}
   2. Open in VS Code: code .
   3. Fill in memories/repo/project_structure.md with your project's facts
-  4. Read QUICK_START.md for the workflow guide
-  5. Start your first feature:
-       cp docs/research/RESEARCH_TEMPLATE.md docs/research/my_feature.md
-       # Fill in the research doc, then create the spec, then the task file
+  4. Read AGENT_INDEX.md (agent cold-start map) and QUICK_START.md (human setup guide)
+  5. Start your first feature (HTML-first):
+       cp docs/research/RESEARCH_TEMPLATE.html docs/research/my_feature.html
+       # Fill in the HTML research doc
+       # Create a thin docs/research/my_feature.md stub (see AGENT_INDEX.md for stub format)
+       # Then: SPEC_TEMPLATE.html → TASK_TEMPLATE.html → implement
 
 Remember: Research → Spec → Task → Implement. Never skip the preflight.
+All artifacts are .html primary + thin .md stub. See .github/copilot-instructions.md §5.7.
 """
     )
 

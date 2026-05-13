@@ -29,9 +29,9 @@ Treat a request as non-trivial by default if it:
 - Requires external concepts, unfamiliar technology, or design judgment
 
 **Before implementing a non-trivial request**, ensure all three artifacts exist and are current:
-1. `docs/research/<feature_name>.md`
-2. `docs/specs/<feature_name>_spec.md`
-3. `tasks/active/<task_name>.md`
+1. `docs/research/<feature_name>.html` + thin `docs/research/<feature_name>.md` stub
+2. `docs/specs/<feature_name>_spec.html` + thin `docs/specs/<feature_name>_spec.md` stub
+3. `tasks/active/<task_name>.html` + thin `tasks/active/<task_name>.md` stub
 
 Until those artifacts exist, edit only:
 - `docs/research/`
@@ -53,39 +53,20 @@ When implementation starts, explicitly reference the governing task file and spe
 2. For new features, unfamiliar technology, or external concepts: search GitHub and authoritative documentation first. Use multiple keyword variants until the landscape is clear enough to cite concrete repos/docs.
 3. Analyze project structure and dependencies.
 4. Identify the correct insertion points for new code.
-5. Record findings in `docs/research/<feature_name>.md`.
+5. Record findings in `docs/research/<feature_name>.html` (canonical) + thin `docs/research/<feature_name>.md` stub.
+   - Copy `docs/research/RESEARCH_TEMPLATE.html` as the starting point.
+   - Stub format: YAML frontmatter + `> **Content:** [file.html](file.html)` + `## Related`
 
 **No code is edited during this phase.**
-
-Research document structure:
-```
-# Feature: <name>
-## Current Architecture
-## Observations
-## Risks
-## Data Requirements (if applicable)
-## Math/Algorithm Survey (if applicable)
-## External Sources
-## Related
-```
 
 ---
 
 ## Phase 2: Specification (before any code changes)
 
 Transform research into a precise implementation plan.
-Write to `docs/specs/<feature_name>_spec.md`.
-
-Specification structure:
-```
-# Spec: <feature_name>
-## Goal
-## Files Affected
-## Implementation Steps (numbered, ordered, atomic)
-## Edge Cases
-## Testing Plan
-## Related
-```
+Create `docs/specs/<feature_name>_spec.html` (canonical) + thin `docs/specs/<feature_name>_spec.md` stub.
+- Copy `docs/specs/SPEC_TEMPLATE.html` as the starting point.
+- Steps must be atomic: one thing changed, one thing tested, one thing proved. If a step has "and" — split it.
 
 ---
 
@@ -117,7 +98,7 @@ Each fact lives in exactly one canonical file. Every other file links to it; nev
 | Current metrics, counts, dimensions | `memories/repo/project_structure.md` |
 | Roadmap, phase ordering | active task file |
 | Session history | checkpoint file (immutable after session) |
-| Architecture decisions | `docs/adr/NNNN-<slug>.md` |
+| Architecture decisions | `docs/adr/NNNN-<slug>.html` (+ thin `.md` stub) |
 
 ### Checkpoints
 Write a checkpoint at every natural session breakpoint.
@@ -126,11 +107,41 @@ Auto-generate: `python scripts/session_checkpoint.py -m "summary"`
 
 ### Cold-Start Protocol
 When beginning a new session:
-1. Read `memories/repo/project_structure.md`
-2. Read the latest checkpoint
-3. Read the active task file(s)
-4. Follow wiki links to reach relevant context
-5. Do NOT re-read the entire codebase
+1. Read `AGENT_INDEX.md` — agent-optimized map of every file and where to write each artifact type
+2. Read `memories/repo/project_structure.md` — canonical project facts
+3. Read the latest checkpoint in `docs/memory/` (most recent `.html` or `.md`)
+4. Read the active task file(s) in `tasks/active/`
+5. Follow wiki links to reach relevant context
+6. Do NOT re-read the entire codebase
+
+---
+
+## HTML-First Artifacts Rule (§5.7)
+
+All output artifacts are created as **`.html` primary** + **thin `.md` stub** for Obsidian navigation.
+
+| Artifact type | Template | Canonical location |
+|---|---|---|
+| Research note | `docs/research/RESEARCH_TEMPLATE.html` | `docs/research/<feature>.html` |
+| Spec | `docs/specs/SPEC_TEMPLATE.html` | `docs/specs/<feature>_spec.html` |
+| Task file | `tasks/active/TASK_TEMPLATE.html` | `tasks/active/<task>.html` |
+| Session checkpoint | `docs/memory/CHECKPOINT_TEMPLATE.html` | `docs/memory/checkpoint_YYYY-MM-DD.html` |
+| ADR | `docs/adr/TEMPLATE.html` | `docs/adr/NNNN-<slug>.html` |
+
+**MD stub format** (mandatory for Obsidian graph, must be co-located with the .html):
+```markdown
+---
+title: "<title>"
+tags:
+  - doc/<type>
+  - topic/<slug>
+---
+> **Content:** [filename.html](filename.html) — open in browser.
+## Related
+- [[linked_doc]]
+```
+
+**Plain Markdown is still OK for:** `README.md`, `AWOS.md`, `AGENT_INDEX.md`, append-only logs (`wiki/log.md`), code comments.
 
 ---
 
@@ -239,9 +250,10 @@ This prints: latest checkpoint, active tasks with step counts, last commits, pro
 If the script doesn't exist, continue to Step 2 manually.
 
 **Step 2 — Load project state (if warmup script unavailable):**
-1. Read `memories/repo/project_structure.md` — canonical project facts
-2. List `docs/memory/` → read the most recent checkpoint file
-3. List `tasks/active/` → read every active task file
+1. Read `AGENT_INDEX.md` — agent cold-start map with file directory and artifact creation rules
+2. Read `memories/repo/project_structure.md` — canonical project facts
+3. List `docs/memory/` → read the most recent checkpoint file
+4. List `tasks/active/` → read every active task file
 
 **Step 3 — Discover available tools:**
 Call `tool_search` with `"file read write search terminal web git memory"` to load the full

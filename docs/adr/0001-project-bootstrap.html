@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ADR 0001: Agentic OS Project Bootstrap — AWOS</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--success:#10b981;--warn:#f59e0b;--danger:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.badge-accepted{background:#10b981;color:#fff;font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+time{font-size:12px;opacity:.5;margin-left:auto}
+main{max-width:760px;margin:0 auto;padding:32px}
+.metadata-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px 20px;margin-bottom:28px;display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:13px}
+.metadata-card .key{color:var(--muted);font-weight:600}
+h2{font-size:17px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:18px 0 8px}
+h3.chosen{color:var(--success)}
+h3.rejected{color:var(--danger)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;margin:12px 0}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px}
+p code,li code{background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px;font-size:12px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.pro{color:var(--success)}
+.con{color:var(--danger)}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+footer{background:var(--surface);border-top:1px solid var(--border);padding:16px 32px;display:flex;justify-content:flex-end}
+.copy-btn{background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:500}
+.copy-btn:hover{background:#4338ca}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb">AWOS / docs / adr</div>
+  <h1>ADR 0001: Agentic OS Project Bootstrap</h1>
+  <div class="meta">
+    <span class="tag">doc/adr</span>
+    <span class="tag">phase/0</span>
+    <span class="tag">topic/bootstrap</span>
+    <span class="badge-accepted">ACCEPTED</span>
+    <time>Fill in when adopted for your project</time>
+  </div>
+</header>
+
+<main>
+
+<div class="metadata-card">
+  <span class="key">Status</span>       <span>Accepted</span>
+  <span class="key">Date</span>         <span><em>Fill in adoption date: YYYY-MM-DD</em></span>
+  <span class="key">Deciders</span>     <span>Project team (agent + user)</span>
+  <span class="key">Superseded by</span><span>— (none)</span>
+</div>
+
+<h2>Context</h2>
+<p>This project uses the <strong>Agentic OS</strong> workflow system. This ADR records the decision to adopt it and documents any customisations made for this specific project.</p>
+<p>The problem being solved: AI-assisted development on complex, multi-session projects fails in three specific ways:</p>
+<ol>
+  <li><strong>Memory loss between sessions</strong> — the agent re-derives decisions, contradicts prior work, re-reads the entire codebase every session start.</li>
+  <li><strong>Unplanned implementation</strong> — code is written before architecture is clear; bugs require re-reading what was just written.</li>
+  <li><strong>Fact drift</strong> — the same number or decision exists in multiple files and they silently diverge.</li>
+</ol>
+
+<h2>Decision</h2>
+<p>Adopt the Agentic OS workflow system as the backbone for this project.</p>
+
+<div class="callout">
+<strong>Project-specific customisations (fill in):</strong>
+<ul>
+  <li>Tag taxonomy extensions: (e.g., <code>layer/training</code>, <code>layer/data</code>)</li>
+  <li>Platform runbooks required: (e.g., Kaggle, HuggingFace)</li>
+  <li>Template modifications: (list any project-specific changes)</li>
+  <li>Additional protocols: (list any project-specific protocols)</li>
+</ul>
+</div>
+
+<h2>Options Considered</h2>
+
+<h3 class="chosen">Option A: Agentic OS ✓ Chosen</h3>
+<p>Full workflow system: research → spec → task triad, single-owner facts, session checkpoints, Obsidian knowledge graph, automation scripts, HTML-first artifacts.</p>
+<table>
+<tr><th>Pros</th><th>Cons</th></tr>
+<tr>
+  <td class="pro">
+    <ul>
+      <li>Prevents all 3 primary failure modes</li>
+      <li>Scales to multi-month, multi-session projects</li>
+      <li>Machine-readable progress tracking</li>
+      <li>Cold-start in ~5 minutes</li>
+      <li>HTML artifacts are readable and shareable</li>
+    </ul>
+  </td>
+  <td class="con">
+    <ul>
+      <li>Initial setup overhead (~15 minutes)</li>
+      <li>Requires discipline to maintain templates and checkpoints</li>
+    </ul>
+  </td>
+</tr>
+</table>
+
+<h3 class="rejected">Option B: Ad Hoc Documentation ✗ Rejected</h3>
+<p>Write docs as needed, no enforced structure.</p>
+<table>
+<tr><th>Pros</th><th>Cons</th></tr>
+<tr>
+  <td class="pro"><ul><li>Zero setup overhead</li></ul></td>
+  <td class="con"><ul>
+    <li>Does not survive context loss between sessions</li>
+    <li>Agent re-derives decisions already made</li>
+    <li>No canonical file for any fact — all facts drift</li>
+  </ul></td>
+</tr>
+</table>
+
+<h3 class="rejected">Option C: External Project Management Tool ✗ Rejected</h3>
+<p>Use a dedicated tool (Jira, Linear, Notion) for task tracking.</p>
+<table>
+<tr><th>Pros</th><th>Cons</th></tr>
+<tr>
+  <td class="pro"><ul><li>Rich UI, integrations</li></ul></td>
+  <td class="con"><ul>
+    <li>Not co-located with codebase — agent cannot read/write directly</li>
+    <li>Breaks Single-Owner Rule — creates fact copies outside codebase</li>
+    <li>No git history for decisions</li>
+  </ul></td>
+</tr>
+</table>
+
+<h2>Rationale</h2>
+<p>Option A was chosen because this project spans multiple sessions and the cost of memory loss (re-deriving decisions, contradicting prior work, re-reading the codebase) is higher than the overhead of maintaining the Agentic OS artifacts.</p>
+<p>The HTML-first artifact policy (§5.7) was adopted because: (1) HTML documents with navigation, tables, and syntax highlighting are 4× more likely to be actually read; (2) they are shareable without attachments; (3) they support interactive elements like "Copy as Prompt" buttons that provide direct agent utility.</p>
+
+<h2>Consequences</h2>
+<table>
+<tr><th>Type</th><th>Consequence</th></tr>
+<tr><td><strong class="pro">Positive</strong></td><td>Cold-start from any session in ~5 minutes using <code>AGENT_INDEX.md</code> → <code>project_structure.md</code> → checkpoint → active task.</td></tr>
+<tr><td><strong class="pro">Positive</strong></td><td>All decisions are traceable, durable, and readable without replaying the conversation.</td></tr>
+<tr><td><strong class="pro">Positive</strong></td><td>Agent and human share the same source of truth. Conflicts resolve by consulting canonical files.</td></tr>
+<tr><td><strong class="con">Negative</strong></td><td>Every non-trivial change requires a research doc and spec before code is touched.</td></tr>
+<tr><td><strong class="con">Negative</strong></td><td>Checkpoints must be written at every natural session breakpoint — this is a discipline requirement, not optional.</td></tr>
+</table>
+
+<h2>Validation</h2>
+<ul>
+  <li>Cold-start test: a new agent session should be fully oriented within 5 minutes of reading the 5 cold-start files.</li>
+  <li>Memory loss test: no decision from a prior session should need to be re-derived in a subsequent session.</li>
+  <li>Fact drift test: <code>scripts/fact_lint.py</code> should report zero duplicated constants after each milestone.</li>
+</ul>
+
+<h2>Related</h2>
+<ul>
+  <li><a href="../../memories/repo/project_structure.md">project_structure.md</a> — canonical project facts</li>
+  <li><a href="../../AWOS.md">AWOS.md</a> — full doctrine</li>
+  <li><a href="../../AGENT_INDEX.md">AGENT_INDEX.md</a> — agent cold-start map</li>
+</ul>
+
+</main>
+
+<footer>
+  <button class="copy-btn" onclick="copyPrompt()">Copy as Prompt</button>
+</footer>
+<script>
+function copyPrompt(){
+  navigator.clipboard.writeText('# ADR 0001: Agentic OS Project Bootstrap\n\n'+document.querySelector('main').innerText)
+    .then(()=>{const b=document.querySelector('.copy-btn');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy as Prompt',1500)});
+}
+</script>
+</body>
+</html>

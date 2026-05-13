@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wiki Schema — AWOS Wiki</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--warn:#f59e0b}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:22px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+time{font-size:12px;opacity:.5;margin-left:auto}
+main{max-width:760px;margin:0 auto;padding:32px}
+h2{font-size:17px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:18px 0 8px;color:var(--accent)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px}
+p code,li code,td code{background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px;font-size:12px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.rule{background:#fef3c7;border-left:3px solid var(--warn);padding:10px 14px;border-radius:0 6px 6px 0;margin:10px 0;font-size:13px}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+footer{background:var(--surface);border-top:1px solid var(--border);padding:16px 32px;display:flex;justify-content:flex-end}
+.copy-btn{background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:500}
+.copy-btn:hover{background:#4338ca}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb">AWOS / wiki</div>
+  <h1>Wiki Schema — Page Creation Rules</h1>
+  <div class="meta">
+    <span class="tag">doc/wiki</span>
+    <span class="tag">topic/knowledge-graph</span>
+    <time>2026-05-13</time>
+  </div>
+</header>
+
+<main>
+
+<h2>When to Create a New Wiki Page</h2>
+<p>Create a new wiki page when <strong>either</strong> threshold is met:</p>
+<ol>
+  <li><strong>Two-source rule:</strong> A topic appears in 2+ independent research notes with overlapping content.</li>
+  <li><strong>Central single-source:</strong> A topic is the primary subject of one research note AND is referenced by 3+ other documents.</li>
+</ol>
+<div class="rule"><strong>Do NOT create a page for:</strong> one-off decisions (use ADRs), temporary working notes (use checkpoints), per-feature details (stay in research/spec/task triad).</div>
+
+<h2>HTML-First: Every Page = HTML + MD Stub</h2>
+<p>All wiki pages are <strong>HTML primary files</strong> with a thin Markdown stub for Obsidian indexing.</p>
+<table>
+<tr><th>File</th><th>Purpose</th></tr>
+<tr><td><code>wiki/&lt;slug&gt;.html</code></td><td>Canonical content — the document you open and read</td></tr>
+<tr><td><code>wiki/&lt;slug&gt;.md</code></td><td>Navigation stub — frontmatter + wiki links + pointer to HTML only</td></tr>
+</table>
+
+<h3>MD Stub Template</h3>
+<pre><code>---
+title: "&lt;descriptive name&gt;"
+tags:
+  - doc/wiki
+  - topic/&lt;slug&gt;
+---
+
+> **Content:** [&lt;filename&gt;.html](&lt;filename&gt;.html) — open in browser.
+
+## Related
+- [[linked_wiki_page]]
+- [[linked_research]]</code></pre>
+
+<h3>HTML Document Conventions</h3>
+<ul>
+  <li>Self-contained — no external CSS/JS dependencies</li>
+  <li>Header: title, tags, date</li>
+  <li>Tab navigation for multi-section docs</li>
+  <li>Code blocks: <code>&lt;pre&gt;&lt;code&gt;</code> with monospace font</li>
+  <li>Tables for comparisons and reference data</li>
+  <li>End every interactive doc with a <strong>"Copy as Prompt"</strong> button</li>
+  <li>Never ASCII art — use SVG or CSS for diagrams</li>
+</ul>
+
+<h2>Page Structure (HTML Sections)</h2>
+<p>Every wiki page HTML must include:</p>
+<ol>
+  <li><strong>Definition</strong> — one paragraph explaining the concept</li>
+  <li><strong>Why it matters</strong> — why relevant to the project</li>
+  <li><strong>Current implementation</strong> — where it lives in the codebase</li>
+  <li><strong>Known limitations / open questions</strong></li>
+  <li><strong>Cross-Reference Map</strong> — links to related docs</li>
+</ol>
+
+<h2>Frontmatter Requirements (MD Stub)</h2>
+<pre><code>---
+title: "&lt;descriptive name&gt;"
+tags:
+  - doc/wiki
+  - topic/&lt;slug&gt;
+---</code></pre>
+<p>For pages with contradicted facts, add:</p>
+<pre><code>contradicted: true
+contradiction_note: "Source A says X (YYYY-MM-DD); Source B says Y (YYYY-MM-DD)"</code></pre>
+
+<h2>Contradiction Handling</h2>
+<ol>
+  <li>Note both positions with their dates in the page</li>
+  <li>Add <code>contradicted: true</code> and <code>contradiction_note</code> to frontmatter of the MD stub</li>
+  <li>Do NOT silently overwrite old information</li>
+  <li>Resolve the contradiction by consulting the canonical owner file</li>
+</ol>
+
+<h2>Page Lifecycle</h2>
+<table>
+<tr><th>Stage</th><th>Action</th></tr>
+<tr><td>Draft</td><td>Add <code>status: draft</code> to MD stub frontmatter</td></tr>
+<tr><td>Active</td><td>Remove <code>status: draft</code>; add <code>doc/wiki</code> tag</td></tr>
+<tr><td>Deprecated</td><td>Add <code>status: deprecated</code>; note what supersedes it in the HTML header</td></tr>
+<tr><td>Retired</td><td>Move to <code>wiki/archive/</code>; do not delete</td></tr>
+</table>
+
+<h2>Log Rotation</h2>
+<p><code>wiki/log.md</code> is a running activity log. When it exceeds <strong>500 entries</strong>:</p>
+<ol>
+  <li>Copy current log to <code>wiki/log-YYYY.md</code> (year of oldest entries)</li>
+  <li>Clear <code>wiki/log.md</code> and start fresh</li>
+  <li>Add a link to the archived log at the top of the new log</li>
+</ol>
+
+<div class="callout">
+<p><strong>Quick test before creating a new page:</strong></p>
+<p>"Does this topic appear in 2+ research notes, OR is it the primary subject of one note that 3+ other docs reference?" If neither condition is true, do not create a page.</p>
+</div>
+
+<h2>Related</h2>
+<ul>
+  <li><a href="GLOSSARY.html">GLOSSARY.html</a> — key terms defined</li>
+  <li><a href="../wiki/log.md">log.md</a> — running activity log</li>
+  <li><a href="../AWOS.md">AWOS.md</a> — the doctrine these rules serve</li>
+</ul>
+
+</main>
+
+<footer>
+  <button class="copy-btn" onclick="copyPrompt()">Copy as Prompt</button>
+</footer>
+<script>
+function copyPrompt(){
+  navigator.clipboard.writeText('# Wiki Schema — Page Creation Rules\n\n'+document.querySelector('main').innerText)
+    .then(()=>{const b=document.querySelector('.copy-btn');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy as Prompt',1500)});
+}
+</script>
+</body>
+</html>

@@ -18,7 +18,7 @@
 > mistakes, or any principle the user explicitly calls out as important.
 > Small talk and routine implementation do not trigger an update.
 >
-> Last updated: 2026-05-13 — v1.4
+> Last updated: 2026-05-13 — v1.5
 
 ---
 
@@ -31,6 +31,9 @@
 | v1.2 | 2026-05-13 | Added "Research First / No Guessing" rule: `DEBUG_PROTOCOL.md §Step 0`, updated §4.4 in AWOS.md, added research-first reminder to `RL_TRAINING_PROTOCOL.md §7` |
 | v1.3 | 2026-05-13 | Added §5.7 HTML-First Artifacts — replace Markdown output with HTML + thin .md stub; migration policy for existing .md files |
 | v1.4 | 2026-05-13 | Added `wiki/AGENTIC_CONCEPTS.md` — project-agnostic reference covering 8 topic areas: agent architectures (ReAct, Plan-and-Execute, Reflexion, LATS, Critic-Actor, Self-Ask), tool use patterns, memory systems, reasoning patterns, evaluation & self-improvement, multi-agent patterns, context window management, and task decomposition strategies |
+| v1.5 | 2026-05-13 | HTML-first restructure complete: `AGENT_INDEX.md` (agent cold-start map); HTML versions of `AGENTIC_CONCEPTS`, `GLOSSARY`, `SCHEMA`, `ADR 0001`; 5 HTML artifact templates (research, spec, task, checkpoint, ADR); MD stubs converted; `copilot-instructions.md` updated with §5.7 HTML-First rule; `new_project.py` updated to copy `AGENT_INDEX.md` and reference HTML templates |
+
+> Last updated: 2026-05-13 — v1.5
 
 ---
 
