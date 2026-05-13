@@ -18,7 +18,7 @@
 > mistakes, or any principle the user explicitly calls out as important.
 > Small talk and routine implementation do not trigger an update.
 >
-> Last updated: 2026-05-04 — v1.1
+> Last updated: 2026-05-13 — v1.2
 
 ---
 
@@ -28,6 +28,7 @@
 |---|---|---|
 | v1.0 | 2026-04-28 | Initial standalone AWOS, distilled from TirraMind 100+ session history |
 | v1.1 | 2026-05-04 | Added `protocols/RL_TRAINING_PROTOCOL.md`; Section 13 summary reference in AWOS.md |
+| v1.2 | 2026-05-13 | Added "Research First / No Guessing" rule: `DEBUG_PROTOCOL.md §Step 0`, updated §4.4 in AWOS.md, added research-first reminder to `RL_TRAINING_PROTOCOL.md §7` |
 
 ---
 
@@ -287,11 +288,12 @@ The upfront investment collapses total time.
 
 After 2 unsuccessful fixes on the same problem:
 1. **STOP patching.** Do not attempt a 3rd fix without completing this debug protocol.
-2. Reproduce the issue with a minimal case
-3. Add targeted instrumentation (logging, assertions, print statements)
-4. Form a hypothesis: "I think the bug is here because of this path, and this check would disconfirm it"
-5. Verify the hypothesis before making any code change
-6. Fix once, with confidence. Then add a regression test.
+2. **Research first** — search GitHub Issues, official docs, and technical forums for the exact error. Write findings to `docs/debug_<name>.md` before touching code. Never guess a fix for an unresearched error. (See `protocols/DEBUG_PROTOCOL.md` Step 0.)
+3. Reproduce the issue with a minimal case
+4. Add targeted instrumentation (logging, assertions, print statements)
+5. Form a hypothesis: "I think the bug is here because of this path, and this check would disconfirm it"
+6. Verify the hypothesis before making any code change
+7. Fix once, with confidence. Then add a regression test.
 
 This is a hard rule, not a suggestion. Infinite retry loops waste context and produce noise.
 

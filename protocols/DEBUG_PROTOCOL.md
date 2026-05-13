@@ -17,6 +17,56 @@
 
 ---
 
+## Step 0: Research First (No Guessing Rule)
+
+**Before any fix attempt, search external technical sources.**
+
+The rule: never guess a fix for an error you have not researched. Hallucinated fixes waste time and can introduce new bugs that mask the real root cause.
+
+### Procedure
+
+1. **Copy the exact error message** (traceback, error code, crash line). Strip project-specific paths/names so it is searchable.
+2. **Search technical sources** — in priority order:
+   - GitHub Issues for the library that produced the error (search: `repo:<owner>/<lib> "<error string>"`)
+   - Official library docs / changelog (check for known bugs in your version)
+   - Stack Overflow, PyTorch forums, HuggingFace forums for ML/training errors
+   - arXiv / blog posts for algorithmic errors (NaN gradients, reward collapse, etc.)
+3. **Read the sources** — do not skim. Look for: root cause explanation, confirmed version-specific triggers, accepted workarounds.
+4. **Write findings to a research file** — `docs/debug_<short_name>.md` — before touching any code:
+
+```markdown
+## Error: <error string>
+
+**Searched:** <date>
+
+### Sources
+| Source | URL | Key finding |
+|---|---|---|
+| GitHub Issue #NNNN | https://github.com/... | Root cause: X. Fixed in version Y. |
+| PyTorch forum thread | https://... | Workaround: disable Z. |
+
+### Root Cause (confirmed)
+<one paragraph — what actually causes this>
+
+### Fix
+<exact change to make, based on sources>
+
+### Prevention
+<what to do so this doesn't recur>
+```
+
+5. **Only then write a fix** — grounded in the sources, not invented.
+
+### Why This Rule Exists
+
+- ML training errors (NaN gradients, CUDA kernel mismatches, dtype crashes) have specific, documented root causes. Guessing produces the wrong fix.
+- A wrong fix can mask the real error, making it harder to find later.
+- The research file becomes the `debug_log.md` entry — no extra work required.
+
+**If search returns nothing useful after 3 keyword variants: mark the claim as `UNVERIFIED` in the research file and escalate. Do not fill the gap with a plausible-sounding guess.**
+
+---
+
 ## Step 1: Reproduce (Minimal Case)
 
 Create the smallest possible case that triggers the bug.

@@ -242,6 +242,8 @@ Tighten the threshold when using a staged reward (format/syntax levels already p
 
 If loss is 0 or reward_std is 0 from the start:
 
+> **Research first.** Before checking any of the boxes below, copy the exact error/crash message and search GitHub Issues + PyTorch/HF forums for it. Write findings to `docs/debug_<name>.md`. See `DEBUG_PROTOCOL.md §Step 0`.
+
 - [ ] Are prompts wrapped with chat template?
 - [ ] Did SFT warm-up run successfully and checkpoint was pushed?
 - [ ] Is the reward function being called at all? (add a print)
