@@ -255,6 +255,7 @@ INSTRUCTIONS:
 4. The SEARCH string must exist literally in the file shown above
 
 If you need to call a method from another file, first search this file for where that class/object is already imported or used, then add your call immediately after that existing usage.
+IMPORTANT: The variable name in the action (e.g., 'tracker.snapshot()') may not match the actual variable name in this file. Search the file for the actual instance name and use that instead.
 
 OUTPUT FORMAT (exact structure required):
 SEARCH:
@@ -627,8 +628,8 @@ Generate a SEARCH/REPLACE block to complete this task."""
         if len(lines) <= 120:
             return file_content
 
-        # Part 1: Always include imports and module docstring (first 30 lines)
-        header_lines = set(range(min(30, len(lines))))
+        # Part 1: Always include imports, docstring, and constructor (first 90 lines)
+        header_lines = set(range(min(90, len(lines))))
 
         # Part 2: Find any class mentioned in the action and include its FULL body
         action_lower = action.lower()
@@ -675,7 +676,12 @@ Generate a SEARCH/REPLACE block to complete this task."""
             if score > best_score:
                 best_score, best_start = score, i
 
-        vicinity = set(range(max(0, best_start - 100), min(len(lines), best_start + 120)))
+        # If keyword match is weak, expand vicinity — common when action references
+        # a variable name that differs from the one used in the file (cross-file tasks)
+        if best_score <= 1:
+            vicinity = set(range(max(0, best_start - 200), min(len(lines), best_start + 250)))
+        else:
+            vicinity = set(range(max(0, best_start - 100), min(len(lines), best_start + 120)))
 
         # Merge and output in order
         selected = sorted(header_lines | vicinity | class_body_lines)
