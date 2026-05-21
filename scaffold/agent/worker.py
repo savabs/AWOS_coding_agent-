@@ -510,36 +510,6 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
         
         Assembles task description, file context, and relevant examples into
         a structured prompt for the LLM.
-        """
-        action = task.get("action", "")
-        complexity = task.get("complexity", "medium")
-        context = self._extract_context(file_content, action)
-        
-        prompt = f"""Task: {action}
-Complexity: {complexity}
-
-File Context:
-{context}
-
-Generate a SEARCH/REPLACE block to complete this task."""
-        return prompt
-
-    def _build_prompt(
-        self,
-        task: dict,
-        file_content: str,
-        codebase_context: dict,
-        symbol_index=None,
-        example_store=None,
-        strategy=None,
-        skill_library=None,
-        vector_chunks=None,
-    ) -> str:
-        """
-        Build the prompt for a code generation task.
-        
-        Assembles task description, file context, and relevant examples into
-        a structured prompt for the LLM.
         
         Returns:
             str: The complete prompt to send to the model.
