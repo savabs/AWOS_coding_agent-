@@ -140,6 +140,16 @@ Do NOT repeat the same approach. Use a different strategy.
         if prev_task_context:
             prev_context_section = f"\n{prev_task_context}\n"
 
+        # Multi-file awareness: extract method signatures from prev task's REPLACE block
+        cross_file_section = ""
+        if prev_task_context:
+            sigs = self._extract_method_signatures(prev_task_context)
+            if sigs:
+                cross_file_section = (
+                    f"\n[CROSS-FILE REFERENCE — methods you may need to call]\n"
+                    f"{sigs}\n[END CROSS-FILE REFERENCE]\n"
+                )
+
         # Improvement 2: Architect/Editor split
         # On retry or high-complexity: call architect first to describe the solution in
         # plain text, then pass that description to the editor (this model) as context.
@@ -218,11 +228,11 @@ Do NOT repeat the same approach. Use a different strategy.
             )
 
         prompt = f"""You are a senior software engineer executing a precise code change.
-{vector_section}{critique_block}{strategy_preamble}{prev_context_section}
+{vector_section}{critique_block}{strategy_preamble}{prev_context_section}{cross_file_section}
 TASK: {action}
 FILE: {file_path}
 COMPLEXITY: {complexity}
-ATTEMPT: {attempt}{retry_section}{architect_section}{contract_section}"
+ATTEMPT: {attempt}{retry_section}{architect_section}{contract_section}
 
 CURRENT FILE CONTEXT:
 ```
@@ -651,7 +661,14 @@ Generate a SEARCH/REPLACE block to complete this task."""
                     header_lines.add(j)
 
         # Part 4: Action-keyword vicinity (100 before, 120 after = 220 lines)
-        relevant_keywords = [w for w in action_lower.split() if len(w) > 3][:4]
+        # Strip punctuation so "tracker.snapshot()" → "tracker" matches "self.tracker"
+        raw_words = re.split(r"[^\w.]", action_lower)
+        relevant_keywords = []
+        for w in raw_words:
+            w = w.strip(".()_")
+            if len(w) > 3 and w not in ("self", "return", "def", "class"):
+                relevant_keywords.append(w.split(".")[0])
+        relevant_keywords = list(dict.fromkeys(relevant_keywords))[:4]
         best_start, best_score = 0, -1
         for i, line in enumerate(lines):
             score = sum(1 for kw in relevant_keywords if kw in line.lower())
@@ -672,3 +689,19 @@ Generate a SEARCH/REPLACE block to complete this task."""
             prev = i
 
         return "\n".join(result)
+
+    def _extract_method_signatures(self, text: str) -> str:
+        """Extract def / class signatures from a code block to show as cross-file reference."""
+        sigs = []
+        current_class = ""
+        lines = text.split("\n")
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith("class "):
+                current_class = stripped.split("(")[0].split(":")[0].replace("class ", "").strip()
+                sigs.append(f"  {stripped}")
+            elif stripped.startswith("def ") and not stripped.startswith("def __"):
+                sig = stripped.rstrip(":").replace("def ", "").strip()
+                prefix = f"{current_class}." if current_class else ""
+                sigs.append(f"  New method: {prefix}{sig}")
+        return "\n".join(sigs) if sigs else ""
