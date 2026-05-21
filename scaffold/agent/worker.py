@@ -244,6 +244,8 @@ INSTRUCTIONS:
 3. REPLACE is the modified version of those exact same lines
 4. The SEARCH string must exist literally in the file shown above
 
+If you need to call a method from another file, first search this file for where that class/object is already imported or used, then add your call immediately after that existing usage.
+
 OUTPUT FORMAT (exact structure required):
 SEARCH:
 ```
