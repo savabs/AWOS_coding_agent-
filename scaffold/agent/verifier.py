@@ -1,0 +1,348 @@
+"""
+Verifier Module: Applies SEARCH/REPLACE changes and validates with local tools.
+
+Uses local compiler/linter to catch errors and provide feedback for retry.
+Cost: FREE (local execution). Enables error-catching loop for worker self-correction.
+"""
+
+import difflib
+import os
+import re
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import Optional
+
+
+class Verifier:
+    """Applies code changes and validates them with local compiler/linter."""
+    
+    def __init__(self):
+        """Initialize Verifier."""
+        pass
+    
+    def verify_and_apply(
+        self,
+        search_replace: dict,
+        file_path: str,
+        check_type: str = "syntax"
+    ) -> dict:
+        """
+        Apply SEARCH/REPLACE to file and validate.
+        
+        Args:
+            search_replace: {"search": "...", "replace": "..."}
+            file_path: Path to file to modify
+            check_type: "syntax", "lint", or "all"
+        
+        Returns:
+            {
+                "success": bool,
+                "applied": bool,
+                "errors": [],
+                "file_content": "modified content (if applied)",
+                "needs_retry": bool,
+                "error_context": "info for worker to fix"
+            }
+        """
+        
+        # Read original file
+        try:
+            with open(file_path, 'r') as f:
+                original_content = f.read()
+        except FileNotFoundError:
+            return {
+                "success": False,
+                "applied": False,
+                "errors": [f"File not found: {file_path}"],
+                "needs_retry": False,
+                "error_context": "File does not exist. Check path in task."
+            }
+        
+        # Apply SEARCH/REPLACE
+        search_text = search_replace.get("search", "")
+        replace_text = search_replace.get("replace", "")
+        
+        if not search_text:
+            return {
+                "success": False,
+                "applied": False,
+                "errors": ["Empty search text"],
+                "needs_retry": False,
+                "error_context": "Worker provided empty search string."
+            }
+        
+        # 4-tier fuzzy matching — find and apply the change
+        matched, modified_content, match_tier = self._apply_fuzzy(
+            original_content, search_text, replace_text
+        )
+        if not matched:
+            nearby_hint = self._find_nearby_content(original_content, search_text)
+            return {
+                "success": False,
+                "applied": False,
+                "errors": ["SEARCH string not found in file"],
+                "needs_retry": True,
+                "error_context": (
+                    f"SEARCH block did not match any content in the file.\n\n"
+                    f"{nearby_hint}\n\n"
+                    f"Your SEARCH block must be an exact (or near-exact) copy of lines "
+                    f"from the file. Fix only the SEARCH block — keep your REPLACE unchanged."
+                ),
+            }
+        if match_tier != "exact":
+            print(f"[VERIFIER] Fuzzy match applied (tier={match_tier})")
+        
+        # Check for syntax errors (local, free validation)
+        errors = self._check_syntax(file_path, modified_content)
+
+        if errors and check_type in ["syntax", "all"]:
+            return {
+                "success": False,
+                "applied": False,
+                "errors": errors,
+                "file_content": modified_content,
+                "needs_retry": True,
+                "error_context": f"Syntax error after applying change:\n{errors[0]}\n\nContext:\n{self._get_error_context(modified_content, errors[0])}"
+            }
+
+        # Check contract compliance if task spec provided
+        contract_errors = self._check_contract_compliance(modified_content, task=search_replace.get("task_spec"))
+        if contract_errors and check_type in ["syntax", "all"]:
+            return {
+                "success": False,
+                "applied": False,
+                "errors": contract_errors,
+                "file_content": modified_content,
+                "needs_retry": True,
+                "error_context": f"Contract violation:\n{chr(10).join(contract_errors)}\n\nFix the code to match the specification exactly."
+            }
+
+        # If no errors, apply the file change (write to disk)
+        try:
+            with open(file_path, 'w') as f:
+                f.write(modified_content)
+        except Exception as e:
+            return {
+                "success": False,
+                "applied": False,
+                "errors": [f"Failed to write file: {str(e)}"],
+                "needs_retry": False,
+                "error_context": f"Permission error writing {file_path}"
+            }
+        
+        return {
+            "success": True,
+            "applied": True,
+            "errors": [],
+            "file_content": modified_content,
+            "needs_retry": False,
+            "error_context": ""
+        }
+    
+    def _check_syntax(self, file_path: str, content: str) -> list:
+        """Check syntax using appropriate tool for file type."""
+        errors = []
+        
+        ext = Path(file_path).suffix.lower()
+        
+        # Python syntax check
+        if ext == ".py":
+            try:
+                compile(content, file_path, "exec")
+            except SyntaxError as e:
+                errors.append(
+                    f"SyntaxError at line {e.lineno}: {e.msg}\n"
+                    f"  {e.text}\n"
+                    f"  {' ' * (e.offset - 1)}^"
+                )
+            except Exception as e:
+                errors.append(f"Python error: {str(e)}")
+        
+        # C++ syntax check (if g++ available)
+        elif ext in [".cpp", ".cc", ".cxx", ".h", ".hpp"]:
+            errors.extend(self._check_cpp_syntax(file_path, content))
+        
+        # TypeScript/JavaScript syntax check
+        elif ext in [".ts", ".tsx", ".js", ".jsx"]:
+            errors.extend(self._check_ts_syntax(file_path, content))
+        
+        return errors
+    
+    def _check_cpp_syntax(self, file_path: str, content: str) -> list:
+        """Check C++ syntax with g++ (if available)."""
+        errors = []
+        try:
+            # Try to compile with -fsyntax-only (fast check)
+            result = subprocess.run(
+                ["g++", "-fsyntax-only", file_path],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            if result.returncode != 0:
+                errors.append(result.stderr)
+        
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            # g++ not available, skip check
+            pass
+        
+        return errors
+    
+    def _check_ts_syntax(self, file_path: str, content: str) -> list:
+        """Check TypeScript/JavaScript syntax."""
+        # Simple check: look for unclosed brackets
+        errors = []
+        
+        brackets = {"(": ")", "{": "}", "[": "]"}
+        stack = []
+        
+        for i, char in enumerate(content):
+            if char in brackets:
+                stack.append((char, i))
+            elif char in brackets.values():
+                if not stack:
+                    errors.append(f"Unmatched closing '{char}' at position {i}")
+                    break
+                open_char, _ = stack.pop()
+                if brackets[open_char] != char:
+                    errors.append(f"Mismatched brackets: '{open_char}' vs '{char}' at position {i}")
+                    break
+        
+        if stack:
+            open_char, pos = stack[-1]
+            errors.append(f"Unclosed '{open_char}' at position {pos}")
+        
+        return errors
+    
+    def _get_error_context(self, content: str, error_msg: str) -> str:
+        """Extract relevant lines around error."""
+        # Try to extract line number from error message
+        try:
+            match = re.search(r"line (\d+)", error_msg)
+            if match:
+                line_num = int(match.group(1))
+                lines = content.split("\n")
+                start = max(0, line_num - 3)
+                end = min(len(lines), line_num + 2)
+                context = "\n".join(
+                    f"{i+1:4d}: {lines[i]}"
+                    for i in range(start, end)
+                )
+                return context
+        except:
+            pass
+        
+        # Default: return first 10 lines
+        lines = content.split("\n")[:10]
+        return "\n".join(f"{i+1:4d}: {line}" for i, line in enumerate(lines))
+
+    def _apply_fuzzy(
+        self, original_content: str, search_text: str, replace_text: str
+    ) -> tuple:
+        """
+        4-tier fuzzy matching (Aider-inspired).
+        Returns (matched: bool, modified_content: str, tier: str).
+        """
+        # Tier 1: exact
+        if search_text in original_content:
+            return True, original_content.replace(search_text, replace_text, 1), "exact"
+
+        o_lines = original_content.split("\n")
+        r_lines = replace_text.split("\n")
+        s_lines = search_text.split("\n")
+        n = len(s_lines)
+
+        # Tier 2: whitespace-insensitive per line
+        def _ws(t): return re.sub(r'[ \t]+', ' ', t.strip())
+        s_ws = [_ws(l) for l in s_lines]
+        o_ws = [_ws(l) for l in o_lines]
+        for i in range(max(1, len(o_lines) - n + 1)):
+            if o_ws[i:i + n] == s_ws:
+                return True, "\n".join(o_lines[:i] + r_lines + o_lines[i + n:]), "whitespace"
+
+        # Tier 3: strip trailing whitespace per line
+        s_rs = [l.rstrip() for l in s_lines]
+        o_rs = [l.rstrip() for l in o_lines]
+        for i in range(max(1, len(o_lines) - n + 1)):
+            if o_rs[i:i + n] == s_rs:
+                return True, "\n".join(o_lines[:i] + r_lines + o_lines[i + n:]), "trailing_ws"
+
+        # Tier 4: difflib fuzzy (≥85% similarity on stripped content)
+        s_stripped = "\n".join(l.strip() for l in s_lines if l.strip())
+        best_ratio, best_start = 0.0, -1
+        for i in range(max(1, len(o_lines) - n + 1)):
+            cand = "\n".join(l.strip() for l in o_lines[i:i + n] if l.strip())
+            ratio = difflib.SequenceMatcher(None, s_stripped, cand).ratio()
+            if ratio > best_ratio:
+                best_ratio, best_start = ratio, i
+        if best_ratio >= 0.85 and best_start >= 0:
+            new_lines = o_lines[:best_start] + r_lines + o_lines[best_start + n:]
+            return True, "\n".join(new_lines), f"fuzzy({best_ratio:.0%})"
+
+        return False, original_content, "none"
+
+    def _find_nearby_content(self, content: str, search_text: str) -> str:
+        """Return the most similar block in the file to help the LLM fix its SEARCH block."""
+        lines = content.split("\n")
+        n = len(search_text.split("\n"))
+        best_ratio, best_start = 0.0, 0
+        for i in range(max(1, len(lines) - n + 1)):
+            cand = "\n".join(lines[i:i + n])
+            ratio = difflib.SequenceMatcher(None, search_text, cand).ratio()
+            if ratio > best_ratio:
+                best_ratio, best_start = ratio, i
+        ctx_start = max(0, best_start - 2)
+        ctx_end = min(len(lines), best_start + n + 2)
+        nearby = "\n".join(
+            f"{ctx_start + j + 1:4d}: {line}"
+            for j, line in enumerate(lines[ctx_start:ctx_end])
+        )
+        return (
+            f"Best match in file (similarity {best_ratio:.0%}) near line {best_start + 1}:\n"
+            f"{nearby}"
+        )
+
+    def _check_contract_compliance(self, content: str, task: dict | None) -> list:
+        return check_contract_compliance(content, task)
+
+
+def check_contract_compliance(content: str, task: dict | None) -> list:
+    """
+    Check if generated code follows the Planner's contract specification.
+
+    Shared helper used by both Verifier and SelfVerificationEngine.
+    """
+    errors = []
+    if not task:
+        return errors
+
+    # 1. function_signature must appear literally in the code
+    sig = task.get("function_signature", "")
+    if sig:
+        # Strip type hints for flexible matching (def name(...):)
+        sig_match = re.search(r"def\s+\w+\s*\(", sig)
+        if sig_match:
+            core_sig = sig_match.group(0)
+            if core_sig not in content:
+                errors.append(f"Missing required function signature: {core_sig}")
+
+    # 2. constraints — key phrases should appear in code (basic keyword check)
+    constraints = task.get("constraints", [])
+    for c in constraints:
+        # Extract key noun phrases (naive: words > 4 chars)
+        keywords = [w.lower() for w in c.split() if len(w) > 4]
+        if keywords and not any(kw in content.lower() for kw in keywords):
+            errors.append(f"Constraint possibly unmet: '{c}' (no keywords found)")
+
+    # 3. must_not — forbidden patterns must NOT appear
+    must_not = task.get("must_not", [])
+    for m in must_not:
+        # Extract import names or forbidden terms
+        forbidden_terms = [w.strip("'\"") for w in m.split() if len(w.strip("'\"")) > 3]
+        for term in forbidden_terms:
+            if term.lower() in content.lower():
+                errors.append(f"Contract violation — forbidden pattern found: '{term}' (from: {m})")
+
+    return errors
