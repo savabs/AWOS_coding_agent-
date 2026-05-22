@@ -1,0 +1,48 @@
+aider-chat>=0.86.2
+anthropic>=0.101.0
+python-dotenv>=1.2.1
+
+# AWOS v2 Blueprint — Layer 1 Cartographer (Tree-Sitter)
+tree-sitter==0.21.0
+tree-sitter-python==0.21.0
+tree-sitter-cpp==0.21.0
+tree-sitter-rust==0.21.0
+
+# File watching for incremental STRUCT.xml sync
+watchdog>=3.0.0
+
+# Content hashing for incremental cache invalidation
+xxhash>=4.4.1
+
+# ── Agentic tool dependencies ──────────────────────────────────────────────
+
+# Internet search (DuckDuckGo — no API key required)
+duckduckgo-search>=6.1.0
+
+# HTTP client for FetchURLTool, GitHubTool, SerpAPI, etc.
+requests>=2.31.0
+
+# HTML parsing / text extraction for FetchURLTool
+beautifulsoup4>=4.12.0
+
+# GitHub API integration (optional; raw REST also works without this)
+PyGithub>=2.1.0
+
+# Tavily — purpose-built agentic search (primary WebSearchTool backend)
+tavily-python>=0.3.0
+
+# HuggingFace Hub — model/dataset search and download
+huggingface-hub>=0.22.0
+
+# Google Generative AI — Gemini Flash for CheapPlanner
+google-generativeai>=0.5.0
+
+# ── AWOS v3 Persistent Memory ────────────────────────────────────────────────
+chromadb>=0.6.0
+fastembed>=0.2.0
+
+# ── AWOS Phase 6: Vector Memory (semantic codebase + session retrieval) ───────
+sentence-transformers>=3.0.0
+
+# MCP server SDK
+mcp>=1.0.0
