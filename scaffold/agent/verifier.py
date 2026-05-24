@@ -307,6 +307,101 @@ class Verifier:
     def _check_contract_compliance(self, content: str, task: dict | None) -> list:
         return check_contract_compliance(content, task)
 
+    def _discover_test_file(self, source_path: str, project_root: str = ".") -> str | None:
+        """
+        Locate the test file for *source_path* using standard, alternative,
+        and grep fallback patterns.  Returns absolute path or None.
+        """
+        import os, subprocess
+        from pathlib import Path
+        src = Path(source_path)
+        stem = src.stem
+        root = Path(project_root)
+
+        # Standard: tests/test_<stem>.py
+        standard = root / "tests" / f"test_{stem}.py"
+        if standard.exists():
+            return str(standard)
+
+        # Alternative 1: <stem>_test.py in tests/
+        alt_in_tests = root / "tests" / f"{stem}_test.py"
+        if alt_in_tests.exists():
+            return str(alt_in_tests)
+
+        # Alternative 2: test_<stem>.py next to source
+        alt = src.parent / f"test_{stem}.py"
+        if alt.exists():
+            return str(alt)
+
+        # Check tests/ directory exists at all
+        tests_dir = root / "tests"
+        if not tests_dir.is_dir():
+            return None
+
+        # Grep fallback: find any test file that imports the module
+        try:
+            result = subprocess.run(
+                ["grep", "-rl", stem, str(tests_dir)],
+                capture_output=True, text=True, timeout=5,
+            )
+            hits = [l.strip() for l in result.stdout.splitlines() if l.strip()]
+            if hits:
+                return hits[0]
+        except Exception:
+            pass
+        return None
+
+    def run_tests(self, source_path: str, project_root: str = ".") -> object:
+        """
+        Run tests for *source_path* if AWOS_SAFE_TO_RUN_TESTS=1 is set.
+        Returns a simple result object with .passed, .failed, .no_tests_found.
+        """
+        import os, subprocess
+        from dataclasses import dataclass
+
+        @dataclass
+        class _TestResult:
+            passed: int = 0
+            failed: int = 0
+            no_tests_found: bool = False
+            timed_out: bool = False
+            @property
+            def pass_rate(self) -> float:
+                total = self.passed + self.failed
+                return self.passed / total if total else 0.0
+
+        if not os.getenv("AWOS_SAFE_TO_RUN_TESTS"):
+            result = _TestResult(no_tests_found=True)
+            return result
+
+        test_file = self._discover_test_file(source_path, project_root)
+        if test_file is None:
+            return _TestResult(no_tests_found=True)
+
+        try:
+            proc = subprocess.run(
+                ["python3", "-m", "pytest", test_file, "-q", "--tb=no"],
+                capture_output=True, text=True, timeout=60,
+                cwd=project_root,
+            )
+            passed = failed = 0
+            for line in proc.stdout.splitlines():
+                if " passed" in line:
+                    try:
+                        passed = int(line.strip().split()[0])
+                    except (ValueError, IndexError):
+                        pass
+                if " failed" in line:
+                    try:
+                        failed = int(line.strip().split()[0])
+                    except (ValueError, IndexError):
+                        pass
+            return _TestResult(passed=passed, failed=failed)
+        except subprocess.TimeoutExpired:
+            return _TestResult(timed_out=True)
+        except Exception:
+            return _TestResult(no_tests_found=True)
+
 
 def check_contract_compliance(content: str, task: dict | None) -> list:
     """

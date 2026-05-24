@@ -373,6 +373,44 @@ class RewardStore:
             "by_action": stats,
         }
 
+    def get_prioritized(self, n: int = 32, alpha: float = 0.6) -> list[Episode]:
+        """
+        Prioritised Experience Replay (PER) sampling.
+        Episodes with higher |reward| are sampled with probability proportional
+        to |reward|^alpha.  Falls back to uniform if all rewards are zero.
+        """
+        episodes = self.get_recent(min(n * 10, 500))
+        if not episodes:
+            return []
+        weights = [abs(e.reward) ** alpha for e in episodes]
+        total_w = sum(weights)
+        if total_w == 0:
+            import random
+            return random.sample(episodes, min(n, len(episodes)))
+        import random
+        probs = [w / total_w for w in weights]
+        chosen: list[Episode] = []
+        population = list(range(len(episodes)))
+        indices = random.choices(population, weights=probs, k=min(n, len(episodes)))
+        seen: set[int] = set()
+        for i in indices:
+            if i not in seen:
+                seen.add(i)
+                chosen.append(episodes[i])
+        return chosen[:n]
+
+    def surprise_scores(self, window: int = 100) -> list[tuple[str, float]]:
+        """
+        Return (episode_id, surprise_score) for the last `window` episodes.
+        Surprise = |reward - rolling_mean_reward|  (deviation from expectation).
+        """
+        episodes = self.get_recent(window)
+        if not episodes:
+            return []
+        rewards = [e.reward for e in episodes]
+        mean = sum(rewards) / len(rewards)
+        return [(e.episode_id, abs(e.reward - mean)) for e in episodes]
+
     # ── Internal ───────────────────────────────────────────────────────────
 
     def _append(self, episode: Episode) -> None:

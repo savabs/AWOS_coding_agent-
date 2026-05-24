@@ -36,11 +36,15 @@ try:
     from .strategy_config import StrategyRouter
     from .self_correction import SelfCorrectionEngine
     from .skill_library import SkillLibrary
-    from .skill_library import SkillLibrary
     from .test_runner import TestRunner
     from .error_pattern_store import ErrorPatternStore, make_error_pattern
     from .project_planner import ProjectPlanner
     from .vector_memory import VectorMemory, VectorMemoryUnavailableError
+    from .critic_engine import CriticEngine, max_critic_rounds
+    from .post_mortem import PostMortemEngine, FailureType
+    from .confidence_calibrator import ConfidenceCalibrator
+    from .live_renderer import LiveRenderer
+    from .cheap_planner import CheapPlanner
 except ImportError:
     from planner import Planner
     from worker import Worker
@@ -64,6 +68,11 @@ except ImportError:
     from test_runner import TestRunner
     from error_pattern_store import ErrorPatternStore, make_error_pattern
     from project_planner import ProjectPlanner
+    from critic_engine import CriticEngine, max_critic_rounds
+    from post_mortem import PostMortemEngine, FailureType
+    from confidence_calibrator import ConfidenceCalibrator
+    from live_renderer import LiveRenderer
+    from cheap_planner import CheapPlanner
     try:
         from vector_memory import VectorMemory, VectorMemoryUnavailableError
     except ImportError:
@@ -119,6 +128,11 @@ class Orchestrator:
             self.vector_memory = None
             logger.warning("[VectorMemory] unavailable (%s) — semantic retrieval disabled", exc)
         self.project_planner = ProjectPlanner(vector_memory=self.vector_memory)
+        self.critic = CriticEngine()
+        self.post_mortem = PostMortemEngine(self.error_store, model_caller=self._cheap_call)
+        self.calibrator = ConfidenceCalibrator()
+        self._prm = None
+        self._prm_last_fit_at = 0
 
     def _cheap_call(self, prompt: str) -> str:
         """
@@ -180,7 +194,132 @@ class Orchestrator:
             gp.fit(episodes)
             self._gp_last_fit_at = total
             logger.info("[gp_world_model] fitted on %d episodes", total)
-    
+
+    def _maybe_train_prm(self) -> None:
+        """Trigger PRM training when 500+ MCTS traces have accumulated."""
+        try:
+            from .mcts_search import MCTSTraceStore
+        except ImportError:
+            try:
+                from mcts_search import MCTSTraceStore
+            except ImportError:
+                return
+        trace_store = MCTSTraceStore()
+        total_traces = trace_store.count()
+        if total_traces < 500:
+            return
+        if total_traces - self._prm_last_fit_at < 50:
+            return
+        try:
+            from .prm import ProcessRewardModel
+        except ImportError:
+            try:
+                from prm import ProcessRewardModel
+            except ImportError:
+                return
+        if self._prm is None:
+            self._prm = ProcessRewardModel()
+        traces = trace_store.get_recent(500)
+        self._prm.train(traces)
+        self._prm_last_fit_at = total_traces
+        logger.info("[prm] trained on %d MCTS traces", total_traces)
+
+    def _critic_refine(self, task: dict, patch: dict, file_content: str,
+                       tracker, esc_decision, attempt: int, codebase_context: dict,
+                       sym_index) -> dict:
+        """P7: Run CriticEngine on the worker patch; return revised patch or original."""
+        if not self.critic.should_run(task=task, attempt=attempt):
+            return patch
+        try:
+            verdict = self.critic.critique(
+                task=task,
+                patch=patch,
+                file_content=file_content,
+                codebase_context=codebase_context,
+            )
+            logger.info(
+                "[critic] task=%s verdict=%s conf=%.2f hints=%d",
+                task.get("task_id", "?"), verdict.verdict,
+                verdict.confidence, len(verdict.hints),
+            )
+            if verdict.should_revise and verdict.hints:
+                revised = {
+                    **patch,
+                    "critic_hints": verdict.hints,
+                    "critic_confidence": verdict.confidence,
+                }
+                return revised
+        except Exception as _ce:
+            logger.warning("[critic] critique failed: %s", _ce)
+        return patch
+
+    def _compute_confidence(self, task: dict, patch: dict, esc_decision) -> object:
+        """P9: Fuse critic+GP+LinUCB+PRM signals; return ConfidenceReport or None."""
+        if self.calibrator is None:
+            return None
+        try:
+            return self._compute_confidence_impl(task, patch, esc_decision)
+        except Exception as _ce:
+            logger.debug("[confidence] failed: %s", _ce)
+            return None
+
+    def _compute_confidence_impl(self, task: dict, patch: dict, esc_decision) -> object:
+        critic_score = patch.get("critic_confidence") if patch else None
+        prm_raw = None
+        gp_score = None
+        linucb_score = None
+        try:
+            import numpy as np
+            features = self._feature_extractor.extract(
+                task, self.escalation.failure_count(str(task.get("task_id", "")))
+            )
+            linucb_score = float(self.ml_router.predict_success(np.array(features)))
+        except Exception:
+            pass
+        try:
+            gp = getattr(self.ml_router, '_gp', None)
+            if gp is not None and gp.is_fitted():
+                import numpy as np
+                features = self._feature_extractor.extract(
+                    task, self.escalation.failure_count(str(task.get("task_id", "")))
+                )
+                gp_score = float(gp.predict_proba(np.array(features).reshape(1, -1))[0])
+        except Exception:
+            pass
+        report = self.calibrator.fuse(
+            critic_score=critic_score,
+            prm_raw=prm_raw,
+            gp_score=gp_score,
+            linucb_score=linucb_score,
+        )
+        logger.info(
+            "[confidence] task=%s score=%.2f verdict=%s",
+            task.get("task_id", "?"), report.fused_score, report.verdict,
+        )
+        return report
+
+    def _pick_best_candidate(self, candidates: list, task: dict) -> dict:
+        """
+        P7: Select the best patch from a list of candidates.
+        Uses PRM scoring when ready, otherwise falls back to highest critic_confidence.
+        Returns the single candidate unchanged if only one is provided.
+        """
+        if len(candidates) <= 1:
+            return candidates[0]
+        if self._prm is not None and getattr(self._prm, "ready", False):
+            best = candidates[0]
+            best_score = -1.0
+            for c in candidates:
+                try:
+                    score = self._prm.predict(task, c)
+                    if score > best_score:
+                        best_score = score
+                        best = c
+                except Exception:
+                    pass
+            return best
+        return max(candidates, key=lambda c: c.get("_critic_confidence", 0.0))
+
     def execute_feature(
         self,
         goal: str,
@@ -255,7 +394,11 @@ class Orchestrator:
         sym_index = SymbolIndex(codebase_root)
         sym_index.build()
         print(f"[SYMBOLS] {sym_index.summary()}")
-        
+
+        # ── LiveRenderer: real-time terminal UI ────────────────────────────
+        _live = LiveRenderer()
+        _live.session_start(goal, n_files=getattr(sym_index, '_file_count', 0))
+
         # Phase 1: Planning — skip if caller already built a cheap plan
         if pre_planned_tasks is not None:
             tasks = pre_planned_tasks
@@ -265,26 +408,37 @@ class Orchestrator:
         else:
             print(f"\n[PLANNER] Breaking down goal: {goal}")
             try:
-                plan = self.planner.plan(
-                    goal, codebase_context,
-                    tracker=self.tracker,
-                    existing_goal=self._active_goal_graph,
-                )
-            except Exception as e:
-                return {
-                    "success": False,
-                    "goal": goal,
-                    "tasks_completed": 0,
-                    "tasks_failed": 0,
-                    "total_cost": 0,
-                    "execution_log": self.execution_log,
-                    "errors": [f"Planning failed: {str(e)}"],
-                    "time_elapsed": time.time() - start_time
-                }
+                with _live.spinner("Planning…"):
+                    plan = self.planner.plan(
+                        goal, codebase_context,
+                        tracker=self.tracker,
+                        existing_goal=self._active_goal_graph,
+                    )
+            except Exception as _primary_err:
+                logger.warning("[planner] primary planner failed (%s) — trying CheapPlanner", _primary_err)
+                try:
+                    with _live.spinner("Planning (fallback)…"):
+                        plan = CheapPlanner().plan(
+                            goal, codebase_context, tracker=self.tracker,
+                        )
+                    print(f"[PLANNER] Fell back to CheapPlanner (Gemini Flash)")
+                except Exception as e:
+                    return {
+                        "success": False,
+                        "goal": goal,
+                        "tasks_completed": 0,
+                        "tasks_failed": 0,
+                        "total_tasks": 0,
+                        "total_cost": 0,
+                        "execution_log": self.execution_log,
+                        "errors": [f"Planning failed (primary: {_primary_err}; fallback: {str(e)})"],
+                        "time_elapsed": time.time() - start_time
+                    }
             tasks = plan.get("plan", [])
             print(f"[PLANNER] Generated {len(tasks)} tasks:")
             for task in tasks:
                 print(f"  Task {task['task_id']}: {task['action']} (complexity: {task['complexity']})")
+        _live.planning_done(tasks, model=self.planner.__class__.__name__)
         
         # ── Phase 5C: Ensure every task has a GoalNode in the graph ──
         if hasattr(self, "_active_goal_graph") and self._active_goal_graph is not None:
@@ -337,6 +491,8 @@ class Orchestrator:
             sym_index=sym_index,
             git=git,
             session=session,
+            _live=_live,
+            _total_tasks=len(tasks),
         )
 
         while True:
@@ -414,6 +570,34 @@ class Orchestrator:
         if tasks_completed == 0 and tasks_failed > 0:
             print("[GIT] All tasks failed — performing full rollback")
         git.finalize(overall_success)
+
+        # ── LiveRenderer: session done ──────────────────────────────────
+        _total_cost = self.tracker.get_budget_status().get("total_cost", 0.0) if self.tracker else 0.0
+        _live.session_done(
+            completed=tasks_completed,
+            failed=tasks_failed,
+            total_cost=_total_cost,
+            elapsed=elapsed,
+        )
+
+        # ── EvalReport: auto-run health dashboard after every session ──
+        try:
+            from .eval_report import _load_spans, _analyse, _feature_status, _load_skills, _load_mcts_traces, _render
+        except ImportError:
+            try:
+                from eval_report import _load_spans, _analyse, _feature_status, _load_skills, _load_mcts_traces, _render
+            except ImportError:
+                _render = None
+        if _render is not None:
+            try:
+                _spans = _load_spans(".awos", 100)
+                _metrics = _analyse(_spans)
+                _features = _feature_status()
+                _skills_n = _load_skills(".awos")
+                _mcts_n = _load_mcts_traces(".awos")
+                _render(_metrics, _features, _skills_n, _mcts_n)
+            except Exception as _er:
+                logger.debug("[eval_report] skipped: %s", _er)
         
         # Phase 3: Summary
         print(f"\n{'='*60}")
@@ -529,6 +713,10 @@ class Orchestrator:
         task_id = task["task_id"]
         file_path = os.path.join(codebase_root, task["file"])
 
+        _live_t = ctx.get("_live")           # LiveRenderer (optional)
+        _total_t = ctx.get("_total_tasks", 1)
+        _task_ts = time.time()
+
         # ── Phase 1: Observability — stamp arrival time ─────────────────────
         _span = new_span(
             task_id=task_id,
@@ -539,6 +727,8 @@ class Orchestrator:
 
         print(f"\n[TASK {task_id}] Executing: {task['action']}")
         print(f"           File: {task['file']}")
+        if _live_t:
+            _live_t.task_start(task_id, _total_t, task)
 
         # Load file content
         try:
@@ -590,7 +780,6 @@ class Orchestrator:
         elif _reason:
             print(f"[BUDGET] {_reason}")
 
-        # Worker attempts
         worker_success = False
         max_attempts = 3
         search_replace = None
@@ -663,8 +852,12 @@ class Orchestrator:
                     f"{esc_decision.spec.name} + correction [{_hint.approach_name}]"
                     + (f" + {len(_past)} past critique(s)" if _past else "")
                 )
+                if _live_t:
+                    _live_t.retry_notice(attempt, _last_error, _hint.approach_name)
 
             print(f"[TASK {task_id}] Worker attempt {attempt}/{max_attempts} via {esc_decision.spec.name}")
+            if _live_t:
+                _live_t.worker_start(attempt, esc_decision.spec.name)
 
             try:
                 search_replace = self.worker.execute_task(
@@ -681,18 +874,48 @@ class Orchestrator:
                     vector_chunks=_vector_chunks,
                 )
                 if search_replace.get("success"):
+                    # ── P7: Critic self-play ────────────────────────────
+                    try:
+                        search_replace = self._critic_refine(
+                            task=_task,
+                            patch=search_replace,
+                            file_content=file_content,
+                            tracker=self.tracker,
+                            esc_decision=esc_decision,
+                            attempt=attempt,
+                            codebase_context=codebase_context,
+                            sym_index=sym_index,
+                        )
+                    except Exception as _ce:
+                        logger.warning("[critic_refine] skipped: %s", _ce)
+                    # ── P9: Confidence gating ──────────────────────────
+                    _conf = self._compute_confidence(_task, search_replace, esc_decision)
+                    if _conf is not None and _conf.should_abort:
+                        print(f"[TASK {task_id}] CONF-ABORT attempt {attempt}: {_conf.explanation}")
+                        _last_error = f"Low confidence ({_conf.fused_score:.0%})"
+                        self.escalation.record_outcome(str(task_id), esc_decision.spec.level, False)
+                        if _live_t:
+                            _live_t.worker_done(False, error=_last_error)
+                        continue
                     worker_success = True
                     self.escalation.record_outcome(str(task_id), esc_decision.spec.level, True)
-                    print(f"[TASK {task_id}] Worker generated SEARCH/REPLACE")
+                    _conf_str = f"[conf={_conf.fused_score:.0%}]" if _conf is not None else ""
+                    print(f"[TASK {task_id}] Worker generated patch {_conf_str}")
+                    if _live_t:
+                        _live_t.worker_done(True, n_edits=len(search_replace.get("extra_edits", [])) + 1)
                     break
                 else:
                     _last_error = search_replace.get("error", "unknown output format")
                     self.escalation.record_outcome(str(task_id), esc_decision.spec.level, False)
                     print(f"[TASK {task_id}] Worker failed: {_last_error}")
+                    if _live_t:
+                        _live_t.worker_done(False, error=_last_error)
             except Exception as exc:
                 _last_error = str(exc)
                 self.escalation.record_outcome(str(task_id), esc_decision.spec.level, False)
                 print(f"[TASK {task_id}] Worker error: {exc}")
+                if _live_t:
+                    _live_t.worker_done(False, error=str(exc))
 
         if not worker_success:
             print(f"[TASK {task_id}] Worker failed after {max_attempts} attempts")
@@ -709,6 +932,13 @@ class Orchestrator:
             _features = self._feature_extractor.extract(task, self.escalation.failure_count(str(task_id)))
             self.reward_store.store(task=task, action_id=_aid, features=_features, success=False, cost_usd=_cost, model_name=esc_decision.spec.name)
             self.escalation.record_outcome(str(task_id), esc_decision.spec.level, False, task=task, reward=_reward)
+            self._maybe_fit_gp()
+            self._maybe_train_prm()
+            # ── P8: final WORKER_FAIL reflection ───────────────────────
+            try:
+                self.post_mortem.reflect(task, _last_error, FailureType.WORKER_FAIL)
+            except Exception as _pme:
+                logger.debug("[post_mortem] final worker_fail reflect: %s", _pme)
             # ── Phase 1: Observability — record failed span (worker gave up) ──
             _span.complete_ts = _time.time()
             _span.success = False
@@ -716,6 +946,8 @@ class Orchestrator:
             _span.cost_usd = _cost
             self.obs_store.record(_span)
             print(_span.one_liner())
+            if _live_t:
+                _live_t.task_done(False, elapsed=time.time() - _task_ts)
             return {"task_id": task_id, "success": False, "task": task}
 
         # Verifier attempts
@@ -735,6 +967,8 @@ class Orchestrator:
             if result["success"] and result["applied"]:
                 print(f"[TASK {task_id}] VERIFIED: Change applied successfully")
                 verify_success = True
+                if _live_t:
+                    _live_t.verify_result(True)
                 break
             elif result.get("needs_retry") and verify_attempt < max_verify_attempts:
                 print(f"[TASK {task_id}] Verification failed, retrying worker with error context")
@@ -754,7 +988,15 @@ class Orchestrator:
                     print(f"[TASK {task_id}] Worker retry failed: {exc}")
                     break
             else:
-                print(f"[TASK {task_id}] VERIFICATION FAILED: {result.get('errors', ['unknown'])[0]}")
+                _verify_err = str(result.get("errors", ["unknown"])[0])
+                print(f"[TASK {task_id}] VERIFICATION FAILED: {_verify_err}")
+                if _live_t:
+                    _live_t.verify_result(False, issues=[_verify_err])
+                # ── P8: verify failure reflection ──────────────────────
+                try:
+                    self.post_mortem.reflect(task, _verify_err, FailureType.VERIFY_FAIL)
+                except Exception as _pme:
+                    logger.debug("[post_mortem] verify_fail reflect: %s", _pme)
                 break
 
         # ── Phase 6: VectorMemory — store task outcome ─────────────────────
@@ -830,6 +1072,18 @@ class Orchestrator:
                         f"[TASK {task_id}] Tests: {test_result.passed} passed, "
                         f"{test_result.failed} failed (pass_rate={test_result.pass_rate:.2%})"
                     )
+                    if _live_t:
+                        _live_t.test_result(test_result.passed, test_result.passed + test_result.failed)
+                    # ── P8: test failure reflection ─────────────────────
+                    if test_result.failed > 0:
+                        try:
+                            self.post_mortem.reflect(
+                                task,
+                                f"{test_result.failed} test(s) failed (pass_rate={test_result.pass_rate:.0%})",
+                                FailureType.TEST_FAIL,
+                            )
+                        except Exception as _pme:
+                            logger.debug("[post_mortem] test_fail reflect: %s", _pme)
             except Exception as exc:
                 logger.warning("[TASK %s] TestRunner error: %s", task_id, exc)
                 task["test_result"] = None
@@ -849,6 +1103,8 @@ class Orchestrator:
         _features = self._feature_extractor.extract(task, self.escalation.failure_count(str(task_id)))
         self.reward_store.store(task=task, action_id=_aid, features=_features, success=_success, cost_usd=_cost, model_name=esc_decision.spec.name)
         self.escalation.record_outcome(str(task_id), esc_decision.spec.level, _success, task=task, reward=_reward)
+        self._maybe_fit_gp()
+        self._maybe_train_prm()
 
         # ── Update StrategyRouter with outcome ──────────────────────────────
         self.strategy_router.update(task, _strategy.name, _reward)
@@ -885,6 +1141,8 @@ class Orchestrator:
                 f"{search_replace.get('replace', '')[:500]}"
             )
 
+        if _live_t:
+            _live_t.task_done(verify_success, elapsed=time.time() - _task_ts)
         return {"task_id": task_id, "success": verify_success, "task": task, "_applied_context": _applied_context}
 
     def _discover_codebase_context(self, codebase_root: str) -> dict:

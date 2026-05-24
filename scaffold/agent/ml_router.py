@@ -146,7 +146,7 @@ class LinUCBRouter:
         self.n_actions   = n_actions
         self.alpha       = alpha
         self.min_samples = min_samples
-        self._weights_path = weights_path or _DEFAULT_WEIGHTS_PATH
+        self._weights_path = weights_path  # None = no persistence
         self._total_updates = 0
         self._gp: GPWorldModel | None = gp_model
 
@@ -156,8 +156,9 @@ class LinUCBRouter:
         self._A: list[np.ndarray] = [np.eye(n_features) for _ in range(n_actions)]
         self._b: list[np.ndarray] = [np.zeros(n_features) for _ in range(n_actions)]
 
-        # Try to restore persisted weights
-        self._load()
+        # Only load persisted weights when a path is explicitly provided
+        if weights_path is not None:
+            self._load()
 
     # ── Selection ────────────────────────────────────────────────────────
 
@@ -254,6 +255,26 @@ class LinUCBRouter:
 
     def total_updates(self) -> int:
         return self._total_updates
+
+    def predict_success(self, features: np.ndarray) -> float:
+        """
+        Return an estimated success probability [0,1] for the given feature vector.
+        Uses GP if available and fitted, else falls back to the best LinUCB UCB score.
+        """
+        if self._gp is not None and self._gp.is_fitted():
+            try:
+                return float(self._gp.predict_proba(features.reshape(1, -1))[0])
+            except Exception:
+                pass
+        if not self.is_ready():
+            return 0.5
+        scores = []
+        for a in range(self.n_actions):
+            A_inv = np.linalg.inv(self._A[a])
+            theta = A_inv @ self._b[a]
+            scores.append(float(theta @ features))
+        best = max(scores)
+        return min(max((best + 1.0) / 2.0, 0.0), 1.0)
 
     def learned_weights(self) -> dict[str, np.ndarray]:
         """
@@ -429,9 +450,11 @@ def build_ml_router(
     Call this once at AWOS startup.
     """
     gp = GPWorldModel(gp_path=gp_path)
+    # Pass the default path explicitly so production router loads persisted weights
+    effective_path = weights_path if weights_path is not None else _DEFAULT_WEIGHTS_PATH
     return LinUCBRouter(
         alpha=alpha,
         min_samples=min_samples,
-        weights_path=weights_path,
+        weights_path=effective_path,
         gp_model=gp,
     )

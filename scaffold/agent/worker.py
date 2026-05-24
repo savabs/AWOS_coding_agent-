@@ -406,7 +406,161 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
         
         result["model_used"] = model_used
         return result
-    
+
+    def _parse_json_edits(self, response_text: str):
+        """
+        Parse a JSON-formatted edit block from response_text.
+        Returns an EditRequest if a valid JSON edit block is found, else None.
+        """
+        try:
+            from .edit_models import EditRequest, EditInstruction
+        except ImportError:
+            from edit_models import EditRequest, EditInstruction
+        import json, re
+        # Try fenced block first, then bare JSON object
+        candidates = []
+        for m in re.finditer(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL):
+            candidates.append(m.group(1).strip())
+        # Also try bare JSON object containing "edits"
+        for m in re.finditer(r'(\{[^{}]*"edits"\s*:.*\})', response_text, re.DOTALL):
+            candidates.append(m.group(1).strip())
+        # And the whole response if it starts with {
+        stripped = response_text.strip()
+        if stripped.startswith("{"):
+            candidates.append(stripped)
+        for candidate in candidates:
+            try:
+                data = json.loads(candidate)
+                if not isinstance(data, dict) or "edits" not in data:
+                    continue
+                raw_edits = data["edits"]
+                if not raw_edits:
+                    return None
+                instructions = [
+                    EditInstruction(
+                        old_string=e.get("old_string", ""),
+                        new_string=e.get("new_string", ""),
+                        description=e.get("description", ""),
+                    )
+                    for e in raw_edits
+                    if isinstance(e, dict)
+                ]
+                return EditRequest(edits=instructions, reasoning=data.get("reasoning", ""))
+            except (json.JSONDecodeError, KeyError, TypeError):
+                continue
+        return None
+
+    def _find_nearest_match(self, file_content: str, old_string: str, threshold: float = 0.82) -> tuple[str, float]:
+        """
+        Find the best fuzzy match for *old_string* in *file_content*.
+        Returns (matched_text, score).  Returns ("", 0.0) if below threshold.
+        """
+        from difflib import SequenceMatcher
+        if not old_string:
+            return ("", 0.0)
+        if not file_content:
+            return ("", 0.0)
+        old_lines = old_string.splitlines()
+        content_lines = file_content.splitlines()
+        n = len(old_lines)
+        if n == 0:
+            return ("", 0.0)
+        best_ratio = 0.0
+        best_start = 0
+        old_text = "\n".join(old_lines)
+        for i in range(max(1, len(content_lines) - n + 1)):
+            window_text = "\n".join(content_lines[i:i + n])
+            ratio = SequenceMatcher(None, old_text, window_text).ratio()
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_start = i
+        if best_ratio < threshold:
+            return ("", 0.0)
+        matched = "\n".join(content_lines[best_start:best_start + n])
+        return (matched, best_ratio)
+
+    def _apply_single_edit(self, file_content: str, old_string: str, new_string: str):
+        """
+        Apply one old_string → new_string substitution to file_content.
+        Returns a SingleEditResult.
+        """
+        try:
+            from .edit_models import SingleEditResult, EditStatus, EditInstruction
+        except ImportError:
+            from edit_models import SingleEditResult, EditStatus, EditInstruction
+        instruction = EditInstruction(old_string=old_string, new_string=new_string)
+        # Empty old_string: append new_string
+        if not old_string:
+            return SingleEditResult(
+                instruction=instruction,
+                status=EditStatus.OK,
+                new_content=file_content + new_string,
+                match_count=0,
+            )
+        count = file_content.count(old_string)
+        if count > 1:
+            return SingleEditResult(
+                instruction=instruction,
+                status=EditStatus.MULTI_MATCH,
+                new_content="",
+                match_count=count,
+                error=f"ambiguous: {count} occurrences of old_string found",
+            )
+        if count == 1:
+            return SingleEditResult(
+                instruction=instruction,
+                status=EditStatus.OK,
+                new_content=file_content.replace(old_string, new_string, 1),
+                match_count=1,
+            )
+        # Fuzzy fallback
+        matched, score = self._find_nearest_match(file_content, old_string)
+        if matched:
+            return SingleEditResult(
+                instruction=instruction,
+                status=EditStatus.FUZZY_MATCH,
+                new_content=file_content.replace(matched, new_string, 1),
+                match_count=1,
+                similarity=score,
+            )
+        return SingleEditResult(
+            instruction=instruction,
+            status=EditStatus.NOT_FOUND,
+            new_content="",
+            match_count=0,
+            error=f"old_string not found in file",
+        )
+
+    def _apply_all_edits(self, file_content: str, edit_request) -> "EditResult":
+        """
+        Apply all EditInstructions in *edit_request* sequentially.
+        Stops on first failure.  Returns an EditResult.
+        """
+        try:
+            from .edit_models import EditResult, EditStatus
+        except ImportError:
+            from edit_models import EditResult, EditStatus
+        content = file_content
+        results = []
+        applied = 0
+        failed = 0
+        for instruction in edit_request.edits:
+            r = self._apply_single_edit(content, instruction.old_string, instruction.new_string)
+            results.append(r)
+            if r.status in (EditStatus.OK, EditStatus.FUZZY_MATCH):
+                content = r.new_content
+                applied += 1
+            else:
+                failed += 1
+                break
+        return EditResult(
+            request=edit_request,
+            results=results,
+            final_content=content,
+            applied=applied,
+            failed=failed,
+        )
+
     def _extract_context(self, file_content: str, action: str) -> str:
         """Extract relevant context: always include imports + class headers + action vicinity."""
         lines = file_content.split("\n")

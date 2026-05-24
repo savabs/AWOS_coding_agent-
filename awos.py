@@ -196,8 +196,7 @@ def cmd_budget(args):
 
 def cmd_performance(args):
     """Print the tool performance success matrix."""
-    sys.path.insert(0, str(AGENT_DIR))
-    from core.performance_tracker import ToolPerformanceTracker
+    from scaffold.agent.core.performance_tracker import ToolPerformanceTracker
 
     tracker = ToolPerformanceTracker(persist_dir=".awos")
     matrix = tracker.success_matrix(window=getattr(args, "window", 200), min_count=1)
@@ -256,8 +255,8 @@ def cmd_index(args):
 
 def cmd_run(args):
     """Execute a feature goal via the Orchestrator."""
-    from orchestrator import Orchestrator
-    from token_tracker import TokenTracker
+    from scaffold.agent.orchestrator import Orchestrator
+    from scaffold.agent.token_tracker import TokenTracker
 
     tracker = TokenTracker(monthly_budget=float(os.getenv("AWOS_MONTHLY_BUDGET", "20.0")))
     orch = Orchestrator(tracker=tracker)
@@ -269,7 +268,9 @@ def cmd_run(args):
 
     print(f"\nGoal:     {result['goal']}")
     print(f"Success:  {'✓' if result['success'] else '✗'}")
-    print(f"Tasks:    {result['tasks_completed']}/{result['total_tasks']} completed")
+    completed = result.get('tasks_completed', 0)
+    total = result.get('total_tasks', result.get('tasks_failed', 0) + completed)
+    print(f"Tasks:    {completed}/{total} completed")
     if result.get("errors"):
         for e in result["errors"][:5]:
             print(f"  ✗ {e}")
