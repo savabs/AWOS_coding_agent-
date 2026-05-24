@@ -86,8 +86,11 @@ class Worker:
         complexity = task.get("complexity", "medium")
         error_context = task.get("error_context", "")  # Set on retry by orchestrator
         
-        # Build micro-context: show only relevant lines
-        context_snippet = self._extract_context(file_content, action)
+        # Build micro-context: show only relevant lines (full file on retry)
+        if attempt > 1 and len(file_content) < 60000:
+            context_snippet = file_content
+        else:
+            context_snippet = self._extract_context(file_content, action)
         
         # Cross-file symbol awareness (Phase 3)
         symbol_section = ""
@@ -741,7 +744,7 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
         """Extract relevant context: imports + full class bodies + wide action vicinity."""
         lines = file_content.split("\n")
 
-        if len(lines) <= 120:
+        if len(lines) <= 500:
             return file_content
 
         # Part 1: Always include imports, docstring, and constructor (first 90 lines)
