@@ -59,6 +59,39 @@ class Verifier:
                 "error_context": "File does not exist. Check path in task."
             }
         
+        # ── JSON-applied path: edits already applied by Worker ──────
+        if search_replace.get("_json_applied"):
+            modified_content = search_replace.get("_final_content", original_content)
+            errors = self._check_syntax(file_path, modified_content)
+            if errors:
+                return {
+                    "success": False, "applied": False, "errors": errors,
+                    "file_content": modified_content, "needs_retry": True,
+                    "error_context": f"Syntax error after JSON edit:\n{errors[0]}\n\nContext:\n{self._get_error_context(modified_content, errors[0])}"
+                }
+            contract_errors = self._check_contract_compliance(modified_content, task=search_replace.get("task_spec"))
+            if contract_errors:
+                return {
+                    "success": False, "applied": False, "errors": contract_errors,
+                    "file_content": modified_content, "needs_retry": True,
+                    "error_context": f"Contract violation:\n{chr(10).join(contract_errors)}"
+                }
+            try:
+                with open(file_path, 'w') as f:
+                    f.write(modified_content)
+            except Exception as e:
+                return {
+                    "success": False, "applied": False,
+                    "errors": [f"Failed to write file: {str(e)}"],
+                    "needs_retry": False,
+                    "error_context": f"Permission error writing {file_path}"
+                }
+            return {
+                "success": True, "applied": True, "errors": [],
+                "file_content": modified_content, "needs_retry": False,
+                "error_context": ""
+            }
+
         # Apply SEARCH/REPLACE
         search_text = search_replace.get("search", "")
         replace_text = search_replace.get("replace", "")

@@ -257,7 +257,9 @@ INSTRUCTIONS:
 If you need to call a method from another file, first search this file for where that class/object is already imported or used, then add your call immediately after that existing usage.
 IMPORTANT: The variable name in the action (e.g., 'tracker.snapshot()') may not match the actual variable name in this file. Search the file for the actual instance name and use that instead.
 
-OUTPUT FORMAT (exact structure required):
+OUTPUT FORMAT — choose ONE of the two formats below:
+
+FORMAT A (SEARCH/REPLACE — preferred for single-block changes):
 SEARCH:
 ```
 <exact multiline text from file, including context lines>
@@ -270,6 +272,17 @@ REPLACE:
 
 REASONING:
 <one sentence: what changes and why>
+
+FORMAT B (JSON — use for multi-location changes or when exact line matching is hard):
+```json
+{{
+  "reasoning": "<one sentence>",
+  "edits": [
+    {{"old_string": "<exact text to find in file>", "new_string": "<replacement text>"}}
+  ]
+}}
+```
+Each old_string must be an exact substring of the file. You can include multiple edits in the array.
 
 Do not add markdown backticks inside the code blocks. The SEARCH text must be copy-pasteable from the file.{strategy_suffix}"""
         
@@ -379,6 +392,24 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                           "reasoning": sv_result.error_context}
         
         if not result["success"]:
+            # ── Fallback: try JSON structured edit format ──────────────
+            json_req = self._parse_json_edits(response_text)
+            if json_req is not None:
+                edit_result = self._apply_all_edits(file_content, json_req)
+                if edit_result.applied > 0 and edit_result.failed == 0:
+                    print(f"[WORKER] JSON edit applied ({edit_result.applied} edit(s))")
+                    return {
+                        "success": True,
+                        "search": "",
+                        "replace": "",
+                        "reasoning": json_req.reasoning,
+                        "model_used": model_used,
+                        "_json_applied": True,
+                        "_final_content": edit_result.final_content,
+                    }
+                else:
+                    print(f"[WORKER] JSON edit partially failed: {edit_result.applied} ok, {edit_result.failed} fail")
+            # ───────────────────────────────────────────────────────────
             if attempt < 2:
                 # Inject self-verification error context into retry
                 _retry_task = task
@@ -561,45 +592,6 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
             failed=failed,
         )
 
-    def _extract_context(self, file_content: str, action: str) -> str:
-        """Extract relevant context: always include imports + class headers + action vicinity."""
-        lines = file_content.split("\n")
-        
-        if len(lines) <= 120:
-            return file_content
-        
-        # Part 1: Always include imports and top-level defs (first 25 lines)
-        header_lines = set(range(min(25, len(lines))))
-        
-        # Part 2: Class/def lines (structural anchors)
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            if stripped.startswith(("class ", "def ", "async def ", "@")):
-                for j in range(max(0, i - 1), min(len(lines), i + 3)):
-                    header_lines.add(j)
-        
-        # Part 3: Action-keyword vicinity (50 lines around best match)
-        relevant_keywords = [w for w in action.lower().split() if len(w) > 3][:4]
-        best_start, best_score = 0, -1
-        for i, line in enumerate(lines):
-            score = sum(1 for kw in relevant_keywords if kw in line.lower())
-            if score > best_score:
-                best_score, best_start = score, i
-        
-        vicinity = set(range(max(0, best_start - 10), min(len(lines), best_start + 60)))
-        
-        # Merge and output in order
-        selected = sorted(header_lines | vicinity)
-        result = []
-        prev = -2
-        for i in selected:
-            if i - prev > 1:
-                result.append("# ...")
-            result.append(lines[i])
-            prev = i
-        
-        return "\n".join(result)
-    
     def _architect_step(
         self,
         action: str,
