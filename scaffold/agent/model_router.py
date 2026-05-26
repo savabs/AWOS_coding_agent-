@@ -128,6 +128,7 @@ if __name__ == "__main__":
     3. Token budgets MUST be enforced (300-700 tokens per request)
     4. Cache hits are critical (30%+ target)
     5. Local analysis skips 40%+ of API calls (free)
+    """)
 # Quick test
 if __name__ == "__main__":
     router = ModelRouter()

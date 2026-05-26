@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Planner Contract Upgrade — Research</title></head>
+<body style="font-family:sans-serif;max-width:800px;margin:2em auto">
+<h1>Planner Contract Upgrade — Research</h1>
+<p><strong>Date:</strong> 2026-05-16</p>
+
+<h2>Problem</h2>
+<p>Cheap models (DeepSeek) fail ~25% on multi-file tasks because the Planner (Sonnet) emits only natural-language actions. The Worker must <em>invent</em> function signatures, error handling patterns, and interface contracts. This causes inconsistency, hallucinated dependencies, and broken SEARCH/REPLACE blocks.</p>
+
+<h2>Root Cause</h2>
+<ul>
+<li>Current task schema: <code>{task_id, file, action, complexity}</code> — too vague</li>
+<li>Worker prompt gives only the action string; model must infer everything else</li>
+<li>No machine-enforceable validation of whether output matches intent</li>
+</ul>
+
+<h2>Prior Art</h2>
+<p>The "Correct AI Development Hierarchy" (shared 2026-05-16) states: cheap models should be "deterministic code compilers from specs." The real secret is that cheap models fail when requirements are ambiguous. If the top model produces exact contracts, signatures, and constraints, weaker models perform surprisingly well.</p>
+
+<h2>Solution</h2>
+<p>Extend Planner output with machine-enforceable contract fields. Extend Worker prompt to consume them. Extend Verifier to validate contract compliance (not just syntax).</p>
+
+<h2>Risks</h2>
+<ul>
+<li>Sonnet output is already near token limit; adding contracts may require higher max_tokens</li>
+<li>Backwards compatibility: old task format must still work</li>
+<li>Contracts may be wrong — need fallback if contract contradicts codebase reality</li>
+</ul>
+
+<h2>Files Affected</h2>
+<ul>
+<li><code>scaffold/agent/planner.py</code> — richer prompt + output schema</li>
+<li><code>scaffold/agent/worker.py</code> — consume contract fields in prompt</li>
+<li><code>scaffold/agent/verifier.py</code> — contract compliance check</li>
+<li><code>scaffold/agent/orchestrator.py</code> — pass contracts through pipeline</li>
+</ul>
+</body>
+</html>

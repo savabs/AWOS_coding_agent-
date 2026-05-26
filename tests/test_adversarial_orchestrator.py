@@ -1,3 +1,6 @@
+import pytest
+pytestmark = pytest.mark.integration
+
 """
 Adversarial test harness for the Orchestrator → Worker → Verifier pipeline.
 

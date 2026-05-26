@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AWOS v2 Blueprint — Implementation Specification</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px 20px;
+            text-align: center;
+        }
+        header h1 { font-size: 2.5em; margin-bottom: 10px; }
+        header .subtitle { opacity: 0.9; font-size: 1.1em; }
+        .content {
+            padding: 40px;
+        }
+        .sprint {
+            background: #f9f9f9;
+            border-left: 6px solid #667eea;
+            padding: 24px;
+            margin-bottom: 32px;
+            border-radius: 4px;
+        }
+        .sprint h2 {
+            font-size: 1.8em;
+            color: #667eea;
+            margin-bottom: 12px;
+        }
+        .sprint-meta {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #ddd;
+        }
+        .step {
+            background: white;
+            border-left: 4px solid #764ba2;
+            padding: 16px;
+            margin-bottom: 16px;
+            border-radius: 4px;
+        }
+        .step-header {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 12px;
+            align-items: center;
+        }
+        .step-number {
+            background: #667eea;
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+        .step-title {
+            font-size: 1.1em;
+            font-weight: 600;
+            color: #333;
+        }
+        .step-content { margin-left: 52px; }
+        .description {
+            color: #555;
+            margin-bottom: 12px;
+        }
+        .files, .test, .exit {
+            font-size: 0.95em;
+            margin-bottom: 8px;
+        }
+        .files strong, .test strong, .exit strong {
+            color: #667eea;
+        }
+        .files code, .test code, .exit code {
+            background: #f5f5f5;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Monaco', 'Menlo', monospace;
+        }
+        .footer {
+            background: #f9f9f9;
+            padding: 20px 40px;
+            border-top: 1px solid #e0e0e0;
+            text-align: center;
+            color: #666;
+            font-size: 0.9em;
+        }
+        .toc {
+            background: #f0f4ff;
+            border: 2px solid #667eea;
+            padding: 20px;
+            border-radius: 6px;
+            margin-bottom: 32px;
+        }
+        .toc h3 {
+            color: #667eea;
+            margin-bottom: 12px;
+        }
+        .toc ul {
+            margin-left: 20px;
+        }
+        .toc li {
+            margin-bottom: 6px;
+            color: #555;
+        }
+        .toc a {
+            color: #667eea;
+            text-decoration: none;
+        }
+        .toc a:hover { text-decoration: underline; }
+        .phase-label {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 600;
+            margin-left: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>AWOS v2 Blueprint</h1>
+            <p class="subtitle">Implementation Specification</p>
+            <p style="font-size: 0.9em; margin-top: 10px;">Atomic Steps: Sprint 1–3 | 23 Total Steps</p>
+        </header>
+
+        <div class="content">
+            <div class="toc">
+                <h3>Implementation Plan Overview</h3>
+                <ul>
+                    <li><strong>Sprint 1 (Foundation):</strong> 8 steps — CLI scaffolding, Tree-Sitter setup, basic Cartographer</li>
+                    <li><strong>Sprint 2 (Intelligence):</strong> 8 steps — Complexity scoring, model routing, HITL consent gate</li>
+                    <li><strong>Sprint 3 (Persistence):</strong> 7 steps — Hydration, prompt caching, SOUL.xml, dreaming cycle</li>
+                </ul>
+                <p style="margin-top: 16px; font-size: 0.95em; color: #555;">
+                    <strong>Total estimated effort:</strong> 12–16 weeks for one engineer. Parallelizable: Sprint 2 Layer 2 can begin after Sprint 1 completes Layer 1 Cartographer.
+                </p>
+            </div>
+
+            <!-- SPRINT 1 -->
+            <div class="sprint">
+                <h2>Sprint 1: Foundation Layer <span class="phase-label">Phase 0 Extension</span></h2>
+                <div class="sprint-meta">
+                    Goal: Establish CLI skeleton, initialize Tree-Sitter integration, build basic STRUCT.xml output.
+                    <br>Duration: ~4 weeks | Steps: 1.1–1.8 | Exit: <code>awos map</code> generates STRUCT.xml for any language
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">1.1</div>
+                        <div class="step-title">Create <code>.awos/</code> project memory directory</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="description">
+                            Initialize the project soul storage. All persistent data (rules, patterns, decisions, cost history) lives here.
+                        </div>
+                        <div class="files">
+                            <strong>Changes:</strong> Create <code>.awos/soul.xml</code> (template), <code>.awos/cost_log.xml</code> (template), <code>.awos/session_dreaming.py</code> (placeholder)
+                        </div>
+                        <div class="test">
+                            <strong>Test:</strong> Verify directory exists; XML templates are valid; <code>git check-ignore .awos</code> confirms directory is untracked (add to <code>.gitignore</code> if needed)
+                        </div>
+                        <div class="exit">
+                            <strong>Exit condition:</strong> <code>.awos/</code> is initialized and checked into repo as example structure. User can customize.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">1.2</div>
+                        <div class="step-title">Add <code>tree-sitter</code> + language parsers to requirements</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="description">
+                            Pin Tree-Sitter Python bindings and language parser modules for initial scope (Python, C, C++, Rust).
+                        </div>
+                        <div class="files">
+                            <strong>Changes:</strong> Add to <code>requirements.txt</code>: <code>tree-sitter==0.21.0</code>, <code>tree-sitter-python==0.21.x</code>, <code>tree-sitter-cpp==0.21.x</code>, <code>tree-sitter-rust==0.21.x</code>
+                        </div>
+                        <div class="test">
+                            <strong>Test:</strong> <code>pip install -r requirements.txt</code> succeeds; <code>python -c "import tree_sitter; print(tree_sitter.__version__)"</code> confirms install
+                        </div>
+                        <div class="exit">
+                            <strong>Exit condition:</strong> Tree-Sitter + parsers installed; Python REPL can import language parsers without error
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">1.3</div>
+                        <div class="step-title">Implement <code>TreeSitterCartographer</code> class</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="description">
+                            Core parser class. Takes a file path, language, and returns AST + symbol list.
+                        </div>
+                        <div class="files">
+                            <strong>Files:</strong> New <code>scaffold/agent/cartographer.py</code><br>
+                            <strong>Class:</strong> <code>TreeSitterCartographer(language: str, parsers: Dict[str, Language])</code><br>
+                            <strong>Methods:</strong>
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li><code>parse(file_path: str) → AST</code></li>
+                                <li><code>extract_symbols(ast) → List[Symbol]</code> (returns id, type, name, signature, line)</li>
+                                <li><code>get_content_hash(file_path: str) → str</code> (XXH3)</li>
+                            </ul>
+                        </div>
+                        <div class="test">
+                            <strong>Test:</strong> Unit test with fixture files:
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li>Python: <code>def my_func(): pass</code> → extract <code>Symbol(id='f1', type='function', name='my_func')</code></li>
+                                <li>C++: <code>void render() {}</code> → extract symbol</li>
+                                <li>Verify XXH3 hash matches same file, differs when modified</li>
+                            </ul>
+                        </div>
+                        <div class="exit">
+                            <strong>Exit condition:</strong> <code>pytest tests/test_cartographer.py</code> passes; all fixtures extracted correctly
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">1.4</div>
+                        <div class="step-title">Build STRUCT.xml generator</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="description">
+                            Traverse repository tree, parse each file, produce hierarchical STRUCT.xml output.
+                        </div>
+                        <div class="files">
+                            <strong>File:</strong> New <code>scaffold/agent/struct_builder.py</code><br>
+                            <strong>Class:</strong> <code>StructBuilder(cartographer: TreeSitterCartographer, repo_path: str)</code><br>
+                            <strong>Methods:</strong>
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li><code>build() → str</code> (returns XML string)</li>
+                                <li><code>to_file(output_path: str)</code></li>
+                            </ul>
+                        </div>
+                        <div class="test">
+                            <strong>Test:</strong> Create minimal test project (5 files), generate STRUCT.xml, validate:
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li>XML is well-formed (can parse with ElementTree)</li>
+                                <li>All files appear in tree</li>
+                                <li>All symbols are correctly typed and named</li>
+                                <li>Hashes are present and stable</li>
+                            </ul>
+                        </div>
+                        <div class="exit">
+                            <strong>Exit condition:</strong> <code>pytest tests/test_struct_builder.py</code> passes; STRUCT.xml output is human-readable and valid
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">1.5</div>
+                        <div class="step-title">Add file-watcher integration (Watchdog)</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="description">
+                            Detect file changes in real-time. Trigger incremental STRUCT.xml re-parse on modified files only.
+                        </div>
+                        <div class="files">
+                            <strong>File:</strong> Update <code>scaffold/agent/struct_builder.py</code> with <code>FileWatcher</code> class<br>
+                            <strong>Deps:</strong> Add <code>watchdog==3.0.0</code> to <code>requirements.txt</code><br>
+                            <strong>Feature:</strong> <code>watch_repo(callback: Callable)</code> — starts file monitor, calls callback on change
+                        </div>
+                        <div class="test">
+                            <strong>Test:</strong> Integration test:
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li>Modify a test file (add/remove function)</li>
+                                <li>Verify STRUCT.xml updated within 1 second</li>
+                                <li>Verify other files untouched (no redundant re-parse)</li>
+                            </ul>
+                        </div>
+                        <div class="exit">
+                            <strong>Exit condition:</strong> File watcher correctly detects modifications and updates STRUCT.xml incrementally (verified by timestamp + hash diff)
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">1.6</div>
+                        <div class="step-title">Implement <code>awos map</code> CLI command</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="description">
+                            New entry point: <code>awos map [--watch] [--output STRUCT.xml]</code>. Generates initial STRUCT.xml from repo.
+                        </div>
+                        <div class="files">
+                            <strong>File:</strong> Update <code>scaffold/agent/cli.py</code><br>
+                            <strong>Command:</strong> <code>@app.command("map")</code> with Typer options
+                        </div>
+                        <div class="test">
+                            <strong>Test:</strong> CLI integration:
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li><code>awos map --help</code> shows usage</li>
+                                <li><code>awos map</code> generates STRUCT.xml in current directory</li>
+                                <li><code>awos map --output /tmp/test.xml</code> writes to custom path</li>
+                                <li><code>awos map --watch</code> starts file watcher (manual Ctrl+C to stop)</li>
+                            </ul>
+                        </div>
+                        <div class="exit">
+                            <strong>Exit condition:</strong> <code>awos map</code> works for Python + C/C++ projects; STRUCT.xml is stable and parseable
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">1.7</div>
+                        <div class="step-title">Add language detection logic</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="description">
+                            Detect project primary language(s) by file count heuristic. Auto-select appropriate Tree-Sitter parsers.
+                        </div>
+                        <div class="files">
+                            <strong>File:</strong> New <code>scaffold/agent/language_detector.py</code><br>
+                            <strong>Function:</strong> <code>detect_languages(repo_path: str) → Dict[str, float]</code> (returns language → proportion)</li>
+                        </div>
+                        <div class="test">
+                            <strong>Test:</strong> Test projects with known language distributions:
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li>Python repo: detect Python > 80%</li>
+                                <li>Mixed C++/Python: detect both, correct proportions</li>
+                            </ul>
+                        </div>
+                        <div class="exit">
+                            <strong>Exit condition:</strong> <code>detect_languages()</code> accurately identifies primary languages; <code>awos map</code> auto-loads correct parsers
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">1.8</div>
+                        <div class="step-title">End-to-end test: Generate STRUCT.xml for AWOS_coding_agent repo</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="description">
+                            Dogfooding: Run <code>awos map</code> on this project. Verify it correctly indexes itself.
+                        </div>
+                        <div class="files">
+                            <strong>Test:</strong> Manual + CI: <code>scripts/test_cartographer_e2e.py</code>
+                        </div>
+                        <div class="test">
+                            <strong>Checks:</strong>
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li>STRUCT.xml generated without error</li>
+                                <li>All Python files in <code>scaffold/</code> are indexed</li>
+                                <li>Symbols extracted correctly (e.g., <code>TreeSitterCartographer</code> class, <code>parse()</code> method)</li>
+                                <li>File hashes are stable across runs</li>
+                            </ul>
+                        </div>
+                        <div class="exit">
+                            <strong>Exit condition:</strong> <code>STRUCT.xml</code> generated for AWOS_coding_agent; at least 20 symbols correctly extracted; <strong>Sprint 1 complete</strong>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SPRINT 2 -->
+            <div class="sprint">
+                <h2>Sprint 2: Intelligence Layer <span class="phase-label">Phase 1 Extension</span></h2>
+                <div class="sprint-meta">
+                    Goal: Implement complexity scoring, model routing, HITL consent gate, pre-flight manifest.
+                    <br>Duration: ~4 weeks | Steps: 2.1–2.8 | Exit: <code>awos run</code> shows pre-flight manifest and routes tasks to correct model tier
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">2.1</div>
+                        <div class="step-title">Implement complexity scorer</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="description">
+                            Tier 4 model (fast + cheap) scores task description → 1–10. Routing uses this score.
+                        </div>
+                        <div class="files">
+                            <strong>File:</strong> New <code>scaffold/agent/dispatcher.py</code><br>
+                            <strong>Class:</strong> <code>ComplexityScorer(model_client)</code><br>
+                            <strong>Methods:</strong> <code>score(task_description: str) → int</code> (1–10 score)
+                        </div>
+                        <div class="test">
+                            <strong>Test:</strong> Unit tests with hardcoded task examples (no API calls):
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li>Simple: "Add type hints to function" → score 1–3</li>
+                                <li>Medium: "Refactor memory allocator" → score 5–7</li>
+                                <li>Hard: "Redesign async architecture" → score 8–10</li>
+                                <li>Verify score is deterministic</li>
+                            </ul>
+                        </div>
+                        <div class="exit">
+                            <strong>Exit condition:</strong> Scorer gives consistent scores for known tasks; scores match expected tier (1–3 → Tier 3, etc.)
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">2.2</div>
+                        <div class="step-title">Implement multi-provider model router</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="description">
+                            Maps complexity score → model tier → API provider. Returns (provider, model, estimated_cost).
+                        </div>
+                        <div class="files">
+                            <strong>File:</strong> Update <code>scaffold/agent/dispatcher.py</code> with <code>ModelRouter</code> class<br>
+                            <strong>Methods:</strong> <code>route(complexity_score: int) → (provider, model, cost_estimate)</code>
+                        </div>
+                        <div class="test">
+                            <strong>Test:</strong> Routing table test:
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li>Score 1 → (DeepSeek, deepseek-chat, $0.001)</li>
+                                <li>Score 5 → (Anthropic, claude-sonnet-4-5, $0.10)</li>
+                                <li>Score 9 → (Anthropic, claude-opus-4-5, $0.50)</li>
+                            </ul>
+                        </div>
+                        <div class="exit">
+                            <strong>Exit condition:</strong> Routing table matches published model costs; all tiers testable without API
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">2.3</div>
+                        <div class="step-title">Build pre-flight manifest generator</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="description">
+                            Formats task + routing info into human-readable pre-flight manifest (ASCII art box).
+                        </div>
+                        <div class="files">
+                            <strong>File:</strong> New <code>scaffold/agent/manifest.py</code><br>
+                            <strong>Class:</strong> <code>PreFlightManifest(task, model_tier, cost_estimate, runtime_estimate)</code><br>
+                            <strong>Methods:</strong> <code>render() → str</code>
+                        </div>
+                        <div class="test">
+                            <strong>Test:</strong> Manifest rendering:
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li>Render manifest for test task</li>
+                                <li>Verify ASCII box is well-formed (borders, alignment)</li>
+                                <li>Verify all fields present (task, tier, cost, runtime)</li>
+                            </ul>
+                        </div>
+                        <div class="exit">
+                            <strong>Exit condition:</strong> Manifest renders correctly; matches spec example format
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">2.4</div>
+                        <div class="step-title">Implement consent gate (HITL)</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="description">
+                            Show manifest, pause for user input: [A]pprove, [S]witch, [O]mni-Mode, [D]eny.
+                        </div>
+                        <div class="files">
+                            <strong>File:</strong> New <code>scaffold/agent/consent.py</code><br>
+                            <strong>Class:</strong> <code>ConsentGate(manifest, default_mode='deny')</code><br>
+                            <strong>Methods:</strong> <code>wait_for_approval() → (approved: bool, mode: str)</code>
+                        </div>
+                        <div class="test">
+                            <strong>Test:</strong> Interactive mode disabled in tests (mock user input):
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li>Mock input 'A' → approved=True</li>
+                                <li>Mock input 'D' → approved=False</li>
+                                <li>Mock input 'O' → mode='omni'; remember for session</li>
+                            </ul>
+                        </div>
+                        <div class="exit">
+                            <strong>Exit condition:</strong> Consent gate correctly parses user input and returns approval status
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">2.5</div>
+                        <div class="step-title">Add LiteLLM integration for multi-provider dispatch</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="description">
+                            Route API calls through LiteLLM. Supports DeepSeek, Claude, Gemini, etc. with fallback/retry logic.
+                        </div>
+                        <div class="files">
+                            <strong>File:</strong> Update <code>scaffold/agent/orchestrator.py</code> with <code>LiteLLMClient</code> wrapper<br>
+                            <strong>Deps:</strong> Add <code>litellm==1.50.0</code> to <code>requirements.txt</code>
+                        </div>
+                        <div class="test">
+                            <strong>Test:</strong> Mock API calls (no real spend):
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li>Mock DeepSeek response</li>
+                                <li>Mock Claude response</li>
+                                <li>Verify routing works without live API</li>
+                            </ul>
+                        </div>
+                        <div class="exit">
+                            <strong>Exit condition:</strong> LiteLLM client routes to correct provider; mock tests pass
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">2.6</div>
+                        <div class="step-title">Initialize COST_LOG.xml tracking</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="description">
+                            Log every API call: model, tokens, cost, cache hit %. Write to <code>.awos/cost_log.xml</code>.
+                        </div>
+                        <div class="files">
+                            <strong>File:</strong> New <code>scaffold/agent/cost_logger.py</code><br>
+                            <strong>Class:</strong> <code>CostLogger(log_path: str = '.awos/cost_log.xml')</code><br>
+                            <strong>Methods:</strong> <code>log_call(model, input_tokens, output_tokens, cache_read, cost)</code>
+                        </div>
+                        <div class="test">
+                            <strong>Test:</strong> Log entries and verify:
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li>XML well-formed</li>
+                                <li>Entries include timestamp, model, tokens, cost</li>
+                                <li>Session totals calculated correctly</li>
+                            </ul>
+                        </div>
+                        <div class="exit">
+                            <strong>Exit condition:</strong> COST_LOG.xml records test calls; totals calculated correctly
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">2.7</div>
+                        <div class="step-title">Integrate dispatcher into <code>awos run</code> command</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="description">
+                            <code>awos run --task "..."</code> → score → route → manifest → consent → execute.
+                        </div>
+                        <div class="files">
+                            <strong>File:</strong> Update <code>scaffold/agent/cli.py</code><br>
+                            <strong>Command:</strong> <code>@app.command("run")</code> with <code>--task</code> option
+                        </div>
+                        <div class="test">
+                            <strong>Test:</strong> CLI flow (no real API):
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li><code>awos run --task "Add tests"</code></li>
+                                <li>Manifest is displayed (captured in test)</li>
+                                <li>Mock approval → proceeds to (mock) execution</li>
+                            </ul>
+                        </div>
+                        <div class="exit">
+                            <strong>Exit condition:</strong> <code>awos run</code> flow works end-to-end with mocked API; manifest displays correctly
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">2.8</div>
+                        <div class="step-title">Implement request escalation heuristic</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="description">
+                            If Tier 2/3 fails (build error, returned None), propose Tier 1 escalation with context.
+                        </div>
+                        <div class="files">
+                            <strong>File:</strong> Update <code>scaffold/agent/dispatcher.py</code> with <code>escalate()</code> method
+                        </div>
+                        <div class="test">
+                            <strong>Test:</strong> Simulate Tier 3 failure → escalate to Tier 1:
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li>Mock failed response from Tier 3</li>
+                                <li>Verify escalation triggered</li>
+                                <li>Verify escalation message explains why</li>
+                            </ul>
+                        </div>
+                        <div class="exit">
+                            <strong>Exit condition:</strong> Escalation detects failure; shows reason; allows user to approve higher tier. <strong>Sprint 2 complete</strong>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SPRINT 3 -->
+            <div class="sprint">
+                <h2>Sprint 3: Persistence & Optimization <span class="phase-label">Phase 2-3 Extension</span></h2>
+                <div class="sprint-meta">
+                    Goal: Implement hydration protocol, prompt caching, SOUL.xml persistence, and session dreaming.
+                    <br>Duration: ~4 weeks | Steps: 3.1–3.7 | Exit: Multi-task session with caching shows 80%+ cost reduction; SOUL.xml learns patterns
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">3.1</div>
+                        <div class="step-title">Implement symbol hydration engine</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="description">
+                            Given STRUCT.xml + symbol ID, fetch source code for that symbol from disk.
+                        </div>
+                        <div class="files">
+                            <strong>File:</strong> New <code>scaffold/agent/hydrator.py</code><br>
+                            <strong>Class:</strong> <code>SymbolHydrator(struct_xml_path, repo_path)</code><br>
+                            <strong>Methods:</strong> <code>hydrate(symbol_id: str) → str</code> (returns source code in <code>&lt;active_code&gt;</code> tags)
+                        </div>
+                        <div class="test">
+                            <strong>Test:</strong> Hydrate specific symbols from STRUCT.xml:
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li>Parse STRUCT.xml for AWOS_coding_agent</li>
+                                <li>Hydrate a function symbol</li>
+                                <li>Verify returned code matches file contents</li>
+                                <li>Verify <code>&lt;active_code&gt;</code> wrapper applied</li>
+                            </ul>
+                        </div>
+                        <div class="exit">
+                            <strong>Exit condition:</strong> Hydrator correctly extracts symbol source code from files; wrapper tags present
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">3.2</div>
+                        <div class="step-title">Integrate prompt caching wrapper (LiteLLM level)</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="description">
+                            Wrap API calls with Claude prompt caching support. Mark STRUCT.xml + system prompt as cacheable.
+                        </div>
+                        <div class="files">
+                            <strong>File:</strong> New <code>scaffold/agent/caching.py</code><br>
+                            <strong>Class:</strong> <code>CacheStrategy(model: str)</code><br>
+                            <strong>Methods:</strong> <code>prepare_cache_control_blocks(struct_xml, system_prompt) → List[CacheBlock]</code>
+                        </div>
+                        <div class="test">
+                            <strong>Test:</strong> Mock Claude API calls with cache headers:
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li>First call: cache_creation_input_tokens > 0</li>
+                                <li>Second call (same prefix): cache_read_input_tokens > 0</li>
+                                <li>Verify cost calculation accounts for 10% read cost</li>
+                            </ul>
+                        </div>
+                        <div class="exit">
+                            <strong>Exit condition:</strong> Mock tests show cache hits; cost reduction correctly calculated (90% reduction on repeated prefixes)
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">3.3</div>
+                        <div class="step-title">Implement the Hydration Protocol (Observe → Select → Hydrate)</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="description">
+                            Agent reads STRUCT.xml (observe), identifies needed symbols (select), fetches code (hydrate), wraps in active_code.
+                        </div>
+                        <div class="files">
+                            <strong>File:</strong> New <code>scaffold/agent/protocol_hydration.py</code><br>
+                            <strong>Class:</strong> <code>HydrationProtocol(struct_xml_path, repo_path, hydrator)</code><br>
+                            <strong>Methods:</strong> <code>execute(symbol_ids: List[str], context_tokens: int) → str</code> (returns prompt with hydrated code)
+                        </div>
+                        <div class="test">
+                            <strong>Test:</strong> Protocol execution:
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li>Parse STRUCT.xml (observe)</li>
+                                <li>Select 3 symbols for a task</li>
+                                <li>Hydrate all 3; verify total token count ≤ context_tokens</li>
+                                <li>Verify active_code tags wrap hydrated source</li>
+                            </ul>
+                        </div>
+                        <div class="exit">
+                            <strong>Exit condition:</strong> Hydration protocol respects token budget; wraps code correctly
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">3.4</div>
+                        <div class="step-title">Create SOUL.xml schema and persistence layer</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="description">
+                            Define SOUL.xml structure (invariants, patterns, decisions, cost_history). Load/save to <code>.awos/soul.xml</code>.
+                        </div>
+                        <div class="files">
+                            <strong>File:</strong> New <code>scaffold/agent/soul.py</code><br>
+                            <strong>Class:</strong> <code>ProjectSoul(path: str = '.awos/soul.xml')</code><br>
+                            <strong>Methods:</strong>
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li><code>load() → ProjectSoul</code></li>
+                                <li><code>add_invariant(rule: str) → None</code></li>
+                                <li><code>add_pattern(issue: str, fix: str) → None</code></li>
+                                <li><code>add_decision(choice: str, reason: str) → None</code></li>
+                                <li><code>record_cost(model, cost) → None</code></li>
+                                <li><code>save() → None</code></li>
+                            </ul>
+                        </div>
+                        <div class="test">
+                            <strong>Test:</strong> SOUL lifecycle:
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li>Create empty ProjectSoul</li>
+                                <li>Add invariant, pattern, decision</li>
+                                <li>Save to file</li>
+                                <li>Load from file</li>
+                                <li>Verify all data persisted correctly</li>
+                            </ul>
+                        </div>
+                        <div class="exit">
+                            <strong>Exit condition:</strong> SOUL.xml reads/writes correctly; XML is valid; data round-trips without loss
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">3.5</div>
+                        <div class="step-title">Implement session dreaming cycle</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="description">
+                            On session end, extract session logs → call Tier 4 model → parse rules/patterns → merge into SOUL.xml.
+                        </div>
+                        <div class="files">
+                            <strong>File:</strong> New <code>scaffold/agent/dream.py</code><br>
+                            <strong>Class:</strong> <code>SessionDreamer(soul: ProjectSoul, llm_client, session_log: str)</code><br>
+                            <strong>Methods:</strong> <code>dream() → None</code> (updates SOUL.xml)
+                        </div>
+                        <div class="test">
+                            <strong>Test:</strong> Mock dreaming cycle:
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li>Create session log with sample errors + fixes</li>
+                                <li>Mock Tier 4 model response (returns pattern)</li>
+                                <li>Verify pattern merged into SOUL.xml</li>
+                            </ul>
+                        </div>
+                        <div class="exit">
+                            <strong>Exit condition:</strong> Dreaming correctly extracts and merges patterns; SOUL.xml learns from sessions
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">3.6</div>
+                        <div class="step-title">Add session checkpoint + dreaming to CLI</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="description">
+                            <code>awos end-session</code> → write checkpoint → call dreaming → update SOUL.xml.
+                        </div>
+                        <div class="files">
+                            <strong>File:</strong> Update <code>scaffold/agent/cli.py</code><br>
+                            <strong>Command:</strong> <code>@app.command("end-session")</code>
+                        </div>
+                        <div class="test">
+                            <strong>Test:</strong> CLI command:
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li><code>awos end-session</code> completes without error</li>
+                                <li>Checkpoint written to <code>docs/memory/</code></li>
+                                <li>SOUL.xml updated with session summary</li>
+                            </ul>
+                        </div>
+                        <div class="exit">
+                            <strong>Exit condition:</strong> End-session command works; checkpoints + SOUL.xml updated correctly
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-number">3.7</div>
+                        <div class="step-title">End-to-end multi-task session with caching + SOUL learning</div>
+                    </div>
+                    <div class="step-content">
+                        <div class="description">
+                            Run synthetic 5-task session: score → route → manifest → execute (mocked) → hydrate → cache → log cost. End session, dream, verify SOUL.xml updated.
+                        </div>
+                        <div class="files">
+                            <strong>Test:</strong> <code>scripts/test_full_e2e.py</code> (integration test)
+                        </div>
+                        <div class="test">
+                            <strong>Checks:</strong>
+                            <ul style="margin-left: 24px; margin-top: 8px;">
+                                <li>5 tasks routed correctly (mix of Tier 1–3)</li>
+                                <li>Cache hit rate ≥ 80% after task 2</li>
+                                <li>COST_LOG shows cumulative spend + cache savings</li>
+                                <li>SOUL.xml contains ≥ 1 new pattern from session</li>
+                                <li>Checkpoint written with session summary</li>
+                            </ul>
+                        </div>
+                        <div class="exit">
+                            <strong>Exit condition:</strong> Full flow works; demonstrates caching benefit + SOUL learning. <strong>Sprint 3 complete; AWOS v2 Blueprint MVP ready for production</strong>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="footer">
+                <p><strong>Specification Summary:</strong></p>
+                <p>23 atomic steps across 3 sprints. Each step is independently testable. No step changes more than one subsystem.</p>
+                <p><strong>Exit Criteria:</strong> All tests pass; STRUCT.xml generated for AWOS_coding_agent; multi-task caching reduces input tokens by ≥80%; SOUL.xml learns patterns.</p>
+                <p><strong>Next:</strong> Create task file (<code>tasks/active/awos_v2_blueprint_task.html</code>) to track execution.</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

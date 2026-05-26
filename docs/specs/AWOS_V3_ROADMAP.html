@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AWOS v3 Roadmap — Closing All Gaps</title>
+    <style>
+        :root {
+            --bg: #1a1a1a;
+            --card: #2d2d2d;
+            --border: #444;
+            --text: #e0e0e0;
+            --muted: #999;
+            --accent: #4fc3f7;
+            --success: #81c784;
+            --warning: #ffb74d;
+            --danger: #e57373;
+            --p0: #e74c3c;
+            --p1: #f39c12;
+            --p2: #3498db;
+            --p3: #95a5a6;
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.7;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            background: var(--bg);
+            color: var(--text);
+        }
+        .container {
+            background: var(--card);
+            padding: 40px;
+            border-radius: 12px;
+        }
+        h1 {
+            color: var(--accent);
+            border-bottom: 3px solid #0288d1;
+            padding-bottom: 15px;
+        }
+        h2 {
+            color: var(--success);
+            margin-top: 40px;
+            border-left: 5px solid #4caf50;
+            padding-left: 20px;
+        }
+        h3 {
+            color: var(--warning);
+            margin-top: 25px;
+        }
+        .meta {
+            background: #1e1e1e;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            border-left: 4px solid var(--accent);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            background: #1e1e1e;
+        }
+        th, td {
+            padding: 14px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        th {
+            background: #0288d1;
+            color: white;
+            font-weight: 600;
+        }
+        tr:hover { background: #333; }
+        .priority-p0 { background: var(--p0); color: white; padding: 4px 10px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
+        .priority-p1 { background: var(--p1); color: white; padding: 4px 10px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
+        .priority-p2 { background: var(--p2); color: white; padding: 4px 10px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
+        .priority-p3 { background: var(--p3); color: white; padding: 4px 10px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
+        .status-done { background: #2e7d32; color: white; padding: 4px 10px; border-radius: 4px; font-size: 0.85em; }
+        .status-planned { background: #f57c00; color: white; padding: 4px 10px; border-radius: 4px; font-size: 0.85em; }
+        .status-deferred { background: #616161; color: white; padding: 4px 10px; border-radius: 4px; font-size: 0.85em; }
+        code {
+            background: #1e1e1e;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            color: var(--accent);
+        }
+        .gap-card {
+            background: #1e1e1e;
+            padding: 25px;
+            border-radius: 8px;
+            margin: 15px 0;
+            border-left: 5px solid var(--danger);
+        }
+        .gap-card h4 {
+            margin-top: 0;
+            color: var(--danger);
+        }
+        .solution-card {
+            background: #1e3c2f;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 10px 0 10px 30px;
+            border-left: 4px solid var(--success);
+        }
+        .solution-card h5 {
+            margin-top: 0;
+            color: var(--success);
+        }
+        .phase-header {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            padding: 25px;
+            border-radius: 10px;
+            margin: 30px 0;
+        }
+        .phase-header h3 {
+            color: #fff;
+            margin: 0;
+        }
+        .phase-header .meta-line {
+            color: #ccc;
+            margin-top: 10px;
+        }
+        .dependency-graph {
+            background: #1e1e1e;
+            padding: 25px;
+            border-radius: 8px;
+            font-family: monospace;
+            white-space: pre;
+            overflow-x: auto;
+            margin: 20px 0;
+        }
+        .effort-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            margin-left: 10px;
+        }
+        .effort-low { background: #2e7d32; color: white; }
+        .effort-medium { background: #f57c00; color: white; }
+        .effort-high { background: #c62828; color: white; }
+        .impact-high { color: var(--success); font-weight: bold; }
+        .impact-medium { color: var(--warning); font-weight: bold; }
+        .impact-low { color: var(--muted); font-weight: bold; }
+        .roadmap-timeline {
+            display: grid;
+            grid-template-columns: 100px 1fr;
+            gap: 0;
+            margin: 30px 0;
+        }
+        .timeline-week {
+            background: #1e1e1e;
+            padding: 20px;
+            border-right: 3px solid var(--accent);
+            font-weight: bold;
+            color: var(--accent);
+        }
+        .timeline-content {
+            background: #1e1e1e;
+            padding: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .highlight {
+            background: #1e3c72;
+            padding: 20px;
+            border-left: 4px solid var(--warning);
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        .risk-card {
+            background: #3c1e1e;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 15px 0;
+            border-left: 4px solid var(--danger);
+        }
+        .risk-card h5 {
+            margin-top: 0;
+            color: var(--danger);
+        }
+        .success-criteria {
+            background: #1e3c2f;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+        .success-criteria h5 {
+            margin-top: 0;
+            color: var(--success);
+        }
+        hr {
+            border: none;
+            border-top: 2px solid var(--border);
+            margin: 40px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🗺️ AWOS v3 Roadmap — Closing All Gaps</h1>
+        
+        <div class="meta">
+            <strong>Status:</strong> Design & Planning Phase | <strong>Current Version:</strong> AWOS v2.5 (Phases 1-5 Complete)<br>
+            <strong>Goal:</strong> Address every gap identified in effectiveness analysis<br>
+            <strong>Approach:</strong> Plan first, code second — no implementation until design is signed off<br>
+            <strong>Constraint:</strong> $20/month budget cap must hold for all improvements
+        </div>
+
+        <h2>📋 Current Gaps (From Effectiveness Analysis)</h2>
+
+        <div class="gap-card">
+            <h4>❌ GAP 1: No Persistent Memory</h4>
+            <p><strong>Symptom:</strong> Agent forgets everything after 15-minute cache TTL. Cross-session learning is zero.</p>
+            <p><strong>Impact:</strong> <span class="impact-high">CRITICAL</span> — Every session starts from scratch. Cannot build institutional knowledge.</p>
+            <p><strong>Evidence:</strong> Session memory dies after 900s TTL. No vector DB. No embeddings.</p>
+            
+            <div class="solution-card">
+                <h5>✅ SOLUTION: Vector Memory System (P0)</h5>
+                <p><strong>What:</strong> ChromaDB + sentence-transformers for persistent semantic memory</p>
+                <p><strong>How:</strong></p>
+                <ul>
+                    <li>Every interaction stored as (text, embedding, metadata) in ChromaDB</li>
+                    <li>Metadata: session_id, timestamp, handler_type, cost, success</li>
+                    <li>On new request: semantic search retrieves top-k similar past interactions</li>
+                    <li>Injects relevant past solutions into context window</li>
+                    <li>Automatic re-indexing when codebase changes (file watcher)</li>
+                </ul>
+                <p><strong>Effort:</strong> <span class="effort-badge effort-medium">4 hours</span></p>
+                <p><strong>Cost impact:</strong> $0 (local embeddings via all-MiniLM-L6-v2)</p>
+                <p><strong>Quality impact:</strong> Cross-session recall 0% → 80%</p>
+            </div>
+        </div>
+
+        <div class="gap-card">
+            <h4>❌ GAP 2: Keyword-Based Context Retrieval</h4>
+            <p><strong>Symptom:</strong> <code>_read_relevant_context</code> uses naive keyword matching. Misses semantically relevant code.</p>
+            <p><strong>Impact:</strong> <span class="impact-high">HIGH</span> — Context relevance at 60% instead of achievable 90%</p>
+            <p><strong>Evidence:</strong> File scored by keyword overlap in name + first 2000 chars. No understanding of what code actually does.</p>
+            
+            <div class="solution-card">
+                <h5>✅ SOLUTION: Semantic Codebase Index (P0)</h5>
+                <p><strong>What:</strong> Embed entire codebase into vector index, query by meaning not keywords</p>
+                <p><strong>How:</strong></p>
+                <ul>
+                    <li>On startup: parse all .py files into chunks (function-level, class-level)</li>
+                    <li>Embed each chunk with all-MiniLM-L6-v2 (384 dim, local)</li>
+                    <li>Store in ChromaDB collection <code>codebase</code></li>
+                    <li>On query: embed query, cosine similarity search, return top-5 chunks</li>
+                    <li>Incremental update: when file changes, re-embed only changed chunks</li>
+                </ul>
+                <p><strong>Effort:</strong> <span class="effort-badge effort-medium">6 hours</span></p>
+                <p><strong>Cost impact:</strong> $0 (local embeddings)</p>
+                <p><strong>Quality impact:</strong> Context relevance 60% → 90%</p>
+                <p><strong>Dependency:</strong> Requires Vector Memory infrastructure (same ChromaDB)</p>
+            </div>
+        </div>
+
+        <div class="gap-card">
+            <h4>❌ GAP 3: Opaque Reasoning</h4>
+            <p><strong>Symptom:</strong> Agent produces outputs but reasoning is invisible. Cannot debug why it chose action X.</p>
+            <p><strong>Impact:</strong> <span class="impact-medium">MEDIUM</span> — Can't improve what you can't see. No learning from reasoning patterns.</p>
+            <p><strong>Evidence:</strong> Orchestrator executes steps but doesn't generate intermediate thoughts. No trace of decision-making.</p>
+            
+            <div class="solution-card">
+                <h5>✅ SOLUTION: ReAct Reasoning Traces (P1)</h5>
+                <p><strong>What:</strong> Thought → Action → Observation loops, persisted for inspection</p>
+                <p><strong>How:</strong></p>
+                <ul>
+                    <li>Before each tool call: LLM generates <em>thought</em> ("I need to find API docs for X")</li>
+                    <li>Execute tool → record <em>observation</em> (result)</li>
+                    <li>Store trace: {thought, action, args, observation, success, timestamp, latency}</li>
+                    <li>Persist to <code>.awos/traces/&lt;session_id&gt;.json</code></li>
+                    <li>CLI: <code>awos traces show &lt;session_id&gt;</code> to inspect</li>
+                    <li>Self-correction: if observation shows failure, generate new thought + try alternative</li>
+                </ul>
+                <p><strong>Effort:</strong> <span class="effort-badge effort-low">3 hours</span></p>
+                <p><strong>Cost impact:</strong> +$0.0001/req (Gemini Flash for thoughts = negligible)</p>
+                <p><strong>Quality impact:</strong> Debuggable reasoning + self-correction on failures</p>
+            </div>
+        </div>
+
+        <div class="gap-card">
+            <h4>❌ GAP 4: No Self-Verification Before Return</h4>
+            <p><strong>Symptom:</strong> Agent returns outputs without checking correctness. User must catch errors.</p>
+            <p><strong>Impact:</strong> <span class="impact-medium">MEDIUM</span> — 15% syntax error rate in sandbox before verifier</p>
+            <p><strong>Evidence:</strong> Worker generates SEARCH/REPLACE but doesn't verify SEARCH exists in file. Verifier catches it downstream.</p>
+            
+            <div class="solution-card">
+                <h5>✅ SOLUTION: Multi-Layer Verification (P1)</h5>
+                <p><strong>What:</strong> Three verification layers before returning to user</p>
+                <p><strong>How:</strong></p>
+                <ul>
+                    <li><strong>Layer 1 (Worker self-verify):</strong> Before returning, verify SEARCH string exists in target file. If not, retry immediately.</li>
+                    <li><strong>Layer 2 (Syntax check):</strong> Parse generated code with <code>ast.parse</code>. If syntax error, return error + retry.</li>
+                    <li><strong>Layer 3 (Spec compliance):</strong> LLM-based check: "Does this code satisfy the spec?" (Gemini Flash, $0.0001)</li>
+                    <li>If any layer fails: auto-retry with error context injected into prompt</li>
+                </ul>
+                <p><strong>Effort:</strong> <span class="effort-badge effort-low">2 hours</span></p>
+                <p><strong>Cost impact:</strong> +$0.0001/req (Gemini Flash for spec check)</p>
+                <p><strong>Quality impact:</strong> Syntax error rate 15% → 5%</p>
+            </div>
+        </div>
+
+        <div class="gap-card">
+            <h4>❌ GAP 5: No Tool Learning</h4>
+            <p><strong>Symptom:</strong> Agent doesn't learn which tools succeed for which tasks. Repeatedly tries wrong tools.</p>
+            <p><strong>Impact:</strong> <span class="impact-medium">MEDIUM</span> — Wasted API calls on tools that don't fit the task</p>
+            <p><strong>Evidence:</strong> Every task starts with naive tool selection. No performance tracking.</p>
+            
+            <div class="solution-card">
+                <h5>✅ SOLUTION: Tool Performance Tracker (P2)</h5>
+                <p><strong>What:</strong> SQLite DB tracking tool success/failure per task type</p>
+                <p><strong>How:</strong></p>
+                <ul>
+                    <li>After every tool call: record {tool, task_type, success, latency, cost}</li>
+                    <li>Task type = embeddings of task description (semantic, not keyword)</li>
+                    <li>Recommend tools: find similar past tasks (cosine similarity), return tools with highest success rate</li>
+                    <li>Decay old data: weight recent outcomes 2× more than old</li>
+                </ul>
+                <p><strong>Effort:</strong> <span class="effort-badge effort-medium">4 hours</span></p>
+                <p><strong>Cost impact:</strong> $0 (local SQLite, no API calls)</p>
+                <p><strong>Quality impact:</strong> Tool selection accuracy 50% → 85%</p>
+            </div>
+        </div>
+
+        <div class="gap-card">
+            <h4>❌ GAP 6: Sequential Execution Only</h4>
+            <p><strong>Symptom:</strong> All tool calls run sequentially. Independent tasks wait for each other.</p>
+            <p><strong>Impact:</strong> <span class="impact-low">LOW</span> — 30-50% slower than necessary on multi-tool tasks</p>
+            <p><strong>Evidence:</strong> Orchestrator iterates steps in a for loop. No parallelization.</p>
+            
+            <div class="solution-card">
+                <h5>✅ SOLUTION: DAG-Based Parallel Executor (P3)</h5>
+                <p><strong>What:</strong> Build dependency graph, execute independent steps in parallel</p>
+                <p><strong>How:</strong></p>
+                <ul>
+                    <li>Planner annotates steps with dependencies ("step 2 needs step 1's result")</li>
+                    <li>Build DAG: nodes = steps, edges = data dependencies</li>
+                    <li>Topological sort → get execution waves</li>
+                    <li>Each wave: asyncio.gather() to run all independent steps in parallel</li>
+                    <li>Example: [web_search, github_search] → [fetch_url(result)] = 5s vs 7s sequential</li>
+                </ul>
+                <p><strong>Effort:</strong> <span class="effort-badge effort-high">8 hours</span></p>
+                <p><strong>Cost impact:</strong> $0 (same number of API calls, just faster)</p>
+                <p><strong>Quality impact:</strong> Speed 30-50% faster. No quality change.</p>
+                <p><strong>Deferred:</strong> Low ROI unless profiling shows significant time wasted</p>
+            </div>
+        </div>
+
+        <div class="gap-card">
+            <h4>❌ GAP 7: No Failure Recovery Strategy</h4>
+            <p><strong>Symptom:</strong> If a tool fails after all escalations, agent gives up. No fallback to simpler approach.</p>
+            <p><strong>Impact:</strong> <span class="impact-medium">MEDIUM</span> — Task failure rate stays at 30% for hard tasks</p>
+            <p><strong>Evidence:</strong> EscalationEngine has 5 tiers but no "simplify and retry" strategy.</p>
+            
+            <div class="solution-card">
+                <h5>✅ SOLUTION: Retry with Simplification (P2)</h5>
+                <p><strong>What:</strong> When all models fail, try simpler task decomposition</p>
+                <p><strong>How:</strong></p>
+                <ul>
+                    <li>If task fails at max escalation: break into smaller sub-tasks</li>
+                    <li>Example: "refactor auth system" → ["add auth module", "move functions", "update imports"]</li>
+                    <li>Each sub-task gets fresh attempt with lower complexity score</li>
+                    <li>Max 2 decomposition cycles to avoid infinite loops</li>
+                </ul>
+                <p><strong>Effort:</strong> <span class="effort-badge effort-low">2 hours</span></p>
+                <p><strong>Cost impact:</strong> +$0.001/req (only on failures, most tasks succeed first try)</p>
+                <p><strong>Quality impact:</strong> First-attempt success 70% → 80%</p>
+            </div>
+        </div>
+
+        <div class="gap-card">
+            <h4>❌ GAP 8: Budget Resets Per Session</h4>
+            <p><strong>Symptom:</strong> TokenTracker is in-memory only. Budget counter resets every time agent restarts.</p>
+            <p><strong>Impact:</strong> <span class="impact-low">LOW</span> — Can't track month-to-date spending</p>
+            <p><strong>Evidence:</strong> No persistence for TokenTracker. Budget alerts fire based on session-only totals.</p>
+            
+            <div class="solution-card">
+                <h5>✅ SOLUTION: Persistent Budget Ledger (P1)</h5>
+                <p><strong>What:</strong> Save TokenTracker state to <code>.awos/budget.json</code> on every update</p>
+                <p><strong>How:</strong></p>
+                <ul>
+                    <li>On <code>record()</code>: append to <code>.awos/budget.json</code> (append-only ledger)</li>
+                    <li>On startup: load ledger, compute running totals</li>
+                    <li>Monthly reset: detect new month from system date, archive old ledger</li>
+                    <li>CLI: <code>awos budget</code> shows month-to-date + projection</li>
+                </ul>
+                <p><strong>Effort:</strong> <span class="effort-badge effort-low">1 hour</span></p>
+                <p><strong>Cost impact:</strong> $0</p>
+                <p><strong>Quality impact:</strong> Budget enforcement actually works across sessions</p>
+            </div>
+        </div>
+
+        <hr>
+
+        <h2>🔗 Dependencies & Build Order</h2>
+
+        <div class="dependency-graph">
+Phase 0: INFRASTRUCTURE (shared by everything)
+├── ChromaDB installed (pip install chromadb sentence-transformers)
+├── .awos/memory/ directory created
+├── .awos/traces/ directory created
+└── .awos/budget.json format defined
+
+Phase 1: FOUNDATION (blocks everything else)
+├── Vector Memory (GAP 1) ──────┐
+│   └── ChromaDB client         │
+│   └── all-MiniLM-L6-v2 embedder
+│   └── store() + search() API  │
+│                                ├──→ feeds into Semantic Codebase Index
+├── Semantic Codebase Index (GAP 2)
+│   └── Reuses ChromaDB from Vector Memory
+│   └── File watcher for incremental updates
+│                                ├──→ feeds into ReAct Traces (context enrichment)
+├── Persistent Budget Ledger (GAP 8)
+│   └── JSON append-only ledger
+│   └── Monthly auto-reset
+│                                ├──→ feeds into Budget Alerts
+└── ReAct Traces (GAP 3)
+    └── ReasoningTrace dataclass
+    └── Trace persistence (JSON)
+    └── CLI viewer
+    └── Self-correction loop
+                                 ├──→ feeds into Self-Verification
+
+Phase 2: QUALITY
+├── Self-Verification (GAP 4)
+│   └── Worker self-verify (SEARCH exists)
+│   └── Syntax check (ast.parse)
+│   └── Spec compliance (Gemini Flash)
+│   └── Auto-retry with error context
+│                                ├──→ feeds into Tool Learning
+└── Tool Performance Tracker (GAP 5)
+    └── SQLite schema
+    └── Record after every tool call
+    └── Recommend based on embeddings
+    └── Decay old data
+                                 ├──→ feeds into Retry with Simplification
+
+Phase 3: RESILIENCE
+├── Retry with Simplification (GAP 7)
+│   └── Task decomposition on failure
+│   └── Sub-task retry loop
+│   └── Max 2 decomposition cycles
+│                                └── Independent, no blockers
+└── DAG-Based Parallel Executor (GAP 6)
+    └── Step dependency annotation
+    └── Topological sort
+    └── asyncio.gather() per wave
+    └── ⚠️ Deferred: measure first, optimize later
+        </div>
+
+        <hr>
+
+        <h2>📅 Implementation Timeline</h2>
+
+        <div class="roadmap-timeline">
+            <div class="timeline-week">Week 1</div>
+            <div class="timeline-content">
+                <h4>Phase 1: Foundation <span class="effort-badge effort-medium">14 hours</span></h4>
+                <p><strong>Day 1-2:</strong> Vector Memory (4h) + Persistent Budget Ledger (1h)</p>
+                <p><strong>Day 3-4:</strong> Semantic Codebase Index (6h)</p>
+                <p><strong>Day 5:</strong> ReAct Traces (3h)</p>
+                <div class="success-criteria">
+                    <h5>✅ Success Criteria</h5>
+                    <ul>
+                        <li>Agent recalls past solutions from previous sessions</li>
+                        <li>Context relevance ≥ 85% on test queries</li>
+                        <li>Budget persists across restarts</li>
+                        <li>Traces saved to .awos/traces/ for every task</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="timeline-week">Week 2</div>
+            <div class="timeline-content">
+                <h4>Phase 2: Quality <span class="effort-badge effort-medium">6 hours</span></h4>
+                <p><strong>Day 1-2:</strong> Self-Verification (2h) + Tool Performance Tracker (4h)</p>
+                <p><strong>Day 3:</strong> Integration testing + benchmarking</p>
+                <div class="success-criteria">
+                    <h5>✅ Success Criteria</h5>
+                    <ul>
+                        <li>Syntax error rate ≤ 5%</li>
+                        <li>Tool selection accuracy ≥ 80%</li>
+                        <li>Self-correction catches ≥ 40% of format errors</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="timeline-week">Week 3</div>
+            <div class="timeline-content">
+                <h4>Phase 3: Resilience <span class="effort-badge effort-low">2 hours</span></h4>
+                <p><strong>Day 1:</strong> Retry with Simplification (2h)</p>
+                <p><strong>Day 2-3:</strong> Measure parallel execution opportunity</p>
+                <div class="success-criteria">
+                    <h5>✅ Success Criteria</h5>
+                    <ul>
+                        <li>First-attempt success ≥ 80%</li>
+                        <li>Hard tasks decompose into solvable sub-tasks</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="timeline-week">Week 4</div>
+            <div class="timeline-content">
+                <h4>Phase 4: Optimization <span class="effort-badge effort-high">8 hours</span> <span class="status-deferred">DEFERRED</span></h4>
+                <p><strong>Day 1-3:</strong> DAG-Based Parallel Executor (8h) — <em>only if profiling shows >30% time wasted</em></p>
+                <div class="risk-card">
+                    <h5>⚠️ Risk</h5>
+                    <p>High effort, low impact. Only build if end-to-end latency profiling justifies it. Most tasks are sequential by nature (step N needs step N-1's output).</p>
+                </div>
+            </div>
+        </div>
+
+        <hr>
+
+        <h2>📊 Impact Projection</h2>
+
+        <h3>Before vs After (All Gaps Closed)</h3>
+        <table>
+            <tr>
+                <th>Metric</th>
+                <th>Current (v2.5)</th>
+                <th>Target (v3)</th>
+                <th>Delta</th>
+                <th>Primary Fix</th>
+            </tr>
+            <tr>
+                <td>Cross-session recall</td>
+                <td>0%</td>
+                <td>80%</td>
+                <td><span class="impact-high">+80%</span></td>
+                <td>Vector Memory</td>
+            </tr>
+            <tr>
+                <td>Context relevance</td>
+                <td>60%</td>
+                <td>90%</td>
+                <td><span class="impact-high">+30%</span></td>
+                <td>Semantic Codebase Index</td>
+            </tr>
+            <tr>
+                <td>Reasoning visibility</td>
+                <td>0%</td>
+                <td>100%</td>
+                <td><span class="impact-high">+100%</span></td>
+                <td>ReAct Traces</td>
+            </tr>
+            <tr>
+                <td>Syntax error rate</td>
+                <td>15%</td>
+                <td>5%</td>
+                <td><span class="impact-medium">-67%</span></td>
+                <td>Self-Verification</td>
+            </tr>
+            <tr>
+                <td>Tool selection accuracy</td>
+                <td>50%</td>
+                <td>85%</td>
+                <td><span class="impact-medium">+35%</span></td>
+                <td>Tool Performance Tracker</td>
+            </tr>
+            <tr>
+                <td>First-attempt success</td>
+                <td>70%</td>
+                <td>80%</td>
+                <td><span class="impact-medium">+10%</span></td>
+                <td>Retry with Simplification</td>
+            </tr>
+            <tr>
+                <td>Budget enforcement</td>
+                <td>Per-session only</td>
+                <td>Month-to-date</td>
+                <td><span class="impact-medium">∞</span></td>
+                <td>Persistent Budget Ledger</td>
+            </tr>
+            <tr>
+                <td>Execution speed</td>
+                <td>Baseline</td>
+                <td>+30-50%</td>
+                <td><span class="impact-low">+30-50%</span></td>
+                <td>DAG Parallel Executor (deferred)</td>
+            </tr>
+        </table>
+
+        <h3>Cost Projection (All Improvements Active)</h3>
+        <table>
+            <tr>
+                <th>Component</th>
+                <th>Monthly Cost</th>
+                <th>Notes</th>
+            </tr>
+            <tr>
+                <td>DeepSeek V4 Flash (55% of tasks)</td>
+                <td>$1.05</td>
+                <td>Primary worker</td>
+            </tr>
+            <tr>
+                <td>Claude Haiku 4.5 (20%)</td>
+                <td>$5.00</td>
+                <td>Mid-tier, review</td>
+            </tr>
+            <tr>
+                <td>Claude Sonnet 4.6 (12%)</td>
+                <td>$8.97</td>
+                <td>Planning, complex</td>
+            </tr>
+            <tr>
+                <td>Gemini 2.5 Flash (10%)</td>
+                <td>$0.16</td>
+                <td>Router, thoughts</td>
+            </tr>
+            <tr>
+                <td>Claude Opus 4.6 (2%)</td>
+                <td>$15.84</td>
+                <td>Hard tasks only</td>
+            </tr>
+            <tr>
+                <td>ChromaDB (local)</td>
+                <td>$0</td>
+                <td>Vector memory + index</td>
+            </tr>
+            <tr>
+                <td>Embeddings (local model)</td>
+                <td>$0</td>
+                <td>all-MiniLM-L6-v2</td>
+            </tr>
+            <tr>
+                <td><strong>TOTAL (Conservative)</strong></td>
+                <td><strong>$0.81</strong></td>
+                <td>No Opus, 70% DeepSeek</td>
+            </tr>
+            <tr>
+                <td><strong>TOTAL (Balanced)</strong></td>
+                <td><strong>$15.18</strong></td>
+                <td>2% Opus for hard tasks</td>
+            </tr>
+            <tr>
+                <td><strong>TOTAL (Quality-focused)</strong></td>
+                <td><strong>$43.82</strong></td>
+                <td>10% Opus, still under $50</td>
+            </tr>
+        </table>
+
+        <div class="highlight">
+            <strong>Key Constraint Met:</strong> Even the Quality-focused routing at $43.82/month is still 95.6% cheaper than Copilot's backend cost ($989). The $20 budget cap can be enforced at the router level: if month-to-date > $18, block Opus and Sonnet, route everything to DeepSeek/Haiku.
+        </div>
+
+        <hr>
+
+        <h2>⚠️ Risks & Mitigations</h2>
+
+        <div class="risk-card">
+            <h5>Risk 1: ChromaDB size grows unbounded</h5>
+            <p><strong>Likelihood:</strong> Medium | <strong>Impact:</strong> Medium</p>
+            <p><strong>Mitigation:</strong> Cap collection at 10,000 interactions (~100MB). Evict oldest by timestamp. Prune traces older than 30 days by default.</p>
+        </div>
+
+        <div class="risk-card">
+            <h5>Risk 2: Embedding quality insufficient for code</h5>
+            <p><strong>Likelihood:</strong> Low | <strong>Impact:</strong> High</p>
+            <p><strong>Mitigation:</strong> Start with all-MiniLM-L6-v2 (free, fast). If code retrieval quality < 80%, upgrade to jina-embeddings-v2-base-code ( specialized for code, still free). Last resort: Gemini embeddings API ($0.0001/1k).</p>
+        </div>
+
+        <div class="risk-card">
+            <h5>Risk 3: ReAct traces bloat context window</h5>
+            <p><strong>Likelihood:</strong> Medium | <strong>Impact:</strong> Low</p>
+            <p><strong>Mitigation:</strong> Only include last 3 traces in context. Summarize older traces into 1-line descriptions. Truncate observation text to 200 chars.</p>
+        </div>
+
+        <div class="risk-card">
+            <h5>Risk 4: Tool learning data is sparse initially</h5>
+            <p><strong>Likelihood:</strong> High | <strong>Impact:</strong> Low</p>
+            <p><strong>Mitigation:</strong> Seed with 20 synthetic examples covering common patterns. Fallback to default tool selection if no relevant history. Warm-up period: first 50 tasks use defaults, learning kicks in after.</p>
+        </div>
+
+        <div class="risk-card">
+            <h5>Risk 5: Parallel execution introduces race conditions</h5>
+            <p><strong>Likelihood:</strong> Medium | <strong>Impact:</strong> Medium</p>
+            <p><strong>Mitigation:</strong> Only parallelize read-only tools (web_search, github_search, hf_search). Write operations (write_file, shell) always sequential. File-level locking for concurrent writes.</p>
+        </div>
+
+        <hr>
+
+        <h2>✅ Go/No-Go Decision Points</h2>
+
+        <table>
+            <tr>
+                <th>Checkpoint</th>
+                <th>When</th>
+                <th>Gate</th>
+                <th>If Failed</th>
+            </tr>
+            <tr>
+                <td><strong>Foundation Gate</strong></td>
+                <td>End of Week 1</td>
+                <td>Vector Memory recalls past solutions with ≥ 70% accuracy</td>
+                <td>Pause. Debug embedding model. Try jina-embeddings-v2.</td>
+            </tr>
+            <tr>
+                <td><strong>Quality Gate</strong></td>
+                <td>End of Week 2</td>
+                <td>Syntax error rate ≤ 5% on 20 sandbox tasks</td>
+                <td>Strengthen self-verify layer. Add more retry attempts.</td>
+            </tr>
+            <tr>
+                <td><strong>Resilience Gate</strong></td>
+                <td>End of Week 3</td>
+                <td>First-attempt success ≥ 80% on known task types</td>
+                <td>Improve task decomposition logic. Better complexity scoring.</td>
+            </tr>
+            <tr>
+                <td><strong>Cost Gate</strong></td>
+                <td>Ongoing</td>
+                <td>Month-to-date ≤ $20</td>
+                <td>Block Opus. Route everything to DeepSeek/Haiku. Emergency mode.</td>
+            </tr>
+        </table>
+
+        <hr>
+
+        <h2>📋 Summary: What to Build, in Order</h2>
+
+        <ol>
+            <li><strong>Vector Memory</strong> (P0, 4h) — Persistent recall across sessions</li>
+            <li><strong>Semantic Codebase Index</strong> (P0, 6h) — Meaning-based code search</li>
+            <li><strong>ReAct Traces</strong> (P1, 3h) — Visible reasoning + self-correction</li>
+            <li><strong>Persistent Budget Ledger</strong> (P1, 1h) — Month-to-date tracking</li>
+            <li><strong>Self-Verification</strong> (P1, 2h) — Catch errors before return</li>
+            <li><strong>Tool Performance Tracker</strong> (P2, 4h) — Learn which tools work</li>
+            <li><strong>Retry with Simplification</strong> (P2, 2h) — Decompose on failure</li>
+            <li><strong>DAG Parallel Executor</strong> (P3, 8h) — Speed up (deferred)</li>
+        </ol>
+
+        <div class="highlight">
+            <strong>Total estimated effort:</strong> 22 hours over 3 weeks (plus 8 hours deferred)<br>
+            <strong>Total cost impact:</strong> ~$0.0002/req (negligible — local embeddings, cheap Gemini for verification)<br>
+            <strong>Expected quality lift:</strong> 75% → 90% overall effectiveness<br>
+            <strong>Budget safety:</strong> All improvements fit within $20/month cap
+        </div>
+
+        <hr style="margin: 50px 0; border: none; border-top: 2px solid #444;">
+
+        <p style="text-align: center; color: #999;">
+            <strong>Document:</strong> AWOS v3 Roadmap<br>
+            <strong>Created:</strong> 2026-05-16<br>
+            <strong>Status:</strong> Design Complete — Awaiting Implementation Approval<br>
+            <strong>Next Step:</strong> Review this plan, then say "implement week 1" to begin
+        </p>
+    </div>
+</body>
+</html>

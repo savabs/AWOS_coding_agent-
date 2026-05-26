@@ -45,6 +45,11 @@ try:
     from .confidence_calibrator import ConfidenceCalibrator
     from .live_renderer import LiveRenderer
     from .cheap_planner import CheapPlanner
+    from .mcts_search import MCTSSearchEngine, write_and_run_tests
+    from .prompt_evolver import PromptEvolver
+    from .live_tool_synth import LiveToolSynthesizer
+    from .scaffold_evolver import ScaffoldEvolver
+    from .stability_gate import StabilityGate
 except ImportError:
     from planner import Planner
     from worker import Worker
@@ -73,6 +78,11 @@ except ImportError:
     from confidence_calibrator import ConfidenceCalibrator
     from live_renderer import LiveRenderer
     from cheap_planner import CheapPlanner
+    from mcts_search import MCTSSearchEngine, write_and_run_tests
+    from prompt_evolver import PromptEvolver
+    from live_tool_synth import LiveToolSynthesizer
+    from scaffold_evolver import ScaffoldEvolver
+    from stability_gate import StabilityGate
     try:
         from vector_memory import VectorMemory, VectorMemoryUnavailableError
     except ImportError:
@@ -133,6 +143,23 @@ class Orchestrator:
         self.calibrator = ConfidenceCalibrator()
         self._prm = None
         self._prm_last_fit_at = 0
+        self._session_count = 0
+        self.prompt_evolver = PromptEvolver(
+            store_path=".awos",
+            cheap_call=self._cheap_call,
+        )
+        self.live_tool_synth = LiveToolSynthesizer(
+            tools_dir=".awos/tools",
+            cheap_call=self._cheap_call,
+        )
+        self.scaffold_evolver = ScaffoldEvolver(
+            scaffold_root=".",
+            cheap_call=self._cheap_call,
+        )
+        self.stability_gate = StabilityGate(
+            project_root=".",
+            env_file=".env",
+        )
 
     def _cheap_call(self, prompt: str) -> str:
         """
@@ -566,10 +593,12 @@ class Orchestrator:
         if _mx is not None:
             print(_mx)
 
-        # Finalize git state — keep branch on success, rollback on total failure
+        # Finalize git state — keep branch on success, rollback only on total failure
         if tasks_completed == 0 and tasks_failed > 0:
             print("[GIT] All tasks failed — performing full rollback")
-        git.finalize(overall_success)
+            git.finalize(False, force_full_rollback=True)
+        else:
+            git.finalize(overall_success)
 
         # ── LiveRenderer: session done ──────────────────────────────────
         _total_cost = self.tracker.get_budget_status().get("total_cost", 0.0) if self.tracker else 0.0
@@ -635,6 +664,37 @@ class Orchestrator:
 
         # ── Finalize goal state ─────────────────────────────────────────
         self.state_manager.finalize(self._current_state, overall_success)
+
+        # ── StabilityGate — auto-detect test suite health + update .env ──
+        self._session_count += 1
+        if self.stability_gate.should_check(self._session_count):
+            try:
+                _stable, _reason = self.stability_gate.run(verbose=False)
+                logger.info("[StabilityGate] %s — %s", "STABLE" if _stable else "UNSTABLE", _reason)
+            except Exception as _sg_exc:
+                logger.debug("[StabilityGate] probe skipped: %s", _sg_exc)
+
+        # ── Feature 1A: PromptEvolver — evolve worker guidelines ────────
+        if self.prompt_evolver.should_evolve(self._session_count):
+            try:
+                guidelines = self.prompt_evolver.evolve()
+                if guidelines:
+                    self.prompt_evolver.persist(guidelines, self._session_count)
+                    logger.info("[PromptEvolver] evolved guidelines persisted (session %d)", self._session_count)
+            except Exception as _pe:
+                logger.debug("[PromptEvolver] evolution skipped: %s", _pe)
+
+        # ── Feature 1C: ScaffoldEvolver — self-patch scaffold on high failure rate ──
+        _failure_rate = tasks_failed / max(tasks_completed + tasks_failed, 1)
+        if self.scaffold_evolver.should_evolve(_failure_rate):
+            try:
+                _mut = self.scaffold_evolver.evolve_once(self.error_store)
+                if _mut.accepted:
+                    logger.info("[ScaffoldEvolver] scaffold mutation ACCEPTED: %s", _mut.description)
+                else:
+                    logger.debug("[ScaffoldEvolver] mutation rejected: %s", _mut.rejection_reason)
+            except Exception as _se:
+                logger.debug("[ScaffoldEvolver] evolution skipped: %s", _se)
 
         return {
             "success": overall_success,
@@ -842,15 +902,33 @@ class Orchestrator:
                     top_n      = 3,
                 )
 
+                # ── Feature 1B: LiveToolSynthesizer — synthesize helper tool on failure ──
+                _tool_output = ""
+                try:
+                    _synth_tool = self.live_tool_synth.reflect(
+                        task=task, error=_last_error, attempt=attempt,
+                    )
+                    if _synth_tool:
+                        logger.info("[LiveToolSynth] new tool synthesized: %s", _synth_tool.name)
+                        _tool_output = self.live_tool_synth.run_tool(_synth_tool, task)
+                    else:
+                        _existing = self.live_tool_synth.find_relevant_tool(task)
+                        if _existing:
+                            _tool_output = self.live_tool_synth.run_tool(_existing, task)
+                except Exception as _lts_exc:
+                    logger.debug("[LiveToolSynth] skipped: %s", _lts_exc)
+
                 _task = {
                     **task,
                     "error_context":  _hint.format_for_prompt(),
                     "past_critiques": _past,
+                    "tool_output":    _tool_output,
                 }
                 print(
                     f"[TASK {task_id}] Retry {attempt}: "
                     f"{esc_decision.spec.name} + correction [{_hint.approach_name}]"
                     + (f" + {len(_past)} past critique(s)" if _past else "")
+                    + (f" + tool output" if _tool_output else "")
                 )
                 if _live_t:
                     _live_t.retry_notice(attempt, _last_error, _hint.approach_name)
@@ -872,6 +950,7 @@ class Orchestrator:
                     strategy=_strategy,
                     skill_library=self.skill_library,
                     vector_chunks=_vector_chunks,
+                    prompt_evolver=self.prompt_evolver,
                 )
                 if search_replace.get("success"):
                     # ── P7: Critic self-play ────────────────────────────
@@ -916,6 +995,37 @@ class Orchestrator:
                 print(f"[TASK {task_id}] Worker error: {exc}")
                 if _live_t:
                     _live_t.worker_done(False, error=str(exc))
+
+        # ── MCTS fallback (Voyager/ToT-inspired, gated by AWOS_USE_MCTS=true) ──
+        if not worker_success \
+                and os.getenv("AWOS_USE_MCTS", "").lower() == "true" \
+                and task.get("complexity") == "high":
+            try:
+                logger.info("[MCTS] Activating MCTS fallback for task %s", task_id)
+                _mcts = MCTSSearchEngine(
+                    generate_fn=self.worker._generate_n_patches,
+                    evaluate_fn=write_and_run_tests,
+                    max_rollouts=int(os.getenv("AWOS_MCTS_ROLLOUTS", "6")),
+                    n_branches=3,
+                    project_root=codebase_root,
+                )
+                _mcts_result = _mcts.search(_task, file_content, codebase_context)
+                if _mcts_result.search:
+                    search_replace = {
+                        "success":    True,
+                        "search":     _mcts_result.search,
+                        "replace":    _mcts_result.replace,
+                        "reasoning":  _mcts_result.reasoning,
+                        "model_used": "mcts",
+                    }
+                    worker_success = True
+                    print(
+                        f"[TASK {task_id}] MCTS recovered patch "
+                        f"(pass_rate={_mcts_result.pass_rate:.0%}, "
+                        f"{_mcts_result.rollouts_used} rollouts)"
+                    )
+            except Exception as _mcts_exc:
+                logger.warning("[MCTS] fallback failed: %s", _mcts_exc)
 
         if not worker_success:
             print(f"[TASK {task_id}] Worker failed after {max_attempts} attempts")

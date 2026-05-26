@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>P1 Spec — Test Execution, Architect+Editor Split, Context Compaction</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 1100px; margin: 0 auto; padding: 2rem; color: #1a1a2e; background: #f8f9fa; }
+  h1 { color: #0d1b2a; border-bottom: 3px solid #2dc653; padding-bottom: 0.5rem; }
+  h2 { color: #1d3557; border-left: 4px solid #2dc653; padding-left: 0.75rem; margin-top: 2.5rem; }
+  h3 { color: #2c3e50; margin-top: 1.5rem; }
+  h4 { color: #2dc653; margin-top: 1rem; }
+  .meta { background: #1d3557; color: #a8dadc; padding: 1rem 1.5rem; border-radius: 8px; margin-bottom: 2rem; font-size: 0.9rem; }
+  .meta span { margin-right: 2rem; }
+  .spec-box { background: #fff; border: 2px solid #1d3557; padding: 1.5rem; border-radius: 8px; margin: 1rem 0; }
+  .code-block { background: #0d1b2a; color: #a8dadc; padding: 1rem 1.5rem; border-radius: 6px; font-family: 'Courier New', monospace; font-size: 0.85rem; overflow-x: auto; margin: 1rem 0; line-height: 1.6; }
+  .flow { background: #fff; border: 1px solid #dee2e6; padding: 1.5rem; border-radius: 6px; margin: 1rem 0; }
+  .step { background: #fff; border-left: 4px solid #2dc653; padding: 1rem 1.5rem; margin: 0.75rem 0; border-radius: 0 6px 6px 0; }
+  .step .step-num { font-weight: bold; color: #2dc653; margin-right: 0.5rem; }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+  th { background: #1d3557; color: white; padding: 0.6rem 1rem; text-align: left; }
+  td { padding: 0.6rem 1rem; border-bottom: 1px solid #dee2e6; vertical-align: top; }
+  tr:nth-child(even) td { background: #f1f3f5; }
+  .tag { display: inline-block; background: #2dc653; color: white; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.75rem; margin: 0.1rem; }
+  .warn { background: #fff3cd; border: 1px solid #ffc107; padding: 0.75rem 1rem; border-radius: 4px; margin: 0.75rem 0; }
+  .ok { background: #d4edda; border: 1px solid #28a745; padding: 0.75rem 1rem; border-radius: 4px; margin: 0.75rem 0; }
+  .danger { background: #f8d7da; border: 1px solid #dc3545; padding: 0.75rem 1rem; border-radius: 4px; margin: 0.75rem 0; }
+  .key { background: #e8f4f8; border-left: 4px solid #457b9d; padding: 1rem 1.5rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .test-case { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 0.75rem 1rem; margin: 0.5rem 0; }
+  ul li, ol li { margin: 0.4rem 0; }
+  .interface { background: #1d3557; color: #e8f4f8; padding: 1.5rem; border-radius: 8px; font-family: monospace; font-size: 0.85rem; line-height: 1.8; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1rem 0; }
+  .card { background: #fff; border: 1px solid #dee2e6; border-radius: 6px; padding: 1.25rem; }
+  .toc { background: #fff; border: 1px solid #dee2e6; border-radius: 6px; padding: 1.5rem; margin-bottom: 2rem; }
+  .toc a { color: #1d3557; text-decoration: none; }
+</style>
+</head>
+<body>
+
+<h1>🔬 P1 Spec — Test Execution, Architect+Editor Split, Context Compaction</h1>
+<div class="meta">
+  <span>📅 2026-05-22</span>
+  <span>🎯 Priority: P1 (High)</span>
+  <span>⏱ Est. 9h total</span>
+  <span>📂 Files: verifier.py, worker.py, orchestrator.py</span>
+  <span>📊 Expected: L3 80+ → 90+, L4 maintained</span>
+</div>
+
+<div class="toc">
+  <strong>Contents</strong>
+  <ul>
+    <li><a href="#p11">1. P1.1 — Test Execution Verifier (3h)</a></li>
+    <li><a href="#p12">2. P1.2 — Architect+Editor Split (3h)</a></li>
+    <li><a href="#p13">3. P1.3 — Auto Context Compaction (3h)</a></li>
+    <li><a href="#tests">4. Test Plan</a></li>
+    <li><a href="#risks">5. Risks &amp; Mitigations</a></li>
+  </ul>
+</div>
+
+<!-- ========================================================= -->
+<h2 id="p11">1. P1.1 — Test Execution Verifier</h2>
+
+<h3>1.1 Why This Matters</h3>
+<div class="key">
+  <strong>The ground truth problem:</strong> AWOS currently verifies code correctness with LLM self-evaluation — asking the model "does this look correct?". Every SOTA agent that scores above 50% on SWE-bench uses <strong>test execution as the objective verifier</strong>. LLM self-eval is wrong ~30% of the time. Tests are wrong ~2% of the time.
+</div>
+
+<p>Research basis:</p>
+<ul>
+  <li>Agentless: generates N patches, selects by test pass rate — achieves competitive scores with no ReAct loop</li>
+  <li>SWE-Agent: runs <code>python -m pytest</code> after every edit, uses output as next-turn context</li>
+  <li>Claude Code: bash tool executes tests freely; agent loops until tests pass</li>
+</ul>
+
+<h3>1.2 Design: Two-Stage Verification</h3>
+
+<div class="flow">
+  <strong>Stage 1 — Syntax + Static (current, keep)</strong>
+  <ul>
+    <li><code>ast.parse()</code> — catches syntax errors instantly, free</li>
+    <li><code>_check_imports()</code> — verifies imports exist</li>
+    <li>If Stage 1 fails → immediate retry with error, no test execution</li>
+  </ul>
+
+  <strong>Stage 2 — Test Execution (NEW)</strong>
+  <ul>
+    <li>Run <code>pytest &lt;test_file&gt; -x -q --tb=short --timeout=30</code></li>
+    <li>Capture stdout/stderr</li>
+    <li>Parse: passed count, failed count, error messages</li>
+    <li>Return structured <code>TestResult</code></li>
+  </ul>
+</div>
+
+<h3>1.3 Test File Discovery</h3>
+<p>Given a task's target file, find the most relevant test file:</p>
+<div class="code-block">
+def _discover_test_file(self, target_file: str, project_root: str) -> str | None:
+    """
+    Find the test file for a given source file.
+
+    Discovery order:
+    1. tests/test_{basename}.py  (e.g., tests/test_worker.py for scaffold/agent/worker.py)
+    2. tests/{basename}_test.py
+    3. test_{basename}.py (same directory)
+    4. Grep for 'import {module_name}' in tests/ directory
+    5. None if not found
+    """
+    basename = Path(target_file).stem  # 'worker' from 'scaffold/agent/worker.py'
+    module_name = basename
+
+    candidates = [
+        Path(project_root) / "tests" / f"test_{basename}.py",
+        Path(project_root) / "tests" / f"{basename}_test.py",
+        Path(target_file).parent / f"test_{basename}.py",
+        Path(project_root) / "scaffold" / "tests" / f"test_{basename}.py",
+    ]
+
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+
+    # Grep fallback
+    return self._grep_for_test_file(project_root, module_name)
+</div>
+
+<h3>1.4 TestResult Dataclass</h3>
+<div class="interface">
+@dataclass
+class TestResult:
+    ran: bool              # Whether test execution was attempted
+    passed: int            # Number of tests passed
+    failed: int            # Number of tests failed
+    errors: int            # Number of test errors (not failures)
+    test_file: str | None  # Which test file was run
+    output: str            # Full pytest output (truncated to 2000 chars)
+    duration_seconds: float
+    timed_out: bool = False
+    error_message: str = ""  # If execution itself failed (not test failure)
+
+    @property
+    def all_passed(self) -> bool:
+        return self.ran and self.failed == 0 and self.errors == 0
+
+    @property
+    def score(self) -> float:
+        """0.0 to 1.0 — fraction of tests passing."""
+        total = self.passed + self.failed + self.errors
+        return self.passed / total if total > 0 else 0.0
+</div>
+
+<h3>1.5 Run Tests Method</h3>
+<div class="code-block">
+def run_tests(self, target_file: str, project_root: str) -> TestResult:
+    """Run pytest for the given target file. Returns TestResult."""
+    test_file = self._discover_test_file(target_file, project_root)
+
+    if test_file is None:
+        return TestResult(
+            ran=False, passed=0, failed=0, errors=0,
+            test_file=None, output="No test file found", duration_seconds=0.0
+        )
+
+    start = time.time()
+    try:
+        result = subprocess.run(
+            ["python", "-m", "pytest", test_file,
+             "-x", "-q", "--tb=short", "--timeout=30",
+             "--no-header", "-rN"],
+            capture_output=True,
+            text=True,
+            timeout=60,  # Hard timeout for whole test run
+            cwd=project_root,
+        )
+        duration = time.time() - start
+        output = result.stdout + result.stderr
+        # Parse pytest output
+        passed, failed, errors = self._parse_pytest_output(output)
+
+        return TestResult(
+            ran=True, passed=passed, failed=failed, errors=errors,
+            test_file=test_file,
+            output=output[-2000:],  # Truncate, keep tail (failures are at end)
+            duration_seconds=duration,
+        )
+    except subprocess.TimeoutExpired:
+        return TestResult(
+            ran=True, passed=0, failed=0, errors=0,
+            test_file=test_file, output="Test execution timed out (60s)",
+            duration_seconds=60.0, timed_out=True,
+        )
+</div>
+
+<h3>1.6 Integration into Orchestrator Retry Loop</h3>
+<p>After each worker attempt, the orchestrator gets a <code>TestResult</code> and decides:</p>
+<div class="code-block">
+# In _execute_single_task():
+
+# After verifier passes syntax check:
+test_result = verifier.run_tests(task["file"], project_root)
+
+if test_result.ran and not test_result.all_passed:
+    # Tests failed — inject test output as feedback for retry
+    task["past_critiques"] = task.get("past_critiques", []) + [
+        f"[TEST FAILURE on attempt {attempt}]\n"
+        f"Tests run: {test_result.passed + test_result.failed}\n"
+        f"Failed: {test_result.failed}\n"
+        f"Output:\n{test_result.output}"
+    ]
+    # Continue to retry loop
+
+elif test_result.all_passed:
+    # Tests pass — mark as definitively successful
+    result["test_verified"] = True
+    result["test_score"] = test_result.score
+</div>
+
+<h3>1.7 Scoring Integration</h3>
+<p>Tests provide a more objective score than the current LLM-based scoring:</p>
+<table>
+  <tr><th>Condition</th><th>Score Contribution</th></tr>
+  <tr><td>Tests found + all pass</td><td>+30 points (high confidence)</td></tr>
+  <tr><td>Tests found + some pass</td><td>+10 to +25 points (proportional)</td></tr>
+  <tr><td>Tests found + all fail</td><td>-20 points</td></tr>
+  <tr><td>Tests not found</td><td>0 (no change to existing scoring)</td></tr>
+  <tr><td>Test execution error</td><td>0 (don't penalize for infra issues)</td></tr>
+</table>
+
+<!-- ========================================================= -->
+<h2 id="p12">2. P1.2 — Architect+Editor Split</h2>
+
+<h3>2.1 Why Two Calls Are Better Than One</h3>
+<div class="grid">
+  <div class="card">
+    <h4>Current: Single LLM call</h4>
+    <p>One model must simultaneously:</p>
+    <ul>
+      <li>Understand the task deeply</li>
+      <li>Navigate the codebase</li>
+      <li>Plan the implementation</li>
+      <li>Write exact JSON/SEARCH blocks</li>
+      <li>Get whitespace exactly right</li>
+    </ul>
+    <p>Conflicting demands → reasoning and editing quality both suffer.</p>
+  </div>
+  <div class="card">
+    <h4>New: Architect + Editor</h4>
+    <p><strong>Architect (Sonnet/DeepSeek-R1):</strong></p>
+    <ul>
+      <li>Understands task + context</li>
+      <li>Plans implementation in plain English</li>
+      <li>Specifies exactly WHAT to change</li>
+    </ul>
+    <p><strong>Editor (Haiku/DeepSeek-chat):</strong></p>
+    <ul>
+      <li>Receives architect's plain text plan</li>
+      <li>Only produces the JSON edit</li>
+      <li>No reasoning needed — just transcription</li>
+    </ul>
+  </div>
+</div>
+
+<div class="ok">
+  <strong>Cost analysis:</strong> Architect (Sonnet ~3k tokens) + Editor (Haiku ~1k tokens) = ~$0.010 + ~$0.001 = $0.011 vs current single Sonnet call ($0.015). <strong>Cheaper AND better quality.</strong>
+</div>
+
+<h3>2.2 Architect Prompt</h3>
+<div class="code-block">
+ARCHITECT PROMPT:
+================
+You are a senior software architect. Analyze this coding task and produce a detailed implementation plan in plain English.
+
+TASK: {task["action"]}
+FILE: {task["file"]}
+COMPLEXITY: {task["complexity"]}
+
+FILE CONTEXT:
+{display_context}
+
+{cross_file_context}
+
+INSTRUCTIONS:
+1. Identify exactly WHERE in the file the change should be made (line reference, function name, class name)
+2. Describe WHAT new code should be added or modified
+3. Specify the exact string that CURRENTLY exists that needs to change (quote it)
+4. Specify what it should become
+5. If multiple locations need changes, list each one
+
+Be specific. The editor needs exact quotes from the file to make the edit.
+Do NOT write code. Write instructions.
+
+OUTPUT FORMAT:
+### Analysis
+[Your understanding of what needs to change]
+
+### Changes Required
+Change 1:
+- Location: [class/method/line description]
+- Currently: `[exact quote from file]`
+- Change to: [description of new code]
+- Reason: [why this change]
+
+Change 2: [if needed]
+...
+</div>
+
+<h3>2.3 Editor Prompt</h3>
+<div class="code-block">
+EDITOR PROMPT:
+==============
+You are a precise code editor. Convert the architect's instructions into exact JSON edits.
+
+ARCHITECT INSTRUCTIONS:
+{architect_output}
+
+FILE CONTENT:
+{full_file_content}
+
+OUTPUT RULES:
+- Respond ONLY with valid JSON, no other text
+- Each old_string MUST be an exact substring of the file content above
+- Include 2-3 lines of context around each change to ensure uniqueness
+
+{
+  "edits": [
+    {
+      "old_string": "exact text from file",
+      "new_string": "replacement text"
+    }
+  ]
+}
+</div>
+
+<h3>2.4 Implementation in <code>worker.py</code></h3>
+<div class="code-block">
+def execute_task(self, task, file_content, ..., use_architect_split=True):
+    if use_architect_split and task.get("complexity", "medium") in ("medium", "high"):
+        return self._execute_with_architect_split(task, file_content, ...)
+    else:
+        return self._execute_direct(task, file_content, ...)
+
+def _execute_with_architect_split(self, task, file_content, ...):
+    # Step 1: Architect call
+    architect_prompt = self._build_architect_prompt(task, file_content, ...)
+    architect_response = self._call_llm(
+        prompt=architect_prompt,
+        model=self.architect_model,  # Sonnet or DeepSeek-R1
+        max_tokens=2048,
+    )
+
+    # Step 2: Editor call (cheaper model)
+    editor_prompt = self._build_editor_prompt(
+        architect_output=architect_response,
+        full_content=file_content,
+    )
+    editor_response = self._call_llm(
+        prompt=editor_prompt,
+        model=self.editor_model,  # Haiku or DeepSeek-chat
+        max_tokens=1024,
+    )
+
+    # Step 3: Parse JSON from editor response
+    edits = self._parse_json_edits(editor_response)
+
+    return {"edits": edits, "architect_reasoning": architect_response}
+</div>
+
+<h3>2.5 Model Assignment</h3>
+<table>
+  <tr><th>Role</th><th>Default Model</th><th>When to Escalate</th><th>Cost/call</th></tr>
+  <tr><td>Architect</td><td>claude-haiku (fast reasoning)</td><td>L3+: deepseek-r1 or sonnet</td><td>~$0.004</td></tr>
+  <tr><td>Editor</td><td>deepseek-chat (T2 cheap)</td><td>If edit fails 2x: haiku</td><td>~$0.001</td></tr>
+</table>
+
+<h3>2.6 Configuration</h3>
+<div class="code-block">
+# In worker.py __init__:
+self.architect_model = os.getenv("AWOS_ARCHITECT_MODEL", "claude-haiku-4-5")
+self.editor_model = os.getenv("AWOS_EDITOR_MODEL", "deepseek/deepseek-chat")
+self.use_architect_split = os.getenv("AWOS_ARCHITECT_SPLIT", "true").lower() == "true"
+
+# Force split for L3+ complexity:
+use_split = self.use_architect_split and task.get("complexity", "medium") in ("medium", "high")
+</div>
+
+<!-- ========================================================= -->
+<h2 id="p13">3. P1.3 — Auto Context Compaction</h2>
+
+<h3>3.1 Problem</h3>
+<div class="danger">
+  For features requiring 5+ tasks (L3/L4), the orchestrator passes increasingly large <code>_applied_context</code> dictionaries. By task 4, the context includes the full description of tasks 1, 2, and 3 — most of which is no longer relevant. This wastes tokens and can confuse the model.
+</div>
+
+<p>Claude Code solves this with AutoCompact: a full LLM summarization when context approaches the limit. AWOS needs a lighter version: structured session state that grows predictably.</p>
+
+<h3>3.2 Session State Structure</h3>
+<div class="interface">
+@dataclass
+class TaskSummary:
+    task_id: int
+    action: str               # Original action description
+    file: str                 # Modified file
+    status: str               # "completed" | "failed" | "skipped"
+    new_symbols: list[str]    # New functions/classes added (e.g. ["snapshot", "ToolPerformanceTracker.snapshot"])
+    key_change: str           # One-line description of what changed
+    test_result: str | None   # "passed" | "failed" | None
+
+@dataclass
+class SessionState:
+    feature_goal: str          # Original user goal
+    completed_tasks: list[TaskSummary]
+    modified_files: list[str]  # All files changed so far
+    current_task_index: int
+    total_tasks: int
+    compact_summary: str = ""  # LLM-generated if too many tasks
+
+    def to_context_block(self) -> str:
+        """Generate the context block injected into each task's prompt."""
+        ...
+</div>
+
+<h3>3.3 Context Block Generation</h3>
+<div class="code-block">
+def to_context_block(self) -> str:
+    """Generate compact context for injection into task prompts."""
+    if len(self.completed_tasks) == 0:
+        return ""
+
+    lines = [
+        f"## Session Context (Feature: {self.feature_goal})",
+        f"Progress: Task {self.current_task_index}/{self.total_tasks}",
+        "",
+        "### Completed Tasks:",
+    ]
+
+    for t in self.completed_tasks:
+        status_icon = "✅" if t.status == "completed" else "❌"
+        lines.append(f"{status_icon} Task {t.task_id}: {t.action}")
+        lines.append(f"   File: {t.file} | Change: {t.key_change}")
+        if t.new_symbols:
+            lines.append(f"   New symbols: {', '.join(t.new_symbols)}")
+        lines.append("")
+
+    lines.append(f"### Modified Files: {', '.join(self.modified_files)}")
+
+    return '\n'.join(lines)
+</div>
+
+<h3>3.4 Compaction Trigger</h3>
+<p>When the context block exceeds <strong>800 tokens</strong> (approximately 8+ tasks), trigger an LLM-based compression:</p>
+<div class="code-block">
+MAX_CONTEXT_TOKENS = 800
+
+def maybe_compact(self, cheap_llm_caller) -> None:
+    """Compress context if too large."""
+    context = self.to_context_block()
+    estimated_tokens = len(context.split()) * 1.3  # Rough estimate
+
+    if estimated_tokens > MAX_CONTEXT_TOKENS:
+        compact_prompt = f"""
+Summarize these completed coding tasks in 3-5 bullet points.
+Focus on: what was added, which files were modified, key new symbols created.
+Be very concise — this will be shown to an LLM for context.
+
+Tasks completed:
+{context}
+
+Summary (3-5 bullet points, max 200 words):"""
+
+        self.compact_summary = cheap_llm_caller(compact_prompt, max_tokens=250)
+        # Clear detailed tasks, keep only compact summary
+        self.completed_tasks = []
+</div>
+
+<h3>3.5 Integration into Orchestrator</h3>
+<div class="code-block">
+# In Orchestrator._execute_feature():
+
+session_state = SessionState(
+    feature_goal=goal,
+    completed_tasks=[],
+    modified_files=[],
+    current_task_index=0,
+    total_tasks=len(tasks),
+)
+
+for i, task in enumerate(tasks):
+    session_state.current_task_index = i + 1
+
+    # Inject session context into task
+    task["session_context"] = session_state.to_context_block()
+
+    # Execute task
+    result = self._execute_single_task(task, ...)
+
+    # Update session state
+    if result["success"]:
+        summary = TaskSummary(
+            task_id=task["task_id"],
+            action=task["action"],
+            file=task["file"],
+            status="completed",
+            new_symbols=self._extract_new_symbols(result["patch"]),
+            key_change=result.get("summary", task["action"][:80]),
+            test_result=result.get("test_result"),
+        )
+        session_state.completed_tasks.append(summary)
+        if task["file"] not in session_state.modified_files:
+            session_state.modified_files.append(task["file"])
+
+    # Maybe compact if too many tasks
+    session_state.maybe_compact(self._cheap_call)
+</div>
+
+<h3>3.6 New Symbol Extraction</h3>
+<p>Parse the diff/edit result to find new function/class names added:</p>
+<div class="code-block">
+def _extract_new_symbols(self, new_content: str, old_content: str) -> list[str]:
+    """Find new function/class definitions added in new_content vs old_content."""
+    import ast
+
+    def get_symbols(code: str) -> set[str]:
+        try:
+            tree = ast.parse(code)
+            symbols = set()
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    symbols.add(node.name)
+            return symbols
+        except SyntaxError:
+            return set()
+
+    old_symbols = get_symbols(old_content)
+    new_symbols = get_symbols(new_content)
+    return list(new_symbols - old_symbols)
+</div>
+
+<!-- ========================================================= -->
+<h2 id="tests">4. Test Plan</h2>
+
+<h3>4.1 Test File: <code>tests/test_p1_improvements.py</code></h3>
+
+<div class="test-case">
+  <strong>test_discover_test_file_standard</strong> — <code>scaffold/agent/worker.py</code> → finds <code>tests/test_planner_worker.py</code>
+</div>
+<div class="test-case">
+  <strong>test_discover_test_file_missing</strong> — file with no tests → returns None without error
+</div>
+<div class="test-case">
+  <strong>test_run_tests_passing</strong> — run tests on known-good file → TestResult.all_passed = True
+</div>
+<div class="test-case">
+  <strong>test_run_tests_failing</strong> — run tests on mock failing file → TestResult.failed &gt; 0, output contains failure
+</div>
+<div class="test-case">
+  <strong>test_run_tests_timeout</strong> — mock timeout → TestResult.timed_out = True, no exception
+</div>
+<div class="test-case">
+  <strong>test_parse_pytest_output</strong> — various pytest output formats parsed correctly
+</div>
+<div class="test-case">
+  <strong>test_architect_prompt_built</strong> — architect prompt contains task, context, instruction format
+</div>
+<div class="test-case">
+  <strong>test_editor_prompt_built</strong> — editor prompt contains architect output and file content
+</div>
+<div class="test-case">
+  <strong>test_architect_split_disabled</strong> — with use_architect_split=False → single LLM call path taken
+</div>
+<div class="test-case">
+  <strong>test_session_state_context_block</strong> — SessionState with 3 tasks → context block contains all 3 summaries
+</div>
+<div class="test-case">
+  <strong>test_session_state_compaction</strong> — 10 tasks → triggers compaction, compact_summary populated
+</div>
+<div class="test-case">
+  <strong>test_extract_new_symbols</strong> — before: no snapshot(); after: snapshot() added → ["snapshot"] returned
+</div>
+<div class="test-case">
+  <strong>test_session_context_injected</strong> — task dict after orchestrator setup contains "session_context" key
+</div>
+
+<!-- ========================================================= -->
+<h2 id="risks">5. Risks &amp; Mitigations</h2>
+
+<table>
+  <tr><th>Risk</th><th>Likelihood</th><th>Mitigation</th></tr>
+  <tr><td>Test execution adds latency per task</td><td>High</td><td>Cap test timeout at 30s; make test discovery optional via flag; only run if test file found</td></tr>
+  <tr><td>Architect output is too verbose for editor</td><td>Medium</td><td>Limit architect to 2048 tokens; if editor fails to parse, fall back to direct edit</td></tr>
+  <tr><td>Cheap editor model produces wrong old_string</td><td>Medium</td><td>Full JSON validation + nearest-match feedback from P0; retry with architect model if editor fails</td></tr>
+  <tr><td>Session compaction loses important context</td><td>Low</td><td>Only compact when &gt;800 tokens; keep symbol list and modified files even after compaction</td></tr>
+  <tr><td>Test execution changes file state</td><td>Low</td><td>Pytest doesn't modify source files; use --timeout to prevent infinite loops</td></tr>
+</table>
+
+<hr style="margin: 3rem 0; border-color: #dee2e6;">
+<p style="color: #888; font-size: 0.85rem;">P1 Spec | AWOS Coding Agent | 2026-05-22 | Total effort: 9h | Next: P2 Spec (Performance &amp; Parallelism)</p>
+
+</body>
+</html>

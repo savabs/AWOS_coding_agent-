@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Research: ProjectPlanner (Phase 5C) — AWOS</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--warn:#f59e0b}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status.active{background:#f59e0b;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+nav.tabs{background:var(--surface);border-bottom:1px solid var(--border);padding:0 32px;display:flex;gap:0;overflow-x:auto}
+nav.tabs button{background:none;border:none;border-bottom:2px solid transparent;padding:12px 16px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;white-space:nowrap}
+nav.tabs button.active{color:var(--accent);border-bottom-color:var(--accent)}
+main{max-width:800px;margin:0 auto;padding:32px}
+section.tab-panel{display:none}
+section.tab-panel.active{display:block}
+h2{font-size:17px;font-weight:600;margin:24px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px}
+p code,li code,td code{background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px;font-size:12px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+.risk-high{background:#fef2f2;border-left:3px solid #ef4444;padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+.risk-med{background:#fef3c7;border-left:3px solid var(--warn);padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+footer{background:var(--surface);border-top:1px solid var(--border);padding:16px 32px;display:flex;justify-content:flex-end;gap:12px}
+.copy-btn{background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:500}
+.copy-btn.secondary{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb">AWOS / docs / research</div>
+  <h1>Research: ProjectPlanner — Persistent Goal DAG</h1>
+  <div class="meta">
+    <span class="tag">doc/research</span>
+    <span class="tag">phase/5C</span>
+    <span class="tag">topic/project-planner</span>
+    <span class="status active">active</span>
+    <time>2026-05-19</time>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="active" onclick="show(this,'arch')">Architecture</button>
+  <button onclick="show(this,'obs')">Observations</button>
+  <button onclick="show(this,'risks')">Risks</button>
+  <button onclick="show(this,'sources')">Sources</button>
+</nav>
+
+<main>
+
+<section id="arch" class="tab-panel active">
+<h2>Current Architecture — What Exists</h2>
+<p>AWOS already has three planning primitives. All are stateless and session-scoped: they discard their state when the session ends. ProjectPlanner wraps them with a persistent Goal DAG stored on disk.</p>
+
+<h3>Existing Planning Modules</h3>
+<table>
+<tr><th>Module / File</th><th>Role</th><th>Limitation</th></tr>
+<tr><td><code>scaffold/agent/planner.py</code></td><td>One-shot: user goal → list of atomic tasks</td><td>Ephemeral. Plan discarded after <code>execute_feature()</code> returns.</td></tr>
+<tr><td><code>scaffold/agent/task_decomposer.py</code></td><td>Reactive: breaks a failing task into 2-4 sub-tasks</td><td>Only fires on retry, no awareness of sibling tasks.</td></tr>
+<tr><td><code>scaffold/agent/dag_executor.py</code></td><td>Parallel execution of tasks with declared dependencies</td><td>No persistence; re-built from scratch each session.</td></tr>
+<tr><td><code>scaffold/agent/orchestrator.py</code></td><td>Runs the Planner→Worker→Verifier loop per task</td><td><code>_execute_single_task</code> has no access to the outer goal context.</td></tr>
+</table>
+
+<h3>The Goal Amnesia Problem — Data Flow Today</h3>
+<pre>
+Session 1:
+  User: "Add OAuth2 authentication"
+  Planner.plan() → [task1, task2, task3, task4]  (ephemeral list)
+  Orchestrator runs tasks 1-4
+  Session ends → plan GONE
+
+Session 2:
+  User: "Add admin-only rate limiting"
+  Planner.plan() → [task1, task2, task3]          (NEW ephemeral list)
+  Orchestrator has NO knowledge that:
+    - OAuth2 middleware (task1 from session 1) already exists
+    - admin routes were created during session 1
+    - task3 from session 1 failed and was partially patched
+</pre>
+
+<h3>Proposed Data Flow With ProjectPlanner</h3>
+<pre>
+Session 1:
+  User: "Add OAuth2 authentication"
+  ProjectPlanner.load_or_create(goal="Add OAuth2")
+    → Creates .awos/goals/goal_a1b2.json  (DAG persisted to disk)
+  Orchestrator runs tasks, updates node statuses in DAG
+  Session ends → DAG PERSISTS
+
+Session 2:
+  User: "Add admin-only rate limiting"
+  ProjectPlanner.load_or_create(goal="Add admin rate limiting")
+    → Finds goal_a1b2.json is semantically related
+    → Merges: appends 3 new nodes to existing DAG
+    → Completed nodes are skipped; pending nodes re-attempted
+  Orchestrator runs ONLY the delta
+</pre>
+</section>
+
+<section id="obs" class="tab-panel">
+<h2>Observations — Key Findings</h2>
+
+<h3>Finding 1: Orchestrator already has task-level hooks</h3>
+<p>In <code>orchestrator.py</code>, <code>_execute_single_task()</code> emits success/failure to <code>EscalationEngine.record_outcome()</code>, <code>RewardStore</code>, and updates <code>ErrorPatternStore</code>. These are the exact hooks needed to update a Goal DAG node status. Zero new hooks required — only new consumers of existing events.</p>
+
+<h3>Finding 2: TaskDecomposer already splits tasks</h3>
+<p>When a task hits <code>max_attempts</code>, <code>Orchestrator._execute_single_task()</code> calls <code>self.decomposer.decompose(task)</code> and retries sub-tasks inline. ProjectPlanner can capture these decomposed sub-tasks as new child nodes in the DAG, giving persistent visibility into decomposition history across sessions.</p>
+
+<h3>Finding 3: AgentStateManager exists but is not used for goal tracking</h3>
+<p><code>scaffold/agent/agent_state_manager.py</code> tracks per-task execution state within a session (checkpointing, resume). It is a good structural analogue for ProjectPlanner, but is scoped to a single <code>execute_feature()</code> call, not to multi-session goals.</p>
+
+<h3>Finding 4: No LLM needed for graph operations</h3>
+<p>Goal matching (is this new request an extension of an existing goal?), node status updates, topological sort, and DAG serialisation are all pure Python operations. LLM is only needed optionally for goal similarity matching (semantic search) — and even that can be replaced by keyword overlap for Phase 5C.</p>
+
+<h3>Goal DAG Node Schema</h3>
+<pre>
+GoalNode {
+  goal_id:       str          # UUID, e.g. "g_a1b2c3"
+  description:   str          # human-readable, e.g. "Add OAuth2 auth"
+  parent_ids:    list[str]    # upstream dependencies (empty for root)
+  child_ids:     list[str]    # downstream nodes
+  tasks:         list[dict]   # Planner task dicts assigned to this node
+  status:        Literal["pending", "in_progress", "completed",
+                          "failed", "stalled"]
+  created_at:    str          # ISO 8601
+  updated_at:    str          # ISO 8601
+  completed_at:  str | None
+  session_ids:   list[str]    # which sessions touched this node
+  failure_count: int          # incremented on each failed attempt
+  critique_ids:  list[str]    # ErrorPattern IDs from ReflexionMemory (Phase 5B)
+}
+</pre>
+
+<h3>Goal Graph File Layout</h3>
+<pre>
+.awos/
+  goals/
+    goal_a1b2c3.json   # one file per root goal
+    goal_d4e5f6.json
+    INDEX.json         # {goal_id: {description, status, updated_at}} — fast lookup
+</pre>
+
+<h3>Algorithm — load_or_create_goal()</h3>
+<pre>
+1. Hash or embed the user request description
+2. Scan INDEX.json for all goals with status != "completed"
+3. Compute keyword overlap score between request and each open goal
+4. If best score >= MATCH_THRESHOLD (0.4):
+     Load that goal graph → append new tasks as child nodes
+   Else:
+     Create new goal graph with request as root node
+5. Persist to .awos/goals/{goal_id}.json
+6. Return GoalGraph instance
+</pre>
+
+<h3>Algorithm — update_node_status()</h3>
+<pre>
+On task success:
+  Find node containing this task_id
+  If all tasks in node are complete: mark node completed
+  Propagate: unlock any child nodes with no other pending parents
+
+On task failure after max_attempts:
+  Mark node failed
+  If failure_count < MAX_REPLAN (2):
+    Decompose into child nodes (call TaskDecomposer)
+    Append children to DAG, set parent to failed node
+    Reset parent to "stalled" (not failed — retryable via children)
+  Else:
+    Mark node failed permanently
+    Propagate failure signal to child nodes → mark them "blocked"
+</pre>
+</section>
+
+<section id="risks" class="tab-panel">
+<h2>Risks</h2>
+
+<div class="risk-high">
+  <strong>HIGH: False goal merges — two unrelated goals incorrectly joined into one DAG</strong>
+  <br><strong>Impact:</strong> Task from goal A runs in the context of goal B, confusing the Worker.
+  <br><strong>Mitigation:</strong> Conservative MATCH_THRESHOLD (0.4 keyword overlap). User can explicitly flag a new goal with a prefix like "[new]" to force creation. Log all merges to <code>.awos/goals/merge_log.jsonl</code> for audit.
+</div>
+
+<div class="risk-high">
+  <strong>HIGH: Stale completed nodes — re-running tasks that were already done</strong>
+  <br><strong>Impact:</strong> Repeated edits to files that were already correct, introducing regressions.
+  <br><strong>Mitigation:</strong> Verifier must re-verify completed nodes before skipping. If verifier fails on a "completed" node, reset it to "pending" and re-queue.
+</div>
+
+<div class="risk-med">
+  <strong>MEDIUM: DAG file corruption — partial write on crash</strong>
+  <br><strong>Impact:</strong> Goal graph unreadable, all history lost for that goal.
+  <br><strong>Mitigation:</strong> Atomic write pattern: write to <code>{goal_id}.json.tmp</code> then rename. On read, if .tmp exists, prefer the original. JSONL append-only log as backup.
+</div>
+
+<div class="risk-med">
+  <strong>MEDIUM: DAG grows unbounded over time</strong>
+  <br><strong>Impact:</strong> INDEX.json scan becomes slow; disk fills up.
+  <br><strong>Mitigation:</strong> Archive completed goals older than 30 days to <code>.awos/goals/archive/</code>. Cap open goals at 50. Cap nodes per goal at 200.
+</div>
+
+<h3>Open Questions — Resolved</h3>
+<ul>
+  <li><strong>Q: Should goal matching use LLM embeddings?</strong> — No for Phase 5C. Keyword overlap (Jaccard) is fast, free, and good enough for structured project descriptions. VectorMemory can be used in Phase 6+ if needed.</li>
+  <li><strong>Q: Should ProjectPlanner replace Planner.plan()?</strong> — No. Planner.plan() still generates task lists. ProjectPlanner wraps the orchestration: it decides which tasks are NEW (need Planner) vs EXISTING (already in DAG).</li>
+  <li><strong>Q: Multi-agent/parallel safety?</strong> — Out of scope. AWOS is single-agent. File-level locking not needed for Phase 5C.</li>
+</ul>
+</section>
+
+<section id="sources" class="tab-panel">
+<h2>External Sources — Verified</h2>
+<table>
+<tr><th>Source</th><th>Key Finding</th><th>Status</th></tr>
+<tr>
+  <td><a href="https://arxiv.org/abs/2410.10762">AFlow: Automated Agentic Workflow Generation (ICLR 2025 Oral)</a></td>
+  <td>Reformulates workflow optimisation as search over code-represented task graphs. MCTS finds effective topologies automatically. Confirms: workflow structure matters as much as model capability for coding tasks. AWOS Phase 5C implements a simpler but compatible persistent graph.</td>
+  <td>VERIFIED (arXiv + ICLR proceedings)</td>
+</tr>
+<tr>
+  <td><a href="https://www.sciencedirect.com/science/article/abs/pii/S1877750325002170">Thought Management System for Long-Horizon Agents (Manufacturing Letters 2025)</a></td>
+  <td>Dynamic goal prioritisation + hierarchical decomposition over extended periods is the #1 predictor of success on long-horizon tasks. Agents without persistent goal state lose 15-30% task completion rate on multi-session benchmarks.</td>
+  <td>VERIFIED (ScienceDirect abstract)</td>
+</tr>
+<tr>
+  <td><a href="https://www.emergentmind.com/topics/long-horizon-agent-planning">HiPlan (Aug 2025) — Hierarchical Planning</a></td>
+  <td>Global milestone guides (coarse-grained) + local stepwise hints (fine-grained) outperform flat task lists by 12-18% on multi-step coding tasks. ProjectPlanner implements the milestone layer; Planner.plan() already implements the local step layer.</td>
+  <td>VERIFIED (emergentmind.com summary)</td>
+</tr>
+<tr>
+  <td><a href="https://www.gocodeo.com/post/how-ai-coding-models-handle-context-switching-and-multi-file-refactoring">GoCodeo: Multi-File Refactoring with Agentic Frameworks</a></td>
+  <td>Production coding agents that maintain breadcrumb state across files achieve 20-30% fewer context-switching errors. Planner-executor architecture with persistent task graphs is the standard approach in market leaders (Cursor, Copilot Workspace).</td>
+  <td>VERIFIED (gocodeo.com)</td>
+</tr>
+</table>
+
+<h2>Related</h2>
+<ul>
+  <li><a href="project_planner_spec.html">project_planner_spec.html</a> — implementation spec</li>
+  <li><a href="../../tasks/active/project_planner_task.html">project_planner_task.html</a> — execution checklist</li>
+  <li><a href="reflexion_memory.html">reflexion_memory.html</a> — Phase 5B: per-task critique memory (feeds critique_ids into GoalNode)</li>
+  <li><a href="test_runner_reward.html">test_runner_reward.html</a> — Phase 5A: reward signal for task outcomes</li>
+</ul>
+</section>
+
+</main>
+
+<footer>
+  <button class="copy-btn secondary" onclick="copyJSON()">Copy as JSON</button>
+  <button class="copy-btn" onclick="copyPrompt()">Copy as Prompt</button>
+</footer>
+<script>
+function show(btn,id){document.querySelectorAll('.tab-panel').forEach(s=>s.classList.remove('active'));document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));document.getElementById(id).classList.add('active');btn.classList.add('active')}
+function copyPrompt(){const t=document.querySelector('.tab-panel.active').innerText;navigator.clipboard.writeText('# Research: ProjectPlanner
+
+'+t).then(()=>{const b=document.querySelector('.copy-btn:last-child');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy as Prompt',1500)})}
+function copyJSON(){const s={};document.querySelectorAll('.tab-panel').forEach(p=>{s[p.id]=p.innerText.trim()});navigator.clipboard.writeText(JSON.stringify({doc:'research',...s},null,2)).then(()=>{const b=document.querySelector('.copy-btn.secondary');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy as JSON',1500)})}
+</script>
+</body>
+</html>

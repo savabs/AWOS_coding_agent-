@@ -1,3 +1,6 @@
+import pytest
+pytestmark = pytest.mark.integration
+
 """
 Sprint 3 Integration Test — Full Hydration Pipeline E2E
 

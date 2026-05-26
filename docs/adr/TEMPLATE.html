@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ADR [NNNN]: [Short Title] — [Project]</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--success:#10b981;--warn:#f59e0b;--danger:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.badge{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.badge-accepted{background:#10b981;color:#fff}
+.badge-proposed{background:var(--warn);color:#fff}
+.badge-deprecated{background:#6b7280;color:#fff}
+.badge-superseded{background:var(--danger);color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+main{max-width:760px;margin:0 auto;padding:32px}
+.metadata-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px 20px;margin-bottom:28px;display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:13px}
+.metadata-card .key{color:var(--muted);font-weight:600}
+h2{font-size:17px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:18px 0 8px}
+h3.chosen{color:var(--success)}
+h3.rejected{color:var(--danger)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px}
+p code,li code,td code{background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px;font-size:12px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.pro{color:var(--success)}
+.con{color:var(--danger)}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+.placeholder{color:var(--muted);font-style:italic}
+footer{background:var(--surface);border-top:1px solid var(--border);padding:16px 32px;display:flex;justify-content:flex-end}
+.copy-btn{background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:500}
+.copy-btn:hover{background:#4338ca}
+</style>
+</head>
+<body>
+
+<!-- INSTRUCTIONS FOR AGENT:
+  Use this template whenever a significant architectural or process decision is made.
+  ADRs are immutable once accepted. If you need to change a decision, write a NEW ADR
+  that supersedes this one — reference the old number in the new ADR's metadata.
+  Delete this comment when filling in the template.
+-->
+
+<header>
+  <div class="breadcrumb">[Project] / docs / adr</div>
+  <h1>ADR [NNNN]: [Short Title]</h1>
+  <div class="meta">
+    <span class="tag">doc/adr</span>
+    <span class="tag">phase/[N]</span>
+    <span class="tag">topic/[slug]</span>
+    <span class="badge badge-proposed">PROPOSED</span>
+    <time>[YYYY-MM-DD]</time>
+  </div>
+</header>
+
+<main>
+
+<div class="metadata-card">
+  <span class="key">Status</span>          <span class="placeholder">Proposed / Accepted / Deprecated / Superseded by ADR [N]</span>
+  <span class="key">Date</span>            <span class="placeholder">[YYYY-MM-DD]</span>
+  <span class="key">Deciders</span>        <span class="placeholder">Agent + [human name] / Team</span>
+  <span class="key">Supersedes</span>      <span class="placeholder">— (none) / ADR [N]</span>
+  <span class="key">Superseded by</span>   <span class="placeholder">— (none so far)</span>
+</div>
+
+<h2>Context</h2>
+<p class="placeholder">[What situation forced this decision? What problem exists now? What would happen without acting?]</p>
+
+<div class="callout">
+  <strong>Decision force:</strong> <span class="placeholder">[The constraint or pressure that requires a decision to be made now. E.g., "Training will not scale beyond 1 GPU without addressing batch memory" or "Two modules share the same state — a decision must be made about ownership."]</span>
+</div>
+
+<h2>Decision</h2>
+<p class="placeholder">[State the decision clearly. One paragraph max. No hedging.]</p>
+
+<h2>Options Considered</h2>
+
+<h3 class="chosen">Option A: [Chosen Option Title] ✓ Chosen</h3>
+<p class="placeholder">[Describe the option.]</p>
+<table>
+<tr><th>Pros</th><th>Cons</th></tr>
+<tr>
+  <td class="pro"><ul><li class="placeholder">Pro 1</li><li class="placeholder">Pro 2</li></ul></td>
+  <td class="con"><ul><li class="placeholder">Con 1</li></ul></td>
+</tr>
+</table>
+
+<h3 class="rejected">Option B: [Rejected Option Title] ✗ Rejected</h3>
+<p class="placeholder">[Describe the option.]</p>
+<table>
+<tr><th>Pros</th><th>Cons</th></tr>
+<tr>
+  <td class="pro"><ul><li class="placeholder">Pro 1</li></ul></td>
+  <td class="con"><ul><li class="placeholder">Con 1</li><li class="placeholder">Con 2</li></ul></td>
+</tr>
+</table>
+
+<h2>Rationale</h2>
+<p class="placeholder">[Why was Option A chosen over the others? Reference specific forces, constraints, or data. Not opinions — evidence.]</p>
+
+<h2>Consequences</h2>
+<table>
+<tr><th>Type</th><th>Consequence</th></tr>
+<tr><td><strong class="pro">Positive</strong></td><td class="placeholder">[what gets better]</td></tr>
+<tr><td><strong class="con">Negative</strong></td><td class="placeholder">[what gets harder or constrained]</td></tr>
+</table>
+
+<h2>Validation</h2>
+<ul>
+  <li class="placeholder">[Falsifiable test that proves this was the right decision. "Test X passes" or "Metric Y improves to Z".]</li>
+  <li class="placeholder">[What would cause this decision to be revisited?]</li>
+</ul>
+
+<h2>Related</h2>
+<ul>
+  <li class="placeholder"><a href="#">[[research_doc]]</a> — research that informed this decision</li>
+  <li class="placeholder"><a href="#">[[spec_doc]]</a> — spec implementing this decision</li>
+</ul>
+
+</main>
+
+<footer>
+  <button class="copy-btn" onclick="copyPrompt()">Copy as Prompt</button>
+</footer>
+<script>
+function copyPrompt(){navigator.clipboard.writeText('# ADR [NNNN]: [Short Title]\n\n'+document.querySelector('main').innerText).then(()=>{const b=document.querySelector('.copy-btn');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy as Prompt',1500)})}
+</script>
+</body>
+</html>

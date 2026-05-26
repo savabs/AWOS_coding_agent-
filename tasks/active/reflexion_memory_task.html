@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task: ReflexionMemory Phase 5B — AWOS</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--success:#10b981;--warn:#f59e0b;--danger:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status.pending{background:#f59e0b;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+main{max-width:860px;margin:0 auto;padding:32px}
+h2{font-size:17px;font-weight:600;margin:24px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:5px}
+.meta-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;margin:16px 0;display:grid;grid-template-columns:100px 1fr;gap:6px 16px;font-size:13px}
+.meta-card .key{font-weight:600;color:var(--muted)}
+.progress-label{font-size:13px;font-weight:600;color:var(--accent);margin:20px 0 4px}
+.progress-bar{height:8px;background:var(--surface2);border-radius:4px;overflow:hidden;margin-bottom:20px}
+.progress-bar .fill{height:100%;background:var(--accent);border-radius:4px;transition:width .3s}
+.step{border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin:10px 0;background:var(--surface);display:flex;gap:12px;align-items:flex-start}
+.step.active{border-color:var(--accent);background:var(--accent-light)}
+.step input[type=checkbox]{margin-top:3px;flex-shrink:0}
+.step-body{flex:1}
+.step-num{font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;margin-bottom:4px}
+.step-title{font-weight:600;margin-bottom:6px}
+.step-exit{font-size:13px;color:var(--muted)}
+.step-notes{font-size:12px;color:var(--muted);margin-top:4px;font-style:italic}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <div class="breadcrumb">AWOS / tasks / active</div>
+  <h1>Task: ReflexionMemory — Phase 5B</h1>
+  <div class="meta">
+    <span class="tag">phase-5b</span>
+    <span class="tag">error-pattern-store</span>
+    <span class="tag">critique-injection</span>
+    <span class="status pending">Pending</span>
+    <time>2026-05-19</time>
+  </div>
+</header>
+
+<main>
+
+<div class="meta-card">
+  <span class="key">Goal</span>       <span>Persistent verbal critique memory: save why tasks fail as LLM-generated critiques, retrieve by (file, error_type), inject into retry prompts</span>
+  <span class="key">Spec</span>       <span><a href="../../docs/specs/reflexion_memory_spec.html">reflexion_memory_spec.html</a></span>
+  <span class="key">Research</span>   <span><a href="../../docs/research/reflexion_memory.html">reflexion_memory.html</a></span>
+  <span class="key">Phase</span>      <span>5B</span>
+  <span class="key">Started</span>    <span>—</span>
+  <span class="key">Completed</span>  <span>—</span>
+</div>
+
+<div class="progress-label" id="progress-label">0 / 8 steps complete</div>
+<div class="progress-bar"><div class="fill" id="progress-fill" style="width: 0%"></div></div>
+
+<h2>Steps</h2>
+<p>Each step is atomic: changes one thing, tests one thing, proves one thing.</p>
+
+<div class="step active" id="step-1">
+  <input type="checkbox" onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 1</div>
+    <div class="step-title">Create scaffold/agent/error_pattern_store.py</div>
+    <div class="step-exit"><strong>Exit:</strong> Module imports cleanly. save() appends to .awos/error_patterns.jsonl. retrieve() returns matching records sorted by recency. summary() returns counts.</div>
+    <div class="step-notes">Dataclass: ErrorPattern(task_id, file_path, error_type, error_msg, critique, timestamp). Storage: JSONL append-only.</div>
+  </div>
+</div>
+
+<div class="step" id="step-2">
+  <input type="checkbox" onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 2</div>
+    <div class="step-title">Add generate_critique() to SelfCorrectionEngine</div>
+    <div class="step-exit"><strong>Exit:</strong> Unit test — mock LLM caller → returns critique string. LLM raises → returns empty string. Prompt contains error_class, file path, action.</div>
+    <div class="step-notes">Accepts model_caller: Callable[[str], str]. Max 100 tokens output. Never raises.</div>
+  </div>
+</div>
+
+<div class="step" id="step-3">
+  <input type="checkbox" onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 3</div>
+    <div class="step-title">Wire generate_critique() + ErrorPatternStore.save() in Orchestrator after worker failure</div>
+    <div class="step-exit"><strong>Exit:</strong> After worker failure, error_patterns.jsonl receives new record. If LLM call fails, no record written. Log line: [TASK X] Critique saved.</div>
+    <div class="step-notes">Wire in _execute_single_task(), in the worker-failure branch. Add self.error_store = ErrorPatternStore() to __init__.</div>
+  </div>
+</div>
+
+<div class="step" id="step-4">
+  <input type="checkbox" onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 4</div>
+    <div class="step-title">Wire ErrorPatternStore.retrieve() + inject task["past_critiques"] before retry</div>
+    <div class="step-exit"><strong>Exit:</strong> task["past_critiques"] populated (may be []) before each retry. No exception if store is empty.</div>
+    <div class="step-notes">Retrieval key: (task["file"], error_class.name). Call retrieve() before building _task dict for next attempt.</div>
+  </div>
+</div>
+
+<div class="step" id="step-5">
+  <input type="checkbox" onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 5</div>
+    <div class="step-title">Modify Worker.execute_task() to prepend [PAST CRITIQUE] blocks</div>
+    <div class="step-exit"><strong>Exit:</strong> Task with past_critiques → prompt contains "[PAST CRITIQUE 1]". Task without past_critiques → prompt identical to current behaviour.</div>
+    <div class="step-notes">Cap: 3 critiques × 400 chars. Prepend to system prompt section, before task description.</div>
+  </div>
+</div>
+
+<div class="step" id="step-6">
+  <input type="checkbox" onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 6</div>
+    <div class="step-title">Add _cheap_call() helper to Orchestrator</div>
+    <div class="step-exit"><strong>Exit:</strong> _cheap_call(prompt) fires Gemini Flash / DeepSeek with max_tokens=100. Returns string. Returns empty string on error.</div>
+    <div class="step-notes">Reuse existing worker API call infrastructure. No new API clients.</div>
+  </div>
+</div>
+
+<div class="step" id="step-7">
+  <input type="checkbox" onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 7</div>
+    <div class="step-title">Write tests/test_reflexion_memory.py</div>
+    <div class="step-exit"><strong>Exit:</strong> All ~14 tests pass. Coverage: store (6), generate_critique (3), prompt injection (2), integration (2), edge cases (1).</div>
+    <div class="step-notes">Use tmp_path fixture for JSONL. Mock LLM caller. No real API calls in tests.</div>
+  </div>
+</div>
+
+<div class="step" id="step-8">
+  <input type="checkbox" onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 8</div>
+    <div class="step-title">Run full test suite — zero regressions</div>
+    <div class="step-exit"><strong>Exit:</strong> 145+ tests pass, 0 failures. New test file adds ~14 more.</div>
+    <div class="step-notes">Run: pytest tests/test_reflexion_memory.py tests/test_ml_meta_controller.py tests/test_test_runner.py -v</div>
+  </div>
+</div>
+
+<h2>Blocked / Decisions</h2>
+<p>None — all pre-conditions met (Phase 5A TestRunner complete, SelfCorrectionEngine stable, Worker accepts error_context).</p>
+
+<h3>Decision Log</h3>
+<div class="callout">
+  <strong>2026-05-19:</strong> JSONL over SQLite for ErrorPatternStore — consistent with RewardStore, zero dependencies, append-only = crash-safe.
+</div>
+<div class="callout">
+  <strong>2026-05-19:</strong> Exact match retrieval over vector search — sufficient for Phase 5B. Vector search deferred to Phase 6 when 500+ critiques exist.
+</div>
+<div class="callout">
+  <strong>2026-05-19:</strong> Critique generated after failure, retrieved on next attempt — avoids adding latency to current retry. Matches Reflexion paper architecture.
+</div>
+
+</main>
+<script>
+function updateProgress() {
+  const total = document.querySelectorAll(".step input[type=checkbox]").length;
+  const done = document.querySelectorAll(".step input[type=checkbox]:checked").length;
+  document.getElementById("progress-label").textContent = done + " / " + total + " steps complete";
+  document.getElementById("progress-fill").style.width = Math.round(done/total*100) + "%";
+}
+</script>
+</body>
+</html>

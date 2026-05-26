@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Research: Vector Memory — AWOS Phase 6</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--warn:#f59e0b}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status.active{background:#f59e0b;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+nav.tabs{background:var(--surface);border-bottom:1px solid var(--border);padding:0 32px;display:flex;gap:0;overflow-x:auto}
+nav.tabs button{background:none;border:none;border-bottom:2px solid transparent;padding:12px 16px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;white-space:nowrap}
+nav.tabs button.active{color:var(--accent);border-bottom-color:var(--accent)}
+main{max-width:800px;margin:0 auto;padding:32px}
+section.tab-panel{display:none}
+section.tab-panel.active{display:block}
+h2{font-size:17px;font-weight:600;margin:24px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px;background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px}
+pre{background:var(--code-bg);color:var(--code-text);padding:16px;border-radius:6px;overflow-x:auto;font-size:12px;margin:12px 0;font-family:'JetBrains Mono','Fira Code',monospace}
+table{width:100%;border-collapse:collapse;font-size:13px;margin:12px 0}
+th{background:var(--surface2);padding:8px 12px;text-align:left;font-weight:600;border:1px solid var(--border)}
+td{padding:8px 12px;border:1px solid var(--border)}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+.warn{background:#fffbeb;border-left:3px solid var(--warn);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+.verified{color:#10b981;font-weight:600}
+.unverified{color:#f59e0b;font-weight:600}
+</style>
+</head>
+<body>
+<header>
+  <div class="breadcrumb">AWOS / docs / research</div>
+  <h1>Vector Memory — Semantic Codebase & Session Retrieval</h1>
+  <div class="meta">
+    <span class="tag">doc/research</span>
+    <span class="tag">phase/6</span>
+    <span class="tag">topic/vector-memory</span>
+    <span class="status active">DRAFT</span>
+    <time>2026-05-19</time>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="active" onclick="show('observations',this)">Observations</button>
+  <button onclick="show('proposed',this)">Proposed Solution</button>
+  <button onclick="show('dataflow',this)">Data Flow</button>
+  <button onclick="show('risks',this)">Risks</button>
+  <button onclick="show('sources',this)">Sources</button>
+</nav>
+
+<main>
+
+<section class="tab-panel active" id="observations">
+  <h2>Current State</h2>
+  <p>AWOS has three retrieval mechanisms today, all lexical (zero semantic understanding):</p>
+  <ul>
+    <li><strong>SymbolIndex</strong> — AST-extracted class/function names sent raw to Planner. No ranking, no relevance filtering.</li>
+    <li><strong>ExampleStore</strong> — exact task_id lookup of past SEARCH/REPLACE pairs. No fuzzy matching.</li>
+    <li><strong>ProjectPlanner Jaccard</strong> — keyword overlap for goal deduplication. Fails on paraphrase ("add auth" ≠ "implement login").</li>
+  </ul>
+  <h3>Impact of no semantic retrieval</h3>
+  <ul>
+    <li>Worker receives up to 40 raw symbols regardless of relevance → noise in prompt.</li>
+    <li>Cross-session recall is 0% for semantically similar but lexically different goals.</li>
+    <li>Past successful examples are not retrieved on retry unless task_id matches exactly.</li>
+    <li>ExampleStore can't surface "add rate limiting" when current task is "add throttling".</li>
+  </ul>
+  <h2>Research Findings</h2>
+  <h3>Dense retrieval vs sparse retrieval for code</h3>
+  <p><span class="verified">VERIFIED</span> (arXiv:2510.04905, Oct 2025): Dense (vector-based) retrieval using neural embeddings outperforms sparse/BM25 retrieval for repository-level code generation tasks. The survey classifies retrieval into: identifier matching → sparse → dense → graph → hybrid. Dense + graph hybrid achieves best results but at higher complexity cost.</p>
+  <p><span class="verified">VERIFIED</span> (arXiv:2510.04905): "Non-graph-based RAG approaches… now incorporate additional contextual signals, such as file paths, surrounding code blocks, dependency metadata… This evolution has transformed non-graph-based retrieval into a sophisticated and adaptable framework."</p>
+  <h3>Embedding model selection</h3>
+  <p><span class="verified">VERIFIED</span> (HuggingFace model card, ChromaDB docs): <code>all-MiniLM-L6-v2</code> is ChromaDB's default embedding function. Maps text to 384-dim vectors. Max 256 tokens per chunk. Runs locally with no API cost. Inference: ~5ms per chunk on CPU. Suitable for code snippets and task descriptions.</p>
+  <h3>ChromaDB as the vector store</h3>
+  <p><span class="verified">VERIFIED</span> (ChromaDB docs, realpython.com): <code>chromadb.PersistentClient(path=…)</code> persists collections to disk. Supports <code>SentenceTransformerEmbeddingFunction</code> natively. API: <code>collection.add(documents, metadatas, ids)</code> and <code>collection.query(query_texts, n_results, where)</code>. Metadata filtering allows scoping queries by file path, status, or session.</p>
+  <h3>What Cursor does (semantic code search)</h3>
+  <p><span class="verified">VERIFIED</span> (semantic code search article): Cursor embeds code chunks with start/end line numbers + file paths stored in a vector DB. On <code>@Codebase</code> query, it retrieves the top-k relevant chunks and injects them into the prompt. This is the baseline we're replicating locally.</p>
+  <h3>Key limitation</h3>
+  <p><span class="verified">VERIFIED</span> (arXiv:2510.04905 §5.1): "Context window constraints and long-range dependency modeling remain a fundamental bottleneck. Although RAG frameworks partially alleviate this issue by retrieving relevant content externally, the retrieved information often fails to fully preserve semantic continuity across distant code segments."</p>
+  <p><span class="unverified">UNVERIFIED</span>: Whether top-5 chunks at 256 tokens each (1280 tokens total) is the right budget for AWOS's DeepSeek-based Worker. Needs empirical validation after implementation.</p>
+</section>
+
+<section class="tab-panel" id="proposed">
+  <h2>Proposed Solution</h2>
+  <p>A new module <code>scaffold/agent/vector_memory.py</code> with two ChromaDB collections stored at <code>.awos/vector_db/</code>:</p>
+  <table>
+    <tr><th>Collection</th><th>What is indexed</th><th>Used by</th></tr>
+    <tr><td><code>codebase_chunks</code></td><td>Python AST chunks (function bodies, class bodies) with file+line metadata</td><td>Worker prompt injection</td></tr>
+    <tr><td><code>session_memory</code></td><td>Past task outcomes: action, file, success bool, critique text</td><td>ProjectPlanner goal matching + ExampleStore supplement</td></tr>
+  </table>
+  <h3>VectorMemory class API</h3>
+  <pre>class VectorMemory:
+    def __init__(self, persist_dir=".awos/vector_db")
+    def index_codebase(self, root: str) -> int           # returns chunks indexed
+    def query_code(self, query: str, top_k=5) -> list[CodeChunk]
+    def store_outcome(self, task: dict, success: bool, critique: str = "") -> None
+    def query_outcomes(self, description: str, top_k=3) -> list[OutcomeRecord]
+    def find_similar_goal(self, description: str, threshold=0.82) -> str | None
+    def reset_codebase_index(self) -> None</pre>
+  <h3>CodeChunk dataclass</h3>
+  <pre>@dataclass
+class CodeChunk:
+    chunk_id: str          # sha1(file_path + start_line)
+    file_path: str
+    start_line: int
+    end_line: int
+    text: str              # raw source text
+    symbol_name: str       # function/class name or ""
+    score: float           # cosine similarity to query (0..1)</pre>
+  <h3>Integration points</h3>
+  <ol>
+    <li><strong>Orchestrator.execute_feature()</strong> → call <code>vector_memory.index_codebase(codebase_root)</code> before planning. Incremental: skip files unchanged since last index (mtime check).</li>
+    <li><strong>Worker.execute_task()</strong> → accept <code>vector_chunks: list[CodeChunk]</code> param, inject top chunks into prompt as <code>[RELEVANT CODE]</code> section.</li>
+    <li><strong>Orchestrator._execute_single_task()</strong> → call <code>vector_memory.query_code(task["action"])</code>, pass result to worker.</li>
+    <li><strong>Orchestrator._execute_single_task()</strong> (post-task) → call <code>vector_memory.store_outcome(task, verify_success, critique)</code>.</li>
+    <li><strong>ProjectPlanner.load_or_create_goal()</strong> → try <code>vector_memory.find_similar_goal(description)</code> first; fall back to Jaccard if VectorMemory unavailable.</li>
+  </ol>
+  <h3>Chunking strategy</h3>
+  <p>Extract via AST: each top-level <code>def</code> or <code>class</code> body becomes one chunk. For files with no top-level symbols, fall back to 50-line sliding windows with 10-line overlap. Max chunk size: 256 tokens (MiniLM limit). Skip <code>__pycache__</code>, <code>.git</code>, generated files.</p>
+  <h3>Incremental indexing</h3>
+  <p>Track per-file mtime in <code>.awos/vector_db/mtime_cache.json</code>. On <code>index_codebase()</code>, only re-embed files modified since last index. Delete+re-add changed file chunks. This keeps indexing fast on subsequent calls (&lt;100ms for a 50-file repo).</p>
+  <h3>Similarity threshold for goal matching</h3>
+  <p>Cosine similarity threshold of 0.82 for <code>find_similar_goal()</code>. Higher than Jaccard (0.4) because embedding space is denser — a 0.82 cosine score corresponds to strong semantic overlap. Configurable via <code>GOAL_SIMILARITY_THRESHOLD</code> constant.</p>
+  <h3>Graceful degradation</h3>
+  <p>If <code>chromadb</code> or <code>sentence-transformers</code> are not installed, <code>VectorMemory</code> raises <code>VectorMemoryUnavailableError</code>. All callers catch this and fall back to the existing non-vector paths (Jaccard, raw symbol list). Zero regressions if deps missing.</p>
+</section>
+
+<section class="tab-panel" id="dataflow">
+  <h2>Data Flow</h2>
+  <pre>execute_feature(goal)
+  │
+  ├─ vector_memory.index_codebase(root)        ← AST parse → embed → store in codebase_chunks
+  │     (incremental, skips unchanged files)
+  │
+  ├─ project_planner.load_or_create_goal(goal) ← vector_memory.find_similar_goal(goal)
+  │     → cosine ≥ 0.82 → reuse existing graph
+  │     → cosine &lt; 0.82 → create new graph (fallback: Jaccard)
+  │
+  ├─ planner.plan(goal, existing_goal=graph)   ← filters completed tasks
+  │
+  └─ for each task:
+        _execute_single_task(task)
+          │
+          ├─ chunks = vector_memory.query_code(task["action"], top_k=5)
+          │           → ChromaDB cosine search on codebase_chunks
+          │
+          ├─ worker.execute_task(task, vector_chunks=chunks)
+          │           → [RELEVANT CODE] section injected into prompt
+          │
+          └─ (post-task) vector_memory.store_outcome(task, success, critique)
+                        → upsert into session_memory collection</pre>
+  <h3>ChromaDB collection schema</h3>
+  <table>
+    <tr><th>Collection</th><th>id</th><th>document</th><th>metadata fields</th></tr>
+    <tr><td>codebase_chunks</td><td>sha1(file:line)</td><td>source text</td><td>file_path, start_line, end_line, symbol_name, mtime</td></tr>
+    <tr><td>session_memory</td><td>uuid</td><td>task action text</td><td>file_path, success, session_id, created_at, critique</td></tr>
+  </table>
+</section>
+
+<section class="tab-panel" id="risks">
+  <h2>Risks &amp; Mitigations</h2>
+  <table>
+    <tr><th>Risk</th><th>Likelihood</th><th>Mitigation</th></tr>
+    <tr><td>chromadb/sentence-transformers not installed</td><td>High (new dep)</td><td>VectorMemoryUnavailableError + graceful fallback in all callers</td></tr>
+    <tr><td>First-run indexing slow on large codebases</td><td>Medium</td><td>Incremental mtime cache; async indexing option in future</td></tr>
+    <tr><td>MiniLM 256-token limit truncates long functions</td><td>Medium</td><td>Truncate to 256 tokens on embed; store full text for prompt injection</td></tr>
+    <tr><td>Stale index after file deletions</td><td>Low</td><td>reset_codebase_index() + full re-index if collection metadata mismatch</td></tr>
+    <tr><td>session_memory grows unbounded</td><td>Low</td><td>Cap at 10,000 documents; evict oldest on overflow</td></tr>
+    <tr><td>Cosine threshold too tight → no goal match</td><td>Low</td><td>Log miss; fall back to Jaccard; threshold configurable</td></tr>
+  </table>
+  <h2>Edge Cases</h2>
+  <ul>
+    <li>Empty codebase (no .py files) → <code>index_codebase</code> returns 0, no error.</li>
+    <li>File with syntax errors → skip that file, log warning, continue.</li>
+    <li>Query with no results above threshold → return empty list (worker falls back to raw symbols).</li>
+    <li>ChromaDB collection already exists on restart → <code>get_or_create_collection</code> is idempotent.</li>
+    <li>Concurrent writes from parallel task execution → ChromaDB handles WAL; not a concern at AWOS scale.</li>
+  </ul>
+</section>
+
+<section class="tab-panel" id="sources">
+  <h2>Sources</h2>
+  <ul>
+    <li><strong>arXiv:2510.04905</strong> (Oct 2025) — "Retrieval-Augmented Code Generation: A Survey with Focus on Repository-Level Approaches." Classifies retrieval strategies (sparse, dense, graph, hybrid); confirms dense embedding superiority for code.</li>
+    <li><strong>ChromaDB docs</strong> — PersistentClient API, SentenceTransformerEmbeddingFunction, get_or_create_collection, metadata filtering.</li>
+    <li><strong>HuggingFace model card: all-MiniLM-L6-v2</strong> — 384-dim, 256 token max, local inference, ChromaDB default.</li>
+    <li><strong>Real Python: ChromaDB guide</strong> — Confirmed SentenceTransformerEmbeddingFunction usage pattern with all-MiniLM-L6-v2.</li>
+    <li><strong>Cursor semantic code search (wangxj03)</strong> — Confirms file_path + start/end line metadata pattern for chunk storage.</li>
+  </ul>
+  <h2>Related Docs</h2>
+  <ul>
+    <li><a href="project_planner.html">project_planner.html</a> — Phase 5C (Jaccard goal matching, to be upgraded)</li>
+    <li><a href="../specs/vector_memory_spec.html">vector_memory_spec.html</a> — Implementation contract</li>
+  </ul>
+</section>
+
+</main>
+<script>
+function show(id, btn) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('nav.tabs button').forEach(b => b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  btn.classList.add('active');
+}
+</script>
+</body>
+</html>

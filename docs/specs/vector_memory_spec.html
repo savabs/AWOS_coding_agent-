@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spec: Vector Memory (Phase 6) — AWOS</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--success:#10b981;--warn:#f59e0b;--danger:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status-badge{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600;background:#f59e0b;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+main{max-width:800px;margin:0 auto;padding:32px}
+h2{font-size:17px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:20px 0 8px}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px;background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px}
+pre{background:var(--code-bg);color:var(--code-text);padding:16px;border-radius:6px;overflow-x:auto;font-size:12px;margin:12px 0;font-family:'JetBrains Mono','Fira Code',monospace}
+table{width:100%;border-collapse:collapse;font-size:13px;margin:12px 0}
+th{background:var(--surface2);padding:8px 12px;text-align:left;font-weight:600;border:1px solid var(--border)}
+td{padding:8px 12px;border:1px solid var(--border)}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+.step-num{font-size:11px;font-family:monospace;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <div class="breadcrumb">AWOS / docs / specs</div>
+  <h1>Spec: Vector Memory — Semantic Codebase &amp; Session Retrieval</h1>
+  <div class="meta">
+    <span class="tag">doc/spec</span>
+    <span class="tag">phase/6</span>
+    <span class="tag">topic/vector-memory</span>
+    <span class="status-badge">READY FOR IMPL</span>
+    <time>2026-05-19</time>
+  </div>
+</header>
+
+<main>
+
+<h2>Goal</h2>
+<p>Add semantic (embedding-based) retrieval to AWOS via a new <code>VectorMemory</code> module backed by ChromaDB + <code>all-MiniLM-L6-v2</code>. This enables: (1) injecting relevant code chunks into Worker prompts, (2) cross-session outcome recall, and (3) goal deduplication by cosine similarity instead of Jaccard keyword overlap.</p>
+
+<h2>New Dependency</h2>
+<pre>chromadb>=0.6.0
+sentence-transformers>=3.0.0</pre>
+<p>Both install locally, no API key required. If absent, <code>VectorMemoryUnavailableError</code> is raised and all callers fall back gracefully.</p>
+
+<h2>Files Affected</h2>
+<table>
+  <tr><th>File</th><th>Change</th></tr>
+  <tr><td><code>scaffold/agent/vector_memory.py</code></td><td>NEW — VectorMemory, CodeChunk, OutcomeRecord, VectorMemoryUnavailableError</td></tr>
+  <tr><td><code>scaffold/agent/orchestrator.py</code></td><td>MODIFY — init VectorMemory, wire index_codebase + query_code + store_outcome</td></tr>
+  <tr><td><code>scaffold/agent/worker.py</code></td><td>MODIFY — add <code>vector_chunks</code> param, inject [RELEVANT CODE] section into prompt</td></tr>
+  <tr><td><code>scaffold/agent/project_planner.py</code></td><td>MODIFY — try VectorMemory goal matching before Jaccard fallback</td></tr>
+  <tr><td><code>requirements.txt</code></td><td>MODIFY — add chromadb, sentence-transformers</td></tr>
+  <tr><td><code>tests/test_vector_memory.py</code></td><td>NEW — 25+ tests, all using tmp_path</td></tr>
+</table>
+
+<h2>Constants</h2>
+<pre>VECTOR_DB_DIR         = ".awos/vector_db"
+CODEBASE_COLLECTION   = "codebase_chunks"
+SESSION_COLLECTION    = "session_memory"
+EMBEDDING_MODEL       = "all-MiniLM-L6-v2"
+MAX_CHUNK_TOKENS      = 256        # MiniLM hard limit
+CHUNK_OVERLAP_LINES   = 10         # for fallback sliding window
+TOP_K_CODE            = 5          # chunks injected into worker prompt
+TOP_K_OUTCOMES        = 3          # past outcomes for retry hint
+GOAL_SIM_THRESHOLD    = 0.82       # cosine threshold for goal matching
+MAX_SESSION_DOCS      = 10_000     # evict oldest above this</pre>
+
+<h2>Interface Contracts</h2>
+<h3>VectorMemory</h3>
+<pre>class VectorMemory:
+    def __init__(self, persist_dir: str = VECTOR_DB_DIR) -> None
+        # Creates persist_dir if missing. Raises VectorMemoryUnavailableError if deps absent.
+
+    def index_codebase(self, root: str) -> int
+        # AST-parse all .py files under root. Chunk by function/class bodies.
+        # Embed + upsert into codebase_chunks collection (incremental via mtime cache).
+        # Returns: number of new/updated chunks written.
+
+    def query_code(self, query: str, top_k: int = TOP_K_CODE,
+                   file_filter: str | None = None) -> list[CodeChunk]
+        # Embed query, cosine search codebase_chunks. Optional where={"file_path": file_filter}.
+        # Returns top_k CodeChunk objects sorted by score descending.
+        # Returns [] if collection empty or query fails.
+
+    def store_outcome(self, task: dict, success: bool,
+                      session_id: str, critique: str = "") -> None
+        # Upsert task action text into session_memory.
+        # Metadata: file_path, success, session_id, created_at, critique.
+        # Evicts oldest if collection > MAX_SESSION_DOCS.
+
+    def query_outcomes(self, description: str,
+                       top_k: int = TOP_K_OUTCOMES) -> list[OutcomeRecord]
+        # Embed description, cosine search session_memory.
+        # Returns top_k OutcomeRecord objects.
+
+    def find_similar_goal(self, description: str,
+                          threshold: float = GOAL_SIM_THRESHOLD) -> str | None
+        # Search session_memory for a past goal description with cosine >= threshold.
+        # Returns the matching document text or None.
+
+    def reset_codebase_index(self) -> None
+        # Delete + recreate codebase_chunks collection. Clears mtime cache.
+        # Used after major refactors.</pre>
+
+<h3>CodeChunk dataclass</h3>
+<pre>@dataclass
+class CodeChunk:
+    chunk_id: str       # sha1(file_path + ":" + str(start_line))
+    file_path: str
+    start_line: int
+    end_line: int
+    text: str           # full source text (may exceed 256 tokens)
+    symbol_name: str    # function/class name, or "" for sliding-window chunks
+    score: float        # cosine similarity to query (0.0..1.0)</pre>
+
+<h3>OutcomeRecord dataclass</h3>
+<pre>@dataclass
+class OutcomeRecord:
+    task_action: str
+    file_path: str
+    success: bool
+    session_id: str
+    created_at: str
+    critique: str
+    score: float</pre>
+
+<h2>Worker Prompt Injection</h2>
+<p>When <code>vector_chunks</code> is non-empty, inject before <code>[TASK]</code> block:</p>
+<pre>[RELEVANT CODE]
+# scaffold/agent/worker.py lines 45-80
+def execute_task(self, task, file_content, ...):
+    ...
+
+# scaffold/agent/planner.py lines 25-50
+def plan(self, goal, codebase_context, ...):
+    ...
+[END RELEVANT CODE]</pre>
+<p>Format: <code># {file_path} lines {start}-{end}\n{text}</code>, separated by blank lines. Total budget: top 5 chunks × ~256 tokens = ~1280 tokens additional context.</p>
+
+<h2>Implementation Steps</h2>
+<table>
+  <tr><th>#</th><th>Step</th><th>Exit Condition</th></tr>
+  <tr><td>1</td><td>Create <code>vector_memory.py</code> — VectorMemoryUnavailableError, CodeChunk, OutcomeRecord dataclasses, VectorMemory.__init__</td><td><code>python3 -c "from scaffold.agent.vector_memory import VectorMemory; print('ok')"</code> → ok</td></tr>
+  <tr><td>2</td><td>Implement <code>index_codebase()</code> — AST parse, chunking, mtime cache, ChromaDB upsert</td><td>Indexing a 5-file test repo returns chunk count > 0; re-indexing unchanged files returns 0 new chunks</td></tr>
+  <tr><td>3</td><td>Implement <code>query_code()</code> — embed query, ChromaDB cosine search, return CodeChunk list</td><td>Query "add login function" returns chunks with score > 0.5 containing relevant symbols</td></tr>
+  <tr><td>4</td><td>Implement <code>store_outcome()</code> and <code>query_outcomes()</code></td><td>Storing "add OAuth auth" success=True then querying "add login" returns it in top_k</td></tr>
+  <tr><td>5</td><td>Implement <code>find_similar_goal()</code> and <code>reset_codebase_index()</code></td><td>Two identical descriptions → find_similar_goal returns non-None; reset → collection empty</td></tr>
+  <tr><td>6</td><td>Add chromadb + sentence-transformers to <code>requirements.txt</code></td><td><code>pip install -r requirements.txt</code> succeeds</td></tr>
+  <tr><td>7</td><td>Wire <code>VectorMemory</code> into <code>Orchestrator.__init__</code> and <code>execute_feature()</code> — index_codebase call</td><td>Orchestrator initializes without error; <code>.awos/vector_db/</code> created on first run</td></tr>
+  <tr><td>8</td><td>Wire <code>query_code()</code> into <code>_execute_single_task()</code> → pass chunks to worker</td><td>Worker receives <code>vector_chunks</code> param on each task call</td></tr>
+  <tr><td>9</td><td>Add <code>vector_chunks</code> param to <code>Worker.execute_task()</code>, inject [RELEVANT CODE] block</td><td>Worker prompt contains [RELEVANT CODE] section when chunks are non-empty</td></tr>
+  <tr><td>10</td><td>Wire <code>store_outcome()</code> post-task in <code>_execute_single_task()</code></td><td>After task completion, session_memory collection grows by 1 document</td></tr>
+  <tr><td>11</td><td>Wire <code>find_similar_goal()</code> into <code>ProjectPlanner.load_or_create_goal()</code></td><td>"Add OAuth authentication" matches "Add OAuth2 auth" with cosine ≥ 0.82; Jaccard fallback used when VectorMemory unavailable</td></tr>
+  <tr><td>12</td><td>Write <code>tests/test_vector_memory.py</code> — 25+ tests, all tmp_path</td><td>pytest tests/test_vector_memory.py -v → 25+ passed</td></tr>
+  <tr><td>13</td><td>Full test suite — zero regressions</td><td>pytest tests/ --ignore=sprint tests → 240+ passed, 0 failed</td></tr>
+</table>
+
+<h2>Edge Cases</h2>
+<table>
+  <tr><th>Case</th><th>Handling</th></tr>
+  <tr><td>chromadb not installed</td><td>ImportError → raise VectorMemoryUnavailableError on __init__; callers catch + fallback</td></tr>
+  <tr><td>File with syntax errors</td><td>log warning, skip file, continue indexing</td></tr>
+  <tr><td>Empty codebase</td><td>index_codebase returns 0; query_code returns []</td></tr>
+  <tr><td>Function body > 256 tokens</td><td>truncate text to 256 tokens for embedding; store full text for prompt injection</td></tr>
+  <tr><td>No chunks above threshold</td><td>query_code returns []; worker prompt unchanged</td></tr>
+  <tr><td>session_memory > 10,000 docs</td><td>evict oldest 1,000 on store_outcome</td></tr>
+  <tr><td>Parallel task writes to session_memory</td><td>ChromaDB WAL handles; no action needed at AWOS scale</td></tr>
+</table>
+
+<h2>Testing Plan</h2>
+<table>
+  <tr><th>Test Class</th><th>Tests</th></tr>
+  <tr><td>TestVectorMemoryInit</td><td>creates dir, raises when deps missing (mocked), idempotent on double-init</td></tr>
+  <tr><td>TestIndexCodebase</td><td>empty dir→0, .py files→count>0, incremental mtime skip, syntax error file skipped</td></tr>
+  <tr><td>TestQueryCode</td><td>relevant query returns chunks, empty collection→[], file_filter scopes results, score ordering</td></tr>
+  <tr><td>TestStoreAndQueryOutcomes</td><td>store+query returns match, success/failure metadata preserved, top_k respected</td></tr>
+  <tr><td>TestFindSimilarGoal</td><td>exact match→found, paraphrase→found, unrelated→None, threshold boundary</td></tr>
+  <tr><td>TestReset</td><td>reset clears collection, subsequent index works</td></tr>
+  <tr><td>TestWorkerInjection</td><td>chunks non-empty → prompt contains [RELEVANT CODE]; empty chunks → prompt unchanged</td></tr>
+  <tr><td>TestGracefulDegradation</td><td>Orchestrator works when VectorMemory unavailable; ProjectPlanner falls back to Jaccard</td></tr>
+</table>
+
+<h2>Related</h2>
+<ul>
+  <li><a href="../research/vector_memory.html">vector_memory.html</a> — background research</li>
+  <li><a href="project_planner_spec.html">project_planner_spec.html</a> — Phase 5C (Jaccard to be supplemented)</li>
+</ul>
+
+</main>
+</body>
+</html>

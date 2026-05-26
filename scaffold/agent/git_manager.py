@@ -118,17 +118,23 @@ class GitManager:
                 except Exception as e:
                     print(f"[GIT] Warning: could not restore {path}: {e}")
 
-    def finalize(self, success: bool):
+    def finalize(self, success: bool, force_full_rollback: bool = False):
         """
         Post-execution cleanup.
-        Success → keep branch as-is (user can review/merge).
-        Failure → full rollback.
+        Success          → keep branch as-is (user can review/merge).
+        Partial failure  → keep branch; individual failed files already reverted.
+        Total failure    → force_full_rollback=True triggers full rollback.
         """
         if success:
             if self.is_git_repo and self.branch_name:
                 print(f"[GIT] Changes on branch '{self.branch_name}' — review and merge when ready.")
-        else:
+        elif force_full_rollback:
             self.rollback_all()
+        else:
+            if self.is_git_repo and self.branch_name:
+                print(f"[GIT] Partial success — changes on branch '{self.branch_name}', failed files were reverted individually.")
+            else:
+                print(f"[GIT] Partial success — {len(self.modified_files)} file(s) modified, failed files were reverted.")
 
     def status(self) -> dict:
         return {

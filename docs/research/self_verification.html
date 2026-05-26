@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Research: Self-Verification Loop for AWOS</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:900px;margin:40px auto;line-height:1.6}
+h1{border-bottom:2px solid #333}
+h2{margin-top:2em}
+code{background:#f4f4f4;padding:2px 6px;border-radius:4px}
+pre{background:#f4f4f4;padding:12px;border-radius:6px;overflow-x:auto}
+.verified{background:#e8f5e9;padding:8px 12px;border-left:4px solid #4caf50}
+.unverified{background:#fff3e0;padding:8px 12px;border-left:4px solid #ff9800}
+table{border-collapse:collapse;width:100%;margin:1em 0}
+th,td{border:1px solid #ccc;padding:8px}
+th{background:#f0f0f0}
+</style>
+</head>
+<body>
+<h1>Research: Self-Verification Loop (Phase 7)</h1>
+<p><strong>Date:</strong> 2026-05-19</p>
+
+<h2>Current State</h2>
+<p>AWOS already has a two-stage pipeline:</p>
+<ol>
+<li><strong>Worker</strong> generates SEARCH/REPLACE and does a lightweight self-check (SEARCH exists in file).</li>
+<li><strong>Verifier</strong> applies the change to disk, runs <code>compile()</code> and contract checks.</li>
+</ol>
+<p>The problem: the Verifier <em>writes to disk first</em>, then validates. If syntax or contract fails, the file is rolled back. This wastes I/O and a full Verifier round-trip for errors that could be caught in-memory.</p>
+
+<h2>Research Findings</h2>
+
+<div class="verified">
+<strong>VERIFIED — V&V Loop Pattern (muthu.co, 2025)</strong><br>
+Verification and Validation (V&V) loops follow: Generate → Verify → Correct. The agent acts as its own QA system. Hierarchical V&V runs checks in order of cost (syntax first, then type, then logic, then security). Fail fast on cheap checks.
+</div>
+
+<div class="verified">
+<strong>VERIFIED — "Easier to verify than generate" (nikhil thorat, 2025)</strong><br>
+LLMs are better critics than composers. A coding agent taught to self-verify via lint, typecheck, and runtime logs catches its own mistakes. Tool chains (ruff, mypy, eslint) are faster than LLM retries and free up tokens for harder problems.
+</div>
+
+<div class="verified">
+<strong>VERIFIED — Code Validation Example (muthu.co)</strong><br>
+Practical implementation: <code>ast.parse()</code> for syntax, <code>subprocess</code> sandbox for runtime, and LLM critique for semantic validation. This pattern reduces first-attempt failures by ~40% in controlled settings.
+</div>
+
+<div class="unverified">
+<strong>UNVERIFIED — Expected AWOS Impact</strong><br>
+Estimates from reasoning: adding an in-memory self-verification step before the Verifier could reduce expensive disk-apply → rollback cycles by 30-50%. Exact figure depends on how often Worker currently produces syntactically invalid SEARCH/REPLACE.
+</div>
+
+<h2>Proposed Solution</h2>
+<p>Add a <code>SelfVerificationEngine</code> that runs fast, in-memory checks <em>before</em> the Verifier touches disk:</p>
+
+<pre>
+Worker.generate() → SelfVerificationEngine.verify() → Verifier.apply()
+                           ↓ fail                    ↓ fail
+                    retry with error_context    retry with error_context
+</pre>
+
+<h3>Check Hierarchy (fastest → slowest)</h3>
+<table>
+<tr><th>Stage</th><th>Check</th><th>Cost</th><th>Current Coverage</th></tr>
+<tr><td>1</td><td>AST parse of modified file</td><td>Free</td><td>Only in Verifier (post-disk)</td></tr>
+<tr><td>2</td><td>Import resolution</td><td>Free</td><td>None</td></tr>
+<tr><td>3</td><td>Contract compliance</td><td>Free</td><td>Only in Verifier (post-disk)</td></tr>
+<tr><td>4</td><td>Search string sanity</td><td>Free</td><td>Partial (Worker)</td></tr>
+<tr><td>5</td><td>Disk apply + full lint</td><td>Disk I/O</td><td>Verifier</td></tr>
+</table>
+
+<h2>Data Flow</h2>
+<pre>
+┌─────────────┐     ┌──────────────────────────┐     ┌──────────────┐
+│   Worker    │────▶│ SelfVerificationEngine   │────▶│   Verifier   │
+│  (generate) │     │  · simulates change        │     │ (disk apply) │
+└─────────────┘     │  · ast.parse()             │     └──────────────┘
+                    │  · resolve imports         │
+                    │  · check contract          │
+                    └──────────────────────────┘
+</pre>
+
+<h2>Risks</h2>
+<ul>
+<li><strong>R1:</strong> Self-verify could add latency. Mitigation: checks are pure Python (ast, regex), sub-millisecond.</li>
+<li><strong>R2:</strong> False positives in import resolution (dynamic imports, optional deps). Mitigation: only flag truly unresolvable imports; warn not error.</li>
+<li><strong>R3:</strong> Contract check duplication with Verifier. Mitigation: extract shared logic into a helper used by both.</li>
+</ul>
+
+<h2>Sources</h2>
+<ol>
+<li><a href="https://notes.muthu.co/2025/11/verification-and-validation-loops-for-agent-reliability-through-runtime-checks/">Verification and Validation Loops for Agent Reliability (muthu.co, 2025)</a></li>
+<li><a href="https://nikubaba.com/blog/coding-agents-self-verification-loops/">Coding Agents: Self-Verification Loops (nikhil thorat, 2025)</a></li>
+<li><a href="https://arxiv.org/abs/2303.11366">Reflexion: Language Agents with Verbal Reinforcement Learning (Shinn et al., 2023)</a> — critique-based self-improvement</li>
+</ol>
+
+<h2>Related</h2>
+<ul>
+<li><a href="vector_memory.html">Vector Memory</a> — semantic retrieval for relevant code context</li>
+<li><a href="project_planner.html">Project Planner</a> — persistent goal DAG</li>
+<li><a href="../specs/self_verification_spec.html">Self-Verification Spec</a></li>
+</ul>
+
+</body>
+</html>

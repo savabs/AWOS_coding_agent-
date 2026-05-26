@@ -1,0 +1,7 @@
+{
+  "task_id": "bench_02",
+  "file": "buggy.py",
+  "action": "Fix two logic bugs: (1) Cache.set evicts the newest key instead of the oldest — change reversed(list(self._store)) to iter(self._store) to pop the first-inserted key. (2) is_palindrome compares cleaned to the original s instead of cleaned[::-1].",
+  "complexity": "medium",
+  "error_context": "FAILED test_cache_evicts_oldest_not_newest - assert None is not None (key 'b' was evicted instead of 'a')\nFAILED test_palindrome_simple - assert False is True\n  File \"buggy.py\", line 14, in Cache.set\n  File \"buggy.py\", line 25, in is_palindrome"
+}

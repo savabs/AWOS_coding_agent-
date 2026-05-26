@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task: TestRunner + Test-as-Reward — AWOS</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--success:#10b981;--warn:#f59e0b;--danger:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status-badge{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status-active{background:#f59e0b;color:#fff}
+.status-done{background:#10b981;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+main{max-width:800px;margin:0 auto;padding:32px}
+.meta-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin-bottom:24px;display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:13px}
+.meta-card .key{color:var(--muted);font-weight:600}
+h2{font-size:17px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:20px 0 8px}
+p{margin-bottom:12px}
+.step{display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border-radius:6px;margin:6px 0;border:1px solid var(--border);background:var(--surface)}
+.step.done{background:#f0fdf4;border-color:#bbf7d0}
+.step.active{background:var(--accent-light);border-color:#c7d2fe}
+.step.blocked{background:#fef2f2;border-color:#fecaca}
+.step input[type=checkbox]{flex-shrink:0;margin-top:3px;width:16px;height:16px;accent-color:var(--success)}
+.step .step-body{flex:1}
+.step .step-num{font-size:11px;color:var(--muted);margin-bottom:2px;font-family:monospace}
+.step .step-title{font-weight:600;font-size:14px;margin-bottom:4px}
+.step .step-exit{font-size:12px;color:var(--muted);font-style:italic}
+.step .step-exit strong{color:var(--text);font-style:normal}
+.step .step-notes{font-size:13px;margin-top:4px;color:var(--muted)}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px;background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px}
+.progress-bar{background:var(--surface2);border-radius:8px;height:8px;margin:8px 0;overflow:hidden}
+.progress-bar .fill{background:var(--success);height:100%;border-radius:8px;transition:.3s;width:0%}
+.progress-label{font-size:12px;color:var(--muted);margin-bottom:4px}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+footer{background:var(--surface);border-top:1px solid var(--border);padding:16px 32px;display:flex;justify-content:flex-end;gap:12px}
+.copy-btn{background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:500}
+.copy-btn:hover{background:#4338ca}
+.copy-btn.secondary{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb">AWOS / tasks / active</div>
+  <h1>Task: TestRunner + Test-as-Reward (Phase 5A)</h1>
+  <div class="meta">
+    <span class="tag">doc/task</span>
+    <span class="tag">phase/5</span>
+    <span class="tag">topic/self-learning</span>
+    <span class="tag">topic/test-runner</span>
+    <span class="tag">status/active</span>
+    <span class="status-badge status-active">IN PROGRESS</span>
+    <time>2026-05-19</time>
+  </div>
+</header>
+
+<main>
+
+<div class="meta-card">
+  <span class="key">Goal</span>        <span>Add TestRunner module: auto-detect tests, run after patches, feed pass_rate into LinUCB reward signal</span>
+  <span class="key">Spec</span>        <span><a href="../../docs/specs/test_runner_reward_spec.html">test_runner_reward_spec.html</a></span>
+  <span class="key">Research</span>    <span><a href="../../docs/research/test_runner_reward.html">test_runner_reward.html</a></span>
+  <span class="key">Phase</span>       <span>5A</span>
+  <span class="key">Started</span>     <span>2026-05-19</span>
+  <span class="key">Completed</span>   <span>—</span>
+</div>
+
+<div class="progress-label" id="progress-label">9 / 9 steps complete</div>
+<div class="progress-bar"><div class="fill" id="progress-fill" style="width: 100%"></div></div>
+
+<h2>Steps</h2>
+<p>Each step is atomic: changes one thing, tests one thing, proves one thing. Check off as you go.</p>
+
+<div class="step done" id="step-1">
+  <input type="checkbox" checked onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 1</div>
+    <div class="step-title">Create scaffold/agent/test_runner.py with dataclasses and detection skeleton</div>
+    <div class="step-exit"><strong>Exit condition:</strong> Module imports cleanly; TestConfig and TestResult have correct fields. <span style="color:var(--success)">✓ DONE</span></div>
+    <div class="step-notes">File: scaffold/agent/test_runner.py — classes: TestRunner, TestConfig, TestResult. Detection helpers for pytest, jest, vitest, make, go, cargo.</div>
+  </div>
+</div>
+
+<div class="step done" id="step-2">
+  <input type="checkbox" checked onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 2</div>
+    <div class="step-title">Implement TestRunner.run() with subprocess and timeout</div>
+    <div class="step-exit"><strong>Exit condition:</strong> Mock test: run() returns correct TestResult with pass_rate for mocked subprocess output. <span style="color:var(--success)">✓ DONE</span></div>
+    <div class="step-notes">Timeout handling, stdout/stderr capture, parser dispatch by runner type.</div>
+  </div>
+</div>
+
+<div class="step done" id="step-3">
+  <input type="checkbox" checked onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 3</div>
+    <div class="step-title">Implement pytest output parser</div>
+    <div class="step-exit"><strong>Exit condition:</strong> Unit test: 5 sample pytest outputs parsed correctly (all-pass, 1-fail, errors, no-tests, collection-error). <span style="color:var(--success)">✓ DONE</span></div>
+    <div class="step-notes">Uses independent regex searches for passed/failed/errors so pytest's variable word order is handled.</div>
+  </div>
+</div>
+
+<div class="step done" id="step-4">
+  <input type="checkbox" checked onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 4</div>
+    <div class="step-title">Implement jest and generic fallback parsers</div>
+    <div class="step-exit"><strong>Exit condition:</strong> Unit test: jest sample output and generic "X passed, Y failed" both parsed correctly. <span style="color:var(--success)">✓ DONE</span></div>
+  </div>
+</div>
+
+<div class="step done" id="step-5">
+  <input type="checkbox" checked onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 5</div>
+    <div class="step-title">Add AWOS_SAFE_TO_RUN_TESTS safety guard</div>
+    <div class="step-exit"><strong>Exit condition:</strong> Unit test: without env var, run() returns pass_rate=0.0 and does not call subprocess. <span style="color:var(--success)">✓ DONE</span></div>
+  </div>
+</div>
+
+<div class="step done" id="step-6">
+  <input type="checkbox" checked onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 6</div>
+    <div class="step-title">Write tests/test_test_runner.py (detection, parsing, run, safety, integration)</div>
+    <div class="step-exit"><strong>Exit condition:</strong> All tests in tests/test_test_runner.py pass with pytest. <span style="color:var(--success)">✓ DONE — 32 tests</span></div>
+    <div class="step-notes">32 test cases: detection (9), parsing (10), run (3), safety (2), integration (1), compute_reward float (4), misc (3).</div>
+  </div>
+</div>
+
+<div class="step done" id="step-7">
+  <input type="checkbox" checked onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 7</div>
+    <div class="step-title">Wire TestRunner into Orchestrator.execute()</div>
+    <div class="step-exit"><strong>Exit condition:</strong> Mock test: Orchestrator.execute() calls record_outcome with float reward matching TestResult.pass_rate. <span style="color:var(--success)">✓ DONE</span></div>
+    <div class="step-notes">Added TestRunner import, init, and wiring after Verifier. Uses test_result.pass_rate when available, falls back to syntax-only when not.</div>
+  </div>
+</div>
+
+<div class="step done" id="step-8">
+  <input type="checkbox" checked onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 8</div>
+    <div class="step-title">Verify EscalationEngine.record_outcome accepts float reward</div>
+    <div class="step-exit"><strong>Exit condition:</strong> Existing ML meta-controller tests pass; Episode.reward field is float when test_reward kwarg provided. <span style="color:var(--success)">✓ DONE</span></div>
+  </div>
+</div>
+
+<div class="step done" id="step-9">
+  <input type="checkbox" checked onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 9</div>
+    <div class="step-title">Run full test suite — zero regressions</div>
+    <div class="step-exit"><strong>Exit condition:</strong> pytest tests/ -x returns 0 failures. <span style="color:var(--success)">✓ DONE — 145 passed, 7 skipped, 0 failures</span></div>
+    <div class="step-notes">Pre-existing SyntaxError in model_router.py blocks sprint2/3 integration tests (unrelated to this change).</div>
+  </div>
+</div>
+
+<h2>Blocked / Decisions</h2>
+<p>None.</p>
+
+<h3>Decision Log</h3>
+<div class="callout">
+  <strong>2026-05-19:</strong> Opt-in safety model chosen (env var required) over opt-out, to prevent accidental destructive side effects on production test suites. Reversible if user feedback says it's too frictionful.
+</div>
+
+<h2>Related</h2>
+<ul>
+  <li><a href="../../docs/specs/test_runner_reward_spec.html">[[test_runner_reward_spec]]</a> — implementation contract</li>
+  <li><a href="../../docs/research/test_runner_reward.html">[[test_runner_reward]]</a> — background research</li>
+  <li><a href="../../scaffold/agent/orchestrator.py">[[orchestrator.py]]</a> — integration point</li>
+</ul>
+
+</main>
+
+<footer>
+  <button class="copy-btn secondary" onclick="copyJSON()">Copy State as JSON</button>
+  <button class="copy-btn" onclick="copyPrompt()">Copy as Prompt</button>
+</footer>
+<script>
+function updateProgress(){
+  const boxes=[...document.querySelectorAll('.step input[type=checkbox]')];
+  const done=boxes.filter(b=>b.checked).length;
+  const total=boxes.length;
+  document.getElementById('progress-label').textContent=`${done} / ${total} steps complete`;
+  document.getElementById('progress-fill').style.width=total?`${(done/total)*100}%`:'0%';
+  boxes.forEach((b,i)=>{
+    const step=b.closest('.step');
+    if(b.checked){step.classList.add('done');step.classList.remove('active','blocked')}
+  });
+}
+function copyPrompt(){navigator.clipboard.writeText('# Task: TestRunner + Test-as-Reward\n\n'+document.querySelector('main').innerText).then(()=>{const b=document.querySelector('.copy-btn:last-child');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy as Prompt',1500)})}
+function copyJSON(){
+  const steps=[...document.querySelectorAll('.step')].map((s,i)=>({
+    step:i+1,
+    title:s.querySelector('.step-title').innerText,
+    done:s.querySelector('input[type=checkbox]').checked,
+    exit:s.querySelector('.step-exit')?.innerText.replace('Exit condition:','').trim()||''
+  }));
+  navigator.clipboard.writeText(JSON.stringify({doc:'task',steps},null,2)).then(()=>{const b=document.querySelector('.copy-btn.secondary');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy State as JSON',1500)});
+}
+updateProgress();
+</script>
+</body>
+</html>

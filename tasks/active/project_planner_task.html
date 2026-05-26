@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task: ProjectPlanner (Phase 5C) — AWOS</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--success:#10b981;--warn:#f59e0b;--danger:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status-badge{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status-active{background:#f59e0b;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+main{max-width:800px;margin:0 auto;padding:32px}
+.meta-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin-bottom:24px;display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:13px}
+.meta-card .key{color:var(--muted);font-weight:600}
+h2{font-size:17px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:20px 0 8px}
+p{margin-bottom:12px}
+.step{display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border-radius:6px;margin:6px 0;border:1px solid var(--border);background:var(--surface)}
+.step.done{background:#f0fdf4;border-color:#bbf7d0}
+.step.active{background:var(--accent-light);border-color:#c7d2fe}
+.step input[type=checkbox]{flex-shrink:0;margin-top:3px;width:16px;height:16px;accent-color:var(--success)}
+.step .step-body{flex:1}
+.step .step-num{font-size:11px;color:var(--muted);margin-bottom:2px;font-family:monospace}
+.step .step-title{font-weight:600;font-size:14px;margin-bottom:4px}
+.step .step-exit{font-size:12px;color:var(--muted);font-style:italic}
+.step .step-exit strong{color:var(--text);font-style:normal}
+.step .step-notes{font-size:12px;margin-top:6px;color:var(--muted);font-family:monospace;background:var(--surface2);padding:6px 8px;border-radius:4px}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px;background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px}
+.progress-bar{background:var(--surface2);border-radius:8px;height:8px;margin:8px 0;overflow:hidden}
+.progress-bar .fill{background:var(--success);height:100%;border-radius:8px;transition:.3s;width:0%}
+.progress-label{font-size:12px;color:var(--muted);margin-bottom:4px}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+footer{background:var(--surface);border-top:1px solid var(--border);padding:16px 32px;display:flex;justify-content:flex-end;gap:12px}
+.copy-btn{background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:500}
+.copy-btn.secondary{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb">AWOS / tasks / active</div>
+  <h1>Task: ProjectPlanner — Persistent Goal DAG</h1>
+  <div class="meta">
+    <span class="tag">doc/task</span>
+    <span class="tag">phase/5C</span>
+    <span class="tag">topic/project-planner</span>
+    <span class="tag">status/ready</span>
+    <span class="status-badge status-active">READY FOR IMPL</span>
+    <time>2026-05-19</time>
+  </div>
+</header>
+
+<main>
+
+<div class="meta-card">
+  <span class="key">Goal</span>      <span>Give AWOS persistent, cross-session project memory via a Goal DAG at <code>.awos/goals/</code>, enabling the agent to resume work, skip completed tasks, and adapt to failures across sessions.</span>
+  <span class="key">Spec</span>      <span><a href="../../docs/specs/project_planner_spec.html">project_planner_spec.html</a></span>
+  <span class="key">Research</span>  <span><a href="../../docs/research/project_planner.html">project_planner.html</a></span>
+  <span class="key">Phase</span>     <span>5C (follows 5A TestRunner, 5B ReflexionMemory)</span>
+  <span class="key">Started</span>   <span>—</span>
+  <span class="key">Completed</span> <span>—</span>
+  <span class="key">Pre-conditions</span> <span>TaskDecomposer ✅ · DAGExecutor ✅ · Orchestrator retry hooks ✅ · ErrorPatternStore ✅</span>
+</div>
+
+<div class="progress-label" id="progress-label">0 / 9 steps complete</div>
+<div class="progress-bar"><div class="fill" id="progress-fill"></div></div>
+
+<h2>Steps</h2>
+<p>Each step is atomic: changes one thing, tests one thing, proves one thing. All tests use <code>tmp_path</code> — no disk pollution. Check off as you go.</p>
+
+<div class="step active" id="step-1">
+  <input type="checkbox" onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 1</div>
+    <div class="step-title">Create <code>scaffold/agent/project_planner.py</code> — GoalNode, GoalGraph, ProjectPlanner skeleton</div>
+    <div class="step-exit"><strong>Exit condition:</strong> <code>python3 -c "from scaffold.agent.project_planner import ProjectPlanner; p = ProjectPlanner('/tmp/g'); print('ok')"</code> prints <code>ok</code>, no errors.</div>
+    <div class="step-notes">
+Implement: GoalNode @dataclass (all fields), GoalGraph class (add_node, get_node, pending_nodes, all_complete, to_dict, from_dict), ProjectPlanner.__init__ (creates goals_dir), _atomic_write(), _load_index(), _save_index(), GoalGraphFullError exception.
+Do NOT yet implement load_or_create_goal or update_node_status — those are Steps 2-3.
+    </div>
+  </div>
+</div>
+
+<div class="step" id="step-2">
+  <input type="checkbox" onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 2</div>
+    <div class="step-title">Implement <code>load_or_create_goal(description, session_id)</code> with Jaccard matching</div>
+    <div class="step-exit"><strong>Exit condition:</strong> Calling with "Add OAuth2 auth" twice returns same <code>goal_id</code>. Calling with "Add rate limiting" returns a different <code>goal_id</code>.</div>
+    <div class="step-notes">
+_jaccard(a, b): tokenise to lowercase words, remove stop-words {"a","an","the","and","or","to","in","of","for","with"}, compute |intersection|/|union|.
+MATCH_THRESHOLD = 0.4. Guard: descriptions with fewer than 3 meaningful words always create new goal.
+Persist new goals: write {goal_id}.json + update INDEX.json.
+    </div>
+  </div>
+</div>
+
+<div class="step" id="step-3">
+  <input type="checkbox" onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 3</div>
+    <div class="step-title">Implement <code>update_node_status()</code> with status propagation and atomic write</div>
+    <div class="step-exit"><strong>Exit condition:</strong> After <code>update_node_status(..., "completed")</code>, reloading graph from disk shows <code>status=="completed"</code> and <code>completed_at</code> is set.</div>
+    <div class="step-notes">
+On "completed": set completed_at. Check if all sibling tasks done → update parent.
+On "failed": increment failure_count. If failure_count >= 2: mark dependent children "blocked".
+Atomic write: write to {root_id}.json.tmp then os.replace() to {root_id}.json.
+Update INDEX.json entry: {status, updated_at}.
+    </div>
+  </div>
+</div>
+
+<div class="step" id="step-4">
+  <input type="checkbox" onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 4</div>
+    <div class="step-title">Implement <code>append_nodes(graph, new_nodes, parent_id)</code> for goal extension</div>
+    <div class="step-exit"><strong>Exit condition:</strong> After appending 2 children under root, <code>graph.pending_nodes()</code> returns exactly the 2 children in topological order (root is "in_progress").</div>
+    <div class="step-notes">
+Validate parent_id exists. Set new_node.parent_ids = [parent_id]. Append new_node.goal_id to parent.child_ids.
+Guard: if len(graph.nodes) >= MAX_NODES_PER_GRAPH (200) → raise GoalGraphFullError.
+Persist and return updated graph.
+    </div>
+  </div>
+</div>
+
+<div class="step" id="step-5">
+  <input type="checkbox" onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 5</div>
+    <div class="step-title">Wire <code>ProjectPlanner</code> into <code>Orchestrator.__init__</code> and <code>execute_feature()</code></div>
+    <div class="step-exit"><strong>Exit condition:</strong> Running <code>Orchestrator().execute_feature("test feature")</code> creates <code>.awos/goals/INDEX.json</code>. All existing tests still pass.</div>
+    <div class="step-notes">
+In __init__: self.project_planner = ProjectPlanner()
+In execute_feature(goal, ...): at top, self._active_goal_graph = self.project_planner.load_or_create_goal(goal or "unnamed_goal", session_id=uuid.uuid4().hex)
+Log: logger.info("[ProjectPlanner] goal_id=%s nodes=%d", graph.root_id, len(graph.nodes))
+Import guard: wrap import in try/except ImportError for backward compat.
+    </div>
+  </div>
+</div>
+
+<div class="step" id="step-6">
+  <input type="checkbox" onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 6</div>
+    <div class="step-title">Wire <code>update_node_status()</code> into <code>Orchestrator._execute_single_task()</code></div>
+    <div class="step-exit"><strong>Exit condition:</strong> After a successful task, <code>.awos/goals/{goal_id}.json</code> shows the task node as <code>"completed"</code>. After max_attempts exhausted, node shows <code>"failed"</code> with <code>failure_count==1</code>.</div>
+    <div class="step-notes">
+Helper: _find_node_for_task(graph, task_id) → GoalNode | None  (scan nodes[].tasks for matching task_id).
+After worker_success=True: project_planner.update_node_status(graph, node.goal_id, "completed", task_id=task_id)
+After max_attempts exhausted: project_planner.update_node_status(graph, node.goal_id, "failed")
+All calls guarded with: if hasattr(self, "_active_goal_graph") and self._active_goal_graph is not None
+    </div>
+  </div>
+</div>
+
+<div class="step" id="step-7">
+  <input type="checkbox" onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 7</div>
+    <div class="step-title">Add <code>existing_goal: GoalGraph | None = None</code> param to <code>Planner.plan()</code></div>
+    <div class="step-exit"><strong>Exit condition:</strong> <code>planner.plan(goal, existing_goal=graph)</code> with 1 completed node returns a list that does NOT include the completed task. <code>planner.plan(goal)</code> without param returns full list (no regression).</div>
+    <div class="step-notes">
+After generating task list, if existing_goal is not None:
+  completed_descs = [n.description for n in existing_goal.nodes.values() if n.status == "completed"]
+  Filter out tasks where jaccard(task["action"], desc) >= 0.5 for any completed_desc.
+  Log each skip: logger.info("[Planner] skipping completed task: %s", task["action"][:60])
+Fully backward compatible — default is None, no existing callers change.
+    </div>
+  </div>
+</div>
+
+<div class="step" id="step-8">
+  <input type="checkbox" onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 8</div>
+    <div class="step-title">Write <code>tests/test_project_planner.py</code> — 25+ tests</div>
+    <div class="step-exit"><strong>Exit condition:</strong> <code>pytest tests/test_project_planner.py -v</code> reports 25+ tests passing, 0 failures.</div>
+    <div class="step-notes">
+Test classes:
+  TestGoalNode — dataclass fields, now_timestamp, new_id uniqueness
+  TestGoalGraph — add_node, get_node, pending_nodes topological order, all_complete, to_dict/from_dict roundtrip
+  TestProjectPlannerSaveLoad — create goal creates file, reload returns same goal_id
+  TestGoalMatching — jaccard threshold, short description guard, different goals create new
+  TestStatusPropagation — completed propagates to parent, failed increments count, 2x fail blocks children
+  TestAppendNodes — links parent/child, topological order, GoalGraphFullError at 200
+  TestEdgeCases — corrupt JSON handled, missing goals dir auto-created, summary counts
+  TestPlannerSkipping — plan() with existing_goal skips completed, plan() without param unchanged
+All tests use pytest tmp_path fixture.
+    </div>
+  </div>
+</div>
+
+<div class="step" id="step-9">
+  <input type="checkbox" onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 9</div>
+    <div class="step-title">Run full test suite — zero regressions</div>
+    <div class="step-exit"><strong>Exit condition:</strong> <code>pytest tests/ -v --tb=short</code> shows 190+ tests passing, 0 failures, 0 errors.</div>
+    <div class="step-notes">pytest tests/ -v --tb=short 2&gt;&amp;1 | tail -20</div>
+  </div>
+</div>
+
+<h2>Blocked / Decisions</h2>
+<p>No blockers at spec time. All pre-conditions met.</p>
+
+<h3>Decision Log</h3>
+<div class="callout">
+  <strong>2026-05-19:</strong> Goal matching uses Jaccard keyword overlap (threshold 0.4) rather than LLM embeddings. Rationale: zero LLM cost, fast, deterministic, sufficient for structured project descriptions. VectorMemory can replace this in Phase 6 if needed. This decision keeps Phase 5C LLM-call-free.
+</div>
+<div class="callout">
+  <strong>2026-05-19:</strong> GoalGraph files stored as one-JSON-per-goal (not a single monolithic store). Rationale: crash isolation — a corrupt file for goal A does not affect goal B. Atomic write via .tmp + os.replace() guards against partial writes.
+</div>
+<div class="callout">
+  <strong>2026-05-19:</strong> ProjectPlanner does NOT replace Planner.plan(). Planner still generates atomic task lists. ProjectPlanner is an orchestration layer above it — deciding which tasks are new vs already-done, and persisting outcome history.
+</div>
+
+<h2>Related</h2>
+<ul>
+  <li><a href="../../docs/specs/project_planner_spec.html">project_planner_spec.html</a> — implementation contract</li>
+  <li><a href="../../docs/research/project_planner.html">project_planner.html</a> — background research</li>
+  <li><a href="../../docs/research/reflexion_memory.html">reflexion_memory.html</a> — Phase 5B (critique_ids wired into GoalNode)</li>
+</ul>
+
+</main>
+
+<footer>
+  <button class="copy-btn secondary" onclick="copyJSON()">Copy State as JSON</button>
+  <button class="copy-btn" onclick="copyPrompt()">Copy as Prompt</button>
+</footer>
+<script>
+function updateProgress(){
+  const boxes=[...document.querySelectorAll('.step input[type=checkbox]')];
+  const done=boxes.filter(b=>b.checked).length;
+  const total=boxes.length;
+  document.getElementById('progress-label').textContent=done+' / '+total+' steps complete';
+  document.getElementById('progress-fill').style.width=total?(done/total*100)+'%':'0%';
+  boxes.forEach((b)=>{
+    const step=b.closest('.step');
+    if(b.checked){step.classList.add('done');step.classList.remove('active')}
+  });
+}
+function copyPrompt(){navigator.clipboard.writeText('# Task: ProjectPlanner
+
+'+document.querySelector('main').innerText).then(()=>{const b=document.querySelector('.copy-btn:last-child');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy as Prompt',1500)})}
+function copyJSON(){
+  const steps=[...document.querySelectorAll('.step')].map((s,i)=>({
+    step:i+1,
+    title:s.querySelector('.step-title').innerText,
+    done:s.querySelector('input[type=checkbox]').checked,
+    exit:s.querySelector('.step-exit')?.innerText.replace('Exit condition:','').trim()||''
+  }));
+  navigator.clipboard.writeText(JSON.stringify({doc:'task',phase:'5C',feature:'ProjectPlanner',steps},null,2)).then(()=>{const b=document.querySelector('.copy-btn.secondary');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy State as JSON',1500)});
+}
+updateProgress();
+</script>
+</body>
+</html>

@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spec: TestRunner + Test-as-Reward — AWOS</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--success:#10b981;--warn:#f59e0b;--danger:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status.active{background:#f59e0b;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+main{max-width:800px;margin:0 auto;padding:32px}
+h2{font-size:17px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px}
+p code,li code,td code{background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px;font-size:12px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.step{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin:10px 0}
+.step .step-num{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:4px}
+.step .step-title{font-weight:600;margin-bottom:6px}
+.step .step-done{color:var(--success);font-size:12px;margin-top:6px}
+.step .exit{font-size:12px;color:var(--muted);margin-top:6px;font-style:italic}
+.step .exit strong{color:var(--text);font-style:normal}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+.risk-high{background:#fef2f2;border-left:3px solid var(--danger);padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+.risk-med{background:#fef3c7;border-left:3px solid var(--warn);padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+footer{background:var(--surface);border-top:1px solid var(--border);padding:16px 32px;display:flex;justify-content:flex-end;gap:12px}
+.copy-btn{background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:500}
+.copy-btn:hover{background:#4338ca}
+.copy-btn.secondary{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb">AWOS / docs / specs</div>
+  <h1>Spec: TestRunner + Test-as-Reward (Phase 5A)</h1>
+  <div class="meta">
+    <span class="tag">doc/spec</span>
+    <span class="tag">phase/5</span>
+    <span class="tag">topic/self-learning</span>
+    <span class="tag">topic/test-runner</span>
+    <span class="status active">active</span>
+    <time>2026-05-19</time>
+  </div>
+</header>
+
+<main>
+
+<h2>Goal</h2>
+<p>
+  Add a <code>TestRunner</code> module that auto-detects the project's test framework,
+  runs tests after every code patch, and feeds the pass rate into the LinUCB reward
+  signal — replacing binary syntax-only success with continuous test-grounded reward.
+</p>
+
+<div class="callout">
+<strong>Governing research:</strong> <a href="../research/test_runner_reward.html">test_runner_reward.html</a><br>
+<strong>Task file:</strong> <a href="../../tasks/active/test_runner_reward_task.html">test_runner_reward_task.html</a>
+</div>
+
+<h2>Files Affected</h2>
+<table>
+<tr><th>File</th><th>Change type</th><th>Description</th></tr>
+<tr><td><code>scaffold/agent/test_runner.py</code></td><td>create</td><td>New module: TestRunner, TestConfig, TestResult, output parsers</td></tr>
+<tr><td><code>scaffold/agent/orchestrator.py</code></td><td>modify</td><td>Wire TestRunner.run() after Verifier, pass test_reward to EscalationEngine</td></tr>
+<tr><td><code>scaffold/agent/escalation_engine.py</code></td><td>modify</td><td>record_outcome() accepts <code>reward</code> float (already supports this; wire it)</td></tr>
+<tr><td><code>scaffold/agent/reward_store.py</code></td><td>modify</td><td>Episode stores test_reward as the reward signal (already supports float)</td></tr>
+<tr><td><code>tests/test_test_runner.py</code></td><td>create</td><td>Unit tests for detection, parsing, timeout, fallback</td></tr>
+</table>
+
+<h2>Interface Contract</h2>
+<pre>
+# scaffold/agent/test_runner.py
+from dataclasses import dataclass
+from typing import Optional, List
+
+@dataclass
+class TestConfig:
+    """Detected test framework configuration for a project."""
+    runner: str        # "pytest" | "jest" | "vitest" | "make" | "go" | "cargo" | None
+    command: List[str] # shell command tokens, e.g. ["pytest", "--tb=short", "-q"]
+    timeout_sec: int   # default 60
+
+@dataclass
+class TestResult:
+    """Result of a single test execution."""
+    passed: int
+    failed: int
+    errors: int
+    pass_rate: float   # 0.0–1.0, 0.0 if timed_out or no tests
+    raw_output: str    # stdout + stderr, for SelfCorrectionEngine injection
+    timed_out: bool
+    test_command: List[str]
+
+class TestRunner:
+    """Language-agnostic test executor."""
+
+    def __init__(self, project_root: str = ".", timeout_sec: int = 60):
+        self.project_root = project_root
+        self.timeout_sec = timeout_sec
+
+    def detect(self) -> Optional[TestConfig]:
+        """Inspect project_root and return a TestConfig, or None if no tests detected."""
+
+    def run(self, changed_files: Optional[List[str]] = None) -> TestResult:
+        """Run tests using detected config. Returns TestResult with pass_rate."""
+
+    def _parse_pytest(self, stdout: str, stderr: str) -> TestResult:
+        """Parse pytest --tb=short -q output."""
+
+    def _parse_jest(self, stdout: str, stderr: str) -> TestResult:
+        """Parse jest --passWithNoTests output."""
+
+    def _parse_generic(self, stdout: str, stderr: str, command: List[str]) -> TestResult:
+        """Fallback regex: X passed / X failed / X errors."""
+</pre>
+
+<h2>Implementation Steps</h2>
+<p>Each step is atomic: changes one thing, tests one thing, proves one thing.</p>
+
+<div class="step">
+  <div class="step-num">Step 1</div>
+  <div class="step-title">Create scaffold/agent/test_runner.py with dataclasses and skeleton</div>
+  <p>Create <code>TestRunner</code>, <code>TestConfig</code>, <code>TestResult</code> as defined above.
+  Add <code>_detect_pytest()</code>, <code>_detect_jest()</code>, <code>_detect_vitest()</code>,
+  <code>_detect_make()</code>, <code>_detect_go()</code>, <code>_detect_cargo()</code> helpers.
+  Each helper checks for signal files and returns a <code>TestConfig</code> or <code>None</code>.</p>
+  <div class="exit"><strong>Exit condition:</strong> <code>pytest tests/test_test_runner.py::TestDetection -x</code> passes (test cases written in Step 6).</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 2</div>
+  <div class="step-title">Implement TestRunner.run() with subprocess + timeout</div>
+  <p>Run the detected command via <code>subprocess.run(..., timeout=timeout_sec, capture_output=True, cwd=project_root)</code>.
+  On <code>TimeoutExpired</code>, return <code>TestResult(passed=0, failed=0, errors=0, pass_rate=0.0, timed_out=True)</code>.
+  On success, dispatch to the correct parser.</p>
+  <div class="exit"><strong>Exit condition:</strong> <code>pytest tests/test_test_runner.py::TestRun -x</code> passes with mocked subprocess.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 3</div>
+  <div class="step-title">Implement pytest output parser</div>
+  <p>Parse pytest summary line: <code>3 passed, 1 failed, 0 errors in 0.12s</code>.
+  Regex: <code>r'(\d+) passed(?:, (\d+) failed)?(?:, (\d+) errors?)?'</code>.
+  Return counts and pass_rate. Store full stdout + stderr in <code>raw_output</code>.</p>
+  <div class="exit"><strong>Exit condition:</strong> Parser correctly extracts (passed, failed, errors, pass_rate) from 5 sample pytest outputs (all pass, 1 fail, errors, no tests, collection error).</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 4</div>
+  <div class="step-title">Implement jest and generic fallback parsers</div>
+  <p>Jest: parse <code>Tests: 2 passed, 1 failed, 3 total</code>.
+  Generic: regex <code>r'(\d+)\s*passed.*?(\d+)\s*failed'</code> and <code>r'(\d+)\s*error'</code>.
+  Both return TestResult with counts.</p>
+  <div class="exit"><strong>Exit condition:</strong> Both parsers extract correct counts from sample outputs.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 5</div>
+  <div class="step-title">Add safety guard: AWOS_SAFE_TO_RUN_TESTS</div>
+  <p>In <code>TestRunner.run()</code>, if <code>os.environ.get("AWOS_SAFE_TO_RUN_TESTS") != "1"</code>:
+  return <code>TestResult(..., pass_rate=0.0, timed_out=False)</code> with a note in <code>raw_output</code>.
+  This prevents accidental destructive side effects.</p>
+  <div class="exit"><strong>Exit condition:</strong> <code>pytest tests/test_test_runner.py::TestSafetyGuard -x</code> passes.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 6</div>
+  <div class="step-title">Write unit tests for TestRunner</div>
+  <p>Create <code>tests/test_test_runner.py</code> with:
+  <ul>
+    <li><code>TestDetection</code> — pytest, jest, vitest, make, go, cargo, unknown (7 cases)</li>
+    <li><code>TestParse</code> — pytest all-pass, 1-fail, errors, no-tests, jest all-pass, generic</li>
+    <li><code>TestRun</code> — mock subprocess.run with side_effect, timeout, success, failure</li>
+    <li><code>TestSafetyGuard</code> — env not set → pass_rate=0; env set → runs</li>
+    <li><code>TestIntegration</code> — full detect → run → parse pipeline</li>
+  </ul></p>
+  <div class="exit"><strong>Exit condition:</strong> All tests in <code>tests/test_test_runner.py</code> pass.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 7</div>
+  <div class="step-title">Wire TestRunner into Orchestrator</div>
+  <p>After <code>Verifier.verify_and_apply()</code> returns <code>success=True</code> in <code>Orchestrator.execute()</code>:
+  <ol>
+    <li>Instantiate <code>TestRunner(project_root=self.project_root or ".")</code></li>
+    <li><code>test_result = runner.run(changed_files=[file_path])</code></li>
+    <li>Store <code>test_result</code> in <code>task["test_result"]</code> for SelfCorrectionEngine</li>
+    <li>Call <code>self.escalation.record_outcome(task, reward=test_result.pass_rate, cost=cost, model_name=model_name)</code></li>
+  </ol>
+  If Verifier fails, skip TestRunner (already retrying via SelfCorrectionEngine).</p>
+  <div class="exit"><strong>Exit condition:</strong> E2E test passes: orchestrator receives float reward matching pass_rate.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 8</div>
+  <div class="step-title">Verify EscalationEngine.reward logic uses test_reward</div>
+  <p>Confirm <code>EscalationEngine.record_outcome()</code> passes the <code>reward</code> kwarg through to
+  <code>Episode</code>. Confirm <code>Episode.reward</code> formula uses the provided reward (not overriding it).
+  If reward kwarg is None, fall back to existing computed reward.</p>
+  <div class="exit"><strong>Exit condition:</strong> <code>pytest tests/test_ml_meta_controller.py</code> still passes; Episode.reward field is float when test_reward provided.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 9</div>
+  <div class="step-title">Run full test suite — no regressions</div>
+  <p><code>pytest tests/ -x</code> — all tests pass, no failures in existing modules.</p>
+  <div class="exit"><strong>Exit condition:</strong> 0 failures across all test files.</div>
+</div>
+
+<h2>Edge Cases</h2>
+<ul>
+  <li><strong>No tests detected:</strong> TestRunner.detect() returns None. Orchestrator skips TestRunner, falls back to syntax-only reward (existing behavior — zero regression).</li>
+  <li><strong>Test collection error:</strong> e.g. import error in test file. <code>subprocess.run</code> returns non-zero exit. Parser extracts 0 passed, 0 failed, treat as pass_rate=0.0. Raw output sent to SelfCorrectionEngine.</li>
+  <li><strong>Timeout:</strong> pass_rate=0.0, timed_out=True. Orchestrator falls back to syntax-only reward. Log warning.</li>
+  <li><strong>Environment variable not set:</strong> Safety guard returns pass_rate=0.0 with note. No subprocess launched. Zero regression.</li>
+  <li><strong>Unknown runner type:</strong> Generic parser handles any output with "X passed / Y failed" pattern.</li>
+</ul>
+
+<h2>Testing Plan</h2>
+<table>
+<tr><th>Test</th><th>Input</th><th>Expected output</th><th>File</th></tr>
+<tr><td>detect_pytest</td><td>Dir with pytest.ini</td><td>TestConfig("pytest", ["pytest","--tb=short","-q"], 60)</td><td>tests/test_test_runner.py</td></tr>
+<tr><td>detect_jest</td><td>Dir with package.json containing "jest"</td><td>TestConfig("jest", ["npx","jest","--passWithNoTests"], 60)</td><td>tests/test_test_runner.py</td></tr>
+<tr><td>detect_unknown</td><td>Empty dir</td><td>None</td><td>tests/test_test_runner.py</td></tr>
+<tr><td>parse_pytest_pass</td><td>"3 passed in 0.12s"</td><td>pass_rate=1.0, passed=3, failed=0, errors=0</td><td>tests/test_test_runner.py</td></tr>
+<tr><td>parse_pytest_fail</td><td>"2 passed, 1 failed in 0.12s"</td><td>pass_rate=0.667, passed=2, failed=1, errors=0</td><td>tests/test_test_runner.py</td></tr>
+<tr><td>parse_pytest_error</td><td>"1 passed, 0 failed, 2 errors"</td><td>pass_rate=0.333, passed=1, failed=0, errors=2</td><td>tests/test_test_runner.py</td></tr>
+<tr><td>run_timeout</td><td>Mock subprocess.TimeoutExpired</td><td>pass_rate=0.0, timed_out=True</td><td>tests/test_test_runner.py</td></tr>
+<tr><td>safety_guard_off</td><td>Env var unset, valid pytest project</td><td>pass_rate=0.0, no subprocess called</td><td>tests/test_test_runner.py</td></tr>
+<tr><td>e2e_orchestrator_reward</td><td>Mock orchestrator with TestRunner</td><td>record_outcome called with float reward</td><td>tests/test_test_runner.py</td></tr>
+</table>
+
+<h2>Related</h2>
+<ul>
+  <li><a href="../research/test_runner_reward.html">[[test_runner_reward]]</a> — research that informed this spec</li>
+  <li><a href="../../tasks/active/test_runner_reward_task.html">[[test_runner_reward_task]]</a> — execution checklist</li>
+  <li><a href="../../scaffold/agent/verifier.py">[[verifier]]</a> — syntax gate that runs before TestRunner</li>
+  <li><a href="../../scaffold/agent/escalation_engine.py">[[escalation_engine]]</a> — record_outcome()</li>
+  <li><a href="../../scaffold/agent/reward_store.py">[[reward_store]]</a> — Episode + ReplayGate</li>
+</ul>
+
+</main>
+
+<footer>
+  <button class="copy-btn secondary" onclick="copyJSON()">Copy Steps as JSON</button>
+  <button class="copy-btn" onclick="copyPrompt()">Copy as Prompt</button>
+</footer>
+<script>
+function copyPrompt(){navigator.clipboard.writeText('# Spec: TestRunner + Test-as-Reward\n\n'+document.querySelector('main').innerText).then(()=>{const b=document.querySelector('.copy-btn:last-child');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy as Prompt',1500)})}
+function copyJSON(){const steps=[...document.querySelectorAll('.step')].map((s,i)=>({step:i+1,title:s.querySelector('.step-title').innerText,exit:s.querySelector('.exit').innerText.replace('Exit condition:','').trim()}));navigator.clipboard.writeText(JSON.stringify({doc:'spec',steps},null,2)).then(()=>{const b=document.querySelector('.copy-btn.secondary');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy Steps as JSON',1500)})}
+</script>
+</body>
+</html>

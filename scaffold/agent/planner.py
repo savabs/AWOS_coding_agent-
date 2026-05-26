@@ -13,6 +13,17 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+_COMPLEX_SIGNALS = frozenset({
+    "refactor", "redesign", "architecture", "system", "migrate",
+    "overhaul", "restructure", "rewrite", "reorganise", "reorganize",
+})
+_SIMPLE_SIGNALS = frozenset({
+    "add", "fix", "update", "rename", "remove", "delete",
+    "create", "append", "insert", "change", "modify",
+})
+_MAX_SIMPLE_FILES = 3
+_MAX_SIMPLE_GOAL_WORDS = 10
+
 
 class Planner:
     """Uses Claude Sonnet to break down user goals into atomic micro-tasks."""
@@ -186,6 +197,26 @@ Key symbols (file::class/def):
         return result
 
     @staticmethod
+    def _classify_goal_complexity(goal: str, codebase_context: dict) -> bool:
+        """Return True if goal is simple (single-file, targeted), False if complex.
+
+        Simple: short goal (<= _MAX_SIMPLE_GOAL_WORDS words), no complex signals,
+                codebase has <= _MAX_SIMPLE_FILES files.
+        Complex: contains refactor/redesign/architecture keywords, long goal,
+                 or large codebase context.
+        """
+        words = goal.lower().split()
+        if len(words) > _MAX_SIMPLE_GOAL_WORDS:
+            return False
+        files = codebase_context.get("files", [])
+        if len(files) > _MAX_SIMPLE_FILES:
+            return False
+        word_set = set(words)
+        if word_set & _COMPLEX_SIGNALS:
+            return False
+        return True
+
+    @staticmethod
     def _filter_completed_tasks(tasks: list, existing_goal: Any) -> list:
         """Remove tasks whose action matches a completed GoalNode description (Jaccard >= 0.5)."""
         # Duck-type: existing_goal must have a .nodes dict of nodes with .status and .description
@@ -209,6 +240,19 @@ Key symbols (file::class/def):
             if not skip:
                 filtered.append(task)
         return filtered
+
+
+# ── Planner singleton ──────────────────────────────────────────────────────────
+
+_planner_instance: Optional["Planner"] = None
+
+
+def get_planner(api_key: Optional[str] = None) -> "Planner":
+    """Return the module-level Planner singleton, creating it on first call."""
+    global _planner_instance
+    if _planner_instance is None:
+        _planner_instance = Planner(api_key=api_key)
+    return _planner_instance
 
 
 def _tokenise(text: str) -> set:

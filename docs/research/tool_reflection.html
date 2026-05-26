@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Research: Tool Reflection / Success Matrix — AWOS</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--warn:#f59e0b}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status.active{background:#f59e0b;color:#fff}
+.status.done{background:#10b981;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+nav.tabs{background:var(--surface);border-bottom:1px solid var(--border);padding:0 32px;display:flex;gap:0;overflow-x:auto}
+nav.tabs button{background:none;border:none;border-bottom:2px solid transparent;padding:12px 16px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;white-space:nowrap}
+nav.tabs button.active{color:var(--accent);border-bottom-color:var(--accent)}
+main{max-width:800px;margin:0 auto;padding:32px}
+section.tab-panel{display:none}
+section.tab-panel.active{display:block}
+h2{font-size:17px;font-weight:600;margin:24px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px}
+p code,li code,td code{background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px;font-size:12px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+.risk-high{background:#fef2f2;border-left:3px solid #ef4444;padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+.risk-med{background:#fef3c7;border-left:3px solid var(--warn);padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+footer{background:var(--surface);border-top:1px solid var(--border);padding:16px 32px;display:flex;justify-content:flex-end;gap:12px}
+.copy-btn{background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:500}
+.copy-btn:hover{background:#4338ca}
+.copy-btn.secondary{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb">AWOS / docs / research</div>
+  <h1>Research: Tool Reflection / Success Matrix</h1>
+  <div class="meta">
+    <span class="tag">doc/research</span>
+    <span class="tag">phase/8</span>
+    <span class="tag">topic/tool-reflection</span>
+    <span class="status active">active</span>
+    <time>2026-05-20</time>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="active" onclick="show(this,'arch')">Architecture</button>
+  <button onclick="show(this,'obs')">Observations</button>
+  <button onclick="show(this,'risks')">Risks</button>
+  <button onclick="show(this,'sources')">Sources</button>
+</nav>
+
+<main>
+
+<section id="arch" class="tab-panel active">
+<h2>Current Architecture</h2>
+<p>The AWOS orchestrator already has a <code>ToolPerformanceTracker</code> that is initialized and partially wired. The success matrix data structure exists but is never displayed and never influences routing. This feature completes the loop.</p>
+
+<h3>Relevant Modules</h3>
+<table>
+<tr><th>Module / File</th><th>Role</th><th>Interface (key functions/classes)</th></tr>
+<tr><td><code>scaffold/agent/core/performance_tracker.py</code></td><td>Persists (tool, model, task_type, success, latency_ms, cost) records to <code>.awos/performance.json</code></td><td><code>record()</code>, <code>success_matrix()</code>, <code>best_model_for()</code>, <code>recommend_model()</code></td></tr>
+<tr><td><code>scaffold/agent/orchestrator.py</code></td><td>Main Planner→Worker→Verifier loop; calls <code>performance.record()</code> at two sites but without latency/cost</td><td><code>_execute_single_task()</code> lines 766–787, <code>execute_feature()</code> lines 371–398</td></tr>
+<tr><td><code>scaffold/agent/escalation_engine.py</code></td><td>Chooses model tier per task; currently ignores success-rate history</td><td><code>decide(task, failure_count, budget_remaining)</code>, <code>record_outcome()</code></td></tr>
+<tr><td><code>scaffold/agent/core/observability.py</code></td><td>Existing panel display pattern (Phases 1–4). Success matrix panel will be Phase 5 of this series.</td><td><code>ObservabilityStore</code>, panel <code>display()</code> methods</td></tr>
+<tr><td><code>scaffold/agent/ml_router.py</code></td><td>TaskFeatureExtractor — already classifies task type from keywords</td><td><code>TaskFeatureExtractor.extract()</code>, keyword sets: <code>_BUG_FIX_KW</code>, <code>_REFACTOR_KW</code>, etc.</td></tr>
+</table>
+
+<h3>Data Flow (current — incomplete)</h3>
+<ol>
+  <li>Worker attempt completes → <code>_execute_single_task</code> calls <code>performance.record(tool="Worker", model=..., task_type=complexity, success=...)</code></li>
+  <li>Records accumulate in <code>.awos/performance.json</code> silently</li>
+  <li><code>success_matrix()</code> is never called. <code>recommend_model()</code> is never called. Data is dead weight.</li>
+</ol>
+
+<h3>Data Flow (after this feature)</h3>
+<ol>
+  <li>Worker completes → <code>performance.record()</code> with enriched <code>latency_ms</code>, <code>cost_usd</code>, semantic <code>task_type</code></li>
+  <li><code>execute_feature</code> prints success matrix panel (Phase 5) after each run</li>
+  <li><code>EscalationEngine.decide()</code> calls <code>performance.recommend_model()</code> as a soft hint; if the recommended model matches a tier, preference it (min 5 samples required — cold-start safe)</li>
+</ol>
+</section>
+
+<section id="obs" class="tab-panel">
+<h2>Observations</h2>
+
+<h3>Key Findings</h3>
+<ul>
+  <li><strong>performance.record() IS partially wired</strong> — orchestrator.py lines 766 and 781 call it, but only pass <code>tool="Worker"</code>, <code>model=...</code>, <code>task_type=task.get("complexity")</code>, <code>success=bool</code>. Missing: <code>latency_ms</code> and <code>cost</code>.</li>
+  <li><strong>success_matrix() is never called</strong> — confirmed by grep. The method is fully implemented in <code>performance_tracker.py:94–138</code> and returns a useful <code>{model → {task_type → {count, success_rate, avg_latency_ms, avg_cost, top_error}}}</code> dict. But nothing reads it.</li>
+  <li><strong>recommend_model() is never called</strong> — confirmed by grep. Method exists at line 165 of performance_tracker.py. EscalationEngine never uses it.</li>
+  <li><strong>Latency data is available</strong> — <code>_span.worker_start_ts</code> is set in _execute_single_task; computing <code>latency_ms = (time.time() - _span.worker_start_ts) * 1000</code> at the record() call site is trivial.</li>
+  <li><strong>Cost data is available</strong> — <code>esc_decision.spec.cost_per_req</code> is already used in reward_store.store() at the same code path.</li>
+  <li><strong>Semantic task_type can be derived cheaply</strong> — <code>ml_router.py</code> already has keyword sets (_BUG_FIX_KW, _REFACTOR_KW, _NEW_FEAT_KW, _ARCH_KW, _TEST_KW). A 5-line helper classifies task["action"] → one of: bug_fix | refactor | new_feature | architecture | test | general.</li>
+  <li><strong>Display pattern is established</strong> — Phases 1–4 in execute_feature print panels via .display() methods. Success matrix panel slots in as Phase 5 in the same section (lines 371–398).</li>
+  <li><strong>EscalationEngine already accepts ml_router as a soft hint</strong> — the pattern of "soft hint that fires after hard overrides but before heuristics" exists in escalation_engine.py for LinUCBRouter. The same pattern can be used for performance.recommend_model().</li>
+  <li><strong>No tests exist for ToolPerformanceTracker</strong> — confirmed by: no test_performance_tracker.py found in tests/. The class itself is well-written and testable.</li>
+</ul>
+
+<h3>Algorithm Survey</h3>
+<p>No new math required. <code>success_matrix()</code> is pure frequency statistics: success_rate = successes / count, avg_latency = mean(latencies). The <code>best_model_for()</code> method uses argmax(success_rate) over candidates — correct and simple. Cold-start protection (min_count=5) prevents routing decisions from n=1 noisy data.</p>
+
+<h3>Data Requirements</h3>
+<ul>
+  <li>Storage: <code>.awos/performance.json</code> (already exists, append-only pattern same as other stores)</li>
+  <li>Schema: existing record schema is sufficient once latency_ms and cost_usd are populated</li>
+  <li>Volume: at 5–50 tasks/day, the window=100 default is appropriate; no compaction needed</li>
+  <li>Cold start: matrix is empty on first run; display panel is no-op if count &lt; min_count (3 by default)</li>
+</ul>
+</section>
+
+<section id="risks" class="tab-panel">
+<h2>Risks</h2>
+
+<div class="risk-high">
+  <strong>HIGH: Soft routing hint could conflict with LinUCBRouter</strong>
+  <br>Both <code>performance.recommend_model()</code> and <code>LinUCBRouter</code> are soft hints in EscalationEngine. If they disagree, the last one applied wins (whichever is later in the decide() flow). This could produce unexpected behavior.
+  <br><strong>Mitigation:</strong> Apply performance hint ONLY as a tie-breaker when LinUCB has no opinion (cold-start, &lt;20 episodes). This makes them non-conflicting by construction. Document the precedence order explicitly.
+</div>
+
+<div class="risk-med">
+  <strong>MEDIUM: performance.json file format mismatch</strong>
+  <br>The existing _load() reads the whole file as a JSON array. But _append_to_disk() appends newline-delimited JSON objects (JSONL). This means after the first session the file is neither valid JSON nor valid JSONL.
+  <br><strong>Mitigation:</strong> This is a pre-existing bug in performance_tracker.py. Fix it as part of this feature: switch _append_to_disk to JSONL (one record per line) and _load to read JSONL lines. Add a migration step for existing files. Covered in spec Step 1.
+</div>
+
+<div class="risk-med">
+  <strong>MEDIUM: latency_ms is wall clock, not pure worker latency</strong>
+  <br><code>_span.worker_start_ts</code> includes all retries and the verifier. Single-attempt latency is not separately tracked.
+  <br><strong>Mitigation:</strong> Document this as "task latency" not "model latency". Still useful as a routing signal. No action needed for v1.
+</div>
+
+<h3>Open Questions</h3>
+<ul>
+  <li>Should the performance hint hard-override a model, or only influence the escalation level? — Answer: influence only. Hard override risks ignoring budget constraints. Soft hint is sufficient.</li>
+  <li>Should the success matrix display be skipped if fewer than N total records exist? — Answer: yes, skip if total records &lt; 3 (same as success_matrix min_count default). Keeps the panel clean for fresh installs.</li>
+</ul>
+</section>
+
+<section id="sources" class="tab-panel">
+<h2>External Sources</h2>
+<table>
+<tr><th>Source</th><th>Key finding</th><th>Accessed</th></tr>
+<tr><td><a href="https://developer.nvidia.com/blog/mastering-agentic-techniques-ai-agent-evaluation/">NVIDIA — Mastering Agentic Techniques: AI Agent Evaluation</a></td><td>VERIFIED: "Make tool usage a first-class signal. Measure tool selection precision/recall. Track tokens, tool calls, and latency per successful task. Use explicit budgets as constraints when tuning routing or retry policies."</td><td>2026-05-20</td></tr>
+<tr><td><a href="https://www.langchain.com/blog/benchmarking-agent-tool-use">LangChain — Benchmarking Agent Tool Use</a></td><td>VERIFIED: Four metrics for tool use evaluation: (1) correctness vs ground truth, (2) correct final environment state, (3) intermediate step correctness (exact tool sequence), (4) ratio of steps taken to expected steps. Models succeed or fail based on how they use tools.</td><td>2026-05-20</td></tr>
+<tr><td><a href="https://www.deeplearning.ai/the-batch/agentic-design-patterns-part-2-reflection/">DeepLearning.AI Batch — Agentic Design Patterns Part 2: Reflection</a></td><td>VERIFIED: "Criticize and rewrite process can lead to iterative improvement on code generation tasks." Reflection = agent observes its own output quality and adjusts future behavior.</td><td>2026-05-20</td></tr>
+<tr><td><a href="https://uptimerobot.com/knowledge-hub/monitoring/ai-agent-monitoring-best-practices-tools-and-metrics/">UptimeRobot — AI Agent Monitoring 2026</a></td><td>VERIFIED: "Good monitoring makes failure patterns visible. Signals that matter: latency, error rates, tool success, cost, and task completion."</td><td>2026-05-20</td></tr>
+</table>
+
+<h2>Related</h2>
+<ul>
+  <li><a href="tool_reflection_spec.html">tool_reflection_spec.html</a> — implementation spec</li>
+  <li><a href="../../tasks/active/tool_reflection_task.html">tool_reflection_task.html</a> — execution checklist</li>
+  <li><a href="../../scaffold/agent/core/performance_tracker.py">performance_tracker.py</a> — the existing tracker being wired up</li>
+  <li><a href="../../scaffold/agent/orchestrator.py">orchestrator.py</a> — integration site</li>
+</ul>
+</section>
+
+</main>
+
+<footer>
+  <button class="copy-btn secondary" onclick="copyJSON()">Copy as JSON</button>
+  <button class="copy-btn" onclick="copyPrompt()">Copy as Prompt</button>
+</footer>
+<script>
+function show(btn,id){document.querySelectorAll('.tab-panel').forEach(s=>s.classList.remove('active'));document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));document.getElementById(id).classList.add('active');btn.classList.add('active')}
+function copyPrompt(){const t=document.querySelector('.tab-panel.active').innerText;navigator.clipboard.writeText('# Research: Tool Reflection / Success Matrix\n\n'+t).then(()=>{const b=document.querySelector('.copy-btn:last-child');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy as Prompt',1500)})}
+function copyJSON(){const s={};document.querySelectorAll('.tab-panel').forEach(p=>{s[p.id]=p.innerText.trim()});navigator.clipboard.writeText(JSON.stringify({doc:'research',...s},null,2)).then(()=>{const b=document.querySelector('.copy-btn.secondary');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy as JSON',1500)})}
+</script>
+</body>
+</html>

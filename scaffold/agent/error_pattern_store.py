@@ -173,6 +173,25 @@ class ErrorPatternStore:
         matches.sort(key=lambda p: p.timestamp, reverse=True)
         return matches[:top_n]
 
+    def list_all(self, limit: int = 200) -> List[ErrorPattern]:
+        """Return up to `limit` most recent ErrorPatterns across all files/types."""
+        if not self._path.exists():
+            return []
+        records: List[ErrorPattern] = []
+        try:
+            lines = self._path.read_text(encoding="utf-8").splitlines()
+            for line in lines[-limit:]:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(ErrorPattern(**json.loads(line)))
+                except (json.JSONDecodeError, TypeError):
+                    continue
+        except Exception as exc:
+            logger.warning("[ErrorPatternStore] list_all failed: %s", exc)
+        return records
+
     def summary(self) -> dict:
         """Return {total, by_type, by_file} counts. Returns empty dict on error."""
         if not self._path.exists():

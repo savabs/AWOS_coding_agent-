@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AWOS — Project Checkpoint</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --green: #3fb950;
+    --yellow: #d29922; --red: #f85149; --blue: #58a6ff;
+    --purple: #d2a8ff; --cyan: #79c0ff; --orange: #ffa657;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; font-size: 14px; line-height: 1.6; }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Layout */
+  .wrapper { max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
+  .header { border-bottom: 1px solid var(--border); padding-bottom: 24px; margin-bottom: 32px; }
+  .header h1 { font-size: 28px; font-weight: 700; color: var(--text); }
+  .header .meta { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; letter-spacing: .3px; }
+  .badge-green  { background: rgba(63,185,80,.15); color: var(--green); border: 1px solid rgba(63,185,80,.3); }
+  .badge-yellow { background: rgba(210,153,34,.15); color: var(--yellow); border: 1px solid rgba(210,153,34,.3); }
+  .badge-red    { background: rgba(248,81,73,.15);  color: var(--red);    border: 1px solid rgba(248,81,73,.3); }
+  .badge-blue   { background: rgba(88,166,255,.15); color: var(--blue);   border: 1px solid rgba(88,166,255,.3); }
+  .badge-purple { background: rgba(210,168,255,.15);color: var(--purple); border: 1px solid rgba(210,168,255,.3); }
+
+  /* Sections */
+  section { margin-bottom: 40px; }
+  h2 { font-size: 18px; font-weight: 600; border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 16px; color: var(--cyan); }
+  h3 { font-size: 15px; font-weight: 600; color: var(--purple); margin: 20px 0 10px; }
+
+  /* Cards */
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .card .title { font-weight: 600; margin-bottom: 6px; font-size: 13px; }
+  .card .desc  { color: var(--muted); font-size: 12px; line-height: 1.5; }
+  .card .status { margin-top: 10px; }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 8px 12px; background: var(--surface); color: var(--muted); font-weight: 600; border-bottom: 2px solid var(--border); }
+  td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,.02); }
+  code { background: rgba(110,118,129,.2); padding: 1px 6px; border-radius: 4px; font-family: 'SF Mono', Consolas, monospace; font-size: 12px; color: var(--orange); }
+
+  /* Code blocks */
+  pre { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; overflow-x: auto; font-size: 12px; line-height: 1.7; margin: 10px 0; }
+  pre code { background: none; padding: 0; color: var(--text); }
+
+  /* Progress bar */
+  .bar-wrap { background: var(--border); border-radius: 4px; height: 8px; overflow: hidden; margin: 6px 0; }
+  .bar { height: 8px; border-radius: 4px; }
+  .bar-green  { background: var(--green); }
+  .bar-yellow { background: var(--yellow); }
+  .bar-blue   { background: var(--blue); }
+
+  /* Phase list */
+  .phase { display: flex; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--border); align-items: flex-start; }
+  .phase:last-child { border-bottom: none; }
+  .phase-num { min-width: 28px; height: 28px; border-radius: 50%; background: var(--surface); border: 2px solid var(--green); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; color: var(--green); }
+  .phase-num.done { background: var(--green); color: #000; border-color: var(--green); }
+  .phase-body { flex: 1; }
+  .phase-body .title { font-weight: 600; font-size: 14px; }
+  .phase-body .items { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .phase-body .items li { margin-left: 18px; }
+
+  /* Metric strip */
+  .metrics { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+  .metric { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px; flex: 1; min-width: 150px; }
+  .metric .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .metric .value { font-size: 22px; font-weight: 700; margin-top: 2px; }
+  .metric .sub   { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  /* Callout */
+  .callout { border-left: 3px solid var(--blue); background: rgba(88,166,255,.06); padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 14px 0; font-size: 13px; }
+  .callout.warn { border-color: var(--yellow); background: rgba(210,153,34,.06); }
+  .callout.success { border-color: var(--green); background: rgba(63,185,80,.06); }
+
+  /* Nav */
+  .toc { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; margin-bottom: 32px; }
+  .toc h3 { font-size: 13px; color: var(--muted); margin: 0 0 10px; text-transform: uppercase; letter-spacing: .5px; }
+  .toc ol { padding-left: 18px; }
+  .toc li { padding: 2px 0; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrapper">
+
+  <!-- ═══ HEADER ═══ -->
+  <div class="header">
+    <h1>AWOS — Agentic Workflow OS &nbsp;<span class="badge badge-green">LIVE</span></h1>
+    <div class="meta">
+      Checkpoint · May 16 2026 &nbsp;·&nbsp; Sessions 1–6 &nbsp;·&nbsp;
+      <span class="badge badge-blue">Phase 5 Complete</span> &nbsp;
+      <span class="badge badge-purple">Gemini + DeepSeek + Haiku Verified</span>
+    </div>
+  </div>
+
+  <!-- ═══ TOC ═══ -->
+  <div class="toc">
+    <h3>Contents</h3>
+    <ol>
+      <li><a href="#objective">Objective &amp; Philosophy</a></li>
+      <li><a href="#architecture">Architecture Overview</a></li>
+      <li><a href="#phases">Phases Completed (1–5)</a></li>
+      <li><a href="#files">All Files Created / Modified</a></li>
+      <li><a href="#models">Model Ladder &amp; Pricing</a></li>
+      <li><a href="#advanced">Advanced Tricks Implemented</a></li>
+      <li><a href="#guardrails">Guardrails &amp; Budget Monitor</a></li>
+      <li><a href="#sandbox">Sandbox Results</a></li>
+      <li><a href="#howto">How to Run</a></li>
+      <li><a href="#pending">Pending / Next Steps</a></li>
+      <li><a href="#bugs">Bugs Fixed</a></li>
+    </ol>
+  </div>
+
+  <!-- ═══ METRICS ═══ -->
+  <div class="metrics">
+    <div class="metric"><div class="label">Unit Tests</div><div class="value" style="color:var(--green)">12/12</div><div class="sub">Phase 1–5 suite passing</div></div>
+    <div class="metric"><div class="label">Sandbox Cost</div><div class="value" style="color:var(--green)">$0.0023</div><div class="sub">of $0.50 budget cap (0.46%)</div></div>
+    <div class="metric"><div class="label">Monthly Cap</div><div class="value" style="color:var(--cyan)">$20</div><div class="sub">AWOS_MONTHLY_BUDGET env</div></div>
+    <div class="metric"><div class="label">Models Active</div><div class="value" style="color:var(--purple)">4</div><div class="sub">Gemini · DeepSeek · Haiku · Sonnet</div></div>
+    <div class="metric"><div class="label">Files Changed</div><div class="value" style="color:var(--orange)">16</div><div class="sub">New + modified this audit</div></div>
+  </div>
+
+  <!-- ═══ 1. OBJECTIVE ═══ -->
+  <section id="objective">
+    <h2>1 · Objective &amp; Philosophy</h2>
+    <div class="callout success">
+      <strong>Goal:</strong> Multiply model effectiveness 10× through scaffolding — not bigger models.
+      Keep cost under $20/month at scale. The model is the CPU; AWOS is the OS.
+    </div>
+    <p style="color:var(--muted); margin-top:12px;">The user requested a <strong>comprehensive audit</strong> of the AWOS coding agent covering:</p>
+    <ul style="margin:10px 0 0 22px; color:var(--muted); font-size:13px; line-height:1.8;">
+      <li>Fix all loopholes, pricing errors, and API bugs</li>
+      <li>Implement a smart escalation ladder (cheap → expensive only when needed)</li>
+      <li>Add intelligence amplifiers: chain-of-thought, self-verify, few-shot, symbol context</li>
+      <li>Add cost guardrails and a live budget monitor</li>
+      <li>Dogfood the agent on itself in a sandbox under $0.50</li>
+      <li>Interactive chat interface — no CLI flags exposed to users</li>
+    </ul>
+  </section>
+
+  <!-- ═══ 2. ARCHITECTURE ═══ -->
+  <section id="architecture">
+    <h2>2 · Architecture Overview</h2>
+    <pre><code>User (natural language)
+    │
+    ▼
+awos.py  ─ loads .env, fixes Gemini key conflict, launches UnifiedAgent
+    │
+    ▼
+UnifiedAgent.handle_request()
+    ├── SelfImprover (detected first — highest priority)
+    ├── ResponseCache (free hit check — skip if cached)
+    ├── RequestRouter (semantic routing → HandlerType)
+    │       ├── WORKFLOW      → ChatOrchestrator (free / local)
+    │       ├── CODING        → _handle_coding (DeepSeek)
+    │       ├── REVIEW        → _handle_review (DeepSeek)
+    │       ├── REASONING     → _handle_reasoning (Haiku)
+    │       ├── PLANNER_WORKER→ _handle_complex_coding
+    │       └── SELF_IMPROVEMENT → SelfImprover
+    │
+    ▼
+Orchestrator.execute_feature()
+    ├── EscalationEngine → ModelSpec (tier 1–5)
+    ├── CheapPlanner (Gemini 2.5 Flash) — breaks goal into tasks
+    ├── Worker.execute_task()  ← DeepSeek / Haiku / Sonnet / Opus
+    │       ├── ExampleStore.get_examples_for_prompt() — few-shot
+    │       ├── SymbolIndex context injection
+    │       ├── Chain-of-Thought prefix
+    │       ├── Self-verification (SEARCH in file check)
+    │       └── SEARCH/REPLACE → Verifier.verify_and_apply()
+    └── GitManager (branch, backup, rollback on failure)
+    │
+    ▼
+TokenTracker → budget_guard → show_status()
+                     ↑
+               AWOS_MONTHLY_BUDGET env (default $20)</code></pre>
+  </section>
+
+  <!-- ═══ 3. PHASES ═══ -->
+  <section id="phases">
+    <h2>3 · Phases Completed</h2>
+
+    <div class="phase">
+      <div class="phase-num done">1</div>
+      <div class="phase-body">
+        <div class="title">Core Pipeline &amp; Routing Fixes</div>
+        <ul class="items">
+          <li>Fixed OpenAI SDK response parsing in <code>worker.py</code> (<code>choices[0].message.content</code>)</li>
+          <li>Fixed all 6 pricing errors across <code>model_selector.py</code>, <code>coding_model_router.py</code>, <code>cheap_planner.py</code></li>
+          <li>Added real Haiku fallback when DeepSeek unavailable</li>
+          <li>Added <code>PLANNER_WORKER</code> handler type to <code>UnifiedAgent</code></li>
+          <li>Improved <code>_is_complex_coding_task</code> with weighted scoring</li>
+          <li>Fixed deprecated Anthropic model IDs → <code>claude-haiku-4-5</code>, <code>claude-sonnet-4-5</code></li>
+          <li>Removed stray <code>print()</code> from <code>session_memory.py</code> module-level</li>
+        </ul>
+        <div class="status"><span class="badge badge-green">✓ Complete</span></div>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-num done">2</div>
+      <div class="phase-body">
+        <div class="title">Reliability &amp; Safe State Management</div>
+        <ul class="items">
+          <li>Created <code>GitManager</code> — branch per execution, per-file backup, full rollback on failure</li>
+          <li>Wired <code>GitManager</code> into <code>Orchestrator.execute_feature()</code></li>
+          <li>Added missing <code>planning</code> / <code>execution</code> request types to <code>TokenTracker</code></li>
+          <li>Fixed budget alert messages to include threshold value</li>
+        </ul>
+        <div class="status"><span class="badge badge-green">✓ Complete</span></div>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-num done">3</div>
+      <div class="phase-body">
+        <div class="title">Context &amp; Intelligence</div>
+        <ul class="items">
+          <li>Created <code>SymbolIndex</code> — cross-file AST symbol extraction + import graph</li>
+          <li>Updated <code>cartographer.py</code> to tree-sitter v0.25 API</li>
+          <li>Injected symbols into <code>CheapPlanner</code> and <code>Planner</code> prompts</li>
+          <li>Added Anthropic prompt caching to <code>planner.py</code> (cache stable system instructions → 90% savings on repeat calls)</li>
+          <li>Improved <code>SelfImprover</code> detection with targeted SELF_REFS + IMPROVEMENT_VERBS (no false positives)</li>
+        </ul>
+        <div class="status"><span class="badge badge-green">✓ Complete</span></div>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-num done">4</div>
+      <div class="phase-body">
+        <div class="title">Cost Optimization</div>
+        <ul class="items">
+          <li>Created <code>ResponseCache</code> — TTL-based deduplication, 15-min TTL, 1000-entry cap, auto-eviction</li>
+          <li>Wired cache into <code>UnifiedAgent.handle_request()</code> — hit before routing (free)</li>
+          <li>Added <code>record_cache_hit()</code> to <code>TokenTracker</code> with savings estimate</li>
+          <li>Added budget threshold alerts at 50% / 75% / 90% usage</li>
+        </ul>
+        <div class="status"><span class="badge badge-green">✓ Complete</span></div>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-num done">5</div>
+      <div class="phase-body">
+        <div class="title">Self-Improvement Loop &amp; Intelligence Amplifiers</div>
+        <ul class="items">
+          <li>Created <code>EscalationEngine</code> — 5-tier ladder with complexity, failure, and budget gates</li>
+          <li>Created <code>ExampleStore</code> — few-shot example injection, grows after each successful task</li>
+          <li>Added chain-of-thought prefix to every worker prompt</li>
+          <li>Added self-verification in worker (SEARCH string checked against actual file before calling Verifier)</li>
+          <li>Built and fully debugged <code>sandbox_test.py</code> — dogfoods AWOS on itself under $0.50</li>
+          <li>Fixed corrupted <code>EscalationDecision</code> dataclass from broken sandbox run</li>
+        </ul>
+        <div class="status"><span class="badge badge-green">✓ Complete</span></div>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-num done">★</div>
+      <div class="phase-body">
+        <div class="title">Session 6 — Chat Interface, Guardrails &amp; Monitor</div>
+        <ul class="items">
+          <li>Fixed Gemini env-key conflict (<code>GOOGLE_API_KEY</code> shadowing) — Gemini 2.5 Flash now live</li>
+          <li>Created <code>awos.py</code> — single entry point from project root with startup banner</li>
+          <li>Added <code>check_guard()</code> to <code>TokenTracker</code> — hard stop at 100%, warn at 90%</li>
+          <li>Wired guardrails into every <code>_call_deepseek</code> / <code>_call_anthropic</code> invocation</li>
+          <li>Enhanced <code>show_status()</code> — visual bar, per-model table, projection, cache stats</li>
+          <li>Added <code>debug</code> command (toggle in chat), per-request <code>[model | $cost]</code> tag</li>
+          <li>Budget controlled via <code>AWOS_MONTHLY_BUDGET</code> env var</li>
+          <li>Added <code>reset_task()</code> to <code>EscalationEngine</code>, <code>recent()</code> to <code>ExampleStore</code>, <code>hit_rate_float()</code> to <code>ResponseCache</code></li>
+        </ul>
+        <div class="status"><span class="badge badge-green">✓ Complete</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 4. FILES ═══ -->
+  <section id="files">
+    <h2>4 · All Files Created / Modified</h2>
+    <table>
+      <tr><th>File</th><th>Status</th><th>What changed</th></tr>
+      <tr><td><code>awos.py</code></td><td><span class="badge badge-blue">NEW</span></td><td>Single project-root launcher — loads .env, fixes Gemini key conflict, runs interactive chat</td></tr>
+      <tr><td><code>sandbox_test.py</code></td><td><span class="badge badge-blue">NEW</span></td><td>Full self-improvement sandbox: API health checks, Gemini planning, DeepSeek execution, Verifier, diff output, $0.50 budget guard</td></tr>
+      <tr><td><code>scaffold/agent/escalation_engine.py</code></td><td><span class="badge badge-blue">NEW</span></td><td>5-tier model ladder (Flash Lite → DeepSeek → Haiku → Sonnet → Opus) with complexity, failure, budget gates</td></tr>
+      <tr><td><code>scaffold/agent/example_store.py</code></td><td><span class="badge badge-blue">NEW</span></td><td>Few-shot example store — records successful SEARCH/REPLACE pairs, retrieves by keyword overlap for prompt injection</td></tr>
+      <tr><td><code>scaffold/agent/response_cache.py</code></td><td><span class="badge badge-blue">NEW</span></td><td>TTL-based response deduplication cache — 15-min TTL, 1000-entry cap, hit/miss tracking</td></tr>
+      <tr><td><code>scaffold/agent/git_manager.py</code></td><td><span class="badge badge-blue">NEW</span></td><td>Safe git branch creation, per-file backup, and full rollback on task failure</td></tr>
+      <tr><td><code>scaffold/agent/symbol_index.py</code></td><td><span class="badge badge-blue">NEW</span></td><td>Cross-file AST symbol extraction + import graph for worker context injection</td></tr>
+      <tr><td><code>scaffold/agent/worker.py</code></td><td><span class="badge badge-yellow">MODIFIED</span></td><td>Fixed response parsing, added escalation/example-store params, CoT prefix, self-verify, multi-provider routing</td></tr>
+      <tr><td><code>scaffold/agent/orchestrator.py</code></td><td><span class="badge badge-yellow">MODIFIED</span></td><td>Wired GitManager, EscalationEngine, ExampleStore into execute_feature()</td></tr>
+      <tr><td><code>scaffold/agent/unified_agent.py</code></td><td><span class="badge badge-yellow">MODIFIED</span></td><td>Added PLANNER_WORKER route, ResponseCache wiring, guardrails, debug mode, per-request cost tag, startup banner</td></tr>
+      <tr><td><code>scaffold/agent/token_tracker.py</code></td><td><span class="badge badge-yellow">MODIFIED</span></td><td>Added planning/execution types, budget alerts, cache savings, check_guard(), enhanced show_status() with visual bar + projection</td></tr>
+      <tr><td><code>scaffold/agent/cheap_planner.py</code></td><td><span class="badge badge-yellow">MODIFIED</span></td><td>Migrated to google.genai SDK, Gemini 2.5 Flash, fixed pricing, fixed GOOGLE_API_KEY conflict, added symbol injection</td></tr>
+      <tr><td><code>scaffold/agent/planner.py</code></td><td><span class="badge badge-yellow">MODIFIED</span></td><td>Added symbol injection to prompt, Anthropic prompt caching on stable system instructions</td></tr>
+      <tr><td><code>scaffold/agent/model_selector.py</code></td><td><span class="badge badge-yellow">MODIFIED</span></td><td>Fixed Gemini, Sonnet, Haiku pricing to May 2026 actuals</td></tr>
+      <tr><td><code>scaffold/agent/coding_model_router.py</code></td><td><span class="badge badge-yellow">MODIFIED</span></td><td>Fixed DeepSeek output cost, Sonnet pricing, cache savings logic (input-only)</td></tr>
+      <tr><td><code>scaffold/agent/cartographer.py</code></td><td><span class="badge badge-yellow">MODIFIED</span></td><td>Updated to tree-sitter v0.25 API</td></tr>
+      <tr><td><code>scaffold/agent/self_improver.py</code></td><td><span class="badge badge-yellow">MODIFIED</span></td><td>Replaced broad keyword match with SELF_REFS + IMPROVEMENT_VERBS (no more false positives)</td></tr>
+      <tr><td><code>scaffold/agent/session_memory.py</code></td><td><span class="badge badge-yellow">MODIFIED</span></td><td>Removed module-level print() that ran on every import</td></tr>
+      <tr><td><code>test_phase1.py</code></td><td><span class="badge badge-yellow">MODIFIED</span></td><td>Extended: GitManager, SymbolIndex, ResponseCache, EscalationEngine, ExampleStore tests — 12/12 passing</td></tr>
+    </table>
+  </section>
+
+  <!-- ═══ 5. MODELS ═══ -->
+  <section id="models">
+    <h2>5 · Model Ladder &amp; Pricing (May 2026)</h2>
+    <table>
+      <tr><th>Tier</th><th>Model</th><th>Input / 1M</th><th>Output / 1M</th><th>Use case</th><th>Status</th></tr>
+      <tr><td>1 (cheapest)</td><td><code>gemini-2.5-flash</code></td><td>$0.15</td><td>$0.60</td><td>Planning, cheap routing</td><td><span class="badge badge-green">✅ Live</span></td></tr>
+      <tr><td>2</td><td><code>deepseek-chat</code> (V4 Flash)</td><td>$0.14</td><td>$0.28</td><td>Code execution, SEARCH/REPLACE</td><td><span class="badge badge-green">✅ Live</span></td></tr>
+      <tr><td>3</td><td><code>claude-haiku-4-5</code></td><td>$0.80</td><td>$4.00</td><td>Reasoning, fallback from DeepSeek</td><td><span class="badge badge-green">✅ Live</span></td></tr>
+      <tr><td>4</td><td><code>claude-sonnet-4-5</code></td><td>$3.00</td><td>$15.00</td><td>Complex multi-file planning</td><td><span class="badge badge-yellow">Available</span></td></tr>
+      <tr><td>5 (most powerful)</td><td><code>claude-opus-4-5</code></td><td>$5.00</td><td>$25.00</td><td>Architectural decisions only</td><td><span class="badge badge-yellow">Available</span></td></tr>
+    </table>
+    <div class="callout" style="margin-top:14px;">
+      <strong>Escalation gates:</strong> complexity score &lt;4 → Tier 2 (DeepSeek) · complexity 4–6 → Tier 3 (Haiku) · failures ≥2 → escalate one tier · budget &lt;10% → lock to Tier 1–2 · explicit "use Opus" → Tier 5.
+    </div>
+  </section>
+
+  <!-- ═══ 6. ADVANCED TRICKS ═══ -->
+  <section id="advanced">
+    <h2>6 · Advanced Intelligence Tricks — All Active</h2>
+    <div class="card-grid">
+      <div class="card">
+        <div class="title">⛓ Chain-of-Thought Prefix</div>
+        <div class="desc">Every worker prompt begins with a structured reasoning scaffold: understand task → identify anchor → write SEARCH/REPLACE → verify. Forces step-by-step reasoning before output.</div>
+        <div class="status"><span class="badge badge-green">Active</span></div>
+      </div>
+      <div class="card">
+        <div class="title">🔍 Self-Verification</div>
+        <div class="desc">After generating SEARCH/REPLACE, worker checks <code>search_str in file_content</code> before calling Verifier. Catches hallucinated SEARCH strings before they waste a round-trip.</div>
+        <div class="status"><span class="badge badge-green">Active — 2 retries max</span></div>
+      </div>
+      <div class="card">
+        <div class="title">📖 Few-Shot Example Injection</div>
+        <div class="desc">ExampleStore retrieves past successful SEARCH/REPLACE pairs by keyword overlap. Injected into worker prompt as format references. Grows with every successful task.</div>
+        <div class="status"><span class="badge badge-green">Active — top 2 examples</span></div>
+      </div>
+      <div class="card">
+        <div class="title">🗺 Symbol Context</div>
+        <div class="desc">SymbolIndex extracts all class/function names + import graph across all <code>.py</code> files. Injected into planner and worker prompts so models know real symbol names.</div>
+        <div class="status"><span class="badge badge-green">Active</span></div>
+      </div>
+      <div class="card">
+        <div class="title">💾 Prompt Caching</div>
+        <div class="desc">Anthropic <code>cache_control</code> on stable system instructions in <code>planner.py</code>. Repeated planning calls hit cache at ~10% of input cost.</div>
+        <div class="status"><span class="badge badge-green">Active — Anthropic only</span></div>
+      </div>
+      <div class="card">
+        <div class="title">🔄 Response Cache</div>
+        <div class="desc">TTL-based deduplication in <code>UnifiedAgent</code>. Identical or near-identical requests hit cache (free). 15-min TTL, MD5 key on normalized input.</div>
+        <div class="status"><span class="badge badge-green">Active — 15-min TTL</span></div>
+      </div>
+      <div class="card">
+        <div class="title">📈 Escalation Engine</div>
+        <div class="desc">5-tier model ladder — starts cheap, escalates on evidence. Gates: complexity score, consecutive failure count, budget remaining, explicit user keyword.</div>
+        <div class="status"><span class="badge badge-green">Active — all 5 tiers</span></div>
+      </div>
+      <div class="card">
+        <div class="title">📚 Session Memory</div>
+        <div class="desc">Hybrid strategy: recent messages kept in full, old messages summarized. Session saved to disk and resumable with <code>--resume &lt;id&gt;</code>.</div>
+        <div class="status"><span class="badge badge-green">Active</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 7. GUARDRAILS ═══ -->
+  <section id="guardrails">
+    <h2>7 · Guardrails &amp; Budget Monitor</h2>
+    <h3>How it works</h3>
+    <table>
+      <tr><th>Trigger</th><th>Action</th></tr>
+      <tr><td>Spent ≥ 100% of budget</td><td><strong>Hard stop</strong> — all API calls blocked, clear error message returned to user</td></tr>
+      <tr><td>Estimated cost of next call > remaining budget</td><td>Hard stop before the call is made</td></tr>
+      <tr><td>Spent ≥ 90% of budget</td><td>Warning printed before each call, but not blocked</td></tr>
+      <tr><td>Budget threshold crossed (50% / 75% / 90%)</td><td>One-time alert printed (fires exactly once per threshold)</td></tr>
+    </table>
+    <h3>Environment Variables</h3>
+    <table>
+      <tr><th>Variable</th><th>Default</th><th>Effect</th></tr>
+      <tr><td><code>AWOS_MONTHLY_BUDGET</code></td><td><code>20.0</code></td><td>Monthly $ cap — hard stop enforced against this</td></tr>
+      <tr><td><code>AWOS_DEBUG</code></td><td><code>0</code></td><td>Set to <code>1</code> to enable verbose routing info after each response</td></tr>
+      <tr><td><code>GEMINI_API_KEY</code></td><td>—</td><td>Gemini 2.5 Flash (planning)</td></tr>
+      <tr><td><code>DEEPSEEK_API_KEY</code></td><td>—</td><td>DeepSeek V4 Flash (execution)</td></tr>
+      <tr><td><code>ANTHROPIC_API_KEY</code></td><td>—</td><td>Claude Haiku / Sonnet / Opus (fallback + reasoning)</td></tr>
+      <tr><td><code>TAVILY_API_KEY</code></td><td>—</td><td>Web search tool</td></tr>
+    </table>
+    <h3>Budget Monitor (type <code>budget</code> in chat)</h3>
+    <pre><code>══════════════════════════════════════════════════
+  💰  AWOS BUDGET MONITOR
+══════════════════════════════════════════════════
+  [🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜]  5.0%
+  Spent:     $0.00159  of  $20.00 monthly cap
+  Remaining: $19.99841
+  Requests:  3  |  Tokens: 2,250
+  Cache:     2 hits (40% rate)  est. saved $0.00400
+
+  Model                     Reqs   Tokens       Cost
+  ────────────────────────  ─────  ──────────   ──────────
+  Claude Haiku 4.5             1       480    $ 0.00105
+  Gemini 2.5 Flash             1     1,000    $ 0.00033
+  DeepSeek V4 Flash            1       770    $ 0.00021
+
+  Monthly projection (1,516 reqs):  $0.81  ✅
+  Avg cost per request:             $0.000532
+══════════════════════════════════════════════════</code></pre>
+  </section>
+
+  <!-- ═══ 8. SANDBOX ═══ -->
+  <section id="sandbox">
+    <h2>8 · Sandbox Results — Agent Working on Itself</h2>
+    <div class="callout success">
+      <strong>All 3 sandbox tasks passed. Total cost: $0.0023 (0.46% of $0.50 cap).</strong>
+      Gemini 2.5 Flash planned the tasks; DeepSeek V4 Flash executed them in ~2s each.
+      Verifier syntax-checked every change before writing to disk.
+    </div>
+    <table style="margin-top:14px;">
+      <tr><th>#</th><th>File</th><th>Change Made</th><th>Model</th><th>Time</th><th>Cost</th><th>Result</th></tr>
+      <tr>
+        <td>1</td><td><code>example_store.py</code></td>
+        <td>Added <code>recent(n=5)</code> method returning last n examples as dicts</td>
+        <td>DeepSeek V4 Flash</td><td>2.2s</td><td>$0.00024</td>
+        <td><span class="badge badge-green">✅ Verified</span></td>
+      </tr>
+      <tr>
+        <td>2</td><td><code>escalation_engine.py</code></td>
+        <td>Added <code>reset_task(task_id)</code> method to clear task failure history</td>
+        <td>DeepSeek V4 Flash</td><td>2.7s</td><td>$0.00034</td>
+        <td><span class="badge badge-green">✅ Verified</span></td>
+      </tr>
+      <tr>
+        <td>3</td><td><code>response_cache.py</code></td>
+        <td>Added <code>hit_rate_float()</code> method; also self-corrected a duplicate method from a previous broken run</td>
+        <td>DeepSeek V4 Flash</td><td>3.0s</td><td>$0.00035</td>
+        <td><span class="badge badge-green">✅ Verified</span></td>
+      </tr>
+    </table>
+    <h3>Pipeline Bugs Found &amp; Fixed During Sandbox</h3>
+    <ul style="margin:10px 0 0 22px; color:var(--muted); font-size:13px; line-height:1.9;">
+      <li>Verifier returns key <code>"success"</code> not <code>"valid"</code> — sandbox was checking wrong key</li>
+      <li><code>errs[0]</code> crashed when <code>errors</code> list was empty — added <code>if errs else fallback</code></li>
+      <li>File pre-written before <code>verify_and_apply()</code> → SEARCH no longer in file → double-apply bug — removed premature write</li>
+      <li>Add-method tasks needed anchor-based SEARCH prompts — model was hallucinating SEARCH for new (non-existent) code</li>
+      <li>Gemini SDK picks <code>GOOGLE_API_KEY</code> from env even when <code>api_key=</code> passed explicitly — shadow-pop fix</li>
+      <li>Corrupted <code>EscalationDecision</code> dataclass from broken sandbox run (duplicate <code>__repr__</code>, misplaced fields) — restored</li>
+    </ul>
+  </section>
+
+  <!-- ═══ 9. HOW TO RUN ═══ -->
+  <section id="howto">
+    <h2>9 · How to Run</h2>
+    <h3>Start the interactive chat</h3>
+    <pre><code>cd /home/becmachlean/2024/projects/AWOS_coding_agent
+python awos.py</code></pre>
+    <h3>Commands inside the chat</h3>
+    <table>
+      <tr><th>Command</th><th>Action</th></tr>
+      <tr><td><code>budget</code></td><td>Show the full budget monitor dashboard</td></tr>
+      <tr><td><code>debug</code></td><td>Toggle verbose mode (shows model used, routing decision, cost per request)</td></tr>
+      <tr><td><code>help</code> / <code>?</code></td><td>Show help text</td></tr>
+      <tr><td><code>exit</code> / <code>quit</code></td><td>Save session and quit</td></tr>
+    </table>
+    <h3>Other entry points</h3>
+    <pre><code>python awos.py "explain this project"        # single query
+python awos.py --budget                       # just show budget
+AWOS_DEBUG=1 python awos.py                  # verbose mode from start
+AWOS_MONTHLY_BUDGET=50 python awos.py        # raise budget cap to $50
+
+python sandbox_test.py                       # run self-improvement sandbox
+python test_phase1.py                        # run 12-test unit suite</code></pre>
+  </section>
+
+  <!-- ═══ 10. PENDING ═══ -->
+  <section id="pending">
+    <h2>10 · Pending / Next Steps</h2>
+    <div class="card-grid">
+      <div class="card">
+        <div class="title">🧠 Persistent Vector Memory</div>
+        <div class="desc">Embed all interactions into a vector DB (ChromaDB / FAISS). Agent currently forgets everything between sessions.</div>
+        <div class="status"><span class="badge badge-yellow">Not started</span></div>
+      </div>
+      <div class="card">
+        <div class="title">⚡ Parallel Tool Execution</div>
+        <div class="desc">Run independent worker tasks concurrently with <code>asyncio.gather()</code>. Currently all tasks are sequential.</div>
+        <div class="status"><span class="badge badge-yellow">Not started</span></div>
+      </div>
+      <div class="card">
+        <div class="title">🔁 Failure Recovery</div>
+        <div class="desc">If a task fails after 2 retries + escalation, auto-generate a simplified sub-task rather than giving up.</div>
+        <div class="status"><span class="badge badge-yellow">Not started</span></div>
+      </div>
+      <div class="card">
+        <div class="title">📋 Sandbox Task Quality</div>
+        <div class="desc">Gemini planner suggests tasks it doesn't verify against actual file content. Need to feed real symbol index into planner before it generates tasks.</div>
+        <div class="status"><span class="badge badge-yellow">Partial</span></div>
+      </div>
+      <div class="card">
+        <div class="title">🛠 Tool Reflection</div>
+        <div class="desc">Agent can't learn which tools work for which patterns. Add tool-outcome logging + retrieval.</div>
+        <div class="status"><span class="badge badge-yellow">Not started</span></div>
+      </div>
+      <div class="card">
+        <div class="title">📊 Monthly Cost Dashboard</div>
+        <div class="desc">Persist token tracker to disk so budget carries across sessions. Currently resets per session.</div>
+        <div class="status"><span class="badge badge-yellow">Not started</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 11. BUGS FIXED ═══ -->
+  <section id="bugs">
+    <h2>11 · All Bugs Fixed This Audit</h2>
+    <table>
+      <tr><th>#</th><th>Location</th><th>Bug</th><th>Fix</th></tr>
+      <tr><td>1</td><td><code>worker.py</code></td><td>Used Anthropic response format (<code>response.content[0].text</code>) on OpenAI SDK response</td><td><code>response.choices[0].message.content</code></td></tr>
+      <tr><td>2</td><td><code>worker.py</code></td><td>Haiku fallback was a recursive call to same method with same provider — infinite loop risk</td><td>Real Anthropic client instantiated for Haiku</td></tr>
+      <tr><td>3</td><td><code>model_selector.py</code></td><td>Sonnet output priced at $27/1M (was $9 — both wrong)</td><td>$15.00/1M output</td></tr>
+      <tr><td>4</td><td><code>coding_model_router.py</code></td><td>DeepSeek output cost $0.14/1M (same as input — wrong)</td><td>$0.28/1M output</td></tr>
+      <tr><td>5</td><td><code>coding_model_router.py</code></td><td>Cache savings applied to output tokens (caching never applies to output)</td><td>Savings only on input tokens at cache read price</td></tr>
+      <tr><td>6</td><td><code>cheap_planner.py</code></td><td>Used deprecated <code>google.generativeai</code> SDK</td><td>Migrated to <code>google.genai</code> with <code>genai.Client</code></td></tr>
+      <tr><td>7</td><td><code>cheap_planner.py</code></td><td><code>GOOGLE_API_KEY</code> env var causes SDK to ignore explicit <code>api_key=</code> param</td><td>Shadow-pop <code>GOOGLE_API_KEY</code> before Client creation, restore after</td></tr>
+      <tr><td>8</td><td><code>token_tracker.py</code></td><td><code>KeyError</code> on <code>planning</code> / <code>execution</code> request types</td><td>Added to <code>requests</code> dict; <code>record()</code> now creates missing keys dynamically</td></tr>
+      <tr><td>9</td><td><code>cartographer.py</code></td><td>Used tree-sitter v0.20 API (<code>Language('path.so', 'name')</code>)</td><td>Updated to v0.25: <code>Language(tspython.language())</code></td></tr>
+      <tr><td>10</td><td><code>session_memory.py</code></td><td>Module-level <code>print()</code> ran on every import</td><td>Removed</td></tr>
+      <tr><td>11</td><td><code>sandbox_test.py</code></td><td>Checked <code>verify.get("valid")</code> — Verifier uses key <code>"success"</code></td><td>Fixed to <code>verify.get("success")</code></td></tr>
+      <tr><td>12</td><td><code>sandbox_test.py</code></td><td><code>errs[0]</code> crashed when <code>errors</code> list empty</td><td>Guard: <code>errs[0] if errs else fallback_msg</code></td></tr>
+      <tr><td>13</td><td><code>sandbox_test.py</code></td><td>File written to disk before <code>verify_and_apply()</code> — SEARCH no longer findable (double-apply)</td><td>Removed premature write; Verifier now does apply + verify atomically</td></tr>
+      <tr><td>14</td><td><code>escalation_engine.py</code></td><td>Broken sandbox run injected duplicate <code>__repr__</code> + misplaced dataclass fields</td><td>Restored correct field ordering and single <code>__repr__</code></td></tr>
+      <tr><td>15</td><td><code>example_store.py</code></td><td>Sandbox ran 3 times on same file — triple-duplicated <code>unlink()</code> in <code>clear()</code></td><td>Collapsed to single call</td></tr>
+      <tr><td>16</td><td><code>self_improver.py</code></td><td>Over-broad keyword matching caused false positives on any "improve" mention</td><td>Replaced with targeted SELF_REFS + IMPROVEMENT_VERBS</td></tr>
+    </table>
+  </section>
+
+  <div style="margin-top:40px; padding-top:20px; border-top:1px solid var(--border); color:var(--muted); font-size:12px; text-align:center;">
+    AWOS Checkpoint · Generated May 16 2026 · Sessions 1–6 · 12/12 tests passing · $0.0023 sandbox cost
+  </div>
+
+</div>
+</body>
+</html>

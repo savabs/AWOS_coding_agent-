@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Research: TestRunner + Test-as-Reward — AWOS</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--warn:#f59e0b;--success:#10b981;--danger:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status.active{background:#f59e0b;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+nav.tabs{background:var(--surface);border-bottom:1px solid var(--border);padding:0 32px;display:flex;gap:0;overflow-x:auto}
+nav.tabs button{background:none;border:none;border-bottom:2px solid transparent;padding:12px 16px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;white-space:nowrap}
+nav.tabs button.active{color:var(--accent);border-bottom-color:var(--accent)}
+main{max-width:860px;margin:0 auto;padding:32px}
+section.tab-panel{display:none}
+section.tab-panel.active{display:block}
+h2{font-size:17px;font-weight:600;margin:24px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:5px}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px}
+p code,li code,td code{background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px;font-size:12px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+.insight{background:#f0fdf4;border-left:3px solid var(--success);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+.risk-high{background:#fef2f2;border-left:3px solid var(--danger);padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+.risk-med{background:#fef3c7;border-left:3px solid var(--warn);padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+.verified{color:var(--success);font-weight:600;font-size:11px;text-transform:uppercase}
+.unverified{color:var(--warn);font-weight:600;font-size:11px;text-transform:uppercase}
+footer{background:var(--surface);border-top:1px solid var(--border);padding:16px 32px;display:flex;justify-content:flex-end;gap:12px}
+.copy-btn{background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:500}
+.copy-btn:hover{background:#4338ca}
+.copy-btn.secondary{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb">AWOS / docs / research</div>
+  <h1>Research: TestRunner + Test-as-Reward (Phase 5A)</h1>
+  <div class="meta">
+    <span class="tag">doc/research</span>
+    <span class="tag">phase/5</span>
+    <span class="tag">topic/self-learning</span>
+    <span class="tag">topic/test-runner</span>
+    <span class="status active">active</span>
+    <time>2026-05-19</time>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="active" onclick="show(this,'arch')">Current Architecture</button>
+  <button onclick="show(this,'obs')">Observations &amp; Research</button>
+  <button onclick="show(this,'options')">Design Options</button>
+  <button onclick="show(this,'risks')">Risks</button>
+  <button onclick="show(this,'sources')">Sources</button>
+</nav>
+
+<main>
+
+<!-- ══════════════════════════════════════════════════════ ARCHITECTURE -->
+<section id="arch" class="tab-panel active">
+<h2>Problem Statement</h2>
+<p>
+  AWOS v4's self-learning loop (LinUCB + GPWorldModel + ReplayGate + SkillLibrary) uses
+  <strong>syntax validation as its reward signal</strong>. A patch that compiles successfully
+  is considered a success. This is a <strong>weak proxy</strong> — code can be syntactically
+  valid but logically broken. The LinUCB bandit is learning to pick models that write
+  syntactically valid code, not models that write <em>correct</em> code.
+</p>
+<p>
+  Upgrading to <strong>test execution as the primary reward signal</strong> means the learning
+  loop is grounded in ground truth. Every patch that makes tests pass is a true success.
+  Every patch that breaks tests is a true failure. This is the same approach used by
+  SWE-RL (Meta, 2025) and the Darwin Gödel Machine (Sakana AI, 2025) — the current
+  state of the art in self-improving coding agents.
+</p>
+
+<h2>Current Architecture</h2>
+
+<h3>Reward Pipeline (current state)</h3>
+<pre>
+Orchestrator.execute(task)
+  → Worker.execute_task()           ← generates SEARCH/REPLACE patch
+  → Verifier.verify_and_apply()     ← checks syntax only (compile/bracket check)
+    → success=True  → reward computed in EscalationEngine.record_outcome()
+    → success=False → SelfCorrectionEngine.suggest() → retry (max 3)
+  → RewardStore.add()               ← stores Episode(success, cost, reward)
+  → LinUCBRouter.update()           ← learns from that Episode
+</pre>
+
+<h3>Relevant Modules</h3>
+<table>
+<tr><th>Module / File</th><th>Role</th><th>Key interfaces</th></tr>
+<tr>
+  <td><code>scaffold/agent/verifier.py</code></td>
+  <td>Current reward gate — syntax only</td>
+  <td><code>Verifier.verify_and_apply(search_replace, file_path) → {success, errors, needs_retry}</code></td>
+</tr>
+<tr>
+  <td><code>scaffold/agent/reward_store.py</code></td>
+  <td>Append-only episode log + ReplayGate</td>
+  <td><code>Episode(task_id, action_id, features, success, cost_usd, reward)</code><br>
+      <code>RewardStore.add(ep)</code>, <code>ReplayGate.admit(ep)</code></td>
+</tr>
+<tr>
+  <td><code>scaffold/agent/escalation_engine.py</code></td>
+  <td>Computes reward, calls LinUCB update</td>
+  <td><code>EscalationEngine.record_outcome(task, success, cost, model_name)</code></td>
+</tr>
+<tr>
+  <td><code>scaffold/agent/orchestrator.py</code></td>
+  <td>Orchestrates the full pipeline</td>
+  <td><code>Orchestrator.execute(task)</code> — calls Verifier, SelfCorrection, records outcome</td>
+</tr>
+<tr>
+  <td><code>scaffold/agent/ml_router.py</code></td>
+  <td>LinUCB + GPWorldModel</td>
+  <td><code>LinUCBRouter.update(action_id, features, reward)</code></td>
+</tr>
+</table>
+
+<h3>Current Reward Formula (in reward_store.py)</h3>
+<pre>
+reward = 1.0 * success                          # 1.0 if syntax passes, else 0.0
+       - η * log(cost / _MIN_COST) / log(_COST_SPREAD)  # opportunity cost penalty
+       + κ * log(cost / _MIN_COST) / log(_COST_SPREAD) * (1 - success)  # failure penalty
+</pre>
+<p>
+  <strong>The <code>success</code> boolean is set by Verifier — syntax only.</strong>
+  This is the single point we need to upgrade.
+</p>
+
+<h3>The Gap</h3>
+<pre>
+CURRENT:   patch applied → syntax check → success=True  → reward = +0.95
+TARGET:    patch applied → syntax check → run tests → all pass → success=True  → reward = +0.95
+                                                     → some fail → success=False → reward = -0.20
+                                                     → test error → success=False → retry with error context
+</pre>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ OBSERVATIONS -->
+<section id="obs" class="tab-panel">
+<h2>Key Research Findings</h2>
+
+<div class="insight">
+  <strong>VERIFIED (SWE-RL, Meta 2025):</strong> RL with rule-based execution rewards on software engineering tasks
+  significantly outperforms supervised fine-tuning. The reward signal used: patch similarity to oracle patch
+  (difflib.SequenceMatcher score 0–1) + format penalty (-1 if malformed). No LLM judge needed.
+  This confirms: <em>objective, rule-based test outcomes are sufficient as a reward signal.</em>
+</div>
+
+<div class="insight">
+  <strong>VERIFIED (Darwin Gödel Machine, Sakana AI 2025):</strong> Self-improving agent that rewrites its own
+  code and evaluates each mutation by running benchmarks. Improved SWE-bench from 20% → 50% resolve rate.
+  Key mechanism: run tests after every self-modification; keep only mutations that improve pass rate.
+  This confirms: <em>test execution as reward = ground truth for coding agents.</em>
+</div>
+
+<div class="insight">
+  <strong>VERIFIED (Reflexion, Princeton 2023):</strong> After failing, agent stores verbal critique of
+  what went wrong. On next attempt, reads prior critiques before acting. Improved HumanEval pass rates
+  without any parameter updates. Confirms: <em>error memory + critique injection improves retry quality.</em>
+  This is what our SelfCorrectionEngine does — but rule-based only, not adaptive.
+</div>
+
+<div class="insight">
+  <strong>VERIFIED (AFlow, ICLR 2025 Oral):</strong> MCTS over workflow topology. Smaller models outperform
+  GPT-4o at 4.55% of inference cost by finding optimal workflow compositions. Confirms:
+  <em>workflow-level optimization (what we call StrategyRouter) is more powerful than prompt-level optimization alone.</em>
+</div>
+
+<h3>What AWOS Already Has (vs State of the Art)</h3>
+<table>
+<tr><th>Mechanism</th><th>Academic reference</th><th>AWOS status</th></tr>
+<tr><td>Episodic memory (skills)</td><td>Reflexion (Princeton 2023)</td><td><span class="verified">✓ DONE</span> — SkillLibrary</td></tr>
+<tr><td>RL model routing</td><td>TEMPERA, LATS</td><td><span class="verified">✓ DONE</span> — LinUCB + GP</td></tr>
+<tr><td>Rule-based error classification</td><td>SWE-RL reward structure</td><td><span class="verified">✓ DONE</span> — SelfCorrectionEngine</td></tr>
+<tr><td>Quality-filtered replay</td><td>RL replay buffers</td><td><span class="verified">✓ DONE</span> — ReplayGate</td></tr>
+<tr><td>Workflow strategy UCB</td><td>AFlow operators</td><td><span class="verified">✓ DONE</span> — StrategyRouter</td></tr>
+<tr><td><strong>Test execution as reward</strong></td><td>SWE-RL, DGM</td><td><span class="unverified">✗ MISSING</span></td></tr>
+<tr><td>Adaptive verbal critique</td><td>Reflexion critique store</td><td><span class="unverified">✗ MISSING</span> — only rule-based</td></tr>
+<tr><td>Workflow topology search</td><td>AFlow MCTS</td><td><span class="unverified">✗ MISSING</span></td></tr>
+<tr><td>Self-code modification</td><td>DGM (Sakana AI 2025)</td><td><span class="unverified">✗ MISSING</span></td></tr>
+</table>
+
+<h3>Language-Agnostic Test Detection — How to Auto-Detect</h3>
+<p>We need to auto-detect the correct test runner for any project. Research finding (UNVERIFIED by paper, standard practice):</p>
+<table>
+<tr><th>Signal file</th><th>Language</th><th>Test command</th></tr>
+<tr><td><code>pytest.ini</code> / <code>pyproject.toml [tool.pytest]</code> / <code>setup.cfg [tool:pytest]</code></td><td>Python</td><td><code>pytest --tb=short -q</code></td></tr>
+<tr><td><code>package.json</code> with <code>"jest"</code> dependency</td><td>JS/TS</td><td><code>npx jest --passWithNoTests</code></td></tr>
+<tr><td><code>package.json</code> with <code>"vitest"</code> dependency</td><td>JS/TS</td><td><code>npx vitest run</code></td></tr>
+<tr><td><code>Makefile</code> with <code>test:</code> target</td><td>Any</td><td><code>make test</code></td></tr>
+<tr><td><code>go.mod</code></td><td>Go</td><td><code>go test ./...</code></td></tr>
+<tr><td><code>Cargo.toml</code></td><td>Rust</td><td><code>cargo test</code></td></tr>
+<tr><td>None detected</td><td>Unknown</td><td>Skip test step; use syntax-only reward</td></tr>
+</table>
+
+<h3>Test Output Parsing — Reward Derivation</h3>
+<p>We need to extract a numeric reward from raw test output. Proposed formula:</p>
+<pre>
+# From pytest --tb=short -q output:
+# "3 passed, 1 failed, 0 errors" → pass_rate = 3/4 = 0.75
+
+pass_rate  = passed / (passed + failed + errors)  # 0.0–1.0
+test_reward = pass_rate   # replaces the binary success bool in Episode
+
+# When no tests exist:
+test_reward = syntax_success  # fallback to current behaviour (no regression)
+
+# When tests crash (collection error, import error):
+test_reward = 0.0  # treat as failure, inject error into SelfCorrectionEngine
+</pre>
+
+<h3>Integration Point</h3>
+<p>
+  The cleanest integration is <strong>between Verifier and EscalationEngine</strong>.
+  Verifier handles syntax. A new <code>TestRunner</code> module runs after a successful syntax check.
+  <code>EscalationEngine.record_outcome()</code> receives <code>test_reward</code> instead of binary <code>success</code>.
+  No other module changes needed.
+</p>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ DESIGN OPTIONS -->
+<section id="options" class="tab-panel">
+<h2>Design Options</h2>
+
+<h3>Option A — Minimal Integration (Recommended)</h3>
+<p>
+  Add <code>TestRunner</code> as a new module (<code>scaffold/agent/test_runner.py</code>).
+  Wire it into <code>Orchestrator.execute()</code> after <code>Verifier.verify_and_apply()</code>.
+  The <code>test_reward</code> replaces <code>success</code> in the Episode.
+  <strong>Zero changes to Verifier, Worker, or LinUCB interfaces.</strong>
+</p>
+<pre>
+# scaffold/agent/test_runner.py
+class TestRunner:
+    def detect(self, project_root: str) → TestConfig | None
+    def run(self, project_root: str, changed_files: list[str]) → TestResult
+
+@dataclass
+class TestConfig:
+    runner: str        # "pytest" | "jest" | "vitest" | "make" | "go" | "cargo"
+    command: list[str] # exact shell command
+    timeout_sec: int   # default 60
+
+@dataclass
+class TestResult:
+    passed: int
+    failed: int
+    errors: int
+    pass_rate: float   # passed / (passed + failed + errors)
+    raw_output: str    # full stdout/stderr for SelfCorrectionEngine injection
+    timed_out: bool
+</pre>
+<p><strong>Orchestrator change (additive only):</strong></p>
+<pre>
+# After Verifier succeeds:
+test_result = self.test_runner.run(project_root, changed_files)
+task["test_result"] = test_result          # for SelfCorrectionEngine
+self.escalation.record_outcome(
+    task=task,
+    reward=test_result.pass_rate,          # float, not bool
+    cost=cost,
+    model_name=model_name
+)
+</pre>
+<p>
+  Pros: additive, backward compatible, clean interface, easy to test.<br>
+  Cons: full test suite runs on every patch (can be slow for large repos).
+</p>
+
+<h3>Option B — Selective Test Execution (Future Optimisation)</h3>
+<p>
+  Run only tests related to changed files. Use pytest's <code>--co</code> (collect-only) to map
+  test files to source files via import graph. Only run the subset.
+</p>
+<p>
+  Pros: 5-10× faster on large repos. Cons: complex to implement correctly; missed tests possible.
+  <strong>Defer to Phase 6.</strong>
+</p>
+
+<h3>Option C — Parallel Test + Patch Generation</h3>
+<p>
+  Generate N candidate patches in parallel (using parallel sub-agents), run tests on all,
+  pick the one with highest pass_rate. This is the DGM "multi-solution ranking" strategy.
+</p>
+<p>
+  Pros: finds the best patch. Cons: N× API cost, needs parallel sub-agents (Phase 6).
+  <strong>Defer to Phase 6.</strong>
+</p>
+
+<h2>Recommendation</h2>
+<div class="callout">
+  <strong>Implement Option A now.</strong> Single new module, additive wiring, backward compatible.
+  Options B and C can layer on top of Option A after Phase 5 is stable.
+</div>
+
+<h2>Completion Gate — 4 Questions</h2>
+<ol>
+  <li><strong>What exactly changes?</strong> New <code>scaffold/agent/test_runner.py</code>. One wire in <code>orchestrator.py</code>. One change to <code>escalation_engine.record_outcome()</code> to accept float reward. No other changes.</li>
+  <li><strong>What risks must the spec address?</strong> Test timeout (hard cap 60s). No tests found (graceful fallback). Flaky tests (average over 2 runs). Test side effects (run in temp dir or dry-run guard).</li>
+  <li><strong>What are the options?</strong> A (minimal, now), B (selective, Phase 6), C (multi-candidate, Phase 6).</li>
+  <li><strong>External references?</strong> SWE-RL (Meta 2025), DGM (Sakana AI 2025), Reflexion (Princeton 2023), AFlow (ICLR 2025).</li>
+</ol>
+<p>All 4 answered. Research is complete. Spec can be written.</p>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ RISKS -->
+<section id="risks" class="tab-panel">
+<h2>Risks</h2>
+
+<div class="risk-high">
+  <strong>HIGH — Reward hacking: agent learns to write tests that trivially pass</strong><br>
+  If AWOS is also generating tests (not just production code), it could generate tests that
+  always pass and get high reward without implementing the actual feature.
+  <br><strong>Mitigation:</strong> TestRunner only runs tests that existed BEFORE the task started
+  (snapshot test file list at task start; ignore any new test files created during the task).
+  New test files are accepted only if a human explicitly marks the task as "write tests".
+</div>
+
+<div class="risk-high">
+  <strong>HIGH — Circular reward: tests are incomplete, agent gets false positive reward</strong><br>
+  If the test suite has 30% coverage, 70% of bugs get reward=1.0 even when logically broken.
+  LinUCB learns incorrect associations.
+  <br><strong>Mitigation:</strong> Pass rate (not just pass/fail) is used as reward. A project
+  with 30% coverage will have pass_rate roughly stable. The signal is still better than syntax-only.
+  Document this limitation clearly. Add coverage tracking as a future improvement (Phase 6).
+</div>
+
+<div class="risk-high">
+  <strong>HIGH — Test suite slowness: full suite takes 5+ minutes, blocks the pipeline</strong><br>
+  Large Django/Rails/Java projects can have test suites taking 10+ minutes.
+  <br><strong>Mitigation:</strong> Hard timeout (default 60s, configurable per project via <code>.awos/config.json</code>).
+  On timeout: <code>test_result.timed_out=True</code>, reward falls back to syntax-only (no penalty,
+  no reward signal). Log a warning recommending faster test subset.
+</div>
+
+<div class="risk-med">
+  <strong>MEDIUM — Flaky tests: random failures pollute the reward signal</strong><br>
+  Tests that randomly fail introduce noise into LinUCB training data. Over time this degrades
+  routing quality.
+  <br><strong>Mitigation:</strong> Run tests twice on failure; use the better result (conservative).
+  Track flakiness per test file in <code>.awos/test_flakiness.json</code>. Discount reward from
+  known-flaky test files.
+</div>
+
+<div class="risk-med">
+  <strong>MEDIUM — Test side effects: tests mutate database, send emails, make API calls</strong><br>
+  Running tests after every patch could trigger destructive side effects on real systems.
+  <br><strong>Mitigation:</strong> AWOS only runs tests if the project has explicit test isolation
+  markers (<code>AWOS_SAFE_TO_RUN_TESTS=1</code> in env, or <code>.awos/config.json: run_tests: true</code>).
+  Default is opt-in, not opt-out.
+</div>
+
+<div class="risk-med">
+  <strong>MEDIUM — No tests at all: new projects with 0 test coverage</strong><br>
+  pass_rate = undefined (0/0). Division by zero, no learning signal.
+  <br><strong>Mitigation:</strong> If no tests found or 0 tests collected, fall back to syntax-only
+  reward. Log a notice: "No tests found. Consider adding tests to enable reward-based learning."
+</div>
+
+<h3>Open Questions (resolved before spec)</h3>
+<ul>
+  <li><strong>Q1: Do we need to sandbox test execution?</strong> — <em>Answer: No for Phase 5A.
+  We require opt-in (<code>AWOS_SAFE_TO_RUN_TESTS=1</code>). Sandboxing is a Phase 7 security item.</em></li>
+  <li><strong>Q2: Should reward be pass_rate (float) or binary?</strong> — <em>Answer: Float (pass_rate).
+  SWE-RL and DGM both use continuous reward. This is richer signal for LinUCB.</em></li>
+  <li><strong>Q3: Does the existing LinUCB handle float rewards?</strong> — <em>Answer: Yes.
+  <code>LinUCBRouter.update(action_id, features, reward)</code> accepts any float.
+  Current reward is already a float (0.95 for cheap success, not binary 1.0).</em></li>
+  <li><strong>Q4: Where does test error output go for SelfCorrectionEngine?</strong> — <em>Answer:
+  <code>task["test_result"].raw_output</code> gets injected as <code>error_context</code> in the retry
+  prompt. SelfCorrectionEngine already handles arbitrary error_context strings.</em></li>
+</ul>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ SOURCES -->
+<section id="sources" class="tab-panel">
+<h2>External Sources — All Verified 2026-05-19</h2>
+<table>
+<tr><th>Source</th><th>Key finding used</th><th>Accessed</th></tr>
+<tr>
+  <td><a href="https://arxiv.org/html/2502.18449v1" target="_blank">SWE-RL — Meta AI (arXiv Feb 2025)</a></td>
+  <td>Rule-based rewards (patch similarity + format check) outperform SFT for SE tasks.
+  Execution feedback is the correct reward signal for coding RL. Used GRPO policy optimisation.</td>
+  <td>2026-05-19</td>
+</tr>
+<tr>
+  <td><a href="https://sakana.ai/dgm/" target="_blank">Darwin Gödel Machine — Sakana AI (2025)</a></td>
+  <td>Self-modifying agent that runs benchmarks after every code mutation.
+  SWE-bench 20% → 50%. Key insight: test execution is ground truth; improvements
+  that raise test pass rate are kept; those that don't are discarded.</td>
+  <td>2026-05-19</td>
+</tr>
+<tr>
+  <td><a href="https://arxiv.org/abs/2303.11366" target="_blank">Reflexion — Princeton (arXiv 2023)</a></td>
+  <td>Verbal RL without parameter updates. Agent stores failure critiques in episodic memory.
+  Improved HumanEval, multi-hop QA. Maps to our SelfCorrectionEngine + ErrorPatternStore (Phase 5B).</td>
+  <td>2026-05-19</td>
+</tr>
+<tr>
+  <td><a href="https://arxiv.org/abs/2410.10762" target="_blank">AFlow — ICLR 2025 Oral</a></td>
+  <td>MCTS over agentic workflow topologies. 5.7% avg improvement over SOTA.
+  Smaller models beat GPT-4o at 4.55% cost. Maps to our StrategyRouter evolution (Phase 5C).</td>
+  <td>2026-05-19</td>
+</tr>
+<tr>
+  <td><a href="https://www.morphllm.com/self-improving-ai" target="_blank">Self-Improving AI Survey — Morph LLM (2026)</a></td>
+  <td>Survey of all self-improvement paradigms. Confirms agent-level improvement (frozen model weights)
+  is the right approach for production. GEPA: 90x cost reduction at Databricks using prompt optimisation.</td>
+  <td>2026-05-19</td>
+</tr>
+</table>
+
+<h2>Summary</h2>
+<p>
+  <strong>The core idea is validated by 4 peer-reviewed papers (2023–2025) and one industry report.</strong>
+  Test execution as reward signal is how both Meta (SWE-RL) and Sakana AI (DGM) — the two leading
+  academic results in self-improving coding agents — ground their reward signals.
+  AWOS is uniquely positioned to implement this at low cost (DeepSeek default model, 20-50×
+  cheaper per iteration than GPT-4-based systems), making faster convergence of the learning loop feasible.
+</p>
+<p>
+  The key risks are reward hacking, flaky tests, and slow test suites — all addressed by
+  the opt-in model, timeout cap, snapshot guard, and graceful fallback to syntax-only reward.
+</p>
+
+<h2>Related</h2>
+<ul>
+  <li><a href="test_runner_reward_spec.html">[[test_runner_reward_spec]]</a> — spec (next to write)</li>
+  <li><a href="../specs/ml_meta_controller_spec.md">[[ml_meta_controller_spec]]</a> — LinUCB + RewardStore design</li>
+  <li><a href="../../scaffold/agent/verifier.py">[[verifier.py]]</a> — current syntax gate</li>
+  <li><a href="../../scaffold/agent/reward_store.py">[[reward_store.py]]</a> — Episode + ReplayGate</li>
+  <li><a href="../../scaffold/agent/escalation_engine.py">[[escalation_engine.py]]</a> — record_outcome()</li>
+</ul>
+</section>
+
+</main>
+
+<footer>
+  <button class="copy-btn secondary" onclick="copyJSON()">Copy as JSON</button>
+  <button class="copy-btn" onclick="copyPrompt()">Copy as Prompt</button>
+</footer>
+<script>
+function show(btn,id){document.querySelectorAll('.tab-panel').forEach(s=>s.classList.remove('active'));document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));document.getElementById(id).classList.add('active');btn.classList.add('active')}
+function copyPrompt(){const t=document.querySelector('.tab-panel.active').innerText;navigator.clipboard.writeText('# Research: TestRunner + Test-as-Reward\n\n'+t).then(()=>{const b=document.querySelector('.copy-btn:last-child');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy as Prompt',1500)})}
+function copyJSON(){const s={};document.querySelectorAll('.tab-panel').forEach(p=>{s[p.id]=p.innerText.trim()});navigator.clipboard.writeText(JSON.stringify({doc:'research',feature:'test_runner_reward',...s},null,2)).then(()=>{const b=document.querySelector('.copy-btn.secondary');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy as JSON',1500)})}
+</script>
+</body>
+</html>

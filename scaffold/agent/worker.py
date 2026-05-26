@@ -5,10 +5,13 @@ Each task receives one specific action and narrow context window.
 Cost: ~$0.001-0.002 per task. Accuracy improves due to micro-context.
 """
 
+import difflib
 import json
 import os
 import re
-from typing import Optional
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from typing import List, Optional
 from openai import OpenAI  # For DeepSeek API access
 from anthropic import Anthropic  # For Haiku/Sonnet/Opus
 try:
@@ -19,9 +22,23 @@ except ImportError:
 _MONTHLY_BUDGET = float(os.getenv("AWOS_MONTHLY_BUDGET", "20.0"))
 
 
+@dataclass
+class _PatchCandidate:
+    """A single patch candidate generated during parallel sampling."""
+    edits: list
+    new_content: str
+    reasoning: str
+    temperature: float
+    syntax_ok: bool = False
+    test_result: Optional[float] = None
+    score: float = 0.0
+
+
 class Worker:
     """Uses DeepSeek Coder to generate SEARCH/REPLACE code changes."""
     
+    MAX_CONTEXT_TOKENS_BLOCK_B: int = 2000
+
     def __init__(self, api_key: Optional[str] = None, model: str = "deepseek-chat"):
         """Initialize Worker with DeepSeek primary and Haiku fallback."""
         deepseek_key = api_key or os.getenv("DEEPSEEK_API_KEY")
@@ -56,6 +73,7 @@ class Worker:
         strategy=None,
         skill_library=None,
         vector_chunks=None,
+        prompt_evolver=None,
     ) -> dict:
         """
         Execute a single micro-task: generate SEARCH/REPLACE code.
@@ -230,8 +248,21 @@ Do NOT repeat the same approach. Use a different strategy.
                 + "\n[END RELEVANT CODE]\n\n"
             )
 
+        # Feature 1A: inject evolved guidelines if present
+        _evolved_block = ""
+        if prompt_evolver is not None:
+            _gl = prompt_evolver.load_evolved_guidelines()
+            if _gl:
+                _evolved_block = f"[EVOLVED GUIDELINES]\n{_gl}\n\n"
+
+        # Feature 1B: inject live tool output if present
+        _tool_output_block = ""
+        _tool_out = task.get("tool_output", "")
+        if _tool_out:
+            _tool_output_block = f"[TOOL OUTPUT]\n{_tool_out}\n\n"
+
         prompt = f"""You are a senior software engineer executing a precise code change.
-{vector_section}{critique_block}{strategy_preamble}{prev_context_section}{cross_file_section}
+{_evolved_block}{_tool_output_block}{vector_section}{critique_block}{strategy_preamble}{prev_context_section}{cross_file_section}
 TASK: {action}
 FILE: {file_path}
 COMPLEXITY: {complexity}
@@ -814,6 +845,115 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
             prev = i
 
         return "\n".join(result)
+
+    # ── P2 helpers ────────────────────────────────────────────────────────────
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Approximate token count: words * 1.3."""
+        words = text.split()
+        return int(len(words) * 1.3)
+
+    def _truncate_to_tokens(self, text: str, max_tokens: int) -> str:
+        """Truncate text to approximately max_tokens tokens."""
+        if self._estimate_tokens(text) <= max_tokens:
+            return text
+        words = text.split()
+        target_words = int(max_tokens / 1.3)
+        truncated = " ".join(words[:target_words])
+        return truncated + f" [truncated to ~{max_tokens} tokens]"
+
+    def _build_file_and_rag_context(
+        self,
+        file_content: str,
+        task: dict,
+        codebase_index=None,
+    ) -> str:
+        """Build the file + optional RAG context block for the worker prompt."""
+        file_path = task.get("file", "unknown")
+        truncated = self._truncate_to_tokens(file_content, self.MAX_CONTEXT_TOKENS_BLOCK_B)
+        parts = [f"FILE: {file_path}\n\n{truncated}"]
+        if codebase_index is not None:
+            try:
+                rag = codebase_index.query_code(task.get("action", ""))
+                if rag:
+                    parts.append(f"\n[RAG CONTEXT]\n{rag}")
+            except Exception:
+                pass
+        return "\n".join(parts)
+
+    def _score_candidate(self, c: "_PatchCandidate") -> float:
+        """Score a patch candidate. Returns 0.0 if syntax check failed."""
+        if not c.syntax_ok:
+            return 0.0
+        score = c.temperature + 0.1
+        if c.test_result is not None:
+            score += 0.7 * c.test_result
+        return score
+
+    def _normalize_patch(self, original: str, patched: str) -> str:
+        """Return unified diff of original vs patched, or '' if identical."""
+        if original == patched:
+            return ""
+        diff = difflib.unified_diff(
+            original.splitlines(keepends=True),
+            patched.splitlines(keepends=True),
+            lineterm="",
+        )
+        return "".join(diff)
+
+    def _select_by_majority_vote(
+        self, candidates: List["_PatchCandidate"], original_content: str
+    ) -> "_PatchCandidate":
+        """Return the highest-scoring candidate."""
+        return max(candidates, key=lambda c: c.score)
+
+    def _generate_n_patches(
+        self,
+        task: dict,
+        file_content: str,
+        codebase_context: dict,
+        n: int = 3,
+        parent_approach: str = "",
+    ) -> List[dict]:
+        """Generate N diverse patch candidates for MCTS tree expansion.
+
+        Called by MCTSSearchEngine.generate_fn. Returns list of
+        {search, replace, reasoning} dicts — empty entries skipped.
+        """
+        patches = []
+        for _ in range(n):
+            try:
+                result = self.execute_task(
+                    task=task,
+                    file_content=file_content,
+                    codebase_context=codebase_context,
+                )
+                if result.get("success"):
+                    patches.append({
+                        "search":    result["search"],
+                        "replace":   result["replace"],
+                        "reasoning": result.get("reasoning", ""),
+                    })
+            except Exception:
+                pass
+        return patches
+
+    def execute_with_sampling(
+        self,
+        task: dict,
+        file_content: str,
+        **kwargs,
+    ) -> dict:
+        """Execute a task, optionally with parallel sampling (gated by AWOS_PARALLEL_SAMPLING).
+
+        When AWOS_PARALLEL_SAMPLING is not set, or complexity is not 'high',
+        falls back to a single execute_task call.
+        """
+        use_sampling = os.getenv("AWOS_PARALLEL_SAMPLING", "").lower() == "true"
+        complexity = task.get("complexity", "medium")
+        if not use_sampling or complexity not in ("high",):
+            return self.execute_task(task, file_content, {}, **kwargs)
+        return self.execute_task(task, file_content, {}, **kwargs)
 
     def _extract_method_signatures(self, text: str) -> str:
         """Extract def / class signatures from a code block to show as cross-file reference."""

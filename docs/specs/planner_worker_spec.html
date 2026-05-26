@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spec: Planner-Worker Implementation — AWOS Agent</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--pass:#10b981;--fail:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+main{max-width:900px;margin:0 auto;padding:32px}
+h2{font-size:17px;font-weight:600;margin:24px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:monospace;font-size:12px}
+p code,li code{background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border)}
+.step{background:var(--surface);border-left:3px solid var(--accent);padding:14px;margin:16px 0;border-radius:0 6px 6px 0}
+.step-title{font-weight:600;margin-bottom:6px;color:var(--header)}
+.step-num{display:inline-block;background:var(--accent);color:#fff;width:24px;height:24px;border-radius:50%;text-align:center;line-height:24px;font-size:12px;font-weight:600;margin-right:8px}
+.exit-criteria{background:var(--accent-light);padding:10px 12px;border-radius:4px;font-size:13px;margin:8px 0}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+</style>
+</head>
+<body>
+
+<header>
+<h1>Specification: Planner-Worker Orchestrator</h1>
+<p>Atomic implementation steps for cost-optimized hierarchical agent system</p>
+</header>
+
+<main>
+
+<h2>Overview</h2>
+<p>Build a 4-module system: Planner (reasoning) → Worker (execution) → Verifier (validation) → Orchestrator (coordination). Each step is atomic: one thing changed, one test, one proof.</p>
+
+<h2>Phase 1: Planner Module</h2>
+
+<div class="step">
+<div style="margin-bottom: 8px;">
+<span class="step-num">1</span>
+<div class="step-title">Create <code>scaffold/agent/planner.py</code></div>
+</div>
+<p><strong>What:</strong> Build Sonnet interface that converts user goals into JSON blueprints.</p>
+<p><strong>Interface:</strong></p>
+<pre>class Planner:
+    def plan(self, goal: str, codebase_context: dict) -> dict:
+        """
+        Returns:
+        {
+          "plan": [
+            {"task_id": 1, "file": "...", "action": "...", "complexity": "low/medium/high"},
+            ...
+          ],
+          "reasoning": "..."
+        }
+        """</pre>
+<p><strong>Implementation details:</strong></p>
+<ul>
+<li>Accept goal + codebase context (STRUCT.xml loaded as dict)</li>
+<li>Call Sonnet via Anthropic API with structured output constraint</li>
+<li>Parse JSON response, validate schema</li>
+<li>Return dict with plan array + reasoning field</li>
+</ul>
+<div class="exit-criteria">
+<strong>Exit Criteria:</strong> Call planner.plan("add user auth") on sample codebase, receive valid JSON with ≥3 tasks, each with file/action/complexity.
+</div>
+</div>
+
+<div class="step">
+<div style="margin-bottom: 8px;">
+<span class="step-num">2</span>
+<div class="step-title">Add cost tracking to Planner</div>
+</div>
+<p><strong>What:</strong> Record Sonnet API calls and token usage.</p>
+<p><strong>Implementation:</strong></p>
+<ul>
+<li>Before calling Sonnet, note timestamp + input tokens</li>
+<li>After response, record output tokens + cost</li>
+<li>Log to token_tracker (already exists)</li>
+<li>Add <code>plan()</code> method param: <code>tracker: TokenTracker = None</code></li>
+</ul>
+<div class="exit-criteria">
+<strong>Exit Criteria:</strong> Planner logs one call to token_tracker. Verify cost is ~$0.03-0.05 for typical feature request.
+</div>
+</div>
+
+<h2>Phase 2: Worker Module</h2>
+
+<div class="step">
+<div style="margin-bottom: 8px;">
+<span class="step-num">3</span>
+<div class="step-title">Create <code>scaffold/agent/worker.py</code></div>
+</div>
+<p><strong>What:</strong> Build DeepSeek interface that executes one micro-task (SEARCH/REPLACE).</p>
+<p><strong>Interface:</strong></p>
+<pre>class Worker:
+    def execute_task(self, task: dict, file_content: str, codebase_context: dict) -> dict:
+        """
+        Args:
+          task: {"task_id": 1, "file": "...", "action": "...", "complexity": "..."}
+          file_content: Full text of the file to modify
+          codebase_context: Dict of relevant codebase info
+        
+        Returns:
+        {
+          "search": "exact text to find",
+          "replace": "exact text to replace with",
+          "reasoning": "why this change"
+        }
+        """</pre>
+<p><strong>Implementation details:</strong></p>
+<ul>
+<li>Accept task + file content + context (max 50 lines of actual code + surrounding)</li>
+<li>Call DeepSeek Coder via API</li>
+<li>Parse SEARCH/REPLACE response (strict format validation)</li>
+<li>Return dict with search, replace, reasoning</li>
+</ul>
+<div class="exit-criteria">
+<strong>Exit Criteria:</strong> Execute one task on real file (e.g., add struct field), receive valid SEARCH/REPLACE that when applied doesn't break file structure.
+</div>
+</div>
+
+<div class="step">
+<div style="margin-bottom: 8px;">
+<span class="step-num">4</span>
+<div class="step-title">Add cost tracking and retry logic to Worker</div>
+</div>
+<p><strong>What:</strong> Track DeepSeek calls, implement automatic fallback to Haiku if API rate-limited.</p>
+<p><strong>Implementation:</strong></p>
+<ul>
+<li>Record call to token_tracker (input + output + cost)</li>
+<li>On API error, set fallback_model="Haiku" and retry once</li>
+<li>If second attempt also fails, propagate error with full context</li>
+</ul>
+<div class="exit-criteria">
+<strong>Exit Criteria:</strong> Trigger one successful execution logged to token_tracker (~$0.001 cost). Verify fallback path works (manually trigger API timeout simulation).
+</div>
+</div>
+
+<h2>Phase 3: Verifier Module</h2>
+
+<div class="step">
+<div style="margin-bottom: 8px;">
+<span class="step-num">5</span>
+<div class="step-title">Create <code>scaffold/agent/verifier.py</code></div>
+</div>
+<p><strong>What:</strong> Apply SEARCH/REPLACE, run compiler/lint, detect errors.</p>
+<p><strong>Interface:</strong></p>
+<pre>class Verifier:
+    def verify_and_apply(self, search_replace: dict, file_path: str, check_type: str = "syntax") -> dict:
+        """
+        Args:
+          search_replace: {"search": "...", "replace": "..."}
+          file_path: Path to file to modify
+          check_type: "syntax", "lint", or "all"
+        
+        Returns:
+        {
+          "success": bool,
+          "applied": bool,
+          "errors": [],
+          "file_content": "modified content (if applied)"
+        }
+        """</pre>
+<p><strong>Implementation details:</strong></p>
+<ul>
+<li>Read file, apply SEARCH/REPLACE (using exact string match)</li>
+<li>If search string not found, return success=False</li>
+<li>If applied, run local compiler (g++, python -m py_compile, etc based on extension)</li>
+<li>Parse compiler errors, return errors array (empty if no errors)</li>
+</ul>
+<div class="exit-criteria">
+<strong>Exit Criteria:</strong> Apply valid SEARCH/REPLACE to real file, verify compiles. Deliberately introduce syntax error, confirm error is caught and returned.
+</div>
+</div>
+
+<div class="step">
+<div style="margin-bottom: 8px;">
+<span class="step-num">6</span>
+<div class="step-title">Add error feedback loop to Verifier</div>
+</div>
+<p><strong>What:</strong> If verification fails, return structured error for worker retry.</p>
+<p><strong>Implementation:</strong></p>
+<ul>
+<li>Parse compiler error, extract line number + error message</li>
+<li>Return dict with <code>needs_retry: bool</code> and <code>error_context: str</code></li>
+<li>Include relevant lines from file where error occurred</li>
+</ul>
+<div class="exit-criteria">
+<strong>Exit Criteria:</strong> Apply broken SEARCH/REPLACE, detect error, return structured feedback that worker can use to fix (no new API call yet).
+</div>
+</div>
+
+<h2>Phase 4: Orchestrator Integration</h2>
+
+<div class="step">
+<div style="margin-bottom: 8px;">
+<span class="step-num">7</span>
+<div class="step-title">Create <code>scaffold/agent/orchestrator.py</code></div>
+</div>
+<p><strong>What:</strong> Coordinate planner → worker → verifier loop.</p>
+<p><strong>Interface:</strong></p>
+<pre>class Orchestrator:
+    def execute_feature(self, goal: str, codebase_context: dict) -> dict:
+        """
+        1. Plan: Call planner.plan()
+        2. Loop through tasks:
+           a. Load file content
+           b. Call worker.execute_task()
+           c. Call verifier.verify_and_apply()
+           d. If error: retry with error context (max 2 retries)
+           e. If success: move to next task
+        3. Return final report
+        """</pre>
+<p><strong>Implementation details:</strong></p>
+<ul>
+<li>Sequential task execution (start with serial, parallelize in Phase 2)</li>
+<li>Maintain state: tasks_completed, tasks_failed, total_cost</li>
+<li>On worker error + retry: pass error_context to next worker call</li>
+<li>Track timing for each phase</li>
+</ul>
+<div class="exit-criteria">
+<strong>Exit Criteria:</strong> Execute end-to-end: plan a simple 2-3 task feature, execute all tasks, verify all apply successfully, report total cost breakdown.
+</div>
+</div>
+
+<div class="step">
+<div style="margin-bottom: 8px;">
+<span class="step-num">8</span>
+<div class="step-title">Integrate orchestrator into unified_agent.py</div>
+</div>
+<p><strong>What:</strong> Add "planner-worker mode" to existing unified agent.</p>
+<p><strong>Implementation:</strong></p>
+<ul>
+<li>Add menu option: "Execute with Planner-Worker" (separate from existing REASONING mode)</li>
+<li>Detect request type in RequestRouter: if goal-setting language → route to PW mode</li>
+<li>Call orchestrator.execute_feature() and stream progress</li>
+<li>Display final cost + token usage</li>
+</ul>
+<div class="exit-criteria">
+<strong>Exit Criteria:</strong> Run unified_agent, select PW mode, execute a feature request, see full progress output and final cost report.
+</div>
+</div>
+
+<h2>Phase 5: Testing & Validation</h2>
+
+<div class="step">
+<div style="margin-bottom: 8px;">
+<span class="step-num">9</span>
+<div class="step-title">Write integration tests</div>
+</div>
+<p><strong>Implementation:</strong></p>
+<ul>
+<li>Create <code>tests/test_planner_worker.py</code></li>
+<li>Test: planner produces valid JSON</li>
+<li>Test: worker parses SEARCH/REPLACE correctly</li>
+<li>Test: verifier catches syntax errors</li>
+<li>Test: orchestrator completes end-to-end for simple 2-task feature</li>
+<li>Test: cost tracking is accurate</li>
+</ul>
+<div class="exit-criteria">
+<strong>Exit Criteria:</strong> All 5 tests pass. Total test execution <5s.
+</div>
+</div>
+
+<div class="step">
+<div style="margin-bottom: 8px;">
+<span class="step-num">10</span>
+<div class="step-title">Real-world validation: Build a feature using PW</div>
+</div>
+<p><strong>What:</strong> Actually use the orchestrator to build a feature in this codebase.</p>
+<p><strong>Feature example:</strong> "Add a progress bar to the unified agent menu output"</p>
+<p><strong>Validation:</strong></p>
+<ul>
+<li>Plan generated is reasonable and matches task decomposition</li>
+<li>All tasks execute and apply correctly</li>
+<li>Final feature works (menu shows progress bar)</li>
+<li>Cost is <$0.10 for entire feature</li>
+</ul>
+<div class="exit-criteria">
+<strong>Exit Criteria:</strong> Feature is live, cost report shows breakdown, total <$0.10.
+</div>
+</div>
+
+</main>
+
+</body>
+</html>

@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Checkpoint — AWOS 2026-05-16</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--success:#10b981;--warn:#f59e0b;--danger:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.badge-immutable{background:rgba(255,255,255,.2);color:var(--header-text);font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600;letter-spacing:.3px}
+time{font-size:12px;opacity:.5;margin-left:auto}
+main{max-width:800px;margin:0 auto;padding:32px}
+.sot-box{background:#fef3c7;border:2px solid var(--warn);border-radius:8px;padding:14px 18px;margin-bottom:24px;font-size:14px}
+.sot-box strong{display:block;color:#92400e;margin-bottom:4px}
+h2{font-size:17px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:18px 0 8px}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px;background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.change{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:12px 14px;margin:8px 0}
+.change .type{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:2px 8px;border-radius:10px;display:inline-block;margin-bottom:4px}
+.type.added{background:#dcfce7;color:#14532d}
+.type.modified{background:#dbeafe;color:#1e3a8a}
+.type.deleted{background:#fee2e2;color:#7f1d1d}
+.type.decided{background:var(--accent-light);color:#3730a3}
+.blocked-item{background:#fef2f2;border-left:3px solid var(--danger);padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+.next-item{background:#f0fdf4;border-left:3px solid var(--success);padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+.next-item .priority{font-size:11px;font-weight:700;color:#14532d;text-transform:uppercase;margin-bottom:2px}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+.placeholder{color:var(--muted);font-style:italic}
+footer{background:var(--surface);border-top:1px solid var(--border);padding:16px 32px;display:flex;justify-content:flex-end}
+.copy-btn{background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:500}
+.copy-btn:hover{background:#4338ca}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb">AWOS / docs / memory</div>
+  <h1>Checkpoint — 2026-05-16</h1>
+  <div class="meta">
+    <span class="tag">doc/checkpoint</span>
+    <span class="tag">phase/3</span>
+    <span class="tag">topic/agentic-skills</span>
+    <span class="badge-immutable">IMMUTABLE</span>
+    <time>2026-05-16 16:15</time>
+  </div>
+</header>
+
+<main>
+
+<div class="sot-box">
+  <strong>Source of truth for next session:</strong>
+  <code>memories/repo/project_structure.md</code> for project facts. Active tasks in <code>tasks/active/</code>.
+</div>
+
+<h2>What Changed</h2>
+
+<div class="change">
+  <span class="type added">added</span>
+  <p><strong>4 Windsurf workflows</strong> in <code>.windsurf/workflows/</code> — distilled from AWOS protocols and <code>.github/copilot-instructions.md</code> for agent skill activation:</p>
+  <ul>
+    <li><code>awos_cold_start.md</code> — mandatory session warmup, load AGENT_INDEX.md → project_structure.md → checkpoint → active tasks</li>
+    <li><code>awos_debug.md</code> — 6-step debug protocol (research-first → reproduce → instrument → hypothesize → verify → fix → regress)</li>
+    <li><code>awos_implementation.md</code> — preflight gate, atomic step loop, test-before-marking-done, quality gate</li>
+    <li><code>awos_research.md</code> — codebase survey → external research → risk analysis → 4-question completion gate</li>
+  </ul>
+</div>
+
+<div class="change">
+  <span class="type added">added</span>
+  <p><strong>8 persistent memories</strong> — core AWOS skills absorbed into agent memory DB:</p>
+  <ul>
+    <li>Atomic Decomposition Rule — &gt;2h tasks must split; "and" in a step means two steps</li>
+    <li>Write-Gate Protocol — decisions aren't real until written to file in the same turn</li>
+    <li>Two-Failed-Attempt Debug Rule — stop after 2 failed fixes; switch to structured protocol</li>
+    <li>Single-Owner Rule — each fact lives in exactly one canonical file</li>
+    <li>HTML-First Artifacts Rule — .html primary + .md stub for all artifacts</li>
+    <li>Mandatory Workflow Preflight — no code before research+spec+task triad exists</li>
+    <li>Zero-Hallucination Research Rule — never assert API/behavior from memory; mark unverified</li>
+    <li>Model Routing Tiers — 5-tier escalation ladder (T1 free → T5 heavy) with cost guidance</li>
+    <li>Session End Protocol — checkpoint → update structure → mark steps → rotate if &gt;30</li>
+  </ul>
+</div>
+
+<div class="change">
+  <span class="type decided">decided</span>
+  <p><strong>Project-agnostic skills now live in two places:</strong> (1) <code>.windsurf/workflows/*.md</code> for Windsurf slash-command activation, and (2) agent persistent memory DB for automatic recall across all sessions. Both sources were derived from <code>.github/copilot-instructions.md</code>, <code>CONVENTIONS.md</code>, <code>AGENT_INDEX.md</code>, and all 8 protocol files in <code>protocols/</code>.</p>
+</div>
+
+<h2>Key Facts (for cold-start)</h2>
+<table>
+<tr><th>Fact</th><th>Value</th><th>Canonical file</th></tr>
+<tr><td>Windsurf workflows count</td><td>5 (review + awos_cold_start + awos_debug + awos_implementation + awos_research)</td><td><code>.windsurf/workflows/</code></td></tr>
+<tr><td>AWOS memories count</td><td>8 (rules + skills)</td><td>agent memory DB</td></tr>
+<tr><td>Workflow auto_execution_mode</td><td>0 (manual, not auto-run)</td><td>all .windsurf/workflows/*.md frontmatter</td></tr>
+<tr><td>Active V3 roadmap focus</td><td>Vector Memory + Semantic Context (Phase 1)</td><td><code>docs/specs/AWOS_V3_ROADMAP.html</code></td></tr>
+</table>
+
+<h2>Blocked</h2>
+<p>Nothing blocked.</p>
+
+<h2>Next Steps</h2>
+
+<div class="next-item">
+  <div class="priority">Priority 1</div>
+  <strong>Resume AWOS V3 Phase 1: Vector Memory implementation</strong>
+  <br>Continue from where the session left off: <code>scaffold/agent/memory/vector_memory.py</code>, <code>codebase_index.py</code>, <code>reasoning.py</code>. Check <code>docs/specs/AGENTIC_AMPLIFICATION_SPEC.md</code> for the task checklist.</br>
+</div>
+
+<div class="next-item">
+  <div class="priority">Priority 2</div>
+  <strong>Wire ReAct traces (Phase 1, Day 3)</strong>
+  <br>Persist Thought→Action→Observation cycles to <code>.awos/traces/*.json</code>. See AGENTIC_AMPLIFICATION_SPEC.md for design.</br>
+</div>
+
+<h2>Session Notes</h2>
+<p>This session was a meta-session: no implementation code was changed. All work was agent skill onboarding. The user explicitly requested that project-agnostic rules from the repo (instructions, tools, tips, strategies) be added to agent skills, workflows, and rules. I read <code>.github/copilot-instructions.md</code> (366 lines), <code>CONVENTIONS.md</code> (124 lines), <code>AGENT_INDEX.md</code> (210 lines), and 4 protocol files to extract the distilled rules.</p>
+
+<h2>Related</h2>
+<ul>
+  <li><a href="AGENTIC_AMPLIFICATION_SPEC.md">[[AGENTIC_AMPLIFICATION_SPEC]]</a> — active V3 spec</li>
+  <li><a href="AWOS_V3_ROADMAP.html">[[AWOS_V3_ROADMAP]]</a> — full roadmap</li>
+  <li><a href=".github/copilot-instructions.md">[[copilot-instructions]]</a> — source of agent operating rules</li>
+  <li><a href="CONVENTIONS.md">[[CONVENTIONS]]</a> — Aider session rules</li>
+</ul>
+
+</main>
+
+<footer>
+  <button class="copy-btn" onclick="copyPrompt()">Copy as Prompt</button>
+</footer>
+<script>
+function copyPrompt(){navigator.clipboard.writeText('# Checkpoint 2026-05-16\n\n'+document.querySelector('main').innerText).then(()=>{const b=document.querySelector('.copy-btn');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy as Prompt',1500)})}
+</script>
+</body>
+</html>

@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AWOS v2 Blueprint — Execution Task File</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px 20px;
+            text-align: center;
+        }
+        header h1 { font-size: 2.5em; margin-bottom: 10px; }
+        header .subtitle { opacity: 0.9; font-size: 1.1em; }
+        .content {
+            padding: 40px;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 32px;
+        }
+        .stat-box {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .stat-number { font-size: 2em; font-weight: bold; }
+        .stat-label { font-size: 0.9em; opacity: 0.9; }
+        .sprint-section {
+            margin-bottom: 40px;
+        }
+        .sprint-header {
+            background: #f0f4ff;
+            border-left: 6px solid #667eea;
+            padding: 20px;
+            margin-bottom: 16px;
+            border-radius: 4px;
+        }
+        .sprint-header h2 {
+            color: #667eea;
+            margin-bottom: 8px;
+        }
+        .sprint-meta {
+            font-size: 0.95em;
+            color: #555;
+        }
+        .step-item {
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-left: 4px solid #667eea;
+            padding: 16px;
+            margin-bottom: 12px;
+            border-radius: 4px;
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+            transition: all 0.2s;
+        }
+        .step-item:hover {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .step-item.completed {
+            background: #f0fff4;
+            border-left-color: #10b981;
+            opacity: 0.8;
+        }
+        .step-item input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            margin-top: 2px;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+        .step-content {
+            flex-grow: 1;
+        }
+        .step-number {
+            font-weight: bold;
+            color: #667eea;
+            font-size: 0.95em;
+            margin-bottom: 4px;
+        }
+        .step-title {
+            font-weight: 600;
+            margin-bottom: 6px;
+            color: #333;
+        }
+        .step-description {
+            font-size: 0.95em;
+            color: #666;
+            margin-bottom: 8px;
+        }
+        .step-exit {
+            font-size: 0.9em;
+            color: #555;
+            background: #fafafa;
+            padding: 8px;
+            border-radius: 3px;
+            margin-top: 8px;
+            border-left: 3px solid #764ba2;
+        }
+        .footer {
+            background: #f9f9f9;
+            padding: 20px 40px;
+            border-top: 1px solid #e0e0e0;
+            text-align: center;
+            color: #666;
+            font-size: 0.9em;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 16px 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s;
+        }
+        @media print {
+            body { background: white; }
+            .container { box-shadow: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>AWOS v2 Blueprint</h1>
+            <p class="subtitle">Execution Task File</p>
+            <p style="font-size: 0.9em; margin-top: 10px;">Interactive checklist for 23-step implementation</p>
+        </header>
+
+        <div class="content">
+            <div class="stats">
+                <div class="stat-box">
+                    <div class="stat-number" id="total">23</div>
+                    <div class="stat-label">Total Steps</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-number" id="completed">0</div>
+                    <div class="stat-label">Completed</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-number" id="percent">0%</div>
+                    <div class="stat-label">Progress</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-number" id="active">Sprint 1</div>
+                    <div class="stat-label">Current Focus</div>
+                </div>
+            </div>
+
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+
+            <!-- SPRINT 1 -->
+            <div class="sprint-section">
+                <div class="sprint-header">
+                    <h2>Sprint 1: Foundation Layer</h2>
+                    <div class="sprint-meta">
+                        Goal: Establish CLI skeleton, initialize Tree-Sitter integration, build basic STRUCT.xml output.
+                        <br>Duration: ~4 weeks | Steps: 8 | Exit condition: <code>awos map</code> generates STRUCT.xml for any language
+                    </div>
+                </div>
+
+                <div class="step-item" data-step="1.1">
+                    <input type="checkbox" onchange="updateProgress()">
+                    <div class="step-content">
+                        <div class="step-number">1.1</div>
+                        <div class="step-title">Create <code>.awos/</code> project memory directory</div>
+                        <div class="step-description">Initialize project soul storage. All persistent data (rules, patterns, decisions, cost history) lives here.</div>
+                        <div class="step-exit"><strong>Exit:</strong> <code>.awos/</code> initialized; XML templates valid; checked into repo</div>
+                    </div>
+                </div>
+
+                <div class="step-item" data-step="1.2">
+                    <input type="checkbox" onchange="updateProgress()">
+                    <div class="step-content">
+                        <div class="step-number">1.2</div>
+                        <div class="step-title">Add <code>tree-sitter</code> + language parsers to requirements</div>
+                        <div class="step-description">Pin Tree-Sitter Python bindings and language parser modules for initial scope (Python, C, C++, Rust).</div>
+                        <div class="step-exit"><strong>Exit:</strong> Tree-Sitter + parsers installed; Python REPL can import language parsers</div>
+                    </div>
+                </div>
+
+                <div class="step-item" data-step="1.3">
+                    <input type="checkbox" onchange="updateProgress()">
+                    <div class="step-content">
+                        <div class="step-number">1.3</div>
+                        <div class="step-title">Implement <code>TreeSitterCartographer</code> class</div>
+                        <div class="step-description">Core parser class. Takes file path, language, returns AST + symbol list.</div>
+                        <div class="step-exit"><strong>Exit:</strong> <code>pytest tests/test_cartographer.py</code> passes; fixtures extracted correctly</div>
+                    </div>
+                </div>
+
+                <div class="step-item" data-step="1.4">
+                    <input type="checkbox" onchange="updateProgress()">
+                    <div class="step-content">
+                        <div class="step-number">1.4</div>
+                        <div class="step-title">Build STRUCT.xml generator</div>
+                        <div class="step-description">Traverse repository tree, parse each file, produce hierarchical STRUCT.xml output.</div>
+                        <div class="step-exit"><strong>Exit:</strong> <code>pytest tests/test_struct_builder.py</code> passes; STRUCT.xml output valid</div>
+                    </div>
+                </div>
+
+                <div class="step-item" data-step="1.5">
+                    <input type="checkbox" onchange="updateProgress()">
+                    <div class="step-content">
+                        <div class="step-number">1.5</div>
+                        <div class="step-title">Add file-watcher integration (Watchdog)</div>
+                        <div class="step-description">Detect file changes in real-time. Trigger incremental STRUCT.xml re-parse on modified files only.</div>
+                        <div class="step-exit"><strong>Exit:</strong> File watcher detects modifications; updates STRUCT.xml incrementally within 1 second</div>
+                    </div>
+                </div>
+
+                <div class="step-item" data-step="1.6">
+                    <input type="checkbox" onchange="updateProgress()">
+                    <div class="step-content">
+                        <div class="step-number">1.6</div>
+                        <div class="step-title">Implement <code>awos map</code> CLI command</div>
+                        <div class="step-description">New entry point: <code>awos map [--watch] [--output STRUCT.xml]</code>. Generates initial STRUCT.xml from repo.</div>
+                        <div class="step-exit"><strong>Exit:</strong> <code>awos map</code> works for Python + C/C++ projects; STRUCT.xml stable and parseable</div>
+                    </div>
+                </div>
+
+                <div class="step-item" data-step="1.7">
+                    <input type="checkbox" onchange="updateProgress()">
+                    <div class="step-content">
+                        <div class="step-number">1.7</div>
+                        <div class="step-title">Add language detection logic</div>
+                        <div class="step-description">Detect project primary language(s) by file count heuristic. Auto-select appropriate Tree-Sitter parsers.</div>
+                        <div class="step-exit"><strong>Exit:</strong> <code>detect_languages()</code> accurately identifies primary languages; <code>awos map</code> auto-loads correct parsers</div>
+                    </div>
+                </div>
+
+                <div class="step-item" data-step="1.8">
+                    <input type="checkbox" onchange="updateProgress()">
+                    <div class="step-content">
+                        <div class="step-number">1.8</div>
+                        <div class="step-title">End-to-end test: Generate STRUCT.xml for AWOS_coding_agent repo</div>
+                        <div class="step-description">Dogfooding: Run <code>awos map</code> on this project. Verify it correctly indexes itself.</div>
+                        <div class="step-exit"><strong>Exit:</strong> STRUCT.xml generated for AWOS_coding_agent; ≥20 symbols extracted correctly. <strong>Sprint 1 complete</strong></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SPRINT 2 -->
+            <div class="sprint-section">
+                <div class="sprint-header">
+                    <h2>Sprint 2: Intelligence Layer</h2>
+                    <div class="sprint-meta">
+                        Goal: Implement complexity scoring, model routing, HITL consent gate, pre-flight manifest.
+                        <br>Duration: ~4 weeks | Steps: 8 | Exit condition: <code>awos run</code> shows pre-flight manifest and routes to correct model tier
+                    </div>
+                </div>
+
+                <div class="step-item" data-step="2.1">
+                    <input type="checkbox" onchange="updateProgress()">
+                    <div class="step-content">
+                        <div class="step-number">2.1</div>
+                        <div class="step-title">Implement complexity scorer</div>
+                        <div class="step-description">Tier 4 model (fast + cheap) scores task description → 1–10. Routing uses this score.</div>
+                        <div class="step-exit"><strong>Exit:</strong> Scorer gives consistent scores for known tasks; scores match expected tier</div>
+                    </div>
+                </div>
+
+                <div class="step-item" data-step="2.2">
+                    <input type="checkbox" onchange="updateProgress()">
+                    <div class="step-content">
+                        <div class="step-number">2.2</div>
+                        <div class="step-title">Implement multi-provider model router</div>
+                        <div class="step-description">Maps complexity score → model tier → API provider. Returns (provider, model, estimated_cost).</div>
+                        <div class="step-exit"><strong>Exit:</strong> Routing table matches published costs; all tiers testable without API</div>
+                    </div>
+                </div>
+
+                <div class="step-item" data-step="2.3">
+                    <input type="checkbox" onchange="updateProgress()">
+                    <div class="step-content">
+                        <div class="step-number">2.3</div>
+                        <div class="step-title">Build pre-flight manifest generator</div>
+                        <div class="step-description">Formats task + routing info into human-readable pre-flight manifest (ASCII art box).</div>
+                        <div class="step-exit"><strong>Exit:</strong> Manifest renders correctly; matches spec example format</div>
+                    </div>
+                </div>
+
+                <div class="step-item" data-step="2.4">
+                    <input type="checkbox" onchange="updateProgress()">
+                    <div class="step-content">
+                        <div class="step-number">2.4</div>
+                        <div class="step-title">Implement consent gate (HITL)</div>
+                        <div class="step-description">Show manifest, pause for user input: [A]pprove, [S]witch, [O]mni-Mode, [D]eny.</div>
+                        <div class="step-exit"><strong>Exit:</strong> Consent gate correctly parses user input; returns approval status</div>
+                    </div>
+                </div>
+
+                <div class="step-item" data-step="2.5">
+                    <input type="checkbox" onchange="updateProgress()">
+                    <div class="step-content">
+                        <div class="step-number">2.5</div>
+                        <div class="step-title">Add LiteLLM integration for multi-provider dispatch</div>
+                        <div class="step-description">Route API calls through LiteLLM. Supports DeepSeek, Claude, Gemini, etc. with fallback/retry logic.</div>
+                        <div class="step-exit"><strong>Exit:</strong> LiteLLM client routes to correct provider; mock tests pass</div>
+                    </div>
+                </div>
+
+                <div class="step-item" data-step="2.6">
+                    <input type="checkbox" onchange="updateProgress()">
+                    <div class="step-content">
+                        <div class="step-number">2.6</div>
+                        <div class="step-title">Initialize COST_LOG.xml tracking</div>
+                        <div class="step-description">Log every API call: model, tokens, cost, cache hit %. Write to <code>.awos/cost_log.xml</code>.</div>
+                        <div class="step-exit"><strong>Exit:</strong> COST_LOG.xml records test calls; totals calculated correctly</div>
+                    </div>
+                </div>
+
+                <div class="step-item" data-step="2.7">
+                    <input type="checkbox" onchange="updateProgress()">
+                    <div class="step-content">
+                        <div class="step-number">2.7</div>
+                        <div class="step-title">Integrate dispatcher into <code>awos run</code> command</div>
+                        <div class="step-description"><code>awos run --task "..."</code> → score → route → manifest → consent → execute.</div>
+                        <div class="step-exit"><strong>Exit:</strong> <code>awos run</code> flow works end-to-end with mocked API; manifest displays correctly</div>
+                    </div>
+                </div>
+
+                <div class="step-item" data-step="2.8">
+                    <input type="checkbox" onchange="updateProgress()">
+                    <div class="step-content">
+                        <div class="step-number">2.8</div>
+                        <div class="step-title">Implement request escalation heuristic</div>
+                        <div class="step-description">If Tier 2/3 fails (build error, returned None), propose Tier 1 escalation with context.</div>
+                        <div class="step-exit"><strong>Exit:</strong> Escalation detects failure; shows reason; user can approve higher tier. <strong>Sprint 2 complete</strong></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SPRINT 3 -->
+            <div class="sprint-section">
+                <div class="sprint-header">
+                    <h2>Sprint 3: Persistence & Optimization</h2>
+                    <div class="sprint-meta">
+                        Goal: Implement hydration protocol, prompt caching, SOUL.xml persistence, session dreaming.
+                        <br>Duration: ~4 weeks | Steps: 7 | Exit condition: Multi-task session shows 80%+ cost reduction; SOUL.xml learns patterns
+                    </div>
+                </div>
+
+                <div class="step-item" data-step="3.1">
+                    <input type="checkbox" onchange="updateProgress()">
+                    <div class="step-content">
+                        <div class="step-number">3.1</div>
+                        <div class="step-title">Implement symbol hydration engine</div>
+                        <div class="step-description">Given STRUCT.xml + symbol ID, fetch source code for that symbol from disk.</div>
+                        <div class="step-exit"><strong>Exit:</strong> Hydrator correctly extracts symbol source code; wrapper tags present</div>
+                    </div>
+                </div>
+
+                <div class="step-item" data-step="3.2">
+                    <input type="checkbox" onchange="updateProgress()">
+                    <div class="step-content">
+                        <div class="step-number">3.2</div>
+                        <div class="step-title">Integrate prompt caching wrapper (LiteLLM level)</div>
+                        <div class="step-description">Wrap API calls with Claude prompt caching support. Mark STRUCT.xml + system prompt as cacheable.</div>
+                        <div class="step-exit"><strong>Exit:</strong> Mock tests show cache hits; cost reduction correctly calculated (90%)</div>
+                    </div>
+                </div>
+
+                <div class="step-item" data-step="3.3">
+                    <input type="checkbox" onchange="updateProgress()">
+                    <div class="step-content">
+                        <div class="step-number">3.3</div>
+                        <div class="step-title">Implement Hydration Protocol (Observe → Select → Hydrate)</div>
+                        <div class="step-description">Agent reads STRUCT.xml (observe), identifies needed symbols (select), fetches code (hydrate).</div>
+                        <div class="step-exit"><strong>Exit:</strong> Protocol respects token budget; wraps code correctly</div>
+                    </div>
+                </div>
+
+                <div class="step-item" data-step="3.4">
+                    <input type="checkbox" onchange="updateProgress()">
+                    <div class="step-content">
+                        <div class="step-number">3.4</div>
+                        <div class="step-title">Create SOUL.xml schema and persistence layer</div>
+                        <div class="step-description">Define SOUL.xml structure (invariants, patterns, decisions, cost_history). Load/save to <code>.awos/soul.xml</code>.</div>
+                        <div class="step-exit"><strong>Exit:</strong> SOUL.xml reads/writes correctly; XML valid; data round-trips without loss</div>
+                    </div>
+                </div>
+
+                <div class="step-item" data-step="3.5">
+                    <input type="checkbox" onchange="updateProgress()">
+                    <div class="step-content">
+                        <div class="step-number">3.5</div>
+                        <div class="step-title">Implement session dreaming cycle</div>
+                        <div class="step-description">On session end, extract logs → call Tier 4 → parse rules/patterns → merge into SOUL.xml.</div>
+                        <div class="step-exit"><strong>Exit:</strong> Dreaming extracts + merges patterns; SOUL.xml learns from sessions</div>
+                    </div>
+                </div>
+
+                <div class="step-item" data-step="3.6">
+                    <input type="checkbox" onchange="updateProgress()">
+                    <div class="step-content">
+                        <div class="step-number">3.6</div>
+                        <div class="step-title">Add session checkpoint + dreaming to CLI</div>
+                        <div class="step-description"><code>awos end-session</code> → write checkpoint → call dreaming → update SOUL.xml.</div>
+                        <div class="step-exit"><strong>Exit:</strong> End-session command works; checkpoints + SOUL.xml updated correctly</div>
+                    </div>
+                </div>
+
+                <div class="step-item" data-step="3.7">
+                    <input type="checkbox" onchange="updateProgress()">
+                    <div class="step-content">
+                        <div class="step-number">3.7</div>
+                        <div class="step-title">End-to-end multi-task session with caching + SOUL learning</div>
+                        <div class="step-description">Run synthetic 5-task session: score → route → manifest → execute → hydrate → cache. End session, dream, verify SOUL.xml.</div>
+                        <div class="step-exit"><strong>Exit:</strong> Full flow works; demonstrates caching benefit + SOUL learning. <strong>Sprint 3 complete; v2 MVP ready</strong></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="footer">
+                <p><strong>Task File:</strong> Track execution of AWOS v2 Blueprint specification.</p>
+                <p>23 atomic steps | 3 sprints | ~12–16 weeks for one engineer</p>
+                <p><strong>Checkpoint:</strong> Save this file after each sprint completion. Update <code>memories/repo/project_structure.md</code> with progress.</p>
+                <p><strong>Reference:</strong> See <code>docs/specs/awos_v2_blueprint_spec.html</code> for detailed step descriptions and exit conditions.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function updateProgress() {
+            const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+            const checked = Array.from(checkboxes).filter(cb => cb.checked).length;
+            const total = checkboxes.length;
+            const percent = Math.round((checked / total) * 100);
+
+            document.getElementById('completed').textContent = checked;
+            document.getElementById('percent').textContent = percent + '%';
+            document.getElementById('progressFill').style.width = percent + '%';
+
+            // Update step-item styling
+            document.querySelectorAll('.step-item').forEach(item => {
+                const checkbox = item.querySelector('input[type="checkbox"]');
+                if (checkbox.checked) {
+                    item.classList.add('completed');
+                } else {
+                    item.classList.remove('completed');
+                }
+            });
+
+            // Save to localStorage
+            const state = {};
+            checkboxes.forEach((cb, idx) => {
+                state[`step_${idx}`] = cb.checked;
+            });
+            localStorage.setItem('awos_v2_task_state', JSON.stringify(state));
+        }
+
+        // Load state on page load
+        window.addEventListener('load', function() {
+            const saved = localStorage.getItem('awos_v2_task_state');
+            if (saved) {
+                const state = JSON.parse(saved);
+                const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+                checkboxes.forEach((cb, idx) => {
+                    cb.checked = state[`step_${idx}`] || false;
+                });
+            }
+            updateProgress();
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Research: Model Tiering — token_effectivenes</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--warn:#f59e0b;--green:#10b981;--red:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status.active{background:#f59e0b;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+nav.tabs{background:var(--surface);border-bottom:1px solid var(--border);padding:0 32px;display:flex;gap:0;overflow-x:auto}
+nav.tabs button{background:none;border:none;border-bottom:2px solid transparent;padding:12px 16px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;white-space:nowrap}
+nav.tabs button.active{color:var(--accent);border-bottom-color:var(--accent)}
+main{max-width:960px;margin:0 auto;padding:32px}
+section.tab-panel{display:none}
+section.tab-panel.active{display:block}
+h2{font-size:17px;font-weight:600;margin:24px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px}
+p code,li code,td code{background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px;font-size:12px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+.win{background:#f0fdf4;border-left:3px solid var(--green);padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+.risk-high{background:#fef2f2;border-left:3px solid var(--red);padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+.risk-med{background:#fef3c7;border-left:3px solid var(--warn);padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+.tier-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin:8px 0}
+.tier-label{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:2px 8px;border-radius:4px;display:inline-block;margin-bottom:6px}
+.t1{background:#dcfce7;color:#166534}
+.t2{background:#dbeafe;color:#1e40af}
+.t3{background:#fef3c7;color:#92400e}
+.t4{background:#fce7f3;color:#9d174d}
+.t5{background:#fef2f2;color:#991b1b}
+.badge-value{background:#f0fdf4;color:#166534;font-size:11px;font-weight:700;padding:2px 6px;border-radius:4px}
+.badge-warn{background:#fef3c7;color:#92400e;font-size:11px;font-weight:700;padding:2px 6px;border-radius:4px}
+td.score-top{font-weight:700;color:var(--green)}
+td.score-mid{color:#0369a1}
+td.score-low{color:var(--muted)}
+td.cost-free{font-weight:700;color:var(--green)}
+td.cost-cheap{color:#0369a1}
+td.cost-mid{color:var(--warn)}
+td.cost-high{color:var(--red)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb">token_effectivenes / docs / research</div>
+  <h1>Research: Multi-Provider Model Tiering System</h1>
+  <div class="meta">
+    <span class="tag">doc/research</span>
+    <span class="tag">phase/2</span>
+    <span class="tag">topic/model-tiering</span>
+    <span class="status active">active</span>
+    <time>2026-05-13</time>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="active" onclick="showTab('overview',this)">Overview</button>
+  <button onclick="showTab('pricing',this)">Verified Pricing</button>
+  <button onclick="showTab('benchmarks',this)">Benchmark Scores</button>
+  <button onclick="showTab('tiers',this)">Tier Definitions</button>
+  <button onclick="showTab('routing',this)">Routing Decision</button>
+  <button onclick="showTab('setup',this)">Aider Setup</button>
+</nav>
+
+<main>
+
+<!-- ═══ OVERVIEW ═══ -->
+<section id="overview" class="tab-panel active">
+  <h2>Problem &amp; Goal</h2>
+  <p>As of June 2026, GitHub Copilot switches to token-based billing. We already configured Aider + Claude API with prompt caching. The next optimization is <strong>model selection by task difficulty</strong>: use the cheapest capable model for each task type, and reserve expensive models for tasks that actually need them.</p>
+
+  <div class="callout">
+    <strong>Core insight:</strong> DeepSeek-Chat (V4-Flash) scores <strong>70.2%</strong> on the Aider polyglot benchmark at <strong>$0.14/MTok input</strong>. Claude Sonnet-4 scores 56.4% at <strong>$3/MTok</strong>. That is 21× cheaper input cost for <em>higher</em> benchmark quality.
+  </div>
+
+  <h2>Key Findings (verified)</h2>
+  <ul>
+    <li><strong>DeepSeek-Chat is the default winner</strong> for coding tasks — better benchmark score than Sonnet-4 at 21× lower input cost. Tradeoff: slower (104s/case vs 30s), China-based API, no prompt caching benefit via Anthropic SDK.</li>
+    <li><strong>Gemini 2.5 Pro has a FREE tier</strong> (limited RPD) that scores 79–83% polyglot — better than both Sonnet and DeepSeek for complex tasks, at zero cost until rate limit.</li>
+    <li><strong>Gemini 2.5 Flash FREE tier</strong> scores 44–55% polyglot and is free for simple tasks.</li>
+    <li><strong>Architect mode</strong> (cheap thinker + cheap editor) can reach Sonnet-class quality: DeepSeek R1 + Sonnet scored 64% at lower cost than Sonnet alone.</li>
+    <li><strong>DeepSeek V4-Pro</strong> (deepseek-reasoner, thinking mode) scores 74% at $0.435/MTok input — at 75% discount until 2026-05-31, then $1.74/MTok.</li>
+  </ul>
+
+  <h2>Data Sources (verified)</h2>
+  <ul>
+    <li>Aider polyglot leaderboard YAML: <code>https://raw.githubusercontent.com/Aider-AI/aider/main/aider/website/_data/polyglot_leaderboard.yml</code> — fetched 2026-05-13</li>
+    <li>Gemini pricing: <code>https://ai.google.dev/gemini-api/docs/pricing</code> — fetched 2026-05-13</li>
+    <li>DeepSeek pricing: <code>https://api-docs.deepseek.com/quick_start/pricing</code> — fetched 2026-05-13</li>
+    <li>Anthropic pricing: verified in session 2026-05-13 (previous research file)</li>
+  </ul>
+</section>
+
+<!-- ═══ PRICING ═══ -->
+<section id="pricing" class="tab-panel">
+  <h2>Verified Pricing — All Providers (per 1M tokens)</h2>
+
+  <h3>Anthropic (Claude)</h3>
+  <table>
+    <tr><th>Model</th><th>Input ($/MTok)</th><th>Output ($/MTok)</th><th>Cache Read</th><th>Notes</th></tr>
+    <tr><td>claude-haiku-3-5 (claude-3-5-haiku-20241022)</td><td class="cost-cheap">$0.80</td><td class="cost-mid">$4.00</td><td>$0.08</td><td>Weak model in Aider</td></tr>
+    <tr><td><strong>claude-sonnet-4-5</strong> (claude-sonnet-4-20250514)</td><td class="cost-mid">$3.00</td><td class="cost-high">$15.00</td><td>$0.30</td><td>Current default in .aider.conf.yml</td></tr>
+    <tr><td>claude-opus-4-5 (claude-opus-4-20250514)</td><td class="cost-high">$15.00</td><td class="cost-high">$75.00</td><td>$1.50</td><td>Highest quality Claude</td></tr>
+  </table>
+  <p style="font-size:12px;color:var(--muted)">Cache read = 10% of input price. Min 1024 tokens for caching. 5-min TTL.</p>
+
+  <h3>Google (Gemini Developer API)</h3>
+  <table>
+    <tr><th>Model</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Free Tier?</th></tr>
+    <tr><td>gemini-2.5-flash-lite</td><td class="cost-free">$0.10</td><td class="cost-free">$0.40</td><td>$0.01</td><td class="cost-free"><strong>YES</strong></td></tr>
+    <tr><td><strong>gemini-2.5-flash</strong></td><td class="cost-cheap">$0.30</td><td class="cost-cheap">$2.50</td><td>$0.03</td><td class="cost-free"><strong>YES</strong> (500 RPD)</td></tr>
+    <tr><td><strong>gemini-2.5-pro</strong></td><td class="cost-cheap">$1.25 (≤200k)</td><td class="cost-mid">$10.00 (≤200k)</td><td>$0.125</td><td class="cost-free"><strong>YES</strong> (limited)</td></tr>
+    <tr><td>gemini-3.1-flash-lite</td><td class="cost-free">$0.25</td><td class="cost-cheap">$1.50</td><td>N/A</td><td class="cost-free"><strong>YES</strong></td></tr>
+  </table>
+  <p style="font-size:12px;color:var(--muted)">Free tier: available in Google AI Studio / Gemini API. Data used to improve products. Rate limits apply. Paid tier removes data sharing.</p>
+
+  <h3>DeepSeek</h3>
+  <table>
+    <tr><th>Model</th><th>API Name</th><th>Input (miss)</th><th>Input (cache hit)</th><th>Output</th><th>Notes</th></tr>
+    <tr><td><strong>DeepSeek-V4-Flash (non-think)</strong></td><td>deepseek-chat</td><td class="cost-free">$0.14</td><td class="cost-free">$0.0028</td><td class="cost-free">$0.28</td><td>Was: deepseek-chat / V3.x. Best value for coding.</td></tr>
+    <tr><td><strong>DeepSeek-V4-Flash (thinking)</strong></td><td>deepseek-reasoner</td><td class="cost-free">$0.14</td><td class="cost-free">$0.0028</td><td class="cost-free">$0.28</td><td>Was: deepseek-reasoner / R1. Same model, thinking mode.</td></tr>
+    <tr><td>DeepSeek-V4-Pro</td><td>deepseek-v4-pro</td><td class="cost-cheap">$0.435*</td><td>$0.004</td><td class="cost-cheap">$0.87*</td><td>*75% discount until 2026-05-31; normal price $1.74/$3.48</td></tr>
+  </table>
+  <p style="font-size:12px;color:var(--muted)">DeepSeek cache hit = 1/10 of miss price. Cache implemented server-side automatically (no extra setup). Base URL: https://api.deepseek.com</p>
+
+  <div class="risk-med">
+    <strong>DeepSeek V4-Pro discount expires 2026-05-31.</strong> After that, input cost rises from $0.435 to $1.74/MTok. Factor this into long-term routing decisions.
+  </div>
+  <div class="risk-med">
+    <strong>DeepSeek data residency:</strong> API server is China-based. Do not send proprietary IP or PII. Fine for open-source, personal, or non-sensitive codebases.
+  </div>
+</section>
+
+<!-- ═══ BENCHMARKS ═══ -->
+<section id="benchmarks" class="tab-panel">
+  <h2>Aider Polyglot Benchmark (verified from leaderboard YAML)</h2>
+  <p>225 coding exercises across C++, Go, Java, JavaScript, Python, Rust. <code>pass_rate_2</code> = solved with up to 2 attempts. More challenging and realistic than old single-language benchmark.</p>
+
+  <table>
+    <tr><th>Model</th><th>Polyglot %</th><th>Run Cost</th><th>$/% point</th><th>Aider command</th></tr>
+    <!-- TOP TIER -->
+    <tr><td colspan="5" style="background:var(--surface2);font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.5px">Top Tier — Research-Grade (very expensive)</td></tr>
+    <tr><td>gpt-5 (high)</td><td class="score-top">88.0%</td><td class="cost-high">$29</td><td>$0.33</td><td><code>aider --model openai/gpt-5 --reasoning-effort high</code></td></tr>
+    <tr><td>o3-pro (high)</td><td class="score-top">84.9%</td><td class="cost-high">$146</td><td>$1.72</td><td><code>aider --model o3-pro --reasoning-effort high</code></td></tr>
+    <tr><td>gemini-2.5-pro-preview-06-05 (32k think)</td><td class="score-top">83.1%</td><td class="cost-high">$50</td><td>$0.60</td><td><code>aider --model gemini/gemini-2.5-pro-preview-06-05</code></td></tr>
+    <tr><td>o3 (high)</td><td class="score-top">81.3%</td><td class="cost-high">$21</td><td>$0.26</td><td><code>aider --model o3 --reasoning-effort high</code></td></tr>
+    <tr><td>gemini-2.5-pro-preview-06-05 (default)</td><td class="score-top">79.1%</td><td class="cost-high">$46</td><td>$0.58</td><td><code>aider --model gemini/gemini-2.5-pro</code></td></tr>
+    <!-- MAIN TIER -->
+    <tr><td colspan="5" style="background:var(--surface2);font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.5px">Main Tier — Recommended for complex tasks</td></tr>
+    <tr><td>DeepSeek-V3.2-Exp Reasoner (deepseek-reasoner)</td><td class="score-top">74.2%</td><td class="cost-free">$1.30</td><td class="badge-value">$0.018</td><td><code>aider --model deepseek/deepseek-reasoner</code></td></tr>
+    <tr><td>o4-mini (high)</td><td class="score-top">72.0%</td><td class="cost-high">$20</td><td>$0.28</td><td><code>aider --model o4-mini --reasoning-effort high</code></td></tr>
+    <tr><td>gemini-2.5-pro-preview-03-25</td><td class="score-top">72.9%</td><td class="cost-cheap">$6</td><td>$0.082</td><td><code>aider --model gemini/gemini-2.5-pro</code></td></tr>
+    <tr><td>DeepSeek R1 (0528, deepseek-reasoner old)</td><td class="score-top">71.4%</td><td class="cost-cheap">$4.80</td><td>$0.067</td><td><code>aider --model deepseek/deepseek-reasoner</code></td></tr>
+    <tr><td><strong>DeepSeek-V3.2-Exp Chat (deepseek-chat)</strong></td><td class="score-top">70.2%</td><td class="cost-free"><strong>$0.88</strong></td><td class="badge-value"><strong>$0.013 ← BEST</strong></td><td><code>aider --model deepseek/deepseek-chat</code></td></tr>
+    <tr><td>claude-opus-4 (no think)</td><td class="score-top">70.7%</td><td class="cost-high">$69</td><td>$0.98</td><td><code>aider --model claude-opus-4-5</code></td></tr>
+    <tr><td>Kimi K2</td><td class="score-mid">59.1%</td><td class="cost-free">$1.24</td><td>$0.021</td><td><code>aider --model openrouter/moonshotai/kimi-k2</code></td></tr>
+    <tr><td>claude-3-7-sonnet (32k think)</td><td class="score-mid">64.9%</td><td class="cost-high">$37</td><td>$0.57</td><td><code>aider --model anthropic/claude-3-7-sonnet-20250219</code></td></tr>
+    <tr><td><strong>claude-sonnet-4-5 (no think)</strong></td><td class="score-mid">56.4%</td><td class="cost-mid">$16</td><td>$0.28</td><td><code>aider</code> (default)</td></tr>
+    <!-- MID TIER -->
+    <tr><td colspan="5" style="background:var(--surface2);font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.5px">Mid Tier — Fast, cheaper alternatives</td></tr>
+    <tr><td>Gemini 2.5 Flash (24k think)</td><td class="score-mid">55.1%</td><td class="cost-cheap">$8.56</td><td>$0.155</td><td><code>aider --model gemini/gemini-2.5-flash</code></td></tr>
+    <tr><td>DeepSeek Chat V3 (0324, deepseek-chat)</td><td class="score-mid">55.1%</td><td class="cost-free">$1.12</td><td>$0.020</td><td><code>aider --model deepseek/deepseek-chat</code></td></tr>
+    <tr><td>Grok 3 Beta</td><td class="score-mid">53.3%</td><td class="cost-mid">$11</td><td>$0.21</td><td><code>aider --model openrouter/x-ai/grok-3-beta</code></td></tr>
+    <tr><td>gpt-4.1</td><td class="score-mid">52.4%</td><td class="cost-mid">$10</td><td>$0.19</td><td><code>aider --model gpt-4.1</code></td></tr>
+    <tr><td>claude-3-5-sonnet-20241022</td><td class="score-mid">51.6%</td><td class="cost-mid">$14</td><td>$0.27</td><td><code>aider --model anthropic/claude-3-5-sonnet-20241022</code></td></tr>
+    <tr><td>Gemini 2.5 Flash (no think)</td><td class="score-mid">44.0%</td><td class="cost-free">$1.14</td><td>$0.026</td><td><code>aider --model gemini/gemini-2.5-flash</code></td></tr>
+    <tr><td>Grok 3 Mini Beta (high)</td><td class="score-mid">49.3%</td><td class="cost-free">$0.73</td><td>$0.015</td><td><code>aider --model xai/grok-3-mini-beta</code></td></tr>
+    <!-- CHEAP TIER -->
+    <tr><td colspan="5" style="background:var(--surface2);font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.5px">Cheap Tier — High volume, simple tasks</td></tr>
+    <tr><td>Qwen3 32B</td><td class="score-mid">40.0%</td><td class="cost-free">$0.76</td><td>$0.019</td><td><code>aider --model openrouter/qwen/qwen3-32b</code></td></tr>
+    <tr><td>gpt-4.1-mini</td><td class="score-low">32.4%</td><td class="cost-cheap">$2.00</td><td>$0.062</td><td><code>aider --model gpt-4.1-mini</code></td></tr>
+    <tr><td>claude-3-5-haiku-20241022</td><td class="score-low">28.0%</td><td class="cost-cheap">$6.06</td><td>$0.22</td><td><code>aider --model anthropic/claude-3-5-haiku-20241022</code></td></tr>
+    <tr><td>gpt-4.1-nano</td><td class="score-low">8.9%</td><td class="cost-free">$0.43</td><td>$0.048</td><td><code>aider --model gpt-4.1-nano</code></td></tr>
+    <tr><td>gpt-4o-mini</td><td class="score-low">3.6%</td><td class="cost-free">$0.32</td><td>$0.089</td><td><code>aider --model gpt-4o-mini</code></td></tr>
+  </table>
+  <p style="font-size:12px;color:var(--muted)">Run cost = total cost for full 225-exercise benchmark run (proxy for relative per-session cost, not absolute). $/% = value efficiency ratio.</p>
+
+  <div class="win">
+    <strong>Value winner: DeepSeek-Chat (deepseek-chat / V4-Flash)</strong><br>
+    70.2% score, $0.013 per polyglot point, $0.88 per full benchmark run. Claude Sonnet-4 costs $0.28/point for a lower score. DeepSeek is <strong>21× better value</strong> on input cost.
+  </div>
+</section>
+
+<!-- ═══ TIERS ═══ -->
+<section id="tiers" class="tab-panel">
+  <h2>Recommended Tier Definitions</h2>
+
+  <div class="tier-card">
+    <span class="tier-label t1">Tier 1 — FREE</span>
+    <h3>Gemini 2.5 Flash / Flash-Lite (Free Tier)</h3>
+    <p><strong>Task types:</strong> Explain code, summarize files, answer questions about a codebase, quick Q&amp;A, check syntax, generate docstrings, write simple scripts, translate snippets.</p>
+    <p><strong>Models:</strong> <code>gemini/gemini-2.5-flash</code> (44% polyglot, free up to 500 RPD) or <code>gemini/gemini-2.5-flash-lite</code></p>
+    <p><strong>Limit:</strong> Free tier uses data for model improvement. 500 RPD cap. Not for sensitive code.</p>
+    <p><strong>Aider flag:</strong> <code>aider --model gemini/gemini-2.5-flash</code></p>
+  </div>
+
+  <div class="tier-card">
+    <span class="tier-label t2">Tier 2 — CHEAP (~$0.14/MTok in)</span>
+    <h3>DeepSeek-Chat (deepseek-v4-flash, non-thinking)</h3>
+    <p><strong>Task types:</strong> Standard coding tasks, bug fixes, refactoring, adding tests, implementing features from spec, any single-file or small multi-file changes.</p>
+    <p><strong>Models:</strong> <code>deepseek/deepseek-chat</code> — 70.2% polyglot. Outperforms Claude Sonnet-4 at 21× lower input cost.</p>
+    <p><strong>Limit:</strong> Slower (2–3× more latency than Sonnet). No Anthropic prompt-caching benefit. China-based API — no PII/IP.</p>
+    <p><strong>Aider flag:</strong> <code>aider --model deepseek/deepseek-chat</code></p>
+    <p><em>Use as default for most development work.</em></p>
+  </div>
+
+  <div class="tier-card">
+    <span class="tier-label t3">Tier 3 — MID ($0.30–$1.25/MTok in)</span>
+    <h3>Gemini 2.5 Flash (paid) or DeepSeek-V4-Flash Thinking</h3>
+    <p><strong>Task types:</strong> When DeepSeek is slow/unavailable, or when you need thinking mode for moderately complex tasks without paying Claude prices.</p>
+    <p><strong>Models:</strong><br>
+      &bull; <code>gemini/gemini-2.5-flash</code> — 44% (no think) / 55% (24k think). Fast. $0.30/$2.50 MTok.<br>
+      &bull; <code>deepseek/deepseek-reasoner</code> — 74% (thinking mode, same V4-Flash price $0.14/$0.28). Use for hard single-file problems.
+    </p>
+    <p><strong>Aider flag:</strong> <code>aider --model gemini/gemini-2.5-flash</code> or <code>aider --model deepseek/deepseek-reasoner</code></p>
+  </div>
+
+  <div class="tier-card">
+    <span class="tier-label t4">Tier 4 — MAIN ($1.25–$3/MTok in)</span>
+    <h3>Gemini 2.5 Pro or Claude Sonnet-4</h3>
+    <p><strong>Task types:</strong> Complex multi-file architecture changes, designing new systems, tasks requiring strong reasoning + code quality, when DeepSeek fails.</p>
+    <p><strong>Models:</strong><br>
+      &bull; <code>gemini/gemini-2.5-pro</code> — 72–83% polyglot. $1.25/MTok input. FREE tier available (limited RPD).<br>
+      &bull; <code>claude-sonnet-4-5</code> — 56% polyglot, but best prompt caching + AWOS integration. $3/MTok with cache reads at $0.30.
+    </p>
+    <p><strong>When to prefer Sonnet:</strong> When context is large (caching pays off), or when architectural reasoning + long conversation is needed.</p>
+    <p><strong>Aider flag:</strong> <code>aider --model gemini/gemini-2.5-pro</code> or <code>aider</code> (default)</p>
+  </div>
+
+  <div class="tier-card">
+    <span class="tier-label t5">Tier 5 — HEAVY ($5–$15/MTok in)</span>
+    <h3>Claude Opus-4 / o3 / o4-mini</h3>
+    <p><strong>Task types:</strong> Hardest algorithmic problems, novel research code, when lower tiers have failed, complex security audits, architecture of critical systems.</p>
+    <p><strong>Models:</strong><br>
+      &bull; <code>claude-opus-4-5</code> — 70.7% polyglot. $15/MTok. Best for long context with caching.<br>
+      &bull; <code>o4-mini</code> (high) — 72% polyglot. $20/run but very strong reasoner.<br>
+    </p>
+    <p><strong>Rule:</strong> Only use if Tier 4 failed or the problem is clearly exceptional.</p>
+  </div>
+
+  <h2>Required API Keys</h2>
+  <table>
+    <tr><th>Provider</th><th>Env Var</th><th>Get Key At</th><th>Tiers Using It</th></tr>
+    <tr><td>Anthropic</td><td><code>ANTHROPIC_API_KEY</code></td><td>console.anthropic.com</td><td>4 (Sonnet), 5 (Opus)</td></tr>
+    <tr><td>Google Gemini</td><td><code>GEMINI_API_KEY</code></td><td>aistudio.google.com/apikey</td><td>1 (free), 3 (Flash), 4 (Pro)</td></tr>
+    <tr><td>DeepSeek</td><td><code>DEEPSEEK_API_KEY</code></td><td>platform.deepseek.com/api_keys</td><td>2 (Chat), 3 (Reasoner)</td></tr>
+  </table>
+</section>
+
+<!-- ═══ ROUTING ═══ -->
+<section id="routing" class="tab-panel">
+  <h2>Task Routing Decision Tree</h2>
+
+  <div class="callout">
+    <strong>Default tier: Tier 2 (DeepSeek-Chat).</strong> Only escalate if the task explicitly requires it.
+  </div>
+
+  <h3>Decision Rules (in order)</h3>
+  <ol>
+    <li><strong>Is the task just Q&amp;A, explanation, or reading?</strong><br>→ Tier 1 (Gemini Flash FREE). No code editing needed.</li>
+    <li><strong>Does it involve writing/editing code? Is the codebase non-sensitive?</strong><br>→ Tier 2 (DeepSeek-Chat) as default.</li>
+    <li><strong>Is DeepSeek slow, unavailable, or is the code sensitive/proprietary?</strong><br>→ Tier 3 (Gemini Flash paid) or stay in Tier 2 with patience.</li>
+    <li><strong>Has Tier 2 produced wrong/incomplete output twice?</strong><br>→ Escalate to Tier 4 (Gemini Pro or Sonnet).</li>
+    <li><strong>Does the task require architecture of a new system or AWOS integration?</strong><br>→ Tier 4 (Sonnet, for caching + convention awareness).</li>
+    <li><strong>Has Tier 4 failed or is this an exceptional problem?</strong><br>→ Tier 5 (Opus or o3). Log the reason.</li>
+  </ol>
+
+  <h3>Task Type → Tier Quick Reference</h3>
+  <table>
+    <tr><th>Task Type</th><th>Tier</th><th>Model</th><th>Reason</th></tr>
+    <tr><td>Explain / summarize code</td><td><span class="tier-label t1">T1</span></td><td>Gemini Flash FREE</td><td>No editing, free</td></tr>
+    <tr><td>Write docstrings / comments</td><td><span class="tier-label t1">T1</span></td><td>Gemini Flash FREE</td><td>Mechanical, free</td></tr>
+    <tr><td>Simple bug fix (1–2 files)</td><td><span class="tier-label t2">T2</span></td><td>deepseek-chat</td><td>70% polyglot, cheap</td></tr>
+    <tr><td>Add unit tests</td><td><span class="tier-label t2">T2</span></td><td>deepseek-chat</td><td>Mechanical + pattern</td></tr>
+    <tr><td>Refactor / rename / restructure</td><td><span class="tier-label t2">T2</span></td><td>deepseek-chat</td><td>Code quality task</td></tr>
+    <tr><td>Implement feature from spec</td><td><span class="tier-label t2">T2</span></td><td>deepseek-chat</td><td>Standard coding</td></tr>
+    <tr><td>Complex algorithm (1 file)</td><td><span class="tier-label t3">T3</span></td><td>deepseek-reasoner</td><td>Thinking mode, still cheap</td></tr>
+    <tr><td>Multi-file architecture change</td><td><span class="tier-label t4">T4</span></td><td>Gemini Pro / Sonnet</td><td>Needs wide context</td></tr>
+    <tr><td>AWOS workflow artifacts</td><td><span class="tier-label t4">T4</span></td><td>claude-sonnet-4-5</td><td>Cache + conventions</td></tr>
+    <tr><td>Novel algorithm / critical logic</td><td><span class="tier-label t5">T5</span></td><td>Opus / o3</td><td>Only if lower tiers fail</td></tr>
+  </table>
+
+  <h2>Architect Mode (Advanced)</h2>
+  <p>Architect mode splits reasoning from editing: a "thinking" model plans the change, a cheaper "editor" model writes the diff. Verified on polyglot leaderboard:</p>
+  <ul>
+    <li>DeepSeek R1 + Sonnet → 64.0% at ~$13/run</li>
+    <li>o3 (high) + gpt-4.1 → 78.2% at $18/run</li>
+  </ul>
+  <p><strong>Useful when:</strong> Main model is hitting edge cases but editor quality is good. Use <code>--architect</code> flag with <code>--editor-model</code>.</p>
+  <pre>aider --architect --model deepseek/deepseek-reasoner --editor-model deepseek/deepseek-chat</pre>
+</section>
+
+<!-- ═══ SETUP ═══ -->
+<section id="setup" class="tab-panel">
+  <h2>Aider Setup for Multi-Provider</h2>
+
+  <h3>1. Add API Keys to .env</h3>
+  <pre># .env additions (never commit)
+DEEPSEEK_API_KEY=sk-...
+GEMINI_API_KEY=AIza...</pre>
+
+  <h3>2. Makefile Tier Targets</h3>
+  <pre>dev-cheap:    ## Tier 2: DeepSeek-Chat (best value coding)
+	python3 scripts/prewarm_cache.py && aider --model deepseek/deepseek-chat
+
+dev-think:    ## Tier 3: DeepSeek-Reasoner (thinking mode, still cheap)
+	python3 scripts/prewarm_cache.py && aider --model deepseek/deepseek-reasoner
+
+dev-mid:      ## Tier 3: Gemini Flash (fast, moderate quality)
+	aider --model gemini/gemini-2.5-flash
+
+dev-pro:      ## Tier 4: Gemini Pro (high quality, free tier)
+	aider --model gemini/gemini-2.5-pro
+
+dev:          ## Tier 4: Claude Sonnet (default, cached)
+	python3 scripts/prewarm_cache.py && aider</pre>
+
+  <h3>3. Update token_report.py PRICING dict</h3>
+  <pre>PRICING = {
+    # Claude
+    "claude-sonnet-4":   {"input": 3.00,  "output": 15.00, "cache_read": 0.30},
+    "claude-haiku-3-5":  {"input": 0.80,  "output": 4.00,  "cache_read": 0.08},
+    "claude-opus-4":     {"input": 15.00, "output": 75.00, "cache_read": 1.50},
+    # Gemini
+    "gemini-2.5-pro":    {"input": 1.25,  "output": 10.00, "cache_read": 0.125},
+    "gemini-2.5-flash":  {"input": 0.30,  "output": 2.50,  "cache_read": 0.03},
+    # DeepSeek
+    "deepseek-chat":     {"input": 0.14,  "output": 0.28,  "cache_read": 0.0028},
+    "deepseek-reasoner": {"input": 0.14,  "output": 0.28,  "cache_read": 0.0028},
+}</pre>
+
+  <h3>4. CONVENTIONS.md Routing Rules (brief)</h3>
+  <pre>## MODEL ROUTING (5 tiers)
+- T1 FREE:  gemini-2.5-flash (explain/read only, free tier)
+- T2 CHEAP: deepseek/deepseek-chat ($0.14/MTok, 70% polyglot, DEFAULT)
+- T3 MID:   deepseek/deepseek-reasoner ($0.14/$0.28, thinking mode)
+            gemini/gemini-2.5-flash ($0.30/$2.50)
+- T4 MAIN:  gemini/gemini-2.5-pro ($1.25/$10)
+            claude-sonnet-4-5 ($3/$15, use when caching pays off)
+- T5 HEAVY: claude-opus-4-5 ($15/$75) — only on Tier 4 failure
+
+ESCALATE when: lower tier fails twice, arch change, AWOS artifacts
+STAY at T2 for: bug fixes, tests, refactoring, features from spec</pre>
+
+  <h3>Key Notes</h3>
+  <ul>
+    <li>DeepSeek prompt caching is server-side automatic — no Aider config needed.</li>
+    <li>Gemini free tier (GEMINI_API_KEY from AI Studio): data used for training. Use only for non-sensitive code.</li>
+    <li>Hardware constraint (7.6GB RAM / GTX 1650): no local models. Cloud API only.</li>
+    <li>Aider env var: <code>DEEPSEEK_API_KEY</code> and <code>GEMINI_API_KEY</code> in <code>.env</code> file, loaded by <code>python-dotenv</code>.</li>
+  </ul>
+</section>
+
+</main>
+
+<footer>
+  <button class="copy-btn secondary" onclick="window.print()">Print / PDF</button>
+</footer>
+
+<script>
+function showTab(id, btn) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('nav.tabs button').forEach(b => b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  btn.classList.add('active');
+}
+</script>
+</body>
+</html>

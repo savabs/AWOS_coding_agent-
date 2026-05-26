@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SOTA Coding Agent Improvements — Research</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 1100px; margin: 0 auto; padding: 2rem; color: #1a1a2e; background: #f8f9fa; }
+  h1 { color: #0d1b2a; border-bottom: 3px solid #e63946; padding-bottom: 0.5rem; }
+  h2 { color: #1d3557; border-left: 4px solid #457b9d; padding-left: 0.75rem; margin-top: 2.5rem; }
+  h3 { color: #2c3e50; margin-top: 1.5rem; }
+  h4 { color: #e63946; margin-top: 1rem; }
+  .meta { background: #1d3557; color: #a8dadc; padding: 1rem 1.5rem; border-radius: 8px; margin-bottom: 2rem; font-size: 0.9rem; }
+  .meta span { margin-right: 2rem; }
+  .key-finding { background: #fff; border-left: 5px solid #e63946; padding: 1rem 1.5rem; margin: 1rem 0; border-radius: 0 6px 6px 0; box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
+  .source-box { background: #eaf2ff; border: 1px solid #457b9d; padding: 1rem 1.5rem; border-radius: 6px; margin: 1rem 0; }
+  .code-block { background: #0d1b2a; color: #a8dadc; padding: 1rem 1.5rem; border-radius: 6px; font-family: 'Courier New', monospace; font-size: 0.85rem; overflow-x: auto; margin: 1rem 0; line-height: 1.6; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+  .card { background: #fff; border: 1px solid #dee2e6; border-radius: 6px; padding: 1rem; }
+  .card h4 { margin-top: 0; }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+  th { background: #1d3557; color: white; padding: 0.6rem 1rem; text-align: left; }
+  td { padding: 0.6rem 1rem; border-bottom: 1px solid #dee2e6; }
+  tr:nth-child(even) td { background: #f1f3f5; }
+  .tag { display: inline-block; background: #457b9d; color: white; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.75rem; margin: 0.1rem; }
+  .critical { color: #e63946; font-weight: bold; }
+  .warn { background: #fff3cd; border: 1px solid #ffc107; padding: 0.75rem 1rem; border-radius: 4px; margin: 0.75rem 0; }
+  .ok { background: #d4edda; border: 1px solid #28a745; padding: 0.75rem 1rem; border-radius: 4px; margin: 0.75rem 0; }
+  ul li { margin: 0.4rem 0; }
+  .section-intro { color: #555; font-size: 1.05rem; margin-bottom: 1.5rem; }
+  .toc { background: #fff; border: 1px solid #dee2e6; border-radius: 6px; padding: 1.5rem; margin-bottom: 2rem; }
+  .toc a { color: #1d3557; text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .toc ul { margin: 0.3rem 0; }
+</style>
+</head>
+<body>
+
+<h1>🔬 SOTA Coding Agent Research — AWOS Improvement Plan</h1>
+<div class="meta">
+  <span>📅 Date: 2026-05-22</span>
+  <span>👤 Author: Cascade (research session)</span>
+  <span>🎯 Scope: P0–P3 improvements</span>
+  <span>📂 Status: Complete</span>
+</div>
+
+<div class="toc">
+  <strong>Table of Contents</strong>
+  <ul>
+    <li><a href="#sources">1. Sources Examined</a></li>
+    <li><a href="#claude-code">2. Claude Code Source Analysis (src/)</a></li>
+    <li><a href="#aider">3. Aider Edit Format Research</a></li>
+    <li><a href="#openhands">4. OpenHands Architecture</a></li>
+    <li><a href="#sweagent">5. SWE-Agent ACI</a></li>
+    <li><a href="#benchmarks">6. SWE-bench SOTA &amp; What Wins</a></li>
+    <li><a href="#caching">7. Prompt Caching Economics</a></li>
+    <li><a href="#lsp">8. LSP Integration</a></li>
+    <li><a href="#gaps">9. AWOS Gap Analysis</a></li>
+    <li><a href="#roadmap">10. Prioritized Improvement Roadmap</a></li>
+  </ul>
+</div>
+
+<!-- ========================================================= -->
+<h2 id="sources">1. Sources Examined</h2>
+<div class="source-box">
+  <strong>Primary Sources (code-level):</strong>
+  <ul>
+    <li><strong>Claude Code src/</strong> — 1,901 TypeScript files (the production system, leaked partial source). Key files: <code>query.ts</code>, <code>tools/FileEditTool/</code>, <code>tools/AgentTool/</code>, <code>services/compact/</code>, <code>services/lsp/</code>, <code>skills/</code></li>
+    <li><strong>Aider edit format docs</strong> — <code>aider.chat/docs/more/edit-formats.html</code> — 5 formats analyzed</li>
+  </ul>
+  <strong>Architecture Sources:</strong>
+  <ul>
+    <li><strong>OpenHands vs SWE-Agent</strong> — localaimaster.com detailed comparison with architecture diagrams</li>
+    <li><strong>Artificial Analysis Coding Agent Benchmark</strong> — artificialanalysis.ai — methodology, task types, scoring</li>
+    <li><strong>SWE-bench Leaderboard</strong> — codesota.com — SOTA progress 1.96% → 79.2%</li>
+    <li><strong>Academic: SWE-EVO, SWE-Bench Pro, Agentless, MASAI</strong></li>
+  </ul>
+  <strong>Economics Sources:</strong>
+  <ul>
+    <li><strong>Anthropic prompt caching docs</strong> — platform.claude.com</li>
+    <li><strong>ProjectDiscovery 59% cost reduction case study</strong></li>
+  </ul>
+</div>
+
+<!-- ========================================================= -->
+<h2 id="claude-code">2. Claude Code Source Analysis (src/)</h2>
+<p class="section-intro">This is the most valuable source. Claude Code is the #1 coding agent by usage. Reading its actual production TypeScript source reveals exactly how they solve every problem AWOS struggles with.</p>
+
+<h3>2.1 The Edit Format — JSON Structured Tool, NOT Text Blocks</h3>
+<div class="key-finding">
+  <strong>🚨 Critical Finding:</strong> Claude Code does NOT use <code>&lt;&lt;&lt;SEARCH/&gt;&gt;&gt;REPLACE</code> text blocks. It uses a <strong>structured JSON tool call</strong> with <code>old_string</code> and <code>new_string</code> fields. The LLM emits structured JSON; a validator processes it before any disk write.
+</div>
+
+<p>From <code>src/tools/FileEditTool/FileEditTool.ts</code>, the tool schema is:</p>
+<div class="code-block">
+{
+  file_path: string,      // absolute path
+  old_string: string,     // exact text to replace (empty = create file)
+  new_string: string,     // replacement text
+  replace_all?: boolean   // default false
+}
+</div>
+
+<p>The <code>validateInput()</code> method enforces these rules in order:</p>
+<ol>
+  <li><strong>Must read first</strong>: <code>readFileState.get(fullFilePath)</code> must exist — error if not read this session</li>
+  <li><strong>File modification guard</strong>: compare <code>lastWriteTime</code> vs <code>readTimestamp</code> — if file changed since read, reject with "Read it again"</li>
+  <li><strong>Quote normalization</strong>: <code>findActualString()</code> normalizes curly quotes ↔ straight quotes before search</li>
+  <li><strong>Not found</strong>: If old_string not in file → error <code>"String to replace not found in file."</code></li>
+  <li><strong>Multiple match detection</strong>: Count occurrences — if &gt;1 and <code>replace_all=false</code> → error with count and instruction to add more context</li>
+  <li><strong>No-op detection</strong>: <code>old_string === new_string</code> → reject immediately</li>
+  <li><strong>Security</strong>: Check for secrets in <code>new_string</code> before writing to team memory files</li>
+</ol>
+
+<p>The apply logic in <code>utils.ts</code>:</p>
+<div class="code-block">
+function applyEditToFile(originalContent, oldString, newString, replaceAll = false) {
+  // Trailing newline stripping: if old_string doesn't end with \n
+  // but file has old_string + \n, strip the trailing newline too
+  const stripTrailingNewline =
+    !oldString.endsWith('\n') &amp;&amp; originalContent.includes(oldString + '\n')
+
+  return stripTrailingNewline
+    ? content.replace(oldString + '\n', newString)
+    : content.replace(oldString, newString)
+}
+</div>
+
+<h3>2.2 Context Management — 5 Layers</h3>
+<p>From <code>src/query.ts</code>, every LLM turn runs these context management layers in order:</p>
+<table>
+  <tr><th>Layer</th><th>Trigger</th><th>Action</th><th>Purpose</th></tr>
+  <tr><td>ToolResultBudget</td><td>Always</td><td>Cap tool outputs to max chars/message</td><td>Prevent single grep flooding context</td></tr>
+  <tr><td>Snip (HISTORY_SNIP)</td><td>Feature gate</td><td>Collapse distant history spans</td><td>Remove stale middle context</td></tr>
+  <tr><td>MicroCompact</td><td>Always</td><td>Collapse repeated tool rounds without output</td><td>Remove "tool called, nothing returned" noise</td></tr>
+  <tr><td>Context Collapse</td><td>Feature gate</td><td>Project collapsed view of archived messages</td><td>Keep granular recent, compress old</td></tr>
+  <tr><td>AutoCompact</td><td>Near context limit</td><td>Full LLM summary of entire conversation</td><td>Survive long sessions</td></tr>
+</table>
+
+<p>The AutoCompact prompt (from <code>compact/prompt.ts</code>) captures precisely:</p>
+<div class="code-block">
+Summary sections required:
+1. Primary Request and Intent
+2. Key Technical Concepts
+3. Files and Code Sections (with FULL code snippets)
+4. Errors and fixes
+5. Problem Solving
+6. All user messages
+7. Pending Tasks
+8. Current Work
+9. Next Step
+</div>
+
+<h3>2.3 Agent Spawning — Worktree Isolation</h3>
+<p>From <code>AgentTool.tsx</code>, Claude Code supports three isolation modes when spawning subagents:</p>
+<div class="code-block">
+isolation: 'worktree'  // git worktree — agent gets isolated repo copy, changes are diffable
+isolation: 'remote'    // remote CCR environment (always background)
+isolation: undefined   // shared working directory
+</div>
+<p>Each spawned agent has its own: model choice (sonnet/opus/haiku), memory scope (user/project/local), permission mode (plan/auto/manual), and can run in background (<code>run_in_background: true</code>).</p>
+
+<h3>2.4 Skills System</h3>
+<p>From <code>skills/loadSkillsDir.ts</code> — skills are Markdown files with YAML frontmatter discovered from <code>.claude/skills/</code> directories:</p>
+<div class="code-block">
+---
+description: "How to add a new API endpoint"
+effort: medium
+tools: [Read, Edit, Bash]
+model: sonnet
+---
+## Instructions
+Step-by-step instructions the agent follows...
+</div>
+<p>Skills are discovered at runtime, matched by keyword relevance to the current task, and injected as context. They're persistent across sessions — equivalent to few-shot examples that survive restarts.</p>
+
+<h3>2.5 LSP Diagnostic Registry</h3>
+<p>From <code>services/lsp/LSPDiagnosticRegistry.ts</code>:</p>
+<ul>
+  <li>Live LSP server (pyright/pylsp) processes every file write asynchronously</li>
+  <li><code>publishDiagnostics</code> notifications are registered in a global registry</li>
+  <li>Next LLM turn automatically receives diagnostics as attachments (max 10/file, 30 total)</li>
+  <li>LRU deduplication prevents the same diagnostic appearing across turns</li>
+  <li>Result: LLM sees type errors, undefined references, syntax errors <em>without running anything</em></li>
+</ul>
+
+<!-- ========================================================= -->
+<h2 id="aider">3. Aider Edit Format Research</h2>
+<p class="section-intro">Aider is the SOTA open-source coding assistant. It has extensively researched edit formats and their reliability across models.</p>
+
+<h3>3.1 The 5 Edit Formats</h3>
+<table>
+  <tr><th>Format</th><th>Syntax</th><th>Best For</th><th>Key Weakness</th></tr>
+  <tr><td><code>whole</code></td><td>Return entire file in fenced block</td><td>Small files, simple changes</td><td>Expensive — full file regeneration</td></tr>
+  <tr><td><code>diff</code></td><td><code>&lt;&lt;&lt;SEARCH / ======= / &gt;&gt;&gt;REPLACE</code></td><td>Most models (default)</td><td>Whitespace/indentation sensitivity</td></tr>
+  <tr><td><code>diff-fenced</code></td><td>Same but file path inside fence</td><td>Gemini family</td><td>Same as diff</td></tr>
+  <tr><td><code>udiff</code></td><td>Unified diff format (simplified)</td><td>GPT-4 Turbo (reduces laziness)</td><td>Complex to parse correctly</td></tr>
+  <tr><td><code>editor-diff</code></td><td>Architect plain text → Editor diff</td><td>High-quality edits</td><td>Two model calls per task</td></tr>
+</table>
+
+<h3>3.2 Architect Mode (The Gold Standard)</h3>
+<div class="key-finding">
+  <strong>Aider's architect mode</strong> separates reasoning from editing. The architect model describes what to change in plain text. The editor model converts those instructions into syntactically correct edits. This produces significantly higher quality edits because each model does only what it's good at.
+</div>
+<p>Quote from Aider docs: <em>"The architect model resolves the coding task and provides plain text instructions about which file changes need to be made. The editor interprets those instructions to produce the syntactically correct diff or whole edits."</em></p>
+
+<h3>3.3 Why SEARCH/REPLACE Fails</h3>
+<p>From research: The 4 root causes of SEARCH block mismatches:</p>
+<ol>
+  <li><strong>Whitespace drift</strong>: LLM omits trailing spaces, changes indentation</li>
+  <li><strong>Context drift</strong>: LLM reconstructs from memory, not exact file content</li>
+  <li><strong>Curly quote substitution</strong>: LLM emits typographic quotes, file has ASCII</li>
+  <li><strong>Partial view problem</strong>: LLM writes SEARCH based on a snippet, not full file</li>
+</ol>
+<p>All 4 are solved by switching to JSON structured tool calls + read-before-write enforcement.</p>
+
+<!-- ========================================================= -->
+<h2 id="openhands">4. OpenHands Architecture</h2>
+<p class="section-intro">OpenHands (formerly OpenDevin) is the leading open-source coding agent platform with 64k+ GitHub stars.</p>
+
+<h3>4.1 Event-Stream Architecture</h3>
+<div class="code-block">
+┌─────────────────────────────────────┐
+│ OpenHands Server                    │
+│  ┌──────────┐ ┌────────┐ ┌───────┐ │
+│  │ Web UI   │ │REST API│ │WS API │ │
+│  └──────────┘ └────────┘ └───────┘ │
+│  Agent Manager                      │
+│  ┌──────────┐ ┌────────┐ ┌───────┐ │
+│  │ CodeAct  │ │Browser │ │Deleg- │ │
+│  │ Agent    │ │ Agent  │ │ ate   │ │
+│  └──────────┘ └────────┘ └───────┘ │
+│  Event Log: Actions ↔ Observations  │
+│  Docker Container (SSH)             │
+│  ┌──────────┐ ┌────────┐ ┌───────┐ │
+│  │ Jupyter  │ │Browser │ │FS     │ │
+│  │ Kernel   │ │ (VNC)  │ │Sandbox│ │
+│  └──────────┘ └────────┘ └───────┘ │
+└─────────────────────────────────────┘
+</div>
+
+<h3>4.2 CodeAct Pattern — Code as Universal Action</h3>
+<p>OpenHands' key innovation: the agent writes <em>Python code</em> as its primary action (not tool calls). This makes every action testable, observable, and replayable. Bash execution, file edits, web browsing — all done through Python code execution in a sandboxed Jupyter kernel.</p>
+
+<h3>4.3 Delegation Pattern</h3>
+<p>Complex tasks are delegated to specialized sub-agents: a main CodeAct agent can spawn a Browser Agent for web tasks, or a specialized test-writing agent. The delegation is explicit in the event stream.</p>
+
+<!-- ========================================================= -->
+<h2 id="sweagent">5. SWE-Agent ACI</h2>
+<p class="section-intro">SWE-Agent from Princeton introduces the Agent-Computer Interface (ACI) concept — a deliberately simplified tool set designed to maximize LLM coding performance.</p>
+
+<h3>5.1 The ACI Design Philosophy</h3>
+<div class="code-block">
+┌─────────────────────────────────────┐
+│ SWE-Agent ACI                       │
+│  Simplified Actions:                │
+│  - view_file(path, start, end)      │
+│  - search_dir(pattern, dir)         │
+│  - edit_file(path, changes)         │
+│  - run_command(cmd)                 │
+│                                     │
+│  Guardrails:                        │
+│  - Syntax checking after each edit  │
+│  - Linting                          │
+│  - Test execution                   │
+│                                     │
+│  Context Window:                    │
+│  - Last 5 steps only (condensed)    │
+└─────────────────────────────────────┘
+</div>
+
+<h3>5.2 Condensed History (Critical Cost Optimization)</h3>
+<div class="key-finding">
+  SWE-Agent keeps only the <strong>last 5 steps condensed</strong> in the context window — not the full history. This keeps costs low and forces the model to reason from current state rather than distant history. AWOS sends the full task description + all context on every retry.
+</div>
+
+<!-- ========================================================= -->
+<h2 id="benchmarks">6. SWE-bench SOTA &amp; What Wins</h2>
+
+<h3>6.1 Progress</h3>
+<table>
+  <tr><th>Year</th><th>SOTA Resolve Rate</th><th>Key Method</th></tr>
+  <tr><td>2023</td><td>1.96%</td><td>SWE-Agent (baseline)</td></tr>
+  <tr><td>2024 Q1</td><td>13.86%</td><td>Devin (first "AI engineer")</td></tr>
+  <tr><td>2024 Q4</td><td>~55%</td><td>Multi-agent + parallel sampling</td></tr>
+  <tr><td>2025 Q2</td><td>79.2%</td><td>SOTA — combination methods</td></tr>
+</table>
+
+<h3>6.2 What's Driving the Improvements</h3>
+<p>From academic analysis (SWE-EVO, MASAI, Agentless papers):</p>
+<ol>
+  <li><strong>Test execution as oracle</strong>: All top agents use test pass/fail as ground truth. Not LLM self-evaluation.</li>
+  <li><strong>Parallel sampling + selection</strong>: Generate N patches, pick best by test execution (like Agentless)</li>
+  <li><strong>Localization first</strong>: File-level then symbol-level localization before attempting any edit</li>
+  <li><strong>Worktree isolation</strong>: Each attempt in its own git worktree — safe parallelism</li>
+  <li><strong>Structured edits</strong>: JSON tool schema, not text block parsing</li>
+  <li><strong>Better scaffolding beats better model</strong>: Scaffolding improvements matter more than model upgrades at equal capability</li>
+</ol>
+
+<h3>6.3 Artificial Analysis Benchmark Task Types</h3>
+<p>The composite index measures three dimensions:</p>
+<ul>
+  <li><strong>SWE-Bench-Pro-Hard</strong>: Make a working patch (code changes + test pass) — needs multi-file reasoning + test execution</li>
+  <li><strong>Terminal-Bench v2</strong>: Shell workflow navigation — needs bash execution</li>
+  <li><strong>SWE-Atlas-QnA</strong>: Repository understanding — needs good code reading/search</li>
+</ul>
+<div class="warn">AWOS is strong at QnA-style but fails on patch-that-works style. The gap: test execution as verification.</div>
+
+<!-- ========================================================= -->
+<h2 id="caching">7. Prompt Caching Economics</h2>
+
+<h3>7.1 What's Available</h3>
+<table>
+  <tr><th>Provider</th><th>Cost Reduction</th><th>Latency Reduction</th><th>Cache Lifetime</th></tr>
+  <tr><td>Anthropic</td><td>90%</td><td>85%</td><td>5 min (ephemeral)</td></tr>
+  <tr><td>OpenAI</td><td>50%</td><td>~40%</td><td>Automatic</td></tr>
+  <tr><td>Google</td><td>75%</td><td>~50%</td><td>60 min explicit</td></tr>
+</table>
+
+<h3>7.2 How Claude Code Uses It</h3>
+<p>Claude Code's compact prompt design is architected around cache stability:</p>
+<ul>
+  <li>System instructions = one stable <code>cache_control: ephemeral</code> block (changes rarely)</li>
+  <li>User messages = always appended (never mutate system block)</li>
+  <li>Per ProjectDiscovery case study: 59% total cost reduction achieved this way</li>
+</ul>
+
+<h3>7.3 AWOS Current Problem</h3>
+<div class="warn">
+  AWOS's Planner creates a new Anthropic client on every <code>execute_feature</code> call. Each call re-sends the full system prompt as uncached tokens. With Sonnet at $3/MTok and ~2k-token system prompts, this wastes ~$0.006 per plan call that could be ~$0.0006 with caching.
+</div>
+<p>Fix: Keep a module-level client singleton. The system prompt block never changes between calls in the same process — it will cache after the first call.</p>
+
+<!-- ========================================================= -->
+<h2 id="lsp">8. LSP Integration</h2>
+
+<h3>8.1 What LSP Provides</h3>
+<p>Language Server Protocol gives the agent semantic understanding that static analysis can't provide:</p>
+<table>
+  <tr><th>Signal</th><th>Static Analysis</th><th>LSP</th></tr>
+  <tr><td>Syntax errors</td><td>✅ (ast.parse)</td><td>✅</td></tr>
+  <tr><td>Type errors</td><td>❌</td><td>✅ (pyright)</td></tr>
+  <tr><td>Undefined names</td><td>❌</td><td>✅</td></tr>
+  <tr><td>Missing imports</td><td>Partial</td><td>✅</td></tr>
+  <tr><td>Go-to-definition</td><td>❌</td><td>✅</td></tr>
+  <tr><td>Find references</td><td>❌</td><td>✅</td></tr>
+  <tr><td>Hover docs</td><td>❌</td><td>✅</td></tr>
+</table>
+
+<h3>8.2 Integration Pattern from Claude Code</h3>
+<div class="code-block">
+Pattern (from src/services/lsp/LSPDiagnosticRegistry.ts):
+1. Start pyright/pylsp server as subprocess
+2. Every file write → LSP processes it (textDocument/didChange)
+3. LSP sends publishDiagnostics notification async
+4. Registry stores diagnostics: max 10/file, 30 total
+5. LRU dedup: same diagnostic not repeated across turns
+6. Next LLM turn: diagnostics injected as system attachment
+7. LLM sees errors immediately without running anything
+</div>
+
+<h3>8.3 Python LSP Options</h3>
+<ul>
+  <li><strong>pyright</strong>: Best type checking, Microsoft, fast (Node.js)</li>
+  <li><strong>pylsp</strong>: Pure Python, slower, more widely compatible</li>
+  <li><strong>ruff</strong>: Fast linting (Rust), not full LSP but excellent diagnostics</li>
+  <li><strong>tree-sitter fallback</strong>: When no LSP available, structural analysis</li>
+</ul>
+<p>For AWOS: <strong>ruff</strong> as quick win (fast, Python, no server overhead), <strong>pyright</strong> for full LSP.</p>
+
+<!-- ========================================================= -->
+<h2 id="gaps">9. AWOS Gap Analysis</h2>
+
+<h3>9.1 Critical Gaps vs SOTA</h3>
+<table>
+  <tr><th>Feature</th><th>Claude Code</th><th>Aider</th><th>OpenHands</th><th>AWOS Current</th><th>Gap Severity</th></tr>
+  <tr><td>Edit format</td><td>JSON tool</td><td>SEARCH/REPLACE + fuzzy</td><td>Code execution</td><td>Text SEARCH/REPLACE</td><td class="critical">🔴 Critical</td></tr>
+  <tr><td>Read-before-write</td><td>✅ Enforced</td><td>✅ Enforced</td><td>N/A (executes)</td><td>❌ Snippet only</td><td class="critical">🔴 Critical</td></tr>
+  <tr><td>Test execution</td><td>✅ Via Bash</td><td>✅ Built-in</td><td>✅ Jupyter</td><td>❌ None</td><td class="critical">🔴 Critical</td></tr>
+  <tr><td>Multiple-match guard</td><td>✅ Counted + rejected</td><td>✅ Error raised</td><td>N/A</td><td>❌ Silently applies first</td><td>🟠 High</td></tr>
+  <tr><td>Context compaction</td><td>✅ 5-layer pipeline</td><td>✅ Automatic</td><td>✅ Event-stream</td><td>⚠️ Manual _applied_context only</td><td>🟠 High</td></tr>
+  <tr><td>Architect+Editor split</td><td>✅ Advisor model</td><td>✅ architect mode</td><td>✅ Delegation</td><td>⚠️ _architect_step exists, not wired</td><td>🟠 High</td></tr>
+  <tr><td>Prompt caching</td><td>✅ Optimized</td><td>N/A</td><td>N/A</td><td>⚠️ ephemeral only, new client per call</td><td>🟡 Medium</td></tr>
+  <tr><td>Parallel sampling</td><td>✅ Worktree</td><td>N/A</td><td>✅ Delegation</td><td>❌ Sequential only</td><td>🟡 Medium</td></tr>
+  <tr><td>LSP diagnostics</td><td>✅ Full registry</td><td>✅ lint hooks</td><td>✅ Jupyter output</td><td>⚠️ syntax only (ast.parse)</td><td>🟡 Medium</td></tr>
+  <tr><td>Skills / persistent macros</td><td>✅ .claude/skills/</td><td>N/A</td><td>N/A</td><td>⚠️ skill_library exists, not auto-populated</td><td>🟡 Medium</td></tr>
+  <tr><td>Repo map / symbol index</td><td>✅ symbol index</td><td>✅ ctags + treesitter</td><td>✅ workspace aware</td><td>✅ CodebaseIndex (AST)</td><td>🟢 Good</td></tr>
+  <tr><td>Vector memory</td><td>N/A (session only)</td><td>N/A</td><td>N/A</td><td>✅ ChromaDB (done)</td><td>🟢 Unique strength</td></tr>
+</table>
+
+<!-- ========================================================= -->
+<h2 id="roadmap">10. Prioritized Improvement Roadmap</h2>
+
+<h3>P0 — Edit Reliability (Must fix, directly causes L3 failures)</h3>
+<div class="grid">
+  <div class="card">
+    <h4>P0.1 — JSON Structured Edit Format</h4>
+    <p>Switch from text SEARCH/REPLACE parsing to structured JSON tool calls. LLM emits <code>{"old_string": "...", "new_string": "..."}</code>. Eliminates all parsing fragility.</p>
+    <span class="tag">worker.py</span><span class="tag">verifier.py</span><br>Effort: 4h | Impact: 🔴 Critical
+  </div>
+  <div class="card">
+    <h4>P0.2 — Read-Before-Write Enforcement</h4>
+    <p>Worker must provide FULL file content to LLM, not snippet. Track which files have been "read" in this task session. Fail if old_string not in actual file content.</p>
+    <span class="tag">worker.py</span><span class="tag">orchestrator.py</span><br>Effort: 2h | Impact: 🔴 Critical
+  </div>
+  <div class="card">
+    <h4>P0.3 — Multiple-Match Detection</h4>
+    <p>Before applying, count occurrences of old_string. If &gt;1 and replace_all not set: error with count + instruction to add surrounding context.</p>
+    <span class="tag">verifier.py</span><br>Effort: 1h | Impact: 🟠 High
+  </div>
+</div>
+
+<h3>P1 — Verification &amp; Architecture (High impact)</h3>
+<div class="grid">
+  <div class="card">
+    <h4>P1.1 — Test Execution Verifier</h4>
+    <p>After each task, run <code>pytest</code> on changed file. Pass/fail is ground truth. Replace pure LLM self-evaluation with objective test results.</p>
+    <span class="tag">verifier.py</span><span class="tag">orchestrator.py</span><br>Effort: 3h | Impact: 🔴 High
+  </div>
+  <div class="card">
+    <h4>P1.2 — Architect+Editor Split (Properly)</h4>
+    <p>Architect: plain text "what to change and where". Editor: only produces JSON edit. Two separate LLM calls. Architect=Sonnet reasoning, Editor=Haiku/DeepSeek cheap.</p>
+    <span class="tag">worker.py</span><br>Effort: 3h | Impact: 🟠 High
+  </div>
+  <div class="card">
+    <h4>P1.3 — Auto Context Compaction</h4>
+    <p>After N tasks, compress completed work into a structured "session summary" block. Inject at start of each new task. Prevents context drift across multi-task features.</p>
+    <span class="tag">orchestrator.py</span><br>Effort: 3h | Impact: 🟠 High
+  </div>
+</div>
+
+<h3>P2 — Performance &amp; Parallelism</h3>
+<div class="grid">
+  <div class="card">
+    <h4>P2.1 — Persistent Prompt Cache</h4>
+    <p>Module-level Planner singleton. System prompt as single stable cached block. 60-90% planner cost reduction.</p>
+    <span class="tag">planner.py</span><br>Effort: 2h | Impact: 💰 Cost
+  </div>
+  <div class="card">
+    <h4>P2.2 — Parallel Sampling for L3+</h4>
+    <p>For complex tasks (L3+): generate 2-3 patch candidates concurrently, evaluate each by test execution, select best. Based on Agentless approach.</p>
+    <span class="tag">orchestrator.py</span><span class="tag">worker.py</span><br>Effort: 4h | Impact: 🟡 Medium
+  </div>
+  <div class="card">
+    <h4>P2.3 — Git Worktree Isolation</h4>
+    <p>Each feature execution in its own <code>git worktree</code>. Safe parallel execution. Easy rollback. Clean diff extraction for verification.</p>
+    <span class="tag">orchestrator.py</span><br>Effort: 3h | Impact: 🟡 Medium
+  </div>
+  <div class="card">
+    <h4>P2.4 — Condensed History (ACI-style)</h4>
+    <p>Keep only last N task summaries in context, not full task bodies. Reduces tokens by 40-60% for long feature runs.</p>
+    <span class="tag">orchestrator.py</span><br>Effort: 2h | Impact: 💰 Cost
+  </div>
+</div>
+
+<h3>P3 — Advanced / SOTA</h3>
+<div class="grid">
+  <div class="card">
+    <h4>P3.1 — LSP Feedback Loop</h4>
+    <p>Wire ruff linter as post-edit feedback. Every file write → ruff check → diagnostics injected as context on retry. Near-instant semantic error detection without test execution.</p>
+    <span class="tag">verifier.py</span><span class="tag">worker.py</span><br>Effort: 4h | Impact: 🟡 Medium
+  </div>
+  <div class="card">
+    <h4>P3.2 — Auto Skill Generation</h4>
+    <p>After each successful task → extract the pattern → save to <code>.awos/skills/</code> as Markdown. Successful patterns reused for future similar tasks.</p>
+    <span class="tag">orchestrator.py</span><span class="tag">worker.py</span><br>Effort: 4h | Impact: 🟡 Long-term
+  </div>
+  <div class="card">
+    <h4>P3.3 — Enhanced Repo Map</h4>
+    <p>Upgrade existing CodebaseIndex: add cross-reference tracking (who calls what), dependency graph, public API surface. Better cross-file task context.</p>
+    <span class="tag">codebase_index.py</span><span class="tag">worker.py</span><br>Effort: 4h | Impact: 🟡 Medium
+  </div>
+</div>
+
+<hr style="margin: 3rem 0; border-color: #dee2e6;">
+<p style="color: #888; font-size: 0.85rem;">Research completed: 2026-05-22 | Sources: Claude Code src/, Aider docs, OpenHands architecture, SWE-bench leaderboard, Artificial Analysis benchmarks | AWOS Coding Agent Project</p>
+
+</body>
+</html>

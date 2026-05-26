@@ -204,6 +204,23 @@ class VectorMemory:
             logger.warning("[VectorMemory] query_code failed: %s", exc)
             return []
 
+    @staticmethod
+    def _importance_score(success: bool, critique: str) -> float:
+        """Compute an importance score [0.0–1.0] for a task outcome.
+
+        Inspired by Generative Agents (arXiv:2304.03442): importance scoring
+        at write time lets the retriever surface the most informative memories
+        rather than treating all outcomes equally.
+
+        Rules:
+            success=True                → 1.0  (positive example worth keeping)
+            success=False, has critique → 0.7  (failure with explanation — high learning signal)
+            success=False, no critique  → 0.3  (bare failure — low signal)
+        """
+        if success:
+            return 1.0
+        return 0.7 if critique.strip() else 0.3
+
     def store_outcome(
         self,
         task: dict,
@@ -215,6 +232,7 @@ class VectorMemory:
         try:
             action = task.get("action", "")
             doc_id = uuid.uuid4().hex
+            importance = self._importance_score(success, critique)
             self._sess_col.add(
                 ids=[doc_id],
                 documents=[action],
@@ -225,6 +243,7 @@ class VectorMemory:
                         "session_id": session_id,
                         "created_at": _now_iso(),
                         "critique": critique[:500],  # cap stored critique length
+                        "importance": importance,
                     }
                 ],
             )
