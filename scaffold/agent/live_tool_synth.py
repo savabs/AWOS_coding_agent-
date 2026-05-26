@@ -77,7 +77,6 @@ class LiveToolSynthesizer:
         self._tools_dir = Path(tools_dir)
         self._index_path = self._tools_dir / _TOOLS_INDEX_FILE
         self._cheap_call = cheap_call
-        self._enabled = os.getenv("AWOS_LIVE_TOOLS", "").lower() == "true"
 
     # ── Public API ──────────────────────────────────────────────────────────
 
@@ -93,7 +92,7 @@ class LiveToolSynthesizer:
         Returns a SynthesizedTool if one was successfully synthesized and
         validated, None otherwise.
         """
-        if not self._enabled or self._cheap_call is None:
+        if os.getenv("AWOS_LIVE_TOOLS", "").lower() != "true" or self._cheap_call is None:
             return None
         if attempt < 2:
             return None
