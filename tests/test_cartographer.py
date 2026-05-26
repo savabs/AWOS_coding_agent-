@@ -18,11 +18,11 @@ from scaffold.agent.cartographer import TreeSitterCartographer, Symbol
 def cartographer():
     """Create cartographer with Python language support."""
     try:
-        python_lang = Language('py_tree_sitter', 'python')
-    except:
-        # If precompiled binding not available, skip
+        import tree_sitter_python as tspython
+        python_lang = Language(tspython.language())
+    except Exception:
         pytest.skip("Tree-Sitter Python bindings not available")
-    
+
     return TreeSitterCartographer({'python': python_lang})
 
 

@@ -189,6 +189,7 @@ def refresh_token(token):
 
 # ── Orchestrator smoke test ───────────────────────────────────────────────────
 
+@pytest.mark.integration
 class TestOrchestratorHasSelfCorrection:
     def test_orchestrator_initializes_self_correction(self, monkeypatch):
         from scaffold.agent import planner as _planner_mod
