@@ -14,6 +14,8 @@ Usage:
     awos index                   (Re)build semantic codebase index
     awos run <goal>              Execute a feature goal
     awos performance             Tool success matrix (model × task type)
+    awos stats                   Self-learning observability report
+    awos stats --json            JSON output (for piping/scripts)
 
 Environment:
     AWOS_DEBUG=1                 Verbose mode
@@ -276,6 +278,20 @@ def cmd_run(args):
             print(f"  ✗ {e}")
 
 
+def cmd_stats(args):
+    """Show self-learning observability report."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent / "scaffold" / "agent"))
+    from self_learning_metrics import SelfLearningMetrics
+    store = getattr(args, "store", ".awos")
+    metrics = SelfLearningMetrics(store_path=store)
+    if getattr(args, "json", False):
+        import json
+        print(json.dumps(metrics.snapshot().to_dict(), indent=2))
+    else:
+        metrics.print_report()
+
+
 def cmd_goals(args):
     """List tracked goals and their status."""
     from agent_state_manager import AgentStateManager
@@ -347,6 +363,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     # goals
     sub.add_parser("goals", help="List tracked goals and their status")
+
+    # stats
+    stats = sub.add_parser("stats", help="Self-learning observability report")
+    stats.add_argument("--json", action="store_true", help="Output as JSON")
+    stats.add_argument("--store", default=".awos", help="Path to .awos store (default: .awos)")
 
     return parser
 

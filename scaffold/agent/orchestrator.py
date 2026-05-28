@@ -696,6 +696,20 @@ class Orchestrator:
             except Exception as _se:
                 logger.debug("[ScaffoldEvolver] evolution skipped: %s", _se)
 
+        # ── Self-Learning Observability ─────────────────────────────────
+        try:
+            from scaffold.agent.self_learning_metrics import SelfLearningMetrics
+        except ImportError:
+            try:
+                from self_learning_metrics import SelfLearningMetrics
+            except ImportError:
+                SelfLearningMetrics = None
+        if SelfLearningMetrics is not None:
+            try:
+                SelfLearningMetrics().print_report()
+            except Exception as _slm_exc:
+                logger.debug("[SelfLearningMetrics] report skipped: %s", _slm_exc)
+
         return {
             "success": overall_success,
             "goal": goal,
