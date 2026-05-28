@@ -40,26 +40,48 @@ class Worker:
     MAX_CONTEXT_TOKENS_BLOCK_B: int = 2000
 
     def __init__(self, api_key: Optional[str] = None, model: str = "deepseek-chat"):
-        """Initialize Worker with DeepSeek primary and Haiku fallback."""
+        """Initialize Worker with DeepSeek primary and multiple fallbacks."""
         deepseek_key = api_key or os.getenv("DEEPSEEK_API_KEY")
         anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-        
-        if deepseek_key and anthropic_key:
+        openai_key = os.getenv("OPENAI_API_KEY")
+
+        # DeepSeek (direct API)
+        if deepseek_key:
             self.client = OpenAI(api_key=deepseek_key, base_url="https://api.deepseek.com")
         else:
             self.client = None
-        
-        if anthropic_key and deepseek_key:
+
+        # Anthropic (Haiku / Sonnet)
+        if anthropic_key:
             self.anthropic_client = Anthropic(api_key=anthropic_key)
         else:
             self.anthropic_client = None
-        
-        if not self.client and not self.anthropic_client:
-            raise ValueError("Set DEEPSEEK_API_KEY or ANTHROPIC_API_KEY")
-        
+
+        # OpenAI direct (GPT-4o-mini etc.)
+        if openai_key:
+            self.openai_client = OpenAI(api_key=openai_key, base_url="https://api.openai.com/v1")
+        else:
+            self.openai_client = None
+
+        if not any([self.client, self.anthropic_client, self.openai_client]):
+            raise ValueError("Set at least one of: DEEPSEEK_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY")
+
         self.model = model
         self.fallback_model = "claude-haiku-4-5"
+        self._dead_providers: set = set()
     
+    @staticmethod
+    def _is_permanent_failure(error: str) -> bool:
+        """Return True if the error is a non-retryable provider failure (e.g. depleted credits)."""
+        low = error.lower()
+        return any(p in low for p in (
+            "credit balance is too low",
+            "your credit balance",
+            "insufficient_quota",
+            "payment required",
+            "billing",
+        ))
+
     def execute_task(
         self,
         task: dict,
@@ -337,7 +359,7 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
             model_label  = "DeepSeek"
         
         # Call the right provider
-        if use_provider == "deepseek" and self.client:
+        if use_provider == "deepseek" and self.client and "deepseek" not in self._dead_providers:
             _allowed, _reason = get_ledger().check_budget(model_spec.cost_per_req if model_spec else 0.001, _MONTHLY_BUDGET)
             if not _allowed:
                 raise RuntimeError(f"[BUDGET HARD STOP] {_reason}")
@@ -356,9 +378,40 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                     cost = (inp / 1_000_000) * inp_price + (out / 1_000_000) * out_price
                     tracker.record("execution", model_label, inp, out, cost)
             except Exception as e:
-                print(f"[WORKER] {model_label} failed (attempt {attempt}): {str(e)[:80]}")
-        
-        elif use_provider == "anthropic" and self.anthropic_client:
+                err_str = str(e)
+                if self._is_permanent_failure(err_str):
+                    self._dead_providers.add("deepseek")
+                    print(f"[CIRCUIT] deepseek tripped — {err_str[:60]}")
+                else:
+                    print(f"[WORKER] {model_label} failed (attempt {attempt}): {err_str[:80]}")
+
+        elif use_provider == "openai" and self.openai_client and "openai" not in self._dead_providers:
+            _allowed, _reason = get_ledger().check_budget(model_spec.cost_per_req if model_spec else 0.003, _MONTHLY_BUDGET)
+            if not _allowed:
+                raise RuntimeError(f"[BUDGET HARD STOP] {_reason}")
+            try:
+                response = self.openai_client.chat.completions.create(
+                    model=use_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=4096,
+                    temperature=0.3,
+                )
+                response_text = response.choices[0].message.content
+                model_used = model_label
+                if tracker:
+                    inp = response.usage.prompt_tokens
+                    out = response.usage.completion_tokens
+                    cost = (inp / 1_000_000) * inp_price + (out / 1_000_000) * out_price
+                    tracker.record("execution", model_label, inp, out, cost)
+            except Exception as e:
+                err_str = str(e)
+                if self._is_permanent_failure(err_str):
+                    self._dead_providers.add("openai")
+                    print(f"[CIRCUIT] openai tripped — {err_str[:60]}")
+                else:
+                    print(f"[WORKER] {model_label} failed (attempt {attempt}): {err_str[:80]}")
+
+        elif use_provider == "anthropic" and self.anthropic_client and "anthropic" not in self._dead_providers:
             _allowed, _reason = get_ledger().check_budget(model_spec.cost_per_req if model_spec else 0.017, _MONTHLY_BUDGET)
             if not _allowed:
                 raise RuntimeError(f"[BUDGET HARD STOP] {_reason}")
@@ -378,10 +431,15 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
             except RuntimeError:
                 raise
             except Exception as e:
-                print(f"[WORKER] {model_label} failed (attempt {attempt}): {str(e)[:80]}")
-        
+                err_str = str(e)
+                if self._is_permanent_failure(err_str):
+                    self._dead_providers.add("anthropic")
+                    print(f"[CIRCUIT] anthropic tripped — {err_str[:60]}")
+                else:
+                    print(f"[WORKER] {model_label} failed (attempt {attempt}): {err_str[:80]}")
+
         # Hard fallback: Haiku if primary failed
-        if not response_text and self.anthropic_client and use_model != self.fallback_model:
+        if not response_text and self.anthropic_client and use_model != self.fallback_model and "anthropic" not in self._dead_providers:
             _allowed, _reason = get_ledger().check_budget(0.017, _MONTHLY_BUDGET)
             if not _allowed:
                 raise RuntimeError(f"[BUDGET HARD STOP] {_reason}")
@@ -399,8 +457,12 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                     cost = (inp / 1_000_000) * 1.00 + (out / 1_000_000) * 5.00
                     tracker.record("execution", "Haiku fallback", inp, out, cost)
             except Exception as e:
-                raise RuntimeError(f"All providers failed: {str(e)}")
-        
+                err_str = str(e)
+                if self._is_permanent_failure(err_str):
+                    self._dead_providers.add("anthropic")
+                    print(f"[CIRCUIT] anthropic tripped — {err_str[:60]}")
+                raise RuntimeError(f"All providers failed: {err_str}")
+
         if not response_text:
             raise RuntimeError("No API key available or all providers failed")
         
@@ -648,14 +710,22 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
             f"Describe the solution in 3-5 sentences (no code):"
         )
         try:
-            if model_spec is not None and model_spec.provider == "anthropic" and self.anthropic_client:
+            if model_spec is not None and model_spec.provider == "anthropic" and self.anthropic_client and "anthropic" not in self._dead_providers:
                 resp = self.anthropic_client.messages.create(
                     model=model_spec.model_id,
                     max_tokens=400,
                     messages=[{"role": "user", "content": prompt}],
                 )
                 return resp.content[0].text.strip()
-            elif self.client:
+            elif model_spec is not None and model_spec.provider == "openai" and self.openai_client and "openai" not in self._dead_providers:
+                resp = self.openai_client.chat.completions.create(
+                    model=model_spec.model_id,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=400,
+                    temperature=0.1,
+                )
+                return resp.choices[0].message.content.strip()
+            elif self.client and "deepseek" not in self._dead_providers:
                 resp = self.client.chat.completions.create(
                     model=self.model,
                     messages=[{"role": "user", "content": prompt}],
@@ -663,7 +733,15 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                     temperature=0.1,
                 )
                 return resp.choices[0].message.content.strip()
-            elif self.anthropic_client:
+            elif self.openai_client and "openai" not in self._dead_providers:
+                resp = self.openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=400,
+                    temperature=0.1,
+                )
+                return resp.choices[0].message.content.strip()
+            elif self.anthropic_client and "anthropic" not in self._dead_providers:
                 resp = self.anthropic_client.messages.create(
                     model="claude-haiku-4-5",
                     max_tokens=400,

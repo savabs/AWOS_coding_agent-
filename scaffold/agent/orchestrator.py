@@ -816,6 +816,7 @@ class Orchestrator:
             task=task,
             failure_count=self.escalation.failure_count(str(task_id)),
             budget_remaining=budget_left,
+            dead_providers=self.worker._dead_providers,
         )
         print(f"[TASK {task_id}] {self.escalation.summary(esc_decision)}")
 

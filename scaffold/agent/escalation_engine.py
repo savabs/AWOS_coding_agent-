@@ -4,14 +4,15 @@ EscalationEngine: 5-tier model ladder with complexity, budget, and failure gates
 Philosophy:
   Start cheap. Escalate on evidence.
   A small model with great context beats a large model with poor context.
-  Opus is NOT banned — it's budget-gated. If you need it, AWOS will use it.
+  Opus is BANNED — too expensive at any scale.
+  Sonnet is restricted — ~10% of requests max, complexity 8+ or 3+ failures.
 
 Ladder (cheapest → most powerful):
-  L0  Gemini 2.5 Flash-Lite  $0.001/req  — routing, simple Q&A
-  L1  DeepSeek V4 Flash       $0.001/req  — default worker
-  L2  Claude Haiku 4.5        $0.017/req  — retry after L1 fail
-  L3  Claude Sonnet 4.6       $0.050/req  — complex tasks or repeated failures
-  L4  Claude Opus 4.6         $0.960/req  — budget-gated premium
+  L0  Gemini 2.5 Flash-Lite      $0.001/req  — routing, simple Q&A
+  L1  DeepSeek V4 Flash           $0.001/req  — default worker
+  L2  GPT-4o-mini (OpenAI)        $0.003/req  — fallback (uses existing credits)
+  L3  Claude Haiku 4.5            $0.017/req  — retry after cheaper tiers fail
+  L4  Claude Sonnet 4.6           $0.050/req  — restricted (complexity 9+ or 3+ failures)
 
 Escalation gates (all must pass to jump a level):
   - Complexity gate:  task score >= threshold for that level
@@ -20,6 +21,7 @@ Escalation gates (all must pass to jump a level):
   - Explicit gate:    user asked for premium / forced via API
 """
 
+import os
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
@@ -32,8 +34,9 @@ except ImportError:
 class EscalationLevel(Enum):
     GEMINI_FLASH  = 0   # Router / simple answers
     DEEPSEEK      = 1   # Default code worker
-    HAIKU         = 2   # Retry tier
-    SONNET        = 3   # Complex / architecture (top tier, no Opus)
+    OPENAI        = 2   # GPT-4o-mini fallback (uses existing OpenAI credits)
+    HAIKU         = 3   # Retry tier
+    SONNET        = 4   # Severely restricted (top tier, Opus banned)
 
 
 @dataclass
@@ -77,6 +80,18 @@ LADDER: list[ModelSpec] = [
         min_failures=0,
     ),
     ModelSpec(
+        level=EscalationLevel.OPENAI,
+        name="GPT-4o-mini",
+        model_id="gpt-4o-mini",
+        provider="openai",
+        cost_per_req=0.003,
+        input_price=0.15,
+        output_price=0.60,
+        min_complexity=5,
+        min_budget_remaining=0.0,
+        min_failures=1,
+    ),
+    ModelSpec(
         level=EscalationLevel.HAIKU,
         name="Claude Haiku 4.5",
         model_id="claude-haiku-4-5",
@@ -84,9 +99,9 @@ LADDER: list[ModelSpec] = [
         cost_per_req=0.017,
         input_price=1.00,
         output_price=5.00,
-        min_complexity=5,
+        min_complexity=8,
         min_budget_remaining=1.0,
-        min_failures=1,
+        min_failures=3,
     ),
     ModelSpec(
         level=EscalationLevel.SONNET,
@@ -96,9 +111,9 @@ LADDER: list[ModelSpec] = [
         cost_per_req=0.050,
         input_price=3.00,
         output_price=15.00,
-        min_complexity=7,
+        min_complexity=9,
         min_budget_remaining=3.0,
-        min_failures=2,
+        min_failures=3,
     ),
 ]
 
@@ -139,6 +154,9 @@ class EscalationEngine:
         self._performance = performance_tracker
         self._ml_router = ml_router          # LinUCBRouter | None
         self._feature_extractor = None
+        # Premium budget: separate cap on Anthropic spend (default: no cap = None)
+        _pb = os.getenv("AWOS_PREMIUM_BUDGET", "")
+        self._premium_budget = float(_pb) if _pb else None
         if ml_router is not None:
             try:
                 from scaffold.agent.ml_router import TaskFeatureExtractor
@@ -148,6 +166,15 @@ class EscalationEngine:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
+    def _effective_budget(self, spec: ModelSpec, budget_remaining: float) -> float:
+        """Return effective budget for a model, accounting for premium cap."""
+        if not self._is_premium_model(spec):
+            return budget_remaining
+        premium_rem = self._premium_budget_remaining()
+        if premium_rem is None:
+            return budget_remaining
+        return min(budget_remaining, premium_rem)
+
     def decide(
         self,
         task: dict,
@@ -155,6 +182,7 @@ class EscalationEngine:
         budget_remaining: Optional[float] = None,
         force_level: Optional[EscalationLevel] = None,
         user_wants_best: bool = False,
+        dead_providers: Optional[set] = None,
     ) -> EscalationDecision:
         """
         Choose the right model tier for this task.
@@ -168,6 +196,8 @@ class EscalationEngine:
         """
         if budget_remaining is None:
             budget_remaining = self.monthly_budget
+        if dead_providers is None:
+            dead_providers = set()
 
         complexity_score = self._score_complexity(task)
 
@@ -184,7 +214,7 @@ class EscalationEngine:
             )
 
         # User explicitly wants best available
-        if user_wants_best and budget_remaining >= LEVEL_MAP[EscalationLevel.SONNET].min_budget_remaining:
+        if user_wants_best and self._effective_budget(LEVEL_MAP[EscalationLevel.SONNET], budget_remaining) >= LEVEL_MAP[EscalationLevel.SONNET].min_budget_remaining:
             spec = LEVEL_MAP[EscalationLevel.SONNET]
             return EscalationDecision(
                 spec=spec,
@@ -215,7 +245,7 @@ class EscalationEngine:
                 default_rate = default_stats.get("success_rate") or 1.0
                 if default_rate < 0.50 and best_rate > default_rate:
                     for spec in LADDER:
-                        if spec.name == best_name and budget_remaining >= spec.min_budget_remaining:
+                        if spec.name == best_name and self._effective_budget(spec, budget_remaining) >= spec.min_budget_remaining:
                             _perf_override = spec
                             break
 
@@ -227,7 +257,7 @@ class EscalationEngine:
         ):
             features = self._feature_extractor.extract(task, failure_count)
             budget_mask = [
-                budget_remaining >= spec.min_budget_remaining
+                self._effective_budget(spec, budget_remaining) >= spec.min_budget_remaining
                 for spec in LADDER
             ]
             action_id = self._ml_router.select(features, budget_mask=budget_mask)
@@ -263,7 +293,7 @@ class EscalationEngine:
             recommended = self._performance.recommend_model(task_type, default_model_names)
             if recommended:
                 for spec in LADDER:
-                    if spec.name == recommended and budget_remaining >= spec.min_budget_remaining:
+                    if spec.name == recommended and self._effective_budget(spec, budget_remaining) >= spec.min_budget_remaining:
                         return EscalationDecision(
                             spec=spec,
                             reason=f"Performance hint (cold-start): {spec.name} has highest empirical success for {task_type}",
@@ -273,13 +303,21 @@ class EscalationEngine:
                         )
 
         # Walk down the ladder from most capable, find highest affordable level
-        chosen = LEVEL_MAP[EscalationLevel.DEEPSEEK]  # safe default
+        # Default: lowest non-dead tier (usually DeepSeek, but skip if tripped)
+        chosen = LEVEL_MAP[EscalationLevel.DEEPSEEK]  # fallback
         reason = "Default DeepSeek worker"
+        for _s in LADDER[1:]:  # ascending — first non-dead tier wins as default
+            if _s.provider not in dead_providers:
+                chosen = _s
+                reason = f"Default {_s.name} (lowest available)"
+                break
 
         for spec in reversed(LADDER[1:]):  # Skip Gemini (routing only)
+            if spec.provider in dead_providers:
+                continue  # skip tripped provider
             qualifies_complexity = complexity_score >= spec.min_complexity
             qualifies_failures   = failure_count   >= spec.min_failures
-            qualifies_budget     = budget_remaining >= spec.min_budget_remaining
+            qualifies_budget     = self._effective_budget(spec, budget_remaining) >= spec.min_budget_remaining
 
             if qualifies_budget and (qualifies_complexity or qualifies_failures):
                 chosen = spec
@@ -392,6 +430,21 @@ class EscalationEngine:
             boost -= 1
 
         return max(1, min(10, base + boost))
+
+    def _premium_budget_remaining(self) -> float | None:
+        """Remaining premium budget, or None if no cap is set."""
+        if self._premium_budget is None:
+            return None
+        try:
+            from scaffold.agent.budget_ledger import get_ledger
+            spent = get_ledger().get_premium_spent()
+            return max(0.0, self._premium_budget - spent)
+        except Exception:
+            return self._premium_budget
+
+    def _is_premium_model(self, spec: ModelSpec) -> bool:
+        """Check if a model spec is an Anthropic (premium) model."""
+        return spec.provider == "anthropic"
 
     def summary(self, decision: EscalationDecision) -> str:
         """Human-readable decision summary."""
