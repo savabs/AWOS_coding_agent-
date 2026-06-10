@@ -56,13 +56,14 @@ if TYPE_CHECKING:
 _MIN_SAMPLES = 3          # minimum spans needed for meaningful M/M/1 estimate
 _SATURATION_WARN = 0.80   # ρ threshold for saturation warning
 _N_FEATURES = 10          # LinUCB feature dimension (must match ml_router.py)
-_N_ACTIONS = 4            # number of model tiers
+_N_ACTIONS = 5            # number of model tiers
 
 ACTION_NAMES = {
     0: "gemini_flash",
     1: "deepseek",
-    2: "haiku",
-    3: "sonnet",
+    2: "openai",
+    3: "haiku",
+    4: "sonnet",
 }
 
 

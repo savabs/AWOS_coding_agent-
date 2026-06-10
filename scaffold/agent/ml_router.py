@@ -27,8 +27,9 @@ GPWorldModel  (SECONDARY — Phase 2 stub)
 Action space (matches EscalationLevel in escalation_engine.py):
     0 = GEMINI_FLASH
     1 = DEEPSEEK
-    2 = HAIKU
-    3 = SONNET
+    2 = OPENAI (GPT-4o-mini)
+    3 = HAIKU
+    4 = SONNET
 """
 
 from __future__ import annotations
@@ -46,8 +47,8 @@ logger = logging.getLogger(__name__)
 # ── Constants ──────────────────────────────────────────────────────────────
 
 N_FEATURES = 10
-N_ACTIONS  = 4
-ACTION_NAMES = ["gemini_flash", "deepseek", "haiku", "sonnet"]
+N_ACTIONS  = 5
+ACTION_NAMES = ["gemini_flash", "deepseek", "openai", "haiku", "sonnet"]
 
 _DEFAULT_WEIGHTS_PATH = Path(".awos") / "linucb_weights.pkl"
 _DEFAULT_GP_PATH      = Path(".awos") / "gp_model.pkl"

@@ -75,20 +75,20 @@ class TestRewardStore:
     def test_reward_cheaper_model_slightly_higher(self):
         from scaffold.agent.reward_store import compute_reward
         r_cheap     = compute_reward(success=True, action_id=1, cost_usd=0.001)  # deepseek
-        r_expensive = compute_reward(success=True, action_id=3, cost_usd=0.05)   # sonnet
+        r_expensive = compute_reward(success=True, action_id=4, cost_usd=0.05)   # sonnet
         assert r_cheap >= r_expensive
         assert r_cheap == pytest.approx(0.999)    # 1 - 0.05*(0.001/0.05)
         assert r_expensive == pytest.approx(0.95)  # 1 - 0.05*1.0
 
     def test_sonnet_failure_is_negative(self):
         from scaffold.agent.reward_store import compute_reward
-        r = compute_reward(success=False, action_id=3, cost_usd=0.05)  # sonnet fail
+        r = compute_reward(success=False, action_id=4, cost_usd=0.05)  # sonnet fail
         assert r < 0, f"Sonnet failure should be negative, got {r}"
         assert r == pytest.approx(-0.35)  # -0.05 opportunity - 0.30 max penalty
 
     def test_reward_breakdown_tracked(self, tmp_path):
         store = self._make_store(tmp_path)
-        ep = store.store(self._sample_task(), action_id=3, features=[0.1]*10, success=False, cost_usd=0.05)
+        ep = store.store(self._sample_task(), action_id=4, features=[0.1]*10, success=False, cost_usd=0.05)
         bd = ep.reward_breakdown
         assert "base_value" in bd
         assert "opportunity_cost" in bd
@@ -219,12 +219,12 @@ class TestLinUCBRouter:
 
     def test_budget_mask_excludes_action(self, tmp_path):
         router = self._router(tmp_path, min_samples=1)
-        router.update(self._feat(), action_id=3, reward=1.0)  # give high reward to sonnet
-        # Mask out sonnet (action 3)
-        mask = [True, True, True, False]
+        router.update(self._feat(), action_id=4, reward=1.0)  # give high reward to sonnet
+        # Mask out sonnet (action 4)
+        mask = [True, True, True, True, False]
         for _ in range(10):
             action = router.select(self._feat(), budget_mask=mask)
-            assert action in (0, 1, 2), f"Expected action in [0,1,2], got {action}"
+            assert action in (0, 1, 2, 3), f"Expected action in [0,1,2,3], got {action}"
 
     def test_persists_and_reloads(self, tmp_path):
         from scaffold.agent.ml_router import LinUCBRouter
@@ -244,7 +244,7 @@ class TestLinUCBRouter:
         router = self._router(tmp_path)
         s = router.summary()
         assert "learned_weights" in s
-        assert set(s["learned_weights"].keys()) == {"gemini_flash", "deepseek", "haiku", "sonnet"}
+        assert set(s["learned_weights"].keys()) == {"gemini_flash", "deepseek", "openai", "haiku", "sonnet"}
 
     def test_learns_to_prefer_rewarded_action(self, tmp_path):
         """After many updates rewarding action 1 (deepseek), it should be preferred."""
@@ -252,7 +252,7 @@ class TestLinUCBRouter:
         feat = self._feat()
         for _ in range(30):
             router.update(feat, action_id=1, reward=1.0)  # deepseek always wins
-            router.update(feat, action_id=3, reward=0.0)  # sonnet always fails
+            router.update(feat, action_id=4, reward=0.0)  # sonnet always fails
         chosen = router.select(feat)
         assert chosen == 1, f"Expected deepseek (1), got {chosen}"
 

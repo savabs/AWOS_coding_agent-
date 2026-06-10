@@ -1,178 +1,139 @@
-# Agentic OS — Backbone for Complex Agent-Driven Projects
+# AWOS — Learnable Operating System for Autonomous Work
 
-> **The problem with AI-assisted development on complex projects is not capability — it is coherence.**
-> An agent that forgets what it decided, re-derives architecture mid-implementation, loses track of state
-> across sessions, or drifts between "what we planned" and "what we built" will fail on any project
-> that takes more than a single sitting to complete. This repository is the fix.
+> **An AI that is greedy to finish your projects — well, fast, and cheap — and gets better every time.**
 
-**Agentic OS** is a project-agnostic backbone: a living workflow system, memory architecture,
-automation toolkit, and minimal Python scaffold that gives any agent — and the human working with it —
-the structure needed to manage complexity at scale.
+AWOS is not a coding assistant or a Cursor alternative. It is a **learnable operating system** for autonomous agents: a meta-AI that schedules work, compiles experience into policy, and optimizes for **quality × speed ÷ cost**.
 
----
+The coding agent is **App #1**. The kernel is domain-agnostic and portable to research, support, ops, and custom agent builds.
 
-## What's in This Repo
-
-```
-agentic-os/
-├── AWOS.md                        ← The living doctrine document. Read this first.
-├── QUICK_START.md                 ← Bootstrap a new project in 5 minutes.
-│
-├── .github/
-│   └── copilot-instructions.md   ← Drop into any project to activate the full workflow.
-│
-├── docs/                         ← Research → Spec → Memory artifacts
-│   ├── research/RESEARCH_TEMPLATE.md
-│   ├── specs/SPEC_TEMPLATE.md
-│   ├── adr/TEMPLATE.md
-│   └── memory/CHECKPOINT_TEMPLATE.md
-│
-├── tasks/                        ← Task tracking (active + done)
-│   ├── active/TASK_TEMPLATE.md
-│   └── done/
-│
-├── wiki/                         ← Knowledge graph foundation
-│   ├── SCHEMA.md                 ← When/how to create wiki pages
-│   ├── GLOSSARY.md
-│   └── log.md
-│
-├── memories/repo/                ← Canonical project facts (one file, no copies)
-│   └── project_structure.md
-│
-├── protocols/                    ← Step-by-step operating guides
-│   ├── DEBUG_PROTOCOL.md
-│   ├── RESEARCH_PROTOCOL.md
-│   ├── IMPLEMENTATION_PROTOCOL.md
-│   ├── INTERNET_RESEARCH_PROTOCOL.md
-│   ├── MEMORY_PROTOCOL.md
-│   ├── MATH_PROTOCOL.md
-│   └── SECURITY_PROTOCOL.md
-│
-├── scripts/                      ← Automation — lint, checkpoint, quality gate
-│   ├── session_checkpoint.py
-│   ├── obsidian_lint.py
-│   ├── obsidian_linkify.py
-│   ├── quality_gate.py
-│   ├── rotate_checkpoints.py
-│   ├── fact_lint.py
-│   ├── extract_patterns.py
-│   └── new_project.py           ← Bootstrap a new project from this template
-│
-├── scaffold/                     ← Minimal Python agent scaffold (extend, don't fork)
-│   └── agent/
-│       ├── config/settings.py
-│       ├── memory/store.py
-│       ├── tools/base.py
-│       └── core/orchestrator.py
-│
-└── examples/                     ← Working minimal examples
-```
+**Read [`VISION.md`](VISION.md) first.** It is the canonical identity document for this project.
 
 ---
 
-## Core Insight
+## What AWOS is
 
-> **An agent without structure is a very fast way to build incoherent software.**
-
-Three failure modes kill complex agent projects:
-
-1. **Memory loss between sessions** — the agent re-derives decisions, contradicts prior work, re-reads the entire codebase on every session start.
-2. **Unplanned implementation** — code is written before the architecture is clear; bugs require re-reading what was just written.
-3. **Fact drift** — the same number or decision exists in five places and they disagree.
-
-This system eliminates all three:
-
-| Failure | Solution |
+| Metaphor | Role |
 |---|---|
-| Memory loss | Session checkpoints + single-owner canonical files + cold-start protocol |
-| Unplanned implementation | Research → Spec → Task triad, enforced by preflight gate |
-| Fact drift | Single-Owner Rule + `fact_lint.py` catches copies before they diverge |
+| **OS** | Schedules agents, manages budget, enforces limits, self-updates |
+| **Compiler** | Turns failures and successes into prompts, tools, routing weights |
+| **Database** | `.awos/` tracks habits, mistakes, and patterns per deployment |
+
+The LLM is compute. AWOS is the intelligence that decides how to spend it.
 
 ---
 
-## The 30-Second Mental Model
+## The objective
 
 ```
-Every non-trivial change:
-  1. Research phase  → docs/research/<name>.md      (understand, no code)
-  2. Spec phase      → docs/specs/<name>_spec.md    (plan, ordered atomic steps)
-  3. Task file       → tasks/active/<name>.md        (track, source of truth)
-  4. Implement       → one step at a time, mark done
-  5. Checkpoint      → docs/memory/checkpoint_<date>.md (persist for next session)
+Maximize:  Quality × Speed ÷ Cost
 ```
 
-The task file is the only thing that needs to survive a session end to resume cold.
+Every component — LinUCB routing, EscalationEngine, PromptEvolver, LiveToolSynthesizer, BudgetLedger — serves this function. Our metric is **project delivery efficiency**, not tokens or model names.
 
 ---
 
-## How to Use This System
+## Repository layout
 
-### Option A — New Project (recommended)
+```
+AWOS_coding_agent/
+├── VISION.md                  ← Identity and strategy (read first)
+├── AWOS.md                    ← Operational protocols for kernel apps
+├── AGENT_INDEX.md             ← Agent cold-start file map
+├── awos.py                    ← CLI entry point
+│
+├── scaffold/agent/            ← Kernel + Coding App implementation
+│   ├── orchestrator.py        ← Kernel loop
+│   ├── reward_store.py        ← Objective function (compute_reward)
+│   ├── ml_router.py             ← LinUCB bandit
+│   ├── escalation_engine.py   ← Model ladder scheduler
+│   ├── prompt_evolver.py      ← Compiles experience → prompts
+│   ├── live_tool_synth.py     ← Compiles failures → tools
+│   ├── scaffold_evolver.py    ← Self-modifying scaffold (test-gated)
+│   ├── worker.py / verifier.py  ← Coding App execute/verify layer
+│   └── core/                  ← Performance, observability, queue model
+│
+├── .awos/                     ← Runtime state (the OS filesystem)
+│   ├── error_patterns.jsonl   ← Mistake database
+│   ├── skills/                ← Learned success patterns
+│   ├── evolved_prompt.json    ← Compiled worker policy
+│   ├── tools/                 ← Synthesized helpers
+│   ├── reward_store.jsonl     ← Outcomes for bandit learning
+│   ├── goals/ + state/          ← Multi-session process table
+│   └── memory/                ← Vector long-term memory
+│
+├── docs/                      ← Research, specs, checkpoints
+├── tasks/                     ← Active implementation tracking
+├── protocols/                 ← Step-by-step operating guides
+└── tests/                     ← 776+ tests
+```
+
+---
+
+## Quick start
+
 ```bash
-python scripts/new_project.py --name my-project --dest ~/projects/my-project
-```
-This scaffolds the full directory structure, copies all templates, seeds the memory file, and initialises git.
+# Install dependencies
+pip install -r requirements.txt
 
-### Option B — Add to Existing Project
-1. Copy `.github/copilot-instructions.md` into your project's `.github/`
-2. Copy `docs/`, `tasks/`, `wiki/`, `memories/`, `scripts/` into your project root
-3. Fill in `memories/repo/project_structure.md` with your project's actual facts
-4. Start a session: `python scripts/session_checkpoint.py -m "cold start"`
+# Configure API keys
+cp .env.example .env   # edit with your keys
 
-### Option C — Just the Doctrine
-Read `AWOS.md`. It is the complete playbook. Everything else in this repo is the tooling to execute it.
+# Run the coding app
+python3 awos.py run --goal "add rate limiting to the API"
 
----
+# Check self-learning state
+python3 awos.py stats
 
-## The Knowledge Graph (Obsidian Integration)
-
-This system is built around an Obsidian-compatible knowledge graph. Every markdown file:
-- Has YAML frontmatter (`title`, `tags`)
-- Uses `[[wiki links]]` for cross-references (never bare file paths)
-- Has a `## Related` section linking the research ↔ spec ↔ task triad
-
-Open the project root as an Obsidian vault. Graph View filtered by tag shows the state of any topic cluster instantly.
-
-Programmatic navigation (when Obsidian UI is not available):
-```bash
-grep -r "\[\[filename\]\]" docs/ tasks/ wiki/   # find all backlinks to a file
-grep -r "topic/convergence" docs/ tasks/         # find all files tagged with a topic
+# Check budget
+python3 awos.py budget
 ```
 
 ---
 
-## Automation Scripts
+## CLI
 
-| Script | What it does |
+| Command | Purpose |
 |---|---|
-| `scripts/session_checkpoint.py` | Auto-generate a checkpoint from git state + active tasks |
-| `scripts/obsidian_lint.py` | Check all markdown files for missing frontmatter and broken links |
-| `scripts/obsidian_linkify.py` | Auto-add frontmatter and convert bare paths to wiki links |
-| `scripts/quality_gate.py` | Pre-commit: tests pass + lint clean + task steps checked |
-| `scripts/rotate_checkpoints.py` | Archive old checkpoints when count exceeds threshold |
-| `scripts/fact_lint.py` | Detect numeric constants duplicated outside their canonical owner |
-| `scripts/extract_patterns.py` | Mine completed tasks and checkpoints for reusable patterns |
-| `scripts/new_project.py` | Bootstrap a new project from this template |
+| `awos run <goal>` | Execute a feature goal (Coding App) |
+| `awos chat` | Interactive session |
+| `awos stats` | Self-learning observability report |
+| `awos budget` | Month-to-date spend |
+| `awos performance` | Model × task type success matrix |
+| `awos memory search <q>` | Search vector memory |
+| `awos goals` | List multi-session goals |
 
 ---
 
-## Philosophy
+## Kernel vs App
 
-This is not a framework that constrains what you build. It is an operating system for how you build it.
+**Kernel (domain-agnostic):** RewardStore, LinUCB, EscalationEngine, BudgetLedger, PromptEvolver, LiveToolSynthesizer, ScaffoldEvolver, VectorMemory, SkillLibrary, DAGExecutor, ObservabilityStore.
 
-The principles are:
-- **Atomicity** — every step changes one thing, tests one thing, proves one thing
-- **Persistence** — every decision is written to a file before it is considered done
-- **Single ownership** — every fact lives in exactly one place
-- **Research before code** — no implementation without a research phase and spec
-- **Checkpoints as handoffs** — the last thing a session writes is the first thing the next session reads
+**Coding App (domain-specific):** Planner, Worker, Verifier, GitManager, Cartographer, TestRunner.
 
-These principles are not bureaucracy. They are the minimum structure required to keep a complex project coherent across dozens of sessions and hundreds of files.
+Future apps (research, support, ops) swap the execute/verify layer. The kernel stays the same.
 
 ---
 
-## Contributing Back
+## Business
 
-When you discover a pattern that works in your project, update `AWOS.md` and bump the version.
-When a pattern fails, strike it out and note why.
-The AWOS is a living document. A stale AWOS is a liability. A maintained AWOS is a compounding asset.
+We are an **agent-making firm** targeting ~1,000 niche paying users — agencies, platform builders, eng teams — not a mass-market IDE product.
+
+- Customers use our API; they never pick models
+- We optimize routing internally; margin improves as LinUCB learns
+- `.awos/` state compounds → switching cost grows over time
+
+See [`VISION.md`](VISION.md) for full strategy, pricing ladder, and competitive positioning.
+
+---
+
+## For agents
+
+Cold-start sequence:
+
+1. `VISION.md`
+2. `memories/repo/project_structure.md`
+3. Latest `docs/memory/checkpoint_*.md`
+4. `tasks/active/*.md`
+5. `AWOS.md` (when implementing)
+
+See `AGENT_INDEX.md` for the full file map.

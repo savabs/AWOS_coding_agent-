@@ -47,7 +47,7 @@ _ETA = 0.05   # opportunity-cost weight for successes
 _KAPPA = 0.30  # max failure-penalty magnitude
 
 # Fallback costs when token-level tracking is unavailable (uses tier defaults)
-_TIER_DEFAULT_COST = {0: 0.001, 1: 0.001, 2: 0.017, 3: 0.050}
+_TIER_DEFAULT_COST = {0: 0.001, 1: 0.001, 2: 0.003, 3: 0.017, 4: 0.050}
 
 
 @dataclass
@@ -58,17 +58,20 @@ class Episode:
     action_id maps to EscalationLevel:
         0 = GEMINI_FLASH
         1 = DEEPSEEK
-        2 = HAIKU
-        3 = SONNET (top tier — no Opus)
+        2 = OPENAI (GPT-4o-mini)
+        3 = HAIKU
+        4 = SONNET (top tier — no Opus)
     """
     episode_id: str
     task_id: str
-    action_id: int                  # 0-3
+    action_id: int                  # 0-4
     features: list[float]           # 10-dim feature vector
     success: bool
     cost_usd: float
-    latency_ms: float
-    reward: float                   # computed reward signal
+    latency_ms: float = 0.0
+    reward: float = 0.0             # computed reward signal
+    input_tokens: int = 0
+    output_tokens: int = 0
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -256,7 +259,7 @@ class ReplayGate:
         return admitted
 
 
-N_ACTIONS_REPLAY = 4  # mirrors ml_router.N_ACTIONS (avoid circular import)
+N_ACTIONS_REPLAY = 5  # mirrors ml_router.N_ACTIONS (avoid circular import)
 
 
 class RewardStore:
@@ -285,6 +288,8 @@ class RewardStore:
         cost_usd: float = 0.0,
         latency_ms: float = 0.0,
         model_name: str = "",
+        input_tokens: int = 0,
+        output_tokens: int = 0,
     ) -> Episode:
         """
         Record a completed task attempt. Returns the stored Episode.
@@ -298,6 +303,8 @@ class RewardStore:
             features=list(features),
             success=success,
             cost_usd=cost_usd,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
             latency_ms=latency_ms,
             reward=reward,
             task_action_text=str(task.get("action", ""))[:200],
@@ -357,7 +364,7 @@ class RewardStore:
             by_action[a]["success"] += int(e.success)
             by_action[a]["total_reward"] += e.reward
 
-        action_names = ["gemini_flash", "deepseek", "haiku", "sonnet"]
+        action_names = ["gemini_flash", "deepseek", "openai", "haiku", "sonnet"]
         stats = {}
         for a_id, data in sorted(by_action.items()):
             name = action_names[a_id] if a_id < len(action_names) else str(a_id)

@@ -22,7 +22,7 @@ try:
     from .verifier import Verifier
     from .git_manager import GitManager
     from .symbol_index import SymbolIndex
-    from .escalation_engine import EscalationEngine
+    from .escalation_engine import EscalationEngine, is_cheap_only
     from .example_store import ExampleStore
     from .integration_reviewer import IntegrationReviewer
     from .core.performance_tracker import ToolPerformanceTracker
@@ -56,7 +56,7 @@ except ImportError:
     from verifier import Verifier
     from git_manager import GitManager
     from symbol_index import SymbolIndex
-    from escalation_engine import EscalationEngine
+    from escalation_engine import EscalationEngine, is_cheap_only
     from example_store import ExampleStore
     from integration_reviewer import IntegrationReviewer
     from core.performance_tracker import ToolPerformanceTracker
@@ -182,8 +182,16 @@ class Orchestrator:
                         temperature=0.3,
                     )
                     return response.choices[0].message.content or ""
-                # Fallback: Anthropic Haiku
-                if hasattr(worker, "anthropic_client") and worker.anthropic_client is not None:
+                # Fallback: OpenAI mini (cheap-only — no Haiku)
+                if hasattr(worker, "openai_client") and worker.openai_client is not None:
+                    response = worker.openai_client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=120,
+                        temperature=0.3,
+                    )
+                    return response.choices[0].message.content or ""
+                if not is_cheap_only() and hasattr(worker, "anthropic_client") and worker.anthropic_client is not None:
                     response = worker.anthropic_client.messages.create(
                         model="claude-haiku-4-5",
                         max_tokens=120,
@@ -436,11 +444,17 @@ class Orchestrator:
             print(f"\n[PLANNER] Breaking down goal: {goal}")
             try:
                 with _live.spinner("Planning…"):
-                    plan = self.planner.plan(
-                        goal, codebase_context,
-                        tracker=self.tracker,
-                        existing_goal=self._active_goal_graph,
-                    )
+                    if is_cheap_only():
+                        plan = CheapPlanner().plan(
+                            goal, codebase_context, tracker=self.tracker,
+                        )
+                        print("[PLANNER] Cheap-only mode — using Gemini Flash")
+                    else:
+                        plan = self.planner.plan(
+                            goal, codebase_context,
+                            tracker=self.tracker,
+                            existing_goal=self._active_goal_graph,
+                        )
             except Exception as _primary_err:
                 logger.warning("[planner] primary planner failed (%s) — trying CheapPlanner", _primary_err)
                 try:
@@ -465,7 +479,10 @@ class Orchestrator:
             print(f"[PLANNER] Generated {len(tasks)} tasks:")
             for task in tasks:
                 print(f"  Task {task['task_id']}: {task['action']} (complexity: {task['complexity']})")
-        _live.planning_done(tasks, model=self.planner.__class__.__name__)
+        _live.planning_done(
+            tasks,
+            model="CheapPlanner" if is_cheap_only() else self.planner.__class__.__name__,
+        )
         
         # ── Phase 5C: Ensure every task has a GoalNode in the graph ──
         if hasattr(self, "_active_goal_graph") and self._active_goal_graph is not None:
@@ -858,6 +875,7 @@ class Orchestrator:
         worker_success = False
         max_attempts = 3
         search_replace = None
+        _task_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cost_usd": 0.0}
 
         _strategy = self.strategy_router.select(task)
         logger.debug("[strategy] task=%s → strategy=%s", task_id, _strategy.name)
@@ -967,6 +985,11 @@ class Orchestrator:
                     vector_chunks=_vector_chunks,
                     prompt_evolver=self.prompt_evolver,
                 )
+                try:
+                    from .usage_record import merge_result_usage
+                except ImportError:
+                    from usage_record import merge_result_usage
+                merge_result_usage(_task_usage, search_replace)
                 if search_replace.get("success"):
                     # ── P7: Critic self-play ────────────────────────────
                     try:
@@ -1051,11 +1074,16 @@ class Orchestrator:
             })
             self._update_task_node(task_id, "failed", session.session_id)
             # ── Log to RewardStore & update ML router ─────────────────────
-            _cost = esc_decision.spec.cost_per_req
+            _cost = float(_task_usage.get("cost_usd", 0)) or esc_decision.spec.cost_per_req
             _aid = esc_decision.spec.level.value
             _reward = compute_reward(False, _aid, _cost)
             _features = self._feature_extractor.extract(task, self.escalation.failure_count(str(task_id)))
-            self.reward_store.store(task=task, action_id=_aid, features=_features, success=False, cost_usd=_cost, model_name=esc_decision.spec.name)
+            self.reward_store.store(
+                task=task, action_id=_aid, features=_features, success=False,
+                cost_usd=_cost, model_name=esc_decision.spec.name,
+                input_tokens=int(_task_usage.get("input_tokens", 0)),
+                output_tokens=int(_task_usage.get("output_tokens", 0)),
+            )
             self.escalation.record_outcome(str(task_id), esc_decision.spec.level, False, task=task, reward=_reward)
             self._maybe_fit_gp()
             self._maybe_train_prm()
@@ -1068,6 +1096,8 @@ class Orchestrator:
             _span.complete_ts = _time.time()
             _span.success = False
             _span.attempt_count = max_attempts
+            _span.input_tokens = int(_task_usage.get("input_tokens", 0))
+            _span.output_tokens = int(_task_usage.get("output_tokens", 0))
             _span.cost_usd = _cost
             self.obs_store.record(_span)
             print(_span.one_liner())
@@ -1163,7 +1193,7 @@ class Orchestrator:
                 task_type=self.performance._classify_task_type(task.get("action", "")),
                 success=True,
                 latency_ms=_latency_ms,
-                cost=esc_decision.spec.cost_per_req,
+                cost=float(_task_usage.get("cost_usd", 0)) or esc_decision.spec.cost_per_req,
             )
         else:
             self._update_task_node(task_id, "failed", session.session_id)
@@ -1181,7 +1211,7 @@ class Orchestrator:
                 task_type=self.performance._classify_task_type(task.get("action", "")),
                 success=False,
                 latency_ms=_latency_ms,
-                cost=esc_decision.spec.cost_per_req,
+                cost=float(_task_usage.get("cost_usd", 0)) or esc_decision.spec.cost_per_req,
                 error_type="verification_failed",
             )
 
@@ -1214,7 +1244,7 @@ class Orchestrator:
                 task["test_result"] = None
 
         # ── Log to RewardStore & update ML router ──────────────────────────
-        _cost = esc_decision.spec.cost_per_req
+        _cost = float(_task_usage.get("cost_usd", 0)) or esc_decision.spec.cost_per_req
         _aid = esc_decision.spec.level.value
 
         # Use test pass rate as reward signal when available, else fall back to syntax-only
@@ -1226,7 +1256,12 @@ class Orchestrator:
             _success = verify_success
 
         _features = self._feature_extractor.extract(task, self.escalation.failure_count(str(task_id)))
-        self.reward_store.store(task=task, action_id=_aid, features=_features, success=_success, cost_usd=_cost, model_name=esc_decision.spec.name)
+        self.reward_store.store(
+            task=task, action_id=_aid, features=_features, success=_success,
+            cost_usd=_cost, model_name=esc_decision.spec.name,
+            input_tokens=int(_task_usage.get("input_tokens", 0)),
+            output_tokens=int(_task_usage.get("output_tokens", 0)),
+        )
         self.escalation.record_outcome(str(task_id), esc_decision.spec.level, _success, task=task, reward=_reward)
         self._maybe_fit_gp()
         self._maybe_train_prm()
@@ -1238,6 +1273,8 @@ class Orchestrator:
         _span.complete_ts = _time.time()
         _span.success = _success
         _span.attempt_count = attempt  # loop var holds the attempt number where worker succeeded
+        _span.input_tokens = int(_task_usage.get("input_tokens", 0))
+        _span.output_tokens = int(_task_usage.get("output_tokens", 0))
         _span.cost_usd = _cost
         self.obs_store.record(_span)
         print(_span.one_liner())

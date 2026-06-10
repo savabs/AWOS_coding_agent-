@@ -16,8 +16,12 @@ from openai import OpenAI  # For DeepSeek API access
 from anthropic import Anthropic  # For Haiku/Sonnet/Opus
 try:
     from .budget_ledger import get_ledger
+    from .usage_record import record_api_usage, empty_usage, merge_usage
+    from .escalation_engine import is_cheap_only
 except ImportError:
     from budget_ledger import get_ledger
+    from usage_record import record_api_usage, empty_usage, merge_usage
+    from escalation_engine import is_cheap_only
 
 _MONTHLY_BUDGET = float(os.getenv("AWOS_MONTHLY_BUDGET", "20.0"))
 
@@ -82,6 +86,74 @@ class Worker:
             "billing",
         ))
 
+    def _try_cheap_fallback(
+        self,
+        prompt: str,
+        tried_provider: str,
+        tracker=None,
+        _usage_accum: Optional[dict] = None,
+    ) -> tuple[str, str]:
+        """Try alternate cheap providers before giving up."""
+        if _usage_accum is None:
+            _usage_accum = empty_usage()
+
+        fallbacks = []
+        if tried_provider != "deepseek" and self.client and "deepseek" not in self._dead_providers:
+            fallbacks.append(("deepseek", self.client, "deepseek-chat", "DeepSeek V4 Flash", 0.14, 0.28, 0.001))
+        if tried_provider != "openai" and self.openai_client and "openai" not in self._dead_providers:
+            fallbacks.append(("openai", self.openai_client, "gpt-4o-mini", "GPT-4o-mini", 0.15, 0.60, 0.003))
+        if (
+            not is_cheap_only()
+            and tried_provider != "anthropic"
+            and self.anthropic_client
+            and "anthropic" not in self._dead_providers
+        ):
+            fallbacks.append(("anthropic", self.anthropic_client, self.fallback_model, "Haiku (fallback)", 1.00, 5.00, 0.017))
+
+        for provider, client, model_id, label, inp_price, out_price, est_cost in fallbacks:
+            _allowed, _reason = get_ledger().check_budget(est_cost, _MONTHLY_BUDGET)
+            if not _allowed:
+                continue
+            try:
+                if provider in ("deepseek", "openai"):
+                    response = client.chat.completions.create(
+                        model=model_id,
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=4096,
+                        temperature=0.3,
+                    )
+                    text = response.choices[0].message.content or ""
+                    inp = response.usage.prompt_tokens
+                    out = response.usage.completion_tokens
+                else:
+                    response = client.messages.create(
+                        model=model_id,
+                        max_tokens=2048,
+                        messages=[{"role": "user", "content": prompt}],
+                    )
+                    text = response.content[0].text or ""
+                    inp = response.usage.input_tokens
+                    out = response.usage.output_tokens
+                if text:
+                    merge_usage(_usage_accum, record_api_usage(
+                        request_type="execution",
+                        model=label,
+                        input_tokens=inp,
+                        output_tokens=out,
+                        input_price=inp_price,
+                        output_price=out_price,
+                        tracker=tracker,
+                    ))
+                    return text, label
+            except Exception as e:
+                err_str = str(e)
+                if self._is_permanent_failure(err_str):
+                    self._dead_providers.add(provider)
+                    print(f"[CIRCUIT] {provider} tripped — {err_str[:60]}")
+                else:
+                    print(f"[WORKER] {label} fallback failed: {err_str[:80]}")
+        return "", "unknown"
+
     def execute_task(
         self,
         task: dict,
@@ -96,6 +168,7 @@ class Worker:
         skill_library=None,
         vector_chunks=None,
         prompt_evolver=None,
+        _usage_accum: Optional[dict] = None,
     ) -> dict:
         """
         Execute a single micro-task: generate SEARCH/REPLACE code.
@@ -344,7 +417,9 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
         
         response_text = ""
         model_used = "unknown"
-        
+        if _usage_accum is None:
+            _usage_accum = empty_usage()
+
         # Determine which provider/model to use (EscalationEngine or defaults)
         if model_spec is not None:
             use_provider = model_spec.provider
@@ -372,11 +447,17 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                 )
                 response_text = response.choices[0].message.content
                 model_used = model_label
-                if tracker:
-                    inp = response.usage.prompt_tokens
-                    out = response.usage.completion_tokens
-                    cost = (inp / 1_000_000) * inp_price + (out / 1_000_000) * out_price
-                    tracker.record("execution", model_label, inp, out, cost)
+                inp = response.usage.prompt_tokens
+                out = response.usage.completion_tokens
+                merge_usage(_usage_accum, record_api_usage(
+                    request_type="execution",
+                    model=model_label,
+                    input_tokens=inp,
+                    output_tokens=out,
+                    input_price=inp_price,
+                    output_price=out_price,
+                    tracker=tracker,
+                ))
             except Exception as e:
                 err_str = str(e)
                 if self._is_permanent_failure(err_str):
@@ -398,11 +479,17 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                 )
                 response_text = response.choices[0].message.content
                 model_used = model_label
-                if tracker:
-                    inp = response.usage.prompt_tokens
-                    out = response.usage.completion_tokens
-                    cost = (inp / 1_000_000) * inp_price + (out / 1_000_000) * out_price
-                    tracker.record("execution", model_label, inp, out, cost)
+                inp = response.usage.prompt_tokens
+                out = response.usage.completion_tokens
+                merge_usage(_usage_accum, record_api_usage(
+                    request_type="execution",
+                    model=model_label,
+                    input_tokens=inp,
+                    output_tokens=out,
+                    input_price=inp_price,
+                    output_price=out_price,
+                    tracker=tracker,
+                ))
             except Exception as e:
                 err_str = str(e)
                 if self._is_permanent_failure(err_str):
@@ -411,7 +498,12 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                 else:
                     print(f"[WORKER] {model_label} failed (attempt {attempt}): {err_str[:80]}")
 
-        elif use_provider == "anthropic" and self.anthropic_client and "anthropic" not in self._dead_providers:
+        elif (
+            use_provider == "anthropic"
+            and not is_cheap_only()
+            and self.anthropic_client
+            and "anthropic" not in self._dead_providers
+        ):
             _allowed, _reason = get_ledger().check_budget(model_spec.cost_per_req if model_spec else 0.017, _MONTHLY_BUDGET)
             if not _allowed:
                 raise RuntimeError(f"[BUDGET HARD STOP] {_reason}")
@@ -423,11 +515,17 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                 )
                 response_text = response.content[0].text
                 model_used = model_label
-                if tracker:
-                    inp = response.usage.input_tokens
-                    out = response.usage.output_tokens
-                    cost = (inp / 1_000_000) * inp_price + (out / 1_000_000) * out_price
-                    tracker.record("execution", model_label, inp, out, cost)
+                inp = response.usage.input_tokens
+                out = response.usage.output_tokens
+                merge_usage(_usage_accum, record_api_usage(
+                    request_type="execution",
+                    model=model_label,
+                    input_tokens=inp,
+                    output_tokens=out,
+                    input_price=inp_price,
+                    output_price=out_price,
+                    tracker=tracker,
+                ))
             except RuntimeError:
                 raise
             except Exception as e:
@@ -438,30 +536,14 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                 else:
                     print(f"[WORKER] {model_label} failed (attempt {attempt}): {err_str[:80]}")
 
-        # Hard fallback: Haiku if primary failed
-        if not response_text and self.anthropic_client and use_model != self.fallback_model and "anthropic" not in self._dead_providers:
-            _allowed, _reason = get_ledger().check_budget(0.017, _MONTHLY_BUDGET)
-            if not _allowed:
-                raise RuntimeError(f"[BUDGET HARD STOP] {_reason}")
-            try:
-                response = self.anthropic_client.messages.create(
-                    model=self.fallback_model,
-                    max_tokens=2048,
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                response_text = response.content[0].text
-                model_used = "Haiku (fallback)"
-                if tracker:
-                    inp = response.usage.input_tokens
-                    out = response.usage.output_tokens
-                    cost = (inp / 1_000_000) * 1.00 + (out / 1_000_000) * 5.00
-                    tracker.record("execution", "Haiku fallback", inp, out, cost)
-            except Exception as e:
-                err_str = str(e)
-                if self._is_permanent_failure(err_str):
-                    self._dead_providers.add("anthropic")
-                    print(f"[CIRCUIT] anthropic tripped — {err_str[:60]}")
-                raise RuntimeError(f"All providers failed: {err_str}")
+        # Fallback: alternate cheap provider (never Haiku/Sonnet in cheap-only mode)
+        if not response_text:
+            response_text, model_used = self._try_cheap_fallback(
+                prompt=prompt,
+                tried_provider=use_provider,
+                tracker=tracker,
+                _usage_accum=_usage_accum,
+            )
 
         if not response_text:
             raise RuntimeError("No API key available or all providers failed")
@@ -523,6 +605,7 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                     symbol_index=symbol_index,
                     model_spec=model_spec,
                     example_store=example_store,
+                    _usage_accum=_usage_accum,
                 )
             else:
                 return {
@@ -532,6 +615,9 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                 }
         
         result["model_used"] = model_used
+        result["input_tokens"] = int(_usage_accum.get("input_tokens", 0))
+        result["output_tokens"] = int(_usage_accum.get("output_tokens", 0))
+        result["cost_usd"] = float(_usage_accum.get("cost_usd", 0.0))
         return result
 
     def _parse_json_edits(self, response_text: str):

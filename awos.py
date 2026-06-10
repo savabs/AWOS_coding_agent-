@@ -1,25 +1,33 @@
 #!/usr/bin/env python3
 """
-AWOS — AI Coding Agent CLI
-==========================
+AWOS — Learnable Operating System for Autonomous Work
+=====================================================
+
+AWOS is a greedy meta-AI that optimizes quality × speed ÷ cost on every project.
+The coding agent is App #1 on the kernel. See VISION.md for full identity.
 
 Usage:
-    awos chat                    Interactive session (default)
+    awos run <goal>              Execute a feature goal (Coding App)
+    awos chat                    Interactive session
+    awos stats                   Self-learning observability report
+    awos stats --json            JSON output (for piping/scripts)
+    awos report                  PEI scorecard — client-facing proof of value
+    awos report --html PATH      Write HTML report to file
+    awos budget                  Month-to-date budget status
+    awos performance             Tool success matrix (model × task type)
     awos memory search <query>   Search past interactions
     awos memory stats            Show memory usage
     awos traces list             List reasoning trace sessions
     awos traces show <id>        Display a trace session
-    awos traces clean [--days N] Remove old traces
-    awos budget                  Month-to-date budget status
     awos index                   (Re)build semantic codebase index
-    awos run <goal>              Execute a feature goal
-    awos performance             Tool success matrix (model × task type)
-    awos stats                   Self-learning observability report
-    awos stats --json            JSON output (for piping/scripts)
+    awos goals                   List multi-session goals
 
 Environment:
     AWOS_DEBUG=1                 Verbose mode
     AWOS_MONTHLY_BUDGET=50       Higher budget cap
+    AWOS_PROMPT_EVOLUTION=true   Enable PromptEvolver
+    AWOS_TOOL_SYNTHESIS=true     Enable LiveToolSynthesizer
+    AWOS_SCAFFOLD_EVOLUTION=true Enable ScaffoldEvolver
 """
 
 import argparse
@@ -183,17 +191,22 @@ def cmd_budget(args):
     status = ledger.get_status(monthly_budget=monthly)
 
     spent = status.get("spent", 0)
-    remaining = status.get("remaining_budget", 0)
+    remaining = status.get("remaining", 0)
+    tokens = status.get("tokens", 0)
+    requests = status.get("requests", 0)
     pct = (spent / monthly * 100) if monthly else 0
     bar_len = 20
     filled = int(pct / 100 * bar_len)
     bar = "█" * filled + "░" * (bar_len - filled)
+    avg_tokens = tokens / requests if requests else 0
 
-    print("Budget Status")
-    print(f"  [{bar}] {pct:.1f}%")
-    print(f"  Spent:     ${spent:.4f} / ${monthly:.2f}")
+    print("Budget Status (tokens = primary measure)")
+    print(f"  Tokens:    {tokens:,} across {requests} API calls ({avg_tokens:,.0f}/call)")
+    print(f"  [{bar}] {pct:.1f}% of ${monthly:.2f} cost cap")
+    print(f"  Spent:     ${spent:.4f} (derived from token counts)")
     print(f"  Remaining: ${remaining:.2f}")
-    print(f"  Requests:  {status.get('requests', '?')}")
+    if status.get("cache_hits"):
+        print(f"  Cache:     {status['cache_hits']} hits, saved ${status.get('cache_savings', 0):.4f}")
 
 
 def cmd_performance(args):
@@ -292,6 +305,39 @@ def cmd_stats(args):
         metrics.print_report()
 
 
+def cmd_report(args):
+    """Generate client-facing PEI (Project Efficiency Index) scorecard."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent / "scaffold" / "agent"))
+    from pei_report import PEIReport
+
+    store = getattr(args, "store", ".awos")
+    project = getattr(args, "project", None) or Path(".").resolve().name
+    budget = float(os.getenv("AWOS_MONTHLY_BUDGET", "20.0"))
+    window = getattr(args, "window", None)
+
+    report = PEIReport(
+        store_path=store,
+        project_name=project,
+        monthly_budget=budget,
+        window=window,
+    )
+
+    if getattr(args, "json", False):
+        import json
+        print(json.dumps(report.snapshot().to_dict(), indent=2))
+        return
+
+    if getattr(args, "html", None):
+        out = report.write_html(args.html)
+        print(f"PEI report written to: {out}")
+        if not getattr(args, "quiet", False):
+            report.print_summary()
+        return
+
+    report.print_summary()
+
+
 def cmd_goals(args):
     """List tracked goals and their status."""
     from agent_state_manager import AgentStateManager
@@ -368,6 +414,15 @@ def build_parser() -> argparse.ArgumentParser:
     stats = sub.add_parser("stats", help="Self-learning observability report")
     stats.add_argument("--json", action="store_true", help="Output as JSON")
     stats.add_argument("--store", default=".awos", help="Path to .awos store (default: .awos)")
+
+    # report
+    rpt = sub.add_parser("report", help="PEI scorecard — client-facing proof of value")
+    rpt.add_argument("--json", action="store_true", help="Output as JSON")
+    rpt.add_argument("--html", metavar="PATH", help="Write HTML report to file")
+    rpt.add_argument("--project", help="Project name for report header")
+    rpt.add_argument("--store", default=".awos", help="Path to .awos store (default: .awos)")
+    rpt.add_argument("--window", type=int, help="Only use last N task spans")
+    rpt.add_argument("-q", "--quiet", action="store_true", help="With --html, skip terminal summary")
 
     return parser
 

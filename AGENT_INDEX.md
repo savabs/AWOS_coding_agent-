@@ -9,27 +9,35 @@
 ## Cold-Start Sequence (do this every session)
 
 ```
-1. Read this file                          → understand the map
-2. Read memories/repo/project_structure.md → get project facts (phase, modules, metrics)
-3. Read latest docs/memory/checkpoint_*.md → get what happened last session
-4. Read tasks/active/*.md                  → get current work and next atomic step
-5. Follow [[wiki links]] in those files    → reach relevant research/spec context
+1. Read VISION.md                           → product identity and strategy
+2. Read memories/repo/project_structure.md  → project facts (phase, modules, metrics)
+3. Read latest docs/memory/checkpoint_*.md → what happened last session
+4. Read tasks/active/*.md                   → current work and next atomic step
+5. Read AWOS.md                             → operational protocols (when implementing)
+6. Follow [[wiki links]] in those files     → reach relevant research/spec context
 ```
 
-Do NOT re-read the full codebase. The above 5 files are all you need.
+Do NOT re-read the full codebase. The above files are all you need.
 
 ---
 
 ## File Map — Every Canonical Location
 
-### Doctrine (read-only unless you're maintaining AWOS itself)
+### Identity (read first)
 
 | File | What it contains |
 |---|---|
-| `AWOS.md` | The full doctrine — all rules, all protocols, all patterns. 900 lines. |
-| `.github/copilot-instructions.md` | Distilled operating rules for agents. Read by Copilot automatically. |
-| `QUICK_START.md` | Human-oriented 5-minute project bootstrap guide. |
-| `AGENT_INDEX.md` | This file. Agent cold-start map. |
+| `VISION.md` | **Canonical identity** — learnable OS, greedy objective, kernel + app, business model |
+| `README.md` | Human-oriented repo overview, points to VISION.md |
+| `memories/repo/project_structure.md` | Canonical project facts, metrics, phase, active work |
+
+### Doctrine (operational protocols)
+
+| File | What it contains |
+|---|---|
+| `AWOS.md` | Operational protocols — Research → Spec → Task, checkpoints, rules |
+| `.github/copilot-instructions.md` | Distilled operating rules for agents |
+| `AGENT_INDEX.md` | This file. Agent cold-start map |
 
 ### Canonical Facts (one owner per fact — Single-Owner Rule)
 
@@ -202,7 +210,8 @@ grep -r "topic/feature-x" docs/ tasks/ wiki/   # find all files on a topic
 
 ## Related
 
-- `AWOS.md` — full doctrine (900 lines, all rules)
+- `VISION.md` — canonical product identity and strategy
+- `AWOS.md` — operational protocols
 - `.github/copilot-instructions.md` — agent operating instructions (auto-loaded by Copilot)
 - `memories/repo/project_structure.md` — canonical project facts
 - `wiki/GLOSSARY.html` — all terms defined

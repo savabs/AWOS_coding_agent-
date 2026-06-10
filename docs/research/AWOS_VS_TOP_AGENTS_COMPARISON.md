@@ -1,11 +1,38 @@
 # AWOS vs Top Coding Agents — Competitive Analysis
 
+> **⚠️ SUPERSEDED for positioning purposes (2026-06-08).**
+> This document was written when AWOS was framed as a "research-first coding agent."
+> **Canonical positioning is now in `VISION.md`:** AWOS is a learnable OS for autonomous work,
+> not a Cursor/Hermes competitor. The coding agent is App #1.
+>
+> Historical feature comparisons below may be outdated (many "gaps" listed are now closed).
+> Retained for research reference only. Do not use for sales or strategy decisions.
+
 **Research Date:** 2026-05-16  
-**Purpose:** Compare AWOS positioning against leading AI coding agents (Hermes, OpenClaw, AutoGPT, CrewAI, LangGraph)
+**Superseded:** 2026-06-08 — see `VISION.md`  
+**Original purpose:** Compare AWOS positioning against leading AI coding agents
 
 ---
 
-## Executive Summary
+## Executive Summary (historical — pre-v2.0 identity)
+
+**Old framing (superseded):** Research-first coding agent with strong process discipline.
+
+**Current framing (see VISION.md):** Learnable operating system for autonomous work. Greedy optimizer for quality × speed ÷ cost. Agent-making firm, ~1,000 niche users. Not competing with Cursor — different category.
+
+**What remains valid from this analysis:**
+- Process discipline (Research → Spec → Task) is unique — now reframed as operational protocol for kernel apps
+- Cursor/Hermes optimize for seats × usage; AWOS optimizes for project delivery efficiency
+- Configured rules (Cursor Team Rules) vs compiled learning (AWOS `.awos/` state) is the core differentiation
+
+**What is outdated in this document:**
+- "Critical gaps" list — vector memory, self-learning, MCP, parallel execution are now implemented
+- "AWOS vs Hermes head-to-head" framing — we are not competing in the general-purpose agent market
+- Strategic recommendation to "close gaps with Hermes" — superseded by niche kernel strategy
+
+---
+
+## Original Executive Summary (2026-05-16, archived)
 
 **AWOS Positioning:** Research-first coding agent with strong process discipline but missing critical agentic features present in market leaders.
 

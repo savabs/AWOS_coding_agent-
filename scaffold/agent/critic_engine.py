@@ -256,8 +256,12 @@ OUTPUT: JSON only, no prose outside the JSON.
         if self._client:
             return self._call_deepseek(prompt, tracker)
 
-        # Fallback to Haiku (still cheap critic)
-        if self._anthropic:
+        # Haiku only when premium models are allowed
+        try:
+            from escalation_engine import is_cheap_only
+        except ImportError:
+            from .escalation_engine import is_cheap_only
+        if self._anthropic and not is_cheap_only():
             return self._call_haiku(prompt, tracker)
 
         raise RuntimeError("[critic] no API client available")

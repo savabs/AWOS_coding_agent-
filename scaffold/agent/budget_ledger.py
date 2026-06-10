@@ -134,6 +134,17 @@ class BudgetLedger:
 
         return True, ""
 
+    def get_premium_spent(self) -> float:
+        """Total spent on premium (Anthropic) models this month."""
+        total = 0.0
+        for r in self._records:
+            if r.get("month") != self._current_month:
+                continue
+            model = r.get("model", "").lower()
+            if "claude" in model:
+                total += r.get("cost", 0)
+        return round(total, 6)
+
     def show_status(self, monthly_budget: float = 20.0) -> None:
         """Print visual budget monitor."""
         s = self.get_status(monthly_budget)

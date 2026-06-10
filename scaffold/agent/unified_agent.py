@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Unified AI Agent Interface
+Unified Agent — Coding App entry point on the AWOS kernel.
 
-One command. Smart routing. Minimal cost.
+Routes requests to handlers, executes via Orchestrator, persists to .awos/.
+See VISION.md for AWOS identity. The kernel optimizes quality × speed ÷ cost.
 
 Usage:
-    ai                      # Interactive menu
-    ai "your question"      # Single query, auto-route
+    awos chat                  # Interactive menu
+    awos "your question"       # Single query, auto-route
 """
 
 import json

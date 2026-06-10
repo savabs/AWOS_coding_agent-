@@ -1,24 +1,15 @@
 # AWOS — Agent Workflow Operating System
 
-> **This is the living OS for agent-assisted development.**
-> It must be treated like a codebase, not a one-time document.
-> Every project that discovers something that works should push an update here.
-> Every session that retires a bad pattern should strike it out.
-> A stale AWOS is a liability. A maintained AWOS is a compounding asset.
->
+> **Operational protocols for work executed on the AWOS kernel.**
+> For product identity, strategy, and architecture — read **`VISION.md`** first.
+> This file governs *how* kernel apps execute work with discipline.
+> It does not define *what* AWOS is (that is `VISION.md`).
+
 > **Update rule:** whenever something new works well — in any project — open this file,
 > add it under the right section, bump the version, and log it in the changelog.
-> Do not let good discoveries die in a chat window.
->
-> **Agent standing instruction:** Do NOT wait to be told. Whenever a conversation
-> produces a new workflow pattern, architectural principle, agent operating rule,
-> or tool discipline that is clearly reusable — update this file proactively in
-> that same turn. Triggers include: a decision that required significant reasoning,
-> a pattern that solved a recurring problem, a rule that prevented a class of
-> mistakes, or any principle the user explicitly calls out as important.
-> Small talk and routine implementation do not trigger an update.
->
-> Last updated: 2026-05-13 — v1.5
+> Identity or strategy changes go in `VISION.md`, not here.
+
+> Last updated: 2026-06-08 — v2.0
 
 ---
 
@@ -26,28 +17,39 @@
 
 | Version | Date | Change |
 |---|---|---|
-| v1.0 | 2026-04-28 | Initial standalone AWOS, distilled from TirraMind 100+ session history |
-| v1.1 | 2026-05-04 | Added `protocols/RL_TRAINING_PROTOCOL.md`; Section 13 summary reference in AWOS.md |
-| v1.2 | 2026-05-13 | Added "Research First / No Guessing" rule: `DEBUG_PROTOCOL.md §Step 0`, updated §4.4 in AWOS.md, added research-first reminder to `RL_TRAINING_PROTOCOL.md §7` |
-| v1.3 | 2026-05-13 | Added §5.7 HTML-First Artifacts — replace Markdown output with HTML + thin .md stub; migration policy for existing .md files |
-| v1.4 | 2026-05-13 | Added `wiki/AGENTIC_CONCEPTS.md` — project-agnostic reference covering 8 topic areas: agent architectures (ReAct, Plan-and-Execute, Reflexion, LATS, Critic-Actor, Self-Ask), tool use patterns, memory systems, reasoning patterns, evaluation & self-improvement, multi-agent patterns, context window management, and task decomposition strategies |
-| v1.5 | 2026-05-13 | HTML-first restructure complete: `AGENT_INDEX.md` (agent cold-start map); HTML versions of `AGENTIC_CONCEPTS`, `GLOSSARY`, `SCHEMA`, `ADR 0001`; 5 HTML artifact templates (research, spec, task, checkpoint, ADR); MD stubs converted; `copilot-instructions.md` updated with §5.7 HTML-First rule; `new_project.py` updated to copy `AGENT_INDEX.md` and reference HTML templates |
+| v2.0 | 2026-06-08 | Identity moved to `VISION.md`. AWOS.md reframed as operational protocols for kernel apps. Supersedes v1.x framing as "agent-assisted development workflow template." |
+| v1.5 | 2026-05-13 | HTML-first restructure complete |
+| v1.0 | 2026-04-28 | Initial standalone AWOS |
 
-> Last updated: 2026-05-13 — v1.5
+> **Canonical identity:** `VISION.md` — learnable OS, greedy objective (quality × speed ÷ cost), kernel + app architecture, agent-making firm strategy.
+
+---
+
+## 0. Relationship to VISION.md
+
+AWOS is a **learnable operating system for autonomous work**. The coding agent is App #1.
+
+| Document | Purpose |
+|---|---|
+| `VISION.md` | What AWOS is, why it exists, business model, kernel architecture |
+| `AWOS.md` (this file) | How to execute work on AWOS without incoherence |
+| `memories/repo/project_structure.md` | Canonical project facts and metrics |
+
+The protocols below (Research → Spec → Task, checkpoints, Single-Owner Rule) serve the greedy objective: **unplanned work wastes cost and destroys quality.** They are operational discipline, not the product.
 
 ---
 
 ## 1. The Core Mental Model
 
-### 1.1 Why This System Exists
+### 1.1 Why These Protocols Exist
 
-AI-assisted development on complex, multi-session projects fails in three specific ways:
+Autonomous work on complex, multi-session projects fails in three specific ways:
 
 1. **Memory loss between sessions** — the agent re-derives architecture already decided, contradicts prior work, re-reads the entire codebase every time because there is no cold-start artifact.
-2. **Unplanned implementation** — code is written before the architecture is understood; bugs require re-reading what was just written; "figuring it out while coding" compounds complexity.
+2. **Unplanned implementation** — work starts before the approach is understood; failures require re-reading what was just done; "figuring it out while executing" compounds cost and destroys quality.
 3. **Fact drift** — the same number, decision, or design appears in multiple files and they silently diverge. The canonical answer is unknown because there is no canonical file.
 
-This system eliminates all three through three structural interventions:
+These protocols eliminate all three:
 
 | Failure mode | Structural fix |
 |---|---|

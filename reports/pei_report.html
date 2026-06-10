@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AWOS PEI Report — AWOS Coding Agent</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --text:#e2e8f0; --muted:#94a3b8;
+           --accent:#38bdf8; --green:#22c55e; --amber:#f59e0b; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background:var(--bg);
+          color:var(--text); line-height:1.6; padding:2rem; }
+  .container { max-width:900px; margin:0 auto; }
+  h1 { font-size:1.75rem; margin-bottom:0.25rem; }
+  .subtitle { color:var(--muted); margin-bottom:2rem; }
+  .pei-hero { background:linear-gradient(135deg,#1e3a5f,#1e293b);
+               border:1px solid #334155; border-radius:12px; padding:2rem;
+               text-align:center; margin-bottom:2rem; }
+  .pei-score { font-size:3.5rem; font-weight:700; color:var(--accent); }
+  .pei-label { color:var(--muted); font-size:0.9rem; margin-top:0.5rem; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:1rem; margin-bottom:2rem; }
+  .card { background:var(--card); border:1px solid #334155; border-radius:8px; padding:1.25rem; }
+  .card h2 { font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em;
+              color:var(--muted); margin-bottom:0.75rem; }
+  .metric { font-size:1.75rem; font-weight:600; }
+  .metric-sub { color:var(--muted); font-size:0.85rem; margin-top:0.25rem; }
+  table { width:100%; border-collapse:collapse; margin-top:0.75rem; }
+  th, td { text-align:left; padding:0.5rem 0.75rem; border-bottom:1px solid #334155; }
+  th { color:var(--muted); font-size:0.75rem; text-transform:uppercase; }
+  .savings { color:#22c55e; font-weight:600; }
+  .footer { color:var(--muted); font-size:0.8rem; margin-top:2rem; text-align:center; }
+  .bar { height:8px; background:#334155; border-radius:4px; margin-top:0.5rem; overflow:hidden; }
+  .bar-fill { height:100%; background:var(--accent); border-radius:4px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>AWOS Project Efficiency Report</h1>
+  <p class="subtitle">AWOS Coding Agent · Generated 2026-06-08</p>
+
+  <div class="pei-hero">
+    <div class="pei-score">19</div>
+    <div class="pei-label">Project Efficiency Index (PEI) = Quality × Speed ÷ Cost</div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Quality</h2>
+      <div class="metric">49.9%</div>
+      <div class="metric-sub">Task success rate · 21/41 goals complete</div>
+      <div class="bar"><div class="bar-fill" style="width:50%"></div></div>
+    </div>
+    <div class="card">
+      <h2>Speed</h2>
+      <div class="metric">2.07s</div>
+      <div class="metric-sub">Avg latency · P95 8.60s</div>
+    </div>
+    <div class="card">
+      <h2>Cost</h2>
+      <div class="metric">$23.20</div>
+      <div class="metric-sub">$0.0125/task · 1,860 tasks</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:1rem;">
+    <h2>Cost Comparison — Why AWOS Routing Matters</h2>
+    <table>
+      <tr><th>Routing strategy</th><th>Total cost</th><th>vs AWOS</th></tr>
+      <tr><td><strong>AWOS (learned routing)</strong></td><td>$23.20</td><td>—</td></tr>
+      <tr><td>Always Claude Sonnet</td><td>$93.00</td>
+          <td class="savings">+75% more expensive</td></tr>
+      <tr><td>Always Copilot-equivalent</td><td>$37.20</td>
+          <td class="savings">+38% more expensive</td></tr>
+    </table>
+    <p style="margin-top:1rem;color:var(--muted);font-size:0.85rem;">
+      57% of tasks routed to cheap tiers (DeepSeek/Gemini).
+      AWOS escalates to premium models only on evidence — not by default.
+    </p>
+  </div>
+
+  <div class="card" style="margin-bottom:1rem;">
+    <h2>Model Mix</h2>
+    <table>
+      <tr><th>Model</th><th>Tasks</th><th>Share</th></tr>
+      <tr><td>DeepSeek V4 Flash</td><td>909</td><td>48.9%</td></tr><tr><td>Claude Haiku 4.5</td><td>520</td><td>28.0%</td></tr><tr><td>Claude Sonnet 4.6</td><td>283</td><td>15.2%</td></tr><tr><td>Gemini 2.5 Flash-Lite</td><td>148</td><td>8.0%</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Learning State (.awos/)</h2>
+    <table>
+      <tr><td>Error patterns recorded</td><td>636</td></tr>
+      <tr><td>Success skills indexed</td><td>0</td></tr>
+      <tr><td>Tools synthesized</td><td>0</td></tr>
+      <tr><td>Prompt evolved</td><td>Pending (needs 10 sessions)</td></tr>
+      <tr><td>Cache hits / savings</td><td>0 hits · $0.00 saved</td></tr>
+    </table>
+    <p style="margin-top:1rem;color:var(--muted);font-size:0.85rem;">
+      The learning state compounds. Week-over-week PEI improvement is the proof
+      that AWOS is worth deploying — not feature count.
+    </p>
+  </div>
+
+  <p class="footer">
+    AWOS — Learnable Operating System for Autonomous Work · awos.dev<br>
+    This report is generated from live .awos/ runtime data. No estimates.
+  </p>
+</div>
+</body>
+</html>

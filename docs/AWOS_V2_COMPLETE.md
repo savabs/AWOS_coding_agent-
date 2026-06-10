@@ -9,6 +9,10 @@ tags:
 
 # AWOS v2 Blueprint — Project Complete ✅
 
+> **Historical milestone doc (2026-05).** Superseded for identity by `VISION.md` (2026-06-08).
+> The 5-layer architecture described here is the **Coding App** layer, not the full AWOS kernel.
+> Current architecture: kernel (reward, bandit, evolvers) + App #1 (cartographer, worker, verifier).
+
 ## Executive Summary
 
 **Status:** ✅ **COMPLETE** — All 5 layers designed, implemented, tested  

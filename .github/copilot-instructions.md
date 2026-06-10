@@ -1,7 +1,11 @@
 # Agentic OS — Agent Operating Instructions
 
-This project follows the **Agentic OS** workflow. Read `AWOS.md` for the full doctrine.
-The rules below are the distilled operating instructions for any AI assistant working in this project.
+This project is **AWOS** — a learnable operating system for autonomous work.
+Read **`VISION.md`** for product identity. Read **`AWOS.md`** for operational protocols.
+The rules below are distilled operating instructions for any AI assistant working in this project.
+
+**Identity:** AWOS is a greedy meta-AI optimizing quality × speed ÷ cost. Coding agent is App #1.
+**Not:** a Cursor alternative, mass-market coding tool, or IDE plugin.
 
 ---
 

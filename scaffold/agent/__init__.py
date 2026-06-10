@@ -1,15 +1,9 @@
 """
-Agent scaffold — minimal Python agent structure for any Agentic OS project.
+AWOS kernel and app scaffold.
 
-Replace 'myproject' with your project prefix.
-This scaffold demonstrates the 7-layer architecture:
-  Layer 1: Surveillance (tools/)
-  Layer 2: Features (quant/ or analysis/)
-  Layer 3: World Model (models/)
-  Layer 4: Fusion (fusion/)
-  Layer 5: Policy (learning/)
-  Layer 6: Adversarial (adversarial/)
-  Layer 7: LLM Support (reasoning/)
+Architecture (see VISION.md):
+  Kernel (domain-agnostic): reward, bandit routing, budget, self-learning loop
+  App layer (domain-specific): Coding App = planner, worker, verifier
 
-The orchestrator ties them together; the CLI is the entry point.
+The orchestrator is the kernel loop. Apps plug in execute/verify layers.
 """

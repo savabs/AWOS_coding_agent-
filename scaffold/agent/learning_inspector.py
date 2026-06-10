@@ -331,7 +331,7 @@ class LearningInspector:
             return {}
 
     def _model_insights(self) -> List[ModelInsight]:
-        ACTION_NAMES = ["gemini_flash", "deepseek", "haiku", "sonnet"]
+        ACTION_NAMES = ["gemini_flash", "deepseek", "openai", "haiku", "sonnet"]
         _, payload = self._load_linucb_state()
         if payload is None:
             return []

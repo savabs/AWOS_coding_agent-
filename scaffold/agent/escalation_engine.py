@@ -11,14 +11,12 @@ Ladder (cheapest → most powerful):
   L0  Gemini 2.5 Flash-Lite      $0.001/req  — routing, simple Q&A
   L1  DeepSeek V4 Flash           $0.001/req  — default worker
   L2  GPT-4o-mini (OpenAI)        $0.003/req  — fallback (uses existing credits)
-  L3  Claude Haiku 4.5            $0.017/req  — retry after cheaper tiers fail
-  L4  Claude Sonnet 4.6           $0.050/req  — restricted (complexity 9+ or 3+ failures)
+  L3  Claude Haiku 4.5            $0.017/req  — BLOCKED when AWOS_CHEAP_ONLY=true
+  L4  Claude Sonnet 4.6           $0.050/req  — BLOCKED when AWOS_CHEAP_ONLY=true
 
-Escalation gates (all must pass to jump a level):
-  - Complexity gate:  task score >= threshold for that level
-  - Failure gate:     failure count >= threshold for that level
-  - Budget gate:      remaining budget >= minimum required for that level
-  - Explicit gate:    user asked for premium / forced via API
+Cheap-only mode (AWOS_CHEAP_ONLY=true):
+  Premium tiers are halted. Intelligence comes from context, skills, and
+  rotating among Gemini / DeepSeek / GPT-4o-mini on retry — not escalation.
 """
 
 import os
@@ -29,6 +27,7 @@ try:
     from .reward_store import ReplayGate
 except ImportError:
     from reward_store import ReplayGate
+
 
 
 class EscalationLevel(Enum):
@@ -119,6 +118,29 @@ LADDER: list[ModelSpec] = [
 
 LEVEL_MAP: dict[EscalationLevel, ModelSpec] = {m.level: m for m in LADDER}
 
+CHEAP_ONLY_MAX_LEVEL = EscalationLevel.OPENAI
+_CHEAP_ROTATION = [
+    EscalationLevel.DEEPSEEK,
+    EscalationLevel.OPENAI,
+]
+
+
+def is_cheap_only() -> bool:
+    """True when premium models are halted (env flag or zero premium budget)."""
+    if os.getenv("AWOS_CHEAP_ONLY", "false").lower() in ("1", "true", "yes"):
+        return True
+    pb = os.getenv("AWOS_PREMIUM_BUDGET", "")
+    return pb == "0"
+
+
+def max_allowed_level() -> EscalationLevel:
+    return CHEAP_ONLY_MAX_LEVEL if is_cheap_only() else EscalationLevel.SONNET
+
+
+def allowed_ladder() -> list[ModelSpec]:
+    cap = max_allowed_level().value
+    return [s for s in LADDER if s.level.value <= cap]
+
 
 @dataclass
 class EscalationDecision:
@@ -201,29 +223,40 @@ class EscalationEngine:
 
         complexity_score = self._score_complexity(task)
 
-        # Hard override
+        # Hard override (capped in cheap-only mode)
         if force_level is not None:
             spec = LEVEL_MAP[force_level]
+            cap = max_allowed_level()
+            if spec.level.value > cap.value:
+                spec = LEVEL_MAP[cap]
+                reason = f"Force blocked above {cap.name} — cheap-only mode"
+            else:
+                reason = f"Forced to {spec.name}"
             return EscalationDecision(
                 spec=spec,
-                reason=f"Forced to {spec.name}",
+                reason=reason,
                 complexity_score=complexity_score,
                 failure_count=failure_count,
                 budget_remaining=budget_remaining,
                 forced=True,
             )
 
-        # User explicitly wants best available
-        if user_wants_best and self._effective_budget(LEVEL_MAP[EscalationLevel.SONNET], budget_remaining) >= LEVEL_MAP[EscalationLevel.SONNET].min_budget_remaining:
-            spec = LEVEL_MAP[EscalationLevel.SONNET]
+        # User explicitly wants best available (capped in cheap-only mode)
+        best_level = max_allowed_level()
+        best_spec = LEVEL_MAP[best_level]
+        if user_wants_best and self._effective_budget(best_spec, budget_remaining) >= best_spec.min_budget_remaining:
+            label = "cheap-only best" if is_cheap_only() else "best available"
             return EscalationDecision(
-                spec=spec,
-                reason="User requested best available (Sonnet)",
+                spec=best_spec,
+                reason=f"User requested {label} ({best_spec.name})",
                 complexity_score=complexity_score,
                 failure_count=failure_count,
                 budget_remaining=budget_remaining,
                 forced=True,
             )
+
+        ladder = allowed_ladder()
+        worker_ladder = [s for s in ladder if s.level != EscalationLevel.GEMINI_FLASH]
 
         # ── Performance veto (empirical success matrix) ──────────────────
         # Runs BEFORE LinUCB so strong empirical evidence overrides the bandit.
@@ -231,7 +264,7 @@ class EscalationEngine:
         _perf_override: Optional[ModelSpec] = None
         if self._performance is not None:
             task_type = self._performance._classify_task_type(task.get("action", ""))
-            default_model_names = [spec.name for spec in LADDER[1:]]  # skip Gemini router
+            default_model_names = [spec.name for spec in worker_ladder]
             best_name, best_rate = self._performance.best_model_for(
                 task_type=task_type,
                 candidates=default_model_names,
@@ -240,11 +273,13 @@ class EscalationEngine:
             )
             if best_name is not None and best_rate is not None:
                 default_stats = self._performance.get_stats(
-                    model=LADDER[1].name, task_type=task_type, window=50
+                    model=worker_ladder[0].name if worker_ladder else LADDER[1].name,
+                    task_type=task_type,
+                    window=50,
                 )
                 default_rate = default_stats.get("success_rate") or 1.0
                 if default_rate < 0.50 and best_rate > default_rate:
-                    for spec in LADDER:
+                    for spec in ladder:
                         if spec.name == best_name and self._effective_budget(spec, budget_remaining) >= spec.min_budget_remaining:
                             _perf_override = spec
                             break
@@ -256,12 +291,16 @@ class EscalationEngine:
             and self._ml_router.is_ready()
         ):
             features = self._feature_extractor.extract(task, failure_count)
+            cap = max_allowed_level().value
             budget_mask = [
-                self._effective_budget(spec, budget_remaining) >= spec.min_budget_remaining
+                spec.level.value <= cap
+                and self._effective_budget(spec, budget_remaining) >= spec.min_budget_remaining
                 for spec in LADDER
             ]
             action_id = self._ml_router.select(features, budget_mask=budget_mask)
             ml_spec = LADDER[action_id]
+            if ml_spec.level.value > cap:
+                ml_spec = LEVEL_MAP[max_allowed_level()]
             # Apply performance veto if empirical data is stronger
             if _perf_override is not None and _perf_override.level.value > ml_spec.level.value:
                 return EscalationDecision(
@@ -289,10 +328,10 @@ class EscalationEngine:
             and _perf_override is None
         ):
             task_type = self._performance._classify_task_type(task.get("action", ""))
-            default_model_names = [spec.name for spec in LADDER[1:]]
+            default_model_names = [spec.name for spec in worker_ladder]
             recommended = self._performance.recommend_model(task_type, default_model_names)
             if recommended:
-                for spec in LADDER:
+                for spec in ladder:
                     if spec.name == recommended and self._effective_budget(spec, budget_remaining) >= spec.min_budget_remaining:
                         return EscalationDecision(
                             spec=spec,
@@ -302,17 +341,29 @@ class EscalationEngine:
                             budget_remaining=budget_remaining,
                         )
 
+        # Cheap-only: rotate among cheap tiers on retry instead of escalating
+        if is_cheap_only() and failure_count > 0:
+            rotated = self._rotate_cheap(failure_count, dead_providers)
+            if rotated is not None:
+                return EscalationDecision(
+                    spec=rotated,
+                    reason=f"Cheap-only rotation after {failure_count} failure(s) — {rotated.name}",
+                    complexity_score=complexity_score,
+                    failure_count=failure_count,
+                    budget_remaining=budget_remaining,
+                )
+
         # Walk down the ladder from most capable, find highest affordable level
         # Default: lowest non-dead tier (usually DeepSeek, but skip if tripped)
         chosen = LEVEL_MAP[EscalationLevel.DEEPSEEK]  # fallback
         reason = "Default DeepSeek worker"
-        for _s in LADDER[1:]:  # ascending — first non-dead tier wins as default
+        for _s in worker_ladder:
             if _s.provider not in dead_providers:
                 chosen = _s
                 reason = f"Default {_s.name} (lowest available)"
                 break
 
-        for spec in reversed(LADDER[1:]):  # Skip Gemini (routing only)
+        for spec in reversed(worker_ladder):
             if spec.provider in dead_providers:
                 continue  # skip tripped provider
             qualifies_complexity = complexity_score >= spec.min_complexity
@@ -334,6 +385,9 @@ class EscalationEngine:
             chosen = _perf_override
             _task_type = task.get("complexity", "unknown")
             reason = f"Performance veto: {_perf_override.name} has higher empirical rate for task_type={_task_type}"
+
+        if is_cheap_only():
+            reason = f"{reason} [cheap-only]"
 
         return EscalationDecision(
             spec=chosen,
@@ -400,6 +454,15 @@ class EscalationEngine:
         self._task_history.pop(task_id, None)
 
     # ── Complexity Scoring ────────────────────────────────────────────────────
+
+    def _rotate_cheap(self, failure_count: int, dead_providers: set) -> Optional[ModelSpec]:
+        """Rotate among cheap tiers on retry — squeeze intelligence from context, not price."""
+        for i in range(len(_CHEAP_ROTATION)):
+            level = _CHEAP_ROTATION[(failure_count - 1 + i) % len(_CHEAP_ROTATION)]
+            spec = LEVEL_MAP[level]
+            if spec.provider not in dead_providers:
+                return spec
+        return LEVEL_MAP[EscalationLevel.DEEPSEEK]
 
     def _score_complexity(self, task: dict) -> int:
         """
