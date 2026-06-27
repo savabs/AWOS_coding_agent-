@@ -1,0 +1,14 @@
+{
+  "goal": "In scaffold/agent/stability_gate.py, add a short docstring to StabilityGate.should_check explaining that it returns true every N completed sessions",
+  "goal_hash": "7d3ba68299",
+  "started_at": "2026-05-27T01:26:04",
+  "last_updated": "2026-05-27T01:26:14",
+  "completed_task_ids": [
+    1
+  ],
+  "failed_task_ids": [],
+  "session_ids": [
+    "orch_a59978ec"
+  ],
+  "status": "complete"
+}

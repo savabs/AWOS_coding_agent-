@@ -1,0 +1,50 @@
+{
+  "root_id": "g_bdbc5f755277",
+  "nodes": {
+    "g_bdbc5f755277": {
+      "goal_id": "g_bdbc5f755277",
+      "description": "In scaffold/agent/run_diagnostics.py add a one-line docstring to TaskDiagnostic.record explaining it appends a stage entry to the diagnostic trace",
+      "parent_ids": [],
+      "child_ids": [
+        "g_598e3a912c7e"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-16T08:18:15Z",
+      "updated_at": "2026-06-16T08:18:26Z",
+      "completed_at": "2026-06-16T08:18:26Z",
+      "session_ids": [
+        "orch_f4edca95"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_598e3a912c7e": {
+      "goal_id": "g_598e3a912c7e",
+      "description": "Add a one-line docstring to the `TaskDiagnostic.record` method.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "scaffold/agent/run_diagnostics.py",
+          "action": "Add a one-line docstring to the `TaskDiagnostic.record` method.",
+          "function_signature": "def record(self, stage: str, data: Optional[Dict] = None):",
+          "constraints": "The docstring should explain that it appends a stage entry to the diagnostic trace.",
+          "complexity": "low",
+          "file": "scaffold/agent/run_diagnostics.py"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-16T08:18:21Z",
+      "updated_at": "2026-06-16T08:18:26Z",
+      "completed_at": "2026-06-16T08:18:26Z",
+      "session_ids": [
+        "orch_f4edca95"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

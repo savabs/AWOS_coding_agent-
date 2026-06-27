@@ -101,6 +101,27 @@ class RewardStore:
         return traces
 
 
+class MCTSTraceStore(RewardStore):
+    """Trace store alias — count/recent helpers for orchestrator + PRM gate."""
+
+    def count(self) -> int:
+        if not self._traces_path.exists():
+            return 0
+        return sum(1 for line in self._traces_path.read_text(encoding="utf-8").splitlines() if line.strip())
+
+    def get_recent(self, n: int) -> List[MCTSTrace]:
+        if not self._traces_path.exists():
+            return []
+        lines = [ln for ln in self._traces_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        traces: List[MCTSTrace] = []
+        for line in lines[-n:]:
+            try:
+                traces.append(MCTSTrace(**json.loads(line)))
+            except (json.JSONDecodeError, TypeError):
+                continue
+        return traces
+
+
 # ── Process Reward Model ──────────────────────────────────────────────────────
 
 class ProcessRewardModel:

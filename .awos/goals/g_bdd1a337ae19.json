@@ -1,0 +1,240 @@
+{
+  "root_id": "g_bdd1a337ae19",
+  "nodes": {
+    "g_bdd1a337ae19": {
+      "goal_id": "g_bdd1a337ae19",
+      "description": "Stage 1 long workload mission: eight docstring/comment edits in worktree sandbox (one file per task). Uses fixed plan — planner skipped.",
+      "parent_ids": [],
+      "child_ids": [
+        "g_eddcf36a3ece",
+        "g_d1e70388e1b5",
+        "g_37a8ddc05c4f",
+        "g_6e3abdc3d57d",
+        "g_b1bb2fc6f283",
+        "g_a645e2c11a2e",
+        "g_82b96f35651e",
+        "g_11cfb53a44d0"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-24T15:17:37Z",
+      "updated_at": "2026-06-24T15:18:13Z",
+      "completed_at": "2026-06-24T15:18:13Z",
+      "session_ids": [
+        "orch_109f9a61"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_eddcf36a3ece": {
+      "goal_id": "g_eddcf36a3ece",
+      "description": "Add a one-line docstring to RuntimeSessionStore.checkpoint() stating it persists progress for pause and resume",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "scaffold/agent/runtime_session.py",
+          "file": "scaffold/agent/runtime_session.py",
+          "action": "Add a one-line docstring to RuntimeSessionStore.checkpoint() stating it persists progress for pause and resume",
+          "complexity": "low",
+          "test_result": {
+            "passed": 0,
+            "failed": 0,
+            "errors": 0,
+            "pass_rate": 0.0,
+            "raw_output": "Tests skipped — set AWOS_SAFE_TO_RUN_TESTS=1 to enable.",
+            "timed_out": false,
+            "test_command": [],
+            "no_tests_found": true
+          }
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-24T15:17:40Z",
+      "updated_at": "2026-06-24T15:17:44Z",
+      "completed_at": "2026-06-24T15:17:44Z",
+      "session_ids": [
+        "orch_109f9a61"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_d1e70388e1b5": {
+      "goal_id": "g_d1e70388e1b5",
+      "description": "Add a one-line docstring to replan_task_after_verify_fail() explaining it runs after verifier rejection",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "task_type": "edit_file",
+          "path": "scaffold/agent/plan_actions.py",
+          "file": "scaffold/agent/plan_actions.py",
+          "action": "Add a one-line docstring to replan_task_after_verify_fail() explaining it runs after verifier rejection",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-24T15:17:40Z",
+      "updated_at": "2026-06-24T15:17:48Z",
+      "completed_at": "2026-06-24T15:17:48Z",
+      "session_ids": [
+        "orch_109f9a61"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_37a8ddc05c4f": {
+      "goal_id": "g_37a8ddc05c4f",
+      "description": "Add a one-line docstring to finalize() noting pause keeps worktree while completed may commit",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 3,
+          "task_type": "edit_file",
+          "path": "scaffold/agent/virtual_execution_runtime.py",
+          "file": "scaffold/agent/virtual_execution_runtime.py",
+          "action": "Add a one-line docstring to finalize() noting pause keeps worktree while completed may commit",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-24T15:17:40Z",
+      "updated_at": "2026-06-24T15:17:51Z",
+      "completed_at": "2026-06-24T15:17:51Z",
+      "session_ids": [
+        "orch_109f9a61"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_6e3abdc3d57d": {
+      "goal_id": "g_6e3abdc3d57d",
+      "description": "Add a one-line comment immediately above _check_edit_fidelity explaining the fidelity gate for comment-above vs docstring edits",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 4,
+          "task_type": "edit_file",
+          "path": "scaffold/agent/verifier.py",
+          "file": "scaffold/agent/verifier.py",
+          "action": "Add a one-line comment immediately above _check_edit_fidelity explaining the fidelity gate for comment-above vs docstring edits",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-24T15:17:40Z",
+      "updated_at": "2026-06-24T15:18:00Z",
+      "completed_at": "2026-06-24T15:18:00Z",
+      "session_ids": [
+        "orch_109f9a61"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_b1bb2fc6f283": {
+      "goal_id": "g_b1bb2fc6f283",
+      "description": "Add a one-line module comment at the top: G1 gauntlet — SymbolIndex must index worktree paths",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 5,
+          "task_type": "edit_file",
+          "path": "tests/test_symbol_index_worktree.py",
+          "file": "tests/test_symbol_index_worktree.py",
+          "action": "Add a one-line module comment at the top: G1 gauntlet — SymbolIndex must index worktree paths",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-24T15:17:40Z",
+      "updated_at": "2026-06-24T15:18:02Z",
+      "completed_at": "2026-06-24T15:18:02Z",
+      "session_ids": [
+        "orch_109f9a61"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_a645e2c11a2e": {
+      "goal_id": "g_a645e2c11a2e",
+      "description": "Add one line to the module docstring: proves G2-style pause mid-plan and resume",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 6,
+          "task_type": "edit_file",
+          "path": "tests/test_pause_resume_orchestrator.py",
+          "file": "tests/test_pause_resume_orchestrator.py",
+          "action": "Add one line to the module docstring: proves G2-style pause mid-plan and resume",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-24T15:17:40Z",
+      "updated_at": "2026-06-24T15:18:05Z",
+      "completed_at": "2026-06-24T15:18:05Z",
+      "session_ids": [
+        "orch_109f9a61"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_82b96f35651e": {
+      "goal_id": "g_82b96f35651e",
+      "description": "Add G7 to the module docstring usage examples (verify-fail replan gauntlet)",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 7,
+          "task_type": "edit_file",
+          "path": "scripts/stage1_gauntlet_runner.py",
+          "file": "scripts/stage1_gauntlet_runner.py",
+          "action": "Add G7 to the module docstring usage examples (verify-fail replan gauntlet)",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-24T15:17:40Z",
+      "updated_at": "2026-06-24T15:18:09Z",
+      "completed_at": "2026-06-24T15:18:09Z",
+      "session_ids": [
+        "orch_109f9a61"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_11cfb53a44d0": {
+      "goal_id": "g_11cfb53a44d0",
+      "description": "Add a short Long mission paragraph mentioning awos mission start --long uses a fixed 8-task plan",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 8,
+          "task_type": "edit_file",
+          "path": "docs/missions/README.md",
+          "file": "docs/missions/README.md",
+          "action": "Add a short Long mission paragraph mentioning awos mission start --long uses a fixed 8-task plan",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-24T15:17:40Z",
+      "updated_at": "2026-06-24T15:18:13Z",
+      "completed_at": "2026-06-24T15:18:13Z",
+      "session_ids": [
+        "orch_109f9a61"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

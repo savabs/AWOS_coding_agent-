@@ -1,0 +1,20 @@
+{
+  "goal": "Add a docstring to the ReplayGate class in scaffold/agent/reward_store.py explaining that threshold was lowered from 0.4 to 0.25 to support single-codebase tasks where novelty is naturally low.",
+  "goal_hash": "251ca67e1e",
+  "started_at": "2026-05-24T13:22:10",
+  "last_updated": "2026-05-24T13:22:49",
+  "completed_task_ids": [],
+  "failed_task_ids": [
+    1,
+    "1_1",
+    "1_2",
+    "1_1_1",
+    "1_1_2",
+    "1_2_1",
+    "1_2_2"
+  ],
+  "session_ids": [
+    "orch_10e0819d"
+  ],
+  "status": "failed"
+}

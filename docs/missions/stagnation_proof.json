@@ -1,0 +1,6 @@
+{
+  "goal": "Stagnation breaker live proof",
+  "plan_file": "stagnation_proof.plan.json",
+  "description": "Single task that triggers stagnation: fix missing colon in function def. Worker will likely fail repeatedly on the same syntax error, triggering the breaker.",
+  "pause_hint": "Watch for [BREAKER] output after 3 identical failures"
+}

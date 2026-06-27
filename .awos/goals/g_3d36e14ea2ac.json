@@ -1,0 +1,52 @@
+{
+  "root_id": "g_3d36e14ea2ac",
+  "nodes": {
+    "g_3d36e14ea2ac": {
+      "goal_id": "g_3d36e14ea2ac",
+      "description": "create docs/http_only_test.md about automated checks",
+      "parent_ids": [],
+      "child_ids": [
+        "g_2631888a69c5"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-13T21:17:14Z",
+      "updated_at": "2026-06-14T08:40:47Z",
+      "completed_at": "2026-06-14T08:40:47Z",
+      "session_ids": [
+        "orch_bdbb44d0",
+        "orch_2946ea3b",
+        "orch_4b0b6962"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_2631888a69c5": {
+      "goal_id": "g_2631888a69c5",
+      "description": "create docs/planner_owned.md about uncensored agents",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "create_file",
+          "path": "docs/planner_owned.md",
+          "file": "docs/planner_owned.md",
+          "action": "create docs/planner_owned.md about uncensored agents",
+          "content_hint": "create docs/planner_owned.md about uncensored agents",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-14T08:14:44Z",
+      "updated_at": "2026-06-14T08:40:47Z",
+      "completed_at": "2026-06-14T08:40:47Z",
+      "session_ids": [
+        "orch_2946ea3b",
+        "orch_4b0b6962"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

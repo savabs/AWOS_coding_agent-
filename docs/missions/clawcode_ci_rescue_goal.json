@@ -1,0 +1,7 @@
+{
+  "goal_assertions": {
+    "must_still_pass": "python3 -m pytest tests/ -q --tb=no",
+    "forbidden_paths": ["tests/"],
+    "max_wall_minutes": 120
+  }
+}

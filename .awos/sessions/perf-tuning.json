@@ -1,0 +1,57 @@
+{
+  "session_id": "perf-tuning",
+  "strategy": "hybrid",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Message 1: Optimizing database queries",
+      "tokens": 100,
+      "timestamp": "2026-05-16T01:06:35.390559"
+    },
+    {
+      "role": "assistant",
+      "content": "Message 2: Optimizing database queries",
+      "tokens": 110,
+      "timestamp": "2026-05-16T01:06:35.390565"
+    },
+    {
+      "role": "user",
+      "content": "Message 3: Optimizing database queries",
+      "tokens": 120,
+      "timestamp": "2026-05-16T01:06:35.390568"
+    },
+    {
+      "role": "assistant",
+      "content": "Message 4: Optimizing database queries",
+      "tokens": 130,
+      "timestamp": "2026-05-16T01:06:35.390571"
+    },
+    {
+      "role": "user",
+      "content": "Message 5: Optimizing database queries",
+      "tokens": 140,
+      "timestamp": "2026-05-16T01:06:35.390573"
+    },
+    {
+      "role": "assistant",
+      "content": "Message 6: Optimizing database queries",
+      "tokens": 150,
+      "timestamp": "2026-05-16T01:06:35.390576"
+    },
+    {
+      "role": "user",
+      "content": "Message 7: Optimizing database queries",
+      "tokens": 160,
+      "timestamp": "2026-05-16T01:06:35.390578"
+    },
+    {
+      "role": "assistant",
+      "content": "Message 8: Optimizing database queries",
+      "tokens": 170,
+      "timestamp": "2026-05-16T01:06:35.390581"
+    }
+  ],
+  "summary": "Key discussion points about Optimizing database queries",
+  "total_tokens": 1080,
+  "message_count": 8
+}

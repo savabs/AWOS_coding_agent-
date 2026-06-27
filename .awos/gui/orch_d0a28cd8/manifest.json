@@ -1,0 +1,76 @@
+{
+  "session_id": "orch_d0a28cd8",
+  "goal": "In scaffold/agent/runtime_session.py add a one-line docstring to RuntimeSessionStore.list_sessions explaining it returns durable sessions sorted by updated time",
+  "status": "completed",
+  "started_at": "2026-06-18T04:16:28Z",
+  "files": [
+    {
+      "path": "scaffold/agent/runtime_session.py",
+      "status": "created",
+      "lines_added": 1,
+      "lines_removed": 0,
+      "hunks": [
+        {
+          "old_start": 3,
+          "old_count": 4,
+          "new_start": 3,
+          "new_count": 5,
+          "lines": [
+            {
+              "type": "header",
+              "content": "@@ -3,4 +3,5 @@",
+              "old_line_no": null,
+              "new_line_no": null
+            },
+            {
+              "type": "context",
+              "content": "        status: Optional[SessionStatus] = None,",
+              "old_line_no": 3,
+              "new_line_no": 3
+            },
+            {
+              "type": "context",
+              "content": "        goal: Optional[str] = None,",
+              "old_line_no": 4,
+              "new_line_no": 4
+            },
+            {
+              "type": "context",
+              "content": "    ) -> list[RuntimeSession]:",
+              "old_line_no": 5,
+              "new_line_no": 5
+            },
+            {
+              "type": "add",
+              "content": "        \"\"\"Return durable sessions sorted by updated time.\"\"\"",
+              "old_line_no": null,
+              "new_line_no": 6
+            },
+            {
+              "type": "context",
+              "content": "        sessions: list[RuntimeSession] = []",
+              "old_line_no": 6,
+              "new_line_no": 7
+            }
+          ]
+        }
+      ],
+      "unified_diff": "--- scaffold/agent/runtime_session.py (before)\n+++ scaffold/agent/runtime_session.py (after)\n@@ -3,4 +3,5 @@\n         status: Optional[SessionStatus] = None,\n\n         goal: Optional[str] = None,\n\n     ) -> list[RuntimeSession]:\n\n+        \"\"\"Return durable sessions sorted by updated time.\"\"\"\n\n         sessions: list[RuntimeSession] = []",
+      "before_excerpt": "def list_sessions(\n        self,\n        status: Optional[SessionStatus] = None,\n        goal: Optional[str] = None,\n    ) -> list[RuntimeSession]:\n        sessions: list[RuntimeSession] = []",
+      "after_excerpt": "def list_sessions(\n        self,\n        status: Optional[SessionStatus] = None,\n        goal: Optional[str] = None,\n    ) -> list[RuntimeSession]:\n        \"\"\"Return durable sessions sorted by updated time.\"\"\"\n        sessions: list[RuntimeSession] = []"
+    }
+  ],
+  "summary": {
+    "total_files": 1,
+    "created": 1,
+    "modified": 0,
+    "deleted": 0,
+    "lines_added": 1,
+    "lines_removed": 0
+  },
+  "completed_at": "2026-06-18T04:16:36Z",
+  "tasks_completed": 1,
+  "tasks_failed": 0,
+  "total_cost_usd": 0.0014591,
+  "elapsed_sec": 13.915576934814453
+}

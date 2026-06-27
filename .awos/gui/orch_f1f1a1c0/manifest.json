@@ -1,0 +1,88 @@
+{
+  "session_id": "orch_f1f1a1c0",
+  "goal": "In scaffold/agent/verifier.py add a one-line docstring to _check_edit_fidelity explaining it rejects edits that miss comment-above or symbol-placement goals",
+  "status": "completed",
+  "started_at": "2026-06-16T08:17:10Z",
+  "files": [
+    {
+      "path": "scaffold/agent/verifier.py",
+      "status": "modified",
+      "lines_added": 1,
+      "lines_removed": 0,
+      "hunks": [
+        {
+          "old_start": 5,
+          "old_count": 6,
+          "new_start": 5,
+          "new_count": 7,
+          "lines": [
+            {
+              "type": "header",
+              "content": "@@ -5,6 +5,7 @@",
+              "old_line_no": null,
+              "new_line_no": null
+            },
+            {
+              "type": "context",
+              "content": "        replace_text: str,",
+              "old_line_no": 5,
+              "new_line_no": 5
+            },
+            {
+              "type": "context",
+              "content": "        task: dict | None,",
+              "old_line_no": 6,
+              "new_line_no": 6
+            },
+            {
+              "type": "context",
+              "content": "    ) -> list:",
+              "old_line_no": 7,
+              "new_line_no": 7
+            },
+            {
+              "type": "add",
+              "content": "        \"\"\"Reject edits missing comment-above or symbol-placement goals.\"\"\"",
+              "old_line_no": null,
+              "new_line_no": 8
+            },
+            {
+              "type": "context",
+              "content": "        \"\"\"",
+              "old_line_no": 8,
+              "new_line_no": 9
+            },
+            {
+              "type": "context",
+              "content": "        Check that edits match placement hints in the task (comment above vs docstring inside).",
+              "old_line_no": 9,
+              "new_line_no": 10
+            },
+            {
+              "type": "context",
+              "content": "        \"\"\"",
+              "old_line_no": 10,
+              "new_line_no": 11
+            }
+          ]
+        }
+      ],
+      "unified_diff": "--- scaffold/agent/verifier.py (before)\n+++ scaffold/agent/verifier.py (after)\n@@ -5,6 +5,7 @@\n         replace_text: str,\n\n         task: dict | None,\n\n     ) -> list:\n\n+        \"\"\"Reject edits missing comment-above or symbol-placement goals.\"\"\"\n\n         \"\"\"\n\n         Check that edits match placement hints in the task (comment above vs docstring inside).\n\n         \"\"\"",
+      "before_excerpt": "def _check_edit_fidelity(\n        self,\n        original: str,\n        modified: str,\n        replace_text: str,\n        task: dict | None,\n    ) -> list:\n        \"\"\"\n        Check that edits match placement hints in the task (comment above vs docstring inside).\n        \"\"\"",
+      "after_excerpt": "def _check_edit_fidelity(\n        self,\n        original: str,\n        modified: str,\n        replace_text: str,\n        task: dict | None,\n    ) -> list:\n        \"\"\"Reject edits missing comment-above or symbol-placement goals.\"\"\"\n        \"\"\"\n        Check that edits match placement hints in the task (comment above vs docstring inside).\n        \"\"\""
+    }
+  ],
+  "summary": {
+    "total_files": 1,
+    "created": 0,
+    "modified": 1,
+    "deleted": 0,
+    "lines_added": 1,
+    "lines_removed": 0
+  },
+  "completed_at": "2026-06-16T08:17:22Z",
+  "tasks_completed": 1,
+  "tasks_failed": 0,
+  "total_cost_usd": 0.00259222,
+  "elapsed_sec": 14.37967038154602
+}

@@ -1,0 +1,104 @@
+{
+  "root_id": "g_7b5bccb6dba3",
+  "nodes": {
+    "g_7b5bccb6dba3": {
+      "goal_id": "g_7b5bccb6dba3",
+      "description": "Stage 1 LONG workload mission (worktree, one file per step, do NOT skip steps): (1) scaffold/agent/worktree.py — expand register_worktree docstring with when session resume uses it (2) scaffold/agent/runtime_session.py — add one-line docstring to RuntimeSessionStore.checkpoint explaining pause/resume (3) scaffold/agent/virtual_execution_runtime.py — add one-line docstring to finalize() for pause vs completed (4) scaffold/agent/plan_actions.py — add one-line docstring to replan_task_after_verify_fail (5) scaffold/agent/self_correction.py — module docstring mention WORKER_FAIL and VERIFY_FAIL classes (6) scaffold/agent/verifier.py — one-line comment above _check_edit_fidelity explaining fidelity gate (7) tests/test_verify_fail_replan.py — add test that replan returns empty when _replan_attempted set (8) tests/test_symbol_index_worktree.py — add one-line comment at top describing G1 worktree indexing (9) tests/test_pause_resume_orchestrator.py — add module docstring line about G2 gauntlet (10) scripts/stage1_gauntlet_runner.py — add G7 to the module docstring usage block (11) awos.py — add 'awos mission start --long' to mission guide print block (12) docs/missions/README.md — add 'Long mission' paragraph with awos mission start --long",
+      "parent_ids": [],
+      "child_ids": [
+        "g_d1ab2f3ae8d0",
+        "g_c8ab2f67d2bc",
+        "g_674650c7dde6"
+      ],
+      "tasks": [],
+      "status": "in_progress",
+      "created_at": "2026-06-21T06:57:50Z",
+      "updated_at": "2026-06-21T06:58:04Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_ed1c7c6b"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_d1ab2f3ae8d0": {
+      "goal_id": "g_d1ab2f3ae8d0",
+      "description": "Expand the docstring for `register_worktree` to clarify its usage during session resume.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "scaffold/agent/worktree.py",
+          "action": "Expand the docstring for `register_worktree` to clarify its usage during session resume.",
+          "complexity": "low"
+        }
+      ],
+      "status": "failed",
+      "created_at": "2026-06-21T06:58:04Z",
+      "updated_at": "2026-06-21T06:58:33Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_ed1c7c6b"
+      ],
+      "failure_count": 1,
+      "critique_ids": []
+    },
+    "g_c8ab2f67d2bc": {
+      "goal_id": "g_c8ab2f67d2bc",
+      "description": "Add a new test case to verify that `replan` returns an empty list when the `_replan_attempted` flag is already set.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "file": "tests/test_verify_fail_replan.py",
+          "action": "Add a new test case to verify that `replan` returns an empty list when the `_replan_attempted` flag is already set.",
+          "complexity": "low",
+          "test_result": {
+            "passed": 0,
+            "failed": 0,
+            "errors": 0,
+            "pass_rate": 0.0,
+            "raw_output": "Tests skipped — set AWOS_SAFE_TO_RUN_TESTS=1 to enable.",
+            "timed_out": false,
+            "test_command": [],
+            "no_tests_found": true
+          }
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-21T06:58:04Z",
+      "updated_at": "2026-06-21T06:58:38Z",
+      "completed_at": "2026-06-21T06:58:38Z",
+      "session_ids": [
+        "orch_ed1c7c6b"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_674650c7dde6": {
+      "goal_id": "g_674650c7dde6",
+      "description": "Add 'awos mission start --long' to the existing mission guide print block.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 3,
+          "file": "awos.py",
+          "action": "Add 'awos mission start --long' to the existing mission guide print block.",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-21T06:58:04Z",
+      "updated_at": "2026-06-21T06:58:47Z",
+      "completed_at": "2026-06-21T06:58:47Z",
+      "session_ids": [
+        "orch_ed1c7c6b"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

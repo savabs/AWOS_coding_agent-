@@ -1,0 +1,106 @@
+{
+  "root_id": "g_6dbf2e0385b0",
+  "nodes": {
+    "g_6dbf2e0385b0": {
+      "goal_id": "g_6dbf2e0385b0",
+      "description": "Add a snapshot() method to ToolPerformanceTracker in scaffold/agent/core/performance_tracker.py. snapshot() returns a dict: {total_tasks, success_rate (float 0-1), avg_latency_ms, best_model (str or None)}. Then in scaffold/agent/orchestrator.py, at the end of the EXECUTION SUMMARY print block, add a one-line print of the snapshot: '[TRACKER] total=X success=Y% avg_ms=Z best=M'",
+      "parent_ids": [],
+      "child_ids": [
+        "g_ab652806529c",
+        "g_37433d787cf7"
+      ],
+      "tasks": [],
+      "status": "in_progress",
+      "created_at": "2026-05-20T15:45:47Z",
+      "updated_at": "2026-05-20T15:46:09Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_8b5bc57c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_ab652806529c": {
+      "goal_id": "g_ab652806529c",
+      "description": "Add a snapshot() method to the ToolPerformanceTracker class that computes and returns a summary dict with keys: total_tasks (int), success_rate (float 0-1), avg_latency_ms (float), best_model (str or None). Use existing internal tracking data (task records, latencies, model performance) already stored on the instance.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "scaffold/agent/core/performance_tracker.py",
+          "action": "Add a snapshot() method to the ToolPerformanceTracker class that computes and returns a summary dict with keys: total_tasks (int), success_rate (float 0-1), avg_latency_ms (float), best_model (str or None). Use existing internal tracking data (task records, latencies, model performance) already stored on the instance.",
+          "complexity": "medium",
+          "function_signature": "def snapshot(self) -> dict:",
+          "interface_contract": "Called on a ToolPerformanceTracker instance with no arguments; returns a plain dict with exactly four keys",
+          "constraints": [
+            "Return dict must have exactly these keys: 'total_tasks', 'success_rate', 'avg_latency_ms', 'best_model'",
+            "success_rate must be a float in range [0.0, 1.0]; return 0.0 if total_tasks is 0",
+            "avg_latency_ms must be a float; return 0.0 if no latency data is available",
+            "best_model must be a str (model name with highest success count) or None if no model data exists",
+            "Must not raise exceptions when tracker has recorded zero tasks"
+          ],
+          "must_not": [
+            "Must not modify any instance state",
+            "Must not make network or file I/O calls",
+            "Must not import new top-level modules not already used in the file"
+          ],
+          "example_call": "tracker = ToolPerformanceTracker(); snap = tracker.snapshot(); assert 'total_tasks' in snap"
+        }
+      ],
+      "status": "failed",
+      "created_at": "2026-05-20T15:46:09Z",
+      "updated_at": "2026-05-21T16:55:07Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_8b5bc57c",
+        "orch_79d22e8d",
+        "orch_d5f8d732",
+        "orch_aab52e48"
+      ],
+      "failure_count": 3,
+      "critique_ids": []
+    },
+    "g_37433d787cf7": {
+      "goal_id": "g_37433d787cf7",
+      "description": "At the end of the existing EXECUTION SUMMARY print block, call self.tracker.snapshot() (or however the tracker is accessed in the orchestrator) and print a single formatted line: '[TRACKER] total=X success=Y% avg_ms=Z best=M' where Y is success_rate*100 rounded to 1 decimal, Z is avg_latency_ms rounded to 1 decimal, M is best_model or 'None'.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "file": "scaffold/agent/orchestrator.py",
+          "action": "At the end of the existing EXECUTION SUMMARY print block, call self.tracker.snapshot() (or however the tracker is accessed in the orchestrator) and print a single formatted line: '[TRACKER] total=X success=Y% avg_ms=Z best=M' where Y is success_rate*100 rounded to 1 decimal, Z is avg_latency_ms rounded to 1 decimal, M is best_model or 'None'.",
+          "complexity": "low",
+          "function_signature": "# No new function; inline addition inside the existing summary print block",
+          "interface_contract": "The print statement executes immediately after the last line of the EXECUTION SUMMARY block during each orchestration run",
+          "constraints": [
+            "success percent must be formatted as e.g. '72.3%' (one decimal place)",
+            "avg_ms must be formatted as e.g. '145.2' (one decimal place)",
+            "best_model must print as the string value or the literal 'None' if the value is None",
+            "Must call snapshot() on the same tracker object already used in the orchestrator; do not instantiate a new tracker",
+            "Print must be a single print() call producing exactly one output line"
+          ],
+          "must_not": [
+            "Must not alter any existing print statements in the summary block",
+            "Must not introduce new imports",
+            "Must not wrap the print in a try/except that silently swallows errors"
+          ],
+          "example_call": "snap = self.tracker.snapshot(); print(f'[TRACKER] total={snap[\"total_tasks\"]} success={snap[\"success_rate\"]*100:.1f}% avg_ms={snap[\"avg_latency_ms\"]:.1f} best={snap[\"best_model\"]}')"
+        }
+      ],
+      "status": "failed",
+      "created_at": "2026-05-20T15:46:09Z",
+      "updated_at": "2026-05-21T16:55:54Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_8b5bc57c",
+        "orch_79d22e8d",
+        "orch_d5f8d732",
+        "orch_aab52e48"
+      ],
+      "failure_count": 3,
+      "critique_ids": []
+    }
+  }
+}

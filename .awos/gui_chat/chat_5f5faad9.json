@@ -1,0 +1,30 @@
+{
+  "chat_id": "chat_5f5faad9",
+  "title": "lets create a file that gives us intsruction on how to code \u2026",
+  "created_at": "2026-06-15T14:18:53.967034Z",
+  "updated_at": "2026-06-15T14:18:56.371677Z",
+  "messages": [
+    {
+      "role": "user",
+      "content": "lets create a file that gives us intsruction on how to code a GPU kernel",
+      "mode": "qa",
+      "timestamp": "2026-06-15T14:18:53.967585Z",
+      "meta": {}
+    },
+    {
+      "role": "assistant",
+      "content": "_Stopped by user._",
+      "mode": "qa",
+      "timestamp": "2026-06-15T14:18:56.371651Z",
+      "meta": {
+        "cancelled": true,
+        "success": false
+      }
+    }
+  ],
+  "token_stats": {
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0
+  }
+}

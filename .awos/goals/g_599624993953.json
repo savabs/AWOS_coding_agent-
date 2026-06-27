@@ -1,0 +1,59 @@
+{
+  "root_id": "g_599624993953",
+  "nodes": {
+    "g_599624993953": {
+      "goal_id": "g_599624993953",
+      "description": "lets create a file that gives us intsruction on how to code a GPU kernel",
+      "parent_ids": [],
+      "child_ids": [
+        "g_a71808393f3c"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-15T14:18:28Z",
+      "updated_at": "2026-06-15T14:18:58Z",
+      "completed_at": "2026-06-15T14:18:58Z",
+      "session_ids": [
+        "orch_312dd8b7"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_a71808393f3c": {
+      "goal_id": "g_a71808393f3c",
+      "description": "Create a comprehensive guide on how to code GPU kernels.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "create_file",
+          "path": "docs/HOW_TO_CODE_GPU_KERNEL.md",
+          "action": "Create a comprehensive guide on how to code GPU kernels.",
+          "content_hint": "Introduction to GPU computing, differences from CPU programming, choosing a framework (e.g., CUDA, OpenCL), essential concepts (threads, blocks, grids, warps/wavefronts), memory types (global, shared, constant, local), data transfer between host and device, basic kernel structure and execution, synchronization, simple example kernels (e.g., vector addition), debugging tips, and performance considerations.",
+          "complexity": "medium",
+          "file": "docs/HOW_TO_CODE_GPU_KERNEL.md",
+          "_placement_validation": {
+            "ok": true,
+            "path": "docs/HOW_TO_CODE_GPU_KERNEL.md",
+            "artifact_kind": "guide",
+            "expected_folder": "docs",
+            "issues": [],
+            "score": 1.0
+          },
+          "artifact_kind": "guide",
+          "placement_ok": true
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-15T14:18:38Z",
+      "updated_at": "2026-06-15T14:18:58Z",
+      "completed_at": "2026-06-15T14:18:58Z",
+      "session_ids": [
+        "orch_312dd8b7"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "task_id": 1,
+  "task_type": "edit_file",
+  "file": "buggy.py",
+  "path": "buggy.py",
+  "action": "Fix broken_add to return a + b instead of a - b",
+  "complexity": "low"
+}

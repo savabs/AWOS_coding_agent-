@@ -64,6 +64,14 @@ class WorktreeManager:
         logger.info("[Worktree] created %s → branch %s", worktree_path, branch_name)
         return str(worktree_path)
 
+    def register_worktree(self, feature_id: str, worktree_path: str) -> None:
+        """Register an existing worktree path (e.g. on session resume)."""
+        path = str(Path(worktree_path).resolve())
+        if not Path(path).is_dir():
+            raise FileNotFoundError(f"[Worktree] path does not exist: {path}")
+        self.worktrees[feature_id] = path
+        logger.info("[Worktree] registered %s → %s", feature_id, path)
+
     def get_diff(self, feature_id: str) -> str:
         """Return unified diff of all changes in the worktree vs HEAD."""
         worktree_path = self._require_worktree(feature_id)

@@ -1,0 +1,73 @@
+{
+  "root_id": "g_41478d2a7b34",
+  "nodes": {
+    "g_41478d2a7b34": {
+      "goal_id": "g_41478d2a7b34",
+      "description": "Add a __repr__ method to the ErrorPattern dataclass in scaffold/agent/error_pattern_store.py that returns: 'ErrorPattern(file=X, type=Y, ts=Z)'",
+      "parent_ids": [],
+      "child_ids": [
+        "g_3785a37ad87a"
+      ],
+      "tasks": [],
+      "status": "in_progress",
+      "created_at": "2026-05-20T15:36:26Z",
+      "updated_at": "2026-05-20T15:36:36Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_70475bf1"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_3785a37ad87a": {
+      "goal_id": "g_3785a37ad87a",
+      "description": "Add a __repr__ method to the ErrorPattern dataclass that returns a string in the format 'ErrorPattern(file=X, type=Y, ts=Z)' where X is the file field, Y is the type field, and Z is the ts field",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "scaffold/agent/error_pattern_store.py",
+          "action": "Add a __repr__ method to the ErrorPattern dataclass that returns a string in the format 'ErrorPattern(file=X, type=Y, ts=Z)' where X is the file field, Y is the type field, and Z is the ts field",
+          "complexity": "low",
+          "function_signature": "def __repr__(self) -> str:",
+          "interface_contract": "Called automatically by Python when repr() or str() is used on an ErrorPattern instance",
+          "constraints": [
+            "Must be defined as an instance method inside the ErrorPattern dataclass class body",
+            "Return value must match exactly: 'ErrorPattern(file=X, type=Y, ts=Z)' using an f-string or string formatting with self.file, self.type, and self.ts",
+            "Must use the exact field names: file, type, ts as they appear in the dataclass definition"
+          ],
+          "must_not": [
+            "Must not modify any existing fields or methods of the ErrorPattern dataclass",
+            "Must not add __str__ or any other dunder methods",
+            "Must not use @property or any decorators on __repr__",
+            "Must not hardcode any values — all three values must come from self"
+          ],
+          "example_call": "ep = ErrorPattern(file='main.py', type='ValueError', ts=1700000000); repr(ep) == \"ErrorPattern(file=main.py, type=ValueError, ts=1700000000)\""
+        }
+      ],
+      "status": "failed",
+      "created_at": "2026-05-20T15:36:36Z",
+      "updated_at": "2026-05-21T16:51:26Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_70475bf1",
+        "orch_0d486161",
+        "orch_13283a1c",
+        "orch_d619049a",
+        "orch_e41f93e4",
+        "orch_aeb6132a",
+        "orch_dc6b245c",
+        "orch_07ddd29e",
+        "orch_dd9e7d2a",
+        "orch_52cc28c9",
+        "orch_0ed6154e",
+        "orch_6525a5dd",
+        "orch_1c1b72a8",
+        "orch_b377de50"
+      ],
+      "failure_count": 14,
+      "critique_ids": []
+    }
+  }
+}

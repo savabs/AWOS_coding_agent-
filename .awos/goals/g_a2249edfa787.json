@@ -1,0 +1,49 @@
+{
+  "root_id": "g_a2249edfa787",
+  "nodes": {
+    "g_a2249edfa787": {
+      "goal_id": "g_a2249edfa787",
+      "description": "In scaffold/agent/integration_reviewer.py add a one-line docstring to _is_cheap_only explaining it reads AWOS_CHEAP_ONLY from the environment",
+      "parent_ids": [],
+      "child_ids": [
+        "g_fbf97729cd4e"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-16T08:18:50Z",
+      "updated_at": "2026-06-16T08:18:58Z",
+      "completed_at": "2026-06-16T08:18:58Z",
+      "session_ids": [
+        "orch_cc6b9eab"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_fbf97729cd4e": {
+      "goal_id": "g_fbf97729cd4e",
+      "description": "Add a one-line docstring to the `_is_cheap_only` function explaining it reads AWOS_CHEAP_ONLY from the environment.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "scaffold/agent/integration_reviewer.py",
+          "action": "Add a one-line docstring to the `_is_cheap_only` function explaining it reads AWOS_CHEAP_ONLY from the environment.",
+          "complexity": "low",
+          "function_signature": "def _is_cheap_only",
+          "file": "scaffold/agent/integration_reviewer.py"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-16T08:18:54Z",
+      "updated_at": "2026-06-16T08:18:58Z",
+      "completed_at": "2026-06-16T08:18:58Z",
+      "session_ids": [
+        "orch_cc6b9eab"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

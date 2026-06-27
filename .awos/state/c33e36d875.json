@@ -1,0 +1,28 @@
+{
+  "goal": "Stage 1 real workload mission (worktree, multi-step): (1) scaffold/agent/mcts_policy.py \u2014 expand module docstring with when MCTS runs (2) scripts/install-awos-cli.sh \u2014 add echo line showing awos version path (3) tests/test_mcts_trace_store.py \u2014 add test that empty store count is 0 (already exists, ensure green) (4) awos.py cmd_sessions_show \u2014 print Sandbox line when worktree enabled (5) docs/missions/README.md \u2014 one paragraph mission playbook",
+  "goal_hash": "c33e36d875",
+  "started_at": "2026-06-19T14:12:26",
+  "last_updated": "2026-06-19T14:49:43",
+  "completed_task_ids": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "failed_task_ids": [
+    "4_1",
+    "4_2",
+    "4_1_1",
+    "4_1_2",
+    "4_2_1",
+    "4_2_2"
+  ],
+  "session_ids": [
+    "orch_10b7460d",
+    "orch_876c7751",
+    "orch_5d2f840d",
+    "orch_db126c12"
+  ],
+  "status": "complete"
+}

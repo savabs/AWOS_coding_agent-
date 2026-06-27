@@ -136,6 +136,19 @@ Key symbols (file::class/def):
             ]
         )
         
+        # Cache telemetry
+        try:
+            from .cache_telemetry import CacheTelemetryStore, extract_cache_stats_anthropic
+            cache_store = CacheTelemetryStore()
+            cache_event = extract_cache_stats_anthropic(
+                response=response.model_dump(),
+                component="planner",
+                model=self.model,
+            )
+            cache_store.record(cache_event)
+        except Exception:
+            pass  # Don't fail planning if telemetry breaks
+        
         # Extract response
         response_text = response.content[0].text.strip()
         

@@ -1,0 +1,27 @@
+{
+  "goal": "In scaffold/agent/orchestrator.py, modify _cheap_call() to retry up to 3 times with exponential backoff (delay: 0.5s, 1s, 2s). Only retry on network/API errors (Exception). If all retries fail, return empty string. Keep the existing logging.",
+  "goal_hash": "dca7cd2b00",
+  "started_at": "2026-05-21T13:52:47",
+  "last_updated": "2026-05-21T22:23:38",
+  "completed_task_ids": [
+    "1_1",
+    "1_2",
+    "1_3",
+    "1_4"
+  ],
+  "failed_task_ids": [
+    1
+  ],
+  "session_ids": [
+    "orch_cb52e639",
+    "orch_d6ba61a2",
+    "orch_a34efe16",
+    "orch_cadca969",
+    "orch_71732400",
+    "orch_e44f6e8d",
+    "orch_079d13d4",
+    "orch_f6dd1c78",
+    "orch_46eaa82c"
+  ],
+  "status": "complete"
+}

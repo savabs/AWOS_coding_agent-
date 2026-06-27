@@ -1,0 +1,14 @@
+{
+  "goal": "In scaffold/agent/learning_policy.py add a one-line docstring to apply_kernel_defaults explaining it enables runtime sessions, learning, and MCTS unless opted out",
+  "goal_hash": "036b51e155",
+  "started_at": "2026-06-18T09:46:47",
+  "last_updated": "2026-06-18T09:46:55",
+  "completed_task_ids": [
+    1
+  ],
+  "failed_task_ids": [],
+  "session_ids": [
+    "orch_77622ad5"
+  ],
+  "status": "complete"
+}

@@ -1,0 +1,43 @@
+---
+description: AWOS sole identity — read VISION.md first; never contradict it
+alwaysApply: true
+---
+
+# AWOS Identity (mandatory)
+
+`VISION.md` v2.5 is the **only** canonical philosophy. Stamped permanent 2026-06-16.
+
+## Every session
+
+1. Read `VISION.md` before proposing architecture, identity, or roadmap changes.
+2. Read `memories/repo/project_structure.md` for **current stage** and facts.
+3. For implementation work, follow `AWOS.md` (Research → Spec → Task → **Live proof**).
+
+Full cold-start: `AGENTS.md` · file map: `AGENT_INDEX.md`
+
+## 2-year mission
+
+> Given any model and any compute budget, produce **maximum reliable work.**
+
+Coding = **benchmark**. **Stage 1 now** (one excellent worker). **Stage 2 parallel:** `compute/` bare-metal layer.
+
+## What AWOS is
+
+- **Deployments:** laptop, on-prem, rented GPU server, API-only, or hybrid
+- **Model choice:** user-configurable **within** verify → reward → learn loop (cannot bypass orchestration)
+
+## Execution discipline
+
+- Vision = decades. **Ship current stage only.**
+- **Deferred:** RL training, foundation model training, AGI, robotics, swarms
+- **Not deferred:** `compute/` inference runtime, CUDA kernels, shared KV cache (Stage 2)
+
+## Never do
+
+- Skip stages; frame as API-only or local-only; restate identity outside `VISION.md`
+
+## When editing docs
+
+- Identity → **only** `VISION.md`
+- Stage/hardware facts → `memories/repo/project_structure.md`
+- Process → `AWOS.md`

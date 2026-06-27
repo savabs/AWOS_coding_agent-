@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "session_id": "rs_7bf8a2a468b9",
+  "goal": "In scaffold/agent/prompt_evolver.py add a one-line docstring to should_evolve explaining it triggers prompt evolution every N sessions",
+  "goal_hash": "109f901ceb",
+  "status": "completed",
+  "created_at": "2026-06-17T10:53:07Z",
+  "updated_at": "2026-06-17T10:53:33Z",
+  "paused_at": null,
+  "codebase_root": ".",
+  "reasoning_session_id": "orch_9f60235a",
+  "goal_graph_id": "g_097846a24e65",
+  "progress": {
+    "completed_task_ids": [
+      1
+    ],
+    "failed_task_ids": [],
+    "current_task_id": null,
+    "total_tasks": 1,
+    "decomposition_depth": 0
+  },
+  "budget": {
+    "spent_usd": 0.00155605
+  },
+  "sandbox": {
+    "enabled": false,
+    "feature_id": null,
+    "worktree_path": null,
+    "branch": null
+  },
+  "parent_session_id": null,
+  "cancel_requested": false
+}

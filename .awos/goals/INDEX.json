@@ -1,0 +1,502 @@
+{
+  "g_8b75232295d7": {
+    "description": "fix factorial edge cases",
+    "status": "in_progress",
+    "updated_at": "2026-05-19T10:23:24Z"
+  },
+  "g_c62363d2e576": {
+    "description": "add docstring to divide",
+    "status": "in_progress",
+    "updated_at": "2026-05-19T10:23:25Z"
+  },
+  "g_e85e521ffeba": {
+    "description": "add input validation to math_utils",
+    "status": "in_progress",
+    "updated_at": "2026-05-19T10:23:27Z"
+  },
+  "g_051510a2600e": {
+    "description": "Add a simple config module to read settings",
+    "status": "in_progress",
+    "updated_at": "2026-05-20T15:47:46Z"
+  },
+  "g_e8e039c640c4": {
+    "description": "add a hello function",
+    "status": "in_progress",
+    "updated_at": "2026-05-20T15:17:11Z"
+  },
+  "g_ee2a62c6dba0": {
+    "description": "add type hints to the greet function in demo.py",
+    "status": "in_progress",
+    "updated_at": "2026-05-20T15:22:52Z"
+  },
+  "g_41478d2a7b34": {
+    "description": "Add a __repr__ method to the ErrorPattern dataclass in scaffold/agent/error_pattern_store.py that returns: 'ErrorPattern(file=X, type=Y, ts=Z)'",
+    "status": "in_progress",
+    "updated_at": "2026-05-20T15:36:36Z"
+  },
+  "g_d15ef3f9f821": {
+    "description": "In scaffold/agent/orchestrator.py, modify _cheap_call() to retry up to 3 times with exponential backoff (delay: 0.5s, 1s, 2s). Only retry on network/API errors (Exception). If all retries fail, return empty string. Keep existing logging.",
+    "status": "in_progress",
+    "updated_at": "2026-05-20T15:45:38Z"
+  },
+  "g_6dbf2e0385b0": {
+    "description": "Add a snapshot() method to ToolPerformanceTracker in scaffold/agent/core/performance_tracker.py. snapshot() returns a dict: {total_tasks, success_rate (float 0-1), avg_latency_ms, best_model (str or None)}. Then in scaffold/agent/orchestrator.py, at the end of the EXECUTION SUMMARY print block, add a one-line print of the snapshot: '[TRACKER] total=X success=Y% avg_ms=Z best=M'",
+    "status": "in_progress",
+    "updated_at": "2026-05-20T15:46:09Z"
+  },
+  "g_5ff8a93c1140": {
+    "description": "Refactor scaffold/agent/worker.py: extract the prompt-building logic from execute_task() into a new private method _build_prompt(self, task, file_content, codebase_context, attempt, error_context, past_critiques, vector_chunks, examples_section, skill_section, symbol_section) -> str. _build_prompt() returns the full system prompt string. execute_task() calls _build_prompt() and passes the result directly to the LLM. All existing behaviour must be preserved.",
+    "status": "in_progress",
+    "updated_at": "2026-05-20T15:46:43Z"
+  },
+  "g_85214532f114": {
+    "description": "Add a docstring to the ReplayGate class in scaffold/agent/reward_store.py explaining that threshold was lowered from 0.4 to 0.25 to support single-codebase tasks where novelty is naturally low.",
+    "status": "in_progress",
+    "updated_at": "2026-05-24T07:52:10Z"
+  },
+  "g_a6cb855063f3": {
+    "description": "Remove the duplicate SkillLibrary import on line 40 of scaffold/agent/orchestrator.py and add return type annotations to the _critic_refine, _pick_best_candidate, _compute_confidence, and _maybe_train_prm methods",
+    "status": "in_progress",
+    "updated_at": "2026-05-24T09:09:34Z"
+  },
+  "g_6e01578fc5f3": {
+    "description": "Add a health_check() method to the Orchestrator class in scaffold/agent/orchestrator.py that returns a dict with the readiness state of each component: LinUCB (is_ready, total_updates), GP (is_fitted), PRM (trained or dormant), VectorMemory (available), CriticEngine (enabled), and PostMortemEngine (patterns stored count)",
+    "status": "in_progress",
+    "updated_at": "2026-05-24T12:13:11Z"
+  },
+  "g_155787c6320c": {
+    "description": "In scaffold/agent/worker.py, when _parse_search_replace fails, log the first 200 characters of the response and the specific reason for failure (no SEARCH: found, mismatched blocks, etc.) so debugging failed tasks is easier",
+    "status": "in_progress",
+    "updated_at": "2026-05-24T09:44:33Z"
+  },
+  "g_295ec392abe4": {
+    "description": "Add a docstring to the _cheap_call method in scaffold/agent/orchestrator.py explaining it retries up to 3 times with exponential backoff",
+    "status": "completed",
+    "updated_at": "2026-06-16T08:19:15Z"
+  },
+  "g_25a8097a766f": {
+    "description": "Add a comment above the Orchestrator class in scaffold/agent/orchestrator.py saying AWOS v2",
+    "status": "in_progress",
+    "updated_at": "2026-05-24T12:07:16Z"
+  },
+  "g_5572a3118495": {
+    "description": "Add a short docstring to the StabilityGate.should_check method explaining that it runs every N completed sessions",
+    "status": "in_progress",
+    "updated_at": "2026-05-26T19:55:20Z"
+  },
+  "g_3251e31928b4": {
+    "description": "Add a one-line docstring to PromptEvolver.should_evolve explaining what it checks",
+    "status": "in_progress",
+    "updated_at": "2026-05-26T20:14:57Z"
+  },
+  "g_688b4187585c": {
+    "description": "Add a one-line docstring to the _extract_context method in worker.py",
+    "status": "completed",
+    "updated_at": "2026-05-27T08:22:50Z"
+  },
+  "g_edb451c624a9": {
+    "description": "Add docstrings to _check_syntax and _check_contract_compliance methods in scaffold/agent/verifier.py",
+    "status": "in_progress",
+    "updated_at": "2026-05-27T08:24:11Z"
+  },
+  "g_dc4b4a457bba": {
+    "description": "Add a docstring to run_tests in scaffold/agent/verifier.py and add type hints to nonexistent_helper in scaffold/agent/worker.py",
+    "status": "in_progress",
+    "updated_at": "2026-05-27T08:26:23Z"
+  },
+  "g_8608910e6b80": {
+    "description": "Add a concise module-level docstring to scaffold/agent/usage_record.py if one is missing or too short",
+    "status": "completed",
+    "updated_at": "2026-06-12T07:42:32Z"
+  },
+  "g_1036f35268f7": {
+    "description": "Add a one-line docstring to is_cheap_only() in escalation_engine.py explaining it returns True when premium models are halted",
+    "status": "completed",
+    "updated_at": "2026-06-16T08:16:43Z"
+  },
+  "g_427b72e56d48": {
+    "description": "In file scaffold/agent/budget_ledger.py add a one-line comment above get_status explaining it returns month-to-date budget status",
+    "status": "completed",
+    "updated_at": "2026-06-12T07:43:42Z"
+  },
+  "g_910f571afe02": {
+    "description": "In scaffold/agent/worker.py add a short comment above _try_cheap_fallback explaining it tries alternate cheap providers",
+    "status": "completed",
+    "updated_at": "2026-06-12T08:13:48Z"
+  },
+  "g_be35d615ccc4": {
+    "description": "In scaffold/agent/worker.py add a short # comment above _try_cheap_fallback explaining it tries alternate cheap providers",
+    "status": "completed",
+    "updated_at": "2026-06-12T08:35:35Z"
+  },
+  "g_26e28a14f709": {
+    "description": "In scaffold/agent/worker.py add a short # comment above _try_cheap_fallback explaining it tries alternate cheap providers",
+    "status": "completed",
+    "updated_at": "2026-06-12T08:36:53Z"
+  },
+  "g_0e7e8e16b423": {
+    "description": "In scaffold/agent/worker.py add a short # comment above _try_cheap_fallback explaining it tries alternate cheap providers",
+    "status": "completed",
+    "updated_at": "2026-06-12T08:38:20Z"
+  },
+  "g_420cd557b631": {
+    "description": "In scaffold/agent/worker.py add a short # comment above _try_cheap_fallback explaining it tries alternate cheap providers",
+    "status": "completed",
+    "updated_at": "2026-06-12T08:38:55Z"
+  },
+  "g_36690e37b7d1": {
+    "description": "In scaffold/agent/worker.py add a short # comment above _try_cheap_fallback explaining it tries alternate cheap providers",
+    "status": "completed",
+    "updated_at": "2026-06-12T08:39:43Z"
+  },
+  "g_82b32c51eca3": {
+    "description": "explain this repo to me",
+    "status": "completed",
+    "updated_at": "2026-06-12T09:01:18Z"
+  },
+  "g_f47827fd407f": {
+    "description": "you can create e .md file regarding making a uncensored agent",
+    "status": "completed",
+    "updated_at": "2026-06-12T10:45:22Z"
+  },
+  "g_9793b516b3cb": {
+    "description": "can you write me this rather than just giving me back in chat",
+    "status": "completed",
+    "updated_at": "2026-06-12T22:05:00Z"
+  },
+  "g_dab9da1d03ed": {
+    "description": "create me  .MD FILE ,write how to make hardware fast",
+    "status": "in_progress",
+    "updated_at": "2026-06-13T21:12:29Z"
+  },
+  "g_3d36e14ea2ac": {
+    "description": "create docs/http_only_test.md about automated checks",
+    "status": "completed",
+    "updated_at": "2026-06-14T08:40:47Z"
+  },
+  "g_d175aa91cf15": {
+    "description": "create docs/e2e_uncensored_agent_guide.md about uncensored local agents",
+    "status": "completed",
+    "updated_at": "2026-06-14T08:40:44Z"
+  },
+  "g_0005846e882a": {
+    "description": "create docs/e2e_uncensored_agent_guide.md about uncensored local agents",
+    "status": "completed",
+    "updated_at": "2026-06-14T08:40:46Z"
+  },
+  "g_2e3a4c92d5e4": {
+    "description": "create docs/http_only_test.md about automated checks",
+    "status": "completed",
+    "updated_at": "2026-06-14T08:40:48Z"
+  },
+  "g_27df7475bcd5": {
+    "description": "create docs/e2e_uncensored_agent_guide.md about uncensored local agents",
+    "status": "completed",
+    "updated_at": "2026-06-14T08:41:03Z"
+  },
+  "g_4fd74f01dbbe": {
+    "description": "create docs/e2e_via_http_guide.md about deliverable routing",
+    "status": "completed",
+    "updated_at": "2026-06-14T08:41:04Z"
+  },
+  "g_bfb1012eaa79": {
+    "description": "create docs/example_uncensored_agent_guide.md about building uncensored local LLM agents with Ollama and open weights",
+    "status": "completed",
+    "updated_at": "2026-06-14T12:18:57Z"
+  },
+  "g_cd654d97e71b": {
+    "description": "create docs/example_uncensored_agent_guide.md about building uncensored local LLM agents with Ollama and open weights",
+    "status": "completed",
+    "updated_at": "2026-06-14T14:55:46Z"
+  },
+  "g_e52af3145134": {
+    "description": "create a .md file reagrding how to code a advance self learning agent",
+    "status": "completed",
+    "updated_at": "2026-06-14T12:23:07Z"
+  },
+  "g_6db9053d18b5": {
+    "description": "create docs/e2e_uncensored_agent_guide.md about uncensored local agents",
+    "status": "completed",
+    "updated_at": "2026-06-14T14:55:48Z"
+  },
+  "g_e6d028141b52": {
+    "description": "create docs/e2e_via_http_guide.md about deliverable routing",
+    "status": "completed",
+    "updated_at": "2026-06-14T14:55:48Z"
+  },
+  "g_a2b2811d6080": {
+    "description": "create docs/http_only_test.md about automated checks",
+    "status": "completed",
+    "updated_at": "2026-06-14T14:55:50Z"
+  },
+  "g_7e72f8e02ed5": {
+    "description": "create docs/e2e_uncensored_agent_guide.md about uncensored local agents",
+    "status": "completed",
+    "updated_at": "2026-06-15T12:52:02Z"
+  },
+  "g_ba35d13120cc": {
+    "description": "create docs/e2e_via_http_guide.md about deliverable routing",
+    "status": "completed",
+    "updated_at": "2026-06-15T12:52:04Z"
+  },
+  "g_a18754a6bad5": {
+    "description": "create docs/http_only_test.md about automated checks",
+    "status": "completed",
+    "updated_at": "2026-06-15T12:52:05Z"
+  },
+  "g_599624993953": {
+    "description": "lets create a file that gives us intsruction on how to code a GPU kernel",
+    "status": "completed",
+    "updated_at": "2026-06-15T14:18:58Z"
+  },
+  "g_d67e0cde840c": {
+    "description": "In scaffold/agent/run_diagnostics.py add a short # comment above print_visual_diff explaining it shows the applied patch in the terminal",
+    "status": "completed",
+    "updated_at": "2026-06-16T08:17:00Z"
+  },
+  "g_f223410a310c": {
+    "description": "In scaffold/agent/verifier.py add a one-line docstring to _check_edit_fidelity explaining it rejects edits that miss comment-above or symbol-placement goals",
+    "status": "completed",
+    "updated_at": "2026-06-16T08:17:22Z"
+  },
+  "g_bf3f4cc6f89a": {
+    "description": "In scaffold/agent/usage_record.py add a short # comment above merge_result_usage explaining it merges worker API usage into a task accumulator",
+    "status": "completed",
+    "updated_at": "2026-06-16T08:18:08Z"
+  },
+  "g_bdbc5f755277": {
+    "description": "In scaffold/agent/run_diagnostics.py add a one-line docstring to TaskDiagnostic.record explaining it appends a stage entry to the diagnostic trace",
+    "status": "completed",
+    "updated_at": "2026-06-16T08:18:26Z"
+  },
+  "g_36cebbf16280": {
+    "description": "In scaffold/agent/cheap_planner.py add a short # comment above _normalize_plan_paths explaining it fixes bare filenames to scaffold/agent paths",
+    "status": "completed",
+    "updated_at": "2026-06-16T08:18:43Z"
+  },
+  "g_a2249edfa787": {
+    "description": "In scaffold/agent/integration_reviewer.py add a one-line docstring to _is_cheap_only explaining it reads AWOS_CHEAP_ONLY from the environment",
+    "status": "completed",
+    "updated_at": "2026-06-16T08:18:58Z"
+  },
+  "g_e8c49fe23301": {
+    "description": "In scaffold/agent/pei_report.py add a short module-level docstring explaining PEI uses tokens as the primary cost measure",
+    "status": "completed",
+    "updated_at": "2026-06-16T08:19:34Z"
+  },
+  "g_138086a76cc1": {
+    "description": "In scaffold/agent/prompt_evolver.py add a one-line docstring to should_evolve explaining it triggers prompt evolution every N sessions",
+    "status": "completed",
+    "updated_at": "2026-06-16T08:19:48Z"
+  },
+  "g_3bdb37d9b06a": {
+    "description": "In scaffold/agent/stability_gate.py add a one-line docstring to should_check explaining it gates scaffold evolution checks by session count",
+    "status": "completed",
+    "updated_at": "2026-06-16T08:20:05Z"
+  },
+  "g_1f93cbb6cf19": {
+    "description": "In scaffold/agent/escalation_engine.py add a short # comment above max_allowed_level explaining it caps the model ladder in cheap-only mode",
+    "status": "completed",
+    "updated_at": "2026-06-16T08:20:22Z"
+  },
+  "g_097846a24e65": {
+    "description": "In scaffold/agent/prompt_evolver.py add a one-line docstring to should_evolve explaining it triggers prompt evolution every N sessions",
+    "status": "completed",
+    "updated_at": "2026-06-17T10:53:31Z"
+  },
+  "g_a52c0da8a52c": {
+    "description": "In scaffold/agent/stability_gate.py add a one-line docstring to should_check explaining it gates scaffold evolution checks by session count",
+    "status": "completed",
+    "updated_at": "2026-06-17T10:53:42Z"
+  },
+  "g_6a256b8dd998": {
+    "description": "In scaffold/agent/escalation_engine.py add a short # comment above max_allowed_level explaining it caps the model ladder in cheap-only mode",
+    "status": "completed",
+    "updated_at": "2026-06-17T10:53:53Z"
+  },
+  "g_c63699026a84": {
+    "description": "In scaffold/agent/runtime_session.py add a one-line docstring to RuntimeSessionStore.list_sessions explaining it returns durable sessions sorted by updated time",
+    "status": "completed",
+    "updated_at": "2026-06-18T04:16:36Z"
+  },
+  "g_70a3a72e3573": {
+    "description": "In scaffold/agent/learning_policy.py add a one-line docstring to apply_kernel_defaults explaining it enables runtime sessions, learning, and MCTS unless opted out",
+    "status": "completed",
+    "updated_at": "2026-06-18T04:16:51Z"
+  },
+  "g_fa68f7e5336b": {
+    "description": "In scaffold/agent/mcts_policy.py add a one-line docstring to mcts_enabled explaining it controls whether MCTS fallback runs after worker failure",
+    "status": "completed",
+    "updated_at": "2026-06-18T04:17:05Z"
+  },
+  "g_d43f632f9fef": {
+    "description": "In scaffold/agent/worktree.py add a one-line docstring to register_worktree explaining it reattaches a persisted worktree path for session resume",
+    "status": "completed",
+    "updated_at": "2026-06-18T04:17:20Z"
+  },
+  "g_7f7a8ffd82f4": {
+    "description": "In scaffold/agent/token_tracker.py add a one-line docstring to check_guard explaining it blocks requests when the monthly budget cap is exceeded",
+    "status": "completed",
+    "updated_at": "2026-06-18T04:17:33Z"
+  },
+  "g_b189def7d24f": {
+    "description": "In scaffold/agent/virtual_execution_runtime.py add a one-line docstring to worktree_enabled explaining it returns True when AWOS_USE_WORKTREE is enabled",
+    "status": "completed",
+    "updated_at": "2026-06-19T13:16:37Z"
+  },
+  "g_14e700a93d00": {
+    "description": "Risky Stage 1 gauntlet — three tasks, one file each: (1) In awos.py add function _sandbox_summary(session) returning a one-line string with feature_id, worktree_path, branch, and whether the worktree directory exists when session.sandbox.enabled else empty string. (2) In cmd_sessions_show call _sandbox_summary and print Sandbox line when non-empty. (3) Add tests/test_awos_sessions_sandbox.py with two pytest tests for enabled and disabled sandbox on a mock RuntimeSession.",
+    "status": "in_progress",
+    "updated_at": "2026-06-18T07:40:22Z"
+  },
+  "g_f57f0f77d0c9": {
+    "description": "Gauntlet G2 pause-mid-plan proof",
+    "status": "in_progress",
+    "updated_at": "2026-06-18T08:31:03Z"
+  },
+  "g_123112247ec3": {
+    "description": "Fix the bug in tests/fixtures/gauntlet_broken_module.py: broken_add must return a+b not a-b. Ensure tests/fixtures/test_gauntlet_broken_module.py passes.",
+    "status": "completed",
+    "updated_at": "2026-06-18T08:32:15Z"
+  },
+  "g_0698716db92b": {
+    "description": "G3 failure hunt — force MCTS after worker fail",
+    "status": "completed",
+    "updated_at": "2026-06-18T08:52:54Z"
+  },
+  "g_8efdfd3394a4": {
+    "description": "g3",
+    "status": "in_progress",
+    "updated_at": "2026-06-18T08:43:37Z"
+  },
+  "g_b9d4f7a222db": {
+    "description": "g3",
+    "status": "in_progress",
+    "updated_at": "2026-06-18T08:44:51Z"
+  },
+  "g_90a5afd94a4a": {
+    "description": "g3",
+    "status": "in_progress",
+    "updated_at": "2026-06-18T08:48:45Z"
+  },
+  "g_b6ee4f74fa35": {
+    "description": "Gauntlet G6 SIGINT: add a one-line comment to each of tests/fixtures/gauntlet_marker_a.py, tests/fixtures/gauntlet_marker_b.py, and tests/fixtures/gauntlet_marker_c.py",
+    "status": "completed",
+    "updated_at": "2026-06-18T16:06:13Z"
+  },
+  "g_74c5e59e5392": {
+    "description": "Stage 1 real workload mission (worktree, multi-step): (1) scaffold/agent/mcts_policy.py — expand module docstring with when MCTS runs (2) scripts/install-awos-cli.sh — add echo line showing awos version path (3) tests/test_mcts_trace_store.py — add test that empty store count is 0 (already exists, ensure green) (4) awos.py cmd_sessions_show — print Sandbox line when worktree enabled (5) docs/missions/README.md — one paragraph mission playbook",
+    "status": "completed",
+    "updated_at": "2026-06-19T08:42:45Z"
+  },
+  "g_bd022d12fa82": {
+    "description": "Stage 1 real workload mission (worktree, multi-step): (1) scaffold/agent/mcts_policy.py — expand module docstring with when MCTS runs (2) scripts/install-awos-cli.sh — add echo line showing awos version path (3) tests/test_mcts_trace_store.py — add test that empty store count is 0 (already exists, ensure green) (4) awos.py cmd_sessions_show — print Sandbox line when worktree enabled (5) docs/missions/README.md — one paragraph mission playbook",
+    "status": "completed",
+    "updated_at": "2026-06-19T09:19:33Z"
+  },
+  "g_8a0c5cedc1c0": {
+    "description": "In scaffold/agent/virtual_execution_runtime.py add a one-line docstring to auto_merge_enabled explaining it reads AWOS_WORKTREE_AUTO_MERGE",
+    "status": "completed",
+    "updated_at": "2026-06-20T07:31:39Z"
+  },
+  "g_43653fba0b61": {
+    "description": "Gauntlet G6 SIGINT: add a one-line comment to each of tests/fixtures/gauntlet_marker_a.py, tests/fixtures/gauntlet_marker_b.py, and tests/fixtures/gauntlet_marker_c.py",
+    "status": "completed",
+    "updated_at": "2026-06-20T08:27:20Z"
+  },
+  "g_d1fb8f26a5ba": {
+    "description": "G3 failure hunt — force MCTS after worker fail",
+    "status": "completed",
+    "updated_at": "2026-06-20T08:33:13Z"
+  },
+  "g_568959cdb4b1": {
+    "description": "Add comment above _try_cheap_fallback in worker.py",
+    "status": "completed",
+    "updated_at": "2026-06-21T06:25:03Z"
+  },
+  "g_98bcc19a1059": {
+    "description": "Add comment above _try_cheap_fallback in worker.py",
+    "status": "in_progress",
+    "updated_at": "2026-06-21T06:25:37Z"
+  },
+  "g_1be67a843185": {
+    "description": "G7 verify-fail replan proof",
+    "status": "in_progress",
+    "updated_at": "2026-06-21T06:25:50Z"
+  },
+  "g_7b5bccb6dba3": {
+    "description": "Stage 1 LONG workload mission (worktree, one file per step, do NOT skip steps): (1) scaffold/agent/worktree.py — expand register_worktree docstring with when session resume uses it (2) scaffold/agent/runtime_session.py — add one-line docstring to RuntimeSessionStore.checkpoint explaining pause/resume (3) scaffold/agent/virtual_execution_runtime.py — add one-line docstring to finalize() for pause vs completed (4) scaffold/agent/plan_actions.py — add one-line docstring to replan_task_after_verify_fail (5) scaffold/agent/self_correction.py — module docstring mention WORKER_FAIL and VERIFY_FAIL classes (6) scaffold/agent/verifier.py — one-line comment above _check_edit_fidelity explaining fidelity gate (7) tests/test_verify_fail_replan.py — add test that replan returns empty when _replan_attempted set (8) tests/test_symbol_index_worktree.py — add one-line comment at top describing G1 worktree indexing (9) tests/test_pause_resume_orchestrator.py — add module docstring line about G2 gauntlet (10) scripts/stage1_gauntlet_runner.py — add G7 to the module docstring usage block (11) awos.py — add 'awos mission start --long' to mission guide print block (12) docs/missions/README.md — add 'Long mission' paragraph with awos mission start --long",
+    "status": "in_progress",
+    "updated_at": "2026-06-21T06:58:04Z"
+  },
+  "g_1ff8a896ecb9": {
+    "description": "create docs/e2e_uncensored_agent_guide.md about uncensored local agents",
+    "status": "in_progress",
+    "updated_at": "2026-06-21T07:01:23Z"
+  },
+  "g_5e83574cf4c1": {
+    "description": "Stage 1 long workload mission: eight docstring/comment edits in worktree sandbox (one file per task). Uses fixed plan — planner skipped.",
+    "status": "completed",
+    "updated_at": "2026-06-24T15:13:39Z"
+  },
+  "g_423494e305e6": {
+    "description": "Fix off-by-one bugs: find_max loop should include the last index; sum_range should use range(start, end + 1).",
+    "status": "completed",
+    "updated_at": "2026-06-23T06:17:30Z"
+  },
+  "g_2d59452ade4d": {
+    "description": "Fix Cache.set to evict oldest key (use iter(self._store) not reversed). Fix is_palindrome to compare cleaned to cleaned[::-1].",
+    "status": "completed",
+    "updated_at": "2026-06-23T06:18:05Z"
+  },
+  "g_2b267415bf1d": {
+    "description": "Fix broken_add to return a + b instead of a - b",
+    "status": "completed",
+    "updated_at": "2026-06-23T06:18:31Z"
+  },
+  "g_06c2001d1430": {
+    "description": "add a comment to tests/test_cache_telemetry.py explaining what it tests",
+    "status": "completed",
+    "updated_at": "2026-06-24T15:09:06Z"
+  },
+  "g_7bc068942cef": {
+    "description": "add a comment to tests/test_cache_telemetry.py explaining what the file tests",
+    "status": "completed",
+    "updated_at": "2026-06-24T15:16:39Z"
+  },
+  "g_bdd1a337ae19": {
+    "description": "Stage 1 long workload mission: eight docstring/comment edits in worktree sandbox (one file per task). Uses fixed plan — planner skipped.",
+    "status": "completed",
+    "updated_at": "2026-06-24T15:18:13Z"
+  },
+  "g_14a52840e6ae": {
+    "description": "Phase D real-repo proof on clawcode: fourteen low-risk docstring and README edits in worktree sandbox (one file per task). Uses fixed plan — planner skipped. Keep all tests green.",
+    "status": "completed",
+    "updated_at": "2026-06-25T06:47:03Z"
+  },
+  "g_0c2f16295449": {
+    "description": "CI Rescue Sprint: fix auth.py, billing.py, inventory.py, shipping.py, and promo.py so all 35 pytest tests pass. Do not edit tests/, conftest.py, or golden/. Keep 7 regression tests green.",
+    "status": "completed",
+    "updated_at": "2026-06-25T14:07:44Z"
+  },
+  "g_82ece9bf6140": {
+    "description": "CI Rescue Sprint: fix auth.py, billing.py, inventory.py, shipping.py, and promo.py so all 35 pytest tests pass. Do not edit tests/, conftest.py, or golden/. Keep 7 regression tests green.",
+    "status": "completed",
+    "updated_at": "2026-06-26T04:33:17Z"
+  },
+  "g_06da5ab67035": {
+    "description": "CI Rescue Sprint: fix auth.py, billing.py, inventory.py, shipping.py, and promo.py so all 35 pytest tests pass. Do not edit tests/, conftest.py, or golden/. Keep 7 regression tests green.",
+    "status": "completed",
+    "updated_at": "2026-06-26T04:35:11Z"
+  },
+  "g_fd78613304e4": {
+    "description": "CI Rescue on clawcode: fix all 12 failing tests in tests/test_porting_workspace.py. Edit only src/ files. Do not modify tests/ or test files. Restore correct behavior for port manifest, query engine, commands, tools, subsystems, setup, remote modes, and bootstrap prompt output.",
+    "status": "completed",
+    "updated_at": "2026-06-26T05:56:39Z"
+  },
+  "g_601d8ab97015": {
+    "description": "CI Rescue on clawcode: fix all 12 failing tests in tests/test_porting_workspace.py. Edit only src/ files. Do not modify tests/ or test files. Restore correct behavior for port manifest, query engine, commands, tools, subsystems, setup, remote modes, and bootstrap prompt output.",
+    "status": "completed",
+    "updated_at": "2026-06-26T06:04:45Z"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "session_id": "rs_9b12efa06152",
+  "goal": "Gauntlet G6 SIGINT: add a one-line comment to each of tests/fixtures/gauntlet_marker_a.py, tests/fixtures/gauntlet_marker_b.py, and tests/fixtures/gauntlet_marker_c.py",
+  "goal_hash": "2547ba2ebc",
+  "status": "completed",
+  "created_at": "2026-06-20T08:26:24Z",
+  "updated_at": "2026-06-20T08:27:35Z",
+  "paused_at": null,
+  "codebase_root": "/home/becmachlean/2024/projects/AWOS_coding_agent",
+  "reasoning_session_id": null,
+  "goal_graph_id": null,
+  "progress": {
+    "completed_task_ids": [
+      1,
+      2,
+      3
+    ],
+    "failed_task_ids": [],
+    "current_task_id": null,
+    "total_tasks": 3,
+    "decomposition_depth": 0
+  },
+  "budget": {
+    "spent_usd": 0.0
+  },
+  "sandbox": {
+    "enabled": false,
+    "feature_id": null,
+    "worktree_path": null,
+    "branch": null
+  },
+  "parent_session_id": null,
+  "cancel_requested": false
+}

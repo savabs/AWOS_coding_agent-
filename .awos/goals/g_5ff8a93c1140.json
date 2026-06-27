@@ -1,0 +1,74 @@
+{
+  "root_id": "g_5ff8a93c1140",
+  "nodes": {
+    "g_5ff8a93c1140": {
+      "goal_id": "g_5ff8a93c1140",
+      "description": "Refactor scaffold/agent/worker.py: extract the prompt-building logic from execute_task() into a new private method _build_prompt(self, task, file_content, codebase_context, attempt, error_context, past_critiques, vector_chunks, examples_section, skill_section, symbol_section) -> str. _build_prompt() returns the full system prompt string. execute_task() calls _build_prompt() and passes the result directly to the LLM. All existing behaviour must be preserved.",
+      "parent_ids": [],
+      "child_ids": [
+        "g_84b5a37189ad"
+      ],
+      "tasks": [],
+      "status": "in_progress",
+      "created_at": "2026-05-20T15:46:29Z",
+      "updated_at": "2026-05-20T15:46:43Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_33b5945f"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_84b5a37189ad": {
+      "goal_id": "g_84b5a37189ad",
+      "description": "Extract prompt-building logic from execute_task() into a new private method _build_prompt(). The method must assemble and return the full system prompt string using exactly the parameters listed. execute_task() must then call self._build_prompt(...) and pass the returned string directly to the LLM, replacing the inline prompt construction. All existing prompt content and behaviour must be preserved exactly.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "scaffold/agent/worker.py",
+          "action": "Extract prompt-building logic from execute_task() into a new private method _build_prompt(). The method must assemble and return the full system prompt string using exactly the parameters listed. execute_task() must then call self._build_prompt(...) and pass the returned string directly to the LLM, replacing the inline prompt construction. All existing prompt content and behaviour must be preserved exactly.",
+          "complexity": "high",
+          "function_signature": "def _build_prompt(self, task: str, file_content: str, codebase_context: str, attempt: int, error_context: str, past_critiques: list, vector_chunks: list, examples_section: str, skill_section: str, symbol_section: str) -> str:",
+          "interface_contract": "Called exclusively from execute_task() with all prompt-relevant variables; returns the complete system prompt string ready to pass to the LLM",
+          "constraints": [
+            "Must return exactly the same prompt string that execute_task() previously built inline — no content additions or removals",
+            "execute_task() must assign the return value of self._build_prompt(...) to a local variable and pass that variable to the LLM call",
+            "All ten parameters must be used inside _build_prompt() to construct the prompt, matching prior inline logic",
+            "Method must be defined as a private instance method (prefixed with underscore) on the same class as execute_task()",
+            "No changes to execute_task()'s external signature, return type, or observable behaviour"
+          ],
+          "must_not": [
+            "Must not alter the LLM call site beyond substituting the inline prompt expression with the variable holding _build_prompt()'s return value",
+            "Must not add, remove, or reorder any prompt sections relative to the original inline construction",
+            "Must not introduce new imports or dependencies",
+            "Must not move any logic other than prompt string construction into _build_prompt()",
+            "Must not change the method to a static method or class method"
+          ],
+          "example_call": "prompt = self._build_prompt(task, file_content, codebase_context, attempt, error_context, past_critiques, vector_chunks, examples_section, skill_section, symbol_section)"
+        }
+      ],
+      "status": "failed",
+      "created_at": "2026-05-20T15:46:43Z",
+      "updated_at": "2026-05-21T16:58:53Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_33b5945f",
+        "orch_54bbeb73",
+        "orch_85a46b86",
+        "orch_fcafc2b0",
+        "orch_26e4523e",
+        "orch_973d4d06",
+        "orch_d595cb52",
+        "orch_89368b29",
+        "orch_eafab91e",
+        "orch_88cd6696",
+        "orch_0c3add0a",
+        "orch_3c3baa35"
+      ],
+      "failure_count": 11,
+      "critique_ids": []
+    }
+  }
+}

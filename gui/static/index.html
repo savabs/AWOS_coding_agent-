@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AWOS</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <nav class="top-nav">
+    <div class="brand">AWOS</div>
+    <div class="tabs">
+      <button class="tab active" data-view="chat" id="tab-chat">Chat</button>
+      <button class="tab" data-view="runs" id="tab-runs">Runs</button>
+    </div>
+    <div class="nav-meta" id="nav-meta"></div>
+  </nav>
+
+  <!-- CHAT VIEW -->
+  <div class="view view-chat active" id="view-chat">
+    <div class="layout chat-layout">
+      <aside class="sidebar">
+        <button class="btn-new-chat" id="btn-new-chat">+ New chat</button>
+        <button class="btn-clear-chats" id="btn-clear-chats" title="Delete all chats">Clear all</button>
+        <div id="chat-sessions"></div>
+      </aside>
+      <div class="main chat-main">
+        <div class="chat-messages" id="chat-messages">
+          <div class="empty chat-welcome">
+            <h2>AWOS Chat</h2>
+            <p>Choose a mode, then ask anything about this project.</p>
+            <div class="mode-cards" id="mode-cards"></div>
+          </div>
+        </div>
+        <footer class="chat-composer">
+          <div class="token-bars">
+            <div class="session-token-bar" id="session-token-bar"></div>
+            <div class="live-token-meta" id="live-token-meta"></div>
+          </div>
+          <div class="mode-picker" id="mode-picker"></div>
+          <div class="composer-row">
+            <textarea id="chat-input" rows="2" placeholder="Ask a question, plan a feature, or run the agent…"></textarea>
+            <button class="btn-send" id="btn-send" title="Send">Send</button>
+          </div>
+        </footer>
+      </div>
+    </div>
+  </div>
+
+  <!-- RUNS VIEW -->
+  <div class="view view-runs" id="view-runs">
+    <div class="layout">
+      <aside class="sidebar">
+        <h2 class="sidebar-title">Runs</h2>
+        <div id="sessions"></div>
+      </aside>
+      <div class="main">
+        <header class="header" id="header">
+          <h1>Run Viewer</h1>
+          <div class="meta">Agent runs with file diffs</div>
+        </header>
+        <div class="content">
+          <div class="file-list" id="files">
+            <div class="empty">No session selected</div>
+          </div>
+          <div class="diff-panel" id="diff">
+            <div class="empty">File diffs appear here with line numbers,<br>additions in green, deletions in red.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/shared.js"></script>
+  <script src="/chat.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

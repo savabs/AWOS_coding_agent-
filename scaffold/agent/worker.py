@@ -458,6 +458,21 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                     output_price=out_price,
                     tracker=tracker,
                 ))
+                
+                # Cache telemetry (DeepSeek/OpenAI compatible)
+                try:
+                    from .cache_telemetry import CacheTelemetryStore, extract_cache_stats_openai
+                    cache_store = CacheTelemetryStore()
+                    cache_event = extract_cache_stats_openai(
+                        response=response.model_dump(),
+                        component="worker",
+                        model=use_model,
+                        price_per_m_tokens=inp_price,
+                    )
+                    cache_store.record(cache_event)
+                except Exception:
+                    pass  # Don't fail task if telemetry breaks
+                
             except Exception as e:
                 err_str = str(e)
                 if self._is_permanent_failure(err_str):
@@ -490,6 +505,21 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                     output_price=out_price,
                     tracker=tracker,
                 ))
+                
+                # Cache telemetry (OpenAI)
+                try:
+                    from .cache_telemetry import CacheTelemetryStore, extract_cache_stats_openai
+                    cache_store = CacheTelemetryStore()
+                    cache_event = extract_cache_stats_openai(
+                        response=response.model_dump(),
+                        component="worker",
+                        model=use_model,
+                        price_per_m_tokens=inp_price,
+                    )
+                    cache_store.record(cache_event)
+                except Exception:
+                    pass  # Don't fail task if telemetry breaks
+                
             except Exception as e:
                 err_str = str(e)
                 if self._is_permanent_failure(err_str):
@@ -526,6 +556,21 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                     output_price=out_price,
                     tracker=tracker,
                 ))
+                
+                # Cache telemetry
+                try:
+                    from .cache_telemetry import CacheTelemetryStore, extract_cache_stats_anthropic
+                    cache_store = CacheTelemetryStore()
+                    cache_event = extract_cache_stats_anthropic(
+                        response=response.model_dump(),
+                        component="worker",
+                        model=use_model,
+                        price_per_m_tokens=inp_price,
+                    )
+                    cache_store.record(cache_event)
+                except Exception:
+                    pass  # Don't fail task if telemetry breaks
+                
             except RuntimeError:
                 raise
             except Exception as e:

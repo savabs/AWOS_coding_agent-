@@ -10,6 +10,29 @@ The coding agent is **App #1**. The kernel is domain-agnostic and portable to re
 
 ---
 
+## Quick start
+
+```bash
+# Start work on a goal
+awos worker start "fix the auth bug in login.py"
+
+# Check status (Ctrl+C anytime to pause)
+awos worker status
+
+# Resume after pause
+awos worker resume
+
+# Review changes before merge
+awos worker diff
+
+# Cancel if needed
+awos worker cancel
+```
+
+**First time?** See [Setup](#setup) below.
+
+---
+
 ## What AWOS is
 
 | Metaphor | Role |

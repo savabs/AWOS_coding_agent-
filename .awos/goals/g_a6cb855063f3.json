@@ -1,0 +1,82 @@
+{
+  "root_id": "g_a6cb855063f3",
+  "nodes": {
+    "g_a6cb855063f3": {
+      "goal_id": "g_a6cb855063f3",
+      "description": "Remove the duplicate SkillLibrary import on line 40 of scaffold/agent/orchestrator.py and add return type annotations to the _critic_refine, _pick_best_candidate, _compute_confidence, and _maybe_train_prm methods",
+      "parent_ids": [],
+      "child_ids": [
+        "g_e077abf8b092",
+        "g_90a319725eb1"
+      ],
+      "tasks": [],
+      "status": "in_progress",
+      "created_at": "2026-05-24T09:09:24Z",
+      "updated_at": "2026-05-24T09:09:34Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_760b02cc"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_e077abf8b092": {
+      "goal_id": "g_e077abf8b092",
+      "description": "Remove the duplicate 'from agent.skills import SkillLibrary' import statement on line 40.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "scaffold/agent/orchestrator.py",
+          "action": "Remove the duplicate 'from agent.skills import SkillLibrary' import statement on line 40.",
+          "complexity": "low",
+          "test_result": {
+            "passed": 0,
+            "failed": 0,
+            "errors": 0,
+            "pass_rate": 0.0,
+            "raw_output": "Tests skipped — set AWOS_SAFE_TO_RUN_TESTS=1 to enable.",
+            "timed_out": false,
+            "test_command": [],
+            "no_tests_found": true
+          }
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-05-24T09:09:34Z",
+      "updated_at": "2026-05-24T09:39:59Z",
+      "completed_at": "2026-05-24T09:39:59Z",
+      "session_ids": [
+        "orch_760b02cc",
+        "orch_8a4b8871"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_90a319725eb1": {
+      "goal_id": "g_90a319725eb1",
+      "description": "Add return type annotations to the '_critic_refine', '_pick_best_candidate', '_compute_confidence', and '_maybe_train_prm' methods.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "file": "scaffold/agent/orchestrator.py",
+          "action": "Add return type annotations to the '_critic_refine', '_pick_best_candidate', '_compute_confidence', and '_maybe_train_prm' methods.",
+          "complexity": "low"
+        }
+      ],
+      "status": "failed",
+      "created_at": "2026-05-24T09:09:34Z",
+      "updated_at": "2026-05-24T09:40:06Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_760b02cc",
+        "orch_8a4b8871"
+      ],
+      "failure_count": 2,
+      "critique_ids": []
+    }
+  }
+}

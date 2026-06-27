@@ -9,7 +9,7 @@
 > add it under the right section, bump the version, and log it in the changelog.
 > Identity or strategy changes go in `VISION.md`, not here.
 
-> Last updated: 2026-06-08 — v2.0
+> Last updated: 2026-06-24 — v2.1
 
 ---
 
@@ -17,6 +17,7 @@
 
 | Version | Date | Change |
 |---|---|---|
+| v2.1 | 2026-06-24 | Added §2.6 Live Proof Protocol — observable end-to-end demos required alongside unit tests for non-trivial features. |
 | v2.0 | 2026-06-08 | Identity moved to `VISION.md`. AWOS.md reframed as operational protocols for kernel apps. Supersedes v1.x framing as "agent-assisted development workflow template." |
 | v1.5 | 2026-05-13 | HTML-first restructure complete |
 | v1.0 | 2026-04-28 | Initial standalone AWOS |
@@ -110,7 +111,8 @@ Every non-trivial change produces three artifacts before any code is touched:
 - Files affected (explicit list)
 - Ordered implementation steps (numbered, atomic)
 - Edge cases
-- Testing plan
+- Testing plan (unit tests)
+- **Live proof** (scenario, runnable command, observable success markers) — required for non-trivial features; see §2.6
 - Every step must be independently falsifiable
 
 **Task file** (`tasks/active/<name>.md`)
@@ -166,6 +168,34 @@ Label milestones explicitly:
 - **Data-gated:** requires runtime accumulation, external events, or time passage
 
 Never treat a data-gated milestone as blocked — address it by building toward it, not waiting.
+
+### 2.6 Live Proof Protocol (mandatory for non-trivial features)
+
+> Full protocol: `protocols/LIVE_PROOF_PROTOCOL.md`
+
+**Unit tests prove code paths. Live proof proves the system behaves as intended in a way a human can read and trust.**
+
+For any change that touches the orchestrator loop, sessions, CLI, verification, routing, rewards, or safety mechanisms:
+
+1. **Unit tests** — falsify regressions in isolation (`pytest`)
+2. **Live proof** — one runnable command + proof guide with **observable success markers**
+
+A feature is not done when tests pass. It is done when someone can run a demo and *feel* it working — see `[BREAKER]`, `Status: paused (STAGNATION)`, session IDs, PEI numbers, etc.
+
+**Required artifacts:**
+
+| Artifact | Location |
+|----------|----------|
+| Runnable demo | `scripts/demo_<feature>.sh` or documented one-liner |
+| Proof guide | `docs/<feature>_proof.md` — what to watch for, success criteria |
+| Spec section | **Live proof** — scenario, command, exact markers |
+| Task step | `- [ ] Live proof: run \`<cmd>\` — watch for \`<marker>\`` |
+
+Mark the task step `[x]` only after actually running the demo and observing the markers. Record command + key output lines in the checkpoint.
+
+**Exempt:** trivial single-file edits (typos, comments), pure internal helpers with no user-visible behavior. When in doubt: require live proof.
+
+**Reference:** `scripts/demo_stagnation_breaker.sh` + `docs/stagnation_breaker_proof.md`
 
 ---
 
@@ -699,9 +729,10 @@ python scripts/quality_gate.py --task tasks/active/<name>.md
 Checks:
 - [ ] All task steps are marked done
 - [ ] Tests pass (`pytest` or equivalent)
+- [ ] **Live proof run** — demo executed; success markers observed (§2.6; gate warns if task lacks live-proof step)
 - [ ] Obsidian lint is clean (no broken frontmatter, no broken links)
 - [ ] No new errors in `get_errors` for modified files
-- [ ] Checkpoint has been written
+- [ ] Checkpoint has been written (includes live-proof command + observed output when applicable)
 - [ ] `memories/repo/project_structure.md` is updated with any new metrics
 
 ---

@@ -1,0 +1,14 @@
+{
+  "goal": "In scaffold/agent/integration_reviewer.py add a one-line docstring to _is_cheap_only explaining it reads AWOS_CHEAP_ONLY from the environment",
+  "goal_hash": "3e2f73d54d",
+  "started_at": "2026-06-16T13:48:54",
+  "last_updated": "2026-06-16T13:49:06",
+  "completed_task_ids": [
+    1
+  ],
+  "failed_task_ids": [],
+  "session_ids": [
+    "orch_cc6b9eab"
+  ],
+  "status": "complete"
+}

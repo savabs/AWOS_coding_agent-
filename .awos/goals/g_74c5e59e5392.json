@@ -1,0 +1,128 @@
+{
+  "root_id": "g_74c5e59e5392",
+  "nodes": {
+    "g_74c5e59e5392": {
+      "goal_id": "g_74c5e59e5392",
+      "description": "Stage 1 real workload mission (worktree, multi-step): (1) scaffold/agent/mcts_policy.py — expand module docstring with when MCTS runs (2) scripts/install-awos-cli.sh — add echo line showing awos version path (3) tests/test_mcts_trace_store.py — add test that empty store count is 0 (already exists, ensure green) (4) awos.py cmd_sessions_show — print Sandbox line when worktree enabled (5) docs/missions/README.md — one paragraph mission playbook",
+      "parent_ids": [],
+      "child_ids": [
+        "g_b174d0601352",
+        "g_874b2c108768",
+        "g_bbe4fb7e9d14",
+        "g_5f6d6ed9d78c"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-19T08:42:15Z",
+      "updated_at": "2026-06-19T08:42:45Z",
+      "completed_at": "2026-06-19T08:42:45Z",
+      "session_ids": [
+        "orch_10b7460d"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_b174d0601352": {
+      "goal_id": "g_b174d0601352",
+      "description": "Expand the module docstring to describe when MCTS (Monte Carlo Tree Search) is run within the agent's policy.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "scaffold/agent/mcts_policy.py",
+          "action": "Expand the module docstring to describe when MCTS (Monte Carlo Tree Search) is run within the agent's policy.",
+          "complexity": "low",
+          "test_result": {
+            "passed": 0,
+            "failed": 0,
+            "errors": 0,
+            "pass_rate": 0.0,
+            "raw_output": "Tests skipped — set AWOS_SAFE_TO_RUN_TESTS=1 to enable.",
+            "timed_out": false,
+            "test_command": [],
+            "no_tests_found": true
+          }
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-19T08:42:26Z",
+      "updated_at": "2026-06-19T08:42:31Z",
+      "completed_at": "2026-06-19T08:42:31Z",
+      "session_ids": [
+        "orch_10b7460d"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_874b2c108768": {
+      "goal_id": "g_874b2c108768",
+      "description": "Add an 'echo' line to the script to display the installed 'awos' version path, aiding in verification.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "file": "scripts/install-awos-cli.sh",
+          "action": "Add an 'echo' line to the script to display the installed 'awos' version path, aiding in verification.",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-19T08:42:26Z",
+      "updated_at": "2026-06-19T08:42:34Z",
+      "completed_at": "2026-06-19T08:42:34Z",
+      "session_ids": [
+        "orch_10b7460d"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_bbe4fb7e9d14": {
+      "goal_id": "g_bbe4fb7e9d14",
+      "description": "Add a new test case within `TestMctsTraceStore` to assert that an newly initialized or empty MCTS trace store correctly reports a count of 0.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 3,
+          "file": "tests/test_mcts_trace_store.py",
+          "action": "Add a new test case within `TestMctsTraceStore` to assert that an newly initialized or empty MCTS trace store correctly reports a count of 0.",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-19T08:42:26Z",
+      "updated_at": "2026-06-19T08:42:36Z",
+      "completed_at": "2026-06-19T08:42:36Z",
+      "session_ids": [
+        "orch_10b7460d"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_5f6d6ed9d78c": {
+      "goal_id": "g_5f6d6ed9d78c",
+      "description": "Modify the `cmd_sessions_show` function to print a 'Sandbox' line when the worktree feature is enabled for a session.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 4,
+          "file": "awos.py",
+          "action": "Modify the `cmd_sessions_show` function to print a 'Sandbox' line when the worktree feature is enabled for a session.",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-19T08:42:26Z",
+      "updated_at": "2026-06-19T08:42:45Z",
+      "completed_at": "2026-06-19T08:42:45Z",
+      "session_ids": [
+        "orch_10b7460d"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

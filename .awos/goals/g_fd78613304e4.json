@@ -1,0 +1,344 @@
+{
+  "root_id": "g_fd78613304e4",
+  "nodes": {
+    "g_fd78613304e4": {
+      "goal_id": "g_fd78613304e4",
+      "description": "CI Rescue on clawcode: fix all 12 failing tests in tests/test_porting_workspace.py. Edit only src/ files. Do not modify tests/ or test files. Restore correct behavior for port manifest, query engine, commands, tools, subsystems, setup, remote modes, and bootstrap prompt output.",
+      "parent_ids": [],
+      "child_ids": [
+        "g_d850cf4ef05f",
+        "g_ab58951b47a7",
+        "g_bc7df7c20469",
+        "g_cc41ed7f7a13",
+        "g_bd4278fb9427",
+        "g_0ab244806f39",
+        "g_274ed5f76f7b",
+        "g_4eb2205ed8d6",
+        "g_b2cb21f75ee9",
+        "g_639b4ec8b2d8",
+        "g_9569901494f8",
+        "g_be61a700bd31"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-26T05:56:08Z",
+      "updated_at": "2026-06-26T05:56:39Z",
+      "completed_at": "2026-06-26T05:56:39Z",
+      "session_ids": [
+        "orch_e6130f33"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_d850cf4ef05f": {
+      "goal_id": "g_d850cf4ef05f",
+      "description": "Fix build_port_manifest: set total_python_files=len(files), not the hardcoded 5",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "src/port_manifest.py",
+          "file": "src/port_manifest.py",
+          "action": "Fix build_port_manifest: set total_python_files=len(files), not the hardcoded 5",
+          "complexity": "low",
+          "test_result": {
+            "passed": 0,
+            "failed": 0,
+            "errors": 0,
+            "pass_rate": 0.0,
+            "raw_output": "Tests skipped — set AWOS_SAFE_TO_RUN_TESTS=1 to enable.",
+            "timed_out": false,
+            "test_command": [],
+            "no_tests_found": true
+          }
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-26T05:56:08Z",
+      "updated_at": "2026-06-26T05:56:11Z",
+      "completed_at": "2026-06-26T05:56:11Z",
+      "session_ids": [
+        "orch_e6130f33"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_ab58951b47a7": {
+      "goal_id": "g_ab58951b47a7",
+      "description": "Fix render_summary title: use '# Python Porting Workspace Summary' not 'Broken'",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "task_type": "edit_file",
+          "path": "src/query_engine.py",
+          "file": "src/query_engine.py",
+          "action": "Fix render_summary title: use '# Python Porting Workspace Summary' not 'Broken'",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-26T05:56:08Z",
+      "updated_at": "2026-06-26T05:56:14Z",
+      "completed_at": "2026-06-26T05:56:14Z",
+      "session_ids": [
+        "orch_e6130f33"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_bc7df7c20469": {
+      "goal_id": "g_bc7df7c20469",
+      "description": "Fix PORTED_COMMANDS: use full load_command_snapshot(), not sliced [:20]",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 3,
+          "task_type": "edit_file",
+          "path": "src/commands.py",
+          "file": "src/commands.py",
+          "action": "Fix PORTED_COMMANDS: use full load_command_snapshot(), not sliced [:20]",
+          "complexity": "medium"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-26T05:56:08Z",
+      "updated_at": "2026-06-26T05:56:16Z",
+      "completed_at": "2026-06-26T05:56:16Z",
+      "session_ids": [
+        "orch_e6130f33"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_cc41ed7f7a13": {
+      "goal_id": "g_cc41ed7f7a13",
+      "description": "Fix PORTED_TOOLS: use full load_tool_snapshot(), not sliced [:20]",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 4,
+          "task_type": "edit_file",
+          "path": "src/tools.py",
+          "file": "src/tools.py",
+          "action": "Fix PORTED_TOOLS: use full load_tool_snapshot(), not sliced [:20]",
+          "complexity": "medium"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-26T05:56:08Z",
+      "updated_at": "2026-06-26T05:56:18Z",
+      "completed_at": "2026-06-26T05:56:18Z",
+      "session_ids": [
+        "orch_e6130f33"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_bd4278fb9427": {
+      "goal_id": "g_bd4278fb9427",
+      "description": "Fix assistant MODULE_COUNT: use _SNAPSHOT['module_count'], not 0",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 5,
+          "task_type": "edit_file",
+          "path": "src/assistant/__init__.py",
+          "file": "src/assistant/__init__.py",
+          "action": "Fix assistant MODULE_COUNT: use _SNAPSHOT['module_count'], not 0",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-26T05:56:08Z",
+      "updated_at": "2026-06-26T05:56:21Z",
+      "completed_at": "2026-06-26T05:56:21Z",
+      "session_ids": [
+        "orch_e6130f33"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_0ab244806f39": {
+      "goal_id": "g_0ab244806f39",
+      "description": "Fix bridge MODULE_COUNT: use _SNAPSHOT['module_count'], not 0",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 6,
+          "task_type": "edit_file",
+          "path": "src/bridge/__init__.py",
+          "file": "src/bridge/__init__.py",
+          "action": "Fix bridge MODULE_COUNT: use _SNAPSHOT['module_count'], not 0",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-26T05:56:08Z",
+      "updated_at": "2026-06-26T05:56:23Z",
+      "completed_at": "2026-06-26T05:56:23Z",
+      "session_ids": [
+        "orch_e6130f33"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_274ed5f76f7b": {
+      "goal_id": "g_274ed5f76f7b",
+      "description": "Fix utils MODULE_COUNT: restore real snapshot module_count (must be >100)",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 7,
+          "task_type": "edit_file",
+          "path": "src/utils/__init__.py",
+          "file": "src/utils/__init__.py",
+          "action": "Fix utils MODULE_COUNT: restore real snapshot module_count (must be >100)",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-26T05:56:08Z",
+      "updated_at": "2026-06-26T05:56:26Z",
+      "completed_at": "2026-06-26T05:56:26Z",
+      "session_ids": [
+        "orch_e6130f33"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_4eb2205ed8d6": {
+      "goal_id": "g_4eb2205ed8d6",
+      "description": "Fix run_deferred_init: plugin_init should be enabled when trusted=True",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 8,
+          "task_type": "edit_file",
+          "path": "src/deferred_init.py",
+          "file": "src/deferred_init.py",
+          "action": "Fix run_deferred_init: plugin_init should be enabled when trusted=True",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-26T05:56:08Z",
+      "updated_at": "2026-06-26T05:56:28Z",
+      "completed_at": "2026-06-26T05:56:28Z",
+      "session_ids": [
+        "orch_e6130f33"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_b2cb21f75ee9": {
+      "goal_id": "g_b2cb21f75ee9",
+      "description": "Fix setup report: heading must be 'Deferred init:' not 'Deferred startup:'",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 9,
+          "task_type": "edit_file",
+          "path": "src/setup.py",
+          "file": "src/setup.py",
+          "action": "Fix setup report: heading must be 'Deferred init:' not 'Deferred startup:'",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-26T05:56:08Z",
+      "updated_at": "2026-06-26T05:56:31Z",
+      "completed_at": "2026-06-26T05:56:31Z",
+      "session_ids": [
+        "orch_e6130f33"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_639b4ec8b2d8": {
+      "goal_id": "g_639b4ec8b2d8",
+      "description": "Fix run_remote_mode: return mode 'remote' not 'broken'",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 10,
+          "task_type": "edit_file",
+          "path": "src/remote_runtime.py",
+          "file": "src/remote_runtime.py",
+          "action": "Fix run_remote_mode: return mode 'remote' not 'broken'",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-26T05:56:08Z",
+      "updated_at": "2026-06-26T05:56:34Z",
+      "completed_at": "2026-06-26T05:56:34Z",
+      "session_ids": [
+        "orch_e6130f33"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_9569901494f8": {
+      "goal_id": "g_9569901494f8",
+      "description": "Fix run_direct_connect: return mode 'direct-connect' not 'broken-direct'",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 11,
+          "task_type": "edit_file",
+          "path": "src/direct_modes.py",
+          "file": "src/direct_modes.py",
+          "action": "Fix run_direct_connect: return mode 'direct-connect' not 'broken-direct'",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-26T05:56:08Z",
+      "updated_at": "2026-06-26T05:56:36Z",
+      "completed_at": "2026-06-26T05:56:36Z",
+      "session_ids": [
+        "orch_e6130f33"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_be61a700bd31": {
+      "goal_id": "g_be61a700bd31",
+      "description": "Fix submit_message output: first summary line must start with 'Prompt:'",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 12,
+          "task_type": "edit_file",
+          "path": "src/query_engine.py",
+          "file": "src/query_engine.py",
+          "action": "Fix submit_message output: first summary line must start with 'Prompt:'",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-26T05:56:08Z",
+      "updated_at": "2026-06-26T05:56:39Z",
+      "completed_at": "2026-06-26T05:56:39Z",
+      "session_ids": [
+        "orch_e6130f33"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

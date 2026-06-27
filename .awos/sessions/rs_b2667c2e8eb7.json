@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "session_id": "rs_b2667c2e8eb7",
+  "goal": "Stage 1 long workload mission: eight docstring/comment edits in worktree sandbox (one file per task). Uses fixed plan — planner skipped.",
+  "goal_hash": "eb09b899f1",
+  "status": "completed",
+  "created_at": "2026-06-23T06:17:14Z",
+  "updated_at": "2026-06-23T06:19:05Z",
+  "paused_at": null,
+  "codebase_root": "/home/becmachlean/2024/projects/AWOS_coding_agent/.awos/worktrees/b2667c2e8eb7",
+  "reasoning_session_id": null,
+  "goal_graph_id": null,
+  "progress": {
+    "completed_task_ids": [
+      1,
+      2,
+      3,
+      5,
+      6,
+      7,
+      8,
+      "4_1",
+      "4_2"
+    ],
+    "failed_task_ids": [
+      4
+    ],
+    "current_task_id": null,
+    "total_tasks": 8,
+    "decomposition_depth": 0
+  },
+  "budget": {
+    "spent_usd": 0.0
+  },
+  "sandbox": {
+    "enabled": true,
+    "feature_id": "b2667c2e8eb7",
+    "worktree_path": "/home/becmachlean/2024/projects/AWOS_coding_agent/.awos/worktrees/b2667c2e8eb7",
+    "branch": "awos/feature/b2667c2e8eb7"
+  },
+  "parent_session_id": null,
+  "cancel_requested": false
+}

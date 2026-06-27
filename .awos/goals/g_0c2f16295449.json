@@ -1,0 +1,500 @@
+{
+  "root_id": "g_0c2f16295449",
+  "nodes": {
+    "g_0c2f16295449": {
+      "goal_id": "g_0c2f16295449",
+      "description": "CI Rescue Sprint: fix auth.py, billing.py, inventory.py, shipping.py, and promo.py so all 35 pytest tests pass. Do not edit tests/, conftest.py, or golden/. Keep 7 regression tests green.",
+      "parent_ids": [],
+      "child_ids": [
+        "g_182dcda04109",
+        "g_e8d79fd9893d",
+        "g_5ab784b92bdd",
+        "g_3b8442cef8b5",
+        "g_7a25563be549",
+        "g_cf96adf81921",
+        "g_f341511b9512",
+        "g_bea4a47d7280",
+        "g_32dd6b35f5d6",
+        "g_bf381ec9e9f6",
+        "g_0222f2d38ca8",
+        "g_46f84a2006de",
+        "g_0cf50660c5dc",
+        "g_48a7ffbbb56f",
+        "g_fcff7fe7ffc7",
+        "g_3584d490927b",
+        "g_52713d3110c3",
+        "g_6ae2a7a94a02"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-25T14:06:57Z",
+      "updated_at": "2026-06-25T14:07:44Z",
+      "completed_at": "2026-06-25T14:07:44Z",
+      "session_ids": [
+        "orch_a489395c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_182dcda04109": {
+      "goal_id": "g_182dcda04109",
+      "description": "Fix verify_password to compare hash_password(plain) with hashed, not plain",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "auth.py",
+          "file": "auth.py",
+          "action": "Fix verify_password to compare hash_password(plain) with hashed, not plain",
+          "complexity": "low",
+          "test_result": {
+            "passed": 0,
+            "failed": 0,
+            "errors": 0,
+            "pass_rate": 0.0,
+            "raw_output": "Tests skipped — set AWOS_SAFE_TO_RUN_TESTS=1 to enable.",
+            "timed_out": false,
+            "test_command": [],
+            "no_tests_found": true
+          }
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T14:06:57Z",
+      "updated_at": "2026-06-25T14:07:01Z",
+      "completed_at": "2026-06-25T14:07:01Z",
+      "session_ids": [
+        "orch_a489395c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_e8d79fd9893d": {
+      "goal_id": "g_e8d79fd9893d",
+      "description": "Fix token_fingerprint to return first 8 characters only",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "task_type": "edit_file",
+          "path": "auth.py",
+          "file": "auth.py",
+          "action": "Fix token_fingerprint to return first 8 characters only",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T14:06:57Z",
+      "updated_at": "2026-06-25T14:07:03Z",
+      "completed_at": "2026-06-25T14:07:03Z",
+      "session_ids": [
+        "orch_a489395c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_5ab784b92bdd": {
+      "goal_id": "g_5ab784b92bdd",
+      "description": "Fix is_session_valid: session valid when now < expires_at",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 3,
+          "task_type": "edit_file",
+          "path": "auth.py",
+          "file": "auth.py",
+          "action": "Fix is_session_valid: session valid when now < expires_at",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T14:06:57Z",
+      "updated_at": "2026-06-25T14:07:05Z",
+      "completed_at": "2026-06-25T14:07:05Z",
+      "session_ids": [
+        "orch_a489395c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_3b8442cef8b5": {
+      "goal_id": "g_3b8442cef8b5",
+      "description": "Fix role_can_checkout to allow staff role",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 4,
+          "task_type": "edit_file",
+          "path": "auth.py",
+          "file": "auth.py",
+          "action": "Fix role_can_checkout to allow staff role",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T14:06:57Z",
+      "updated_at": "2026-06-25T14:07:07Z",
+      "completed_at": "2026-06-25T14:07:07Z",
+      "session_ids": [
+        "orch_a489395c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_7a25563be549": {
+      "goal_id": "g_7a25563be549",
+      "description": "Fix line_total to multiply unit_price by quantity",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 5,
+          "task_type": "edit_file",
+          "path": "billing.py",
+          "file": "billing.py",
+          "action": "Fix line_total to multiply unit_price by quantity",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T14:06:57Z",
+      "updated_at": "2026-06-25T14:07:09Z",
+      "completed_at": "2026-06-25T14:07:09Z",
+      "session_ids": [
+        "orch_a489395c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_cf96adf81921": {
+      "goal_id": "g_cf96adf81921",
+      "description": "Fix apply_coupon: single /100 for percent discount",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 6,
+          "task_type": "edit_file",
+          "path": "billing.py",
+          "file": "billing.py",
+          "action": "Fix apply_coupon: single /100 for percent discount",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T14:06:57Z",
+      "updated_at": "2026-06-25T14:07:11Z",
+      "completed_at": "2026-06-25T14:07:11Z",
+      "session_ids": [
+        "orch_a489395c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_f341511b9512": {
+      "goal_id": "g_f341511b9512",
+      "description": "Fix invoice_total to include tax_rate via round_money",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 7,
+          "task_type": "edit_file",
+          "path": "billing.py",
+          "file": "billing.py",
+          "action": "Fix invoice_total to include tax_rate via round_money",
+          "complexity": "medium"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T14:06:57Z",
+      "updated_at": "2026-06-25T14:07:13Z",
+      "completed_at": "2026-06-25T14:07:13Z",
+      "session_ids": [
+        "orch_a489395c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_bea4a47d7280": {
+      "goal_id": "g_bea4a47d7280",
+      "description": "Fix round_money to use Decimal ROUND_HALF_UP",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 8,
+          "task_type": "edit_file",
+          "path": "billing.py",
+          "file": "billing.py",
+          "action": "Fix round_money to use Decimal ROUND_HALF_UP",
+          "complexity": "medium"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T14:06:57Z",
+      "updated_at": "2026-06-25T14:07:15Z",
+      "completed_at": "2026-06-25T14:07:15Z",
+      "session_ids": [
+        "orch_a489395c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_32dd6b35f5d6": {
+      "goal_id": "g_32dd6b35f5d6",
+      "description": "Fix currency_split so last part absorbs remainder and sum equals total",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 9,
+          "task_type": "edit_file",
+          "path": "billing.py",
+          "file": "billing.py",
+          "action": "Fix currency_split so last part absorbs remainder and sum equals total",
+          "complexity": "medium"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T14:06:57Z",
+      "updated_at": "2026-06-25T14:07:18Z",
+      "completed_at": "2026-06-25T14:07:18Z",
+      "session_ids": [
+        "orch_a489395c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_bf381ec9e9f6": {
+      "goal_id": "g_bf381ec9e9f6",
+      "description": "Fix sku_normalize: strip whitespace and uppercase",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 10,
+          "task_type": "edit_file",
+          "path": "inventory.py",
+          "file": "inventory.py",
+          "action": "Fix sku_normalize: strip whitespace and uppercase",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T14:06:57Z",
+      "updated_at": "2026-06-25T14:07:20Z",
+      "completed_at": "2026-06-25T14:07:20Z",
+      "session_ids": [
+        "orch_a489395c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_0222f2d38ca8": {
+      "goal_id": "g_0222f2d38ca8",
+      "description": "Fix stock_available: on_hand minus reserved without off-by-one",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 11,
+          "task_type": "edit_file",
+          "path": "inventory.py",
+          "file": "inventory.py",
+          "action": "Fix stock_available: on_hand minus reserved without off-by-one",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T14:06:57Z",
+      "updated_at": "2026-06-25T14:07:22Z",
+      "completed_at": "2026-06-25T14:07:22Z",
+      "session_ids": [
+        "orch_a489395c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_46f84a2006de": {
+      "goal_id": "g_46f84a2006de",
+      "description": "Fix reserve_stock to increment reserved by qty",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 12,
+          "task_type": "edit_file",
+          "path": "inventory.py",
+          "file": "inventory.py",
+          "action": "Fix reserve_stock to increment reserved by qty",
+          "complexity": "medium"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T14:06:57Z",
+      "updated_at": "2026-06-25T14:07:24Z",
+      "completed_at": "2026-06-25T14:07:24Z",
+      "session_ids": [
+        "orch_a489395c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_0cf50660c5dc": {
+      "goal_id": "g_0cf50660c5dc",
+      "description": "Fix release_stock: decrement reserved only, do not add to on_hand",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 13,
+          "task_type": "edit_file",
+          "path": "inventory.py",
+          "file": "inventory.py",
+          "action": "Fix release_stock: decrement reserved only, do not add to on_hand",
+          "complexity": "medium"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T14:06:57Z",
+      "updated_at": "2026-06-25T14:07:27Z",
+      "completed_at": "2026-06-25T14:07:27Z",
+      "session_ids": [
+        "orch_a489395c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_48a7ffbbb56f": {
+      "goal_id": "g_48a7ffbbb56f",
+      "description": "Fix reorder_point: True when available <= needed",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 14,
+          "task_type": "edit_file",
+          "path": "inventory.py",
+          "file": "inventory.py",
+          "action": "Fix reorder_point: True when available <= needed",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T14:06:57Z",
+      "updated_at": "2026-06-25T14:07:30Z",
+      "completed_at": "2026-06-25T14:07:30Z",
+      "session_ids": [
+        "orch_a489395c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_fcff7fe7ffc7": {
+      "goal_id": "g_fcff7fe7ffc7",
+      "description": "Fix shipping_cost top tier to 25.0 for weight above 5kg",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 15,
+          "task_type": "edit_file",
+          "path": "shipping.py",
+          "file": "shipping.py",
+          "action": "Fix shipping_cost top tier to 25.0 for weight above 5kg",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T14:06:57Z",
+      "updated_at": "2026-06-25T14:07:32Z",
+      "completed_at": "2026-06-25T14:07:32Z",
+      "session_ids": [
+        "orch_a489395c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_3584d490927b": {
+      "goal_id": "g_3584d490927b",
+      "description": "Fix qualifies_free_shipping to use >= threshold; delivery_days express max(1, base-1)",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 16,
+          "task_type": "edit_file",
+          "path": "shipping.py",
+          "file": "shipping.py",
+          "action": "Fix qualifies_free_shipping to use >= threshold; delivery_days express max(1, base-1)",
+          "complexity": "medium"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T14:06:57Z",
+      "updated_at": "2026-06-25T14:07:36Z",
+      "completed_at": "2026-06-25T14:07:36Z",
+      "session_ids": [
+        "orch_a489395c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_52713d3110c3": {
+      "goal_id": "g_52713d3110c3",
+      "description": "Fix can_ship_international to reject blocked country codes",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 17,
+          "task_type": "edit_file",
+          "path": "shipping.py",
+          "file": "shipping.py",
+          "action": "Fix can_ship_international to reject blocked country codes",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T14:06:57Z",
+      "updated_at": "2026-06-25T14:07:38Z",
+      "completed_at": "2026-06-25T14:07:38Z",
+      "session_ids": [
+        "orch_a489395c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_6ae2a7a94a02": {
+      "goal_id": "g_6ae2a7a94a02",
+      "description": "Fix stackable compound discount, min_order_for_promo >=, loyalty_points round, bundle_discount 0 for single item",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 18,
+          "task_type": "edit_file",
+          "path": "promo.py",
+          "file": "promo.py",
+          "action": "Fix stackable compound discount, min_order_for_promo >=, loyalty_points round, bundle_discount 0 for single item",
+          "complexity": "high"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T14:06:57Z",
+      "updated_at": "2026-06-25T14:07:44Z",
+      "completed_at": "2026-06-25T14:07:44Z",
+      "session_ids": [
+        "orch_a489395c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

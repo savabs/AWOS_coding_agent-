@@ -125,6 +125,21 @@ class Verifier:
             }
         if match_tier != "exact":
             print(f"[VERIFIER] Fuzzy match applied (tier={match_tier})")
+
+        fidelity_errors = self._check_edit_fidelity(original_content, modified_content, search_replace.get("task_spec"))
+        if fidelity_errors:
+            return {
+                "success": False,
+                "applied": False,
+                "errors": fidelity_errors,
+                "file_content": modified_content,
+                "needs_retry": False,
+                "fidelity_fail": True,
+                "error_context": (
+                    f"{fidelity_errors[0]}\n\n"
+                    "Match the edit shape to the task wording (e.g. # comment above, not inner docstring)."
+                ),
+            }
         
         # Check for syntax errors (local, free validation)
         errors = self._check_syntax(file_path, modified_content)
@@ -315,6 +330,26 @@ class Verifier:
             return True, "\n".join(new_lines), f"fuzzy({best_ratio:.0%})"
 
         return False, original_content, "none"
+
+    def _check_edit_fidelity(
+        self, original_content: str, modified_content: str, task: dict | None
+    ) -> list:
+        """Reject patches whose shape contradicts the task action (e.g. docstring vs comment-above)."""
+        if not task:
+            return []
+        action = (task.get("action") or "").lower()
+        if "comment above" not in action:
+            return []
+
+        orig_set = set(original_content.splitlines())
+        new_lines = [ln for ln in modified_content.splitlines() if ln not in orig_set]
+        added_hash = any(ln.lstrip().startswith("#") for ln in new_lines)
+        added_docstring = any('"""' in ln or "'''" in ln for ln in new_lines)
+        if added_docstring and not added_hash:
+            return [
+                "fidelity_fail: task asked for comment above but patch added docstring inside function body"
+            ]
+        return []
 
     def _find_nearby_content(self, content: str, search_text: str) -> str:
         """Return the most similar block in the file to help the LLM fix its SEARCH block."""

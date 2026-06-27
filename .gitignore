@@ -98,3 +98,7 @@ node_modules/
 .Spotlight-V100
 .Trashes
 ehthumbs.db
+
+# Wedge fixture runtime (mission worktrees / local git)
+tests/fixtures/wedge_v1/ci_rescue_sprint/.git/
+tests/fixtures/wedge_v1/ci_rescue_sprint/.awos/

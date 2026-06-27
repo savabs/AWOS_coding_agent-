@@ -56,6 +56,12 @@ class SelfLearningSnapshot:
     # ── ErrorPatternStore (shared) ──────────────────────────────────────────
     error_patterns_recorded: int = 0
     top_error_types: List[dict] = field(default_factory=list)  # [{type, count}]
+    
+    # ── Cache Performance (new) ─────────────────────────────────────────────
+    cache_hit_rate: float = 0.0       # overall cache hit %
+    cache_tokens_read: int = 0        # total tokens from cache
+    cache_tokens_fresh: int = 0       # total fresh input tokens
+    cache_cost_saved: float = 0.0     # total $ saved via cache
 
     def to_dict(self) -> dict:
         return {
@@ -82,6 +88,12 @@ class SelfLearningSnapshot:
                 "total": self.error_patterns_recorded,
                 "top_types": self.top_error_types,
             },
+            "cache_performance": {
+                "hit_rate": round(self.cache_hit_rate, 3),
+                "tokens_cached": self.cache_tokens_read,
+                "tokens_fresh": self.cache_tokens_fresh,
+                "cost_saved_usd": round(self.cache_cost_saved, 2),
+            },
         }
 
 
@@ -103,6 +115,7 @@ class SelfLearningMetrics:
         self._tools_index = self._store / "tools" / "index.json"
         self._mutations_log = self._store / "scaffold_mutations.jsonl"
         self._patterns_log = self._store / "error_patterns.jsonl"
+        self._cache_stats = self._store / "cache_stats.jsonl"
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -113,6 +126,7 @@ class SelfLearningMetrics:
         self._collect_live_tools(snap)
         self._collect_scaffold_evolver(snap)
         self._collect_error_patterns(snap)
+        self._collect_cache_performance(snap)
         return snap
 
     def print_report(self) -> None:
@@ -201,6 +215,29 @@ class SelfLearningMetrics:
             ]
         except Exception as exc:
             logger.debug("[SelfLearningMetrics] error_patterns read error: %s", exc)
+    
+    def _collect_cache_performance(self, snap: SelfLearningSnapshot) -> None:
+        """Collect cache hit rate stats from cache_stats.jsonl."""
+        if not self._cache_stats.exists():
+            return
+        try:
+            from datetime import timedelta
+            try:
+                from .cache_telemetry import CacheTelemetryStore
+            except ImportError:
+                from cache_telemetry import CacheTelemetryStore
+            
+            cache_store = CacheTelemetryStore(store_path=str(self._store))
+            # Get stats for last 7 days
+            now = datetime.now(timezone.utc)
+            stats = cache_store.stats(since=now - timedelta(days=7))
+            
+            snap.cache_hit_rate = stats["hit_rate"]
+            snap.cache_tokens_read = stats["tokens_cached"]
+            snap.cache_tokens_fresh = stats["tokens_fresh"]
+            snap.cache_cost_saved = stats["cost_saved"]
+        except Exception as exc:
+            logger.debug("[SelfLearningMetrics] cache_performance read error: %s", exc)
 
 
 # ── ASCII report renderer ─────────────────────────────────────────────────────
@@ -276,6 +313,18 @@ def _print_box(snap: SelfLearningSnapshot) -> None:
             lines.append(_row(f"  {et['type'][:28]}", f"{et['count']}×"))
     else:
         lines.append(_row("  (none recorded yet)", ""))
+    
+    # ── Cache Performance ──────────────────────────────────────────────────
+    lines.append(_divider())
+    lines.append(_header("Cache Performance (last 7 days)"))
+    total_input = snap.cache_tokens_read + snap.cache_tokens_fresh
+    if total_input == 0:
+        lines.append(_row("Status", "No API calls recorded yet"))
+    else:
+        lines.append(_row("Hit rate", f"{snap.cache_hit_rate:.1%}"))
+        lines.append(_row("Cached tokens", f"{snap.cache_tokens_read:,}"))
+        lines.append(_row("Fresh tokens", f"{snap.cache_tokens_fresh:,}"))
+        lines.append(_row("Cost saved", f"${snap.cache_cost_saved:.2f}"))
 
     lines.append(f"╰{'─' * (_W - 2)}╯")
     print("\n".join(lines))

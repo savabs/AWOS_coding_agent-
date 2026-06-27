@@ -1,0 +1,49 @@
+{
+  "root_id": "g_2e3a4c92d5e4",
+  "nodes": {
+    "g_2e3a4c92d5e4": {
+      "goal_id": "g_2e3a4c92d5e4",
+      "description": "create docs/http_only_test.md about automated checks",
+      "parent_ids": [],
+      "child_ids": [
+        "g_8a746f63941d"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-14T08:40:48Z",
+      "updated_at": "2026-06-14T08:40:48Z",
+      "completed_at": "2026-06-14T08:40:48Z",
+      "session_ids": [
+        "orch_296aff86"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_8a746f63941d": {
+      "goal_id": "g_8a746f63941d",
+      "description": "create docs/http_only_test.md about automated checks",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "create_file",
+          "path": "docs/http_only_test.md",
+          "file": "docs/http_only_test.md",
+          "action": "create docs/http_only_test.md about automated checks",
+          "content_hint": "create docs/http_only_test.md about automated checks",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-14T08:40:48Z",
+      "updated_at": "2026-06-14T08:40:48Z",
+      "completed_at": "2026-06-14T08:40:48Z",
+      "session_ids": [
+        "orch_296aff86"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

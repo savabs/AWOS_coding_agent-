@@ -1,0 +1,8 @@
+{
+  "task_id": 1,
+  "task_type": "edit_file",
+  "file": "buggy.py",
+  "path": "buggy.py",
+  "action": "Fix off-by-one bugs: find_max loop should include the last index; sum_range should use range(start, end + 1).",
+  "complexity": "low"
+}

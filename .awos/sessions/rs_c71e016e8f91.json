@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "session_id": "rs_c71e016e8f91",
+  "goal": "In scaffold/agent/escalation_engine.py add a short # comment above max_allowed_level explaining it caps the model ladder in cheap-only mode",
+  "goal_hash": "bae3627484",
+  "status": "completed",
+  "created_at": "2026-06-17T10:53:45Z",
+  "updated_at": "2026-06-17T10:53:55Z",
+  "paused_at": null,
+  "codebase_root": ".",
+  "reasoning_session_id": "orch_4f0b317a",
+  "goal_graph_id": "g_6a256b8dd998",
+  "progress": {
+    "completed_task_ids": [
+      1
+    ],
+    "failed_task_ids": [],
+    "current_task_id": null,
+    "total_tasks": 1,
+    "decomposition_depth": 0
+  },
+  "budget": {
+    "spent_usd": 0.00148769
+  },
+  "sandbox": {
+    "enabled": false,
+    "feature_id": null,
+    "worktree_path": null,
+    "branch": null
+  },
+  "parent_session_id": null,
+  "cancel_requested": false
+}

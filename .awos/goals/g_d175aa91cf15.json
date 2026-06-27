@@ -1,0 +1,51 @@
+{
+  "root_id": "g_d175aa91cf15",
+  "nodes": {
+    "g_d175aa91cf15": {
+      "goal_id": "g_d175aa91cf15",
+      "description": "create docs/e2e_uncensored_agent_guide.md about uncensored local agents",
+      "parent_ids": [],
+      "child_ids": [
+        "g_258baca3119c"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-14T08:14:44Z",
+      "updated_at": "2026-06-14T08:40:44Z",
+      "completed_at": "2026-06-14T08:40:44Z",
+      "session_ids": [
+        "orch_7101432f",
+        "orch_bcdae78d"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_258baca3119c": {
+      "goal_id": "g_258baca3119c",
+      "description": "create docs/e2e_uncensored_agent_guide.md about uncensored local agents",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "create_file",
+          "path": "docs/e2e_uncensored_agent_guide.md",
+          "file": "docs/e2e_uncensored_agent_guide.md",
+          "action": "create docs/e2e_uncensored_agent_guide.md about uncensored local agents",
+          "content_hint": "create docs/e2e_uncensored_agent_guide.md about uncensored local agents",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-14T08:14:44Z",
+      "updated_at": "2026-06-14T08:40:44Z",
+      "completed_at": "2026-06-14T08:40:44Z",
+      "session_ids": [
+        "orch_7101432f",
+        "orch_bcdae78d"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

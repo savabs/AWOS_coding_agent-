@@ -1,0 +1,14 @@
+{
+  "goal": "Fix broken_add to return a + b instead of a - b",
+  "goal_hash": "98d790deff",
+  "started_at": "2026-06-23T11:48:28",
+  "last_updated": "2026-06-23T11:48:46",
+  "completed_task_ids": [
+    1
+  ],
+  "failed_task_ids": [],
+  "session_ids": [
+    "orch_69143be2"
+  ],
+  "status": "complete"
+}

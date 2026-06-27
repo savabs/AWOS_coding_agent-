@@ -1,0 +1,22 @@
+{
+  "goal": "Risky Stage 1 gauntlet \u2014 three tasks, one file each: (1) In awos.py add function _sandbox_summary(session) returning a one-line string with feature_id, worktree_path, branch, and whether the worktree directory exists when session.sandbox.enabled else empty string. (2) In cmd_sessions_show call _sandbox_summary and print Sandbox line when non-empty. (3) Add tests/test_awos_sessions_sandbox.py with two pytest tests for enabled and disabled sandbox on a mock RuntimeSession.",
+  "goal_hash": "f017696201",
+  "started_at": "2026-06-18T13:10:22",
+  "last_updated": "2026-06-18T13:11:48",
+  "completed_task_ids": [
+    1,
+    3,
+    "2_1",
+    "2_2",
+    "2_3_1",
+    "2_3_2"
+  ],
+  "failed_task_ids": [
+    2,
+    "2_3"
+  ],
+  "session_ids": [
+    "orch_9686b703"
+  ],
+  "status": "complete"
+}

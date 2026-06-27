@@ -1,0 +1,50 @@
+{
+  "root_id": "g_138086a76cc1",
+  "nodes": {
+    "g_138086a76cc1": {
+      "goal_id": "g_138086a76cc1",
+      "description": "In scaffold/agent/prompt_evolver.py add a one-line docstring to should_evolve explaining it triggers prompt evolution every N sessions",
+      "parent_ids": [],
+      "child_ids": [
+        "g_fe326b03628a"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-16T08:19:41Z",
+      "updated_at": "2026-06-16T08:19:48Z",
+      "completed_at": "2026-06-16T08:19:48Z",
+      "session_ids": [
+        "orch_a2b4ebf5"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_fe326b03628a": {
+      "goal_id": "g_fe326b03628a",
+      "description": "Add a one-line docstring to the `should_evolve` function.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "scaffold/agent/prompt_evolver.py",
+          "action": "Add a one-line docstring to the `should_evolve` function.",
+          "function_signature": "def should_evolve(...):",
+          "constraints": "The docstring should explain that it triggers prompt evolution every N sessions.",
+          "complexity": "low",
+          "file": "scaffold/agent/prompt_evolver.py"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-16T08:19:45Z",
+      "updated_at": "2026-06-16T08:19:48Z",
+      "completed_at": "2026-06-16T08:19:48Z",
+      "session_ids": [
+        "orch_a2b4ebf5"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

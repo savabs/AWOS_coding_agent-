@@ -1,0 +1,46 @@
+{
+  "root_id": "g_85214532f114",
+  "nodes": {
+    "g_85214532f114": {
+      "goal_id": "g_85214532f114",
+      "description": "Add a docstring to the ReplayGate class in scaffold/agent/reward_store.py explaining that threshold was lowered from 0.4 to 0.25 to support single-codebase tasks where novelty is naturally low.",
+      "parent_ids": [],
+      "child_ids": [
+        "g_6ea6686640e2"
+      ],
+      "tasks": [],
+      "status": "in_progress",
+      "created_at": "2026-05-24T07:51:58Z",
+      "updated_at": "2026-05-24T07:52:10Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_10e0819d"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_6ea6686640e2": {
+      "goal_id": "g_6ea6686640e2",
+      "description": "Add a docstring to the `ReplayGate` class, explaining that its novelty threshold was lowered from 0.4 to 0.25 to better support single-codebase tasks where novelty is naturally low.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "scaffold/agent/reward_store.py",
+          "action": "Add a docstring to the `ReplayGate` class, explaining that its novelty threshold was lowered from 0.4 to 0.25 to better support single-codebase tasks where novelty is naturally low.",
+          "complexity": "low"
+        }
+      ],
+      "status": "failed",
+      "created_at": "2026-05-24T07:52:10Z",
+      "updated_at": "2026-05-24T07:52:17Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_10e0819d"
+      ],
+      "failure_count": 1,
+      "critique_ids": []
+    }
+  }
+}

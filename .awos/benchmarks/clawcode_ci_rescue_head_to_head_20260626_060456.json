@@ -1,0 +1,26 @@
+{
+  "timestamp": "2026-06-26T06:04:56.821191+00:00",
+  "repo": "/home/becmachlean/2024/projects/clawcode",
+  "branch": "awos-ci-rescue-buggy",
+  "raw": {
+    "arm": "raw",
+    "tasks_done": 12,
+    "tasks_total": 12,
+    "all_tests_pass": true,
+    "semantic_pass": true,
+    "cost_usd": 0.002237,
+    "wall_sec": 31.75,
+    "error": ""
+  },
+  "awos": {
+    "arm": "awos",
+    "tasks_done": 12,
+    "tasks_total": 12,
+    "all_tests_pass": true,
+    "semantic_pass": true,
+    "cost_usd": 0.004569,
+    "wall_sec": 49.66,
+    "error": ""
+  },
+  "cost_ratio": 2.042
+}

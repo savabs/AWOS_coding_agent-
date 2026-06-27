@@ -1,0 +1,100 @@
+{
+  "root_id": "g_f57f0f77d0c9",
+  "nodes": {
+    "g_f57f0f77d0c9": {
+      "goal_id": "g_f57f0f77d0c9",
+      "description": "Gauntlet G2 pause-mid-plan proof",
+      "parent_ids": [],
+      "child_ids": [
+        "g_786cc2f8efbf",
+        "g_266c1762fb4d",
+        "g_e3b0fa1d254a"
+      ],
+      "tasks": [],
+      "status": "in_progress",
+      "created_at": "2026-06-18T08:31:03Z",
+      "updated_at": "2026-06-18T08:31:06Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_eea94556"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_786cc2f8efbf": {
+      "goal_id": "g_786cc2f8efbf",
+      "description": "Ensure marker A",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "tests/fixtures/gauntlet_marker_a.py",
+          "file": "tests/fixtures/gauntlet_marker_a.py",
+          "action": "Ensure marker A",
+          "complexity": "low"
+        }
+      ],
+      "status": "pending",
+      "created_at": "2026-06-18T08:31:06Z",
+      "updated_at": "2026-06-18T08:31:06Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_eea94556"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_266c1762fb4d": {
+      "goal_id": "g_266c1762fb4d",
+      "description": "Ensure marker B",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "task_type": "edit_file",
+          "path": "tests/fixtures/gauntlet_marker_b.py",
+          "file": "tests/fixtures/gauntlet_marker_b.py",
+          "action": "Ensure marker B",
+          "complexity": "low"
+        }
+      ],
+      "status": "pending",
+      "created_at": "2026-06-18T08:31:06Z",
+      "updated_at": "2026-06-18T08:31:06Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_eea94556"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_e3b0fa1d254a": {
+      "goal_id": "g_e3b0fa1d254a",
+      "description": "Ensure marker C",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 3,
+          "task_type": "edit_file",
+          "path": "tests/fixtures/gauntlet_marker_c.py",
+          "file": "tests/fixtures/gauntlet_marker_c.py",
+          "action": "Ensure marker C",
+          "complexity": "low"
+        }
+      ],
+      "status": "pending",
+      "created_at": "2026-06-18T08:31:06Z",
+      "updated_at": "2026-06-18T08:31:06Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_eea94556"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}
