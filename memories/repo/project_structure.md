@@ -126,6 +126,7 @@ Tracked via: `performance.json`, `spans.jsonl`, `reward_store.jsonl`, `awos stat
 | **Compounding advantage positioning** | Core value prop: AWOS gets cheaper every run (Apple ecosystem moat) | **DONE** — [`docs/product/AWOS_POSITIONING_COMPOUNDING.md`](../../docs/product/AWOS_POSITIONING_COMPOUNDING.md) |
 | **Cost savings tracker** | `awos stats --savings` CLI command | **DONE** — shows learning trend + compounding value prop |
 | **Pilot plan** | Get ONE customer to prove compounding value | **READY** — [`docs/product/PILOT_PLAN.md`](../../docs/product/PILOT_PLAN.md) — 1hr outreach needed |
+| **Goal clarification (Phases 1-3)** | Detect ambiguous goals, ask questions, review plan before execution | **DONE 2026-06-27** — [`docs/GOAL_CLARIFICATION_GUIDE.md`](../../docs/GOAL_CLARIFICATION_GUIDE.md) — prevents misinterpretation (dogfood UX fix) |
 | **Stage 1 Subscription Worker** | Pre-planned long mission + benchmark path + worker CLI | **Baseline v1 frozen** — `docs/benchmarks/BASELINE.md`; compare via `scripts/compare_baseline.py` |
 | **Stage 1 Risk Gauntlet** | Extreme stress catalog | **DONE** (G1–G7) — lab only, not customer UX |
 | PEI scorecard (`awos report`) | Client-facing proof | ✅ DONE — `reports/pei_report.html` |

@@ -187,6 +187,10 @@ Key symbols (file::class/def):
             result["plan"] = self._filter_completed_tasks(result["plan"], existing_goal)
             result["total_tasks"] = len(result["plan"])
 
+        # ── Phase 5D: decompose complex refactoring tasks into atomic sub-tasks ──
+        result["plan"] = self._decompose_refactoring_tasks(result["plan"])
+        result["total_tasks"] = len(result["plan"])
+
         # Record cost if tracker provided
         if tracker:
             # Estimate tokens (Sonnet ~11 input, ~27 output per 1k)
@@ -228,6 +232,53 @@ Key symbols (file::class/def):
         if word_set & _COMPLEX_SIGNALS:
             return False
         return True
+
+    @staticmethod
+    def _decompose_refactoring_tasks(tasks: list) -> list:
+        """
+        Decompose complex refactoring tasks into atomic sub-tasks.
+        
+        Uses RefactoringDecomposer to intelligently break down:
+          - "Add import + use" → [add import, use]
+          - "Replace all X" → [replace first, replace rest]
+        
+        Returns expanded task list with atomic sub-tasks.
+        """
+        from .refactoring_decomposer import RefactoringDecomposer
+        
+        decomposer = RefactoringDecomposer()
+        expanded_tasks = []
+        task_id_counter = 1
+        
+        for task in tasks:
+            if decomposer.should_decompose(task):
+                # Decompose into atomic sub-tasks
+                atomic_tasks = decomposer.decompose(task)
+                
+                for atomic in atomic_tasks:
+                    # Convert AtomicTask to dict format
+                    sub_task = {
+                        "task_id": task_id_counter,
+                        "action": atomic.action,
+                        "file": atomic.file,
+                        "complexity": atomic.complexity,
+                    }
+                    
+                    # Add optional fields
+                    if hasattr(task, 'constraints') and task.get('constraints'):
+                        sub_task["constraints"] = task["constraints"]
+                    if hasattr(task, 'must_not') and task.get('must_not'):
+                        sub_task["must_not"] = task["must_not"]
+                    
+                    expanded_tasks.append(sub_task)
+                    task_id_counter += 1
+            else:
+                # Keep original task
+                task["task_id"] = task_id_counter
+                expanded_tasks.append(task)
+                task_id_counter += 1
+        
+        return expanded_tasks
 
     @staticmethod
     def _filter_completed_tasks(tasks: list, existing_goal: Any) -> list:

@@ -46,18 +46,23 @@ class Verifier:
             }
         """
         
-        # Read original file
+        # Read original file (or detect new file creation)
+        is_new_file = search_replace.get("_is_new_file", False)
         try:
             with open(file_path, 'r') as f:
                 original_content = f.read()
         except FileNotFoundError:
-            return {
-                "success": False,
-                "applied": False,
-                "errors": [f"File not found: {file_path}"],
-                "needs_retry": False,
-                "error_context": "File does not exist. Check path in task."
-            }
+            # If this is a new file creation (empty SEARCH), that's OK
+            if is_new_file or (not search_replace.get("search") or search_replace.get("search").strip() == ""):
+                original_content = ""
+            else:
+                return {
+                    "success": False,
+                    "applied": False,
+                    "errors": [f"File not found: {file_path}"],
+                    "needs_retry": False,
+                    "error_context": "File does not exist. Check path in task."
+                }
         
         # ── JSON-applied path: edits already applied by Worker ──────
         if search_replace.get("_json_applied"):
@@ -96,14 +101,56 @@ class Verifier:
         search_text = search_replace.get("search", "")
         replace_text = search_replace.get("replace", "")
         
-        if not search_text:
-            return {
-                "success": False,
-                "applied": False,
-                "errors": ["Empty search text"],
-                "needs_retry": False,
-                "error_context": "Worker provided empty search string."
-            }
+        # Handle new file creation (empty SEARCH = write full content)
+        if not search_text or search_text.strip() == "":
+            if is_new_file or original_content == "":
+                # Creating new file - write full content
+                from pathlib import Path
+                Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+                modified_content = replace_text
+                
+                # Check syntax
+                errors = self._check_syntax(file_path, modified_content)
+                if errors:
+                    return {
+                        "success": False,
+                        "applied": False,
+                        "errors": errors,
+                        "file_content": modified_content,
+                        "needs_retry": True,
+                        "error_context": f"Syntax error in new file:\n{errors[0]}\n\nContext:\n{self._get_error_context(modified_content, errors[0])}"
+                    }
+                
+                # Write file
+                try:
+                    with open(file_path, 'w') as f:
+                        f.write(modified_content)
+                except Exception as e:
+                    return {
+                        "success": False,
+                        "applied": False,
+                        "errors": [f"Failed to write file: {str(e)}"],
+                        "needs_retry": False,
+                        "error_context": f"Error writing {file_path}"
+                    }
+                
+                return {
+                    "success": True,
+                    "applied": True,
+                    "errors": [],
+                    "file_content": modified_content,
+                    "needs_retry": False,
+                    "error_context": ""
+                }
+            else:
+                # Existing file but empty search - error
+                return {
+                    "success": False,
+                    "applied": False,
+                    "errors": ["Empty search text"],
+                    "needs_retry": False,
+                    "error_context": "Worker provided empty search string."
+                }
         
         # 4-tier fuzzy matching — find and apply the change
         matched, modified_content, match_tier = self._apply_fuzzy(
@@ -164,6 +211,20 @@ class Verifier:
                 "file_content": modified_content,
                 "needs_retry": True,
                 "error_context": f"Contract violation:\n{chr(10).join(contract_errors)}\n\nFix the code to match the specification exactly."
+            }
+
+        # Check integration compliance (imports, instantiation, usage)
+        integration_errors = self._check_integration_compliance(
+            original_content, modified_content, task=search_replace.get("task_spec")
+        )
+        if integration_errors:
+            return {
+                "success": False,
+                "applied": False,
+                "errors": integration_errors,
+                "file_content": modified_content,
+                "needs_retry": True,
+                "error_context": f"Integration check failed:\n{chr(10).join(integration_errors)}\n\nEnsure all required imports, instantiations, and usages are present."
             }
 
         # If no errors, apply the file change (write to disk)
@@ -371,6 +432,59 @@ class Verifier:
             f"Best match in file (similarity {best_ratio:.0%}) near line {best_start + 1}:\n"
             f"{nearby}"
         )
+
+    def _check_integration_compliance(
+        self, original_content: str, modified_content: str, task: dict = None
+    ) -> list:
+        """
+        Verify integration-related changes were actually applied.
+        
+        Checks for common integration patterns mentioned in task:
+        - "Add import" → verify import statement exists
+        - "Instantiate" → verify class instantiation exists
+        - "Replace calls" → verify new usage exists
+        """
+        if not task:
+            return []
+        
+        errors = []
+        action = task.get("action", "").lower()
+        
+        # Check 1: Import statements
+        if "import" in action and "add" in action:
+            # Extract potential class/module names from action
+            # Look for patterns like "import X" or "from X import Y"
+            import re
+            # Common pattern: mentions class name in quotes or CamelCase
+            import_patterns = re.findall(r"'([A-Z][a-zA-Z0-9_]+)'|\"([A-Z][a-zA-Z0-9_]+)\"|\\b([A-Z][a-zA-Z0-9_]+)\\b", action)
+            for pattern_match in import_patterns:
+                # pattern_match is a tuple of (quoted1, quoted2, unquoted)
+                class_name = pattern_match[0] or pattern_match[1] or pattern_match[2]
+                if class_name and len(class_name) > 2:  # Avoid single letters
+                    # Check if import was added
+                    if class_name not in modified_content and f"import {class_name}" not in modified_content:
+                        errors.append(f"Task requires importing '{class_name}' but no import statement found")
+        
+        # Check 2: Instantiation
+        if "instantiat" in action:  # matches "instantiate", "instantiation"
+            # Extract class names mentioned in task
+            import re
+            class_patterns = re.findall(r"'([A-Z][a-zA-Z0-9_]+)'|\"([A-Z][a-zA-Z0-9_]+)\"|([A-Z][a-zA-Z0-9_]+)\(", action)
+            for pattern_match in class_patterns:
+                class_name = pattern_match[0] or pattern_match[1] or pattern_match[2]
+                if class_name and len(class_name) > 2:
+                    # Check for instantiation pattern: ClassName()
+                    if f"{class_name}(" not in modified_content:
+                        errors.append(f"Task requires instantiating '{class_name}' but no instantiation found: {class_name}()")
+        
+        # Check 3: Replacements
+        if "replace" in action and ("call" in action or "usage" in action or "method" in action):
+            # This is trickier - we need to verify SOME change happened
+            # Simple heuristic: if task says "replace", modified should differ from original
+            if modified_content.strip() == original_content.strip():
+                errors.append("Task requires replacing calls/usage but file content is unchanged")
+        
+        return errors
 
     def _check_contract_compliance(self, content: str, task: dict | None) -> list:
         return check_contract_compliance(content, task)

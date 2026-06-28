@@ -481,6 +481,7 @@ class Orchestrator:
         use_parallel: bool = False,
         resume: bool = False,
         session_id: Optional[str] = None,
+        auto_approve_plan: bool = False,
     ) -> dict:
         """
         Execute a complete feature request end-to-end.
@@ -592,6 +593,32 @@ class Orchestrator:
         sym_index.build()
         print(f"[SYMBOLS] {sym_index.summary()}")
 
+        # ── Goal Clarification (Phase 1 & 3) — NEW ──────────────────────────
+        # Feature flag: AWOS_ENABLE_CLARIFICATION
+        if os.getenv("AWOS_ENABLE_CLARIFICATION", "").lower() in ("1", "true", "yes"):
+            try:
+                from .goal_clarifier import clarify_goal
+                from .plan_reviewer import review_plan
+                
+                print("\n[CLARIFICATION] Analyzing goal...")
+                clarified = clarify_goal(goal, interactive=True)
+                
+                if clarified.is_ambiguous and not clarified.clarifying_questions:
+                    # Questions were answered, use enriched goal
+                    goal = clarified.to_enriched_prompt()
+                    print(f"[CLARIFICATION] Goal clarified")
+                elif clarified.is_ambiguous:
+                    # Non-interactive or failed, proceed with original
+                    print(f"[CLARIFICATION] Warning: Goal may be ambiguous")
+                
+                # Store clarified goal for plan review
+                _clarified_goal = clarified
+            except Exception as exc:
+                logger.warning("[CLARIFICATION] Failed (%s), proceeding with original goal", exc)
+                _clarified_goal = None
+        else:
+            _clarified_goal = None
+
         # ── LiveRenderer: real-time terminal UI ────────────────────────────
         _live = LiveRenderer()
         _live.session_start(goal, n_files=getattr(sym_index, '_file_count', 0))
@@ -641,6 +668,64 @@ class Orchestrator:
             print(f"[PLANNER] Generated {len(tasks)} tasks:")
             for task in tasks:
                 print(f"  Task {task['task_id']}: {task['action']} (complexity: {task['complexity']})")
+        
+        # ── Plan Review Checkpoint (Phase 2) — NEW ───────────────────────────
+        # Feature flag: AWOS_ENABLE_PLAN_REVIEW
+        if os.getenv("AWOS_ENABLE_PLAN_REVIEW", "").lower() in ("1", "true", "yes"):
+            try:
+                from .plan_reviewer import review_plan
+                
+                # Extract files and acceptance from clarified goal if available
+                files_to_modify = []
+                acceptance = None
+                if _clarified_goal:
+                    acceptance = _clarified_goal.acceptance_criteria
+                    # Try to extract files from tasks
+                    for task in tasks:
+                        file = task.get('file', task.get('files'))
+                        if file:
+                            if isinstance(file, list):
+                                files_to_modify.extend(file)
+                            else:
+                                files_to_modify.append(file)
+                    files_to_modify = list(set(files_to_modify)) if files_to_modify else None
+                
+                # Review plan with user
+                review_result = review_plan(
+                    goal=goal,
+                    plan=tasks,
+                    files_to_modify=files_to_modify,
+                    acceptance_criteria=acceptance,
+                    interactive=True,
+                    auto_approve=auto_approve_plan,
+                )
+                
+                if not review_result.approved:
+                    # Plan rejected or needs refinement
+                    if review_result.feedback:
+                        print(f"\n[PLAN REVIEW] Plan needs revision: {review_result.feedback}")
+                        print("[PLAN REVIEW] Please rerun with refined goal")
+                    elif review_result.rejection_reason:
+                        print(f"\n[PLAN REVIEW] Plan rejected: {review_result.rejection_reason}")
+                    
+                    return {
+                        "success": False,
+                        "goal": goal,
+                        "tasks_completed": 0,
+                        "tasks_failed": 0,
+                        "total_tasks": len(tasks),
+                        "total_cost": 0,
+                        "execution_log": self.execution_log,
+                        "errors": ["Plan not approved by user"],
+                        "plan_review_feedback": review_result.feedback or review_result.rejection_reason,
+                        "time_elapsed": time.time() - start_time
+                    }
+                
+                print("\n[PLAN REVIEW] ✓ Plan approved, proceeding with execution")
+                
+            except Exception as exc:
+                logger.warning("[PLAN REVIEW] Failed (%s), proceeding without review", exc)
+        
         _live.planning_done(
             tasks,
             model="CheapPlanner" if is_cheap_only() else self.planner.__class__.__name__,
@@ -1063,6 +1148,16 @@ class Orchestrator:
         session = ctx["session"]
 
         task_id = task["task_id"]
+        
+        # Resolve short filenames to full paths intelligently
+        from .file_resolver import resolve_file
+        try:
+            resolved_file = resolve_file(task["file"], project_root=codebase_root)
+            task = {**task, "file": resolved_file}  # Update task with resolved path
+        except FileNotFoundError:
+            # If resolution fails, try original path (might be already full)
+            pass
+        
         file_path = os.path.join(codebase_root, task["file"])
 
         _live_t = ctx.get("_live")           # LiveRenderer (optional)
@@ -1082,24 +1177,41 @@ class Orchestrator:
         if _live_t:
             _live_t.task_start(task_id, _total_t, task)
 
-        # Load file content
-        try:
-            with open(file_path, "r") as f:
-                file_content = f.read()
-            git.backup_file(file_path)
-        except FileNotFoundError:
-            print(f"[TASK {task_id}] ERROR: File not found")
-            self.execution_log.append({
-                "task_id": task_id,
-                "status": "failed",
-                "reason": f"File not found: {file_path}",
-            })
-            return {
-                "task_id": task_id,
-                "success": False,
-                "task": task,
-                "failure_kind": "file_not_found",
-            }
+        # Detect if this is a file creation task
+        action_lower = task['action'].lower()
+        is_create_task = any(keyword in action_lower for keyword in [
+            'initialize', 'create', 'add new', 'generate new', 'write new'
+        ])
+        
+        # Load or initialize file content
+        if is_create_task and not Path(file_path).exists():
+            # Creating new file - use empty content and ensure parent dir exists
+            print(f"[TASK {task_id}] Creating new file")
+            Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+            file_content = ""
+            # Mark task as new file creation for worker
+            task = {**task, "_is_new_file": True}
+            # No need to backup non-existent file
+        else:
+            task = {**task, "_is_new_file": False}
+            # Modifying existing file - read current content
+            try:
+                with open(file_path, "r") as f:
+                    file_content = f.read()
+                git.backup_file(file_path)
+            except FileNotFoundError:
+                print(f"[TASK {task_id}] ERROR: File not found")
+                self.execution_log.append({
+                    "task_id": task_id,
+                    "status": "failed",
+                    "reason": f"File not found: {file_path}",
+                })
+                return {
+                    "task_id": task_id,
+                    "success": False,
+                    "task": task,
+                    "failure_kind": "file_not_found",
+                }
 
         # Auto-fit GPWorldModel if enough episodes have accumulated
         self._maybe_fit_gp()

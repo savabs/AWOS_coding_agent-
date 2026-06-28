@@ -356,7 +356,38 @@ Do NOT repeat the same approach. Use a different strategy.
         if _tool_out:
             _tool_output_block = f"[TOOL OUTPUT]\n{_tool_out}\n\n"
 
-        prompt = f"""You are a senior software engineer executing a precise code change.
+        # NEW FILE: Different prompt for file creation
+        if task.get("_is_new_file", False):
+            prompt = f"""You are a senior software engineer creating a new file.
+{_evolved_block}{_tool_output_block}{vector_section}{strategy_preamble}
+TASK: {action}
+FILE: {file_path} (NEW FILE - will be created)
+COMPLEXITY: {complexity}
+ATTEMPT: {attempt}{retry_section}{contract_section}
+
+This is a NEW FILE. Generate the COMPLETE file content from scratch.
+{symbol_section}{examples_section}
+{skill_section}PROJECT CONTEXT: {codebase_context.get('modules', 'standard Python project')}
+
+INSTRUCTIONS:
+1. Generate the COMPLETE file content
+2. Include all necessary imports, docstrings, and code structure
+3. Make it production-ready and well-documented
+
+OUTPUT FORMAT:
+
+CONTENT:
+```
+<full file content here - include everything from imports to the end>
+```
+
+REASONING:
+<one sentence explaining what you created and why>
+
+Do NOT use SEARCH/REPLACE format. Just provide the complete file content.{strategy_suffix}"""
+        else:
+            # EXISTING FILE: Standard SEARCH/REPLACE prompt
+            prompt = f"""You are a senior software engineer executing a precise code change.
 {_evolved_block}{_tool_output_block}{vector_section}{critique_block}{strategy_preamble}{prev_context_section}{cross_file_section}
 TASK: {action}
 FILE: {file_path}
@@ -593,26 +624,35 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
         if not response_text:
             raise RuntimeError("No API key available or all providers failed")
         
-        # Parse SEARCH/REPLACE from response
-        result = self._parse_search_replace(response_text)
+        # Parse response based on file type
+        if task.get("_is_new_file", False):
+            # For new files, parse CONTENT block
+            result = self._parse_new_file_content(response_text, task.get('file', 'unknown'))
+        else:
+            # For existing files, parse SEARCH/REPLACE
+            result = self._parse_search_replace(response_text)
         
         # ── Phase 7: Self-Verification ─────────────────────────────────────
         if result["success"]:
-            try:
-                from .self_verification import SelfVerificationEngine
-            except ImportError:
-                from self_verification import SelfVerificationEngine
-            sv = SelfVerificationEngine()
-            sv_result = sv.verify(
-                original_content=file_content,
-                search_replace=result,
-                file_path=file_path,
-                task_spec=task,
-            )
-            if not sv_result.passed:
-                print(f"[WORKER] Self-verify FAILED at stage={sv_result.stage}. Retrying.")
-                result = {"success": False, "search": "", "replace": "",
-                          "reasoning": sv_result.error_context}
+            # Skip verification for new files (nothing to verify)
+            if task.get("_is_new_file", False):
+                print(f"[WORKER] New file - skipping self-verification")
+            else:
+                try:
+                    from .self_verification import SelfVerificationEngine
+                except ImportError:
+                    from self_verification import SelfVerificationEngine
+                sv = SelfVerificationEngine()
+                sv_result = sv.verify(
+                    original_content=file_content,
+                    search_replace=result,
+                    file_path=file_path,
+                    task_spec=task,
+                )
+                if not sv_result.passed:
+                    print(f"[WORKER] Self-verify FAILED at stage={sv_result.stage}. Retrying.")
+                    result = {"success": False, "search": "", "replace": "",
+                              "reasoning": sv_result.error_context}
         
         if not result["success"]:
             # ── Fallback: try JSON structured edit format ──────────────
@@ -906,15 +946,80 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
         action = task.get("action", "")
         context = self._extract_context(file_content, action)
         
-        prompt = (
-            f"File: {task.get('file', 'unknown')}\n"
-            f"Task: {action}\n"
-            f"Complexity: {task.get('complexity', 'medium')}\n\n"
-            f"Context:\n{context}\n\n"
-            f"Generate SEARCH/REPLACE blocks to complete this task."
-        )
+        # Handle new file creation differently
+        if task.get("_is_new_file", False):
+            prompt = (
+                f"File: {task.get('file', 'unknown')} (NEW FILE)\n"
+                f"Task: {action}\n"
+                f"Complexity: {task.get('complexity', 'medium')}\n\n"
+                f"This is a NEW file. Generate the COMPLETE file content.\n\n"
+                f"Format:\n"
+                f"CONTENT:\n"
+                f"```\n"
+                f"<full file content here>\n"
+                f"```\n\n"
+                f"REASONING:\n"
+                f"<brief explanation>\n"
+            )
+        else:
+            prompt = (
+                f"File: {task.get('file', 'unknown')}\n"
+                f"Task: {action}\n"
+                f"Complexity: {task.get('complexity', 'medium')}\n\n"
+                f"Context:\n{context}\n\n"
+                f"Generate SEARCH/REPLACE blocks to complete this task."
+            )
         return prompt
 
+    def _parse_new_file_content(self, response_text: str, file_path: str) -> dict:
+        """Parse CONTENT block for new file creation."""
+        try:
+            # Extract CONTENT block
+            content_match = re.search(
+                r'CONTENT:\s*\n```[^\n]*\n(.*?)\n```',
+                response_text, re.DOTALL | re.IGNORECASE
+            )
+            
+            if not content_match:
+                # Try without fences
+                content_match = re.search(
+                    r'CONTENT:\s*\n(.*?)(?=\nREASONING:|\Z)',
+                    response_text, re.DOTALL | re.IGNORECASE
+                )
+            
+            if content_match:
+                content = content_match.group(1).strip()
+                
+                # Extract reasoning if present
+                reasoning_match = re.search(
+                    r'REASONING:\s*\n(.+?)(?:\n\n|\Z)',
+                    response_text, re.DOTALL | re.IGNORECASE
+                )
+                reasoning = reasoning_match.group(1).strip() if reasoning_match else "Create new file"
+                
+                # For new files, we use empty SEARCH and full content as REPLACE
+                return {
+                    "success": True,
+                    "search": "",  # Empty for new files
+                    "replace": content,
+                    "reasoning": reasoning,
+                    "_is_new_file": True
+                }
+            else:
+                return {
+                    "success": False,
+                    "search": "",
+                    "replace": "",
+                    "reasoning": "Failed to parse CONTENT block from response"
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "search": "",
+                "replace": "",
+                "reasoning": f"Parse error for new file: {str(e)}"
+            }
+    
     def _parse_search_replace(self, response_text: str) -> dict:
         """Parse SEARCH/REPLACE blocks — handles fenced and unfenced formats."""
         try:

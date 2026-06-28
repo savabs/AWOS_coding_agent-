@@ -432,6 +432,7 @@ def cmd_run(args):
         codebase_root=getattr(args, "root", ".") or ".",
         resume=getattr(args, "resume", False) and not session_id,
         session_id=session_id,
+        auto_approve_plan=getattr(args, "auto_approve", False),
     )
     pre_planned = getattr(args, "pre_planned_tasks", None)
     if pre_planned is not None:
@@ -930,10 +931,13 @@ def cmd_worker_start(args):
         session_id=None,
         root=str(root_path),
         pre_planned_tasks=None,
+        auto_approve=getattr(args, "auto_approve", False),
     )
     
     print(f"Starting work: {args.goal}")
     print(f"Target repo: {root_path}")
+    if getattr(args, "auto_approve", False):
+        print(f"[AUTO-APPROVE] Plans will be executed without review")
     print(f"Ctrl+C to pause anytime\n")
     
     cmd_run(wrapped_args)
@@ -1143,6 +1147,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--root",
         default=".",
         help="Target repo path (default: current directory)",
+    )
+    w_start.add_argument(
+        "--auto-approve",
+        action="store_true",
+        help="Auto-approve plans without interactive review (useful for scripts)",
     )
     
     worker_sub.add_parser("status", help="List all work sessions")
