@@ -13,89 +13,97 @@ import re
 import time
 import uuid
 from collections import deque
-from typing import Any, Optional, Dict, List
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor
+from typing import Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
 try:
-    from .planner import Planner
-    from .worker import Worker
-    from .verifier import Verifier
-    from .git_manager import GitManager
-    from .symbol_index import SymbolIndex
+    from .agent_state_manager import AgentStateManager
+    from .cheap_planner import CheapPlanner
+    from .confidence_calibrator import ConfidenceCalibrator
+    from .core.observability import ObservabilityStore, TaskSpan, new_span
+    from .core.performance_tracker import ToolPerformanceTracker
+    from .core.reasoning import ReasoningSession, ReasoningTrace, ReasoningTraceStore
+    from .critic_engine import CriticEngine, max_critic_rounds
+    from .dag_executor import DAGExecutor
+    from .error_pattern_store import ErrorPatternStore, make_error_pattern
     from .escalation_engine import EscalationEngine, is_cheap_only
     from .example_store import ExampleStore
+    from .exploration_phase import enrich_codebase_context, exploration_enabled, run_exploration
+    from .git_manager import GitManager
     from .integration_reviewer import IntegrationReviewer
-    from .core.performance_tracker import ToolPerformanceTracker
-    from .core.reasoning import ReasoningTrace, ReasoningSession, ReasoningTraceStore
-    from .core.observability import ObservabilityStore, new_span, TaskSpan
-    from .task_decomposer import TaskDecomposer
-    from .dag_executor import DAGExecutor
-    from .agent_state_manager import AgentStateManager
-    from .reward_store import RewardStore, compute_reward
-    from .ml_router import build_ml_router, TaskFeatureExtractor
-    from .strategy_config import StrategyRouter
-    from .self_correction import SelfCorrectionEngine, ErrorClass
-    from .skill_library import SkillLibrary
-    from .test_runner import TestRunner
-    from .error_pattern_store import ErrorPatternStore, make_error_pattern
-    from .project_planner import ProjectPlanner
-    from .vector_memory import VectorMemory, VectorMemoryUnavailableError
-    from .critic_engine import CriticEngine, max_critic_rounds
-    from .post_mortem import PostMortemEngine, FailureType
-    from .confidence_calibrator import ConfidenceCalibrator
     from .live_renderer import LiveRenderer
-    from .cheap_planner import CheapPlanner
-    from .mcts_search import MCTSSearchEngine, write_and_run_tests
-    from .prompt_evolver import PromptEvolver
     from .live_tool_synth import LiveToolSynthesizer
+    from .mcts_search import MCTSSearchEngine, write_and_run_tests
+    from .ml_router import TaskFeatureExtractor, build_ml_router
+    from .planner import Planner
+    from .post_mortem import FailureType, PostMortemEngine
+    from .project_planner import ProjectPlanner
+    from .prompt_evolver import PromptEvolver
+    from .react_worker import ReActWorker, react_worker_enabled
+    from .reward_store import RewardStore, compute_reward
     from .scaffold_evolver import ScaffoldEvolver
+    from .self_correction import ErrorClass, SelfCorrectionEngine
+    from .skill_library import SkillLibrary
     from .stability_gate import StabilityGate
+    from .strategy_config import StrategyRouter
+    from .symbol_index import SymbolIndex
+    from .task_decomposer import TaskDecomposer
+    from .test_runner import TestRunner
+    from .vector_memory import VectorMemory, VectorMemoryUnavailableError
+    from .verifier import Verifier
+    from .worker import Worker
 except ImportError:
-    from planner import Planner
-    from worker import Worker
-    from verifier import Verifier
-    from git_manager import GitManager
-    from symbol_index import SymbolIndex
+    from agent_state_manager import AgentStateManager
+    from cheap_planner import CheapPlanner
+    from confidence_calibrator import ConfidenceCalibrator
+    from core.observability import ObservabilityStore, new_span
+    from core.performance_tracker import ToolPerformanceTracker
+    from core.reasoning import ReasoningSession, ReasoningTrace, ReasoningTraceStore
+    from critic_engine import CriticEngine
+    from dag_executor import DAGExecutor
+    from error_pattern_store import ErrorPatternStore, make_error_pattern
     from escalation_engine import EscalationEngine, is_cheap_only
     from example_store import ExampleStore
+    from exploration_phase import enrich_codebase_context, exploration_enabled, run_exploration
+    from git_manager import GitManager
     from integration_reviewer import IntegrationReviewer
-    from core.performance_tracker import ToolPerformanceTracker
-    from core.reasoning import ReasoningTrace, ReasoningSession, ReasoningTraceStore
-    from core.observability import ObservabilityStore, new_span, TaskSpan
-    from task_decomposer import TaskDecomposer
-    from dag_executor import DAGExecutor
-    from agent_state_manager import AgentStateManager
-    from reward_store import RewardStore, compute_reward
-    from ml_router import build_ml_router, TaskFeatureExtractor
-    from strategy_config import StrategyRouter
-    from self_correction import SelfCorrectionEngine, ErrorClass
-    from skill_library import SkillLibrary
-    from test_runner import TestRunner
-    from error_pattern_store import ErrorPatternStore, make_error_pattern
-    from project_planner import ProjectPlanner
-    from critic_engine import CriticEngine, max_critic_rounds
-    from post_mortem import PostMortemEngine, FailureType
-    from confidence_calibrator import ConfidenceCalibrator
     from live_renderer import LiveRenderer
-    from cheap_planner import CheapPlanner
-    from mcts_search import MCTSSearchEngine, write_and_run_tests
-    from prompt_evolver import PromptEvolver
     from live_tool_synth import LiveToolSynthesizer
+    from mcts_search import MCTSSearchEngine, write_and_run_tests
+    from ml_router import TaskFeatureExtractor, build_ml_router
+    from planner import Planner
+    from post_mortem import FailureType, PostMortemEngine
+    from project_planner import ProjectPlanner
+    from prompt_evolver import PromptEvolver
+    from react_worker import ReActWorker, react_worker_enabled
+    from reward_store import RewardStore, compute_reward
     from scaffold_evolver import ScaffoldEvolver
+    from self_correction import ErrorClass, SelfCorrectionEngine
+    from skill_library import SkillLibrary
     from stability_gate import StabilityGate
+    from strategy_config import StrategyRouter
+    from symbol_index import SymbolIndex
+    from task_decomposer import TaskDecomposer
+    from test_runner import TestRunner
+    from verifier import Verifier
+    from worker import Worker
     try:
         from vector_memory import VectorMemory, VectorMemoryUnavailableError
     except ImportError:
         VectorMemory = None  # type: ignore
         VectorMemoryUnavailableError = Exception  # type: ignore
 
+    try:
+        from multi_resolution_context import suggest_level  # noqa: F401
+    except ImportError:
+        suggest_level = None  # type: ignore
+
 
 class Orchestrator:
     """Orchestrates the full Planner-Worker-Verifier pipeline."""
-    
+
     def __init__(self, tracker=None):
         """
         Initialize Orchestrator.
@@ -173,9 +181,35 @@ class Orchestrator:
         self._runtime_session = None
         self._runtime_store = None
         self._virtual_runtime = None
+        self._gui_bus = None  # GuiEventBus — set during execute_feature()
         # Stagnation breaker
         self._failure_history: deque = deque(maxlen=int(os.getenv("AWOS_STAGNATION_WINDOW", "10")))
         self._stagnation_threshold = int(os.getenv("AWOS_STAGNATION_THRESHOLD", "3"))
+        self.react_worker = None
+        if react_worker_enabled():
+            try:
+                self.react_worker = ReActWorker()
+                logger.info("[ReActWorker] enabled (AWOS_REACT_WORKER=1)")
+            except ValueError as exc:
+                logger.warning("[ReActWorker] unavailable (%s) — patch worker fallback", exc)
+
+        # Multi-Resolution Context Pipeline
+        self.context_pipeline = None
+        self.semantic_retriever = None
+        if self.vector_memory is not None:
+            try:
+                from .multi_resolution_context import MultiResolutionContextPipeline
+                from .semantic_retriever import SemanticRetriever
+                self.semantic_retriever = SemanticRetriever(
+                    vector_memory=self.vector_memory,
+                )
+                self.context_pipeline = MultiResolutionContextPipeline(
+                    semantic_retriever=self.semantic_retriever,
+                )
+                self._suggest_context_level = suggest_level  # noqa: F821
+                logger.info("[MultiResContext] pipeline initialised")
+            except Exception as exc:
+                logger.warning("[MultiResContext] pipeline unavailable (%s)", exc)
 
     def _runtime_session_enabled(self) -> bool:
         return os.getenv("AWOS_RUNTIME_SESSION", "").lower() in ("1", "true", "yes")
@@ -199,6 +233,19 @@ class Orchestrator:
                         messages=[{"role": "user", "content": prompt}],
                         max_tokens=120,
                         temperature=0.3,
+                    )
+                    return response.choices[0].message.content or ""
+                # Fallback: OpenRouter (cheap, diverse models)
+                if hasattr(worker, "openrouter_client") and worker.openrouter_client is not None:
+                    response = worker.openrouter_client.chat.completions.create(
+                        model="openrouter/auto",
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=120,
+                        temperature=0.3,
+                        extra_headers={
+                            "HTTP-Referer": "https://github.com/999-sbpatel/AWOS_coding_agent",
+                            "X-OpenRouter-Title": "AWOS",
+                        },
                     )
                     return response.choices[0].message.content or ""
                 # Fallback: OpenAI mini (cheap-only — no Haiku)
@@ -333,23 +380,23 @@ class Orchestrator:
         """
         if result.get("success"):
             return False
-        
+
         failure_kind = result.get("failure_kind", "unknown")
         error = result.get("verify_error") or result.get("worker_error", "")
         file_path = result["task"].get("path") or result["task"].get("file", "")
-        
+
         sig = self._failure_signature(failure_kind, error[:200], file_path)
         self._failure_history.append((sig, result["task_id"]))
-        
+
         sig_count = sum(1 for s, _ in self._failure_history if s == sig)
-        
+
         if sig_count >= self._stagnation_threshold:
             logger.warning(
                 "[BREAKER] Stagnation detected: signature %s repeated %d times",
                 sig[:8], sig_count
             )
             return True
-        
+
         return False
 
     def _log_mcts_trace(self, task: dict, task_id: Any, result, features: list) -> None:
@@ -503,7 +550,7 @@ class Orchestrator:
                 "time_elapsed": 12.5
             }
         """
-        
+
         start_time = time.time()
         self.execution_log = []  # Reset log for each run
 
@@ -514,10 +561,13 @@ class Orchestrator:
         )
 
         # ── Phase 6: VectorMemory — index codebase for semantic retrieval ──
+        _vm_start = time.time()
         if self.vector_memory is not None:
             try:
                 _n = self.vector_memory.index_codebase(codebase_root)
                 logger.info("[VectorMemory] indexed %d chunks from %s", _n, codebase_root)
+                if self._gui_bus:
+                    self._gui_bus.emit_codebase_indexed(_n, time.time() - _vm_start)
             except Exception as _vm_exc:
                 logger.warning("[VectorMemory] index_codebase failed: %s", _vm_exc)
 
@@ -559,6 +609,16 @@ class Orchestrator:
                 f"({self._runtime_session.status.value})"
             )
 
+            # ── GuiEventBus: structured event streaming ──────────────────
+            try:
+                from .gui_events import GuiEventBus
+            except ImportError:
+                from gui_events import GuiEventBus
+            _session_id = self._runtime_session.session_id
+            self._gui_bus = GuiEventBus(_session_id, goal)
+            self._gui_bus.emit_session_start(goal, repo_root)
+            print(f"[EVENTS] GuiEventBus started for session {_session_id}")
+
         # ── Worktree sandbox (optional) ─────────────────────────────────
         self._virtual_runtime = None
         if self._runtime_session and self._runtime_store:
@@ -582,15 +642,28 @@ class Orchestrator:
         if branch:
             print(f"[GIT] Working on branch '{branch}'")
         else:
-            print(f"[GIT] No git repo — using in-memory file backups")
-        
+            print("[GIT] No git repo — using in-memory file backups")
+
         # Auto-discover codebase context if not provided
         if codebase_context is None:
             codebase_context = self._discover_codebase_context(codebase_root)
-        
-        # Build symbol index for cross-file awareness (Phase 3)
-        sym_index = SymbolIndex(codebase_root)
-        sym_index.build()
+
+        # Build/Load symbol index for cross-file awareness (Phase 3)
+        _index_path = str(Path(".awos") / "symbol_index.json")
+        sym_index = SymbolIndex.load(_index_path)
+        if sym_index is not None:
+            # Loaded from cache — only reparse changed files
+            _changed = sym_index.rebuild_changed()
+            logger.info(
+                "[SymbolIndex] loaded from cache (%d changed, %d files)",
+                _changed, len(sym_index._cache),
+            )
+        else:
+            # Full build from scratch
+            sym_index = SymbolIndex(codebase_root)
+            sym_index.build()
+            sym_index.save(_index_path)
+            logger.info("[SymbolIndex] built from scratch — %s", sym_index.summary())
         print(f"[SYMBOLS] {sym_index.summary()}")
 
         # ── Goal Clarification (Phase 1 & 3) — NEW ──────────────────────────
@@ -599,18 +672,18 @@ class Orchestrator:
             try:
                 from .goal_clarifier import clarify_goal
                 from .plan_reviewer import review_plan
-                
+
                 print("\n[CLARIFICATION] Analyzing goal...")
                 clarified = clarify_goal(goal, interactive=True)
-                
+
                 if clarified.is_ambiguous and not clarified.clarifying_questions:
                     # Questions were answered, use enriched goal
                     goal = clarified.to_enriched_prompt()
-                    print(f"[CLARIFICATION] Goal clarified")
+                    print("[CLARIFICATION] Goal clarified")
                 elif clarified.is_ambiguous:
                     # Non-interactive or failed, proceed with original
-                    print(f"[CLARIFICATION] Warning: Goal may be ambiguous")
-                
+                    print("[CLARIFICATION] Warning: Goal may be ambiguous")
+
                 # Store clarified goal for plan review
                 _clarified_goal = clarified
             except Exception as exc:
@@ -622,6 +695,16 @@ class Orchestrator:
         # ── LiveRenderer: real-time terminal UI ────────────────────────────
         _live = LiveRenderer()
         _live.session_start(goal, n_files=getattr(sym_index, '_file_count', 0))
+
+        # ── Exploration phase (pre-plan grep/find) ─────────────────────────
+        _exploration_data: dict = {}
+        if exploration_enabled() and pre_planned_tasks is None:
+            print("\n[EXPLORE] Pre-plan repository scan...")
+            _exploration_data = run_exploration(goal, codebase_root)
+            codebase_context = enrich_codebase_context(codebase_context, _exploration_data)
+            n_hits = len(_exploration_data.get("grep_hits", []))
+            n_files = len(_exploration_data.get("hit_files", []))
+            print(f"[EXPLORE] {n_hits} grep hit(s) across {n_files} file(s)")
 
         # Phase 1: Planning — skip if caller already built a cheap plan
         if pre_planned_tasks is not None:
@@ -651,7 +734,7 @@ class Orchestrator:
                         plan = CheapPlanner().plan(
                             goal, codebase_context, tracker=self.tracker,
                         )
-                    print(f"[PLANNER] Fell back to CheapPlanner (Gemini Flash)")
+                    print("[PLANNER] Fell back to CheapPlanner (Gemini Flash)")
                 except Exception as e:
                     return {
                         "success": False,
@@ -668,13 +751,20 @@ class Orchestrator:
             print(f"[PLANNER] Generated {len(tasks)} tasks:")
             for task in tasks:
                 print(f"  Task {task['task_id']}: {task['action']} (complexity: {task['complexity']})")
-        
+
+        # ── GuiEventBus: plan_generated ─────────────────────────────────────
+        if self._gui_bus:
+            self._gui_bus.emit_plan_generated(len(tasks), [
+                {"task_id": t["task_id"], "action": t["action"], "complexity": t.get("complexity", 0)}
+                for t in tasks
+            ])
+
         # ── Plan Review Checkpoint (Phase 2) — NEW ───────────────────────────
         # Feature flag: AWOS_ENABLE_PLAN_REVIEW
         if os.getenv("AWOS_ENABLE_PLAN_REVIEW", "").lower() in ("1", "true", "yes"):
             try:
                 from .plan_reviewer import review_plan
-                
+
                 # Extract files and acceptance from clarified goal if available
                 files_to_modify = []
                 acceptance = None
@@ -689,7 +779,7 @@ class Orchestrator:
                             else:
                                 files_to_modify.append(file)
                     files_to_modify = list(set(files_to_modify)) if files_to_modify else None
-                
+
                 # Review plan with user
                 review_result = review_plan(
                     goal=goal,
@@ -699,7 +789,7 @@ class Orchestrator:
                     interactive=True,
                     auto_approve=auto_approve_plan,
                 )
-                
+
                 if not review_result.approved:
                     # Plan rejected or needs refinement
                     if review_result.feedback:
@@ -707,7 +797,7 @@ class Orchestrator:
                         print("[PLAN REVIEW] Please rerun with refined goal")
                     elif review_result.rejection_reason:
                         print(f"\n[PLAN REVIEW] Plan rejected: {review_result.rejection_reason}")
-                    
+
                     return {
                         "success": False,
                         "goal": goal,
@@ -720,17 +810,17 @@ class Orchestrator:
                         "plan_review_feedback": review_result.feedback or review_result.rejection_reason,
                         "time_elapsed": time.time() - start_time
                     }
-                
+
                 print("\n[PLAN REVIEW] ✓ Plan approved, proceeding with execution")
-                
+
             except Exception as exc:
                 logger.warning("[PLAN REVIEW] Failed (%s), proceeding without review", exc)
-        
+
         _live.planning_done(
             tasks,
             model="CheapPlanner" if is_cheap_only() else self.planner.__class__.__name__,
         )
-        
+
         if self._runtime_session and self._runtime_store:
             self._runtime_session.progress.total_tasks = len(tasks)
             self._runtime_store.save(self._runtime_session)
@@ -798,6 +888,7 @@ class Orchestrator:
             session=session,
             _live=_live,
             _total_tasks=len(tasks),
+            exploration=_exploration_data,
         )
 
         while True:
@@ -821,12 +912,12 @@ class Orchestrator:
                             failed_task_id=r["task_id"],
                             total_tasks=len(tasks),
                         )
-                    
+
                     # ── Stagnation breaker ──────────────────────────────────
                     if self._check_stagnation(r):
                         from .runtime_session import SessionStatus
                         self._runtime_session.pause_reason = "STAGNATION"
-                        print(f"\n[BREAKER] Stagnation detected: same error pattern repeating")
+                        print("\n[BREAKER] Stagnation detected: same error pattern repeating")
                         print(f"[BREAKER] Task {r['task_id']} stuck — auto-pausing session")
                         print(f"[BREAKER] Review: awos sessions show {self._runtime_session.session_id}")
                         self._runtime_store.finalize(self._runtime_session, SessionStatus.PAUSED)
@@ -848,7 +939,7 @@ class Orchestrator:
             failed_tasks = [r["task"] for r in results if not r["success"]]
 
             # ── Verify-fail → replan (before decomposition) ─────────────────
-            if replan_depth < max_replan and not os.getenv("AWOS_REPLAN_DISABLE", "").lower() in (
+            if replan_depth < max_replan and os.getenv("AWOS_REPLAN_DISABLE", "").lower() not in (
                 "1", "true", "yes",
             ):
                 replanned: list[dict] = []
@@ -948,10 +1039,24 @@ class Orchestrator:
 
         # ── EvalReport: auto-run health dashboard after every session ──
         try:
-            from .eval_report import _load_spans, _analyse, _feature_status, _load_skills, _load_mcts_traces, _render
+            from .eval_report import (
+                _analyse,
+                _feature_status,
+                _load_mcts_traces,
+                _load_skills,
+                _load_spans,
+                _render,
+            )
         except ImportError:
             try:
-                from eval_report import _load_spans, _analyse, _feature_status, _load_skills, _load_mcts_traces, _render
+                from eval_report import (
+                    _analyse,
+                    _feature_status,
+                    _load_mcts_traces,
+                    _load_skills,
+                    _load_spans,
+                    _render,
+                )
             except ImportError:
                 _render = None
         if _render is not None:
@@ -964,10 +1069,10 @@ class Orchestrator:
                 _render(_metrics, _features, _skills_n, _mcts_n)
             except Exception as _er:
                 logger.debug("[eval_report] skipped: %s", _er)
-        
+
         # Phase 3: Summary
         print(f"\n{'='*60}")
-        print(f"EXECUTION SUMMARY")
+        print("EXECUTION SUMMARY")
         print(f"{'='*60}")
         print(f"Goal:            {goal}")
         print(f"Tasks Completed: {tasks_completed}/{total_tasks_all_cycles}")
@@ -975,14 +1080,14 @@ class Orchestrator:
         if decomposition_depth > 0:
             print(f"Decomposition:   {decomposition_depth} cycle(s)")
         print(f"Time Elapsed:    {elapsed:.1f}s")
-        
+
         if self.tracker:
             status = self.tracker.get_budget_status()
             print(f"Total Cost:      ${status.get('total_cost', 0):.4f}")
             print(f"Remaining Budget:{status.get('remaining_budget', 0):.2f}")
-        
+
         print(f"{'='*60}\n")
-        
+
         # ── Integration Review (T4 model checks cross-task coherence) ────
         review = {"passed": True, "issues": [], "suggestions": []}
         if overall_success:
@@ -1063,6 +1168,17 @@ class Orchestrator:
             except Exception as _slm_exc:
                 logger.debug("[SelfLearningMetrics] report skipped: %s", _slm_exc)
 
+        # ── GuiEventBus: session_done ────────────────────────────────────────
+        if self._gui_bus:
+            self._gui_bus.emit_session_done(
+                completed=tasks_completed,
+                failed=tasks_failed,
+                total_cost=sum(
+                    log.get("cost_usd", 0) for log in self.execution_log
+                ) if self.execution_log else 0.0,
+                elapsed=elapsed,
+            )
+
         return {
             "success": overall_success,
             "goal": goal,
@@ -1083,7 +1199,7 @@ class Orchestrator:
                 else None
             ),
         }
-    
+
     # ── Batch / Parallel Execution ─────────────────────────────────────────────
 
     def _run_task_batch(
@@ -1130,6 +1246,213 @@ class Orchestrator:
                 break
         return results
 
+    def _execute_task_via_react(
+        self,
+        task: dict,
+        ctx: dict,
+        *,
+        task_id,
+        file_path: str,
+        file_content: str,
+        esc_decision,
+        _span,
+        _strategy,
+        _task_ts: float,
+        _live_t,
+        _task_usage: dict,
+        budget_left: float,
+    ) -> dict:
+        """Execute one task via ReAct tool loop (grep → read → edit → test)."""
+        import time as _time
+
+        codebase_root = ctx["codebase_root"]
+        codebase_context = ctx["codebase_context"]
+        git = ctx["git"]
+        session = ctx["session"]
+        exploration = (ctx.get("exploration") or {}).get("exploration_summary", "")
+
+        print(f"[TASK {task_id}] ReAct worker ({esc_decision.spec.name})")
+        if _live_t:
+            _live_t.worker_start(1, esc_decision.spec.name)
+
+        # ── ReAct step callback: emit agent thinking + tool calls live ─────
+        _react_turn = 0
+
+        def _on_react_step(thought: str, action: str, action_input: dict,
+                           observation: str, success: bool, latency_ms: float) -> None:
+            nonlocal _react_turn
+            _react_turn += 1
+            if not self._gui_bus:
+                return
+            # Emit thinking for non-trivial thoughts
+            if thought and len(thought) > 5:
+                self._gui_bus.emit_agent_thinking(thought, _react_turn)
+            # Emit tool call
+            self._gui_bus.emit_agent_tool_call(
+                action=action,
+                action_input=action_input,
+                observation=observation,
+                success=success,
+                latency_ms=latency_ms,
+                turn=_react_turn,
+            )
+
+        react_result = self.react_worker.execute_task(
+            task=task,
+            file_content=file_content,
+            codebase_context=codebase_context,
+            project_root=codebase_root,
+            tracker=self.tracker,
+            model_spec=esc_decision.spec,
+            exploration_context=exploration,
+            step_callback=_on_react_step,
+        )
+        try:
+            from .usage_record import merge_result_usage
+        except ImportError:
+            from usage_record import merge_result_usage
+        merge_result_usage(_task_usage, react_result)
+
+        steps = react_result.get("steps") or []
+        for step in steps:
+            trace = ReasoningTrace(
+                thought=getattr(step, "thought", ""),
+                action=getattr(step, "action", ""),
+                action_input=getattr(step, "action_input", {}),
+                observation=getattr(step, "observation", "")[:500],
+                success=getattr(step, "success", False),
+                latency_ms=getattr(step, "latency_ms", 0.0),
+                model=react_result.get("model_used", esc_decision.spec.name),
+            )
+            session.add_trace(trace)
+
+        success = bool(react_result.get("success"))
+        test_result = react_result.get("test_result")
+        files_changed = react_result.get("files_changed") or []
+
+        # ── GuiEventBus: file_edit for each changed file ──────────────────
+        if self._gui_bus:
+            for rel in files_changed:
+                self._gui_bus.emit_file_edit(
+                    path=rel,
+                    status="modified",
+                    lines_added=0,  # Will be detailed in follow-up
+                    lines_removed=0,
+                )
+
+        if _live_t:
+            _live_t.worker_done(success, n_edits=len(files_changed))
+
+        if success:
+            print(f"[TASK {task_id}] REACT OK: {react_result.get('summary', 'done')[:200]}")
+            for rel in files_changed:
+                abs_path = os.path.join(codebase_root, rel)
+                git.record_modified(abs_path)
+            self._update_task_node(task_id, "completed", session.session_id)
+            self.execution_log.append({
+                "task_id": task_id,
+                "status": "completed",
+                "reason": f"ReAct: {react_result.get('summary', 'completed')[:120]}",
+            })
+            self.performance.record(
+                tool="ReActWorker",
+                model=esc_decision.spec.name,
+                task_type=self.performance._classify_task_type(task.get("action", "")),
+                success=True,
+                latency_ms=(_time.time() - _task_ts) * 1000,
+                cost=float(_task_usage.get("cost_usd", 0)) or esc_decision.spec.cost_per_req,
+            )
+        else:
+            err = react_result.get("error", "ReAct worker failed")
+            print(f"[TASK {task_id}] REACT FAILED: {err}")
+            for rel in files_changed:
+                git.rollback_file(os.path.join(codebase_root, rel))
+            self._update_task_node(task_id, "failed", session.session_id)
+            self.execution_log.append({
+                "task_id": task_id,
+                "status": "failed",
+                "reason": err,
+            })
+            self._persist_worker_failure_pattern(task, task_id, err)
+            self.performance.record(
+                tool="ReActWorker",
+                model=esc_decision.spec.name,
+                task_type=self.performance._classify_task_type(task.get("action", "")),
+                success=False,
+                latency_ms=(_time.time() - _task_ts) * 1000,
+                cost=float(_task_usage.get("cost_usd", 0)) or esc_decision.spec.cost_per_req,
+                error_type="react_fail",
+            )
+
+        if test_result is not None and not getattr(test_result, "no_tests_found", True):
+            print(
+                f"[TASK {task_id}] Tests: {test_result.passed} passed, "
+                f"{test_result.failed} failed (pass_rate={test_result.pass_rate:.2%})"
+            )
+            if _live_t:
+                _live_t.test_result(test_result.passed, test_result.passed + test_result.failed)
+            # ── GuiEventBus: test_result ────────────────────────────────
+            if self._gui_bus:
+                self._gui_bus.emit_test_result(
+                    test_name=task.get("action", f"task_{task_id}"),
+                    passed=test_result.failed == 0,
+                    duration=test_result.duration_sec if hasattr(test_result, 'duration_sec') else 0.0,
+                    output=test_result.output if hasattr(test_result, 'output') else "",
+                )
+            task["test_result"] = test_result
+            if test_result.failed > 0:
+                success = False
+
+        _cost = float(_task_usage.get("cost_usd", 0)) or esc_decision.spec.cost_per_req
+        _aid = esc_decision.spec.level.value
+        if success and test_result is not None and not test_result.no_tests_found and not test_result.timed_out:
+            _reward = compute_reward(test_result.pass_rate, _aid, _cost)
+            _success = test_result.pass_rate >= 1.0
+        else:
+            _reward = compute_reward(success, _aid, _cost)
+            _success = success
+
+        _features = self._feature_extractor.extract(task, self.escalation.failure_count(str(task_id)))
+        self.reward_store.store(
+            task=task, action_id=_aid, features=_features, success=_success,
+            cost_usd=_cost, model_name=esc_decision.spec.name,
+            input_tokens=int(_task_usage.get("input_tokens", 0)),
+            output_tokens=int(_task_usage.get("output_tokens", 0)),
+        )
+        self.escalation.record_outcome(str(task_id), esc_decision.spec.level, _success, task=task, reward=_reward)
+        self.strategy_router.update(task, _strategy.name, _reward)
+
+        _span.complete_ts = _time.time()
+        _span.success = _success
+        _span.attempt_count = len(steps) or 1
+        _span.input_tokens = int(_task_usage.get("input_tokens", 0))
+        _span.context_level = int(_task_usage.get("context_level", 0))
+        _span.context_tokens = int(_task_usage.get("context_tokens", 0))
+        _span.output_tokens = int(_task_usage.get("output_tokens", 0))
+        _span.cost_usd = _cost
+        _span.strategy = _strategy.name
+        self.obs_store.record(_span)
+        print(_span.one_liner())
+
+        if _live_t:
+            _live_t.task_done(_success, elapsed=_time.time() - _task_ts)
+
+        # ── GuiEventBus: task_complete ──────────────────────────────────────
+        if self._gui_bus:
+            self._gui_bus.emit_task_complete(
+                task_id=task_id,
+                success=_success,
+                cost_usd=_cost,
+                n_edits=len(files_changed),
+                error="" if _success else (react_result.get("error", "")),
+            )
+
+        out = {"task_id": task_id, "success": _success, "task": task, "react": True}
+        if not _success:
+            out["failure_kind"] = "react_fail"
+            out["verify_error"] = react_result.get("error", "")
+        return out
+
     def _execute_single_task(self, task: dict, ctx: dict) -> dict:
         """
         Execute one task through the Worker → Verifier pipeline.
@@ -1148,7 +1471,7 @@ class Orchestrator:
         session = ctx["session"]
 
         task_id = task["task_id"]
-        
+
         # Resolve short filenames to full paths intelligently
         from .file_resolver import resolve_file
         try:
@@ -1157,7 +1480,7 @@ class Orchestrator:
         except FileNotFoundError:
             # If resolution fails, try original path (might be already full)
             pass
-        
+
         file_path = os.path.join(codebase_root, task["file"])
 
         _live_t = ctx.get("_live")           # LiveRenderer (optional)
@@ -1182,7 +1505,7 @@ class Orchestrator:
         is_create_task = any(keyword in action_lower for keyword in [
             'initialize', 'create', 'add new', 'generate new', 'write new'
         ])
-        
+
         # Load or initialize file content
         if is_create_task and not Path(file_path).exists():
             # Creating new file - use empty content and ensure parent dir exists
@@ -1229,6 +1552,24 @@ class Orchestrator:
         )
         print(f"[TASK {task_id}] {self.escalation.summary(esc_decision)}")
 
+        # ── GuiEventBus: model_routed + task_start ──────────────────────────
+        if self._gui_bus:
+            _spec = esc_decision.spec
+            self._gui_bus.emit_model_routed(
+                model_name=_spec.name,
+                tier=f"T{_spec.level.value}",
+                reason=esc_decision.reason,
+                cost_estimate=_spec.cost_per_req,
+                provider=_spec.provider,
+            )
+            self._gui_bus.emit_task_start(
+                task_id=task_id,
+                action=task.get("action", ""),
+                file=task.get("file", ""),
+                model_name=_spec.name,
+                model_reason=esc_decision.reason,
+            )
+
         # ── Phase 1: Observability — stamp routing decision ─────────────────
         import time as _time
         _span.routing_ts = _time.time()
@@ -1258,7 +1599,7 @@ class Orchestrator:
         worker_success = False
         max_attempts = 3
         search_replace = None
-        _task_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cost_usd": 0.0}
+        _task_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cost_usd": 0.0, "context_level": 0, "context_tokens": 0}
 
         _strategy = self.strategy_router.select(task)
         logger.debug("[strategy] task=%s → strategy=%s", task_id, _strategy.name)
@@ -1266,6 +1607,30 @@ class Orchestrator:
         _task = task          # working copy; correction hints injected on each failure
         _last_error = ""      # error text from previous attempt
         _last_error_class = None  # ErrorClass from previous failure (for store retrieval)
+
+        # ── Multi-Resolution Context: build tiered assembly ──────────────
+        _context_assembly = None
+        if self.context_pipeline is not None:
+            try:
+                _level = (
+                    self._suggest_context_level(_task)
+                    if hasattr(self, "_suggest_context_level")
+                    else 2
+                )
+                _context_assembly = self.context_pipeline.build(
+                    task=_task,
+                    level=_level,
+                    file_content=file_content,
+                )
+                logger.info(
+                    "[MultiResContext] level=%d tokens=%d",
+                    _context_assembly.level,
+                    _context_assembly.estimated_tokens,
+                )
+                _task_usage["context_level"] = _context_assembly.level
+                _task_usage["context_tokens"] = _context_assembly.estimated_tokens
+            except Exception as _ctx_exc:
+                logger.debug("[MultiResContext] build skipped: %s", _ctx_exc)
 
         # ── Phase 6: VectorMemory — retrieve relevant code chunks ──────────
         _vector_chunks = []
@@ -1278,6 +1643,23 @@ class Orchestrator:
         # ── Phase 1: Observability — stamp worker start ───────────────────
         _span.worker_start_ts = _time.time()
         _span.strategy = _strategy.name
+
+        # ── ReAct worker path (default ON via AWOS_REACT_WORKER=1) ───────
+        if self.react_worker is not None and react_worker_enabled():
+            return self._execute_task_via_react(
+                task,
+                ctx,
+                task_id=task_id,
+                file_path=file_path,
+                file_content=file_content,
+                esc_decision=esc_decision,
+                _span=_span,
+                _strategy=_strategy,
+                _task_ts=_task_ts,
+                _live_t=_live_t,
+                _task_usage=_task_usage,
+                budget_left=budget_left,
+            )
 
         for attempt in range(1, max_attempts + 1):
             if attempt > 1:
@@ -1344,7 +1726,7 @@ class Orchestrator:
                     f"[TASK {task_id}] Retry {attempt}: "
                     f"{esc_decision.spec.name} + correction [{_hint.approach_name}]"
                     + (f" + {len(_past)} past critique(s)" if _past else "")
-                    + (f" + tool output" if _tool_output else "")
+                    + (" + tool output" if _tool_output else "")
                 )
                 if _live_t:
                     _live_t.retry_notice(attempt, _last_error, _hint.approach_name)
@@ -1367,6 +1749,7 @@ class Orchestrator:
                     skill_library=self.skill_library,
                     vector_chunks=_vector_chunks,
                     prompt_evolver=self.prompt_evolver,
+                    context_assembly=_context_assembly,
                 )
                 try:
                     from .usage_record import merge_result_usage
@@ -1420,9 +1803,9 @@ class Orchestrator:
         # ── MCTS fallback — search + verify after worker failure (default on) ──
         if not worker_success:
             try:
-                from .mcts_policy import should_run_mcts_fallback, mcts_rollout_budget
+                from .mcts_policy import mcts_rollout_budget, should_run_mcts_fallback
             except ImportError:
-                from mcts_policy import should_run_mcts_fallback, mcts_rollout_budget
+                from mcts_policy import mcts_rollout_budget, should_run_mcts_fallback
             if should_run_mcts_fallback(task, worker_failed=True):
                 self._persist_worker_failure_pattern(task, task_id, _last_error)
                 try:
@@ -1489,6 +1872,8 @@ class Orchestrator:
             _span.success = False
             _span.attempt_count = max_attempts
             _span.input_tokens = int(_task_usage.get("input_tokens", 0))
+            _span.context_level = int(_task_usage.get("context_level", 0))
+            _span.context_tokens = int(_task_usage.get("context_tokens", 0))
             _span.output_tokens = int(_task_usage.get("output_tokens", 0))
             _span.cost_usd = _cost
             self.obs_store.record(_span)
@@ -1534,6 +1919,7 @@ class Orchestrator:
                         tracker=self.tracker,
                         attempt=verify_attempt + 1,
                         symbol_index=sym_index,
+                        context_assembly=_context_assembly,
                     )
                     if search_replace.get("success"):
                         continue
@@ -1675,6 +2061,8 @@ class Orchestrator:
         _span.success = _success
         _span.attempt_count = attempt  # loop var holds the attempt number where worker succeeded
         _span.input_tokens = int(_task_usage.get("input_tokens", 0))
+        _span.context_level = int(_task_usage.get("context_level", 0))
+        _span.context_tokens = int(_task_usage.get("context_tokens", 0))
         _span.output_tokens = int(_task_usage.get("output_tokens", 0))
         _span.cost_usd = _cost
         self.obs_store.record(_span)
@@ -1722,20 +2110,20 @@ class Orchestrator:
         modules = []
         files = []
         symbols = []  # class/function names for richer planning context
-        
+
         root = Path(codebase_root)
-        
+
         for py_file in root.rglob("*.py"):
             if "__pycache__" in str(py_file) or ".git" in str(py_file):
                 continue
-            
+
             rel_path = str(py_file.relative_to(codebase_root))
             files.append(rel_path)
-            
+
             if "__init__.py" not in str(py_file):
                 module_name = rel_path.replace(".py", "").replace("/", ".")
                 modules.append(module_name)
-            
+
             # Extract top-level class and function names via AST
             try:
                 source = py_file.read_text(errors="ignore")
@@ -1748,11 +2136,11 @@ class Orchestrator:
                             symbols.append(f"{rel_path}::def {node.name}")
             except (SyntaxError, Exception):
                 pass
-        
+
         architecture = "Python project with modular structure"
         if (root / "scaffold").exists():
             architecture = "AWOS-based Python agent framework (planner/worker/verifier pattern)"
-        
+
         return {
             "modules": ", ".join(modules[:8]) + ("..." if len(modules) > 8 else ""),
             "files": files[:30],

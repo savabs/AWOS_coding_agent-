@@ -1,0 +1,1402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AWOS — CI Rescue Agent</title>
+  <!-- CodeMirror for syntax highlighting -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/dracula.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/python/python.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/javascript/javascript.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/clike/clike.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/shell/shell.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/yaml/yaml.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/markdown/markdown.min.js"></script>
+  <!-- Marked.js for markdown rendering -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: #0d1117;
+      color: #c9d1d9;
+      height: 100vh;
+      overflow: hidden;
+    }
+    
+    .container {
+      display: grid;
+      grid-template-columns: 350px 1fr;
+      height: 100vh;
+    }
+    
+    /* Sidebar */
+    .sidebar {
+      background: #161b22;
+      border-right: 1px solid #30363d;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .sidebar-header {
+      padding: 20px;
+      border-bottom: 1px solid #30363d;
+    }
+    
+    .logo {
+      font-size: 24px;
+      font-weight: 700;
+      color: #58a6ff;
+      margin-bottom: 10px;
+    }
+    
+    .tagline {
+      font-size: 13px;
+      color: #8b949e;
+    }
+    
+    .stats {
+      padding: 20px;
+      border-bottom: 1px solid #30363d;
+    }
+    
+    .stat-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    
+    .stat-card {
+      background: #0d1117;
+      padding: 12px;
+      border-radius: 6px;
+      border: 1px solid #30363d;
+    }
+    
+    .stat-label {
+      font-size: 11px;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+    
+    .stat-value {
+      font-size: 20px;
+      font-weight: 600;
+      color: #58a6ff;
+    }
+    
+    .history {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+    }
+    
+    .history-title {
+      font-size: 12px;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+    }
+    
+    .history-item {
+      background: #0d1117;
+      padding: 12px;
+      border-radius: 6px;
+      border: 1px solid #30363d;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .history-item:hover {
+      border-color: #58a6ff;
+      background: #161b22;
+    }
+    
+    .history-item.active {
+      border-color: #58a6ff;
+      background: #161b22;
+    }
+    
+    .history-goal {
+      font-size: 13px;
+      color: #c9d1d9;
+      margin-bottom: 6px;
+      line-height: 1.4;
+    }
+    
+    .history-meta {
+      display: flex;
+      gap: 12px;
+      font-size: 11px;
+      color: #8b949e;
+    }
+    
+    .status-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    
+    .status-running {
+      background: #1f6feb33;
+      color: #58a6ff;
+    }
+    
+    .status-completed {
+      background: #23863633;
+      color: #3fb950;
+    }
+    
+    .status-failed {
+      background: #da363333;
+      color: #f85149;
+    }
+    
+    /* Main content */
+    .main {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    
+    .main-header {
+      padding: 20px;
+      border-bottom: 1px solid #30363d;
+      background: #161b22;
+    }
+    
+    .main-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #c9d1d9;
+      margin-bottom: 8px;
+    }
+    
+    .progress-bar {
+      width: 100%;
+      height: 6px;
+      background: #30363d;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 12px;
+    }
+    
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #58a6ff, #3fb950);
+      transition: width 0.3s ease;
+    }
+    
+    .progress-text {
+      font-size: 12px;
+      color: #8b949e;
+      margin-top: 6px;
+    }
+    
+    /* Terminal output */
+    .terminal {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    
+    .log-entry {
+      margin-bottom: 12px;
+      padding: 8px 12px;
+      border-radius: 4px;
+      animation: fadeIn 0.3s ease;
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .log-info {
+      background: #161b22;
+      border-left: 3px solid #58a6ff;
+    }
+    
+    .log-success {
+      background: #161b22;
+      border-left: 3px solid #3fb950;
+    }
+    
+    .log-error {
+      background: #161b22;
+      border-left: 3px solid #f85149;
+    }
+    
+    .log-warning {
+      background: #161b22;
+      border-left: 3px solid #d29922;
+    }
+    
+    .log-task {
+      background: #161b22;
+      border-left: 3px solid #a371f7;
+    }
+    
+    .log-time {
+      color: #8b949e;
+      font-size: 11px;
+      margin-bottom: 4px;
+    }
+    
+    .log-message {
+      color: #c9d1d9;
+    }
+    
+    .log-highlight {
+      color: #58a6ff;
+      font-weight: 600;
+    }
+    
+    /* Diff view */
+    .diff-view {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      margin-top: 12px;
+      overflow: hidden;
+    }
+    
+    .diff-header {
+      background: #161b22;
+      padding: 12px;
+      border-bottom: 1px solid #30363d;
+      font-size: 12px;
+      color: #8b949e;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .diff-content {
+      padding: 0;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      overflow-x: auto;
+    }
+    
+    /* CodeMirror customization */
+    .CodeMirror {
+      height: auto !important;
+      background: #0d1117 !important;
+      color: #c9d1d9 !important;
+    }
+    
+    .CodeMirror-gutters {
+      background: #161b22 !important;
+      border-right: 1px solid #30363d !important;
+    }
+    
+    .CodeMirror-linenumber {
+      color: #8b949e !important;
+    }
+    
+    .CodeMirror-selected {
+      background: #264f78 !important;
+    }
+    
+    .CodeMirror-focused .CodeMirror-selected {
+      background: #264f78 !important;
+    }
+    
+    .CodeMirror-cursor {
+      border-left: 2px solid #58a6ff !important;
+    }
+    
+    /* Diff line styling */
+    .diff-line {
+      padding: 2px 8px;
+      white-space: pre;
+      font-family: 'Monaco', 'Menlo', monospace;
+    }
+    
+    .diff-add {
+      background: #23863633;
+      color: #3fb950;
+    }
+    
+    .diff-remove {
+      background: #da363333;
+      color: #f85149;
+    }
+    
+    .diff-context {
+      color: #8b949e;
+    }
+    
+    /* Empty state */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: #8b949e;
+      text-align: center;
+    }
+    
+    .empty-icon {
+      font-size: 64px;
+      margin-bottom: 20px;
+      opacity: 0.5;
+    }
+    
+    .empty-title {
+      font-size: 20px;
+      font-weight: 600;
+      color: #c9d1d9;
+      margin-bottom: 8px;
+    }
+    
+    .empty-text {
+      font-size: 14px;
+      max-width: 400px;
+      line-height: 1.6;
+    }
+    
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    
+    ::-webkit-scrollbar-track {
+      background: #0d1117;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+      background: #30363d;
+      border-radius: 4px;
+    }
+    
+    ::-webkit-scrollbar-thumb:hover {
+      background: #484f58;
+    }
+    
+    /* Chat View */
+    .chat-view {
+      display: none;
+      flex-direction: column;
+      height: 100vh;
+    }
+    
+    .chat-view.active {
+      display: flex;
+    }
+    
+    .chat-header {
+      padding: 20px;
+      border-bottom: 1px solid #30363d;
+      background: #161b22;
+    }
+    
+    .chat-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #c9d1d9;
+      margin-bottom: 8px;
+    }
+    
+    .chat-mode-selector {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    
+    .mode-btn {
+      padding: 6px 12px;
+      border: 1px solid #30363d;
+      background: #0d1117;
+      color: #8b949e;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+    
+    .mode-btn:hover {
+      border-color: #58a6ff;
+      color: #58a6ff;
+    }
+    
+    .mode-btn.active {
+      background: #58a6ff;
+      color: #0d1117;
+      border-color: #58a6ff;
+    }
+    
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+    }
+    
+    .chat-message {
+      margin-bottom: 16px;
+      display: flex;
+      gap: 12px;
+    }
+    
+    .chat-message.user {
+      flex-direction: row-reverse;
+    }
+    
+    .chat-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+    
+    .chat-message.user .chat-avatar {
+      background: #58a6ff;
+      color: #0d1117;
+    }
+    
+    .chat-message.assistant .chat-avatar {
+      background: #3fb950;
+      color: #0d1117;
+    }
+    
+    .chat-bubble {
+      max-width: 70%;
+      padding: 12px 16px;
+      border-radius: 12px;
+      line-height: 1.5;
+    }
+    
+    .chat-message.user .chat-bubble {
+      background: #1f6feb;
+      color: #ffffff;
+      border-bottom-right-radius: 4px;
+    }
+    
+    .chat-message.assistant .chat-bubble {
+      background: #161b22;
+      color: #c9d1d9;
+      border: 1px solid #30363d;
+      border-bottom-left-radius: 4px;
+    }
+    
+    .chat-bubble p {
+      margin: 0 0 8px 0;
+    }
+    
+    .chat-bubble p:last-child {
+      margin-bottom: 0;
+    }
+    
+    .chat-bubble code {
+      background: #0d1117;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 12px;
+    }
+    
+    .chat-bubble pre {
+      background: #0d1117;
+      padding: 12px;
+      border-radius: 6px;
+      overflow-x: auto;
+      margin: 8px 0;
+    }
+    
+    .chat-bubble pre code {
+      background: none;
+      padding: 0;
+    }
+    
+    .chat-input-container {
+      padding: 20px;
+      border-top: 1px solid #30363d;
+      background: #161b22;
+    }
+    
+    .chat-input-wrapper {
+      display: flex;
+      gap: 12px;
+      align-items: flex-end;
+    }
+    
+    .chat-input {
+      flex: 1;
+      padding: 12px 16px;
+      border: 1px solid #30363d;
+      background: #0d1117;
+      color: #c9d1d9;
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: inherit;
+      resize: none;
+      min-height: 44px;
+      max-height: 200px;
+    }
+    
+    .chat-input:focus {
+      outline: none;
+      border-color: #58a6ff;
+    }
+    
+    .chat-send-btn {
+      padding: 12px 24px;
+      background: #58a6ff;
+      color: #0d1117;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .chat-send-btn:hover {
+      background: #79c0ff;
+    }
+    
+    .chat-send-btn:disabled {
+      background: #30363d;
+      color: #8b949e;
+      cursor: not-allowed;
+    }
+    
+    .typing-indicator {
+      display: flex;
+      gap: 4px;
+      padding: 8px 0;
+    }
+    
+    .typing-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #8b949e;
+      animation: typing 1.4s infinite;
+    }
+    
+    .typing-dot:nth-child(2) {
+      animation-delay: 0.2s;
+    }
+    
+    .typing-dot:nth-child(3) {
+      animation-delay: 0.4s;
+    }
+    
+    @keyframes typing {
+      0%, 60%, 100% {
+        transform: translateY(0);
+        opacity: 0.7;
+      }
+      30% {
+        transform: translateY(-10px);
+        opacity: 1;
+      }
+    }
+    
+    .chat-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: #8b949e;
+      text-align: center;
+    }
+    
+    .chat-empty-icon {
+      font-size: 64px;
+      margin-bottom: 20px;
+      opacity: 0.5;
+    }
+    
+    .chat-empty-title {
+      font-size: 20px;
+      font-weight: 600;
+      color: #c9d1d9;
+      margin-bottom: 8px;
+    }
+    
+    .chat-empty-text {
+      font-size: 14px;
+      max-width: 400px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">🔧 AWOS</div>
+        <div class="tagline">CI Rescue Agent</div>
+        <div class="view-tabs" style="display: flex; gap: 8px; margin-top: 12px;">
+          <button class="mode-btn active" data-view="dashboard" onclick="switchView('dashboard')">Dashboard</button>
+          <button class="mode-btn" data-view="chat" onclick="switchView('chat')">Chat</button>
+        </div>
+      </div>
+      
+      <div class="stats">
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-label">Rescues</div>
+            <div class="stat-value" id="stat-rescues">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Tests Fixed</div>
+            <div class="stat-value" id="stat-tests">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Cost</div>
+            <div class="stat-value" id="stat-cost">$0.00</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Savings</div>
+            <div class="stat-value" id="stat-savings">0%</div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="history">
+        <div class="history-title">Recent Sessions</div>
+        <div id="history-list"></div>
+      </div>
+    </div>
+    
+    <!-- Main content -->
+    <div class="main" id="dashboard-view">
+      <div class="main-header">
+        <div class="main-title" id="main-title">Select a session to view</div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+        </div>
+        <div class="progress-text" id="progress-text">No active session</div>
+      </div>
+      
+      <div class="terminal" id="terminal">
+        <div class="empty-state">
+          <div class="empty-icon">🚀</div>
+          <div class="empty-title">Welcome to AWOS CI Rescue</div>
+          <div class="empty-text">
+            Select a session from the sidebar to see the agent in action, or run <code>awos fix-ci</code> to start a new rescue.
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Chat View -->
+    <div class="chat-view" id="chat-view">
+      <div class="chat-header">
+        <div class="chat-title">💬 Chat with AWOS Agent</div>
+        <div class="chat-mode-selector">
+          <button class="mode-btn active" data-mode="qa">Q/A</button>
+          <button class="mode-btn" data-mode="plan">Plan</button>
+          <button class="mode-btn" data-mode="agent">Agent</button>
+        </div>
+      </div>
+      
+      <div class="chat-messages" id="chat-messages">
+        <div class="chat-empty" id="chat-empty">
+          <div class="chat-empty-icon">💬</div>
+          <div class="chat-empty-title">Start a conversation</div>
+          <div class="chat-empty-text">
+            Ask questions about your codebase, plan features, or run the agent to make changes.
+          </div>
+        </div>
+      </div>
+      
+      <div class="chat-input-container">
+        <div class="chat-input-wrapper">
+          <textarea 
+            class="chat-input" 
+            id="chat-input" 
+            placeholder="Ask a question or describe what you want to do..."
+            rows="1"
+          ></textarea>
+          <button class="chat-send-btn" id="chat-send-btn">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    const API = window.location.origin;
+    let eventSource = null;
+    let liveSessionId = null;
+    let tasksTotal = 0;
+    let tasksDone = 0;
+    let sessionCost = 0.0;
+    
+    // Connect to SSE stream for real-time structured events
+    function connectSSE() {
+      if (eventSource) {
+        eventSource.close();
+      }
+      
+      eventSource = new EventSource(`${API}/api/agent/events`);
+      
+      eventSource.onmessage = function(event) {
+        try {
+          const data = JSON.parse(event.data);
+          handleAgentEvent(data);
+        } catch (err) {
+          console.error('Failed to parse SSE data:', err);
+        }
+      };
+      
+      eventSource.onerror = function(error) {
+        console.error('SSE connection error:', error);
+        // Reconnect after 5 seconds
+        setTimeout(connectSSE, 5000);
+      };
+    }
+    
+    // Handle agent events by type
+    function handleAgentEvent(event) {
+      const type = event.type || 'idle';
+      const payload = event.payload || {};
+      
+      switch (type) {
+        case 'session_start':
+          liveSessionId = event.session_id;
+          tasksTotal = 0;
+          tasksDone = 0;
+          sessionCost = 0.0;
+          // Clear terminal
+          document.getElementById('terminal').innerHTML = '';
+          // Show session header
+          addLog('info', `═══ Session started: ${payload.goal || 'CI Rescue'} ═══`);
+          document.getElementById('main-title').textContent = payload.goal || 'CI Rescue';
+          updateProgress();
+          break;
+          
+        case 'plan_generated':
+          tasksTotal = payload.n_tasks || 0;
+          addLog('task', `📋 Plan: ${tasksTotal} tasks generated`);
+          updateProgress();
+          break;
+          
+        case 'model_routed':
+          addLog('info', `🧠 Router: ${payload.model_name || 'Unknown'} (${payload.tier || '?'}) — ${payload.reason || ''}`);
+          if (payload.cost_estimate) {
+            addLog('info', `   Cost: ~$${payload.cost_estimate.toFixed(4)} · Provider: ${payload.provider || '?'}`);
+          }
+          break;
+          
+        case 'task_start':
+          tasksDone++;
+          addLog('task', `📋 Task ${payload.task_id || '?'}: ${payload.action || ''}`);
+          if (payload.model_name) {
+            addLog('info', `   Using: ${payload.model_name} — ${payload.model_reason || ''}`);
+          }
+          updateProgress();
+          break;
+          
+        case 'file_edit':
+          addLog('info', `📝 ${payload.path || '?'} (${payload.status || 'modified'})`);
+          break;
+          
+        case 'test_result':
+          if (payload.passed) {
+            addLog('success', `✅ ${payload.test_name || 'Test'} passed (${(payload.duration || 0).toFixed(1)}s)`);
+          } else {
+            addLog('error', `❌ ${payload.test_name || 'Test'} failed (${(payload.duration || 0).toFixed(1)}s)`);
+          }
+          break;
+          
+        case 'task_complete':
+          if (payload.success) {
+            addLog('success', `✓ Task ${payload.task_id || '?'} done · $${(payload.cost_usd || 0).toFixed(4)}`);
+          } else {
+            addLog('error', `✗ Task ${payload.task_id || '?'} failed: ${payload.error || 'Unknown error'}`);
+          }
+          sessionCost += payload.cost_usd || 0;
+          updateStats();
+          updateProgress();
+          break;
+          
+        case 'session_done':
+          addLog('success', `═══ Session complete: ${payload.completed || 0}/${(payload.completed || 0) + (payload.failed || 0)} tasks · $${(payload.total_cost || 0).toFixed(4)} · ${(payload.elapsed || 0).toFixed(1)}s ═══`);
+          updateStats();
+          updateProgress();
+          break;
+          
+        case 'agent_thinking':
+          // Model's chain-of-thought — show as a dimmed, italic thought line
+          addLog('info', `💭 ${payload.thought || ''}`);
+          break;
+          
+        case 'agent_tool_call':
+          // Tool call — show action name + result
+          const action = payload.action || '';
+          const success = payload.success;
+          const obs = (payload.observation || '').substring(0, 150);
+          if (action === 'finish') {
+            addLog('success', `✅ ${obs}`);
+          } else if (success) {
+            addLog('info', `🔧 ${action} — OK`);
+          } else {
+            addLog('error', `🔧 ${action} — FAILED: ${obs.substring(0, 100)}`);
+          }
+          break;
+          
+        case 'idle':
+          // Keepalive — update status text if no session
+          if (!liveSessionId) {
+            document.getElementById('progress-text').textContent = 'Waiting for agent...';
+          }
+          break;
+          
+        default:
+          // Unknown event type — log raw
+          if (type !== 'idle') {
+            addLog('info', `[${type}]: ${JSON.stringify(payload).substring(0, 200)}`);
+          }
+      }
+    }
+    
+    // Update progress bar
+    function updateProgress() {
+      const progressFill = document.getElementById('progress-fill');
+      const progressText = document.getElementById('progress-text');
+      if (tasksTotal > 0) {
+        const pct = Math.min(100, (tasksDone / tasksTotal) * 100);
+        progressFill.style.width = `${pct}%`;
+        progressText.textContent = `${tasksDone}/${tasksTotal} tasks · $${sessionCost.toFixed(4)}`;
+      } else {
+        progressFill.style.width = '0%';
+        progressText.textContent = liveSessionId ? 'Running...' : 'No active agent';
+      }
+    }
+    
+    // Update stats sidebar
+    function updateStats() {
+      document.getElementById('stat-rescues').textContent = tasksDone || 0;
+      document.getElementById('stat-cost').textContent = `$${sessionCost.toFixed(4)}`;
+    }
+    
+    // Load stats (fallback for when SSE is not available)
+    async function loadStats() {
+      try {
+        const stats = await fetch(`${API}/api/ci-rescue/stats`).then(r => r.json());
+        document.getElementById('stat-rescues').textContent = stats.total_rescues || 0;
+        document.getElementById('stat-tests').textContent = stats.total_tests_fixed || 0;
+        document.getElementById('stat-cost').textContent = `$${(stats.total_cost_usd || 0).toFixed(2)}`;
+        
+        const savings = stats.total_cost_usd > 0 ? 
+          Math.round(((stats.total_cost_usd * 2 - stats.total_cost_usd) / (stats.total_cost_usd * 2)) * 100) : 0;
+        document.getElementById('stat-savings').textContent = `${savings}%`;
+      } catch (err) {
+        console.error('Failed to load stats:', err);
+      }
+    }
+    
+    // Load history
+    async function loadHistory() {
+      try {
+        const history = await fetch(`${API}/api/ci-rescue/history`).then(r => r.json());
+        const list = document.getElementById('history-list');
+        
+        if (history.length === 0) {
+          list.innerHTML = '<div style="color: #8b949e; font-size: 13px;">No sessions yet</div>';
+          return;
+        }
+        
+        list.innerHTML = history.map(session => `
+          <div class="history-item" data-id="${session.session_id}" onclick="loadSession('${session.session_id}')">
+            <div class="history-goal">${escapeHtml(session.goal.substring(0, 60))}...</div>
+            <div class="history-meta">
+              <span class="status-badge status-${session.status}">${session.status}</span>
+              <span>${session.tasks_completed}/${session.tasks_completed + session.tasks_failed} tasks</span>
+              <span>$${(session.total_cost_usd || 0).toFixed(4)}</span>
+            </div>
+          </div>
+        `).join('');
+      } catch (err) {
+        console.error('Failed to load history:', err);
+      }
+    }
+    
+    // Load session details
+    async function loadSession(sessionId) {
+      try {
+        // Highlight active session
+        document.querySelectorAll('.history-item').forEach(el => {
+          el.classList.toggle('active', el.dataset.id === sessionId);
+        });
+        
+        // Load session manifest
+        const manifest = await fetch(`${API}/api/sessions/${sessionId}`).then(r => r.json());
+        const files = await fetch(`${API}/api/sessions/${sessionId}/files`).then(r => r.json());
+        
+        // Update header
+        document.getElementById('main-title').textContent = manifest.goal || 'CI Rescue';
+        
+        const total = manifest.tasks_completed + manifest.tasks_failed;
+        const progress = total > 0 ? (manifest.tasks_completed / total) * 100 : 0;
+        document.getElementById('progress-fill').style.width = `${progress}%`;
+        document.getElementById('progress-text').textContent = 
+          `${manifest.tasks_completed}/${total} tasks completed · $${(manifest.total_cost_usd || 0).toFixed(4)}`;
+        
+        // Show logs
+        const terminal = document.getElementById('terminal');
+        terminal.innerHTML = '';
+        
+        // Add session start log
+        addLog('info', `Session started: ${sessionId}`);
+        addLog('info', `Goal: ${manifest.goal}`);
+        
+        // Add task logs
+        if (manifest.tasks && manifest.tasks.length > 0) {
+          manifest.tasks.forEach((task, idx) => {
+            addLog('task', `Task ${idx + 1}: ${task.action || task.description || 'Unknown task'}`);
+            if (task.status === 'completed') {
+              addLog('success', `✓ Task ${idx + 1} completed`);
+            } else if (task.status === 'failed') {
+              addLog('error', `✗ Task ${idx + 1} failed: ${task.error || 'Unknown error'}`);
+            }
+          });
+        }
+        
+        // Show file diffs
+        if (files.files && files.files.length > 0) {
+          addLog('info', `Modified ${files.files.length} file(s)`);
+          files.files.forEach(file => {
+            showDiff(file);
+          });
+        }
+        
+        // Add completion log
+        if (manifest.status === 'completed') {
+          addLog('success', `✓ Session completed successfully`);
+        } else if (manifest.status === 'failed') {
+          addLog('error', `✗ Session failed`);
+        }
+        
+      } catch (err) {
+        console.error('Failed to load session:', err);
+        addLog('error', `Failed to load session: ${err.message}`);
+      }
+    }
+    
+    // Add log entry
+    function addLog(type, message) {
+      const terminal = document.getElementById('terminal');
+      const time = new Date().toLocaleTimeString();
+      
+      const entry = document.createElement('div');
+      entry.className = `log-entry log-${type}`;
+      entry.innerHTML = `
+        <div class="log-time">${time}</div>
+        <div class="log-message">${escapeHtml(message)}</div>
+      `;
+      
+      terminal.appendChild(entry);
+      terminal.scrollTop = terminal.scrollHeight;
+    }
+    
+    // Show diff with syntax highlighting
+    function showDiff(file) {
+      const terminal = document.getElementById('terminal');
+      
+      const diffView = document.createElement('div');
+      diffView.className = 'diff-view';
+      
+      // Detect language from file extension
+      const language = detectLanguage(file.path);
+      
+      // Create diff content with syntax highlighting
+      let diffContent = '';
+      if (file.hunks && file.hunks.length > 0) {
+        file.hunks.forEach(hunk => {
+          hunk.lines.forEach(line => {
+            const type = line.type === 'add' ? 'diff-add' : 
+                        line.type === 'remove' ? 'diff-remove' : 'diff-context';
+            const prefix = line.type === 'add' ? '+' : 
+                          line.type === 'remove' ? '-' : ' ';
+            diffContent += `<div class="diff-line ${type}">${prefix} ${escapeHtml(line.content)}</div>`;
+          });
+        });
+      } else if (file.unified_diff) {
+        file.unified_diff.split('\n').forEach(line => {
+          const type = line.startsWith('+') && !line.startsWith('+++') ? 'diff-add' :
+                      line.startsWith('-') && !line.startsWith('---') ? 'diff-remove' : 'diff-context';
+          diffContent += `<div class="diff-line ${type}">${escapeHtml(line)}</div>`;
+        });
+      }
+      
+      diffView.innerHTML = `
+        <div class="diff-header">📄 ${escapeHtml(file.path)} (${file.status}) · ${language}</div>
+        <div class="diff-content" id="diff-${file.path.replace(/[^a-z0-9]/gi, '_')}">${diffContent || '<div class="diff-context">No diff available</div>'}</div>
+      `;
+      
+      terminal.appendChild(diffView);
+      
+      // Apply syntax highlighting if we have CodeMirror
+      if (typeof CodeMirror !== 'undefined' && (file.hunks || file.unified_diff)) {
+        const diffContainer = diffView.querySelector('.diff-content');
+        const code = extractCode(file);
+        
+        if (code) {
+          // Clear the diff content and create a CodeMirror editor
+          diffContainer.innerHTML = '';
+          const editor = CodeMirror(diffContainer, {
+            value: code,
+            mode: language,
+            theme: 'dracula',
+            lineNumbers: true,
+            readOnly: true,
+            viewportMargin: Infinity,
+            lineWrapping: false,
+            gutters: ['CodeMirror-linenumbers'],
+            extraKeys: {
+              'Ctrl-F': 'findPersistent',
+              'Cmd-F': 'findPersistent'
+            }
+          });
+          
+          // Style the editor to match our theme
+          editor.getWrapperElement().style.background = '#0d1117';
+          editor.getWrapperElement().style.border = 'none';
+          editor.getWrapperElement().style.fontSize = '12px';
+          editor.getWrapperElement().style.lineHeight = '1.5';
+        }
+      }
+      
+      terminal.scrollTop = terminal.scrollHeight;
+    }
+    
+    // Detect language from file path
+    function detectLanguage(filePath) {
+      const ext = filePath.split('.').pop().toLowerCase();
+      const languageMap = {
+        'py': 'python',
+        'js': 'javascript',
+        'jsx': 'javascript',
+        'ts': 'text/typescript',
+        'tsx': 'text/typescript',
+        'java': 'text/x-java',
+        'c': 'text/x-csrc',
+        'cpp': 'text/x-c++src',
+        'h': 'text/x-csrc',
+        'hpp': 'text/x-c++src',
+        'cs': 'text/x-csharp',
+        'go': 'text/x-go',
+        'rs': 'text/x-rustsrc',
+        'rb': 'text/x-ruby',
+        'php': 'application/x-httpd-php',
+        'sh': 'shell',
+        'bash': 'shell',
+        'yml': 'yaml',
+        'yaml': 'yaml',
+        'json': 'application/json',
+        'md': 'markdown',
+        'html': 'htmlmixed',
+        'css': 'css',
+        'sql': 'text/x-sql',
+        'xml': 'application/xml',
+        'toml': 'text/x-toml'
+      };
+      return languageMap[ext] || 'text/plain';
+    }
+    
+    // Extract code from diff for syntax highlighting
+    function extractCode(file) {
+      let code = '';
+      
+      if (file.hunks && file.hunks.length > 0) {
+        // Extract code from hunks (show the new version)
+        file.hunks.forEach(hunk => {
+          hunk.lines.forEach(line => {
+            if (line.type === 'add' || line.type === 'context') {
+              code += line.content + '\n';
+            }
+          });
+        });
+      } else if (file.unified_diff) {
+        // Extract code from unified diff (show the new version)
+        file.unified_diff.split('\n').forEach(line => {
+          if (line.startsWith('+') && !line.startsWith('+++')) {
+            code += line.substring(1) + '\n';
+          } else if (!line.startsWith('-') && !line.startsWith('---') && !line.startsWith('@@')) {
+            code += line + '\n';
+          }
+        });
+      }
+      
+      return code.trim();
+    }
+    
+    // Escape HTML
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+    
+    // Initialize
+    loadStats();
+    loadHistory();
+    connectSSE();  // Connect to real-time updates
+    
+    // Refresh history every 10 seconds (less frequent since we have SSE for live updates)
+    setInterval(() => {
+      loadHistory();
+    }, 10000);
+    
+    // Chat functionality
+    let currentChatMode = 'qa';
+    let currentChatId = null;
+    let isStreaming = false;
+    
+    // Switch between dashboard and chat views
+    function switchView(view) {
+      document.querySelectorAll('.view-tabs .mode-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.view === view);
+      });
+      
+      if (view === 'dashboard') {
+        document.getElementById('dashboard-view').style.display = 'grid';
+        document.getElementById('chat-view').classList.remove('active');
+      } else if (view === 'chat') {
+        document.getElementById('dashboard-view').style.display = 'none';
+        document.getElementById('chat-view').classList.add('active');
+      }
+    }
+    
+    // Mode selector for chat
+    document.querySelectorAll('.chat-mode-selector .mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.chat-mode-selector .mode-btn').forEach(b => {
+          b.classList.remove('active');
+        });
+        btn.classList.add('active');
+        currentChatMode = btn.dataset.mode;
+      });
+    });
+    
+    // Auto-resize textarea
+    const chatInput = document.getElementById('chat-input');
+    chatInput.addEventListener('input', () => {
+      chatInput.style.height = 'auto';
+      chatInput.style.height = Math.min(chatInput.scrollHeight, 200) + 'px';
+    });
+    
+    // Send message on Enter (Shift+Enter for new line)
+    chatInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+    
+    // Send button click
+    document.getElementById('chat-send-btn').addEventListener('click', sendMessage);
+    
+    // Send message function
+    async function sendMessage() {
+      const message = chatInput.value.trim();
+      if (!message || isStreaming) return;
+      
+      // Hide empty state
+      const emptyState = document.getElementById('chat-empty');
+      if (emptyState) {
+        emptyState.remove();
+      }
+      
+      // Add user message
+      addChatMessage('user', message);
+      chatInput.value = '';
+      chatInput.style.height = 'auto';
+      
+      // Show typing indicator
+      const typingId = showTypingIndicator();
+      isStreaming = true;
+      document.getElementById('chat-send-btn').disabled = true;
+      
+      try {
+        // Stream response
+        const response = await fetch(`${API}/api/chat/stream`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: message,
+            mode: currentChatMode,
+            chat_id: currentChatId
+          })
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        
+        // Read SSE stream
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let assistantMessage = '';
+        let messageId = null;
+        
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.substring(6));
+                
+                if (data.event === 'start') {
+                  // Remove typing indicator and create message
+                  removeTypingIndicator(typingId);
+                  messageId = addChatMessage('assistant', '');
+                  currentChatId = data.data?.chat_id;
+                } else if (data.event === 'token') {
+                  // Append token to message
+                  assistantMessage += data.data?.content || '';
+                  updateChatMessage(messageId, assistantMessage);
+                } else if (data.event === 'done') {
+                  // Stream complete
+                  isStreaming = false;
+                  document.getElementById('chat-send-btn').disabled = false;
+                } else if (data.event === 'error') {
+                  throw new Error(data.data?.error || 'Stream error');
+                }
+              } catch (e) {
+                console.error('Failed to parse SSE data:', e);
+              }
+            }
+          }
+        }
+        
+      } catch (error) {
+        console.error('Chat error:', error);
+        removeTypingIndicator(typingId);
+        addChatMessage('assistant', `Error: ${error.message}`);
+        isStreaming = false;
+        document.getElementById('chat-send-btn').disabled = false;
+      }
+    }
+    
+    // Add chat message to UI
+    function addChatMessage(role, content) {
+      const messagesContainer = document.getElementById('chat-messages');
+      const messageId = 'msg-' + Date.now();
+      
+      const messageDiv = document.createElement('div');
+      messageDiv.className = `chat-message ${role}`;
+      messageDiv.id = messageId;
+      
+      const avatar = role === 'user' ? '👤' : '🤖';
+      
+      messageDiv.innerHTML = `
+        <div class="chat-avatar">${avatar}</div>
+        <div class="chat-bubble">${renderMarkdown(content)}</div>
+      `;
+      
+      messagesContainer.appendChild(messageDiv);
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      
+      return messageId;
+    }
+    
+    // Update existing chat message
+    function updateChatMessage(messageId, content) {
+      const messageDiv = document.getElementById(messageId);
+      if (messageDiv) {
+        const bubble = messageDiv.querySelector('.chat-bubble');
+        bubble.innerHTML = renderMarkdown(content);
+        
+        const messagesContainer = document.getElementById('chat-messages');
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      }
+    }
+    
+    // Render markdown with code highlighting
+    function renderMarkdown(text) {
+      if (!text) return '';
+      
+      // Configure marked
+      marked.setOptions({
+        breaks: true,
+        gfm: true,
+        headerIds: false,
+        mangle: false
+      });
+      
+      // Render markdown
+      let html = marked.parse(text);
+      
+      // Add syntax highlighting to code blocks
+      html = html.replace(/<pre><code class="language-(\w+)">([\s\S]*?)<\/code><\/pre>/g, (match, lang, code) => {
+        return `<pre><code class="language-${lang}">${escapeHtml(code)}</code></pre>`;
+      });
+      
+      return html;
+    }
+    
+    // Show typing indicator
+    function showTypingIndicator() {
+      const messagesContainer = document.getElementById('chat-messages');
+      const indicatorId = 'typing-' + Date.now();
+      
+      const indicatorDiv = document.createElement('div');
+      indicatorDiv.className = 'chat-message assistant';
+      indicatorDiv.id = indicatorId;
+      
+      indicatorDiv.innerHTML = `
+        <div class="chat-avatar">🤖</div>
+        <div class="chat-bubble">
+          <div class="typing-indicator">
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+          </div>
+        </div>
+      `;
+      
+      messagesContainer.appendChild(indicatorDiv);
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      
+      return indicatorId;
+    }
+    
+    // Remove typing indicator
+    function removeTypingIndicator(indicatorId) {
+      const indicator = document.getElementById(indicatorId);
+      if (indicator) {
+        indicator.remove();
+      }
+    }
+  </script>
+</body>
+</html>

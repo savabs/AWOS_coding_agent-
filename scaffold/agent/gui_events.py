@@ -10,12 +10,35 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-
 _GUI_ROOT = Path(".awos") / "gui"
+
+
+class EventType:
+    """String constants for all structured event types emitted by the orchestrator."""
+    SESSION_START = "session_start"
+    CODEBASE_INDEXED = "codebase_indexed"
+    PLAN_GENERATED = "plan_generated"
+    MODEL_ROUTED = "model_routed"
+    TASK_START = "task_start"
+    FILE_EDIT = "file_edit"
+    TEST_RESULT = "test_result"
+    TASK_COMPLETE = "task_complete"
+    SESSION_DONE = "session_done"
+    AGENT_THINKING = "agent_thinking"
+    AGENT_TOOL_CALL = "agent_tool_call"
+    IDLE = "idle"
+    ERROR = "error"
+
+    @classmethod
+    def all(cls) -> set[str]:
+        return {
+            v for k, v in vars(cls).items()
+            if not k.startswith("_") and isinstance(v, str)
+        }
 
 
 @dataclass
@@ -89,6 +112,114 @@ class GuiEventBus:
                 pass
         return event
 
+    # ── Structured emit helpers ──────────────────────────────────────────
+
+    def emit_session_start(self, goal: str, codebase_root: str) -> GuiEvent:
+        """Session started. Emitted once at the start of execute_feature()."""
+        return self.emit(EventType.SESSION_START, {
+            "goal": goal,
+            "session_id": self.session_id,
+            "codebase_root": codebase_root,
+        })
+
+    def emit_codebase_indexed(self, n_chunks: int, elapsed: float) -> GuiEvent:
+        """Codebase vector index complete."""
+        return self.emit(EventType.CODEBASE_INDEXED, {
+            "n_chunks": n_chunks,
+            "elapsed": elapsed,
+        })
+
+    def emit_plan_generated(self, n_tasks: int, tasks: list[dict]) -> GuiEvent:
+        """Plan generated with N tasks."""
+        return self.emit(EventType.PLAN_GENERATED, {
+            "n_tasks": n_tasks,
+            "tasks": tasks,
+        })
+
+    def emit_model_routed(self, model_name: str, tier: str, reason: str,
+                          cost_estimate: float, provider: str) -> GuiEvent:
+        """Model routing decision made by EscalationEngine."""
+        return self.emit(EventType.MODEL_ROUTED, {
+            "model_name": model_name,
+            "tier": tier,
+            "reason": reason,
+            "cost_estimate": cost_estimate,
+            "provider": provider,
+        })
+
+    def emit_task_start(self, task_id: int, action: str, file: str,
+                        model_name: str, model_reason: str) -> GuiEvent:
+        """Task execution started."""
+        return self.emit(EventType.TASK_START, {
+            "task_id": task_id,
+            "action": action,
+            "file": file,
+            "model_name": model_name,
+            "model_reason": model_reason,
+        })
+
+    def emit_file_edit(self, path: str, status: str, lines_added: int,
+                       lines_removed: int, diff: str = "") -> GuiEvent:
+        """File modified by the agent."""
+        return self.emit(EventType.FILE_EDIT, {
+            "path": path,
+            "status": status,
+            "lines_added": lines_added,
+            "lines_removed": lines_removed,
+            "diff": diff,
+        })
+
+    def emit_test_result(self, test_name: str, passed: bool,
+                         duration: float, output: str = "") -> GuiEvent:
+        """Test completed (pass or fail)."""
+        return self.emit(EventType.TEST_RESULT, {
+            "test_name": test_name,
+            "passed": passed,
+            "duration": duration,
+            "output": output,
+        })
+
+    def emit_task_complete(self, task_id: int, success: bool, cost_usd: float,
+                           n_edits: int, error: str = "") -> GuiEvent:
+        """Task execution finished."""
+        return self.emit(EventType.TASK_COMPLETE, {
+            "task_id": task_id,
+            "success": success,
+            "cost_usd": cost_usd,
+            "n_edits": n_edits,
+            "error": error,
+        })
+
+    def emit_session_done(self, completed: int, failed: int,
+                          total_cost: float, elapsed: float) -> GuiEvent:
+        """Session completed. Emitted once at the end of execute_feature()."""
+        return self.emit(EventType.SESSION_DONE, {
+            "completed": completed,
+            "failed": failed,
+            "total_cost": total_cost,
+            "elapsed": elapsed,
+        })
+
+    def emit_agent_thinking(self, thought: str, turn: int = 0) -> GuiEvent:
+        """Model's internal chain-of-thought during a ReAct turn."""
+        return self.emit(EventType.AGENT_THINKING, {
+            "thought": thought,
+            "turn": turn,
+        })
+
+    def emit_agent_tool_call(self, action: str, action_input: dict,
+                             observation: str, success: bool,
+                             latency_ms: float, turn: int = 0) -> GuiEvent:
+        """Tool call made by the agent during a ReAct turn."""
+        return self.emit(EventType.AGENT_TOOL_CALL, {
+            "action": action,
+            "action_input": action_input,
+            "observation": observation[:500],
+            "success": success,
+            "latency_ms": latency_ms,
+            "turn": turn,
+        })
+
     def record_file_change(self, change: dict[str, Any]) -> None:
         self._file_changes.append(change)
         self.emit("file_change", change)
@@ -96,9 +227,9 @@ class GuiEventBus:
 
     def _refresh_manifest_files(self) -> None:
         try:
-            from .diff_builder import collect_session_files, FileChange
+            from .diff_builder import FileChange, collect_session_files
         except ImportError:
-            from diff_builder import collect_session_files, FileChange
+            from diff_builder import FileChange, collect_session_files
 
         changes = [
             FileChange(

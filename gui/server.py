@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import mimetypes
 import os
 import sys
@@ -47,6 +48,9 @@ except ImportError:
 sys.path.insert(0, str(ROOT))
 os.chdir(ROOT)
 
+# Initialize logger
+logger = logging.getLogger(__name__)
+
 from scaffold.agent.gui_events import GuiEventBus  # noqa: E402
 from scaffold.agent.gui_chat import GuiChatService, MODE_LABELS, VALID_MODES  # noqa: E402
 
@@ -61,7 +65,7 @@ def get_chat_service() -> GuiChatService:
 
 
 class GuiHandler(BaseHTTPRequestHandler):
-    def log_message(self, fmt: str, *args) -> None:
+    def log_message(self, format: str, *args) -> None:
         pass
 
     def _send_json(self, data: object, status: int = 200) -> None:
@@ -116,6 +120,103 @@ class GuiHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _handle_sse_events(self) -> None:
+        """SSE endpoint that tails .awos/gui/<session>/events.jsonl.
+
+        Tracks byte offset per session so we only send new events.
+        Sends structured events that agent.html renders by type.
+        Falls back to idle keepalive when no active session.
+        """
+        import time
+        from pathlib import Path
+
+        _GUI_ROOT = Path(".awos") / "gui"
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+
+        # Track per-session byte offsets
+        _offsets: dict[str, int] = {}
+        _last_session_id: str | None = None
+
+        def _find_latest_session() -> str | None:
+            """Return the most recent session directory name (by mtime)."""
+            if not _GUI_ROOT.is_dir():
+                return None
+            dirs = sorted(
+                [d for d in _GUI_ROOT.iterdir() if d.is_dir()],
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            return dirs[0].name if dirs else None
+
+        def _read_new_events(session_id: str) -> list[dict]:
+            """Read new events from events.jsonl since last offset."""
+            events_path = _GUI_ROOT / session_id / "events.jsonl"
+            if not events_path.is_file():
+                return []
+            current_size = events_path.stat().st_size
+            last_offset = _offsets.get(session_id, 0)
+            if current_size <= last_offset:
+                return []
+            with open(events_path, "r", encoding="utf-8") as f:
+                f.seek(last_offset)
+                new_lines = f.read()
+                _offsets[session_id] = f.tell()
+            events = []
+            for line in new_lines.splitlines():
+                line = line.strip()
+                if line:
+                    try:
+                        events.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+            return events
+
+        try:
+            while True:
+                session_id = _find_latest_session()
+
+                if session_id is None:
+                    # No sessions at all — send idle keepalive
+                    self._sse_send({"type": "idle", "payload": {"message": "No active sessions"}})
+                    time.sleep(2.0)
+                    continue
+
+                # Reset offset if session changed (new run)
+                if session_id != _last_session_id:
+                    _last_session_id = session_id
+                    _offsets[session_id] = 0
+
+                # Read new events
+                events = _read_new_events(session_id)
+
+                if events:
+                    for event in events:
+                        self._sse_send(event)
+                else:
+                    self._sse_send({"type": "idle", "payload": {"message": "Waiting for events..."}})
+
+                time.sleep(0.5)
+
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as e:
+            logger.error(f"SSE error: {e}")
+
+    def _sse_send(self, data: dict) -> None:
+        """Send one SSE data frame."""
+        message = f"data: {json.dumps(data, default=str)}\n\n"
+        try:
+            self.wfile.write(message.encode("utf-8"))
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            raise
 
     def do_OPTIONS(self) -> None:
         self.send_response(204)
@@ -254,11 +355,113 @@ class GuiHandler(BaseHTTPRequestHandler):
 
         self._send_json({"error": "not found"}, 404)
 
+    def _get_ci_rescue_stats(self) -> dict:
+        """Get CI rescue statistics from runtime sessions."""
+        from scaffold.agent.runtime_session import RuntimeSessionStore
+        
+        store = RuntimeSessionStore()
+        sessions = store.list_sessions()
+        
+        # Filter for CI rescue sessions (goal contains "CI Rescue")
+        ci_sessions = [s for s in sessions if "CI Rescue" in (s.goal or "")]
+        
+        total_rescues = len(ci_sessions)
+        total_tests_fixed = 0
+        total_cost = 0.0
+        
+        for session in ci_sessions:
+            # Count completed tasks as tests fixed
+            total_tests_fixed += len(session.progress.completed_task_ids)
+            # Sum up costs
+            total_cost += session.budget.get("spent_usd", 0.0)
+        
+        # Calculate trends (compare last 5 vs previous 5)
+        trend_rescues = ""
+        trend_tests = ""
+        trend_cost = ""
+        trend_savings = ""
+        
+        if total_rescues >= 10:
+            recent = ci_sessions[:5]
+            previous = ci_sessions[5:10]
+            
+            recent_tests = sum(len(s.progress.completed_task_ids) for s in recent)
+            previous_tests = sum(len(s.progress.completed_task_ids) for s in previous)
+            
+            if recent_tests > previous_tests:
+                trend_tests = f"+{recent_tests - previous_tests} vs previous"
+            elif recent_tests < previous_tests:
+                trend_tests = f"{recent_tests - previous_tests} vs previous"
+        
+        return {
+            "total_rescues": total_rescues,
+            "total_tests_fixed": total_tests_fixed,
+            "total_cost_usd": total_cost,
+            "trend_rescues": trend_rescues,
+            "trend_tests": trend_tests,
+            "trend_cost": trend_cost,
+            "trend_savings": trend_savings,
+        }
+
+    def _get_ci_rescue_history(self) -> list:
+        """Get CI rescue session history."""
+        from scaffold.agent.runtime_session import RuntimeSessionStore
+        
+        store = RuntimeSessionStore()
+        sessions = store.list_sessions()
+        
+        # Filter for CI rescue sessions
+        ci_sessions = [s for s in sessions if "CI Rescue" in (s.goal or "")]
+        
+        # Sort by timestamp (most recent first)
+        ci_sessions.sort(key=lambda s: s.updated_at or "", reverse=True)
+        
+        history = []
+        for session in ci_sessions[:20]:  # Last 20 rescues
+            history.append({
+                "session_id": session.session_id,
+                "goal": session.goal,
+                "timestamp": session.updated_at or session.created_at,
+                "status": session.status.value,
+                "success": session.status.value == "completed",
+                "tasks_completed": len(session.progress.completed_task_ids),
+                "tasks_failed": len(session.progress.failed_task_ids),
+                "total_cost_usd": session.budget.get("spent_usd", 0.0),
+                "tests_fixed": len(session.progress.completed_task_ids),
+            })
+        
+        return history
+
     def do_GET(self) -> None:
         path = unquote(self.path.split("?", 1)[0])
 
+        # SSE endpoint for real-time agent events
+        if path == "/api/agent/stream":
+            self._handle_sse_events()
+            return
+
+        if path == "/api/agent/events":
+            self._handle_sse_events()
+            return
+
         if path == "/api/cache/stats":
             self._send_json(get_chat_service().response_cache.stats())
+            return
+
+        if path == "/api/ci-rescue/stats":
+            try:
+                stats = self._get_ci_rescue_stats()
+                self._send_json(stats)
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, 500)
+            return
+
+        if path == "/api/ci-rescue/history":
+            try:
+                history = self._get_ci_rescue_history()
+                self._send_json(history)
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, 500)
             return
 
         if path == "/api/metrics/summary":
@@ -338,6 +541,10 @@ class GuiHandler(BaseHTTPRequestHandler):
             self._send_file(STATIC / "index.html")
             return
 
+        if path in ("/agent", "/agent.html"):
+            self._send_file(STATIC / "agent.html")
+            return
+
         static_path = STATIC / path.lstrip("/")
         if static_path.is_file() and STATIC in static_path.resolve().parents:
             self._send_file(static_path)
@@ -361,6 +568,7 @@ def main() -> None:
     args = parser.parse_args()
     server = ThreadingHTTPServer((args.host, args.port), GuiHandler)
     print(f"AWOS GUI → http://{args.host}:{args.port}")
+    print(f"  Agent: http://{args.host}:{args.port}/agent")
     print(f"  Chat:  http://{args.host}:{args.port}/?view=chat")
     print(f"  Runs:  http://{args.host}:{args.port}/?view=runs")
     print(f"Sessions: {GUI_ROOT}")

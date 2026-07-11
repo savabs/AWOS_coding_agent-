@@ -1,5 +1,5 @@
 """
-EscalationEngine: 5-tier model ladder with complexity, budget, and failure gates.
+EscalationEngine: 6-tier model ladder with complexity, budget, and failure gates.
 
 Philosophy:
   Start cheap. Escalate on evidence.
@@ -10,19 +10,22 @@ Philosophy:
 Ladder (cheapest → most powerful):
   L0  Gemini 2.5 Flash-Lite      $0.001/req  — routing, simple Q&A
   L1  DeepSeek V4 Flash           $0.001/req  — default worker
-  L2  GPT-4o-mini (OpenAI)        $0.003/req  — fallback (uses existing credits)
-  L3  Claude Haiku 4.5            $0.017/req  — BLOCKED when AWOS_CHEAP_ONLY=true
-  L4  Claude Sonnet 4.6           $0.050/req  — BLOCKED when AWOS_CHEAP_ONLY=true
+  L2  OpenRouter                 $0.002/req  — 200+ model catalog (one key)
+  L3  GPT-4o-mini (OpenAI)        $0.003/req  — fallback (uses existing credits)
+  L4  Claude Haiku 4.5            $0.017/req  — BLOCKED when AWOS_CHEAP_ONLY=true
+  L5  Claude Sonnet 4.6           $0.050/req  — BLOCKED when AWOS_CHEAP_ONLY=true
 
 Cheap-only mode (AWOS_CHEAP_ONLY=true):
-  Premium tiers are halted. Intelligence comes from context, skills, and
-  rotating among Gemini / DeepSeek / GPT-4o-mini on retry — not escalation.
+  Premium tiers (Haiku, Sonnet) are halted. Intelligence comes from context, skills, and
+  rotating among Gemini / DeepSeek / OpenRouter / GPT-4o-mini on retry — not escalation.
+  OpenRouter (L5) is always available — it is a cheap provider with diverse model access.
 """
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
+
 try:
     from .reward_store import ReplayGate
 except ImportError:
@@ -34,8 +37,10 @@ class EscalationLevel(Enum):
     GEMINI_FLASH  = 0   # Router / simple answers
     DEEPSEEK      = 1   # Default code worker
     OPENAI        = 2   # GPT-4o-mini fallback (uses existing OpenAI credits)
-    HAIKU         = 3   # Retry tier
+    HAIKU         = 3   # Retry tier (Anthropic Claude Haiku)
     SONNET        = 4   # Severely restricted (top tier, Opus banned)
+    OPENROUTER    = 5   # Unified access to 200+ models (one API key)
+    OPENCODE      = 6   # OpenCode Go — primary coding model
 
 
 @dataclass
@@ -44,7 +49,7 @@ class ModelSpec:
     level: EscalationLevel
     name: str                   # Human-readable
     model_id: str               # API identifier
-    provider: str               # "anthropic" | "deepseek" | "google"
+    provider: str               # "anthropic" | "deepseek" | "google" | "openrouter"
     cost_per_req: float         # Estimated $USD per average request
     input_price:  float         # $/MTok input
     output_price: float         # $/MTok output
@@ -79,6 +84,18 @@ LADDER: list[ModelSpec] = [
         min_failures=0,
     ),
     ModelSpec(
+        level=EscalationLevel.OPENROUTER,
+        name="OpenRouter",
+        model_id="openrouter/auto",
+        provider="openrouter",
+        cost_per_req=0.002,
+        input_price=0.20,
+        output_price=0.80,
+        min_complexity=10,  # Only as fallback after DeepSeek fails
+        min_budget_remaining=0.0,
+        min_failures=1,
+    ),
+    ModelSpec(
         level=EscalationLevel.OPENAI,
         name="GPT-4o-mini",
         model_id="gpt-4o-mini",
@@ -86,9 +103,21 @@ LADDER: list[ModelSpec] = [
         cost_per_req=0.003,
         input_price=0.15,
         output_price=0.60,
-        min_complexity=5,
+        min_complexity=10,  # Only as fallback after DeepSeek fails
         min_budget_remaining=0.0,
-        min_failures=1,
+        min_failures=2,  # Use after 2 DeepSeek failures
+    ),
+    ModelSpec(
+        level=EscalationLevel.OPENCODE,
+        name="OpenCode Go",
+        model_id="deepseek-chat",
+        provider="opencode",  # Uses OPENCODE_GO_API_KEY (endpoint TBD)
+        cost_per_req=0.001,
+        input_price=0.14,
+        output_price=0.28,
+        min_complexity=99,  # Disabled until endpoint is known
+        min_budget_remaining=0.0,
+        min_failures=99,
     ),
     ModelSpec(
         level=EscalationLevel.HAIKU,
@@ -98,7 +127,7 @@ LADDER: list[ModelSpec] = [
         cost_per_req=0.017,
         input_price=1.00,
         output_price=5.00,
-        min_complexity=8,
+        min_complexity=10,  # Only use after failures, not for complexity
         min_budget_remaining=1.0,
         min_failures=3,
     ),
@@ -110,9 +139,9 @@ LADDER: list[ModelSpec] = [
         cost_per_req=0.050,
         input_price=3.00,
         output_price=15.00,
-        min_complexity=9,
+        min_complexity=10,  # Only use after failures, not for complexity
         min_budget_remaining=3.0,
-        min_failures=3,
+        min_failures=5,  # Only after Haiku also fails
     ),
 ]
 
@@ -121,6 +150,7 @@ LEVEL_MAP: dict[EscalationLevel, ModelSpec] = {m.level: m for m in LADDER}
 CHEAP_ONLY_MAX_LEVEL = EscalationLevel.OPENAI
 _CHEAP_ROTATION = [
     EscalationLevel.DEEPSEEK,
+    EscalationLevel.OPENROUTER,
     EscalationLevel.OPENAI,
 ]
 
@@ -134,12 +164,17 @@ def is_cheap_only() -> bool:
 
 
 def max_allowed_level() -> EscalationLevel:
-    return CHEAP_ONLY_MAX_LEVEL if is_cheap_only() else EscalationLevel.SONNET
+    return CHEAP_ONLY_MAX_LEVEL if is_cheap_only() else EscalationLevel.OPENCODE
 
 
 def allowed_ladder() -> list[ModelSpec]:
+    """Return ladder tiers allowed in current mode.
+    
+    Always includes OpenRouter (level 5) — it is a cheap provider with wide model
+    access and works in both cheap-only and premium modes.
+    """
     cap = max_allowed_level().value
-    return [s for s in LADDER if s.level.value <= cap]
+    return [s for s in LADDER if s.level.value <= cap or s.level == EscalationLevel.OPENROUTER]
 
 
 @dataclass
@@ -421,7 +456,6 @@ class EscalationEngine:
             _reward = reward if reward is not None else (1.0 if success else 0.0)
 
             # Build a minimal Episode-like object for the gate
-            from dataclasses import dataclass as _dc
             _gate = getattr(self, '_replay_gate', None)
             if _gate is None:
                 self._replay_gate = ReplayGate()
