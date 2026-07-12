@@ -409,34 +409,29 @@ class ReActWorker:
         }
 
     def _build_system_prompt(self, tool_catalog: str, project_root: str) -> str:
-        return f"""You are an expert coding agent using ReAct (Reason + Act).
+        return f"""You are an expert coding agent. Fix the issue by editing source files.
 
-WORKSPACE ROOT: {project_root}
-All file paths must be relative to this root.
+WORKSPACE: {project_root}
 
-AVAILABLE TOOLS:
+EDITING RULES (MUST FOLLOW):
+1. ALWAYS read_file before editing — you need the exact text to match.
+   Read the file, find the exact lines to change, then edit.
+2. For ALL edits use shell: sed, python3 -c, or heredocs.
+   Example: python3 -c \"c=open('f.py').read();c=c.replace('old','new');open('f.py','w').write(c)\"
+3. After EVERY edit, run: shell \"git diff\" to confirm changes are correct.
+4. Make MINIMAL changes — change only what's needed. One-line fixes preferred.
+5. If edit fails (command error, no diff), READ the file again to see exact content.
+
+TOOLS:
 {tool_catalog}
 
-EDITING STRATEGY (CRITICAL):
-1. PREFER bash for ALL file edits. Use sed, python -c, cat, or heredocs.
-   Examples:
-   - sed -i 's/old_line/new_line/' file.py
-   - python -c "content=open('file.py').read(); content=content.replace('old','new'); open('file.py','w').write(content)"
-   - cat > file.py << 'EOF'\\n...new content...\\nEOF
-2. Only use edit_file for simple single-line changes where you have the EXACT text.
-3. After ANY edit, verify with: bash "git diff" to confirm changes are correct and minimal.
-4. Make MINIMAL changes. Do not rewrite entire functions. Change only what's needed.
+WORKFLOW:
+1. grep/find to locate the code → read_file to see exact lines
+2. shell sed/python3-c to edit → shell \"git diff\" to verify
+3. If tests available: install deps, run tests, fix if failing
+4. finish(summary=...) when done
 
-RULES:
-1. Use grep to find code, read_file to see content with line numbers.
-2. After editing, ALWAYS run "git diff" via bash to verify your changes.
-3. If tests are available (AWOS_SAFE_TO_RUN_TESTS=1), run them before finishing.
-4. Call finish(summary=...) when the task is complete.
-5. One tool call per response — JSON only, no markdown fences.
-
-RESPONSE FORMAT (strict JSON):
-{{"thought": "why this step", "action": "tool_name", "action_input": {{...}}}}
-"""
+RESPONSE: {{\"thought\": \"...\", \"action\": \"tool\", \"action_input\": {{...}} }}"""
 
     def _build_task_prompt(
         self,
@@ -452,33 +447,21 @@ RESPONSE FORMAT (strict JSON):
         symbols = codebase_context.get("symbols", [])[:15]
         snippet = file_content[:2500] if file_content else "(empty / new file)"
         return f"""TASK: {action}
-PRIMARY FILE: {file_path}
+FILE: {file_path}
 
-REPO MAP (read these line numbers first — use read_file start_line/end_line):
-{repo_map or "(disabled — set AWOS_REPO_MAP=1)"}
-
-EXPLORATION (keyword grep):
-{exploration or "(none)"}
+CODE (first 20K chars — read_file for more):
+{snippet[:5000]}
 
 ARCHITECTURE: {arch}
-SYMBOLS: {', '.join(symbols) if symbols else '(none)'}
+REPO MAP: {repo_map or '(none)'}
+EXPLORATION: {exploration or '(none)'}
 
-CURRENT FILE SNIPPET (first 2500 chars only — use read_file for the rest):
-{snippet}
-
-STRATEGY:
-1. grep/read to find the exact code that needs changing
-2. Edit using bash (sed, python -c, or heredoc) — NOT edit_file
-3. Run "git diff" via bash to verify your changes are correct and minimal
-4. Run the REPO'S EXISTING TESTS to verify your fix:
-   - First try: pytest /path/to/test_file.py
-   - If tests fail with ModuleNotFoundError: pip install the missing package
-   - If tests fail with import errors: pip install -e . (install the repo)
-   - Keep installing deps and retrying tests until they run
-5. ONLY call finish when tests pass OR you've exhausted all options (3+ attempts to install)
-6. If you truly cannot run tests, explain why and finish
-
-Begin: find the code, edit with bash, verify with git diff, install deps and run tests, then finish."""
+STEPS:
+1. read_file to see exact code around the bug
+2. shell sed/python3-c to make minimal edit
+3. shell \"git diff\" to verify change is correct
+4. If possible, run tests; if deps missing, install them
+5. finish with summary when done"""
 
     def _parse_action(self, raw: str) -> Optional[dict[str, Any]]:
         raw = raw.strip()

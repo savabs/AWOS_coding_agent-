@@ -227,7 +227,7 @@ def run_instance_react(
     primary = _guess_primary_file(work_dir, instance.problem_statement)
     snippet = ""
     if primary and (work_dir / primary).is_file():
-        snippet = (work_dir / primary).read_text(encoding="utf-8", errors="replace")[:8000]
+        snippet = (work_dir / primary).read_text(encoding="utf-8", errors="replace")[:20000]
 
     # ── EscalationEngine: pick the RIGHT model for this task ─────────────
     escalation = EscalationEngine()
