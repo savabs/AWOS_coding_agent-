@@ -382,7 +382,6 @@ def build_coding_tool_registry(
     registry.register(WorkspaceGrepTool(root))
     registry.register(WorkspaceFindFilesTool(root))
     registry.register(WorkspaceListDirTool(root))
-    registry.register(WorkspaceShellTool(root))
     registry.register(RunTestsTool(root))
     if research_tools_enabled():
         registry.register(WebSearchTool())
