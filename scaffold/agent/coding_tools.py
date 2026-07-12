@@ -374,6 +374,8 @@ def build_coding_tool_registry(
     """Build a workspace-scoped tool registry for ReAct coding."""
     root = Path(project_root).resolve()
     registry = ToolRegistry()
+    # Shell FIRST — bash-only editing (sed, python -c, cat)
+    registry.register(WorkspaceShellTool(root))
     registry.register(WorkspaceReadFileTool(root))
     registry.register(WorkspaceWriteFileTool(root, on_change=on_file_change))
     registry.register(EditFileTool(root, on_change=on_file_change))

@@ -272,19 +272,49 @@ def run_instance_react(
         status = "✓" if success else "✗"
         print(f"  [{react_turn}] {status} {action_name}: {thought[:80]}")
 
-    # ── Run the ReAct worker with the routed model ───────────────────────
-    worker = ReActWorker()
-    react = worker.execute_task(
-        task=task_dict,
-        file_content=snippet,
-        codebase_context={
-            "architecture": f"SWE-bench Lite: {instance.repo}",
-            "files": [],
-        },
-        project_root=str(work_dir),
-        model_spec=model_spec,  # ← Use the routed model, not GPT-4o-mini!
-        step_callback=on_step,
-    )
+    # ── Run with escalating models on empty patches ─────────────────────
+    max_attempts = 3
+    failure_count = 0
+    react = None
+    model_used = model_spec.name
+    cost = 0.0
+    tokens_in = 0
+    tokens_out = 0
+
+    for attempt in range(max_attempts):
+        worker = ReActWorker()
+        react = worker.execute_task(
+            task=task_dict,
+            file_content=snippet,
+            codebase_context={
+                "architecture": f"SWE-bench Lite: {instance.repo}",
+                "files": [],
+            },
+            project_root=str(work_dir),
+            model_spec=model_spec,
+            step_callback=on_step,
+        )
+
+        # Check if we got a non-empty patch
+        patch = extract_model_patch(work_dir, instance.test_patch)
+        if patch.strip():
+            break  # Got a patch, don't escalate
+
+        # Empty patch — escalate model
+        failure_count = [1, 3, 5][attempt]  # Escalate more aggressively
+        print(f"  [ESCALATE] Empty patch, retry with higher model (attempt {attempt+1})...")
+        esc_decision = escalation.decide(
+            task=task_dict,
+            failure_count=failure_count,
+            budget_remaining=20.0,
+            dead_providers=set(),
+        )
+        model_spec = esc_decision.spec
+        print(f"  [ESCALATE] → {model_spec.name} ({model_spec.provider})")
+
+        # Reset work dir for retry (revert agent's failed changes)
+        subprocess.run(["git", "checkout", "HEAD", "--", "."], cwd=work_dir,
+                      capture_output=True, text=True, timeout=30)
 
     # ── Record outcome ───────────────────────────────────────────────────
     result.react_success = bool(react.get("files_changed"))
@@ -292,11 +322,12 @@ def run_instance_react(
     result.model_patch = extract_model_patch(work_dir, instance.test_patch)
     result.success = bool(result.model_patch.strip())
 
-    # Cost tracking
-    cost = float(react.get("cost_usd", 0.0))
-    model_used = react.get("model_used", model_spec.name)
-    tokens_in = int(react.get("input_tokens", 0))
-    tokens_out = int(react.get("output_tokens", 0))
+    # Cost tracking (sum across attempts)
+    if react:
+        cost = float(react.get("cost_usd", 0.0))
+        model_used = react.get("model_used", model_spec.name)
+        tokens_in = int(react.get("input_tokens", 0))
+        tokens_out = int(react.get("output_tokens", 0))
 
     if not result.success:
         result.error = react.get("error") or "empty patch"
