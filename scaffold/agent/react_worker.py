@@ -728,7 +728,7 @@ STEPS:
             resp = self.client.chat.completions.create(
                 model=model_id,
                 messages=messages,
-                max_tokens=2000,  # DeepSeek needs extra room for thinking
+                max_tokens=4000,  # DeepSeek V4 needs room for thinking + response
                 temperature=0.1,
             )
             text = resp.choices[0].message.content.strip()
