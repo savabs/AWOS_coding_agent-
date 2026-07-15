@@ -98,13 +98,16 @@ class ReActWorker:
         self.gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         openrouter_key = os.getenv("OPENROUTER_API_KEY")
         opencode_key = os.getenv("OPENCODE_GO_API_KEY")
-        opencode_base = os.getenv("OPENCODE_GO_BASE_URL", "https://api.deepseek.com")
+        opencode_base = os.getenv("OPENCODE_GO_BASE_URL", "https://opencode.ai/zen/go/v1")
 
-        self.client = OpenAI(api_key=deepseek_key, base_url="https://api.deepseek.com") if deepseek_key else None
+        # DeepSeek via OpenCode Go (primary) with fallback to direct DeepSeek
+        self.client = OpenAI(api_key=opencode_key, base_url="https://opencode.ai/zen/go/v1") if opencode_key else (
+            OpenAI(api_key=deepseek_key, base_url="https://api.deepseek.com") if deepseek_key else None
+        )
         self.anthropic_client = Anthropic(api_key=anthropic_key) if anthropic_key else None
         self.openai_client = OpenAI(api_key=openai_key, base_url="https://api.openai.com/v1") if openai_key else None
         self.openrouter_client = OpenAI(api_key=openrouter_key, base_url="https://openrouter.ai/api/v1") if openrouter_key else None
-        self.opencode_client = OpenAI(api_key=opencode_key, base_url=opencode_base) if opencode_key else None
+        self.opencode_client = OpenAI(api_key=opencode_key, base_url="https://opencode.ai/zen/go/v1") if opencode_key else None
         self.gemini_client = None
         if self.gemini_key and genai is not None:
             _shadow = os.environ.pop("GOOGLE_API_KEY", None)
@@ -721,11 +724,11 @@ STEPS:
             merge_usage(usage, recorded)
             return text, usage, label
 
-        if self.client and "deepseek" not in self._dead_providers:
+        if provider == "deepseek" and self.client and "deepseek" not in self._dead_providers:
             resp = self.client.chat.completions.create(
-                model=model_id if provider == "deepseek" else self.model,
+                model=model_id,
                 messages=messages,
-                max_tokens=1500,
+                max_tokens=2000,  # DeepSeek needs extra room for thinking
                 temperature=0.1,
             )
             text = resp.choices[0].message.content.strip()

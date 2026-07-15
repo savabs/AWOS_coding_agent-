@@ -74,7 +74,7 @@ LADDER: list[ModelSpec] = [
     ModelSpec(
         level=EscalationLevel.DEEPSEEK,
         name="DeepSeek V4 Flash",
-        model_id="deepseek-chat",
+        model_id="deepseek-v4-flash",  # OpenCode Go model ID
         provider="deepseek",
         cost_per_req=0.001,
         input_price=0.14,
@@ -85,15 +85,15 @@ LADDER: list[ModelSpec] = [
     ),
     ModelSpec(
         level=EscalationLevel.OPENROUTER,
-        name="OpenRouter",
-        model_id="openrouter/auto",
-        provider="openrouter",
+        name="DeepSeek V4 Pro",
+        model_id="deepseek-v4-pro",  # OpenCode Go model ID
+        provider="deepseek",
         cost_per_req=0.002,
-        input_price=0.20,
-        output_price=0.80,
-        min_complexity=10,  # Only as fallback after DeepSeek fails
+        input_price=0.28,
+        output_price=0.56,
+        min_complexity=10,  # Only when flash fails
         min_budget_remaining=0.0,
-        min_failures=1,
+        min_failures=1,  # Use after 1 flash failure
     ),
     ModelSpec(
         level=EscalationLevel.OPENAI,
