@@ -88,6 +88,7 @@ class ReActWorker:
             self.openai_client = None
             self.gemini_client = None
             self.openrouter_client = None
+            self.opencode_client = None  # added for OpenCode Go integration
             self.model = model
             self._dead_providers: set[str] = set()
             return
@@ -119,7 +120,20 @@ class ReActWorker:
             raise ValueError("Set at least one API key for ReActWorker")
 
         self.model = model
+        # Pre-populate dead providers from missing API keys so escalation engine skips them
         self._dead_providers: set[str] = set()
+        if not self.client:
+            self._dead_providers.add("deepseek")
+        if not self.anthropic_client:
+            self._dead_providers.add("anthropic")
+        if not self.openai_client:
+            self._dead_providers.add("openai")
+        if not self.openrouter_client:
+            self._dead_providers.add("openrouter")
+        if not self.gemini_client:
+            self._dead_providers.add("google")
+        if not self.opencode_client:
+            self._dead_providers.add("opencode")
 
     def execute_task(
         self,
@@ -555,6 +569,28 @@ STEPS:
                 )
             return None
 
+        def _opencode():
+            # OpenCode Go is the only model with reliable quota right now
+            # (per checkpoint_2026-07-24_master_session §3.4). Prefer it.
+            if self.opencode_client and "opencode" not in self._dead_providers:
+                # OpenCode Go's catalog uses "deepseek-v4-flash" — "deepseek-chat"
+                # (the ReActWorker default) is NOT in their catalog. Hardcode
+                # the correct model name here.
+                opencode_model = os.getenv("AWOS_OPENCODE_MODEL", "deepseek-v4-flash")
+                return ModelSpec(
+                    level=EscalationLevel.OPENCODE,
+                    name="OpenCode Go",
+                    model_id=opencode_model,
+                    provider="opencode",
+                    cost_per_req=0.001,
+                    input_price=0.14,
+                    output_price=0.28,
+                    min_complexity=0,
+                    min_budget_remaining=0.0,
+                    min_failures=0,
+                )
+            return None
+
         def _openrouter():
             if self.openrouter_client and "openrouter" not in self._dead_providers:
                 return ModelSpec(
@@ -588,14 +624,18 @@ STEPS:
             return None
 
         order = {
-            "gemini": (_gemini, _deepseek, _openrouter, _anthropic, _openai),
-            "google": (_gemini, _deepseek, _openrouter, _anthropic, _openai),
-            "deepseek": (_deepseek, _gemini, _openrouter, _anthropic, _openai),
-            "openrouter": (_openrouter, _deepseek, _gemini, _anthropic, _openai),
-            "anthropic": (_anthropic, _openrouter, _gemini, _deepseek, _openai),
-            "openai": (_openai, _openrouter, _gemini, _deepseek, _anthropic),
+            "opencode": (_opencode, _deepseek, _openrouter, _gemini, _anthropic, _openai),
+            "gemini": (_gemini, _opencode, _deepseek, _openrouter, _anthropic, _openai),
+            "google": (_gemini, _opencode, _deepseek, _openrouter, _anthropic, _openai),
+            "deepseek": (_deepseek, _opencode, _openrouter, _gemini, _anthropic, _openai),
+            "openrouter": (_openrouter, _opencode, _deepseek, _gemini, _anthropic, _openai),
+            "anthropic": (_anthropic, _opencode, _openrouter, _gemini, _deepseek, _openai),
+            "openai": (_openai, _opencode, _openrouter, _gemini, _deepseek, _anthropic),
         }
-        builders = order.get(prefer, (_openai, _openrouter, _gemini, _deepseek, _anthropic))
+        # Default order: OpenCode Go first — it's the only provider with
+        # working quota (see checkpoint_2026-07-24_master_session §3.4).
+        # When Sprint 2 restores other providers, move them back to the front.
+        builders = order.get(prefer, (_opencode, _deepseek, _openrouter, _gemini, _anthropic, _openai))
         for build in builders:
             spec = build()
             if spec is not None:

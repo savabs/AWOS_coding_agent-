@@ -43,6 +43,21 @@ class EscalationLevel(Enum):
     OPENCODE      = 6   # OpenCode Go — primary coding model
 
 
+# Models that are currently dead (404 / rate-limited / no working key).
+# Single source of truth — see checkpoint_2026-07-24_master_session §3.4.
+# Filtered out of the escalation ladder at decide() time so we never pick
+# a model that will fail. When the upstream quota issue is resolved,
+# remove the entry from this set — the ladder will pick it up again
+# without any other code change.
+MODELS_UNAVAILABLE: set[str] = {
+    "gemini-2.0-flash",     # 404 from Google (no longer served)
+    "gemini-2.5-flash",     # 404 from our OpenCode Go config
+    "gpt-4o-mini",          # rate-limited (per checkpoint §3.4)
+    "claude-haiku-4-5",     # no working API key
+    "claude-sonnet-4-6",    # no working API key
+}
+
+
 @dataclass
 class ModelSpec:
     """Spec for one level of the escalation ladder."""
@@ -110,14 +125,14 @@ LADDER: list[ModelSpec] = [
     ModelSpec(
         level=EscalationLevel.OPENCODE,
         name="OpenCode Go",
-        model_id="deepseek-chat",
-        provider="opencode",  # Uses OPENCODE_GO_API_KEY (endpoint TBD)
+        model_id="deepseek-v4-flash",
+        provider="opencode",
         cost_per_req=0.001,
         input_price=0.14,
         output_price=0.28,
-        min_complexity=99,  # Disabled until endpoint is known
+        min_complexity=0,   # Enabled — primary provider for all tasks
         min_budget_remaining=0.0,
-        min_failures=99,
+        min_failures=0,     # First choice for cheap tasks
     ),
     ModelSpec(
         level=EscalationLevel.HAIKU,
@@ -291,6 +306,11 @@ class EscalationEngine:
             )
 
         ladder = allowed_ladder()
+        # Filter out models in MODELS_UNAVAILABLE. This is the single source
+        # of truth — see the set definition above. Without this filter, the
+        # failure-driven escalation walk would still pick dead models (e.g.
+        # gpt-4o-mini after 2 failures) and burn budget on guaranteed failures.
+        ladder = [s for s in ladder if s.model_id not in MODELS_UNAVAILABLE]
         worker_ladder = [s for s in ladder if s.level != EscalationLevel.GEMINI_FLASH]
 
         # ── Performance veto (empirical success matrix) ──────────────────
@@ -316,8 +336,12 @@ class EscalationEngine:
                 if default_rate < 0.50 and best_rate > default_rate:
                     for spec in ladder:
                         if spec.name == best_name and self._effective_budget(spec, budget_remaining) >= spec.min_budget_remaining:
-                            _perf_override = spec
-                            break
+                            # Honor the dead-model filter even for perf vetoes.
+                            # Empirical data may be stale (the model was alive
+                            # when the data was collected).
+                            if spec.model_id not in MODELS_UNAVAILABLE:
+                                _perf_override = spec
+                                break
 
         # ── LinUCB ML router (learned policy) ────────────────────────────
         if (
@@ -327,15 +351,24 @@ class EscalationEngine:
         ):
             features = self._feature_extractor.extract(task, failure_count)
             cap = max_allowed_level().value
+            # The mask also filters MODELS_UNAVAILABLE — learned policy
+            # would otherwise pick a dead model that was valid when the
+            # weights were trained.
             budget_mask = [
                 spec.level.value <= cap
                 and self._effective_budget(spec, budget_remaining) >= spec.min_budget_remaining
+                and spec.model_id not in MODELS_UNAVAILABLE
                 for spec in LADDER
             ]
             action_id = self._ml_router.select(features, budget_mask=budget_mask)
             ml_spec = LADDER[action_id]
-            if ml_spec.level.value > cap:
-                ml_spec = LEVEL_MAP[max_allowed_level()]
+            if ml_spec.model_id in MODELS_UNAVAILABLE or ml_spec.level.value > cap:
+                # The learned policy picked something dead or above cap.
+                # Fall back to the cheapest non-dead available level.
+                for s in LADDER:
+                    if s.level.value <= cap and s.model_id not in MODELS_UNAVAILABLE:
+                        ml_spec = s
+                        break
             # Apply performance veto if empirical data is stronger
             if _perf_override is not None and _perf_override.level.value > ml_spec.level.value:
                 return EscalationDecision(
@@ -368,6 +401,9 @@ class EscalationEngine:
             if recommended:
                 for spec in ladder:
                     if spec.name == recommended and self._effective_budget(spec, budget_remaining) >= spec.min_budget_remaining:
+                        # Honor the dead-model filter here too.
+                        if spec.model_id in MODELS_UNAVAILABLE:
+                            continue
                         return EscalationDecision(
                             spec=spec,
                             reason=f"Performance hint (cold-start): {spec.name} has highest empirical success for {task_type}",
@@ -542,6 +578,31 @@ class EscalationEngine:
     def _is_premium_model(self, spec: ModelSpec) -> bool:
         """Check if a model spec is an Anthropic (premium) model."""
         return spec.provider == "anthropic"
+
+    def routing_status(self) -> dict:
+        """Return LinUCB routing observability snapshot for diagnostics.
+
+        Returns a dict with ready state, update count, learned weights per action,
+        cheap-only mode, and known dead providers (empty when no calls recorded).
+        """
+        status: dict = {
+            "linucb_ready": False,
+            "linucb_updates": 0,
+            "actions": {},
+            "is_cheap_only": is_cheap_only(),
+            "dead_providers": [],
+        }
+
+        if self._ml_router is not None:
+            status["linucb_ready"] = self._ml_router.is_ready()
+            status["linucb_updates"] = self._ml_router.total_updates()
+            try:
+                summary = self._ml_router.summary()
+                status["actions"] = summary.get("learned_weights", {})
+            except Exception:
+                pass
+
+        return status
 
     def summary(self, decision: EscalationDecision) -> str:
         """Human-readable decision summary."""

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,6 +19,13 @@ def sessions_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("AWOS_RUNTIME_SESSION", "true")
     monkeypatch.setenv("AWOS_LEARNING_DISABLE", "true")
     monkeypatch.setenv("AWOS_MCTS_DISABLE", "true")
+    # CheapPlanner is now the orchestrator's primary planner
+    # (post OpenCode Go integration). AWOS_E2E=1 skips LLM calls
+    # but the planner still validates the API key exists. Set a
+    # fake key here so the test fixture is self-contained — the
+    # real LLM path is short-circuited by AWOS_E2E before any
+    # network call would happen.
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "fake-key-for-testing")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key-for-testing")
     monkeypatch.setenv("AWOS_E2E", "1")
     return d

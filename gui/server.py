@@ -27,7 +27,9 @@ import json
 import logging
 import mimetypes
 import os
+import subprocess
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote
@@ -38,11 +40,25 @@ GUI_ROOT = ROOT / ".awos" / "gui"
 STATIC = Path(__file__).resolve().parent / "static"
 
 # Load .env for API keys
+print(f"[server] Starting with cwd={os.getcwd()}", file=sys.stderr, flush=True)
+print(f"[server] ROOT={ROOT}", file=sys.stderr, flush=True)
+print(f"[server] .env exists={os.path.exists(ROOT / '.env')}", file=sys.stderr, flush=True)
 try:
     from dotenv import load_dotenv
-    load_dotenv(ROOT / ".env")
-except ImportError:
-    pass
+    load_dotenv(ROOT / ".env", override=True)
+    print(f"[server] After load_dotenv: OPENCODE_GO_API_KEY={os.environ.get('OPENCODE_GO_API_KEY', 'NOT SET')[:20]}...", file=sys.stderr, flush=True)
+    # Explicitly parse and set env vars to ensure they're available for subprocesses
+    with open(ROOT / ".env") as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _v = _line.split("=", 1)
+                os.environ[_k.strip()] = _v.strip()
+    print(f"[server] After manual parse: OPENCODE_GO_API_KEY={os.environ.get('OPENCODE_GO_API_KEY', 'NOT SET')[:20]}...", file=sys.stderr, flush=True)
+except ImportError as e:
+    print(f"[server] dotenv not installed: {e}", file=sys.stderr, flush=True)
+except Exception as _e:
+    print(f"[server] .env load error: {_e}", file=sys.stderr, flush=True)
 
 # Repo root on path so `scaffold.agent.*` imports work (same as awos.py)
 sys.path.insert(0, str(ROOT))
@@ -53,6 +69,43 @@ logger = logging.getLogger(__name__)
 
 from scaffold.agent.gui_events import GuiEventBus  # noqa: E402
 from scaffold.agent.gui_chat import GuiChatService, MODE_LABELS, VALID_MODES  # noqa: E402
+from scaffold.agent.diagnostics import TraceSpan, TimingReport  # noqa: E402
+
+# ── Subprocess tracking (for crash detection) ─────────────────────────────────
+# Each /api/agent/run spawns an orchestrator subprocess. We track the Popen
+# handle so the SSE loop can detect when a subprocess dies without writing a
+# session_done event (orchestrator crash, OOM, etc.) and surface a visible
+# error in the UI instead of leaving the client hanging. Class-level so the
+# dict is shared across request handler instances.
+_running_orchestrators: dict[str, subprocess.Popen] = {}
+
+# Lazy-loaded: EscalationEngine + routing deps (heavy imports, only for /api/routing/*)
+_routing_engine: object | None = None
+_routing_store: object | None = None
+
+
+def _get_routing_deps() -> tuple[object, object]:
+    """Lazy-load EscalationEngine + RewardStore for routing API."""
+    global _routing_engine, _routing_store
+    if _routing_engine is None:
+        from scaffold.agent.escalation_engine import EscalationEngine
+        from scaffold.agent.reward_store import RewardStore
+        from scaffold.agent.ml_router import build_ml_router
+        from pathlib import Path as _Path
+
+        store = RewardStore()
+        router = build_ml_router(
+            min_samples=20,
+            weights_path=_Path(".awos") / "linucb_weights.pkl",
+            gp_path=_Path(".awos") / "gp_model.pkl",
+        )
+        router.warm_start(store, max_episodes=50)
+        engine = EscalationEngine(ml_router=router)
+
+        _routing_store = store
+        _routing_engine = engine
+
+    return _routing_engine, _routing_store
 
 _chat_service: GuiChatService | None = None
 
@@ -99,8 +152,11 @@ class GuiHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             if on_disconnect:
                 on_disconnect()
-            for _ in gen:
-                pass
+            try:
+                for _ in gen:
+                    pass
+            except Exception:
+                pass  # Suppress downstream errors during client disconnect
 
     def _read_json_body(self) -> dict:
         length = int(self.headers.get("Content-Length", 0))
@@ -199,8 +255,38 @@ class GuiHandler(BaseHTTPRequestHandler):
                 if events:
                     for event in events:
                         self._sse_send(event)
+                        # If the orchestrator finishes cleanly, drop the
+                        # tracked process so we don't try to report it as
+                        # crashed later.
+                        if event.get("type") == "session_done":
+                            for rid in list(_running_orchestrators.keys()):
+                                proc = _running_orchestrators[rid]
+                                if proc.poll() is not None:
+                                    del _running_orchestrators[rid]
                 else:
                     self._sse_send({"type": "idle", "payload": {"message": "Waiting for events..."}})
+
+                # ── Crash detection ─────────────────────────────────────────
+                # On each iteration, check tracked Popen handles. If one
+                # has died without a session_done event, emit a synthetic
+                # error so the UI can show a toast instead of stalling.
+                for rid in list(_running_orchestrators.keys()):
+                    proc = _running_orchestrators[rid]
+                    rc = proc.poll()
+                    if rc is not None:
+                        # Process has exited. If exit code != 0 and we
+                        # haven't seen a session_done, surface as crash.
+                        # Skip the latest session if it just completed
+                        # normally (race condition).
+                        if rc != 0:
+                            self._sse_send({
+                                "type": "error",
+                                "payload": {
+                                    "message": f"Orchestrator exited unexpectedly with code {rc}",
+                                    "run_id": rid,
+                                },
+                            })
+                        del _running_orchestrators[rid]
 
                 time.sleep(0.5)
 
@@ -228,20 +314,67 @@ class GuiHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         path = unquote(self.path.split("?", 1)[0])
 
+        if path == "/api/agent/run":
+            try:
+                body = self._read_json_body()
+                goal = body.get("goal", "").strip()
+                codebase_root = body.get("root", str(ROOT))
+                if not goal:
+                    self._send_json({"error": "goal is required"}, 400)
+                    return
+                # Spawn awos run as background subprocess with logging
+                import uuid
+                run_id = str(uuid.uuid4())[:8]
+                log_file = ROOT / ".awos" / "gui" / f"orch_{run_id}.log"
+                log_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(log_file, "w") as lf:
+                    lf.write(f"Started: {goal}\n")
+                proc = subprocess.Popen(
+                    [sys.executable, "-m", "awos", "run", goal, "--root", codebase_root],
+                    cwd=ROOT,
+                    env=os.environ,  # Pass environment with .env vars
+                    stdout=open(log_file, "a"),
+                    stderr=open(log_file, "a"),
+                )
+                # Track for crash detection (SSE loop checks this on each
+                # iteration). Removed when a session_done event is observed.
+                _running_orchestrators[run_id] = proc
+                self._send_json({"status": "started", "goal": goal, "root": codebase_root, "run_id": run_id})
+            except json.JSONDecodeError:
+                self._send_json({"error": "invalid JSON body"}, 400)
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, 500)
+            return
+
         if path == "/api/chat/stream":
+            span = TraceSpan("chat_stream", "http")
             try:
                 body = self._read_json_body()
                 svc = get_chat_service()
                 chat_id_holder: dict[str, str | None] = {"id": body.get("chat_id")}
 
                 def events() -> Iterator[dict]:
+                    t0 = time.perf_counter()
+                    first = True
                     for evt in svc.handle_message_stream(
                         message=body.get("message", ""),
                         mode=body.get("mode", "qa"),
                         chat_id=body.get("chat_id"),
+                        model=body.get("model") or None,
                     ):
                         if evt.get("event") == "start":
                             chat_id_holder["id"] = evt.get("data", {}).get("chat_id")
+                        if first and evt.get("event") == "token":
+                            ttfb = (time.perf_counter() - t0) * 1000
+                            span.metadata["ttfb_ms"] = round(ttfb, 1)
+                            first = False
+                        if evt.get("event") == "done" or evt.get("event") == "error":
+                            span.done(
+                                success=evt.get("event") != "error",
+                                error=str(evt.get("data", {}).get("error", ""))[:100] if evt.get("event") == "error" else "",
+                                mode=body.get("mode", "qa"),
+                                total_ms=round((time.perf_counter() - t0) * 1000, 1)
+                            )
                         yield evt
 
                 def on_disconnect() -> None:
@@ -432,6 +565,79 @@ class GuiHandler(BaseHTTPRequestHandler):
         
         return history
 
+    def _get_routing_status(self) -> dict:
+        """Return transparent routing status for the dashboard.
+
+        Combines EscalationEngine.routing_status() (live LinUCB state) with
+        RewardStore summary (per-model historical performance).
+        """
+        engine, store = _get_routing_deps()
+
+        # Live routing state
+        status = engine.routing_status()
+
+        # Historical performance from RewardStore
+        from scaffold.agent.reward_store import RewardStore as _RS
+        perf: dict = {"by_model": {}, "total_episodes": 0}
+        try:
+            rstore: _RS = store  # type: ignore[assignment]
+            total = rstore.total_episodes()
+            perf["total_episodes"] = total
+            if total > 0:
+                episodes = rstore.get_recent(min(total, 500))
+                by_model: dict[int, dict] = {}
+                for ep in episodes:
+                    aid = ep.action_id
+                    if aid not in by_model:
+                        by_model[aid] = {"attempts": 0, "successes": 0, "total_cost": 0.0}
+                    by_model[aid]["attempts"] += 1
+                    by_model[aid]["successes"] += int(ep.success)
+                    by_model[aid]["total_cost"] += ep.cost_usd
+
+                from scaffold.agent.ml_router import ACTION_NAMES
+                for aid, data in sorted(by_model.items()):
+                    name = ACTION_NAMES[aid] if aid < len(ACTION_NAMES) else str(aid)
+                    perf["by_model"][name] = {
+                        "attempts": data["attempts"],
+                        "success_rate": round(data["successes"] / data["attempts"], 3),
+                        "avg_cost_usd": round(data["total_cost"] / data["attempts"], 5),
+                        "total_cost_usd": round(data["total_cost"], 4),
+                    }
+        except Exception:
+            pass
+
+        return {
+            "routing": status,
+            "performance": perf,
+            "timestamp": __import__("datetime").datetime.now().isoformat(),
+        }
+
+    def _get_routing_history(self, limit: int = 20) -> list[dict]:
+        """Return recent routing decisions with outcomes for the dashboard."""
+        _, store = _get_routing_deps()
+        from scaffold.agent.reward_store import RewardStore as _RS
+        from scaffold.agent.ml_router import ACTION_NAMES
+
+        history: list[dict] = []
+        try:
+            rstore: _RS = store  # type: ignore[assignment]
+            episodes = rstore.get_recent(limit)
+            for ep in episodes:
+                name = ACTION_NAMES[ep.action_id] if ep.action_id < len(ACTION_NAMES) else str(ep.action_id)
+                history.append({
+                    "episode_id": ep.episode_id[:8],
+                    "task": ep.task_action_text[:80],
+                    "model": name,
+                    "success": ep.success,
+                    "reward": ep.reward,
+                    "cost_usd": ep.cost_usd,
+                    "timestamp": ep.timestamp,
+                })
+        except Exception:
+            pass
+
+        return history
+
     def do_GET(self) -> None:
         path = unquote(self.path.split("?", 1)[0])
 
@@ -464,6 +670,13 @@ class GuiHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(exc)}, 500)
             return
 
+        if path == "/api/diagnostics":
+            from scaffold.agent import diagnostics
+            timing = TimingReport.by_phase()
+            detail = TimingReport.by_name()
+            self._send_json({"phases": timing, "details": detail, "trace_count": len(diagnostics.TRACES)})
+            return
+
         if path == "/api/metrics/summary":
             try:
                 from scaffold.agent.pei_report import PEIReport
@@ -471,6 +684,35 @@ class GuiHandler(BaseHTTPRequestHandler):
                 self._send_json(snap.to_dict())
             except Exception as exc:
                 self._send_json({"error": str(exc)}, 500)
+            return
+
+        if path == "/api/budget":
+            try:
+                from scaffold.agent.budget_ledger import get_ledger
+                status = get_ledger().get_status()
+                self._send_json(status)
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, 500)
+            return
+
+        if path == "/api/diagnostics":
+            from scaffold.agent import diagnostics
+            timing = TimingReport.by_phase()
+            detail = TimingReport.by_name()
+            self._send_json({"phases": timing, "details": detail, "trace_count": len(diagnostics.TRACES)})
+            return
+
+        if path == "/api/health":
+            from scaffold.agent.provider_health import check_all as _check_all
+            results = _check_all()
+            self._send_json({name: {"available": h.available, "balance_ok": h.balance_ok, "latency_ms": h.latency_ms, "error": h.error} for name, h in results.items()})
+            return
+
+        if path == "/api/models/status":
+            """Return current model tier list with cached status."""
+            from scaffold.agent.gui_chat import GuiChatService
+            tiers = GuiChatService._OC_MODEL_TIERS
+            self._send_json([{"model": m[0], "name": m[1], "protocol": m[4]} for m in tiers])
             return
 
         if path == "/api/modes":
@@ -497,6 +739,20 @@ class GuiHandler(BaseHTTPRequestHandler):
                     return
                 self._send_json(session.to_dict())
                 return
+
+        if path == "/api/routing/status":
+            try:
+                self._send_json(self._get_routing_status())
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, 500)
+            return
+
+        if path == "/api/routing/history":
+            try:
+                self._send_json(self._get_routing_history(limit=30))
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, 500)
+            return
 
         if path == "/api/sessions":
             self._send_json(GuiEventBus.list_sessions(GUI_ROOT))
@@ -572,6 +828,28 @@ def main() -> None:
     print(f"  Chat:  http://{args.host}:{args.port}/?view=chat")
     print(f"  Runs:  http://{args.host}:{args.port}/?view=runs")
     print(f"Sessions: {GUI_ROOT}")
+    # ── Startup health check (async, non-blocking) ────────────────────
+    import threading
+    def _startup_health():
+        from scaffold.agent.provider_health import check_opencode_go, check_deepseek, check_anthropic
+        import traceback
+        while True:
+            try:
+                results = {}
+                for name, fn in [("opencode", check_opencode_go), ("deepseek", check_deepseek), ("anthropic", check_anthropic)]:
+                    try:
+                        results[name] = fn()
+                    except Exception as e:
+                        results[name] = type('H',(),{'can_use':False,'latency_ms':0,'error':str(e)[:60]})()
+                statuses = []
+                for name, h in results.items():
+                    icon = "✅" if getattr(h, 'can_use', False) else "❌"
+                    statuses.append(f"  {icon} {name}: {getattr(h, 'latency_ms', 0):.0f}ms" + (f" — {getattr(h, 'error', '')[:60]}" if getattr(h, 'error', '') else ""))
+                print("Provider health:\n" + "\n".join(statuses))
+            except Exception as e:
+                print(f"Health check error: {e}\n{traceback.format_exc()}")
+            time.sleep(300)
+    threading.Thread(target=_startup_health, daemon=True).start()
     server.serve_forever()
 
 

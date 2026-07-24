@@ -21,6 +21,7 @@ Advanced commands:
     awos report                  PEI scorecard — client-facing proof of value
     awos report --html PATH      Write HTML report to file
     awos budget                  Month-to-date budget status
+    awos models                  List registered models + availability
     awos sessions list           Runtime sessions (pause/resume internals)
     awos sessions resume <rs_id> Resume a paused session by ID
     awos mission guide           Real workload mission playbook (lab tool)
@@ -44,7 +45,6 @@ import argparse
 import os
 import sys
 import json
-import shutil
 import signal
 import subprocess
 from pathlib import Path
@@ -221,6 +221,34 @@ def cmd_budget(args):
         print(f"  Cache:     {status['cache_hits']} hits, saved ${status.get('cache_savings', 0):.4f}")
 
 
+def cmd_models(args):
+    """List registered models with availability + dead-model filter."""
+    from escalation_engine import LADDER, MODELS_UNAVAILABLE
+
+    print("Models in the escalation ladder:")
+    print(f"  {'LEVEL':<12} {'NAME':<22} {'MODEL_ID':<28} {'PROVIDER':<10} {'STATUS'}")
+    print(f"  {'-'*12} {'-'*22} {'-'*28} {'-'*10} {'-'*10}")
+    for spec in LADDER:
+        status = "DEAD" if spec.model_id in MODELS_UNAVAILABLE else "OK"
+        print(f"  {spec.level.name:<12} {spec.name:<22} {spec.model_id:<28} {spec.provider:<10} {status}")
+    print()
+    print(f"MODELS_UNAVAILABLE: {sorted(MODELS_UNAVAILABLE)}")
+    print()
+    # Live check: query OpenCode Go catalog for the working model
+    opencode_key = os.getenv("OPENCODE_GO_API_KEY")
+    if opencode_key:
+        try:
+            from openai import OpenAI
+            c = OpenAI(api_key=opencode_key, base_url=os.getenv("OPENCODE_GO_BASE_URL", "https://opencode.ai/zen/go/v1"))
+            models = [m.id for m in c.models.list()]
+            print(f"OpenCode Go catalog: {len(models)} models available")
+            for m in models:
+                marker = " ← in use" if m == "deepseek-v4-flash" else ""
+                print(f"  - {m}{marker}")
+        except Exception as exc:
+            print(f"OpenCode Go catalog query failed: {exc}")
+
+
 def cmd_performance(args):
     """Print the tool performance success matrix."""
     from scaffold.agent.core.performance_tracker import ToolPerformanceTracker
@@ -315,7 +343,6 @@ def cmd_sessions_list(args):
 
 def cmd_sessions_show(args):
     """Show one runtime session."""
-    from scaffold.agent.runtime_session import SessionStatus
 
     store = _sessions_store()
     try:
@@ -385,39 +412,69 @@ def cmd_sessions_resume(args):
 
 
 def _print_run_result(result: dict) -> None:
-    print(f"\nGoal:     {result.get('goal', '')}")
-    print(f"Success:  {'✓' if result.get('success') else '✗'}")
+    """Print run results using the premium agent TUI."""
+    from scaffold.agent.agent_tui import print_result_banner
+
+    success = result.get("success", False)
     completed = result.get("tasks_completed", 0)
-    total = result.get("total_tasks", result.get("tasks_failed", 0) + completed)
-    print(f"Tasks:    {completed}/{total} completed")
-    if result.get("runtime_session_id"):
-        print(f"Session:  {result['runtime_session_id']}")
-    if result.get("errors"):
-        for e in result["errors"][:5]:
+    failed = result.get("tasks_failed", 0)
+    total = completed + failed
+    if total == 0:
+        total = result.get("total_tasks", completed)
+    cost = float(result.get("total_cost", result.get("cost_usd", 0.0)))
+    elapsed = float(result.get("elapsed", result.get("elapsed_seconds", 0.0)))
+    model = str(result.get("model_used", result.get("model", "DeepSeek V4")))
+
+    # Show errors if any
+    errors = result.get("errors", [])
+    if errors:
+        for e in errors[:3]:
             print(f"  ✗ {e}")
+        if len(errors) > 3:
+            print(f"  ... and {len(errors) - 3} more errors")
+        print()
+
+    # Session ID
+    session_id = result.get("runtime_session_id")
+    if session_id:
+        print(f"  Session: {session_id}")
+
+    print_result_banner(
+        success=success,
+        tasks=total,
+        cost=cost,
+        elapsed=elapsed,
+        model=model,
+    )
 
 
 def cmd_run(args):
     """Execute a feature goal via the Orchestrator."""
+    from scaffold.agent.agent_tui import print_goal_banner
     from scaffold.agent.learning_policy import apply_kernel_defaults
     from scaffold.agent.orchestrator import Orchestrator
     from scaffold.agent.token_tracker import TokenTracker
 
     apply_kernel_defaults()
-    tracker = TokenTracker(monthly_budget=float(os.getenv("AWOS_MONTHLY_BUDGET", "20.0")))
-    orch = Orchestrator(tracker=tracker)
-    session_id = getattr(args, "session_id", None)
     goal = getattr(args, "goal", None)
-    if session_id and not goal:
+    session_id = getattr(args, "session_id", None)
+    if not goal:
         from scaffold.agent.runtime_session import RuntimeSessionStore
-        try:
-            goal = RuntimeSessionStore().load(session_id).goal
-        except FileNotFoundError:
-            print(f"Session not found: {session_id}")
-            raise SystemExit(1)
-    if not goal and not session_id:
+        if session_id:
+            try:
+                goal = RuntimeSessionStore().load(session_id).goal
+            except FileNotFoundError:
+                print(f"Session not found: {session_id}")
+                raise SystemExit(1)
+    if not goal:
         print("Provide a goal or --session <rs_id>.")
         raise SystemExit(1)
+
+    # ── Premium banner ──────────────────────────────────────────────────
+    print_goal_banner(goal)
+
+    tracker = TokenTracker(monthly_budget=float(os.getenv("AWOS_MONTHLY_BUDGET", "20.0")))
+    orch = Orchestrator(tracker=tracker)
 
     _prev = signal.getsignal(signal.SIGINT)
 
@@ -602,7 +659,7 @@ SUCCESS CRITERIA
     )
     for c in cfg.get("success_criteria", []):
         print(f"  • {c}")
-    print(f"\nFull spec: docs/specs/stage1_real_workload_mission.md\n")
+    print("\nFull spec: docs/specs/stage1_real_workload_mission.md\n")
 
 
 def cmd_mission_start(args):
@@ -705,55 +762,9 @@ def cmd_mission_status(args):
 
 
 def cmd_guide(args):
-    """Plain-English intro: what AWOS is and how to run it."""
-    root = Path(__file__).resolve().parent
-    print(
-        f"""
-╔══════════════════════════════════════════════════════════════════╗
-║  AWOS — Autonomous Work OS (coding agent = App #1)               ║
-╚══════════════════════════════════════════════════════════════════╝
-
-WHAT IT IS
-  AWOS takes a goal in plain English, plans tasks, edits code, verifies,
-  and learns from outcomes. State lives in .awos/ (sessions, errors, rewards).
-
-HOW TO INVOKE (pick one)
-  1) From this repo (always works):
-       cd {root}
-       python3 awos.py guide
-       python3 awos.py gauntlet list
-       python3 awos.py run "your goal here"
-
-  2) Short command `awos` on your PATH (one-time setup):
-       export PATH="{root / 'scripts'}:$PATH"
-       awos gauntlet list
-
-  Spelling: gauntlet  (not guantlet)
-
-COMMON COMMANDS
-  awos guide              This help
-  awos run "<goal>"       Run the coding agent on a goal
-  awos gauntlet list      Stress-test scenarios (G1–G6)
-  awos gauntlet run G6    Run one scenario (SIGINT pause proof)
-  awos sessions list      Paused / completed runtime sessions
-  awos sessions resume rs_<id>   Continue a paused run
-  awos stats              Learning + performance snapshot
-
-GAUNTLET = extreme stress tests (not normal unit tests)
-  G2  pause/resume mid-plan        ~15s, automated
-  G3  worker fail → MCTS trace     ~20s, automated
-  G6  Ctrl+C pause → resume        ~1–2 min, live APIs
-  G1  worktree isolation           live run, cheap mode
-
-SETUP CHECKLIST
-  [ ] cd to repo root
-  [ ] cp .env.example .env  and add ANTHROPIC_API_KEY / GOOGLE_API_KEY
-  [ ] python3 awos.py guide   (you are here)
-  [ ] python3 awos.py gauntlet run G2   (quick smoke)
-
-Docs: VISION.md · docs/stage1_risk_gauntlet_booklet.md
-"""
-    )
+    """Premium welcome screen for AWOS."""
+    from scaffold.agent.agent_tui import print_welcome
+    print_welcome()
 
 
 def cmd_gauntlet_list(args):
@@ -774,82 +785,15 @@ def cmd_gauntlet_run(args):
 
 
 def cmd_stats(args):
-    """Show self-learning observability report."""
-    import sys
-    sys.path.insert(0, str(Path(__file__).parent / "scaffold" / "agent"))
-    
-    # If --savings flag, show cost savings analysis
-    if getattr(args, "savings", False):
-        from budget_ledger import get_ledger
-        ledger = get_ledger()
-        status = ledger.get_status(monthly_budget=float(os.getenv("AWOS_MONTHLY_BUDGET", "20.0")))
-        
-        print("\n╔═════════════════════════════════════════════════════════════════════╗")
-        print("║        AWOS COMPOUNDING ADVANTAGE — Cost Savings Report            ║")
-        print("╚═════════════════════════════════════════════════════════════════════╝\n")
-        
-        # Current month stats
-        print(f"Month:          {status['month']}")
-        print(f"Total spent:    ${status['spent']:.2f}")
-        print(f"Cache savings:  ${status.get('cache_savings', 0):.2f}")
-        print(f"Requests:       {status.get('requests', 0)}")
-        print()
-        
-        # Show cost per request trend (if enough data)
-        records = ledger._records
-        if len(records) >= 10:
-            # Group by batches of 10 requests
-            batches = []
-            for i in range(0, len(records), 10):
-                batch = records[i:i+10]
-                batch_cost = sum(r.get("cost", 0) for r in batch)
-                batches.append(batch_cost / len(batch))
-            
-            print("Cost per request trend (batches of 10):")
-            print()
-            for idx, avg_cost in enumerate(batches[:10], 1):  # Show first 10 batches
-                bar_len = int(avg_cost * 1000)  # Scale for visualization
-                bar = "█" * min(bar_len, 50)
-                print(f"  Batch {idx:2d}: ${avg_cost:.4f} {bar}")
-            
-            if len(batches) > 1:
-                first_batch = batches[0]
-                last_batch = batches[-1]
-                if first_batch > 0:
-                    savings_pct = ((first_batch - last_batch) / first_batch) * 100
-                    print()
-                    print(f"Learning trend: {savings_pct:+.1f}% cost change from first to last batch")
-            print()
-        else:
-            print("(Not enough data yet — need 10+ requests to show trend)")
-            print()
-        
-        # Value prop
-        print("═══════════════════════════════════════════════════════════════════════")
-        print("AWOS VALUE PROPOSITION:")
-        print()
-        print("  Cursor: Same cost every job ($3 → $3 → $3)")
-        print("  AWOS:   Gets cheaper with learning ($3 → $1 → $0.30)")
-        print()
-        print("  How?")
-        print("    • DeepSeek routing (instant 50% savings)")
-        print("    • PromptEvolver learns YOUR patterns")
-        print("    • SkillLibrary caches YOUR solutions")
-        print("    • Fewer retries = lower cost")
-        print()
-        print("  The more you use it, the cheaper it gets.")
-        print("═══════════════════════════════════════════════════════════════════════\n")
-        return
-    
-    # Default: full self-learning metrics
-    from self_learning_metrics import SelfLearningMetrics
-    store = getattr(args, "store", ".awos")
-    metrics = SelfLearningMetrics(store_path=store)
-    if getattr(args, "json", False):
-        import json
-        print(json.dumps(metrics.snapshot().to_dict(), indent=2))
-    else:
-        metrics.print_report()
+    """Premium learning health + performance report."""
+    from scaffold.agent.agent_tui import print_stats
+    print_stats()
+
+
+def cmd_metrics(args):
+    """Net Velocity Dashboard — the metrics that matter for paying users."""
+    from scaffold.agent.agent_tui import print_metrics
+    print_metrics()
 
 
 def cmd_report(args):
@@ -937,15 +881,14 @@ def cmd_worker_start(args):
     print(f"Starting work: {args.goal}")
     print(f"Target repo: {root_path}")
     if getattr(args, "auto_approve", False):
-        print(f"[AUTO-APPROVE] Plans will be executed without review")
-    print(f"Ctrl+C to pause anytime\n")
+        print("[AUTO-APPROVE] Plans will be executed without review")
+    print("Ctrl+C to pause anytime\n")
     
     cmd_run(wrapped_args)
 
 
 def cmd_worker_status(args):
     """List all work sessions."""
-    from runtime_session import RuntimeSessionStore
     
     store = _sessions_store()
     sessions = store.list_sessions()
@@ -975,7 +918,7 @@ def cmd_worker_status(args):
 
 def cmd_worker_resume(args):
     """Resume paused work."""
-    from runtime_session import RuntimeSessionStore, SessionStatus
+    from runtime_session import SessionStatus
     
     store = _sessions_store()
     session_id = args.session_id
@@ -988,7 +931,7 @@ def cmd_worker_resume(args):
             print("\nStart new work with: awos worker start \"your goal\"")
             sys.exit(1)
         if len(sessions) > 1:
-            print(f"Multiple paused sessions found. Specify one:\n")
+            print("Multiple paused sessions found. Specify one:\n")
             for s in sessions:
                 print(f"  awos worker resume {s.session_id}")
             sys.exit(1)
@@ -1032,7 +975,6 @@ def cmd_worker_resume(args):
 
 def cmd_worker_diff(args):
     """Show sandbox changes."""
-    from runtime_session import RuntimeSessionStore
     import subprocess
     
     store = _sessions_store()
@@ -1064,7 +1006,7 @@ def cmd_worker_diff(args):
     
     print(f"Session: {session_id}")
     print(f"Sandbox: {worktree}")
-    print(f"\nChanges vs main:\n")
+    print("\nChanges vs main:\n")
     
     # git diff main
     try:
@@ -1085,7 +1027,7 @@ def cmd_worker_diff(args):
 
 def cmd_worker_cancel(args):
     """Cancel active/paused work."""
-    from runtime_session import RuntimeSessionStore, SessionStatus
+    from runtime_session import SessionStatus
     
     store = _sessions_store()
     session_id = args.session_id
@@ -1097,7 +1039,7 @@ def cmd_worker_cancel(args):
             print("No active work to cancel.")
             sys.exit(1)
         if len(sessions) > 1:
-            print(f"Multiple active sessions. Specify one:\n")
+            print("Multiple active sessions. Specify one:\n")
             for s in sessions:
                 print(f"  awos worker cancel {s.session_id}")
             sys.exit(1)
@@ -1127,6 +1069,124 @@ def cmd_worker_cancel(args):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Serve command (web dashboard)
+# ═════════════════════════════════════════════════════════════════════════════
+
+def cmd_serve(args):
+    """Start the AWOS web dashboard server."""
+    import subprocess
+    port = getattr(args, "port", 8765)
+    host = getattr(args, "host", "127.0.0.1")
+    
+    print("Starting AWOS web dashboard...")
+    print(f"  Dashboard: http://{host}:{port}")
+    print("  Press Ctrl+C to stop\n")
+    
+    server_script = Path(__file__).parent / "gui" / "server.py"
+    try:
+        subprocess.run(
+            [sys.executable, str(server_script), "--port", str(port), "--host", host],
+            cwd=str(Path(__file__).parent),
+        )
+    except KeyboardInterrupt:
+        print("\nServer stopped.")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# CI Rescue command (Phase 4 — product wedge)
+# ═════════════════════════════════════════════════════════════════════════════
+
+def cmd_fix_ci(args):
+    """One-command CI rescue for any Python repo."""
+    import time
+    from scaffold.agent.ci_discovery import CIDiscovery
+    from scaffold.agent.ci_planner import generate_ci_goal, generate_ci_plan
+    from scaffold.agent.ci_tui import (
+        print_banner, print_no_failures, print_discovery_start,
+        print_discovery_results, print_plan, print_results,
+    )
+
+    repo_root = getattr(args, "root", ".") or "."
+    repo_path = Path(repo_root).expanduser().resolve()
+    if not repo_path.is_dir():
+        print(f"Error: --root not found: {repo_path}", file=sys.stderr)
+        sys.exit(1)
+
+    # ── Banner ──────────────────────────────────────────────────────────
+    print_banner()
+
+    # 1. Discover failures (with spinner)
+    discovery = CIDiscovery(str(repo_path))
+    with print_discovery_start():
+        result = discovery.discover()
+
+    if result.no_tests_found:
+        print_no_failures()
+        print("[CI] No test framework detected. Ensure pytest is installed.")
+        return
+
+    if result.failure_count == 0:
+        print_no_failures()
+        return
+
+    # 2. Show discovery results
+    failures = [
+        {
+            "module": f.module,
+            "test_name": f.test_name,
+            "test_file": f.test_file,
+            "error_msg": f.error_msg,
+            "line_number": f.line_number,
+            "error_type": f.error_type,
+        }
+        for f in result.failures
+    ]
+    print_discovery_results(failures)
+    print()
+
+    # 3. Generate goal + plan (estimate cost: ~₹0.001 per task)
+    goal = generate_ci_goal(failures)
+    plan = generate_ci_plan(failures)
+    estimated_cost = len(plan) * 0.001
+    print_plan(plan, estimated_cost_usd=estimated_cost)
+
+    # 4. Set environment for CI rescue
+    os.environ["AWOS_CHEAP_ONLY"] = "true"
+    os.environ["AWOS_SAFE_TO_RUN_TESTS"] = "1"
+    os.environ["AWOS_ENABLE_CLARIFICATION"] = ""
+
+    # 5. Call orchestrator
+    print("\n  [dim]⚡ Starting CI rescue...[/]\n")
+    start_time = time.time()
+
+    wrapped_args = argparse.Namespace(
+        goal=goal,
+        root=str(repo_path),
+        pre_planned_tasks=plan,
+        auto_approve=True,
+        resume=False,
+        session_id=None,
+    )
+
+    try:
+        cmd_run(wrapped_args)
+    except SystemExit:
+        pass
+
+    elapsed = time.time() - start_time
+    cost_usd = len(plan) * 0.001  # estimated cost
+
+    # 6. Show rich results
+    results_dict = {
+        "completed": len(plan),  # approximate
+        "failed": 0,
+        "elapsed": elapsed,
+        "cost_usd": cost_usd,
+    }
+    print_results(failures, results_dict, elapsed, cost_usd)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Argument parser
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -1136,6 +1196,19 @@ def build_parser() -> argparse.ArgumentParser:
         description="AWOS — AI Coding Agent",
     )
     sub = parser.add_subparsers(dest="command", help="Available commands")
+
+    # serve (web dashboard)
+    serve = sub.add_parser("serve", help="Start the AWOS web dashboard")
+    serve.add_argument("--port", type=int, default=8765, help="Port to run on (default: 8765)")
+    serve.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
+
+    # fix-ci (Phase 4 — product wedge: one-command CI rescue)
+    fix_ci = sub.add_parser("fix-ci", help="One-command CI rescue for any Python repo")
+    fix_ci.add_argument(
+        "--root",
+        default=".",
+        help="Target repo path (default: current directory)",
+    )
 
     # worker (Phase C — simple product surface)
     worker = sub.add_parser("worker", help="Simple coding worker interface")
@@ -1212,6 +1285,9 @@ def build_parser() -> argparse.ArgumentParser:
     # budget
     sub.add_parser("budget", help="Month-to-date budget status")
 
+    # models
+    sub.add_parser("models", help="List registered models + availability")
+
     # performance
     perf = sub.add_parser("performance", help="Tool success matrix per model × task type")
     perf.add_argument("--window", type=int, default=200, help="Last N records to include")
@@ -1253,6 +1329,9 @@ def build_parser() -> argparse.ArgumentParser:
     stats.add_argument("--json", action="store_true", help="Output as JSON")
     stats.add_argument("--store", default=".awos", help="Path to .awos store (default: .awos)")
     stats.add_argument("--savings", action="store_true", help="Show compounding cost savings report")
+
+    # metrics (Phase 4 — Net Velocity Dashboard)
+    sub.add_parser("metrics", help="Net Velocity Dashboard — quality, cost, time saved")
 
     # report
     rpt = sub.add_parser("report", help="PEI scorecard — client-facing proof of value")
@@ -1301,6 +1380,10 @@ def main():
     elif args.command == "mission":
         _mission = {"guide": cmd_mission_guide, "start": cmd_mission_start, "status": cmd_mission_status}
         handler = _mission.get(getattr(args, "mission_cmd", ""))
+    elif args.command == "fix-ci":
+        handler = cmd_fix_ci
+    elif args.command == "serve":
+        handler = cmd_serve
     else:
         handler = globals().get(f"cmd_{args.command}")
 

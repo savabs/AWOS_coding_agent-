@@ -47,8 +47,8 @@ logger = logging.getLogger(__name__)
 # ── Constants ──────────────────────────────────────────────────────────────
 
 N_FEATURES = 10
-N_ACTIONS  = 5
-ACTION_NAMES = ["gemini_flash", "deepseek", "openai", "haiku", "sonnet"]
+N_ACTIONS  = 6
+ACTION_NAMES = ["gemini_flash", "deepseek", "openai", "haiku", "sonnet", "openrouter"]
 
 _DEFAULT_WEIGHTS_PATH = Path(".awos") / "linucb_weights.pkl"
 _DEFAULT_GP_PATH      = Path(".awos") / "gp_model.pkl"
@@ -240,6 +240,13 @@ class LinUCBRouter:
         x = np.asarray(features, dtype=np.float64)
         a = int(action_id)
 
+        # Defensive: action_id may exceed n_actions (e.g. a new
+        # EscalationLevel was added without recreating the router).
+        # Extend the per-action arrays rather than crashing.
+        while a >= len(self._A):
+            self._A.append(np.eye(self.n_features))
+            self._b.append(np.zeros(self.n_features))
+
         self._A[a] += np.outer(x, x)
         self._b[a] += reward * x
         self._total_updates += 1
@@ -247,6 +254,55 @@ class LinUCBRouter:
         if self._total_updates % 10 == 0:
             self._save()
             logger.debug("[linucb] saved weights after %d updates", self._total_updates)
+
+    # ── Warm-Start ───────────────────────────────────────────────────────
+
+    def warm_start(self, reward_store, max_episodes: int = 100) -> int:
+        """Batch-replay historical episodes from RewardStore to prime LinUCB weights.
+
+        Skips ReplayGate — these are trusted historical episodes that already
+        passed gating when they were originally recorded. Uses prioritized
+        experience replay (PER) to maximize learning per episode.
+
+        Args:
+            reward_store: RewardStore instance with recorded episodes.
+            max_episodes: Maximum number of episodes to replay (default 100).
+
+        Returns:
+            Number of episodes successfully replayed.
+        """
+        episodes = reward_store.get_prioritized(max_episodes)
+        if not episodes:
+            logger.info("[linucb] warm_start: no episodes in RewardStore")
+            return 0
+
+        replayed = 0
+        for ep in episodes:
+            action_id = getattr(ep, "action_id", -1)
+            if action_id < 0 or action_id >= self.n_actions:
+                logger.debug(
+                    "[linucb] warm_start: skipping action_id=%d (out of 0..%d)",
+                    action_id, self.n_actions - 1,
+                )
+                continue
+
+            features = np.asarray(getattr(ep, "features", []), dtype=np.float64)
+            if features.shape[0] != self.n_features:
+                logger.debug(
+                    "[linucb] warm_start: skipping malformed features (dim=%d, expected %d)",
+                    features.shape[0], self.n_features,
+                )
+                continue
+
+            reward = float(getattr(ep, "reward", 0.0))
+            self.update(features, action_id, reward)
+            replayed += 1
+
+        logger.info(
+            "[linucb] warm_start: replayed %d episodes — total_updates=%d, is_ready=%s",
+            replayed, self._total_updates, self.is_ready(),
+        )
+        return replayed
 
     # ── State ────────────────────────────────────────────────────────────
 
@@ -311,8 +367,11 @@ class LinUCBRouter:
     # ── Persistence ───────────────────────────────────────────────────────
 
     def _save(self) -> None:
+        if self._weights_path is None:
+            return
         self._weights_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
+            "format_version": 2,
             "A": [a.tolist() for a in self._A],
             "b": [b.tolist() for b in self._b],
             "total_updates": self._total_updates,
@@ -324,26 +383,80 @@ class LinUCBRouter:
             pickle.dump(payload, f, protocol=4)
 
     def _load(self) -> None:
-        if not self._weights_path.exists():
+        """Load persisted weights. Handles n_actions changes by padding/truncating.
+
+        V2 format (format_version ≥ 2): pads new actions with identity matrices
+        so learning from historical data is never lost when action space grows.
+        V1 format (no format_version key): only loads on exact n_actions match.
+        """
+        if self._weights_path is None or not self._weights_path.exists():
             return
         try:
             with self._weights_path.open("rb") as f:
                 payload = pickle.load(f)
-            if (
-                payload.get("n_features") == self.n_features
-                and payload.get("n_actions") == self.n_actions
-            ):
-                self._A = [np.array(a) for a in payload["A"]]
-                self._b = [np.array(b) for b in payload["b"]]
-                self._total_updates = payload.get("total_updates", 0)
-                logger.info(
-                    "[linucb] loaded weights: %d updates accumulated",
-                    self._total_updates,
-                )
-            else:
-                logger.warning("[linucb] weight shape mismatch — starting fresh")
         except Exception as exc:
-            logger.warning("[linucb] could not load weights: %s — starting fresh", exc)
+            logger.warning("[linucb] could not read weights file: %s — starting fresh", exc)
+            return
+
+        fmt_ver = payload.get("format_version", 1)
+        stored_actions = payload.get("n_actions", 0)
+        stored_features = payload.get("n_features", 0)
+
+        # Feature dimension mismatch — incompatible, start fresh
+        if stored_features != self.n_features:
+            logger.warning(
+                "[linucb] feature dimension mismatch stored=%d current=%d — starting fresh",
+                stored_features, self.n_features,
+            )
+            return
+
+        # ── Exact match — direct load ──────────────────────────────────
+        if stored_actions == self.n_actions:
+            self._A = [np.array(a) for a in payload["A"]]
+            self._b = [np.array(b) for b in payload["b"]]
+            self._total_updates = payload.get("total_updates", 0)
+            logger.info(
+                "[linucb] loaded v%d: %d updates, %d actions",
+                fmt_ver, self._total_updates, self.n_actions,
+            )
+            return
+
+        # ── Action space mismatch (v1) — discard (can't pad v1 safely) ──
+        if fmt_ver < 2:
+            logger.warning(
+                "[linucb] v1 weights: stored=%d actions current=%d — starting fresh "
+                "(upgrade to v2 to preserve learning across action space changes)",
+                stored_actions, self.n_actions,
+            )
+            return
+
+        # ── Action space mismatch (v2+) — pad or truncate ──────────────
+        stored_A = [np.array(a) for a in payload["A"]]
+        stored_b = [np.array(b) for b in payload["b"]]
+
+        if stored_actions < self.n_actions:
+            # GROW: new actions start with identity (explore freely)
+            self._A = stored_A + [
+                np.eye(self.n_features) for _ in range(self.n_actions - stored_actions)
+            ]
+            self._b = stored_b + [
+                np.zeros(self.n_features) for _ in range(self.n_actions - stored_actions)
+            ]
+            self._total_updates = payload.get("total_updates", 0)
+            logger.info(
+                "[linucb] loaded v%d: %d updates, padded %d→%d actions (new actions explore freely)",
+                fmt_ver, self._total_updates, stored_actions, self.n_actions,
+            )
+        else:
+            # SHRINK: drop actions that no longer exist
+            self._A = stored_A[:self.n_actions]
+            self._b = stored_b[:self.n_actions]
+            self._total_updates = payload.get("total_updates", 0)
+            logger.info(
+                "[linucb] loaded v%d: %d updates, truncated %d→%d actions (dropped %d)",
+                fmt_ver, self._total_updates, stored_actions, self.n_actions,
+                stored_actions - self.n_actions,
+            )
 
     def save_now(self) -> None:
         """Force an immediate save (call this on shutdown)."""

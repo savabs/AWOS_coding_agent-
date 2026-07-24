@@ -1,7 +1,7 @@
 """
-Cheap Planner: Uses Gemini Flash or Haiku for planning, NOT Sonnet.
+Cheap Planner: Uses OpenCode Go (DeepSeek V4 Flash) for planning.
 
-Cost: ~$0.0005-0.001 per planning call (vs $0.03-0.05 for Sonnet)
+Cost: ~$0.0001-0.0005 per planning call (vs $0.03-0.05 for Sonnet)
 Accuracy: Still 90%+ for task decomposition when prompt is clear
 Trade: Slightly less sophisticated reasoning, but 50-100x cheaper
 
@@ -10,44 +10,40 @@ Perfect for self-improvement loops where speed + cost matter more than perfectio
 
 import json
 import os
-import re
 from typing import Optional
-from google import genai
+
+from openai import OpenAI
 
 
 class CheapPlanner:
-    """Uses Gemini 2.5 Flash for budget-conscious planning."""
-    
-    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-2.5-flash"):
-        """Initialize with Google Gemini API (google.genai SDK).
+    """Uses OpenCode Go (DeepSeek V4 Flash) for budget-conscious planning."""
+
+    def __init__(self, api_key: Optional[str] = None, model: str = "deepseek-v4-flash"):
+        """Initialize with OpenCode Go API.
         
         Args:
-            api_key: Gemini/Google API key. Reads GEMINI_API_KEY then GOOGLE_API_KEY.
-            model: Model to use (gemini-2.5-flash recommended)
+            api_key: OpenCode Go API key. Reads OPENCODE_GO_API_KEY.
+            model: Model to use (deepseek-v4-flash recommended)
         """
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        self.api_key = api_key or os.getenv("OPENCODE_GO_API_KEY")
         if not self.api_key:
             raise ValueError(
-                "No Gemini key found. Set GEMINI_API_KEY in .env "
-                "(get free key from https://aistudio.google.com/apikey)"
+                "No OpenCode Go key found. Set OPENCODE_GO_API_KEY in .env"
             )
-        
-        # google.genai SDK picks GOOGLE_API_KEY over our explicit key when both are set.
-        # Temporarily hide it so the SDK uses our explicit api_key parameter.
-        _shadow = os.environ.pop("GOOGLE_API_KEY", None)
-        self.client = genai.Client(api_key=self.api_key)
-        if _shadow is not None:
-            os.environ["GOOGLE_API_KEY"] = _shadow
+
+        opencode_base = os.getenv("OPENCODE_GO_BASE_URL", "https://opencode.ai/zen/go/v1")
+        self.client = OpenAI(api_key=self.api_key, base_url=opencode_base)
         self.model_name = model
-    
-    def plan(self, goal: str, codebase_context: dict, tracker=None) -> dict:
+
+    def plan(self, goal: str, codebase_context: dict, tracker=None, existing_goal=None) -> dict:
         """
-        Break down a goal into atomic micro-tasks using Gemini Flash.
+        Break down a goal into atomic micro-tasks using OpenCode Go (DeepSeek V4 Flash).
         
         Args:
             goal: User's objective (e.g., "improve error handling")
             codebase_context: Project structure, modules, architecture
             tracker: Optional TokenTracker to record usage
+            existing_goal: Optional existing goal graph (ignored by CheapPlanner)
         
         Returns:
             {
@@ -59,13 +55,13 @@ class CheapPlanner:
                 "total_tasks": int
             }
         """
-        
+
         modules = codebase_context.get("modules", "Unknown")
         architecture = codebase_context.get("architecture", "Unknown")
         files = codebase_context.get("files", [])[:10]
         symbols = codebase_context.get("symbols", [])
         symbols_str = "\n".join(symbols[:20]) if symbols else "(none)"
-        
+
         prompt = f"""You are a code improvement expert. Break down this goal into 2-4 atomic micro-tasks.
 
 GOAL: {goal}
@@ -91,56 +87,58 @@ RESPOND WITH ONLY JSON (no markdown, no text before/after):
   "reasoning": "Brief explanation",
   "total_tasks": 2
 }}"""
-        
+
         try:
-            response = self.client.models.generate_content(
-                model=self.model_name, contents=prompt
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=4096,  # Enough for both reasoning and the JSON response
+                temperature=0.3,
             )
-            response_text = response.text.strip()
-            
+            response_text = response.choices[0].message.content or ""
+
             # Remove markdown if present
             if "```" in response_text:
                 response_text = response_text.split("```")[1]
                 if response_text.startswith("json"):
                     response_text = response_text[4:]
-            
+
             # Parse JSON
             result = json.loads(response_text)
-            
+
             # Validate structure
             if "plan" not in result or not isinstance(result["plan"], list):
                 raise ValueError(f"Invalid plan structure: {result}")
-            
+
             for task in result["plan"]:
                 required = ["task_id", "file", "action", "complexity"]
                 if not all(k in task for k in required):
                     raise ValueError(f"Task missing fields: {task}")
-            
+
             # Record token usage if tracker provided
-            if tracker:
-                meta = response.usage_metadata
-                input_tokens  = meta.prompt_token_count if meta else len(prompt) // 4
-                output_tokens = meta.candidates_token_count if meta else len(response_text) // 4
-                # Gemini 2.5 Flash pricing: $0.15 input, $0.60 output per 1M
+            if tracker and response.usage:
+                input_tokens = response.usage.prompt_tokens or len(prompt) // 4
+                output_tokens = response.usage.completion_tokens or len(response_text) // 4
+                # DeepSeek V4 Flash pricing via OpenCode Go: $0.14 input, $0.28 output per 1M
                 cost = (
-                    (input_tokens  / 1_000_000) * 0.15 +
-                    (output_tokens / 1_000_000) * 0.60
+                    (input_tokens  / 1_000_000) * 0.14 +
+                    (output_tokens / 1_000_000) * 0.28
                 )
                 tracker.record(
                     request_type="planning",
-                    model="Gemini 2.5 Flash (cheap planning)",
+                    model="DeepSeek V4 Flash (cheap planning)",
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
                     cost=cost
                 )
-            
+
             return result
-        
+
         except json.JSONDecodeError as e:
             raise ValueError(f"Gemini returned invalid JSON: {response_text[:300]}... Error: {e}")
         except Exception as e:
             raise RuntimeError(f"Gemini planning failed: {str(e)}")
-    
+
     def refine_goal(self, vague_goal: str, codebase_context: dict) -> str:
         """Convert vague goal into specific, actionable goal.
         
@@ -149,7 +147,7 @@ RESPOND WITH ONLY JSON (no markdown, no text before/after):
         
         This runs quickly and cheaply on Gemini Flash.
         """
-        
+
         prompt = f"""The user said: "{vague_goal}"
 
 Given this codebase:
@@ -158,20 +156,23 @@ Given this codebase:
 
 Suggest a SPECIFIC, actionable improvement goal. Be concise.
 Respond with ONLY the refined goal, no explanation."""
-        
+
         try:
-            response = self.client.models.generate_content(
-                model=self.model_name, contents=prompt
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=256,
+                temperature=0.3,
             )
-            refined = response.text.strip()
-            
+            refined = response.choices[0].message.content or ""
+
             # Clean up if it has extra text
             if "Goal:" in refined:
                 refined = refined.split("Goal:")[-1].strip()
             if refined.startswith("- "):
                 refined = refined[2:]
-            
+
             return refined
-        except Exception as e:
+        except Exception:
             # Fallback: return original
             return vague_goal

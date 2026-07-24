@@ -3,1400 +3,951 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AWOS — CI Rescue Agent</title>
-  <!-- CodeMirror for syntax highlighting -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/dracula.min.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/python/python.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/javascript/javascript.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/clike/clike.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/shell/shell.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/yaml/yaml.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/markdown/markdown.min.js"></script>
-  <!-- Marked.js for markdown rendering -->
+  <title>AWOS</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-      background: #0d1117;
-      color: #c9d1d9;
-      height: 100vh;
-      overflow: hidden;
-    }
-    
-    .container {
-      display: grid;
-      grid-template-columns: 350px 1fr;
-      height: 100vh;
-    }
-    
-    /* Sidebar */
-    .sidebar {
-      background: #161b22;
-      border-right: 1px solid #30363d;
-      display: flex;
-      flex-direction: column;
-    }
-    
-    .sidebar-header {
-      padding: 20px;
-      border-bottom: 1px solid #30363d;
-    }
-    
-    .logo {
-      font-size: 24px;
-      font-weight: 700;
-      color: #58a6ff;
-      margin-bottom: 10px;
-    }
-    
-    .tagline {
-      font-size: 13px;
-      color: #8b949e;
-    }
-    
-    .stats {
-      padding: 20px;
-      border-bottom: 1px solid #30363d;
-    }
-    
-    .stat-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-    }
-    
-    .stat-card {
-      background: #0d1117;
-      padding: 12px;
-      border-radius: 6px;
-      border: 1px solid #30363d;
-    }
-    
-    .stat-label {
-      font-size: 11px;
-      color: #8b949e;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 4px;
-    }
-    
-    .stat-value {
-      font-size: 20px;
-      font-weight: 600;
-      color: #58a6ff;
-    }
-    
-    .history {
-      flex: 1;
-      overflow-y: auto;
-      padding: 20px;
-    }
-    
-    .history-title {
-      font-size: 12px;
-      color: #8b949e;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 12px;
-    }
-    
-    .history-item {
-      background: #0d1117;
-      padding: 12px;
-      border-radius: 6px;
-      border: 1px solid #30363d;
-      margin-bottom: 8px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    
-    .history-item:hover {
-      border-color: #58a6ff;
-      background: #161b22;
-    }
-    
-    .history-item.active {
-      border-color: #58a6ff;
-      background: #161b22;
-    }
-    
-    .history-goal {
-      font-size: 13px;
-      color: #c9d1d9;
-      margin-bottom: 6px;
-      line-height: 1.4;
-    }
-    
-    .history-meta {
-      display: flex;
-      gap: 12px;
-      font-size: 11px;
-      color: #8b949e;
-    }
-    
-    .status-badge {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 12px;
-      font-size: 11px;
-      font-weight: 600;
-    }
-    
-    .status-running {
-      background: #1f6feb33;
-      color: #58a6ff;
-    }
-    
-    .status-completed {
-      background: #23863633;
-      color: #3fb950;
-    }
-    
-    .status-failed {
-      background: #da363333;
-      color: #f85149;
-    }
-    
-    /* Main content */
-    .main {
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-    
-    .main-header {
-      padding: 20px;
-      border-bottom: 1px solid #30363d;
-      background: #161b22;
-    }
-    
-    .main-title {
-      font-size: 18px;
-      font-weight: 600;
-      color: #c9d1d9;
-      margin-bottom: 8px;
-    }
-    
-    .progress-bar {
-      width: 100%;
-      height: 6px;
-      background: #30363d;
-      border-radius: 3px;
-      overflow: hidden;
-      margin-top: 12px;
-    }
-    
-    .progress-fill {
-      height: 100%;
-      background: linear-gradient(90deg, #58a6ff, #3fb950);
-      transition: width 0.3s ease;
-    }
-    
-    .progress-text {
-      font-size: 12px;
-      color: #8b949e;
-      margin-top: 6px;
-    }
-    
-    /* Terminal output */
-    .terminal {
-      flex: 1;
-      overflow-y: auto;
-      padding: 20px;
-      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-      font-size: 13px;
-      line-height: 1.6;
-    }
-    
-    .log-entry {
-      margin-bottom: 12px;
-      padding: 8px 12px;
-      border-radius: 4px;
-      animation: fadeIn 0.3s ease;
-    }
-    
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(10px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    
-    .log-info {
-      background: #161b22;
-      border-left: 3px solid #58a6ff;
-    }
-    
-    .log-success {
-      background: #161b22;
-      border-left: 3px solid #3fb950;
-    }
-    
-    .log-error {
-      background: #161b22;
-      border-left: 3px solid #f85149;
-    }
-    
-    .log-warning {
-      background: #161b22;
-      border-left: 3px solid #d29922;
-    }
-    
-    .log-task {
-      background: #161b22;
-      border-left: 3px solid #a371f7;
-    }
-    
-    .log-time {
-      color: #8b949e;
-      font-size: 11px;
-      margin-bottom: 4px;
-    }
-    
-    .log-message {
-      color: #c9d1d9;
-    }
-    
-    .log-highlight {
-      color: #58a6ff;
-      font-weight: 600;
-    }
-    
-    /* Diff view */
-    .diff-view {
-      background: #0d1117;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      margin-top: 12px;
-      overflow: hidden;
-    }
-    
-    .diff-header {
-      background: #161b22;
-      padding: 12px;
-      border-bottom: 1px solid #30363d;
-      font-size: 12px;
-      color: #8b949e;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    
-    .diff-content {
-      padding: 0;
-      font-family: 'Monaco', 'Menlo', monospace;
-      font-size: 12px;
-      line-height: 1.5;
-      overflow-x: auto;
-    }
-    
-    /* CodeMirror customization */
-    .CodeMirror {
-      height: auto !important;
-      background: #0d1117 !important;
-      color: #c9d1d9 !important;
-    }
-    
-    .CodeMirror-gutters {
-      background: #161b22 !important;
-      border-right: 1px solid #30363d !important;
-    }
-    
-    .CodeMirror-linenumber {
-      color: #8b949e !important;
-    }
-    
-    .CodeMirror-selected {
-      background: #264f78 !important;
-    }
-    
-    .CodeMirror-focused .CodeMirror-selected {
-      background: #264f78 !important;
-    }
-    
-    .CodeMirror-cursor {
-      border-left: 2px solid #58a6ff !important;
-    }
-    
-    /* Diff line styling */
-    .diff-line {
-      padding: 2px 8px;
-      white-space: pre;
-      font-family: 'Monaco', 'Menlo', monospace;
-    }
-    
-    .diff-add {
-      background: #23863633;
-      color: #3fb950;
-    }
-    
-    .diff-remove {
-      background: #da363333;
-      color: #f85149;
-    }
-    
-    .diff-context {
-      color: #8b949e;
-    }
-    
-    /* Empty state */
-    .empty-state {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100%;
-      color: #8b949e;
-      text-align: center;
-    }
-    
-    .empty-icon {
-      font-size: 64px;
-      margin-bottom: 20px;
-      opacity: 0.5;
-    }
-    
-    .empty-title {
-      font-size: 20px;
-      font-weight: 600;
-      color: #c9d1d9;
-      margin-bottom: 8px;
-    }
-    
-    .empty-text {
-      font-size: 14px;
-      max-width: 400px;
-      line-height: 1.6;
-    }
-    
-    /* Scrollbar */
-    ::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
-    }
-    
-    ::-webkit-scrollbar-track {
-      background: #0d1117;
-    }
-    
-    ::-webkit-scrollbar-thumb {
-      background: #30363d;
-      border-radius: 4px;
-    }
-    
-    ::-webkit-scrollbar-thumb:hover {
-      background: #484f58;
-    }
-    
-    /* Chat View */
-    .chat-view {
-      display: none;
-      flex-direction: column;
-      height: 100vh;
-    }
-    
-    .chat-view.active {
-      display: flex;
-    }
-    
-    .chat-header {
-      padding: 20px;
-      border-bottom: 1px solid #30363d;
-      background: #161b22;
-    }
-    
-    .chat-title {
-      font-size: 18px;
-      font-weight: 600;
-      color: #c9d1d9;
-      margin-bottom: 8px;
-    }
-    
-    .chat-mode-selector {
-      display: flex;
-      gap: 8px;
-      margin-top: 12px;
-    }
-    
-    .mode-btn {
-      padding: 6px 12px;
-      border: 1px solid #30363d;
-      background: #0d1117;
-      color: #8b949e;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 13px;
-      transition: all 0.2s;
-    }
-    
-    .mode-btn:hover {
-      border-color: #58a6ff;
-      color: #58a6ff;
-    }
-    
-    .mode-btn.active {
-      background: #58a6ff;
-      color: #0d1117;
-      border-color: #58a6ff;
-    }
-    
-    .chat-messages {
-      flex: 1;
-      overflow-y: auto;
-      padding: 20px;
-    }
-    
-    .chat-message {
-      margin-bottom: 16px;
-      display: flex;
-      gap: 12px;
-    }
-    
-    .chat-message.user {
-      flex-direction: row-reverse;
-    }
-    
-    .chat-avatar {
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 16px;
-      flex-shrink: 0;
-    }
-    
-    .chat-message.user .chat-avatar {
-      background: #58a6ff;
-      color: #0d1117;
-    }
-    
-    .chat-message.assistant .chat-avatar {
-      background: #3fb950;
-      color: #0d1117;
-    }
-    
-    .chat-bubble {
-      max-width: 70%;
-      padding: 12px 16px;
-      border-radius: 12px;
-      line-height: 1.5;
-    }
-    
-    .chat-message.user .chat-bubble {
-      background: #1f6feb;
-      color: #ffffff;
-      border-bottom-right-radius: 4px;
-    }
-    
-    .chat-message.assistant .chat-bubble {
-      background: #161b22;
-      color: #c9d1d9;
-      border: 1px solid #30363d;
-      border-bottom-left-radius: 4px;
-    }
-    
-    .chat-bubble p {
-      margin: 0 0 8px 0;
-    }
-    
-    .chat-bubble p:last-child {
-      margin-bottom: 0;
-    }
-    
-    .chat-bubble code {
-      background: #0d1117;
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-family: 'Monaco', 'Menlo', monospace;
-      font-size: 12px;
-    }
-    
-    .chat-bubble pre {
-      background: #0d1117;
-      padding: 12px;
-      border-radius: 6px;
-      overflow-x: auto;
-      margin: 8px 0;
-    }
-    
-    .chat-bubble pre code {
-      background: none;
-      padding: 0;
-    }
-    
-    .chat-input-container {
-      padding: 20px;
-      border-top: 1px solid #30363d;
-      background: #161b22;
-    }
-    
-    .chat-input-wrapper {
-      display: flex;
-      gap: 12px;
-      align-items: flex-end;
-    }
-    
-    .chat-input {
-      flex: 1;
-      padding: 12px 16px;
-      border: 1px solid #30363d;
-      background: #0d1117;
-      color: #c9d1d9;
-      border-radius: 8px;
-      font-size: 14px;
-      font-family: inherit;
-      resize: none;
-      min-height: 44px;
-      max-height: 200px;
-    }
-    
-    .chat-input:focus {
-      outline: none;
-      border-color: #58a6ff;
-    }
-    
-    .chat-send-btn {
-      padding: 12px 24px;
-      background: #58a6ff;
-      color: #0d1117;
-      border: none;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    
-    .chat-send-btn:hover {
-      background: #79c0ff;
-    }
-    
-    .chat-send-btn:disabled {
-      background: #30363d;
-      color: #8b949e;
-      cursor: not-allowed;
-    }
-    
-    .typing-indicator {
-      display: flex;
-      gap: 4px;
-      padding: 8px 0;
-    }
-    
-    .typing-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #8b949e;
-      animation: typing 1.4s infinite;
-    }
-    
-    .typing-dot:nth-child(2) {
-      animation-delay: 0.2s;
-    }
-    
-    .typing-dot:nth-child(3) {
-      animation-delay: 0.4s;
-    }
-    
-    @keyframes typing {
-      0%, 60%, 100% {
-        transform: translateY(0);
-        opacity: 0.7;
-      }
-      30% {
-        transform: translateY(-10px);
-        opacity: 1;
-      }
-    }
-    
-    .chat-empty {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100%;
-      color: #8b949e;
-      text-align: center;
-    }
-    
-    .chat-empty-icon {
-      font-size: 64px;
-      margin-bottom: 20px;
-      opacity: 0.5;
-    }
-    
-    .chat-empty-title {
-      font-size: 20px;
-      font-weight: 600;
-      color: #c9d1d9;
-      margin-bottom: 8px;
-    }
-    
-    .chat-empty-text {
-      font-size: 14px;
-      max-width: 400px;
-      line-height: 1.6;
-    }
+    *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+    :root{--bg:#1a1a1e;--surface:#252529;--surface-hover:#2c2c30;--border:#38383d;--text:#f5f5f7;--dim:#86868b;--faint:#636366;--accent:#0a84ff;--accent-dim:#0a84ff22;--green:#30d158;--red:#ff453a;--yellow:#ffd60a;--font:-apple-system,'SF Pro Display','Helvetica Neue',sans-serif;--mono:'SF Mono','Menlo',monospace;--radius:12px;--ease:cubic-bezier(0.22,1,0.36,1)}
+    html,body{height:100%;overflow:hidden;font-family:var(--font);font-size:14px;line-height:1.5;color:var(--text);background:var(--bg);-webkit-font-smoothing:antialiased}
+
+    /* ── Titlebar ───────────────────────────────── */
+    #titlebar{display:flex;align-items:center;justify-content:space-between;height:38px;padding:0 14px;background:var(--surface);border-bottom:1px solid var(--border);-webkit-app-region:drag;user-select:none;flex-shrink:0}
+    .tb-left{display:flex;align-items:center;gap:6px;padding-left:68px}
+    .tb-icon{font-size:16px}.tb-name{font-size:12px;font-weight:600;color:var(--dim)}
+    .tb-dot{width:7px;height:7px;border-radius:50%;background:var(--faint);margin-left:6px;transition:background .3s}
+    .tb-dot.running{background:var(--accent);animation:pulse 1.5s infinite}
+    .tb-dot.done{background:var(--green)}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+    .tb-actions{display:flex;gap:4px;-webkit-app-region:no-drag}
+    .tb-btn{background:none;border:none;color:var(--dim);padding:4px 8px;border-radius:4px;font-size:13px;cursor:pointer}
+    .tb-btn:hover{background:rgba(255,255,255,.06);color:var(--text)}
+
+    /* ── Conversation Layout ────────────────────── */
+    #layout{display:flex;flex-direction:column;height:calc(100vh - 38px)}
+    #conv{flex:1;overflow-y:auto;padding:24px 0}
+    #conv-inner{max-width:680px;margin:0 auto;padding:0 24px}
+
+    /* ── Empty State ────────────────────────────── */
+    #empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;height:calc(100vh - 38px - 140px);text-align:center;padding:40px}
+    #empty-state .icon{font-size:48px;margin-bottom:12px;opacity:.3}
+    #empty-state h2{font-size:20px;font-weight:700;margin-bottom:4px}
+    #empty-state p{font-size:13px;color:var(--dim);max-width:300px;margin-bottom:20px}
+    .quick-actions{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;max-width:500px}
+    .quick-act{background:var(--surface);border:1px solid var(--border);color:var(--dim);padding:8px 14px;border-radius:8px;font-size:12px;cursor:pointer;transition:all .15s;white-space:nowrap}
+    .quick-act:hover{background:var(--surface-hover);color:var(--text);border-color:var(--faint)}
+
+    /* ── Message Bubbles ────────────────────────── */
+    .msg{display:flex;gap:10px;margin-bottom:20px;animation:msgIn .3s var(--ease)}
+    @keyframes msgIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+    .msg.user{flex-direction:row-reverse}
+    .msg-avatar{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+    .msg.user .msg-avatar{background:#333}
+    .msg.assistant .msg-avatar{background:var(--accent)}
+    .msg-content{max-width:85%}
+    .msg.user .msg-bubble{background:var(--accent);color:#fff;border-radius:var(--radius) var(--radius) 4px var(--radius);padding:10px 14px;font-size:14px}
+    .msg.assistant .msg-bubble{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius) var(--radius) var(--radius) 4px;padding:14px 18px;font-size:14px;line-height:1.7}
+    .msg.assistant .msg-bubble p{margin-bottom:8px}
+    .msg.assistant .msg-bubble p:last-child{margin-bottom:0}
+    .msg.assistant .msg-bubble code{font-family:var(--mono);font-size:12px;background:var(--bg);padding:1px 5px;border-radius:3px;color:var(--accent)}
+    .msg.assistant .msg-bubble pre{position:relative;background:#0d1117;padding:16px;border-radius:8px;overflow-x:auto;margin:10px 0;font-family:var(--mono);font-size:13px;line-height:1.5;border:1px solid #30363d}
+    .msg.assistant .msg-bubble pre code{background:none;padding:0;color:#c9d1d9;font-size:13px}
+    .copy-btn{position:absolute;top:8px;right:8px;background:#21262d;border:1px solid #30363d;color:#8b949e;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer;opacity:0;transition:opacity .15s}
+    .msg.assistant .msg-bubble pre:hover .copy-btn{opacity:1}
+    .copy-btn:hover{background:#30363d;color:#c9d1d9}
+    .copy-btn.copied{background:#1b3d2f;border-color:#2ea043;color:#2ea043}
+
+    /* ── Message Actions ─────────────────────────── */
+    .msg-actions{display:flex;gap:2px;margin-top:4px;opacity:0;transition:opacity .15s}
+    .msg.assistant:hover .msg-actions,.msg.user:hover .msg-actions{opacity:1}
+    .msg-act{background:none;border:1px solid var(--border);color:var(--dim);padding:3px 8px;border-radius:5px;font-size:11px;cursor:pointer;transition:all .15s}
+    .msg-act:hover{background:var(--surface-hover);color:var(--text);border-color:var(--faint)}
+    .msg-act.danger:hover{color:var(--red);border-color:var(--red)}
+    .msg-meta{display:flex;align-items:center;gap:4px 10px;flex-wrap:wrap;margin-top:6px;font-size:11px;color:var(--faint)}
+    .msg-meta .model{font-weight:500;color:var(--dim);margin-left:4px}
+    .msg-meta .time{font-family:var(--mono)}
+    .msg-meta .files{color:var(--accent)}
+    .msg-meta .dot{width:6px;height:6px;border-radius:50%;background:var(--green)}
+    .msg-meta .cost{font-family:var(--mono);color:var(--green);font-weight:500}
+
+    /* ── Streaming indicator ────────────────────── */
+    .msg.streaming .msg-bubble{border-color:var(--accent)}
+    .stream-dot{display:inline-flex;gap:3px;padding:2px 0}
+    .stream-dot span{width:5px;height:5px;border-radius:50%;background:var(--accent);animation:dotPulse 1.4s infinite}
+    .stream-dot span:nth-child(2){animation-delay:.2s}
+    .stream-dot span:nth-child(3){animation-delay:.4s}
+    @keyframes dotPulse{0%,60%,100%{opacity:.3}30%{opacity:1}}
+
+    /* ── Input Bar ──────────────────────────────── */
+    #input-area{flex-shrink:0;padding:12px 24px 16px;background:var(--surface);border-top:1px solid var(--border)}
+    #input-inner{max-width:680px;margin:0 auto;display:flex;gap:8px;align-items:center;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:4px;transition:border-color .2s,box-shadow .2s}
+    #input-inner:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim)}
+    #prompt-input{flex:1;background:none;border:none;padding:10px 14px;font-family:var(--font);font-size:14px;color:var(--text);outline:none}
+    #prompt-input::placeholder{color:var(--faint)}
+    #prompt-btn{display:flex;align-items:center;gap:4px;padding:8px 18px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:var(--font);font-size:13px;font-weight:600;cursor:pointer;transition:background .15s,transform .1s;white-space:nowrap}
+    #prompt-btn:hover{background:#1a8dff}
+    #prompt-btn:active{transform:scale(.97)}
+    #prompt-btn:disabled{background:var(--border);color:var(--faint);cursor:not-allowed;transform:none}
+
+    /* ── Model Selector ──────────────────────────── */
+    #model-select{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:6px;font-size:12px;cursor:pointer;outline:none;appearance:none;-webkit-appearance:none;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2386868b'/%3E%3C/svg%3E\");background-repeat:no-repeat;background-position:right 6px center;padding-right:22px;max-width:120px}
+    #model-select:hover{border-color:var(--faint)}
+    #model-select:focus{border-color:var(--accent)}
+
+    /* ── Command Palette ────────────────────────── */
+    #palette-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(6px);z-index:1000;display:none;align-items:flex-start;justify-content:center;padding-top:18vh}
+    #palette{width:500px;background:rgba(37,37,41,.96);backdrop-filter:blur(30px);border:1px solid var(--border);border-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,.5);overflow:hidden;animation:slideDown .15s var(--ease)}
+    @keyframes slideDown{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+    #palette-input{width:100%;background:none;border:none;border-bottom:1px solid var(--border);padding:16px 20px;font-family:var(--font);font-size:17px;color:var(--text);outline:none}
+    #palette-input::placeholder{color:var(--faint)}
+    .pal-item{display:flex;align-items:center;gap:10px;padding:10px 20px;font-size:13px;color:var(--dim);cursor:pointer;transition:background .1s}
+    .pal-item:hover{background:var(--accent-dim);color:var(--text)}
+    .pal-item .key{margin-left:auto;font-size:10px;color:var(--faint);font-family:var(--mono);background:var(--bg);padding:2px 6px;border-radius:3px}
+    .pal-section-title{padding:8px 20px 4px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--faint)}
+
+    ::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+    @media(max-width:640px){#input-area{padding:8px 12px}}
+
+    /* ── Thinking Panel (reasoning_content) ──────── */
+    .thinking-toggle{cursor:pointer;color:var(--accent);font-size:0.82em;padding:4px 0;user-select:none;margin-bottom:2px}
+    .thinking-toggle:hover{opacity:0.8}
+    .thinking-toggle .arrow{font-size:10px;color:var(--faint);transition:transform .15s}
+    .thinking-toggle.collapsed .arrow{transform:rotate(-90deg)}
+    .thinking-panel{background:#18181f;border-left:3px solid var(--accent);padding:8px 12px;margin:2px 0 8px;border-radius:0 6px 6px 0;max-height:200px;overflow-y:auto;font-family:var(--mono);font-size:11px;color:var(--dim);line-height:1.5;white-space:pre-wrap}
+    .thinking-panel.collapsed{display:none}
+
+    /* ── Error Block ─────────────────────────────────────── */
+    .msg.assistant .msg-bubble.error-bubble{border-color:var(--red);background:rgba(255,69,58,.06)}
+    .error-header{color:var(--red);font-weight:600;font-size:13px;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+    .error-content{position:relative;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px 14px;max-height:240px;overflow-y:auto;margin:0;font-family:var(--mono);font-size:12px;color:#ffa198;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+    .error-content .copy-btn{opacity:1;background:#21262d;border:1px solid #30363d;color:#8b949e;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer;transition:background .15s,color .15s}
+    .error-content .copy-btn:hover{background:#30363d;color:#c9d1d9}
+    .error-content .copy-btn.copied{background:#1b3d2f;border-color:#2ea043;color:#2ea043}
+
+    /* ── Orchestrator Progress (sectioned) ───────────────── */
+    .orch-header{font-size:13px;color:var(--dim);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border);font-weight:500}
+    .orch-header strong{color:var(--text)}
+    .orch-section{margin-bottom:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);overflow:hidden}
+    .orch-section-header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--surface);cursor:pointer;user-select:none;font-size:13px;font-weight:600;color:var(--text);border-bottom:1px solid var(--border);transition:background .15s}
+    .orch-section-header:hover{background:var(--surface-hover)}
+    .orch-section-toggle{color:var(--dim);font-size:11px;transition:transform .15s}
+    .orch-section-body{padding:10px 12px;font-family:var(--mono);font-size:12px;line-height:1.6;max-height:400px;overflow-y:auto}
+    .orch-line{padding:3px 0;color:var(--text);font-family:var(--font);font-size:13px}
+    .orch-line code{background:var(--surface);padding:1px 5px;border-radius:3px;font-family:var(--mono);font-size:12px;color:var(--accent);border:1px solid var(--border)}
+    .orch-line strong{color:var(--text);font-weight:600}
+    .orch-line.orch-done{color:var(--green)}
+    .orch-line.orch-done::before{content:'✓ '}
+    .orch-line.orch-fail{color:var(--red)}
+    .orch-line.orch-fail::before{content:'✗ '}
+    .orch-line.orch-edit{color:#ffd60a}
+    .orch-line.orch-task-start{color:var(--accent);font-weight:500}
+    .orch-tool .orch-tool-name{font-weight:600;color:var(--accent)}
+    .orch-tool-output{margin:4px 0 4px 16px;padding:6px 8px;background:var(--bg);border-left:2px solid var(--accent);font-size:11px;color:var(--dim);white-space:pre-wrap;word-break:break-word;border-radius:0 4px 4px 0}
+    .orch-thinking-line{padding:5px 8px;margin:4px 0;background:#18181f;border-left:3px solid var(--accent);color:var(--text);font-size:12px;line-height:1.5;font-family:var(--mono);border-radius:0 4px 4px 0;white-space:pre-wrap}
+    .orch-thinking-line:not(:last-child){margin-bottom:6px}
+    .orch-tier{display:inline-block;padding:1px 6px;background:var(--accent-dim);color:var(--accent);border-radius:3px;font-size:11px;margin-left:4px}
+    .orch-reason{color:var(--dim);font-style:italic}
+    .orch-task-file{color:var(--dim);font-size:12px}
+    .orch-tasks{margin:6px 0 0 20px;padding:0;color:var(--text);font-family:var(--font);font-size:13px}
+    .orch-tasks li{margin-bottom:6px;padding-left:4px}
+    .orch-tasks code{background:var(--surface);padding:1px 5px;border-radius:3px;font-size:11px;color:var(--accent);border:1px solid var(--border)}
+    .orch-task-action{color:var(--text)}
+    .orch-error{color:var(--red);font-style:italic}
+    .orch-summary{margin-top:14px;padding:10px 14px;background:rgba(48,209,88,.08);border:1px solid var(--green);border-radius:8px;color:var(--text);font-size:13px;font-weight:500}
+    .orch-summary strong{color:var(--green)}
   </style>
 </head>
 <body>
-  <div class="container">
-    <!-- Sidebar -->
-    <div class="sidebar">
-      <div class="sidebar-header">
-        <div class="logo">🔧 AWOS</div>
-        <div class="tagline">CI Rescue Agent</div>
-        <div class="view-tabs" style="display: flex; gap: 8px; margin-top: 12px;">
-          <button class="mode-btn active" data-view="dashboard" onclick="switchView('dashboard')">Dashboard</button>
-          <button class="mode-btn" data-view="chat" onclick="switchView('chat')">Chat</button>
-        </div>
-      </div>
-      
-      <div class="stats">
-        <div class="stat-grid">
-          <div class="stat-card">
-            <div class="stat-label">Rescues</div>
-            <div class="stat-value" id="stat-rescues">0</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Tests Fixed</div>
-            <div class="stat-value" id="stat-tests">0</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Cost</div>
-            <div class="stat-value" id="stat-cost">$0.00</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Savings</div>
-            <div class="stat-value" id="stat-savings">0%</div>
-          </div>
-        </div>
-      </div>
-      
-      <div class="history">
-        <div class="history-title">Recent Sessions</div>
-        <div id="history-list"></div>
+
+<div id="titlebar">
+  <div class="tb-left">
+    <span class="tb-icon">⚡</span><span class="tb-name">AWOS</span>
+    <span class="tb-dot" id="tb-dot"></span>
+  </div>
+  <div class="tb-actions">
+    <button class="tb-btn" onclick="togglePalette()" title="Command Palette">⌘K</button>
+  </div>
+</div>
+
+<div id="layout">
+  <div id="conv">
+    <div id="empty-state">
+      <div class="icon">⚡</div>
+      <h2>AWOS Agent</h2>
+      <p>Ask anything about your codebase or run autonomous tasks.</p>
+      <div class="quick-actions">
+        <button class="quick-act" onclick="document.getElementById('prompt-input').value='Explain the AWOS kernel architecture';send()">🏗️ Kernel architecture</button>
+        <button class="quick-act" onclick="document.getElementById('prompt-input').value='How does model routing work?';send()">🔄 Model routing</button>
+        <button class="quick-act" onclick="document.getElementById('prompt-input').value='Show me the project structure';send()">📁 Project structure</button>
+        <button class="quick-act" onclick="document.getElementById('prompt-input').value='What is the budget ledger?';send()">💰 Budget system</button>
+        <button class="quick-act" onclick="document.getElementById('prompt-input').value='How does the orchestrator work?';send()">⚙️ Orchestrator</button>
+        <button class="quick-act" onclick="document.getElementById('prompt-input').focus()">💬 Ask anything...</button>
       </div>
     </div>
-    
-    <!-- Main content -->
-    <div class="main" id="dashboard-view">
-      <div class="main-header">
-        <div class="main-title" id="main-title">Select a session to view</div>
-        <div class="progress-bar">
-          <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
-        </div>
-        <div class="progress-text" id="progress-text">No active session</div>
-      </div>
-      
-      <div class="terminal" id="terminal">
-        <div class="empty-state">
-          <div class="empty-icon">🚀</div>
-          <div class="empty-title">Welcome to AWOS CI Rescue</div>
-          <div class="empty-text">
-            Select a session from the sidebar to see the agent in action, or run <code>awos fix-ci</code> to start a new rescue.
-          </div>
-        </div>
-      </div>
-    </div>
-    
-    <!-- Chat View -->
-    <div class="chat-view" id="chat-view">
-      <div class="chat-header">
-        <div class="chat-title">💬 Chat with AWOS Agent</div>
-        <div class="chat-mode-selector">
-          <button class="mode-btn active" data-mode="qa">Q/A</button>
-          <button class="mode-btn" data-mode="plan">Plan</button>
-          <button class="mode-btn" data-mode="agent">Agent</button>
-        </div>
-      </div>
-      
-      <div class="chat-messages" id="chat-messages">
-        <div class="chat-empty" id="chat-empty">
-          <div class="chat-empty-icon">💬</div>
-          <div class="chat-empty-title">Start a conversation</div>
-          <div class="chat-empty-text">
-            Ask questions about your codebase, plan features, or run the agent to make changes.
-          </div>
-        </div>
-      </div>
-      
-      <div class="chat-input-container">
-        <div class="chat-input-wrapper">
-          <textarea 
-            class="chat-input" 
-            id="chat-input" 
-            placeholder="Ask a question or describe what you want to do..."
-            rows="1"
-          ></textarea>
-          <button class="chat-send-btn" id="chat-send-btn">Send</button>
-        </div>
-      </div>
+    <div id="conv-inner"></div>
+  </div>
+  <div id="input-area">
+    <div id="input-inner">
+      <select id="model-select" title="Model selection — default Auto lets AWOS pick the best model">
+        <option value="">🤖 Auto (best match)</option>
+        <optgroup label="Cheapest">
+          <option value="deepseek-v4-flash">Flash — $0.14/MTok</option>
+        </optgroup>
+        <optgroup label="Balanced">
+          <option value="deepseek-v4-pro">Pro — $0.44/MTok</option>
+          <option value="mimo-v2.5-pro">MiMo — $0.44/MTok</option>
+          <option value="minimax-m3">M3 — $0.30/$1.20 per MTok</option>
+        </optgroup>
+        <optgroup label="Powerful">
+          <option value="grok-4.5">Grok 4.5 — $2.00/MTok</option>
+          <option value="glm-5.2">GLM-5.2 — $1.40/MTok</option>
+        </optgroup>
+      </select>
+      <input type="text" id="prompt-input" placeholder="Ask a question or describe a task…" autofocus autocomplete="off" />
+      <button id="prompt-btn" onclick="send()">Send</button>
     </div>
   </div>
+</div>
+
+<!-- Palette -->
+<div id="palette-overlay" onclick="closePalette(event)">
+  <div id="palette" onclick="event.stopPropagation()">
+    <input type="text" id="palette-input" placeholder="Ask a question or describe a task…" autocomplete="off" />
+    <div class="pal-item" onclick="closePalette();document.getElementById('prompt-input').focus()">⚡ Ask or run a task <span class="key">⌘K</span></div>
+    <div class="pal-item" onclick="closePalette()">💬 Clear conversation</div>
+  </div>
+</div>
+
+<script>
+// ── Marked config ─────────────────────────────────────────────
+marked.setOptions({ breaks: true, gfm: true });
+if (typeof hljs !== 'undefined') {
+  marked.setOptions({
+    highlight: function(code, lang) {
+      if (lang && hljs.getLanguage(lang)) {
+        return hljs.highlight(code, { language: lang }).value;
+      }
+      return hljs.highlightAuto(code).value;
+    }
+  });
+}
+
+const API = window.location.origin;
+let running = false;
+let abortController = null;
+let conversation = []; // {role, content, model, time, files}
+let eventSource = null;
+let activeSession = false;
+let thinkingCount = 0;
+let currentModel = null;
+let currentTime = 0;
+
+// ── Stop ───────────────────────────────────────────────────────
+function stop() {
+  if (abortController) {
+    abortController.abort();
+    abortController = null;
+  }
+  const inp = document.getElementById('prompt-input');
+  const btn = document.getElementById('prompt-btn');
+  inp.disabled = false; inp.focus();
+  btn.textContent = 'Send'; btn.disabled = false;
+  btn.style.background = '';
+  running = false;
+  document.getElementById('tb-dot').className = 'tb-dot';
+}
+
+// ── Send ──────────────────────────────────────────────────────
+async function send() {
+  const inp = document.getElementById('prompt-input');
+  const btn = document.getElementById('prompt-btn');
+  const msg = inp.value.trim();
+  if (!msg) return;
+
+  // If running, treat as stop
+  if (running) { stop(); return; }
+
+  running = true; thinkingCount = 0; currentModel = null; currentTime = 0;
+  abortController = new AbortController();
+  btn.textContent = '■ Stop'; btn.disabled = false;
+  btn.style.background = '#ff453a';  // red for stop
+  inp.disabled = true;
+
+  // Remove empty state
+  const es = document.getElementById('empty-state');
+  if (es) es.remove();
+
+  // Add user message
+  addMessage('user', msg);
+
+  // Create streaming assistant message
+  const msgEl = addMessage('assistant', '', true);
+
+  // Time it
+  const t0 = performance.now();
+
+  // Route: question or task?
+  const QUESTION_RE = /^(explain|what|how|why|describe|tell me|show me|who|where|when|can you|is there)\b/i;
+  if (QUESTION_RE.test(msg)) {
+    await streamChatResponse(msg, msgEl, t0, abortController.signal);
+  } else {
+    await runOrchestrator(msg, msgEl, t0);
+  }
+
+  if (!abortController) return;  // was stopped manually
+  currentTime = Math.round(performance.now() - t0);
+  inp.value = ''; inp.disabled = false; inp.focus();
+  btn.textContent = 'Send'; btn.disabled = false; btn.style.background = '';
+  running = false; abortController = null;
+  document.getElementById('tb-dot').className = 'tb-dot';
+
+  saveHistory(msg);
+}
+
+// ── Add Message ───────────────────────────────────────────────
+function addMessage(role, content, streaming) {
+  const inner = document.getElementById('conv-inner');
+  const el = document.createElement('div');
+  el.className = `msg ${role}${streaming ? ' streaming' : ''}`;
+  el.id = 'msg-' + conversation.length;
   
-  <script>
-    const API = window.location.origin;
-    let eventSource = null;
-    let liveSessionId = null;
-    let tasksTotal = 0;
-    let tasksDone = 0;
-    let sessionCost = 0.0;
-    
-    // Connect to SSE stream for real-time structured events
-    function connectSSE() {
-      if (eventSource) {
-        eventSource.close();
-      }
-      
-      eventSource = new EventSource(`${API}/api/agent/events`);
-      
-      eventSource.onmessage = function(event) {
-        try {
-          const data = JSON.parse(event.data);
-          handleAgentEvent(data);
-        } catch (err) {
-          console.error('Failed to parse SSE data:', err);
+  const avatar = role === 'user' ? '👤' : '🤖';
+  el.innerHTML = `
+    <div class="msg-avatar">${avatar}</div>
+    <div class="msg-content">
+      <div class="msg-bubble">${streaming ? '<div class="stream-dot"><span></span><span></span><span></span></div>' : content}</div>
+      <div class="msg-meta" style="${streaming ? '' : 'margin-top:6px'}">
+        ${streaming ? '<span class="model">thinking...</span>' : ''}
+      </div>
+    </div>
+  `;
+  inner.appendChild(el);
+  inner.parentElement.scrollTop = inner.parentElement.scrollHeight;
+
+  conversation.push({role, content: streaming ? '' : content});
+  return el;
+}
+
+function updateMessageBubble(el, content) {
+  const bubble = el.querySelector('.msg-bubble');
+  if (bubble) {
+    bubble.innerHTML = marked.parse(content);
+    // Add copy buttons to code blocks
+    bubble.querySelectorAll('pre').forEach(pre => {
+      if (pre.querySelector('.copy-btn')) return;
+      const btn = document.createElement('button');
+      btn.className = 'copy-btn';
+      btn.textContent = 'Copy';
+      btn.onclick = function() {
+        const code = this.parentElement.querySelector('code')?.textContent || '';
+        navigator.clipboard.writeText(code).then(() => {
+          this.textContent = 'Copied!';
+          this.classList.add('copied');
+          setTimeout(() => { this.textContent = 'Copy'; this.classList.remove('copied'); }, 2000);
+        });
+      };
+      pre.appendChild(btn);
+    });
+  }
+  el.classList.remove('streaming');
+  const conv = document.getElementById('conv');
+  conv.scrollTop = conv.scrollHeight;
+}
+
+function updateMessageMeta(el, model, time, files, usage) {
+  const meta = el.querySelector('.msg-meta');
+  if (!meta) return;
+  let html = '';
+  if (model) html += `<span class="dot" style="background:var(--green)"></span><span class="model">${model}</span>`;
+  if (time) html += `<span class="time">${time}</span>`;
+  if (files && files.length) html += `<span class="files">📄 ${files.join(', ')}</span>`;
+  if (usage) {
+    if (usage.ttfbMs) html += `<span class="time">TTFB ${Math.round(usage.ttfbMs)}ms</span>`;
+    const tokStr = usage.promptTokens ? `${(usage.promptTokens/1000).toFixed(1)}k in` : '';
+    const outTokStr = usage.completionTokens ? `${(usage.completionTokens/1000).toFixed(1)}k out` : '';
+    if (tokStr || outTokStr) html += `<span class="time">${tokStr} ${outTokStr}</span>`;
+    if (usage.cost > 0) {
+      const costStr = usage.cost < 0.01 
+        ? '$' + usage.cost.toFixed(4)
+        : '$' + usage.cost.toFixed(3);
+      html += `<span class="cost">${costStr}</span>`;
+    }
+  }
+  meta.innerHTML = html;
+  console.log('[AWOS] meta rendered:', html);
+}
+
+// ── Thinking Panel ────────────────────────────────────────────
+function updateThinkingPanel(msgEl, text) {
+  let toggle = msgEl.querySelector('.thinking-toggle');
+  if (!toggle) {
+    toggle = document.createElement('div');
+    toggle.className = 'thinking-toggle';  // start expanded by default — user can collapse
+    toggle.innerHTML = '💭 Thinking <span class="arrow">▼</span>';
+    toggle.onclick = function() {
+      const panel = this.nextElementSibling;
+      this.classList.toggle('collapsed');
+      panel.classList.toggle('collapsed');
+      this.querySelector('.arrow').textContent = this.classList.contains('collapsed') ? '▶' : '▼';
+    };
+    const bubble = msgEl.querySelector('.msg-bubble');
+    bubble.insertBefore(toggle, bubble.firstChild);
+  }
+  // Update label with model name when available
+  if (currentModel && !toggle.dataset.modelSet) {
+    toggle.innerHTML = toggle.innerHTML.replace('Thinking', `${currentModel} thinking`);
+    toggle.dataset.modelSet = '1';
+  }
+  // Expand automatically while streaming
+  if (toggle.classList.contains('collapsed')) {
+    toggle.classList.remove('collapsed');
+    toggle.querySelector('.arrow').textContent = '▼';
+  }
+  let panel = toggle.nextElementSibling;
+  if (!panel || !panel.classList.contains('thinking-panel')) {
+    panel = document.createElement('div');
+    panel.className = 'thinking-panel';
+    toggle.parentNode.insertBefore(panel, toggle.nextSibling);
+  }
+  panel.textContent = text;
+  document.getElementById('conv').scrollTop = document.getElementById('conv').scrollHeight;
+}
+
+// ── Add Message Actions ───────────────────────────────────────
+function addMessageActions(msgEl, fullText, question) {
+  const content = msgEl.querySelector('.msg-content');
+  if (!content || content.querySelector('.msg-actions')) return;
+  const actions = document.createElement('div');
+  actions.className = 'msg-actions';
+  
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'msg-act';
+  copyBtn.title = 'Copy response';
+  copyBtn.textContent = '📋 Copy';
+  copyBtn.onclick = function() {
+    navigator.clipboard.writeText(fullText).then(() => {
+      this.textContent = 'Copied!';
+      setTimeout(() => { this.textContent = '📋 Copy'; }, 1500);
+    });
+  };
+  
+  const regenBtn = document.createElement('button');
+  regenBtn.className = 'msg-act';
+  regenBtn.title = 'Regenerate';
+  regenBtn.textContent = '🔄 Regenerate';
+  regenBtn.onclick = function() {
+    document.getElementById('prompt-input').value = question;
+    send();
+  };
+  
+  const delBtn = document.createElement('button');
+  delBtn.className = 'msg-act danger';
+  delBtn.title = 'Delete';
+  delBtn.textContent = '🗑 Delete';
+  delBtn.onclick = function() { this.closest('.msg').remove(); };
+  
+  actions.appendChild(copyBtn);
+  actions.appendChild(regenBtn);
+  actions.appendChild(delBtn);
+  content.appendChild(actions);
+}
+
+// ── Error Bubble ─────────────────────────────────────────────
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// T2: detect a "thinking preamble" in non-reasoning model output and move it
+// to a separate thinking panel. Handles two patterns:
+//   1. Explicit <think>...</think> blocks (used by MiniMax M3, Qwen, etc.)
+//   2. Implicit thinking: first paragraph starts with a "thinking" cue phrase
+function splitThinkingPreamble(text) {
+  if (!text || text.length < 50) return null;
+
+  // Pattern 1: explicit <think>...</think> block at the start
+  const thinkMatch = text.match(/^<think>([\s\S]*?)<\/think>/);
+  if (thinkMatch) {
+    const thinking = thinkMatch[1].trim();
+    const answer = text.substring(thinkMatch[0].length).trim();
+    if (answer.length > 20 && thinking.length > 20) {
+      return { thinking, answer };
+    }
+  }
+
+  // Guard: don't split if the answer (after thought block) is too short —
+  // this protects against models that put "4." or other tiny answers after thinking.
+  // (already handled for explicit think blocks above)
+
+  // Pattern 2: first paragraph is implicit thinking, marked by a cue phrase
+  const idx = text.indexOf('\n\n');
+  if (idx < 0 || idx > 600) return null;
+  const firstPara = text.substring(0, idx).trim();
+  const rest = text.substring(idx).trim();
+  if (!rest) return null;
+  // Guard: don't trust the split if the leftover "answer" is too short or too
+  // similar in length to the thinking — heuristic probably got it wrong.
+  if (rest.length < 100) return null;
+  if (firstPara.length < 50) return null;
+  const thinkingCues = /^(Let me|I'll|I need to|First,|The user|To answer|To make|To create|To do this|To write|To implement|To fix|To build|Looking at|Reading|Sure,|Okay,|Alright,|I should|I can|Sure!|Okay!|Alright!|Got it|First let|To start|My approach|Here's how|To begin|Let's|We are asked|We need to)/i;
+  if (!thinkingCues.test(firstPara)) return null;
+  if (/^#{1,6}\s/m.test(firstPara)) return null;
+  if (/^[-*]\s/m.test(firstPara)) return null;
+  if (/^```/m.test(firstPara)) return null;
+  if (/^\|.+\|/m.test(firstPara)) return null;
+  if (/^\d+\.\s/m.test(firstPara)) return null;
+  return { thinking: firstPara, answer: rest };
+}
+function renderErrorBubble(msgEl, fullError, shortMsg) {
+  const bubble = msgEl.querySelector('.msg-bubble');
+  if (!bubble) return;
+  bubble.classList.add('error-bubble');
+  // shortMsg is the one-liner ("Error: All models failed..."); fullError is the raw exception text
+  const headerText = shortMsg && shortMsg !== fullError
+    ? escapeHtml(shortMsg.split('\n')[0])
+    : 'An error occurred';
+  const body = fullError || shortMsg || 'Unknown error';
+  bubble.innerHTML = `
+    <div class="error-header">⚠️ ${headerText}</div>
+    <pre class="error-content"><code>${escapeHtml(body)}</code><button class="copy-btn" type="button">Copy</button></pre>
+  `;
+  // Wire up copy button
+  const btn = bubble.querySelector('.copy-btn');
+  if (btn) {
+    btn.onclick = function() {
+      navigator.clipboard.writeText(body).then(() => {
+        this.textContent = 'Copied!';
+        this.classList.add('copied');
+        setTimeout(() => { this.textContent = 'Copy'; this.classList.remove('copied'); }, 2000);
+      }).catch(() => {
+        this.textContent = 'Copy failed';
+        setTimeout(() => { this.textContent = 'Copy'; }, 2000);
+      });
+    };
+  }
+  msgEl.classList.remove('streaming');
+  document.getElementById('conv').scrollTop = document.getElementById('conv').scrollHeight;
+}
+
+// ── Chat Stream ───────────────────────────────────────────────
+async function streamChatResponse(question, msgEl, t0, signal) {
+  let answer = '';
+  let thinkingText = '';
+  let lastUsage = null;  // persist usage across meta updates
+  // No initial model placeholder — wait for real usage event to avoid phantom model names
+  updateMessageMeta(msgEl, '', '', []);
+
+  try {
+    const res = await fetch(`${API}/api/chat/stream`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        message: question, mode: 'qa',
+        model: document.getElementById('model-select')?.value || undefined
+      }),
+      signal,  // abort signal
+    });
+    if (!res.ok) throw new Error(`API ${res.status}`);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '', currentEvent = '';
+    let modelUsed = '';
+    let filesUsed = [];
+    let renderTimeout = null;
+
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, {stream: true});
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('event: ')) { currentEvent = line.substring(7).trim(); continue; }
+        if (line.startsWith('data: ') && currentEvent === 'token') {
+          const chunk = JSON.parse(line.substring(6)).content || '';
+          answer += chunk;
+          clearTimeout(renderTimeout);
+          renderTimeout = setTimeout(() => updateMessageBubble(msgEl, answer), 30);
         }
-      };
-      
-      eventSource.onerror = function(error) {
-        console.error('SSE connection error:', error);
-        // Reconnect after 5 seconds
-        setTimeout(connectSSE, 5000);
-      };
-    }
-    
-    // Handle agent events by type
-    function handleAgentEvent(event) {
-      const type = event.type || 'idle';
-      const payload = event.payload || {};
-      
-      switch (type) {
-        case 'session_start':
-          liveSessionId = event.session_id;
-          tasksTotal = 0;
-          tasksDone = 0;
-          sessionCost = 0.0;
-          // Clear terminal
-          document.getElementById('terminal').innerHTML = '';
-          // Show session header
-          addLog('info', `═══ Session started: ${payload.goal || 'CI Rescue'} ═══`);
-          document.getElementById('main-title').textContent = payload.goal || 'CI Rescue';
-          updateProgress();
-          break;
-          
-        case 'plan_generated':
-          tasksTotal = payload.n_tasks || 0;
-          addLog('task', `📋 Plan: ${tasksTotal} tasks generated`);
-          updateProgress();
-          break;
-          
-        case 'model_routed':
-          addLog('info', `🧠 Router: ${payload.model_name || 'Unknown'} (${payload.tier || '?'}) — ${payload.reason || ''}`);
-          if (payload.cost_estimate) {
-            addLog('info', `   Cost: ~$${payload.cost_estimate.toFixed(4)} · Provider: ${payload.provider || '?'}`);
+        if (line.startsWith('data: ') && currentEvent === 'thinking') {
+          const chunk = JSON.parse(line.substring(6)).content || '';
+          thinkingText += chunk;
+          updateThinkingPanel(msgEl, thinkingText);
+        }
+        if (line.startsWith('data: ') && currentEvent === 'status') {
+          const payload = JSON.parse(line.substring(6));
+          if (payload.message) {
+            updateMessageMeta(msgEl, modelUsed, payload.message, filesUsed, lastUsage);
           }
-          break;
-          
-        case 'task_start':
-          tasksDone++;
-          addLog('task', `📋 Task ${payload.task_id || '?'}: ${payload.action || ''}`);
-          if (payload.model_name) {
-            addLog('info', `   Using: ${payload.model_name} — ${payload.model_reason || ''}`);
-          }
-          updateProgress();
-          break;
-          
-        case 'file_edit':
-          addLog('info', `📝 ${payload.path || '?'} (${payload.status || 'modified'})`);
-          break;
-          
-        case 'test_result':
-          if (payload.passed) {
-            addLog('success', `✅ ${payload.test_name || 'Test'} passed (${(payload.duration || 0).toFixed(1)}s)`);
-          } else {
-            addLog('error', `❌ ${payload.test_name || 'Test'} failed (${(payload.duration || 0).toFixed(1)}s)`);
-          }
-          break;
-          
-        case 'task_complete':
-          if (payload.success) {
-            addLog('success', `✓ Task ${payload.task_id || '?'} done · $${(payload.cost_usd || 0).toFixed(4)}`);
-          } else {
-            addLog('error', `✗ Task ${payload.task_id || '?'} failed: ${payload.error || 'Unknown error'}`);
-          }
-          sessionCost += payload.cost_usd || 0;
-          updateStats();
-          updateProgress();
-          break;
-          
-        case 'session_done':
-          addLog('success', `═══ Session complete: ${payload.completed || 0}/${(payload.completed || 0) + (payload.failed || 0)} tasks · $${(payload.total_cost || 0).toFixed(4)} · ${(payload.elapsed || 0).toFixed(1)}s ═══`);
-          updateStats();
-          updateProgress();
-          break;
-          
-        case 'agent_thinking':
-          // Model's chain-of-thought — show as a dimmed, italic thought line
-          addLog('info', `💭 ${payload.thought || ''}`);
-          break;
-          
-        case 'agent_tool_call':
-          // Tool call — show action name + result
-          const action = payload.action || '';
-          const success = payload.success;
-          const obs = (payload.observation || '').substring(0, 150);
-          if (action === 'finish') {
-            addLog('success', `✅ ${obs}`);
-          } else if (success) {
-            addLog('info', `🔧 ${action} — OK`);
-          } else {
-            addLog('error', `🔧 ${action} — FAILED: ${obs.substring(0, 100)}`);
-          }
-          break;
-          
-        case 'idle':
-          // Keepalive — update status text if no session
-          if (!liveSessionId) {
-            document.getElementById('progress-text').textContent = 'Waiting for agent...';
-          }
-          break;
-          
-        default:
-          // Unknown event type — log raw
-          if (type !== 'idle') {
-            addLog('info', `[${type}]: ${JSON.stringify(payload).substring(0, 200)}`);
-          }
+        }
+        if (line.startsWith('data: ') && currentEvent === 'usage') {
+          const payload = JSON.parse(line.substring(6));
+          modelUsed = payload.model || modelUsed;
+          lastUsage = {
+            promptTokens: payload.prompt_tokens || 0,
+            completionTokens: payload.completion_tokens || 0,
+            cost: payload.cost_usd || 0,
+            ttfbMs: payload.ttfb_ms || 0,
+            totalMs: payload.latency_sec ? payload.latency_sec * 1000 : 0,
+          };
+          console.log('[AWOS] usage:', {model: modelUsed, cost: lastUsage.cost, ttfb: lastUsage.ttfbMs, tokens_in: lastUsage.promptTokens, tokens_out: lastUsage.completionTokens});
+          updateMessageMeta(msgEl, modelUsed, '', filesUsed, lastUsage);
+        }
+        if (line.startsWith('data: ') && currentEvent === 'error') {
+          const payload = JSON.parse(line.substring(6));
+          renderErrorBubble(msgEl, payload.error || payload.short || 'Unknown error', payload.short);
+          return;  // stop reading stream; error is terminal
+        }
+        if (line.startsWith('data: ') && currentEvent === 'done') {
+          currentEvent = '';
+        }
       }
     }
-    
-    // Update progress bar
-    function updateProgress() {
-      const progressFill = document.getElementById('progress-fill');
-      const progressText = document.getElementById('progress-text');
-      if (tasksTotal > 0) {
-        const pct = Math.min(100, (tasksDone / tasksTotal) * 100);
-        progressFill.style.width = `${pct}%`;
-        progressText.textContent = `${tasksDone}/${tasksTotal} tasks · $${sessionCost.toFixed(4)}`;
+
+    if (answer.startsWith('Error: 402') || answer.startsWith('{"error"')) {
+      updateMessageBubble(msgEl, 'Failed to get a response. Try again.');
+    } else if (answer) {
+      clearTimeout(renderTimeout);
+      // T2: detect thinking preamble in non-reasoning models and move it to a thinking panel
+      const split = splitThinkingPreamble(answer);
+      const display = split ? split.answer : answer;
+      updateMessageBubble(msgEl, display);
+      if (split) {
+        updateThinkingPanel(msgEl, split.thinking);
+      }
+      const elapsed = Math.round(performance.now() - t0);
+      updateMessageMeta(msgEl, modelUsed, `${elapsed}ms`, [], lastUsage);
+      addMessageActions(msgEl, answer, question);
+    }
+
+  } catch (err) {
+    // If aborted, keep what we have (don't show error)
+    if (err.name === 'AbortError') return;
+    // If we have partial answer, keep it
+    if (answer.trim()) {
+      const split = splitThinkingPreamble(answer);
+      updateMessageBubble(msgEl, split ? split.answer : answer);
+      if (split) updateThinkingPanel(msgEl, split.thinking);
+      updateMessageMeta(msgEl, modelUsed, `${Math.round(performance.now()-t0)}ms`, [], lastUsage);
+      return;
+    }
+    updateMessageBubble(msgEl, `Failed: ${err.message}`);
+  }
+}
+
+// ── Orchestrator ──────────────────────────────────────────────
+// Active orchestrator message — when set, progress events are appended to its bubble
+let currentOrchestratorMsgEl = null;
+let currentOrchestratorSessionId = null;
+let orchSectionBodies = {};   // cache of section body elements
+
+async function runOrchestrator(goal, msgEl, t0) {
+  currentOrchestratorMsgEl = msgEl;
+  currentOrchestratorSessionId = null;
+  orchSectionBodies = {};
+  // Initialize the bubble with sectioned layout
+  msgEl.querySelector('.msg-bubble').innerHTML = `
+    <div class="orch-header">⚡ Agent started on: <strong>${escapeHtml(goal)}</strong></div>
+    <div class="orch-section" data-section="model" hidden>
+      <div class="orch-section-header" onclick="toggleOrchSection('model')">🤖 Model &amp; Routing <span class="orch-section-toggle">▼</span></div>
+      <div class="orch-section-body"></div>
+    </div>
+    <div class="orch-section" data-section="plan" hidden>
+      <div class="orch-section-header" onclick="toggleOrchSection('plan')">📋 Plan &amp; Tasks <span class="orch-section-toggle">▼</span></div>
+      <div class="orch-section-body"></div>
+    </div>
+    <div class="orch-section" data-section="thinking" hidden>
+      <div class="orch-section-header" onclick="toggleOrchSection('thinking')">💭 LLM Thinking <span class="orch-section-toggle">▼</span></div>
+      <div class="orch-section-body"></div>
+    </div>
+    <div class="orch-section" data-section="tools" hidden>
+      <div class="orch-section-header" onclick="toggleOrchSection('tools')">🔧 Tool Calls <span class="orch-section-toggle">▼</span></div>
+      <div class="orch-section-body"></div>
+    </div>
+    <div class="orch-section" data-section="edits" hidden>
+      <div class="orch-section-header" onclick="toggleOrchSection('edits')">📝 File Edits <span class="orch-section-toggle">▼</span></div>
+      <div class="orch-section-body"></div>
+    </div>
+    <div class="orch-section" data-section="results" hidden>
+      <div class="orch-section-header" onclick="toggleOrchSection('results')">✅ Results <span class="orch-section-toggle">▼</span></div>
+      <div class="orch-section-body"></div>
+    </div>
+    <div class="orch-summary" hidden></div>
+  `;
+  try {
+    const res = await fetch(`${API}/api/agent/run`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({goal, root: '.'}),
+    });
+    const data = await res.json();
+    if (data && data.session_id) {
+      currentOrchestratorSessionId = data.session_id;
+    }
+  } catch (err) {
+    currentOrchestratorMsgEl = null;
+    currentOrchestratorSessionId = null;
+    updateMessageBubble(msgEl, `Failed: ${err.message}`);
+  }
+}
+
+function toggleOrchSection(name) {
+  const sec = currentOrchestratorMsgEl?.querySelector(`.orch-section[data-section="${name}"]`);
+  if (!sec) return;
+  const body = sec.querySelector('.orch-section-body');
+  const toggle = sec.querySelector('.orch-section-toggle');
+  if (!body || !toggle) return;
+  if (body.style.display === 'none') {
+    body.style.display = 'block';
+    toggle.textContent = '▼';
+  } else {
+    body.style.display = 'none';
+    toggle.textContent = '▶';
+  }
+}
+
+function appendToOrchSection(name, html) {
+  if (!currentOrchestratorMsgEl) return;
+  const sec = currentOrchestratorMsgEl.querySelector(`.orch-section[data-section="${name}"]`);
+  if (!sec) return;
+  sec.hidden = false;
+  let body = orchSectionBodies[name];
+  if (!body) {
+    body = sec.querySelector('.orch-section-body');
+    orchSectionBodies[name] = body;
+  }
+  if (body) {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = html;
+    while (wrap.firstChild) body.appendChild(wrap.firstChild);
+  }
+  // Auto-scroll
+  const conv = document.getElementById('conv');
+  conv.scrollTop = conv.scrollHeight;
+}
+
+function setOrchSummary(html) {
+  if (!currentOrchestratorMsgEl) return;
+  const sum = currentOrchestratorMsgEl.querySelector('.orch-summary');
+  if (sum) {
+    sum.hidden = false;
+    sum.innerHTML = html;
+  }
+  const conv = document.getElementById('conv');
+  conv.scrollTop = conv.scrollHeight;
+}
+
+function formatOrchestratorEvent(ev) {
+  const p = ev.payload || {};
+  switch (ev.type) {
+    case 'session_start': {
+      const sid = ev.session_id || '?';
+      return { section: 'model', html: `<div class="orch-line">Session <code>${escapeHtml(sid.substring(0, 16))}</code> started</div>` };
+    }
+    case 'planning_done':
+    case 'plan_generated': {
+      const tasks = p.tasks || [];
+      const n = p.task_count || p.n_tasks || tasks.length || '?';
+      let html = `<div class="orch-line"><strong>${escapeHtml(String(n))}</strong> task(s) planned:</div>`;
+      if (tasks.length) {
+        html += '<ol class="orch-tasks">';
+        for (const t of tasks) {
+          html += `<li><span class="orch-task-action">${escapeHtml((t.action || '').substring(0, 200))}</span>${t.file ? ` <span class="orch-task-file">→ <code>${escapeHtml(t.file)}</code></span>` : ''}</li>`;
+        }
+        html += '</ol>';
+      }
+      return { section: 'plan', html };
+    }
+    case 'model_routed': {
+      return { section: 'model', html: `<div class="orch-line"><strong>${escapeHtml(p.model_name || '?')}</strong> <span class="orch-tier">(${escapeHtml(p.tier || '?')})</span> — <span class="orch-reason">${escapeHtml(p.reason || '')}</span> · est. $${(p.cost_estimate || 0).toFixed(4)}</div>` };
+    }
+    case 'task_start': {
+      return { section: 'plan', html: `<div class="orch-line orch-task-start">▶ Task <strong>${escapeHtml(String(p.task_id || '?'))}</strong>: ${escapeHtml((p.action || '').substring(0, 150))}${p.file ? ` → <code>${escapeHtml(p.file)}</code>` : ''}</div>` };
+    }
+    case 'task_done':
+    case 'task_complete': {
+      const ok = p.success !== false;
+      const elapsed = p.elapsed ? ` · ${p.elapsed.toFixed(1)}s` : '';
+      const cost = p.cost_usd ? ` · $${p.cost_usd.toFixed(4)}` : '';
+      return { section: 'results', html: `<div class="orch-line ${ok ? 'orch-done' : 'orch-fail'}">${ok ? '✓' : '✗'} Task <strong>${escapeHtml(String(p.task_id || '?'))}</strong> done${elapsed}${cost}${p.n_edits !== undefined ? ` · ${p.n_edits} edit(s)` : ''}${p.error ? ` · <span class="orch-error">${escapeHtml(p.error.substring(0, 120))}</span>` : ''}</div>` };
+    }
+    case 'worker_start': {
+      return { section: 'model', html: `<div class="orch-line">Worker on <code>${escapeHtml(p.file || '?')}</code>${p.model ? ` · ${escapeHtml(p.model)}` : ''}</div>` };
+    }
+    case 'worker_done': {
+      return { section: 'results', html: `<div class="orch-line orch-done">✓ Worker done — ${p.tokens || 0} tokens · $${(p.cost || 0).toFixed(4)}</div>` };
+    }
+    case 'file_change':
+    case 'file_edit': {
+      return { section: 'edits', html: `<div class="orch-line orch-edit">📝 <code>${escapeHtml(p.path || '?')}</code> +${p.lines_added || 0} lines${p.lines_removed ? ` / -${p.lines_removed}` : ''}</div>` };
+    }
+    case 'agent_thinking': {
+      const thought = (p.thought || '').trim();
+      if (!thought) return null;
+      return { section: 'thinking', html: `<div class="orch-thinking-line">${escapeHtml(thought)}</div>` };
+    }
+    case 'agent_tool_call': {
+      const toolName = p.action || '?';
+      const input = p.action_input || {};
+      let inputStr = '';
+      if (input.path) inputStr = `<code>${escapeHtml(input.path)}</code>`;
+      else if (input.command) inputStr = `<code>${escapeHtml(String(input.command).substring(0, 100))}</code>`;
+      else if (input.code) inputStr = `<code>${escapeHtml(String(input.code).substring(0, 100))}</code>`;
+      else if (input.query) inputStr = `<code>${escapeHtml(String(input.query).substring(0, 100))}</code>`;
+      const obs = p.observation ? String(p.observation).substring(0, 200) : '';
+      const ok = p.success !== false;
+      const resultIcon = p.success === false ? '✗' : (p.success === true ? '✓' : '⏳');
+      let html = `<div class="orch-line ${ok ? 'orch-tool' : 'orch-fail'}"><span class="orch-tool-name">${resultIcon} ${escapeHtml(toolName)}</span> ${inputStr}`;
+      if (obs) html += `<div class="orch-tool-output">${escapeHtml(obs)}</div>`;
+      html += '</div>';
+      return { section: 'tools', html };
+    }
+    case 'verify_result': {
+      const ok = p.passed || p.success;
+      return { section: 'results', html: `<div class="orch-line ${ok ? 'orch-done' : 'orch-fail'}">${ok ? '✓' : '✗'} Verification ${ok ? 'passed' : 'failed'}${p.issues?.length ? ` — ${p.issues.length} issue(s)` : ''}</div>` };
+    }
+    case 'session_done': {
+      const completed = p.completed || 0;
+      const failed = p.failed || 0;
+      const cost = p.total_cost || 0;
+      const elapsed = p.elapsed ? p.elapsed.toFixed(1) : '?';
+      const files = p.files_summary || {};
+      return { section: '__summary__', html: `🏁 <strong>${completed}/${completed + failed}</strong> tasks · $${cost.toFixed(4)} · ${elapsed}s · ${files.total_files || 0} files (${files.created || 0} new, ${files.modified || 0} modified)` };
+    }
+    case 'idle':
+      return null;
+    default:
+      return null;
+  }
+}
+
+// ── History ───────────────────────────────────────────────────
+function getHistory() { try { return JSON.parse(localStorage.getItem('awos-history2') || '[]'); } catch(_){return[];} }
+function saveHistory(msg) {
+  let h = getHistory().filter(e => e.goal !== msg);
+  h.unshift({goal: msg, time: new Date().toISOString()});
+  if (h.length > 20) h = h.slice(0, 20);
+  localStorage.setItem('awos-history2', JSON.stringify(h));
+}
+
+// ── Command Palette ───────────────────────────────────────────
+function togglePalette() {
+  const ov = document.getElementById('palette-overlay');
+  if (ov.style.display === 'flex') { ov.style.display = 'none'; return; }
+  ov.style.display = 'flex';
+  document.getElementById('palette-input').focus();
+}
+function closePalette(e) {
+  if (e && e.target !== document.getElementById('palette-overlay')) return;
+  document.getElementById('palette-overlay').style.display = 'none';
+}
+
+// ── Keyboard ──────────────────────────────────────────────────
+document.getElementById('prompt-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); togglePalette(); }
+  if (e.key === 'Escape') closePalette();
+});
+if (window.awos) window.awos.onCommandPalette(() => togglePalette());
+
+// ── SSE for orchestrator events ───────────────────────────────
+function showOrchestratorErrorToast(message) {
+  // A floating error banner at the top of the chat that the user can
+  // dismiss. Triggered when the orchestrator subprocess dies unexpectedly
+  // (the SSE loop in gui/server.py detects this and emits an error event).
+  const existing = document.getElementById('orch-error-toast');
+  if (existing) existing.remove();
+  const toast = document.createElement('div');
+  toast.id = 'orch-error-toast';
+  toast.style.cssText = [
+    'position: fixed', 'top: 56px', 'left: 50%', 'transform: translateX(-50%)',
+    'z-index: 10000', 'max-width: 640px', 'width: calc(100% - 64px)',
+    'padding: 14px 18px', 'border-radius: 10px',
+    'background: #3a1a1a', 'border: 1px solid #c44545', 'color: #fdd',
+    'box-shadow: 0 6px 24px rgba(0,0,0,0.5)',
+    'display: flex', 'align-items: flex-start', 'gap: 12px',
+    'font: 14px/1.4 system-ui, -apple-system, sans-serif', 'z-index: 10000',
+  ].join(';');
+  toast.innerHTML = `
+    <div style="flex: 1; min-width: 0;">
+      <div style="font-weight: 600; color: #f88; margin-bottom: 4px;">
+        Orchestrator crashed
+      </div>
+      <div style="word-wrap: break-word;">${escapeHtml(message)}</div>
+      <div style="margin-top: 8px; font-size: 12px; color: #caa;">
+        Check the orchestrator log at <code>.awos/gui/orch_*.log</code> for details.
+      </div>
+    </div>
+    <button type="button" aria-label="Dismiss"
+      style="background: none; border: none; color: #f88; cursor: pointer; font-size: 18px; line-height: 1; padding: 0 4px;"
+      onclick="document.getElementById('orch-error-toast').remove()">×</button>
+  `;
+  document.body.appendChild(toast);
+  // Auto-dismiss after 30s — the log is the persistent record.
+  setTimeout(() => {
+    const t = document.getElementById('orch-error-toast');
+    if (t) t.remove();
+  }, 30000);
+}
+
+function connectSSE() {
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource(`${API}/api/agent/events`);
+  eventSource.onmessage = (e) => {
+    try {
+      const ev = JSON.parse(e.data);
+      if (ev.type === 'session_start') {
+        document.getElementById('tb-dot').className = 'tb-dot running';
+        if (window.awos) window.awos.setAgentStatus('running');
+        // Capture the session_id from the first session_start (if we don't have one yet)
+        if (currentOrchestratorMsgEl && !currentOrchestratorSessionId && ev.session_id) {
+          currentOrchestratorSessionId = ev.session_id;
+        }
+      } else if (ev.type === 'session_done') {
+        document.getElementById('tb-dot').className = 'tb-dot done';
+        if (window.awos) window.awos.setAgentStatus('done');
+        setTimeout(() => {
+          document.getElementById('tb-dot').className = 'tb-dot';
+          if (window.awos) window.awos.setAgentStatus('idle');
+        }, 5000);
+        currentOrchestratorMsgEl = null;
+        currentOrchestratorSessionId = null;
+        orchSectionBodies = {};
+      } else if (ev.type === 'error') {
+        // Orchestrator crashed (SSE loop detected dead Popen with
+        // non-zero exit). Surface a clear error toast so the user
+        // knows the system is broken, not just stalled.
+        document.getElementById('tb-dot').className = 'tb-dot error';
+        if (window.awos) window.awos.setAgentStatus('error');
+        showOrchestratorErrorToast(
+          (ev.payload && ev.payload.message) || 'Orchestrator crashed'
+        );
+        currentOrchestratorMsgEl = null;
+        currentOrchestratorSessionId = null;
+        orchSectionBodies = {};
       } else {
-        progressFill.style.width = '0%';
-        progressText.textContent = liveSessionId ? 'Running...' : 'No active agent';
-      }
-    }
-    
-    // Update stats sidebar
-    function updateStats() {
-      document.getElementById('stat-rescues').textContent = tasksDone || 0;
-      document.getElementById('stat-cost').textContent = `$${sessionCost.toFixed(4)}`;
-    }
-    
-    // Load stats (fallback for when SSE is not available)
-    async function loadStats() {
-      try {
-        const stats = await fetch(`${API}/api/ci-rescue/stats`).then(r => r.json());
-        document.getElementById('stat-rescues').textContent = stats.total_rescues || 0;
-        document.getElementById('stat-tests').textContent = stats.total_tests_fixed || 0;
-        document.getElementById('stat-cost').textContent = `$${(stats.total_cost_usd || 0).toFixed(2)}`;
-        
-        const savings = stats.total_cost_usd > 0 ? 
-          Math.round(((stats.total_cost_usd * 2 - stats.total_cost_usd) / (stats.total_cost_usd * 2)) * 100) : 0;
-        document.getElementById('stat-savings').textContent = `${savings}%`;
-      } catch (err) {
-        console.error('Failed to load stats:', err);
-      }
-    }
-    
-    // Load history
-    async function loadHistory() {
-      try {
-        const history = await fetch(`${API}/api/ci-rescue/history`).then(r => r.json());
-        const list = document.getElementById('history-list');
-        
-        if (history.length === 0) {
-          list.innerHTML = '<div style="color: #8b949e; font-size: 13px;">No sessions yet</div>';
-          return;
+        // Route progress events to the active orchestrator message
+        // (filter by session_id if both are set)
+        if (currentOrchestratorMsgEl && currentOrchestratorSessionId && ev.session_id && ev.session_id !== currentOrchestratorSessionId) {
+          return;  // event is for a different session
         }
-        
-        list.innerHTML = history.map(session => `
-          <div class="history-item" data-id="${session.session_id}" onclick="loadSession('${session.session_id}')">
-            <div class="history-goal">${escapeHtml(session.goal.substring(0, 60))}...</div>
-            <div class="history-meta">
-              <span class="status-badge status-${session.status}">${session.status}</span>
-              <span>${session.tasks_completed}/${session.tasks_completed + session.tasks_failed} tasks</span>
-              <span>$${(session.total_cost_usd || 0).toFixed(4)}</span>
-            </div>
-          </div>
-        `).join('');
-      } catch (err) {
-        console.error('Failed to load history:', err);
-      }
-    }
-    
-    // Load session details
-    async function loadSession(sessionId) {
-      try {
-        // Highlight active session
-        document.querySelectorAll('.history-item').forEach(el => {
-          el.classList.toggle('active', el.dataset.id === sessionId);
-        });
-        
-        // Load session manifest
-        const manifest = await fetch(`${API}/api/sessions/${sessionId}`).then(r => r.json());
-        const files = await fetch(`${API}/api/sessions/${sessionId}/files`).then(r => r.json());
-        
-        // Update header
-        document.getElementById('main-title').textContent = manifest.goal || 'CI Rescue';
-        
-        const total = manifest.tasks_completed + manifest.tasks_failed;
-        const progress = total > 0 ? (manifest.tasks_completed / total) * 100 : 0;
-        document.getElementById('progress-fill').style.width = `${progress}%`;
-        document.getElementById('progress-text').textContent = 
-          `${manifest.tasks_completed}/${total} tasks completed · $${(manifest.total_cost_usd || 0).toFixed(4)}`;
-        
-        // Show logs
-        const terminal = document.getElementById('terminal');
-        terminal.innerHTML = '';
-        
-        // Add session start log
-        addLog('info', `Session started: ${sessionId}`);
-        addLog('info', `Goal: ${manifest.goal}`);
-        
-        // Add task logs
-        if (manifest.tasks && manifest.tasks.length > 0) {
-          manifest.tasks.forEach((task, idx) => {
-            addLog('task', `Task ${idx + 1}: ${task.action || task.description || 'Unknown task'}`);
-            if (task.status === 'completed') {
-              addLog('success', `✓ Task ${idx + 1} completed`);
-            } else if (task.status === 'failed') {
-              addLog('error', `✗ Task ${idx + 1} failed: ${task.error || 'Unknown error'}`);
-            }
-          });
-        }
-        
-        // Show file diffs
-        if (files.files && files.files.length > 0) {
-          addLog('info', `Modified ${files.files.length} file(s)`);
-          files.files.forEach(file => {
-            showDiff(file);
-          });
-        }
-        
-        // Add completion log
-        if (manifest.status === 'completed') {
-          addLog('success', `✓ Session completed successfully`);
-        } else if (manifest.status === 'failed') {
-          addLog('error', `✗ Session failed`);
-        }
-        
-      } catch (err) {
-        console.error('Failed to load session:', err);
-        addLog('error', `Failed to load session: ${err.message}`);
-      }
-    }
-    
-    // Add log entry
-    function addLog(type, message) {
-      const terminal = document.getElementById('terminal');
-      const time = new Date().toLocaleTimeString();
-      
-      const entry = document.createElement('div');
-      entry.className = `log-entry log-${type}`;
-      entry.innerHTML = `
-        <div class="log-time">${time}</div>
-        <div class="log-message">${escapeHtml(message)}</div>
-      `;
-      
-      terminal.appendChild(entry);
-      terminal.scrollTop = terminal.scrollHeight;
-    }
-    
-    // Show diff with syntax highlighting
-    function showDiff(file) {
-      const terminal = document.getElementById('terminal');
-      
-      const diffView = document.createElement('div');
-      diffView.className = 'diff-view';
-      
-      // Detect language from file extension
-      const language = detectLanguage(file.path);
-      
-      // Create diff content with syntax highlighting
-      let diffContent = '';
-      if (file.hunks && file.hunks.length > 0) {
-        file.hunks.forEach(hunk => {
-          hunk.lines.forEach(line => {
-            const type = line.type === 'add' ? 'diff-add' : 
-                        line.type === 'remove' ? 'diff-remove' : 'diff-context';
-            const prefix = line.type === 'add' ? '+' : 
-                          line.type === 'remove' ? '-' : ' ';
-            diffContent += `<div class="diff-line ${type}">${prefix} ${escapeHtml(line.content)}</div>`;
-          });
-        });
-      } else if (file.unified_diff) {
-        file.unified_diff.split('\n').forEach(line => {
-          const type = line.startsWith('+') && !line.startsWith('+++') ? 'diff-add' :
-                      line.startsWith('-') && !line.startsWith('---') ? 'diff-remove' : 'diff-context';
-          diffContent += `<div class="diff-line ${type}">${escapeHtml(line)}</div>`;
-        });
-      }
-      
-      diffView.innerHTML = `
-        <div class="diff-header">📄 ${escapeHtml(file.path)} (${file.status}) · ${language}</div>
-        <div class="diff-content" id="diff-${file.path.replace(/[^a-z0-9]/gi, '_')}">${diffContent || '<div class="diff-context">No diff available</div>'}</div>
-      `;
-      
-      terminal.appendChild(diffView);
-      
-      // Apply syntax highlighting if we have CodeMirror
-      if (typeof CodeMirror !== 'undefined' && (file.hunks || file.unified_diff)) {
-        const diffContainer = diffView.querySelector('.diff-content');
-        const code = extractCode(file);
-        
-        if (code) {
-          // Clear the diff content and create a CodeMirror editor
-          diffContainer.innerHTML = '';
-          const editor = CodeMirror(diffContainer, {
-            value: code,
-            mode: language,
-            theme: 'dracula',
-            lineNumbers: true,
-            readOnly: true,
-            viewportMargin: Infinity,
-            lineWrapping: false,
-            gutters: ['CodeMirror-linenumbers'],
-            extraKeys: {
-              'Ctrl-F': 'findPersistent',
-              'Cmd-F': 'findPersistent'
-            }
-          });
-          
-          // Style the editor to match our theme
-          editor.getWrapperElement().style.background = '#0d1117';
-          editor.getWrapperElement().style.border = 'none';
-          editor.getWrapperElement().style.fontSize = '12px';
-          editor.getWrapperElement().style.lineHeight = '1.5';
-        }
-      }
-      
-      terminal.scrollTop = terminal.scrollHeight;
-    }
-    
-    // Detect language from file path
-    function detectLanguage(filePath) {
-      const ext = filePath.split('.').pop().toLowerCase();
-      const languageMap = {
-        'py': 'python',
-        'js': 'javascript',
-        'jsx': 'javascript',
-        'ts': 'text/typescript',
-        'tsx': 'text/typescript',
-        'java': 'text/x-java',
-        'c': 'text/x-csrc',
-        'cpp': 'text/x-c++src',
-        'h': 'text/x-csrc',
-        'hpp': 'text/x-c++src',
-        'cs': 'text/x-csharp',
-        'go': 'text/x-go',
-        'rs': 'text/x-rustsrc',
-        'rb': 'text/x-ruby',
-        'php': 'application/x-httpd-php',
-        'sh': 'shell',
-        'bash': 'shell',
-        'yml': 'yaml',
-        'yaml': 'yaml',
-        'json': 'application/json',
-        'md': 'markdown',
-        'html': 'htmlmixed',
-        'css': 'css',
-        'sql': 'text/x-sql',
-        'xml': 'application/xml',
-        'toml': 'text/x-toml'
-      };
-      return languageMap[ext] || 'text/plain';
-    }
-    
-    // Extract code from diff for syntax highlighting
-    function extractCode(file) {
-      let code = '';
-      
-      if (file.hunks && file.hunks.length > 0) {
-        // Extract code from hunks (show the new version)
-        file.hunks.forEach(hunk => {
-          hunk.lines.forEach(line => {
-            if (line.type === 'add' || line.type === 'context') {
-              code += line.content + '\n';
-            }
-          });
-        });
-      } else if (file.unified_diff) {
-        // Extract code from unified diff (show the new version)
-        file.unified_diff.split('\n').forEach(line => {
-          if (line.startsWith('+') && !line.startsWith('+++')) {
-            code += line.substring(1) + '\n';
-          } else if (!line.startsWith('-') && !line.startsWith('---') && !line.startsWith('@@')) {
-            code += line + '\n';
-          }
-        });
-      }
-      
-      return code.trim();
-    }
-    
-    // Escape HTML
-    function escapeHtml(text) {
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
-    }
-    
-    // Initialize
-    loadStats();
-    loadHistory();
-    connectSSE();  // Connect to real-time updates
-    
-    // Refresh history every 10 seconds (less frequent since we have SSE for live updates)
-    setInterval(() => {
-      loadHistory();
-    }, 10000);
-    
-    // Chat functionality
-    let currentChatMode = 'qa';
-    let currentChatId = null;
-    let isStreaming = false;
-    
-    // Switch between dashboard and chat views
-    function switchView(view) {
-      document.querySelectorAll('.view-tabs .mode-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.view === view);
-      });
-      
-      if (view === 'dashboard') {
-        document.getElementById('dashboard-view').style.display = 'grid';
-        document.getElementById('chat-view').classList.remove('active');
-      } else if (view === 'chat') {
-        document.getElementById('dashboard-view').style.display = 'none';
-        document.getElementById('chat-view').classList.add('active');
-      }
-    }
-    
-    // Mode selector for chat
-    document.querySelectorAll('.chat-mode-selector .mode-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.chat-mode-selector .mode-btn').forEach(b => {
-          b.classList.remove('active');
-        });
-        btn.classList.add('active');
-        currentChatMode = btn.dataset.mode;
-      });
-    });
-    
-    // Auto-resize textarea
-    const chatInput = document.getElementById('chat-input');
-    chatInput.addEventListener('input', () => {
-      chatInput.style.height = 'auto';
-      chatInput.style.height = Math.min(chatInput.scrollHeight, 200) + 'px';
-    });
-    
-    // Send message on Enter (Shift+Enter for new line)
-    chatInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendMessage();
-      }
-    });
-    
-    // Send button click
-    document.getElementById('chat-send-btn').addEventListener('click', sendMessage);
-    
-    // Send message function
-    async function sendMessage() {
-      const message = chatInput.value.trim();
-      if (!message || isStreaming) return;
-      
-      // Hide empty state
-      const emptyState = document.getElementById('chat-empty');
-      if (emptyState) {
-        emptyState.remove();
-      }
-      
-      // Add user message
-      addChatMessage('user', message);
-      chatInput.value = '';
-      chatInput.style.height = 'auto';
-      
-      // Show typing indicator
-      const typingId = showTypingIndicator();
-      isStreaming = true;
-      document.getElementById('chat-send-btn').disabled = true;
-      
-      try {
-        // Stream response
-        const response = await fetch(`${API}/api/chat/stream`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: message,
-            mode: currentChatMode,
-            chat_id: currentChatId
-          })
-        });
-        
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        
-        // Read SSE stream
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let assistantMessage = '';
-        let messageId = null;
-        
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-          
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.substring(6));
-                
-                if (data.event === 'start') {
-                  // Remove typing indicator and create message
-                  removeTypingIndicator(typingId);
-                  messageId = addChatMessage('assistant', '');
-                  currentChatId = data.data?.chat_id;
-                } else if (data.event === 'token') {
-                  // Append token to message
-                  assistantMessage += data.data?.content || '';
-                  updateChatMessage(messageId, assistantMessage);
-                } else if (data.event === 'done') {
-                  // Stream complete
-                  isStreaming = false;
-                  document.getElementById('chat-send-btn').disabled = false;
-                } else if (data.event === 'error') {
-                  throw new Error(data.data?.error || 'Stream error');
-                }
-              } catch (e) {
-                console.error('Failed to parse SSE data:', e);
-              }
-            }
+        const formatted = formatOrchestratorEvent(ev);
+        if (formatted) {
+          if (formatted.section === '__summary__') {
+            setOrchSummary(formatted.html);
+          } else {
+            appendToOrchSection(formatted.section, formatted.html);
           }
         }
-        
-      } catch (error) {
-        console.error('Chat error:', error);
-        removeTypingIndicator(typingId);
-        addChatMessage('assistant', `Error: ${error.message}`);
-        isStreaming = false;
-        document.getElementById('chat-send-btn').disabled = false;
       }
-    }
-    
-    // Add chat message to UI
-    function addChatMessage(role, content) {
-      const messagesContainer = document.getElementById('chat-messages');
-      const messageId = 'msg-' + Date.now();
-      
-      const messageDiv = document.createElement('div');
-      messageDiv.className = `chat-message ${role}`;
-      messageDiv.id = messageId;
-      
-      const avatar = role === 'user' ? '👤' : '🤖';
-      
-      messageDiv.innerHTML = `
-        <div class="chat-avatar">${avatar}</div>
-        <div class="chat-bubble">${renderMarkdown(content)}</div>
-      `;
-      
-      messagesContainer.appendChild(messageDiv);
-      messagesContainer.scrollTop = messagesContainer.scrollHeight;
-      
-      return messageId;
-    }
-    
-    // Update existing chat message
-    function updateChatMessage(messageId, content) {
-      const messageDiv = document.getElementById(messageId);
-      if (messageDiv) {
-        const bubble = messageDiv.querySelector('.chat-bubble');
-        bubble.innerHTML = renderMarkdown(content);
-        
-        const messagesContainer = document.getElementById('chat-messages');
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-      }
-    }
-    
-    // Render markdown with code highlighting
-    function renderMarkdown(text) {
-      if (!text) return '';
-      
-      // Configure marked
-      marked.setOptions({
-        breaks: true,
-        gfm: true,
-        headerIds: false,
-        mangle: false
-      });
-      
-      // Render markdown
-      let html = marked.parse(text);
-      
-      // Add syntax highlighting to code blocks
-      html = html.replace(/<pre><code class="language-(\w+)">([\s\S]*?)<\/code><\/pre>/g, (match, lang, code) => {
-        return `<pre><code class="language-${lang}">${escapeHtml(code)}</code></pre>`;
-      });
-      
-      return html;
-    }
-    
-    // Show typing indicator
-    function showTypingIndicator() {
-      const messagesContainer = document.getElementById('chat-messages');
-      const indicatorId = 'typing-' + Date.now();
-      
-      const indicatorDiv = document.createElement('div');
-      indicatorDiv.className = 'chat-message assistant';
-      indicatorDiv.id = indicatorId;
-      
-      indicatorDiv.innerHTML = `
-        <div class="chat-avatar">🤖</div>
-        <div class="chat-bubble">
-          <div class="typing-indicator">
-            <div class="typing-dot"></div>
-            <div class="typing-dot"></div>
-            <div class="typing-dot"></div>
-          </div>
-        </div>
-      `;
-      
-      messagesContainer.appendChild(indicatorDiv);
-      messagesContainer.scrollTop = messagesContainer.scrollHeight;
-      
-      return indicatorId;
-    }
-    
-    // Remove typing indicator
-    function removeTypingIndicator(indicatorId) {
-      const indicator = document.getElementById(indicatorId);
-      if (indicator) {
-        indicator.remove();
-      }
-    }
-  </script>
+    } catch(_){}
+  };
+  eventSource.onerror = () => setTimeout(connectSSE, 5000);
+}
+
+connectSSE();
+</script>
 </body>
 </html>

@@ -73,7 +73,6 @@ except ImportError:
     from live_tool_synth import LiveToolSynthesizer
     from mcts_search import MCTSSearchEngine, write_and_run_tests
     from ml_router import TaskFeatureExtractor, build_ml_router
-    from planner import Planner
     from post_mortem import FailureType, PostMortemEngine
     from project_planner import ProjectPlanner
     from prompt_evolver import PromptEvolver
@@ -111,7 +110,7 @@ class Orchestrator:
         Args:
             tracker: TokenTracker instance for cost monitoring (optional)
         """
-        self.planner = Planner()
+        self.planner = CheapPlanner()
         self.worker = Worker()
         self.verifier = Verifier()
         self.tracker = tracker
@@ -126,6 +125,14 @@ class Orchestrator:
         )
         self._gp_last_fit_at = 0  # episode count at last GP fit
         self._feature_extractor = TaskFeatureExtractor()
+
+        # ── Warm-start LinUCB from historical RewardStore data ───────────
+        replayed = self.ml_router.warm_start(self.reward_store, max_episodes=50)
+        logger.info(
+            "[orchestrator] warm-started LinUCB with %d episodes (ready=%s, updates=%d)",
+            replayed, self.ml_router.is_ready(), self.ml_router.total_updates(),
+        )
+
         self.escalation = EscalationEngine(
             monthly_budget=getattr(tracker, 'monthly_budget', 20.0) if tracker else 20.0,
             performance_tracker=self.performance,
@@ -226,7 +233,16 @@ class Orchestrator:
         for attempt in range(3):
             try:
                 worker = self.worker
-                # Try DeepSeek / OpenAI-compatible first (cheapest)
+                # Try OpenCode Go FIRST (has quota, cheapest)
+                if hasattr(worker, "opencode_client") and worker.opencode_client is not None:
+                    response = worker.opencode_client.chat.completions.create(
+                        model="deepseek-v4-flash",  # OpenCode Go's cheapest model
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=4096,  # Enough for reasoning + content
+                        temperature=0.3,
+                    )
+                    return response.choices[0].message.content or ""
+                # Try DeepSeek / OpenAI-compatible
                 if hasattr(worker, "client") and worker.client is not None:
                     response = worker.client.chat.completions.create(
                         model="deepseek-chat",
@@ -720,7 +736,7 @@ class Orchestrator:
                         plan = CheapPlanner().plan(
                             goal, codebase_context, tracker=self.tracker,
                         )
-                        print("[PLANNER] Cheap-only mode — using Gemini Flash")
+                        print("[PLANNER] Cheap-only mode — using OpenCode Go (DeepSeek V4 Flash)")
                     else:
                         plan = self.planner.plan(
                             goal, codebase_context,
@@ -734,7 +750,7 @@ class Orchestrator:
                         plan = CheapPlanner().plan(
                             goal, codebase_context, tracker=self.tracker,
                         )
-                    print("[PLANNER] Fell back to CheapPlanner (Gemini Flash)")
+                    print("[PLANNER] Fell back to CheapPlanner (OpenCode Go / DeepSeek V4 Flash)")
                 except Exception as e:
                     return {
                         "success": False,
