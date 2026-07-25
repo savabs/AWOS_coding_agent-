@@ -1009,6 +1009,12 @@ class GuiChatService:
         The LLM itself classifies intent. Returns "qa" or "task".
         """
         import os
+        from pathlib import Path
+        try:
+            from dotenv import load_dotenv
+            load_dotenv(Path(__file__).parent.parent.parent / ".env")
+        except ImportError:
+            pass
         opencode_key = os.getenv("OPENCODE_GO_API_KEY")
         if not opencode_key:
             return "qa"  # safe fallback — answer directly
@@ -1016,13 +1022,12 @@ class GuiChatService:
         from openai import OpenAI
         client = OpenAI(api_key=opencode_key, base_url="https://opencode.ai/zen/go/v1")
         prompt = (
-            "Classify this user prompt. Output ONLY one word: 'qa' or 'task'.\n\n"
-            "'qa' = the user is asking a question, requesting information, "
-            "having a conversation, or making a recall request.\n"
-            "'task' = the user wants code edited, files changed, commands run, "
-            "bugs fixed, or features implemented.\n\n"
-            f"User prompt: \"{message}\"\n\n"
-            "Respond with ONLY: qa\nOR\nRespond with ONLY: task"
+            "Classify this prompt. Output ONLY one word: qa or task.\n\n"
+            "TASK = code work: add, fix, change, create, modify, implement, "
+            "refactor, remove, delete, update, edit, write.\n"
+            "QA = questions, recall, conversation, information request.\n\n"
+            f"Prompt: {message}\n\n"
+            "Classification:"
         )
         try:
             resp = client.chat.completions.create(
