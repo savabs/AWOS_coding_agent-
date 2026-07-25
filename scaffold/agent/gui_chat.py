@@ -344,6 +344,7 @@ class GuiChatService:
         message: str,
         mode: str = "qa",
         chat_id: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> Iterator[dict[str, Any]]:
         """Yield SSE event dicts: {event, data}."""
         mode = mode if mode in VALID_MODES else "qa"
@@ -489,7 +490,8 @@ class GuiChatService:
         return "\n\n".join(p for p in parts if p)
 
     def _stream_qa(
-        self, session: ChatSession, message: str, cancel: threading.Event
+        self, session: ChatSession, message: str, cancel: threading.Event,
+        model: Optional[str] = None,
     ) -> Iterator[dict[str, Any]]:
         from scaffold.agent.escalation_engine import is_cheap_only
 
@@ -545,7 +547,40 @@ class GuiChatService:
         self._reset_usage()
         full_parts: list[str] = []
         first_token = True
-        if os.getenv("DEEPSEEK_API_KEY") or is_cheap_only():
+        # OpenCode Go first — only provider with credits
+        opencode_key = os.getenv("OPENCODE_GO_API_KEY")
+        if opencode_key:
+            opencode_base = os.getenv("OPENCODE_GO_BASE_URL", "https://opencode.ai/zen/go/v1")
+            oc_model = "qwen3.7-plus"
+            from openai import OpenAI
+            oc_client = OpenAI(api_key=opencode_key, base_url=opencode_base)
+            if model and model not in ("", "deepseek-chat"):
+                oc_model = model
+            try:
+                resp = oc_client.chat.completions.create(
+                    model=oc_model,
+                    messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                    max_tokens=3000,  # enough for reasoning + answer
+                    temperature=0.3,
+                    stream=True,
+                )
+                for chunk in resp:
+                    if cancel.is_set():
+                        break
+                    delta = chunk.choices[0].delta.content
+                    if delta:
+                        if first_token:
+                            ttfb_ms = (time.perf_counter() - t0) * 1000.0
+                            first_token = False
+                        full_parts.append(delta)
+                        yield {"event": "token", "data": {"content": delta}}
+                    if token_type := getattr(chunk, "object", None):
+                        pass
+                model = oc_model
+            except Exception as exc:
+                yield {"event": "error", "data": {"error": str(exc)}}
+                model = oc_model
+        elif os.getenv("DEEPSEEK_API_KEY") or is_cheap_only():
             for token in self._stream_deepseek(system, user, session):
                 if cancel.is_set():
                     break
@@ -568,7 +603,7 @@ class GuiChatService:
             if not self._last_completion_tokens:
                 self._last_completion_tokens = _estimate_tokens("".join(full_parts))
         else:
-            raise RuntimeError("Set DEEPSEEK_API_KEY or ANTHROPIC_API_KEY in .env")
+            raise RuntimeError("Set OPENCODE_GO_API_KEY, DEEPSEEK_API_KEY, or ANTHROPIC_API_KEY in .env")
 
         if cancel.is_set():
             text = "".join(full_parts)
