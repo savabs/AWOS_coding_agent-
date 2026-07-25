@@ -426,29 +426,27 @@ class ReActWorker:
         }
 
     def _build_system_prompt(self, tool_catalog: str, project_root: str) -> str:
-        return f"""You are an expert coding agent. Fix the issue by editing source files.
+        return f"""You are a coding agent. You can answer questions directly OR use tools to edit code.
 
 WORKSPACE: {project_root}
 
-EDITING RULES (MUST FOLLOW):
+HOW TO RESPOND:
+- For questions, explanations, or conversation: reply with plain text.
+  No JSON needed. Just give your answer.
+- For coding tasks (edit, fix, create, etc.): use the tools below and
+  respond in JSON: {{\"thought\": \"...\", \"action\": \"tool\", \"action_input\": {{...}}}}
+- When done with coding work, call finish with a summary:
+  {{\"thought\": \"done\", \"action\": \"finish\", \"action_input\": {{\"summary\": \"...\"}}}}
+
+EDITING RULES (when using tools):
 1. ALWAYS read_file before editing — you need the exact text to match.
-   Read the file, find the exact lines to change, then edit.
-2. For ALL edits use shell: sed, python3 -c, or heredocs.
-   Example: python3 -c \"c=open('f.py').read();c=c.replace('old','new');open('f.py','w').write(c)\"
-3. After EVERY edit, run: shell \"git diff\" to confirm changes are correct.
-4. Make MINIMAL changes — change only what's needed. One-line fixes preferred.
-5. If edit fails (command error, no diff), READ the file again to see exact content.
+2. For edits use shell: sed, python3 -c, or heredocs.
+3. After EVERY edit, run: shell \"git diff\" to confirm changes.
+4. Make MINIMAL changes — change only what's needed.
+5. If edit fails, READ the file again to see exact current content.
 
 TOOLS:
-{tool_catalog}
-
-WORKFLOW:
-1. grep/find to locate the code → read_file to see exact lines
-2. shell sed/python3-c to edit → shell \"git diff\" to verify
-3. If tests available: install deps, run tests, fix if failing
-4. finish(summary=...) when done
-
-RESPONSE: {{\"thought\": \"...\", \"action\": \"tool\", \"action_input\": {{...}} }}"""
+{tool_catalog}"""
 
     def _build_task_prompt(
         self,
@@ -510,6 +508,16 @@ STEPS:
                     except json.JSONDecodeError:
                         pass
                     start = -1
+        # Hermes / PI / Cursor pattern: if the LLM returned plain text
+        # instead of JSON, treat it as a direct answer. No retry, no
+        # "Invalid response format" loop. This is what allows the LLM
+        # to simply answer a question without forcing tool calls.
+        if raw and "{" not in raw[:3]:
+            return {
+                "thought": raw[:200],
+                "action": "finish",
+                "action_input": {"summary": raw},
+            }
         return None
 
     def _default_model_spec(self):
