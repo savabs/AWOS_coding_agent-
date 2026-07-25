@@ -236,7 +236,7 @@ class Orchestrator:
                 # Try OpenCode Go FIRST (has quota, cheapest)
                 if hasattr(worker, "opencode_client") and worker.opencode_client is not None:
                     response = worker.opencode_client.chat.completions.create(
-                        model="deepseek-v4-flash",  # OpenCode Go's cheapest model
+                        model="qwen3.7-plus",  # Qwen for reasoning quality on aux calls
                         messages=[{"role": "user", "content": prompt}],
                         max_tokens=4096,  # Enough for reasoning + content
                         temperature=0.3,

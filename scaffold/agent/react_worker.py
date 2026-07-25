@@ -570,16 +570,14 @@ STEPS:
             return None
 
         def _opencode():
-            # OpenCode Go is the only model with reliable quota right now
-            # (per checkpoint_2026-07-24_master_session §3.4). Prefer it.
+            # OpenCode Go — single provider, two models:
+            #   default: deepseek-v4-flash (cheap, fast)
+            #   escalate: deepseek-v4-pro (complex / failed tasks)
             if self.opencode_client and "opencode" not in self._dead_providers:
-                # OpenCode Go's catalog uses "deepseek-v4-flash" — "deepseek-chat"
-                # (the ReActWorker default) is NOT in their catalog. Hardcode
-                # the correct model name here.
                 opencode_model = os.getenv("AWOS_OPENCODE_MODEL", "deepseek-v4-flash")
                 return ModelSpec(
-                    level=EscalationLevel.OPENCODE,
-                    name="OpenCode Go",
+                    level=EscalationLevel.DEEPSEEK,
+                    name="DeepSeek V4 Flash",
                     model_id=opencode_model,
                     provider="opencode",
                     cost_per_req=0.001,

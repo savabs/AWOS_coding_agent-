@@ -44,18 +44,10 @@ class EscalationLevel(Enum):
 
 
 # Models that are currently dead (404 / rate-limited / no working key).
-# Single source of truth — see checkpoint_2026-07-24_master_session §3.4.
-# Filtered out of the escalation ladder at decide() time so we never pick
-# a model that will fail. When the upstream quota issue is resolved,
-# remove the entry from this set — the ladder will pick it up again
-# without any other code change.
-MODELS_UNAVAILABLE: set[str] = {
-    "gemini-2.0-flash",     # 404 from Google (no longer served)
-    "gemini-2.5-flash",     # 404 from our OpenCode Go config
-    "gpt-4o-mini",          # rate-limited (per checkpoint §3.4)
-    "claude-haiku-4-5",     # no working API key
-    "claude-sonnet-4-6",    # no working API key
-}
+# Empty now — all dead models (gemini, gpt-4o-mini, claude) were removed
+# from the LADDER entirely. Leave the filter mechanism in place so a
+# future dead model can be blocked with a single-line addition here.
+MODELS_UNAVAILABLE: set[str] = set()
 
 
 @dataclass
@@ -74,99 +66,41 @@ class ModelSpec:
 
 
 LADDER: list[ModelSpec] = [
-    ModelSpec(
-        level=EscalationLevel.GEMINI_FLASH,
-        name="Gemini 2.5 Flash-Lite",
-        model_id="gemini-2.0-flash",
-        provider="google",
-        cost_per_req=0.001,
-        input_price=0.10,
-        output_price=0.40,
-        min_complexity=0,
-        min_budget_remaining=0.0,
-        min_failures=0,
-    ),
+    # L0: Default worker — DeepSeek V4 Flash (cheap, fast, good enough for most subtasks)
     ModelSpec(
         level=EscalationLevel.DEEPSEEK,
         name="DeepSeek V4 Flash",
-        model_id="deepseek-v4-flash",  # OpenCode Go model ID
-        provider="deepseek",
-        cost_per_req=0.001,
-        input_price=0.14,
-        output_price=0.28,
-        min_complexity=0,
-        min_budget_remaining=0.0,
-        min_failures=0,
-    ),
-    ModelSpec(
-        level=EscalationLevel.OPENROUTER,
-        name="DeepSeek V4 Pro",
-        model_id="deepseek-v4-pro",  # OpenCode Go model ID
-        provider="deepseek",
-        cost_per_req=0.002,
-        input_price=0.28,
-        output_price=0.56,
-        min_complexity=10,  # Only when flash fails
-        min_budget_remaining=0.0,
-        min_failures=1,  # Use after 1 flash failure
-    ),
-    ModelSpec(
-        level=EscalationLevel.OPENAI,
-        name="GPT-4o-mini",
-        model_id="gpt-4o-mini",
-        provider="openai",
-        cost_per_req=0.003,
-        input_price=0.15,
-        output_price=0.60,
-        min_complexity=10,  # Only as fallback after DeepSeek fails
-        min_budget_remaining=0.0,
-        min_failures=2,  # Use after 2 DeepSeek failures
-    ),
-    ModelSpec(
-        level=EscalationLevel.OPENCODE,
-        name="OpenCode Go",
         model_id="deepseek-v4-flash",
         provider="opencode",
         cost_per_req=0.001,
         input_price=0.14,
         output_price=0.28,
-        min_complexity=0,   # Enabled — primary provider for all tasks
+        min_complexity=0,
         min_budget_remaining=0.0,
-        min_failures=0,     # First choice for cheap tasks
+        min_failures=0,
     ),
+    # L1: Escalation — DeepSeek V4 Pro (stronger reasoning, used when Flash fails
+    #     or task complexity is high)
     ModelSpec(
-        level=EscalationLevel.HAIKU,
-        name="Claude Haiku 4.5",
-        model_id="claude-haiku-4-5",
-        provider="anthropic",
-        cost_per_req=0.017,
-        input_price=1.00,
-        output_price=5.00,
-        min_complexity=10,  # Only use after failures, not for complexity
-        min_budget_remaining=1.0,
-        min_failures=3,
-    ),
-    ModelSpec(
-        level=EscalationLevel.SONNET,
-        name="Claude Sonnet 4.6",
-        model_id="claude-sonnet-4-6",
-        provider="anthropic",
-        cost_per_req=0.050,
-        input_price=3.00,
-        output_price=15.00,
-        min_complexity=10,  # Only use after failures, not for complexity
-        min_budget_remaining=3.0,
-        min_failures=5,  # Only after Haiku also fails
+        level=EscalationLevel.OPENCODE,
+        name="DeepSeek V4 Pro",
+        model_id="deepseek-v4-pro",
+        provider="opencode",
+        cost_per_req=0.002,
+        input_price=0.44,
+        output_price=0.88,
+        min_complexity=6,  # Only for complex tasks
+        min_budget_remaining=0.0,
+        min_failures=1,     # Use after 1 Flash failure
     ),
 ]
 
 LEVEL_MAP: dict[EscalationLevel, ModelSpec] = {m.level: m for m in LADDER}
 
-CHEAP_ONLY_MAX_LEVEL = EscalationLevel.OPENAI
+CHEAP_ONLY_MAX_LEVEL = EscalationLevel.OPENCODE
 _CHEAP_ROTATION = [
     EscalationLevel.DEEPSEEK,
-    EscalationLevel.OPENROUTER,
-    EscalationLevel.OPENAI,
+    EscalationLevel.OPENCODE,
 ]
 
 
@@ -311,7 +245,7 @@ class EscalationEngine:
         # failure-driven escalation walk would still pick dead models (e.g.
         # gpt-4o-mini after 2 failures) and burn budget on guaranteed failures.
         ladder = [s for s in ladder if s.model_id not in MODELS_UNAVAILABLE]
-        worker_ladder = [s for s in ladder if s.level != EscalationLevel.GEMINI_FLASH]
+        worker_ladder = list(ladder)  # all models are eligible for worker tasks now
 
         # ── Performance veto (empirical success matrix) ──────────────────
         # Runs BEFORE LinUCB so strong empirical evidence overrides the bandit.

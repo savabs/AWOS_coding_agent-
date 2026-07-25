@@ -18,12 +18,12 @@ from openai import OpenAI
 class CheapPlanner:
     """Uses OpenCode Go (DeepSeek V4 Flash) for budget-conscious planning."""
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "deepseek-v4-flash"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "qwen3.7-plus"):
         """Initialize with OpenCode Go API.
         
         Args:
             api_key: OpenCode Go API key. Reads OPENCODE_GO_API_KEY.
-            model: Model to use (deepseek-v4-flash recommended)
+            model: Model to use (qwen3.7-plus for reasoning quality)
         """
         self.api_key = api_key or os.getenv("OPENCODE_GO_API_KEY")
         if not self.api_key:
