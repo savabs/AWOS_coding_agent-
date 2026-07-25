@@ -332,7 +332,17 @@ class GuiHandler(BaseHTTPRequestHandler):
                 proc = subprocess.Popen(
                     [sys.executable, "-m", "awos", "run", goal, "--root", codebase_root],
                     cwd=ROOT,
-                    env=os.environ,  # Pass environment with .env vars
+                    env={
+                        **os.environ,
+                        # Disable the worktree sandbox for web UI tasks.
+                        # The orchestrator creates a worktree at
+                        # .awos/worktrees/<id>/ that isolates file edits.
+                        # For interactive web UI use (file paths relative
+                        # to the project root), this isolation causes
+                        # "File not found" errors because dotfiles and
+                        # non-codebase files aren't copied to the sandbox.
+                        "AWOS_USE_WORKTREE": "false",
+                    },
                     stdout=open(log_file, "a"),
                     stderr=open(log_file, "a"),
                 )
