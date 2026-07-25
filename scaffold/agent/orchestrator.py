@@ -51,7 +51,6 @@ try:
     from .symbol_index import SymbolIndex
     from .task_decomposer import TaskDecomposer
     from .test_runner import TestRunner
-    from .vector_memory import VectorMemory, VectorMemoryUnavailableError
     from .verifier import Verifier
     from .worker import Worker
 except ImportError:
@@ -88,11 +87,6 @@ except ImportError:
     from test_runner import TestRunner
     from verifier import Verifier
     from worker import Worker
-    try:
-        from vector_memory import VectorMemory, VectorMemoryUnavailableError
-    except ImportError:
-        VectorMemory = None  # type: ignore
-        VectorMemoryUnavailableError = Exception  # type: ignore
 
     try:
         from multi_resolution_context import suggest_level  # noqa: F401
@@ -149,18 +143,11 @@ class Orchestrator:
         self.test_runner = None
         self.error_store = ErrorPatternStore()
         self.obs_store = ObservabilityStore(persist_dir=".awos")
-        if os.getenv("AWOS_E2E", "").lower() in ("1", "true", "yes"):
-            self.vector_memory = None
-            logger.warning(
-                "[VectorMemory] unavailable (E2E mode — vector memory disabled) — semantic retrieval disabled"
-            )
-        else:
-            try:
-                self.vector_memory = VectorMemory()
-                logger.info("[VectorMemory] initialised")
-            except Exception as exc:
-                self.vector_memory = None
-                logger.warning("[VectorMemory] unavailable (%s) — semantic retrieval disabled", exc)
+        # VectorMemory pulls in sentence_transformers + ChromaDB + TensorFlow,
+        # adding 60s to every startup. ChromaDB's index is corrupted ("Failed
+        # to apply logs to the hnsw segment writer") on every attempt anyway.
+        # Skip it entirely until the ChromaDB issue is resolved.
+        self.vector_memory = None
         self.project_planner = ProjectPlanner(vector_memory=self.vector_memory)
         self.critic = CriticEngine()
         self.post_mortem = PostMortemEngine(self.error_store, model_caller=self._cheap_call)
@@ -666,7 +653,11 @@ class Orchestrator:
 
         # Build/Load symbol index for cross-file awareness (Phase 3)
         _index_path = str(Path(".awos") / "symbol_index.json")
-        sym_index = SymbolIndex.load(_index_path)
+        sym_index = None
+        try:
+            sym_index = SymbolIndex.load(_index_path)
+        except (AttributeError, FileNotFoundError):
+            pass  # load() removed or cache missing — build from scratch
         if sym_index is not None:
             # Loaded from cache — only reparse changed files
             _changed = sym_index.rebuild_changed()
@@ -678,7 +669,10 @@ class Orchestrator:
             # Full build from scratch
             sym_index = SymbolIndex(codebase_root)
             sym_index.build()
-            sym_index.save(_index_path)
+            try:
+                sym_index.save(_index_path)
+            except (AttributeError, OSError):
+                pass  # save() removed or I/O error — non-critical
             logger.info("[SymbolIndex] built from scratch — %s", sym_index.summary())
         print(f"[SYMBOLS] {sym_index.summary()}")
 

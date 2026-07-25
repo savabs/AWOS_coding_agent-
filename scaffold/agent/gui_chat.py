@@ -553,10 +553,15 @@ class GuiChatService:
             opencode_base = os.getenv("OPENCODE_GO_BASE_URL", "https://opencode.ai/zen/go/v1")
             oc_model = "qwen3.7-plus"
             from openai import OpenAI
+            # qwen3.7-plus uses Anthropic Messages endpoint, not chat/completions.
+            # OpenCode Go auto-routes but explicit endpoint is more reliable.
             oc_client = OpenAI(api_key=opencode_key, base_url=opencode_base)
             if model and model not in ("", "deepseek-chat"):
                 oc_model = model
             try:
+                # Use chat/completions — OpenCode Go auto-converts for
+                # models that need the Messages endpoint (qwen3.7, minimax).
+                # All supported models accept this path.
                 resp = oc_client.chat.completions.create(
                     model=oc_model,
                     messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
@@ -567,15 +572,16 @@ class GuiChatService:
                 for chunk in resp:
                     if cancel.is_set():
                         break
-                    delta = chunk.choices[0].delta.content
-                    if delta:
+                    choices = getattr(chunk, "choices", None)
+                    if not choices:
+                        continue
+                    delta_content = getattr(choices[0].delta, "content", None) if choices else None
+                    if delta_content:
                         if first_token:
                             ttfb_ms = (time.perf_counter() - t0) * 1000.0
                             first_token = False
-                        full_parts.append(delta)
-                        yield {"event": "token", "data": {"content": delta}}
-                    if token_type := getattr(chunk, "object", None):
-                        pass
+                        full_parts.append(delta_content)
+                        yield {"event": "token", "data": {"content": delta_content}}
                 model = oc_model
             except Exception as exc:
                 yield {"event": "error", "data": {"error": str(exc)}}

@@ -21,6 +21,7 @@ Advanced commands:
     awos report                  PEI scorecard — client-facing proof of value
     awos report --html PATH      Write HTML report to file
     awos budget                  Month-to-date budget status
+    awos debug                   Show running processes + git commit
     awos models                  List registered models + availability
     awos sessions list           Runtime sessions (pause/resume internals)
     awos sessions resume <rs_id> Resume a paused session by ID
@@ -54,6 +55,13 @@ from datetime import datetime, timedelta
 try:
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).parent / ".env")
+except ImportError:
+    pass
+
+# ── 1.5. Debugger: identify which commit is actually running ──────────────────
+try:
+    from scaffold.agent.debug_trace import startup_banner as _debug_banner
+    _debug_banner()
 except ImportError:
     pass
 
@@ -219,6 +227,60 @@ def cmd_budget(args):
     print(f"  Remaining: ${remaining:.2f}")
     if status.get("cache_hits"):
         print(f"  Cache:     {status['cache_hits']} hits, saved ${status.get('cache_savings', 0):.4f}")
+
+
+def cmd_debug(args):
+    """Show running processes, git commit, and code version."""
+    import subprocess
+    # Git commit
+    commit = "unknown"
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=2,
+        )
+        if r.returncode == 0:
+            commit = r.stdout.strip()
+    except Exception:
+        pass
+    print(f"Commit: {commit}")
+
+    # Modified files (unstaged) — tells us if code is stale
+    r = subprocess.run(
+        ["git", "diff", "--name-only"],
+        capture_output=True, text=True, timeout=2,
+    )
+    modified = [f for f in r.stdout.strip().split("\n") if f]
+    if modified:
+        print("\nModified (not yet committed):")
+        for f in modified[:10]:
+            print(f"  M {f}")
+        if len(modified) > 10:
+            print(f"  ... and {len(modified)-10} more")
+    else:
+        print("Working tree clean — code matches commit.")
+
+    # Running processes
+    print("\nRunning processes:")
+    try:
+        r = subprocess.run(
+            ["ps", "-ef"], capture_output=True, text=True, timeout=2,
+        )
+        for line in r.stdout.split("\n"):
+            if "gui/server" in line and "grep" not in line:
+                parts = line.split()
+                pid = parts[1]
+                started = parts[6] if len(parts) > 6 else "?"
+                print(f"  gui/server   PID={pid}  started={started}")
+            if "awos run" in line and "grep" not in line:
+                parts = line.split()
+                pid = parts[1]
+                started = parts[6] if len(parts) > 6 else "?"
+                goal = " ".join(parts[10:])[:60] if len(parts) > 10 else "?"
+                print(f"  awos run     PID={pid}  started={started}  goal={goal}")
+    except Exception:
+        pass
+    print("\nTip: kill -USR1 <pid> to dump Python traceback (faulthandler)")
 
 
 def cmd_models(args):
@@ -1284,6 +1346,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     # budget
     sub.add_parser("budget", help="Month-to-date budget status")
+
+    # debug
+    sub.add_parser("debug", help="Show running processes + git commit")
 
     # models
     sub.add_parser("models", help="List registered models + availability")

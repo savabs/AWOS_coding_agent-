@@ -71,6 +71,10 @@ from scaffold.agent.gui_events import GuiEventBus  # noqa: E402
 from scaffold.agent.gui_chat import GuiChatService, MODE_LABELS, VALID_MODES  # noqa: E402
 from scaffold.agent.diagnostics import TraceSpan, TimingReport  # noqa: E402
 
+# ── Debugger: identify which code is actually running ────────────────────────
+from scaffold.agent.debug_trace import startup_banner as _debug_banner
+_debug_banner()
+
 # ── Subprocess tracking (for crash detection) ─────────────────────────────────
 # Each /api/agent/run spawns an orchestrator subprocess. We track the Popen
 # handle so the SSE loop can detect when a subprocess dies without writing a
@@ -334,14 +338,12 @@ class GuiHandler(BaseHTTPRequestHandler):
                     cwd=ROOT,
                     env={
                         **os.environ,
-                        # Disable the worktree sandbox for web UI tasks.
-                        # The orchestrator creates a worktree at
-                        # .awos/worktrees/<id>/ that isolates file edits.
-                        # For interactive web UI use (file paths relative
-                        # to the project root), this isolation causes
-                        # "File not found" errors because dotfiles and
-                        # non-codebase files aren't copied to the sandbox.
+                        # Disable interactive features for subprocess runs
                         "AWOS_USE_WORKTREE": "false",
+                        "AWOS_ENABLE_CLARIFICATION": "false",
+                        "AWOS_ENABLE_PLAN_REVIEW": "false",
+                        # Enable debug tracing so we can see what's happening
+                        "AWOS_TRACE": "1",
                     },
                     stdout=open(log_file, "a"),
                     stderr=open(log_file, "a"),
