@@ -24,7 +24,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Generator, Iterator, Literal, Optional
+from typing import Any, Iterator, Literal, Optional
 
 from scaffold.agent.response_cache import ResponseCache
 from scaffold.agent.run_metrics import build_run_metrics
@@ -32,12 +32,13 @@ from scaffold.agent.run_metrics import build_run_metrics
 ChatMode = Literal["qa", "plan", "agent"]
 
 CHAT_DIR = Path(".awos/gui_chat")
-VALID_MODES = ("qa", "plan", "agent")
+VALID_MODES = ("qa", "plan", "agent", "auto")
 
 MODE_LABELS = {
     "qa": "Q/A",
     "plan": "Plan",
     "agent": "Agent",
+    "auto": "Auto",
 }
 
 
@@ -400,6 +401,34 @@ class GuiChatService:
                         reply_text = plan_full
                 else:
                     cancelled = True
+            elif mode == "auto":
+                # Auto mode: let the LLM decide whether this is a
+                # question (stream answer) or a task (run orchestrator).
+                # One cheap classification call using qwen3.7-plus.
+                yield {"event": "status", "data": {"message": "Detecting intent…"}}
+                classification = self._classify_intent(message)
+                if classification == "task":
+                    # Route to agent mode — full orchestrator
+                    for evt in self._stream_agent(message, session, cancel):
+                        if evt["event"] in ("progress", "token", "status"):
+                            yield evt
+                        elif evt["event"] == "_complete":
+                            reply_text = evt["data"]["text"]
+                            meta = evt["data"]["meta"]
+                        if cancel.is_set():
+                            cancelled = True
+                            break
+                else:
+                    # Route to QA mode — stream the answer directly
+                    for evt in self._stream_qa(session, message, cancel, model=model):
+                        if evt["event"] in ("token", "status", "usage", "error"):
+                            yield evt
+                        elif evt["event"] == "_complete":
+                            reply_text = evt["data"]["text"]
+                            meta = evt["data"]["meta"]
+                        if cancel.is_set():
+                            cancelled = True
+                            break
             else:
                 for evt in self._stream_agent(message, session, cancel):
                     if evt["event"] in ("progress", "token", "status"):
@@ -972,6 +1001,42 @@ class GuiChatService:
             handler="qa",
             extra={"memory_turns": prior_turns},
         )
+
+    def _classify_intent(self, message: str) -> str:
+        """One cheap LLM call to decide: question (qa) or coding task (task).
+
+        Hermes / Cursor / PI pattern: no regex, no client-side routing.
+        The LLM itself classifies intent. Returns "qa" or "task".
+        """
+        import os
+        opencode_key = os.getenv("OPENCODE_GO_API_KEY")
+        if not opencode_key:
+            return "qa"  # safe fallback — answer directly
+
+        from openai import OpenAI
+        client = OpenAI(api_key=opencode_key, base_url="https://opencode.ai/zen/go/v1")
+        prompt = (
+            "Classify this user prompt. Output ONLY one word: 'qa' or 'task'.\n\n"
+            "'qa' = the user is asking a question, requesting information, "
+            "having a conversation, or making a recall request.\n"
+            "'task' = the user wants code edited, files changed, commands run, "
+            "bugs fixed, or features implemented.\n\n"
+            f"User prompt: \"{message}\"\n\n"
+            "Respond with ONLY: qa\nOR\nRespond with ONLY: task"
+        )
+        try:
+            resp = client.chat.completions.create(
+                model="qwen3.7-plus",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=5,
+                temperature=0.0,
+            )
+            text = (resp.choices[0].message.content or "").strip().lower()
+            if "task" in text:
+                return "task"
+            return "qa"
+        except Exception:
+            return "qa"  # safe fallback
 
     def _run_plan(self, message: str) -> tuple[str, dict[str, Any]]:
         from scaffold.agent.cheap_planner import CheapPlanner

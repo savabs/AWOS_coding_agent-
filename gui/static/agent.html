@@ -287,13 +287,10 @@ async function send() {
   // Time it
   const t0 = performance.now();
 
-  // Route: question or task?
-  const QUESTION_RE = /^(explain|what|how|why|describe|tell me|show me|who|where|when|can you|is there)\b/i;
-  if (QUESTION_RE.test(msg)) {
-    await streamChatResponse(msg, msgEl, t0, abortController.signal);
-  } else {
-    await runOrchestrator(msg, msgEl, t0);
-  }
+  // Route: always send to auto mode — the server classifies intent
+  // using the LLM itself (no regex). For questions, it streams the answer
+  // directly. For tasks, it spawns the full orchestrator.
+  await streamChatResponse(msg, msgEl, t0, abortController.signal);
 
   if (!abortController) return;  // was stopped manually
   currentTime = Math.round(performance.now() - t0);
@@ -541,7 +538,7 @@ async function streamChatResponse(question, msgEl, t0, signal) {
     const res = await fetch(`${API}/api/chat/stream`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
-        message: question, mode: 'qa',
+        message: question, mode: 'auto',
         model: document.getElementById('model-select')?.value || undefined
       }),
       signal,  // abort signal
