@@ -190,7 +190,15 @@ class LinUCBRouter:
         if self._gp is not None and self._gp.is_ready():
             sampled = []
             for a in range(self.n_actions):
-                if budget_mask is not None and not budget_mask[a]:
+                # Defensive: budget_mask may be shorter than n_actions
+                # (e.g. after trimming the escalation ladder). Treat
+                # out-of-range as "allowed" — no budget constraint.
+                blocked = (
+                    budget_mask is not None
+                    and a < len(budget_mask)
+                    and not budget_mask[a]
+                )
+                if blocked:
                     sampled.append(-np.inf)
                     continue
                 mu, sigma = self._gp.predict(x, a)
@@ -206,7 +214,12 @@ class LinUCBRouter:
         ucb_scores = np.zeros(self.n_actions)
 
         for a in range(self.n_actions):
-            if budget_mask is not None and not budget_mask[a]:
+            blocked = (
+                budget_mask is not None
+                and a < len(budget_mask)
+                and not budget_mask[a]
+            )
+            if blocked:
                 ucb_scores[a] = -np.inf
                 continue
 
