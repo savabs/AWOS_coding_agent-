@@ -15,7 +15,119 @@ tags:
 
 ## Session Summary
 
-Deep checkpoint: AWOS App #1 remains a coding-agent-first system aligned with the long-term learnable autonomous-work OS vision. This session resumed after the live Electron observer/control work. Verified the previous live run chat_d068c565 and trace_ce82ed3008f5401b8dcd3f55806e875d created runtime session rs_f340cb8cc537, completed 2 tasks with failed=0, emitted session_done, and produced no broken pipe. Confirmed root cause of the earlier Errno 32 Broken pipe: an orphaned gui/server.py owned port 8765 after its Electron parent died; the old Electron fallback silently switched to alternate ports, causing the fresh UI to reuse the orphan and its closed stdout pipe. Fixed and pushed commit ec62862: canonical server always uses 8765 with no fallback; Electron is launched detached and shutdown/restart targets the whole process group, preventing orphan backend reuse. Proved clean startup and hot reload live: Python is a child of Electron in the same process group, control remains on 8766, touching awos-app/main.js replaced the full group and restored 8765. Then investigated the next safety issue: harmless touch was blocked, and discovered prefix-only shell allowlist matching could permit chained-command bypasses. Added complete-command safety classification that rejects separators, pipelines, redirection, backticks, command substitution, and requires a safe suffix; preserved existing read-only commands and write_file as the preferred write path. Added tests/test_shell_safety.py with 3 passing tests. Pushed commit f06df74. Validation: focused shell tests 3 passed; awos-app npm test 3 passed; Python py_compile passed; changed-file diagnostics clean; git diff check clean. New research/spec/task artifacts: docs/research/shell_safety_classification.html and .md, docs/specs/shell_safety_classification_spec.html and .md, tasks/active/shell_safety_classification.html and .md. Remote branch is synchronized at f06df74. Runtime app is healthy and idle. Do not stage unrelated dirty .awos runtime state, generated benchmark changes, historical docs, or user work. Top priority: make the coding agent functional end-to-end (plan → execute → verify → recover). Then verify the live app can execute a small safe coding task after the safety fix; finish live observer/renderer proof and improve event-stream understanding; keep quality as the hard floor while speed/cost remain tunable; later address malformed historical observer replay as a separate task; do not broaden shell permissions or weaken safety.
+Deep checkpoint: AWOS App #1 remains a coding-agent-first system aligned with the long-term learnable autonomous-work OS vision. This session resumed after the live Electron observer/control work. Verified the previous live run chat_d068c565 and trace_ce82ed3008f5401b8dcd3f55806e875d created runtime session rs_f340cb8cc537, completed 2 tasks with failed=0, emitted session_done, and produced no broken pipe. Confirmed root cause of the earlier Errno 32 Broken pipe: an orphaned gui/server.py owned port 8765 after its Electron parent died; the old Electron fallback silently switched to alternate ports, causing the fresh UI to reuse the orphan and its closed stdout pipe. Fixed and pushed commit ec62862: canonical server always uses 8765 with no fallback; Electron is launched detached and shutdown/restart targets the whole process group, preventing orphan backend reuse. Proved clean startup and hot reload live: Python is a child of Electron in the same process group, control remains on 8766, touching awos-app/main.js replaced the full group and restored 8765. Then investigated the next safety issue: harmless touch was blocked, and discovered prefix-only shell allowlist matching could permit chained-command bypasses. Added complete-command safety classification that rejects separators, pipelines, redirection, backticks, command substitution, and requires a safe suffix; preserved existing read-only commands and write_file as the preferred write path. Added tests/test_shell_safety.py with 3 passing tests. Pushed commit f06df74. Validation: focused shell tests 3 passed; awos-app npm test 3 passed; Python py_compile passed; changed-file diagnostics clean; git diff check clean. New research/spec/task artifacts: docs/research/shell_safety_classification.html and .md, docs/specs/shell_safety_classification_spec.html and .md, tasks/active/shell_safety_classification.html and .md. Remote branch is synchronized at f06df74. Runtime app is healthy and idle. Do not stage unrelated dirty .awos runtime state, generated benchmark changes, historical docs, or user work.
+
+---
+
+## Full session record (detailed)
+
+### What we did (step-by-step)
+
+- Reproduced the Broken pipe failure from a real Electron UI submission (UI chat/trace recorded). Captured exact chat and trace IDs.
+- Inspected live processes and sockets: found an orphaned `gui/server.py` holding port `8765` whose Electron parent had exited; new Electron fell back to alternative control port causing mismatched server reuse and a closed stdout pipe → BrokenPipeError.
+- Implemented a minimal, focused lifecycle fix:
+  - `awos-app/main.js`: removed alternate-port fallback; canonical Python server always uses `8765` and now logs clear failure.
+  - `awos-app/dev-runner.js`: spawn Electron `detached: true`; supervisor terminates entire process group via negative PID kill where supported; bounded SIGTERM → SIGKILL escalation to avoid hidden-to-tray orphaning.
+  - `awos-app/dev-runner.test.js`: added tests asserting `detached` option and restart behavior.
+- Live-validated by performing a clean restart and a hot-reload proof (touched `awos-app/main.js`) showing new Electron+Python group owning `8765`.
+- Observed the next issue: agents blocked a harmless `touch` command due to a shell safety classifier. Investigated `scaffold/agent/tools/shell.py` and found the allowlist used `re.match`-style (prefix) patterns which permitted safe prefixes to hide chained destructive commands.
+- Implemented a minimal but safe classifier hardening:
+  - Reject command metacharacters (command separators `;`, `&&`, `|`, pipes, redirection `> <`, backticks, `$()` / `${}` command substitution) unless explicit allow override.
+  - Require the allowlist to match the complete command shape (allowing benign flags/args but disallowing appended shell metacharacters).
+  - Preserve `write_file` as the canonical write path for destructive file changes; keep `ALLOW_SHELL`/`allow_destructive` override but blocked by default.
+- Added focused regression tests: `tests/test_shell_safety.py` (3 tests) asserting allowed read-only commands and blocked chained/redirection constructs.
+- Created research/spec/task artifacts documenting the change: `docs/research/shell_safety_classification.*`, `docs/specs/shell_safety_classification_spec.*`, `tasks/active/shell_safety_classification.*`.
+- Committed and pushed three focused commits:
+  - `ec62862` — lifecycle/process-group fix
+  - `f06df74` — shell safety hardening + tests + docs
+  - `5b6825c` — checkpoint update marking coding-agent readiness top priority
+
+
+### Where we failed / remaining problems (open issues)
+
+- The coding agent is not yet a complete end-to-end working product. Current status: major components exist, focused proofs pass, but the full cycle (plan → execute edits → run tests → verify changes → recover on failures) still needs an in-repo minimal E2E scenario and automation.
+- Observer historical replay: there are malformed historical observer lines and many Obsidian/markdown lint issues across the repo (hundreds of FM01 / LK01 warnings). These are documentation/knowledge-graph issues that should not block code changes but are noisy for quality gates.
+- Tool-safety policy: we hardened the classifier, but further UX decisions remain: whether to add explicit allowlisting for trivial safe ops (like `touch`) in dev-only flows, or to keep `write_file` the only safe write route for agents.
+- Large working-tree contains `.awos/` runtime state and other generated artifacts — must not be pushed into remote branches; ensure CI excludes `.awos` and other transient artifacts.
+- Quality gate scripts currently flag many unrelated docs; do not conflate code pushes with repo-wide doc fixes in the same change.
+
+
+### Validation evidence (commands & artifacts)
+
+- Live run evidence:
+  - Initial broken run: chat_id `chat_1f2c9aeb`, trace `trace_788f3a78e3db469b872faa213e9a675b` ended with `Error: [Errno 32] Broken pipe`.
+  - Successful retry: chat `chat_d068c565`, trace `trace_ce82ed3008f5401b8dcd3f55806e875d`, session `rs_f340cb8cc537` → session events `session_start`, `plan_generated`, `model_routed`, `task_start`, `agent_tool_call`, `task_complete`, `session_done`.
+- Commits pushed:
+  - `ec62862` — lifecycle fix (awos-app main + dev-runner + test)
+  - `f06df74` — shell-safety hardening + tests + docs
+  - `5b6825c` — checkpoint update
+- Tests & checks run locally during this session:
+  - `pytest -q tests/test_shell_safety.py` → 3 passed
+  - `npm test` (awos-app) → 3 passed
+  - `node --check` on JS files and `python3 -m py_compile` on Python files → OK
+  - Supervisor hot-reload proof: touch `awos-app/main.js` replaced Electron+Python process group and restored canonical port binding.
+- Files added (not exhaustive, major artifacts):
+  - `awos-app/main.js` (modified)
+  - `awos-app/dev-runner.js` (modified)
+  - `awos-app/dev-runner.test.js` (modified)
+  - `scaffold/agent/tools/shell.py` (modified)
+  - `tests/test_shell_safety.py` (new)
+  - `docs/research/shell_safety_classification.*` (new)
+  - `docs/specs/shell_safety_classification_spec.*` (new)
+  - `tasks/active/shell_safety_classification.*` (new)
+  - `docs/memory/checkpoint_2026-07-28_6.md` (new/updated)
+
+
+### Immediate next steps (short-term, next 1–3 days)
+
+1. Define and implement a minimal E2E scenario that proves plan → edit → test → verify → recover, e.g. a one-file simple task:
+   - Example: "Add function sum_list(lst) returning sum(lst) with unit test". The agent should plan edits, write file(s) using `write_file` or `edit_file`, run the tests, and record pass/fail events.
+2. Create spec and task artifacts for the E2E scenario (HTML primary + MD stub) following preflight rules, then implement the minimal wiring in `scaffold/agent/worker.py` or a focused runner that executes the plan using the current tools.
+3. Use the live Electron control to fill and submit the prompt, then observe the session events with `python3 awos.py observe events --session <session_id>`; verify the `runtime_session` is created and the agent action sequence completes.
+4. Tighten observer/renderer live display to show backend event stream in `/renderer` and record any mapping issues between UI chat IDs and runtime session IDs.
+
+
+### Mid-term (weeks)
+
+- Harden the evidence-first verification loop: automatic apply + test-run + revert on failures, and tracked reward update to the `reward_store`.
+- Expand the toolset and regression suite for safety-critical actions (file IO, running tests, CI interactions) and document explicit trust boundaries.
+- Add regression test for the orphaned-process lifecycle to avoid future BrokenPipe regressions.
+- Iterate on the observer event schema to reduce malformed historical replay lines; build replay sanitizers.
+
+
+### Long-term (quarters)
+
+- Reach the coding-agent capability bar: parity with leading code assistants on repository understanding, safe edits, verification, and end-to-end test success rates.
+- Implement dynamic model routing (learned policy) with an evidence-backed reward signal to optimize Quality × Speed ÷ Cost.
+- Build self-learning loop: failures → prompt/tool adjustments → re-evaluate accuracy and reliability automatically.
+- Create a developer-focused live renderer that displays the UI, trace, and backend execution step-by-step (this increases dev velocity and creates a moat).
+- Make the system model-agnostic and provider-agnostic with controlled adapter interfaces.
+
+
+### Remote/value artifacts to preserve and share
+
+- Branch: `awos/fix-cache-set-to-evict-oldest-key-use-it` (contains current work)
+- Commits: `ec62862` (lifecycle fix), `f06df74` (shell safety), `5b6825c` (checkpoint)
+- Key files to review: `awos-app/main.js`, `awos-app/dev-runner.js`, `scaffold/agent/tools/shell.py`, `tests/test_shell_safety.py`, `tasks/active/backend_broken_pipe.html`, `tasks/active/shell_safety_classification.html`, `docs/research/shell_safety_classification.html`, `docs/memory/checkpoint_2026-07-28_6.md`.
+
+
+### Security & operational notes
+
+- Never commit `.awos/observer_token` or any secret. The code uses `.awos/observer_token` as local control auth; token rotation happened in-session.
+- `ALLOW_SHELL` remains gated and must be explicitly set for destructive shell execution. Prefer `write_file` for deterministic file writes in agent flows.
+- `awos-app/dev-runner.js` now kills process groups; be careful when running manual processes in nested shells during development.
+- Do not stage `.awos/` runtime state, benchmark outputs, or user files when creating focused commits.
+
+
+### Owner & next action
+
+- Owner (short-term): engineering lead / session owner (you) — decide the minimal E2E task for the agent.
+- My next action (after your confirmation): create the E2E spec+task and start wiring the minimal runner and tests. I can implement the first atomic step immediately (create spec + research note) and wait for your approval to modify code.
+
+
+---
+
+This checkpoint is final for the session. It is written to `docs/memory/checkpoint_2026-07-28_6.md` and pushed to the remote branch. If you want me to include additional artifacts, logs, or sanitized traces in this checkpoint, tell me which ones and I will append them (without secrets).
 
 ---
 
