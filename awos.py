@@ -16,9 +16,9 @@ Usage (primary interface):
 Advanced commands:
     awos run <goal>              Execute via orchestrator directly (power users)
     awos stats                   Self-learning observability report
-    awos stats --savings         Compounding cost savings report (show AWOS value)
+    awos stats --savings         Efficiency estimate versus heavier-routing baseline
     awos stats --json            JSON output (for piping/scripts)
-    awos report                  PEI scorecard — client-facing proof of value
+    awos report                  PEI scorecard — quality × speed ÷ cost summary
     awos report --html PATH      Write HTML report to file
     awos budget                  Month-to-date budget status
     awos debug                   Show running processes + git commit
@@ -27,12 +27,14 @@ Advanced commands:
     awos sessions resume <rs_id> Resume a paused session by ID
     awos mission guide           Real workload mission playbook (lab tool)
     awos mission start           Start Stage 1 worktree mission
-    awos mission start --ci-rescue  CI Rescue Sprint (18 tasks, 28 reds)
+    awos mission start --ci-rescue  Optional CI repair workload benchmark
     awos gauntlet list           Stage 1 risk gauntlet scenarios (lab tool)
     awos gauntlet run <ID>       Run gauntlet G1–G6
     awos memory search <query>   Search past interactions
     awos traces list             List reasoning trace sessions
     awos index                   (Re)build semantic codebase index
+    awos observe snapshot        Read the current assistant-safe state
+    awos observe events          Read a bounded assistant-safe event range
 
 Environment:
     AWOS_DEBUG=1                 Verbose mode
@@ -48,6 +50,7 @@ import sys
 import json
 import signal
 import subprocess
+import time
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -227,6 +230,21 @@ def cmd_budget(args):
     print(f"  Remaining: ${remaining:.2f}")
     if status.get("cache_hits"):
         print(f"  Cache:     {status['cache_hits']} hits, saved ${status.get('cache_savings', 0):.4f}")
+
+
+def cmd_debug_report(args):
+    """Print a saved evidence-first debugger report as JSON."""
+    from scaffold.agent.core.debug_inspection import inspect_debug_bundle
+
+    try:
+        report = inspect_debug_bundle(args.root, args.session_id)
+    except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+
+    payload = report.to_dict()
+    indent = 2 if getattr(args, "pretty", False) else None
+    print(json.dumps(payload, sort_keys=True, indent=indent))
 
 
 def cmd_debug(args):
@@ -699,7 +717,7 @@ YOUR MISSION GOAL ({cfg.get('id', 'mission')}, cheap-only, worktree sandbox):
 STEP 1 — START
   awos mission start              # 5-task quick mission
   awos mission start --long       # 8-task fixed plan (~10–30 min)
-  awos mission start --ci-rescue  # 18-task CI Rescue Sprint (28 reds)
+  awos mission start --ci-rescue  # 18-task CI repair benchmark sprint (28 reds)
 
 STEP 2 — PAUSE (when task 2 finishes, or whenever)
   Press Ctrl+C once. Wait for "[SESSION] Pause requested".
@@ -853,13 +871,13 @@ def cmd_stats(args):
 
 
 def cmd_metrics(args):
-    """Net Velocity Dashboard — the metrics that matter for paying users."""
+    """Net Velocity Dashboard — the metrics that matter for agent progress."""
     from scaffold.agent.agent_tui import print_metrics
     print_metrics()
 
 
 def cmd_report(args):
-    """Generate client-facing PEI (Project Efficiency Index) scorecard."""
+    """Generate a PEI (Project Efficiency Index) scorecard."""
     import sys
     sys.path.insert(0, str(Path(__file__).parent / "scaffold" / "agent"))
     from pei_report import PEIReport
@@ -1155,11 +1173,11 @@ def cmd_serve(args):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# CI Rescue command (Phase 4 — product wedge)
+# CI repair command (supported coding-agent workflow)
 # ═════════════════════════════════════════════════════════════════════════════
 
 def cmd_fix_ci(args):
-    """One-command CI rescue for any Python repo."""
+    """One-command CI repair benchmark workflow for any Python repo."""
     import time
     from scaffold.agent.ci_discovery import CIDiscovery
     from scaffold.agent.ci_planner import generate_ci_goal, generate_ci_plan
@@ -1212,13 +1230,13 @@ def cmd_fix_ci(args):
     estimated_cost = len(plan) * 0.001
     print_plan(plan, estimated_cost_usd=estimated_cost)
 
-    # 4. Set environment for CI rescue
+    # 4. Set environment for CI repair workflow
     os.environ["AWOS_CHEAP_ONLY"] = "true"
     os.environ["AWOS_SAFE_TO_RUN_TESTS"] = "1"
     os.environ["AWOS_ENABLE_CLARIFICATION"] = ""
 
     # 5. Call orchestrator
-    print("\n  [dim]⚡ Starting CI rescue...[/]\n")
+    print("\n  [dim]⚡ Starting CI repair benchmark...[/]\n")
     start_time = time.time()
 
     wrapped_args = argparse.Namespace(
@@ -1248,6 +1266,150 @@ def cmd_fix_ci(args):
     print_results(failures, results_dict, elapsed, cost_usd)
 
 
+def _observer_session_id(requested: str | None) -> str | None:
+    """Resolve an optional session from the non-mutating current snapshot."""
+    from gui.server import build_observer_snapshot
+
+    snapshot = build_observer_snapshot(requested)
+    if snapshot.get("status") == "ambiguous":
+        raise SystemExit("Multiple active sessions; pass --session RS_ID")
+    session = snapshot.get("session") or {}
+    return session.get("session_id")
+
+
+def cmd_observe_snapshot(args):
+    """Print the current assistant-safe observer snapshot as JSON."""
+    from gui.server import build_observer_snapshot
+
+    snapshot = build_observer_snapshot(getattr(args, "session_id", None))
+    print(json.dumps(snapshot, indent=2, sort_keys=True))
+
+
+def cmd_observe_events(args):
+    """Print assistant-safe events, optionally following one explicit stream."""
+    from gui.server import read_observer_events
+
+    session_id = _observer_session_id(getattr(args, "session_id", None))
+    if not session_id:
+        print(json.dumps({"status": "idle", "events": []}, indent=2))
+        return
+
+    cursor = getattr(args, "after", None)
+    event_types = set(getattr(args, "event_type", []) or []) or None
+    while True:
+        result = read_observer_events(
+            session_id,
+            after=cursor,
+            limit=getattr(args, "limit", 100),
+            event_types=event_types,
+        )
+        print(json.dumps(result, indent=2, sort_keys=True), flush=True)
+        if result.get("gap"):
+            return
+        next_cursor = result.get("next_cursor")
+        if not getattr(args, "follow", False):
+            return
+        if next_cursor != cursor:
+            cursor = next_cursor
+        time.sleep(0.5)
+
+
+def cmd_control(args):
+    """Operate the authenticated local Electron control bridge."""
+    from gui.observer_client import ControlClientError, send_control, verify_control_result
+
+    try:
+        response = send_control(
+            args.control_action,
+            target=getattr(args, "target", None),
+            value=getattr(args, "value", None),
+            port=args.port,
+            token_file=args.token_file,
+        )
+        response = verify_control_result(
+            response,
+            args.control_action,
+            target=getattr(args, "target", None),
+            value=getattr(args, "value", None),
+        )
+    except ControlClientError as exc:
+        raise SystemExit(f"control error: {exc}") from exc
+    print(json.dumps(response, indent=2, sort_keys=True))
+
+
+def cmd_observe_follow(args):
+    """Follow the current UI action into exactly one backend event ledger."""
+    from gui.server import read_observer_events, resolve_observer_session
+
+    chat_id = getattr(args, "chat_id", None)
+    trace_id = getattr(args, "trace_id", None)
+    session_id = getattr(args, "session_id", None)
+    ui_cursor = None
+    backend_cursor = None
+    follow = bool(getattr(args, "follow", False))
+
+    def emit(stream: str, payload: dict) -> None:
+        print(json.dumps({"stream": stream, **payload}, sort_keys=True), flush=True)
+
+    while True:
+        if not session_id and not chat_id and not trace_id:
+            ui_result = read_observer_events("ui", limit=200)
+            ui_events = ui_result.get("events", [])
+            ui_cursor = ui_result.get("next_cursor")
+            latest = next(
+                (event for event in reversed(ui_events)
+                 if event.get("chat_id") or event.get("trace_id")),
+                None,
+            )
+            if latest:
+                chat_id = latest.get("chat_id")
+                trace_id = latest.get("trace_id")
+                emit("ui", latest)
+            elif not follow:
+                emit("observer", {"status": "idle", "reason": "no correlated UI action"})
+                return
+
+        if not session_id and (chat_id or trace_id):
+            resolution = resolve_observer_session(chat_id=chat_id, trace_id=trace_id)
+            emit("resolution", resolution)
+            if resolution.get("status") == "resolved":
+                session_id = resolution["session_id"]
+            elif not follow:
+                return
+
+        if session_id:
+            result = read_observer_events(
+                session_id,
+                after=backend_cursor,
+                limit=getattr(args, "limit", 100),
+            )
+            if result.get("gap"):
+                emit("backend", result)
+                return
+            for event in result.get("events", []):
+                emit("backend", event)
+            backend_cursor = result.get("next_cursor")
+            if not follow:
+                return
+
+        if not follow:
+            return
+
+        time.sleep(0.5)
+        if not session_id:
+            ui_result = read_observer_events("ui", after=ui_cursor, limit=200)
+            if ui_result.get("gap"):
+                emit("ui", ui_result)
+                return
+            ui_cursor = ui_result.get("next_cursor")
+            for event in ui_result.get("events", []):
+                if event.get("chat_id") or event.get("trace_id"):
+                    chat_id = event.get("chat_id") or chat_id
+                    trace_id = event.get("trace_id") or trace_id
+                    emit("ui", event)
+                    break
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Argument parser
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1255,7 +1417,7 @@ def cmd_fix_ci(args):
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="awos",
-        description="AWOS — AI Coding Agent",
+        description="AWOS — self-improving coding agent harness",
     )
     sub = parser.add_subparsers(dest="command", help="Available commands")
 
@@ -1264,8 +1426,8 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=8765, help="Port to run on (default: 8765)")
     serve.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
 
-    # fix-ci (Phase 4 — product wedge: one-command CI rescue)
-    fix_ci = sub.add_parser("fix-ci", help="One-command CI rescue for any Python repo")
+    # fix-ci (optional coding-agent workload adapter)
+    fix_ci = sub.add_parser("fix-ci", help="Optional CI repair workload for any Python repo")
     fix_ci.add_argument(
         "--root",
         default=".",
@@ -1306,19 +1468,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_guide = mis_sub.add_parser("guide", help="Mission playbook")
     p_guide.add_argument("--long", action="store_true", help="Long mission playbook")
     p_guide.add_argument("--clawcode", action="store_true", help="Phase D clawcode mission playbook")
-    p_guide.add_argument("--ci-rescue", action="store_true", help="CI Rescue Sprint playbook")
+    p_guide.add_argument("--ci-rescue", action="store_true", help="Optional CI repair workload benchmark playbook")
     p_guide.add_argument("--config", metavar="PATH", help="Mission JSON config path")
     p_start = mis_sub.add_parser("start", help="Start mission (worktree, cheap-only)")
     p_start.add_argument("--long", action="store_true", help="8-task long workload mission (AWOS repo)")
     p_start.add_argument("--clawcode", action="store_true", help="Phase D: 14-task mission on clawcode repo")
-    p_start.add_argument("--ci-rescue", action="store_true", dest="ci_rescue", help="CI Rescue Sprint: 18-task, 28 reds")
-    p_start.add_argument("--clawcode-ci-rescue", action="store_true", dest="clawcode_ci_rescue", help="clawcode real repo: 12 failing tests")
+    p_start.add_argument("--ci-rescue", action="store_true", dest="ci_rescue", help="Optional CI repair workload benchmark")
+    p_start.add_argument("--clawcode-ci-rescue", action="store_true", dest="clawcode_ci_rescue", help="Optional CI repair workload on the clawcode repo")
     p_start.add_argument("--config", metavar="PATH", help="Mission JSON config (e.g. docs/missions/ci_rescue_sprint.json)")
     p_status = mis_sub.add_parser("status", help="Mission session progress")
     p_status.add_argument("--long", action="store_true", help="Show long-mission sessions")
     p_status.add_argument("--clawcode", action="store_true", help="Show clawcode mission sessions")
-    p_status.add_argument("--ci-rescue", action="store_true", dest="ci_rescue", help="Show CI Rescue Sprint sessions")
-    p_status.add_argument("--clawcode-ci-rescue", action="store_true", dest="clawcode_ci_rescue", help="Show clawcode CI rescue sessions")
+    p_status.add_argument("--ci-rescue", action="store_true", dest="ci_rescue", help="Show optional CI repair workload sessions")
+    p_status.add_argument("--clawcode-ci-rescue", action="store_true", dest="clawcode_ci_rescue", help="Show optional clawcode CI repair workload sessions")
     p_status.add_argument("--config", metavar="PATH", help="Mission JSON config path")
 
     # guide
@@ -1326,6 +1488,40 @@ def build_parser() -> argparse.ArgumentParser:
 
     # chat
     sub.add_parser("chat", help="Interactive session")
+
+    # assistant observer (read-only)
+    observe = sub.add_parser("observe", help="Read-only live observer contract")
+    observe_sub = observe.add_subparsers(dest="observe_cmd", required=True)
+    observe_snapshot = observe_sub.add_parser("snapshot", help="Show current state")
+    observe_snapshot.add_argument("--session", dest="session_id", metavar="RS_ID")
+    observe_events = observe_sub.add_parser("events", help="Read observer events")
+    observe_events.add_argument("--session", dest="session_id", metavar="RS_ID")
+    observe_events.add_argument("--after", metavar="EVENT_ID", help="Resume after an event ID")
+    observe_events.add_argument("--limit", type=int, default=100, help="Maximum events to return")
+    observe_events.add_argument("--type", dest="event_type", action="append", help="Filter by event type (repeatable)")
+    observe_events.add_argument("--follow", action="store_true", help="Poll for later events")
+    observe_follow = observe_sub.add_parser("follow", help="Join current UI action to backend events")
+    observe_follow.add_argument("--session", dest="session_id", metavar="RS_ID")
+    observe_follow.add_argument("--chat", dest="chat_id", metavar="CHAT_ID")
+    observe_follow.add_argument("--trace", dest="trace_id", metavar="TRACE_ID")
+    observe_follow.add_argument("--limit", type=int, default=100, help="Maximum backend events per read")
+    observe_follow.add_argument("--follow", action="store_true", help="Continue polling for later UI/backend events")
+
+    # assistant control (authenticated local Electron bridge)
+    control = sub.add_parser("control", help="Operate the running Electron app safely")
+    control_sub = control.add_subparsers(dest="control_action", required=True)
+    for action in ("status", "show", "hide", "focus", "reload"):
+        control_sub.add_parser(action, help=f"Electron control action: {action}")
+    navigate = control_sub.add_parser("navigate", help="Navigate to an allowlisted internal route")
+    navigate.add_argument("target", choices=("/agent", "/renderer"))
+    click = control_sub.add_parser("click", help="Click an allowlisted semantic target")
+    click.add_argument("target", choices=("prompt_submit", "prompt_focus", "command_palette"))
+    fill = control_sub.add_parser("fill", help="Fill an allowlisted text input without submitting")
+    fill.add_argument("target", choices=("prompt",))
+    fill.add_argument("value")
+    for action_parser in control_sub.choices.values():
+        action_parser.add_argument("--port", type=int, default=8766, help="Electron control port")
+        action_parser.add_argument("--token-file", default=None, help="Control token JSON path")
 
     # memory search
     mem_search = sub.add_parser("memory", help="Vector memory commands")
@@ -1349,6 +1545,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     # debug
     sub.add_parser("debug", help="Show running processes + git commit")
+
+    # debug-report (machine-readable evidence report)
+    debug_report = sub.add_parser(
+        "debug-report", help="Inspect a saved debugger bundle as JSON"
+    )
+    debug_report.add_argument("session_id", help="Debugger session ID")
+    debug_report.add_argument(
+        "--root", default=".awos/debug", help="Debugger bundle root"
+    )
+    debug_report.add_argument(
+        "--pretty", action="store_true", help="Pretty-print JSON"
+    )
 
     # models
     sub.add_parser("models", help="List registered models + availability")
@@ -1393,13 +1601,13 @@ def build_parser() -> argparse.ArgumentParser:
     stats = sub.add_parser("stats", help="Self-learning observability report")
     stats.add_argument("--json", action="store_true", help="Output as JSON")
     stats.add_argument("--store", default=".awos", help="Path to .awos store (default: .awos)")
-    stats.add_argument("--savings", action="store_true", help="Show compounding cost savings report")
+    stats.add_argument("--savings", action="store_true", help="Show efficiency estimate versus heavier-routing baseline")
 
     # metrics (Phase 4 — Net Velocity Dashboard)
     sub.add_parser("metrics", help="Net Velocity Dashboard — quality, cost, time saved")
 
     # report
-    rpt = sub.add_parser("report", help="PEI scorecard — client-facing proof of value")
+    rpt = sub.add_parser("report", help="PEI scorecard — quality × speed ÷ cost summary")
     rpt.add_argument("--json", action="store_true", help="Output as JSON")
     rpt.add_argument("--html", metavar="PATH", help="Write HTML report to file")
     rpt.add_argument("--project", help="Project name for report header")
@@ -1440,6 +1648,10 @@ def main():
         handler = globals().get(f"cmd_sessions_{args.sessions_cmd}")
     elif args.command == "worker" and getattr(args, "worker_cmd", None):
         handler = globals().get(f"cmd_worker_{args.worker_cmd}")
+    elif args.command == "observe" and getattr(args, "observe_cmd", None):
+        handler = globals().get(f"cmd_observe_{args.observe_cmd}")
+    elif args.command == "control":
+        handler = cmd_control
     elif args.command == "gauntlet":
         handler = cmd_gauntlet_run if getattr(args, "gauntlet_cmd", None) == "run" else cmd_gauntlet_list
     elif args.command == "mission":

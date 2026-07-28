@@ -5,6 +5,16 @@ let sending = false;
 let activeAbort = null;
 let stopRequested = false;
 
+function emitObserverUIEvent(type, payload = {}, chatId = currentChatId, traceId = null) {
+  // Observer telemetry is best-effort and intentionally excludes raw input.
+  fetch(`${API}/api/observer/ui-event`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type, payload, chat_id: chatId, trace_id: traceId }),
+    keepalive: true,
+  }).catch(() => {});
+}
+
 const MODE_ICONS = { qa: "?", plan: "≡", agent: "⚙" };
 
 async function loadModes() {
@@ -33,6 +43,7 @@ function renderModePicker() {
   el.querySelectorAll("input").forEach((input) => {
     input.addEventListener("change", () => {
       currentMode = input.value;
+      emitObserverUIEvent("view_changed", { view: "chat", mode: currentMode });
       el.querySelectorAll(".mode-option").forEach((n) => {
         n.classList.toggle("active", n.querySelector("input").value === currentMode);
       });
@@ -123,6 +134,16 @@ function renderMetaBadge(meta) {
   return `<span class="sub meta-badge">${escapeHtml(parts.join(" · "))}</span>`;
 }
 
+function renderPromptTrace(meta) {
+  const trace = meta?.prompt_trace;
+  if (!trace) return "";
+  return `
+    <details class="prompt-trace">
+      <summary>Request trace</summary>
+      <pre>${escapeHtml(JSON.stringify(trace, null, 2))}</pre>
+    </details>`;
+}
+
 function updateSessionTokenBar(session) {
   const el = document.getElementById("session-token-bar");
   if (!el) return;
@@ -200,6 +221,7 @@ function renderMessages(messages) {
             : "Stopped — agent run cancelled";
           extra += `<div class="msg-actions sub stopped-label">${escapeHtml(stopNote)}</div>`;
         }
+        extra += renderPromptTrace(meta);
         extra += renderMetaBadge(meta);
       }
       const stoppedClass = !isUser && meta.cancelled ? " stopped" : "";
@@ -228,6 +250,7 @@ async function loadChat(chatId) {
   await waitForStreamEnd();
   const session = await fetchJSON(`${API}/api/chat/sessions/${chatId}`);
   currentChatId = chatId;
+  emitObserverUIEvent("session_selected", { selected: true }, chatId);
   renderMessages(session.messages || []);
   updateSessionTokenBar(session);
   const sessions = await fetchJSON(`${API}/api/chat/sessions`);
@@ -281,6 +304,7 @@ function finishStreamUI() {
 async function stopChat() {
   if (!sending) return;
   stopRequested = true;
+  emitObserverUIEvent("task_control", { action: "stop" });
   const btn = document.getElementById("btn-send");
   if (btn) {
     btn.disabled = true;
@@ -393,6 +417,12 @@ async function sendMessage() {
       {
         onStart(data) {
           if (data.chat_id) currentChatId = data.chat_id;
+          emitObserverUIEvent(
+            "chat_submitted",
+            { mode: currentMode, has_message: true, message_chars: message.length },
+            data.chat_id || currentChatId,
+            data.trace_id || null
+          );
         },
         onStatus(data) {
           if (data.message) appendProgress(data.message);
@@ -512,6 +542,7 @@ async function clearAllChats() {
 }
 
 async function initChat() {
+  emitObserverUIEvent("app_opened", { view: "chat" }, null, null);
   try {
     await loadModes();
   } catch (err) {

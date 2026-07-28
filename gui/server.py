@@ -18,6 +18,7 @@ API:
     POST /api/chat/stream           — SSE stream {message, mode, chat_id?}
     POST /api/chat/stop             — stop active stream {chat_id}
     GET  /api/cache/stats           — response cache stats
+    GET  /api/debug/<session_id>    — read-only evidence-first debugger report
 """
 
 from __future__ import annotations
@@ -29,11 +30,13 @@ import mimetypes
 import os
 import subprocess
 import sys
+import threading
 import time
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote
-from typing import Callable, Iterator
+from urllib.parse import parse_qs, unquote, urlsplit
+from typing import Any, Callable, Iterator
 
 ROOT = Path(__file__).resolve().parent.parent
 GUI_ROOT = ROOT / ".awos" / "gui"
@@ -46,7 +49,7 @@ print(f"[server] .env exists={os.path.exists(ROOT / '.env')}", file=sys.stderr, 
 try:
     from dotenv import load_dotenv
     load_dotenv(ROOT / ".env", override=True)
-    print(f"[server] After load_dotenv: OPENCODE_GO_API_KEY={os.environ.get('OPENCODE_GO_API_KEY', 'NOT SET')[:20]}...", file=sys.stderr, flush=True)
+    print(f"[server] dotenv loaded; OpenCode Go key configured={bool(os.environ.get('OPENCODE_GO_API_KEY'))}", file=sys.stderr, flush=True)
     # Explicitly parse and set env vars to ensure they're available for subprocesses
     with open(ROOT / ".env") as _f:
         for _line in _f:
@@ -54,7 +57,7 @@ try:
             if _line and not _line.startswith("#") and "=" in _line:
                 _k, _v = _line.split("=", 1)
                 os.environ[_k.strip()] = _v.strip()
-    print(f"[server] After manual parse: OPENCODE_GO_API_KEY={os.environ.get('OPENCODE_GO_API_KEY', 'NOT SET')[:20]}...", file=sys.stderr, flush=True)
+    print(f"[server] environment loaded; OpenCode Go key configured={bool(os.environ.get('OPENCODE_GO_API_KEY'))}", file=sys.stderr, flush=True)
 except ImportError as e:
     print(f"[server] dotenv not installed: {e}", file=sys.stderr, flush=True)
 except Exception as _e:
@@ -67,7 +70,8 @@ os.chdir(ROOT)
 # Initialize logger
 logger = logging.getLogger(__name__)
 
-from scaffold.agent.gui_events import GuiEventBus  # noqa: E402
+from scaffold.agent.gui_events import GuiEventBus, UIEventType  # noqa: E402
+from scaffold.agent.observer_protocol import parse_event_line, project_assistant_event  # noqa: E402
 from scaffold.agent.gui_chat import GuiChatService, MODE_LABELS, VALID_MODES  # noqa: E402
 from scaffold.agent.diagnostics import TraceSpan, TimingReport  # noqa: E402
 
@@ -112,6 +116,9 @@ def _get_routing_deps() -> tuple[object, object]:
     return _routing_engine, _routing_store
 
 _chat_service: GuiChatService | None = None
+_ui_observer_bus: GuiEventBus | None = None
+_ui_observer_bus_root: Path | None = None
+_ui_observer_lock = threading.Lock()
 
 
 def get_chat_service() -> GuiChatService:
@@ -119,6 +126,279 @@ def get_chat_service() -> GuiChatService:
     if _chat_service is None:
         _chat_service = GuiChatService(codebase_root=str(ROOT))
     return _chat_service
+
+
+def emit_ui_observer_event(
+    event_type: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    chat_id: str | None = None,
+    trace_id: str | None = None,
+) -> dict[str, Any]:
+    """Persist one semantic UI action without exposing raw prompt content."""
+    global _ui_observer_bus, _ui_observer_bus_root
+    with _ui_observer_lock:
+        if _ui_observer_bus is None or _ui_observer_bus_root != GUI_ROOT:
+            _ui_observer_bus = GuiEventBus("ui", "AWOS UI observer", gui_root=GUI_ROOT)
+            _ui_observer_bus_root = GUI_ROOT
+        return _ui_observer_bus.emit(
+            event_type,
+            payload or {},
+            source="ui",
+            chat_id=chat_id,
+            trace_id=trace_id,
+        ).to_dict()
+
+
+def read_observer_events(
+    session_id: str,
+    *,
+    after: str | None = None,
+    limit: int = 100,
+    event_types: set[str] | None = None,
+    gui_root: Path = GUI_ROOT,
+) -> dict[str, Any]:
+    """Read a bounded assistant-safe range from one session ledger."""
+    if not session_id or Path(session_id).name != session_id or session_id in {".", ".."}:
+        raise ValueError("session_id must be a single safe path component")
+    limit = max(1, min(int(limit), 200))
+    events_path = gui_root / session_id / "events.jsonl"
+    valid_events: list[dict[str, Any]] = []
+    malformed = 0
+    if events_path.exists():
+        for line in events_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            event = parse_event_line(line)
+            if event is None or event.get("session_id") != session_id:
+                malformed += 1
+                continue
+            valid_events.append(event)
+
+    after_index = -1
+    if after:
+        after_index = next(
+            (index for index, event in enumerate(valid_events) if event["event_id"] == after),
+            -1,
+        )
+        if after_index < 0:
+            return {
+                "session_id": session_id,
+                "events": [],
+                "next_cursor": valid_events[-1]["event_id"] if valid_events else None,
+                "gap": True,
+                "reason": "unknown_cursor",
+                "malformed_lines": malformed,
+            }
+
+    safe_events: list[dict[str, Any]] = []
+    next_cursor = after
+    for event in valid_events[after_index + 1 :]:
+        next_cursor = event["event_id"]
+        if event_types and event["type"] not in event_types:
+            continue
+        projected = project_assistant_event(event)
+        if projected is not None:
+            safe_events.append(projected)
+        if len(safe_events) >= limit:
+            break
+
+    return {
+        "session_id": session_id,
+        "events": safe_events,
+        "next_cursor": next_cursor,
+        "gap": False,
+        "malformed_lines": malformed,
+    }
+
+
+def resolve_observer_session(
+    *,
+    chat_id: str | None = None,
+    trace_id: str | None = None,
+    gui_root: Path = GUI_ROOT,
+) -> dict[str, Any]:
+    """Resolve one backend ledger from explicit UI correlation IDs.
+
+    This deliberately returns ``ambiguous`` or ``not_found`` instead of guessing
+    from directory timestamps or runtime status.
+    """
+    if not chat_id and not trace_id:
+        raise ValueError("chat_id or trace_id is required")
+
+    matches: set[str] = set()
+    malformed = 0
+    for events_path in gui_root.glob("rs_*/events.jsonl"):
+        session_id = events_path.parent.name
+        try:
+            lines = events_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            if not line.strip():
+                continue
+            event = parse_event_line(line)
+            if event is None:
+                malformed += 1
+                continue
+            if ((chat_id and event.get("chat_id") == chat_id)
+                    or (trace_id and event.get("trace_id") == trace_id)):
+                matches.add(session_id)
+                break
+
+    if len(matches) == 1:
+        return {
+            "status": "resolved",
+            "session_id": next(iter(matches)),
+            "chat_id": chat_id,
+            "trace_id": trace_id,
+            "malformed_lines": malformed,
+        }
+    if len(matches) > 1:
+        return {
+            "status": "ambiguous",
+            "session_ids": sorted(matches),
+            "chat_id": chat_id,
+            "trace_id": trace_id,
+            "malformed_lines": malformed,
+        }
+    return {
+        "status": "not_found",
+        "session_ids": [],
+        "chat_id": chat_id,
+        "trace_id": trace_id,
+        "malformed_lines": malformed,
+    }
+
+
+def build_observer_snapshot(
+    session_id: str | None = None,
+    *,
+    gui_root: Path = GUI_ROOT,
+    runtime_sessions_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Build a compact current-state projection from canonical runtime + events."""
+    from scaffold.agent.runtime_session import RuntimeSessionStore, SessionStatus
+
+    store = RuntimeSessionStore(str(runtime_sessions_dir)) if runtime_sessions_dir else RuntimeSessionStore()
+    runtime = None
+    active = [
+        session
+        for session in store.list_sessions()
+        if session.status in (SessionStatus.RUNNING, SessionStatus.PAUSED)
+    ]
+    active.sort(key=lambda session: (session.updated_at, session.created_at, session.session_id), reverse=True)
+
+    if session_id:
+        if Path(session_id).name != session_id or session_id in {".", ".."}:
+            raise ValueError("session_id must be a single safe path component")
+        try:
+            runtime = store.load(session_id)
+        except (FileNotFoundError, ValueError):
+            runtime = next((candidate for candidate in active if candidate.session_id == session_id), None)
+    elif len(active) == 1:
+        runtime = active[0]
+        session_id = runtime.session_id
+    elif len(active) > 1:
+        return {
+            "status": "ambiguous",
+            "active_session_ids": [session.session_id for session in active],
+            "message": "Specify session_id; multiple sessions are active.",
+            "freshness": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        }
+    else:
+        ui_result = read_observer_events("ui", limit=200, gui_root=gui_root)
+        return {
+            "status": "idle",
+            "session": None,
+            "current_user_action": ui_result["events"][-1] if ui_result["events"] else None,
+            "current_chat": None,
+            "current_task": None,
+            "plan": None,
+            "latest_tools": [],
+            "files": [],
+            "verification": [],
+            "errors": [],
+            "cursor": ui_result["next_cursor"],
+            "freshness": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        }
+
+    assert session_id is not None
+    run_result = read_observer_events(session_id, limit=200, gui_root=gui_root)
+    events = run_result["events"]
+    correlation_ids = {
+        value
+        for event in events
+        for field in ("chat_id", "trace_id")
+        if (value := event.get(field))
+    }
+    ui_events = read_observer_events("ui", limit=200, gui_root=gui_root)["events"]
+    matching_ui = [
+        event for event in ui_events
+        if not correlation_ids
+        or event.get("chat_id") in correlation_ids
+        or event.get("trace_id") in correlation_ids
+    ]
+
+    latest_chat = next(
+        (
+            {"chat_id": event.get("chat_id"), "trace_id": event.get("trace_id")}
+            for event in reversed(events + matching_ui)
+            if event.get("chat_id") or event.get("trace_id")
+        ),
+        None,
+    )
+    current_tasks: dict[str, dict[str, Any]] = {}
+    for event in events:
+        if event["type"] == "task_start":
+            task_id = event.get("task_id") or str(event["payload"].get("task_id", ""))
+            if task_id:
+                current_tasks[task_id] = {**event["payload"], "task_id": task_id, "status": "running"}
+        elif event["type"] == "task_complete":
+            task_id = event.get("task_id") or str(event["payload"].get("task_id", ""))
+            if task_id:
+                current_tasks.setdefault(task_id, {"task_id": task_id})["status"] = (
+                    "completed" if event["payload"].get("success") else "failed"
+                )
+                current_tasks[task_id].update(event["payload"])
+
+    session_done = next((event for event in reversed(events) if event["type"] == "session_done"), None)
+    status = runtime.status.value if runtime else ("completed" if session_done else "running")
+    if session_done and not runtime:
+        status = "completed" if session_done["payload"].get("failed", 0) == 0 else "partial"
+
+    all_times = [event["emitted_at"] for event in events + matching_ui]
+    return {
+        "status": status,
+        "session": {
+            "session_id": session_id,
+            "goal": runtime.goal if runtime else next(
+                (event["payload"].get("goal", "") for event in events if event["type"] == "session_start"),
+                "",
+            ),
+            "status": status,
+            "current_task_id": runtime.progress.current_task_id if runtime else None,
+        },
+        "current_user_action": matching_ui[-1] if matching_ui else None,
+        "current_chat": latest_chat,
+        "current_task": list(current_tasks.values())[-1] if current_tasks else None,
+        "plan": next((event["payload"] for event in reversed(events) if event["type"] == "plan_generated"), None),
+        "latest_tools": [event["payload"] for event in events if event["type"] == "agent_tool_call"][-10:],
+        "files": [event["payload"] for event in events if event["type"] in {"file_edit", "file_change"}][-50:],
+        "verification": [event["payload"] for event in events if event["type"] == "test_result"][-20:],
+        "errors": [event["payload"] for event in events if event["type"] == "error"][-20:],
+        "cursor": run_result["next_cursor"],
+        "freshness": max(all_times) if all_times else datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+    }
+
+
+def format_observer_sse(event: dict[str, Any]) -> str:
+    """Format one validated observer event as a resumable SSE frame."""
+    return (
+        f"id: {event['event_id']}\n"
+        "event: observer\n"
+        f"data: {json.dumps(event, ensure_ascii=False, separators=(',', ':'))}\n\n"
+    )
 
 
 class GuiHandler(BaseHTTPRequestHandler):
@@ -180,6 +460,71 @@ class GuiHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _handle_observer_stream(self) -> None:
+        """Serve explicit, assistant-safe, cursor-resumable observer SSE."""
+        query = parse_qs(urlsplit(self.path).query)
+        session_id = query.get("session_id", [""])[0]
+        if not session_id:
+            self._send_json({"error": "session_id is required"}, 400)
+            return
+        event_types = {
+            value
+            for raw in query.get("type", [])
+            for value in raw.split(",")
+            if value
+        }
+        cursor = self.headers.get("Last-Event-ID") or query.get("after", [None])[0]
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        self.wfile.write(b"retry: 2000\n\n")
+        self.wfile.flush()
+        last_keepalive = time.monotonic()
+
+        try:
+            while True:
+                result = read_observer_events(
+                    session_id,
+                    after=cursor,
+                    limit=100,
+                    event_types=event_types or None,
+                    gui_root=GUI_ROOT,
+                )
+                if result["gap"]:
+                    data = json.dumps(
+                        {"session_id": session_id, "reason": result["reason"], "snapshot_required": True},
+                        separators=(",", ":"),
+                    )
+                    self.wfile.write(f"event: observer_gap\ndata: {data}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+                    return
+
+                events = result["events"]
+                for event in events:
+                    self.wfile.write(format_observer_sse(event).encode("utf-8"))
+                if events:
+                    self.wfile.flush()
+                    cursor = result["next_cursor"]
+                    last_keepalive = time.monotonic()
+                elif result["next_cursor"] != cursor:
+                    cursor = result["next_cursor"]
+
+                now = time.monotonic()
+                if now - last_keepalive >= 15.0:
+                    self.wfile.write(b": keepalive\n\n")
+                    self.wfile.flush()
+                    last_keepalive = now
+                time.sleep(0.5)
+        except (BrokenPipeError, ConnectionResetError):
+            return
+        except (OSError, ValueError) as exc:
+            logger.warning("observer SSE stopped: %s", exc)
 
     def _handle_sse_events(self) -> None:
         """SSE endpoint that tails .awos/gui/<session>/events.jsonl.
@@ -358,12 +703,152 @@ class GuiHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(exc)}, 500)
             return
 
+        if path == "/api/observer/ui-event":
+            try:
+                body = self._read_json_body()
+                event_type = str(body.get("type", ""))
+                if event_type not in UIEventType.all():
+                    self._send_json({"error": "unsupported UI event type"}, 400)
+                    return
+                payload = body.get("payload") or {}
+                if not isinstance(payload, dict):
+                    self._send_json({"error": "payload must be an object"}, 400)
+                    return
+                event = emit_ui_observer_event(
+                    event_type,
+                    payload,
+                    chat_id=body.get("chat_id"),
+                    trace_id=body.get("trace_id"),
+                )
+                self._send_json({"status": "recorded", "event": event}, 201)
+            except json.JSONDecodeError:
+                self._send_json({"error": "invalid JSON body"}, 400)
+            except (TypeError, ValueError) as exc:
+                self._send_json({"error": str(exc)}, 400)
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, 500)
+            return
+
+        # New: local control API (non-destructive commands)
+        if path == "/api/observer/control":
+            try:
+                from .observer_control import validate_token, append_audit, read_audit_lines
+            except Exception:
+                try:
+                    from observer_control import validate_token, append_audit, read_audit_lines
+                except Exception:
+                    validate_token = None
+
+            # Authenticate via X-OBSERVER-TOKEN header
+            token = self.headers.get("X-OBSERVER-TOKEN")
+            if not validate_token or not validate_token(token):
+                self._send_json({"error": "forbidden"}, 403)
+                return
+
+            try:
+                body = self._read_json_body()
+                command = str(body.get("command", "")).strip()
+                args = body.get("args") or {}
+                allowed = {"reload_renderer", "snapshot", "list_sessions", "headless_smoke"}
+                if command not in allowed:
+                    self._send_json({"error": "unsupported command"}, 400)
+                    return
+
+                audit = {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "command": command,
+                    "args": args,
+                    "caller_ip": self.client_address[0],
+                }
+
+                # Implement non-destructive behaviors
+                if command == "snapshot":
+                    session_id = args.get("session_id") if isinstance(args, dict) else None
+                    snapshot = build_observer_snapshot(session_id, gui_root=GUI_ROOT)
+                    audit["result"] = "snapshot_returned"
+                    append_audit(audit)
+                    self._send_json({"status": "ok", "audit": audit, "snapshot": snapshot})
+                    return
+
+                if command == "list_sessions":
+                    from scaffold.agent.runtime_session import RuntimeSessionStore
+                    store = RuntimeSessionStore()
+                    sessions = [s.session_id for s in store.list_sessions()]
+                    audit["result"] = "sessions_listed"
+                    append_audit(audit)
+                    self._send_json({"status": "ok", "audit": audit, "sessions": sessions})
+                    return
+
+                if command == "reload_renderer":
+                    # Non-destructive: record the request in audit. Actual reload of the
+                    # renderer requires user action (or Electron IPC) on the client side.
+                    audit["result"] = "reload_requested"
+                    append_audit(audit)
+                    self._send_json({"status": "ok", "audit": audit, "note": "renderer reload requested (client must refresh)"})
+                    return
+
+                if command == "headless_smoke":
+                    # Playwright automation is gated; do not run here. Return queued status.
+                    audit["result"] = "automation_disabled_or_queued"
+                    append_audit(audit)
+                    self._send_json({"status": "ok", "audit": audit, "note": "automation is gated; enable AWOS_ENABLE_AUTOMATION and install Playwright to run"})
+                    return
+
+            except json.JSONDecodeError:
+                self._send_json({"error": "invalid JSON body"}, 400)
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, 500)
+            return
+
+        if path == "/api/observer/control/audit":
+            try:
+                from .observer_control import read_audit_lines
+            except Exception:
+                try:
+                    from observer_control import read_audit_lines
+                except Exception:
+                    read_audit_lines = None
+            token = self.headers.get("X-OBSERVER-TOKEN")
+            if read_audit_lines is None or not validate_token or not validate_token(token):
+                self._send_json({"error": "forbidden"}, 403)
+                return
+            query = parse_qs(urlsplit(self.path).query)
+            limit = int(query.get("limit", ["100"])[0])
+            lines = read_audit_lines(limit=limit)
+            self._send_json({"status": "ok", "entries": lines})
+            return
+            try:
+                body = self._read_json_body()
+                event_type = str(body.get("type", ""))
+                if event_type not in UIEventType.all():
+                    self._send_json({"error": "unsupported UI event type"}, 400)
+                    return
+                payload = body.get("payload") or {}
+                if not isinstance(payload, dict):
+                    self._send_json({"error": "payload must be an object"}, 400)
+                    return
+                event = emit_ui_observer_event(
+                    event_type,
+                    payload,
+                    chat_id=body.get("chat_id"),
+                    trace_id=body.get("trace_id"),
+                )
+                self._send_json({"status": "recorded", "event": event}, 201)
+            except json.JSONDecodeError:
+                self._send_json({"error": "invalid JSON body"}, 400)
+            except (TypeError, ValueError) as exc:
+                self._send_json({"error": str(exc)}, 400)
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, 500)
+            return
+
         if path == "/api/chat/stream":
             span = TraceSpan("chat_stream", "http")
             try:
                 body = self._read_json_body()
                 svc = get_chat_service()
                 chat_id_holder: dict[str, str | None] = {"id": body.get("chat_id")}
+                trace_id_holder: dict[str, str | None] = {"id": None}
 
                 def events() -> Iterator[dict]:
                     t0 = time.perf_counter()
@@ -375,7 +860,32 @@ class GuiHandler(BaseHTTPRequestHandler):
                         model=body.get("model") or None,
                     ):
                         if evt.get("event") == "start":
-                            chat_id_holder["id"] = evt.get("data", {}).get("chat_id")
+                            data = evt.get("data", {})
+                            chat_id_holder["id"] = data.get("chat_id")
+                            trace_id_holder["id"] = data.get("trace_id")
+                            try:
+                                emit_ui_observer_event(
+                                    "chat_response_started",
+                                    {"mode": data.get("mode", body.get("mode", "qa"))},
+                                    chat_id=chat_id_holder["id"],
+                                    trace_id=trace_id_holder["id"],
+                                )
+                            except Exception as exc:
+                                logger.warning("observer start event skipped: %s", exc)
+                        if evt.get("event") in ("done", "cancelled", "error"):
+                            try:
+                                emit_ui_observer_event(
+                                    "chat_response_completed",
+                                    {
+                                        "mode": body.get("mode", "qa"),
+                                        "status": evt.get("event"),
+                                        "cancelled": evt.get("event") == "cancelled",
+                                    },
+                                    chat_id=chat_id_holder["id"],
+                                    trace_id=trace_id_holder["id"],
+                                )
+                            except Exception as exc:
+                                logger.warning("observer completion event skipped: %s", exc)
                         if first and evt.get("event") == "token":
                             ttfb = (time.perf_counter() - t0) * 1000
                             span.metadata["ttfb_ms"] = round(ttfb, 1)
@@ -500,22 +1010,20 @@ class GuiHandler(BaseHTTPRequestHandler):
 
         self._send_json({"error": "not found"}, 404)
 
-    def _get_ci_rescue_stats(self) -> dict:
-        """Get CI rescue statistics from runtime sessions."""
+    def _get_session_stats(self) -> dict:
+        """Get workload-neutral statistics from runtime sessions."""
         from scaffold.agent.runtime_session import RuntimeSessionStore
         
         store = RuntimeSessionStore()
         sessions = store.list_sessions()
+        all_sessions = sorted(sessions, key=lambda s: s.updated_at or s.created_at or "", reverse=True)
         
-        # Filter for CI rescue sessions (goal contains "CI Rescue")
-        ci_sessions = [s for s in sessions if "CI Rescue" in (s.goal or "")]
-        
-        total_rescues = len(ci_sessions)
+        total_rescues = len(all_sessions)
         total_tests_fixed = 0
         total_cost = 0.0
         
-        for session in ci_sessions:
-            # Count completed tasks as tests fixed
+        for session in all_sessions:
+            # Count completed tasks as general task completions for the dashboard
             total_tests_fixed += len(session.progress.completed_task_ids)
             # Sum up costs
             total_cost += session.budget.get("spent_usd", 0.0)
@@ -527,8 +1035,8 @@ class GuiHandler(BaseHTTPRequestHandler):
         trend_savings = ""
         
         if total_rescues >= 10:
-            recent = ci_sessions[:5]
-            previous = ci_sessions[5:10]
+            recent = all_sessions[:5]
+            previous = all_sessions[5:10]
             
             recent_tests = sum(len(s.progress.completed_task_ids) for s in recent)
             previous_tests = sum(len(s.progress.completed_task_ids) for s in previous)
@@ -539,30 +1047,31 @@ class GuiHandler(BaseHTTPRequestHandler):
                 trend_tests = f"{recent_tests - previous_tests} vs previous"
         
         return {
-            "total_rescues": total_rescues,
-            "total_tests_fixed": total_tests_fixed,
+            # Canonical workload-neutral fields.
+            "total_runs": total_rescues,
+            "total_tasks_completed": total_tests_fixed,
             "total_cost_usd": total_cost,
-            "trend_rescues": trend_rescues,
-            "trend_tests": trend_tests,
+            "trend_runs": trend_rescues,
+            "trend_tasks": trend_tests,
             "trend_cost": trend_cost,
             "trend_savings": trend_savings,
+            # Compatibility fields for older CI-rescue clients.
+            "total_rescues": total_rescues,
+            "total_tests_fixed": total_tests_fixed,
+            "trend_rescues": trend_rescues,
+            "trend_tests": trend_tests,
         }
 
-    def _get_ci_rescue_history(self) -> list:
-        """Get CI rescue session history."""
+    def _get_session_history(self) -> list:
+        """Get workload-neutral session history."""
         from scaffold.agent.runtime_session import RuntimeSessionStore
         
         store = RuntimeSessionStore()
         sessions = store.list_sessions()
-        
-        # Filter for CI rescue sessions
-        ci_sessions = [s for s in sessions if "CI Rescue" in (s.goal or "")]
-        
-        # Sort by timestamp (most recent first)
-        ci_sessions.sort(key=lambda s: s.updated_at or "", reverse=True)
+        all_sessions = sorted(sessions, key=lambda s: s.updated_at or s.created_at or "", reverse=True)
         
         history = []
-        for session in ci_sessions[:20]:  # Last 20 rescues
+        for session in all_sessions[:20]:  # Last 20 runs
             history.append({
                 "session_id": session.session_id,
                 "goal": session.goal,
@@ -653,6 +1162,45 @@ class GuiHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = unquote(self.path.split("?", 1)[0])
 
+        if path == "/api/observer/snapshot":
+            try:
+                query = parse_qs(urlsplit(self.path).query)
+                snapshot = build_observer_snapshot(
+                    query.get("session_id", [None])[0],
+                    gui_root=GUI_ROOT,
+                )
+                self._send_json(snapshot)
+            except (TypeError, ValueError) as exc:
+                self._send_json({"error": str(exc)}, 400)
+            except (OSError, UnicodeError) as exc:
+                self._send_json({"error": "observer snapshot unavailable", "detail": str(exc)}, 500)
+            return
+
+        if path == "/api/observer/events":
+            try:
+                query = parse_qs(urlsplit(self.path).query)
+                session_id = query.get("session_id", [""])[0]
+                if not session_id:
+                    self._send_json({"error": "session_id is required"}, 400)
+                    return
+                raw_limit = query.get("limit", ["100"])[0]
+                result = read_observer_events(
+                    session_id,
+                    after=query.get("after", [None])[0],
+                    limit=int(raw_limit),
+                    gui_root=GUI_ROOT,
+                )
+                self._send_json(result)
+            except (TypeError, ValueError) as exc:
+                self._send_json({"error": str(exc)}, 400)
+            except (OSError, UnicodeError) as exc:
+                self._send_json({"error": "observer ledger unavailable", "detail": str(exc)}, 500)
+            return
+
+        if path == "/api/observer/stream":
+            self._handle_observer_stream()
+            return
+
         # SSE endpoint for real-time agent events
         if path == "/api/agent/stream":
             self._handle_sse_events()
@@ -666,18 +1214,31 @@ class GuiHandler(BaseHTTPRequestHandler):
             self._send_json(get_chat_service().response_cache.stats())
             return
 
-        if path == "/api/ci-rescue/stats":
+        if path.startswith("/api/debug/"):
+            session_id = path.rsplit("/", 1)[-1]
             try:
-                stats = self._get_ci_rescue_stats()
-                self._send_json(stats)
+                from scaffold.agent.core.debug_inspection import inspect_debug_bundle
+                report = inspect_debug_bundle(ROOT / ".awos" / "debug", session_id)
+                self._send_json(report.to_dict())
+            except FileNotFoundError:
+                self._send_json({"error": "debug report not found"}, 404)
+            except ValueError:
+                self._send_json({"error": "invalid debug session id"}, 400)
+            except (json.JSONDecodeError, TypeError, KeyError) as exc:
+                logger.warning("Invalid debug report %s: %s", session_id, exc)
+                self._send_json({"error": "invalid debug report"}, 500)
+            return
+
+        if path in ("/api/sessions/stats", "/api/ci-rescue/stats"):
+            try:
+                self._send_json(self._get_session_stats())
             except Exception as exc:
                 self._send_json({"error": str(exc)}, 500)
             return
 
-        if path == "/api/ci-rescue/history":
+        if path in ("/api/sessions/history", "/api/ci-rescue/history"):
             try:
-                history = self._get_ci_rescue_history()
-                self._send_json(history)
+                self._send_json(self._get_session_history())
             except Exception as exc:
                 self._send_json({"error": str(exc)}, 500)
             return
@@ -813,6 +1374,10 @@ class GuiHandler(BaseHTTPRequestHandler):
             self._send_file(STATIC / "agent.html")
             return
 
+        if path in ("/renderer", "/renderer.html"):
+            self._send_file(STATIC / "renderer.html")
+            return
+
         static_path = STATIC / path.lstrip("/")
         if static_path.is_file() and STATIC in static_path.resolve().parents:
             self._send_file(static_path)
@@ -837,6 +1402,7 @@ def main() -> None:
     server = ThreadingHTTPServer((args.host, args.port), GuiHandler)
     print(f"AWOS GUI → http://{args.host}:{args.port}")
     print(f"  Agent: http://{args.host}:{args.port}/agent")
+    print(f"  Renderer: http://{args.host}:{args.port}/renderer")
     print(f"  Chat:  http://{args.host}:{args.port}/?view=chat")
     print(f"  Runs:  http://{args.host}:{args.port}/?view=runs")
     print(f"Sessions: {GUI_ROOT}")

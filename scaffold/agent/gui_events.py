@@ -10,9 +10,15 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
+
+try:
+    from .observer_protocol import build_event, parse_event_line
+except ImportError:  # pragma: no cover - supports direct module execution
+    from observer_protocol import build_event, parse_event_line
 
 _GUI_ROOT = Path(".awos") / "gui"
 
@@ -41,37 +47,107 @@ class EventType:
         }
 
 
+class UIEventType:
+    """Semantic browser/UI actions; keystrokes are intentionally excluded."""
+
+    APP_OPENED = "app_opened"
+    VIEW_CHANGED = "view_changed"
+    CHAT_SUBMITTED = "chat_submitted"
+    CHAT_RESPONSE_STARTED = "chat_response_started"
+    CHAT_RESPONSE_COMPLETED = "chat_response_completed"
+    SESSION_SELECTED = "session_selected"
+    APPROVAL = "approval"
+    TASK_CONTROL = "task_control"
+    CONTROL_REQUESTED = "control_requested"
+    CONTROL_COMPLETED = "control_completed"
+    CONTROL_REJECTED = "control_rejected"
+
+    @classmethod
+    def all(cls) -> set[str]:
+        return {
+            value for name, value in vars(cls).items()
+            if not name.startswith("_") and isinstance(value, str)
+        }
+
+
 @dataclass
 class GuiEvent:
+    """Backward-compatible event object backed by the observer envelope."""
+
     type: str
     session_id: str
     timestamp: str = field(
         default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     )
     payload: dict[str, Any] = field(default_factory=dict)
+    event_id: str = field(default_factory=lambda: f"evt_{uuid.uuid4().hex}")
+    sequence: int = 0
+    source: str = "agent"
+    visibility: str = "assistant_safe"
+    chat_id: str | None = None
+    task_id: str | None = None
+    trace_id: str | None = None
+    span_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "type": self.type,
-            "session_id": self.session_id,
-            "timestamp": self.timestamp,
-            "payload": self.payload,
-        }
+        event = build_event(
+            event_type=self.type,
+            session_id=self.session_id,
+            payload=self.payload,
+            sequence=self.sequence,
+            source=self.source,
+            visibility=self.visibility,
+            event_id=self.event_id or None,
+            emitted_at=self.timestamp,
+            chat_id=self.chat_id,
+            task_id=self.task_id,
+            trace_id=self.trace_id,
+            span_id=self.span_id,
+        )
+        # Keep the old field during migration. New observer consumers use
+        # emitted_at; existing renderer code can continue reading timestamp.
+        event["timestamp"] = event["emitted_at"]
+        return event
 
 
 class GuiEventBus:
     """Per-run event bus: persists events and notifies live subscribers (SSE/WebSocket)."""
 
-    def __init__(self, session_id: str, goal: str = "", gui_root: Optional[Path] = None):
+    def __init__(
+        self,
+        session_id: str,
+        goal: str = "",
+        gui_root: Optional[Path] = None,
+        *,
+        chat_id: str | None = None,
+        trace_id: str | None = None,
+    ):
         self.session_id = session_id
         self.goal = goal
+        self.chat_id = chat_id
+        self.trace_id = trace_id or f"trace_{uuid.uuid4().hex}"
         self._root = (gui_root or _GUI_ROOT) / session_id
         self._root.mkdir(parents=True, exist_ok=True)
         self._events_path = self._root / "events.jsonl"
         self._manifest_path = self._root / "manifest.json"
         self._subscribers: list[Callable[[GuiEvent], None]] = []
         self._file_changes: list[dict[str, Any]] = []
+        self._next_sequence = self._load_next_sequence()
         self._init_manifest()
+
+    def _load_next_sequence(self) -> int:
+        """Recover the next cursor from valid persisted observer envelopes."""
+        if not self._events_path.exists():
+            return 1
+        highest = 0
+        try:
+            for line in self._events_path.read_text(encoding="utf-8").splitlines():
+                event = parse_event_line(line)
+                if event is not None:
+                    highest = max(highest, event["sequence"])
+        except OSError:
+            return 1
+        return highest + 1
 
     def _init_manifest(self) -> None:
         if self._manifest_path.exists():
@@ -97,14 +173,34 @@ class GuiEventBus:
     def subscribe(self, callback: Callable[[GuiEvent], None]) -> None:
         self._subscribers.append(callback)
 
-    def emit(self, event_type: str, payload: Optional[dict[str, Any]] = None) -> GuiEvent:
+    def emit(
+        self,
+        event_type: str,
+        payload: Optional[dict[str, Any]] = None,
+        *,
+        source: str = "agent",
+        visibility: str = "assistant_safe",
+        chat_id: str | None = None,
+        task_id: str | None = None,
+        trace_id: str | None = None,
+        span_id: str | None = None,
+    ) -> GuiEvent:
         event = GuiEvent(
             type=event_type,
             session_id=self.session_id,
             payload=payload or {},
+            sequence=self._next_sequence,
+            source=source,
+            visibility=visibility,
+            chat_id=chat_id if chat_id is not None else self.chat_id,
+            task_id=task_id,
+            trace_id=trace_id if trace_id is not None else self.trace_id,
+            span_id=span_id,
         )
+        serialized = json.dumps(event.to_dict(), ensure_ascii=False)
         with open(self._events_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(event.to_dict(), default=str) + "\n")
+            f.write(serialized + "\n")
+        self._next_sequence += 1
         for cb in self._subscribers:
             try:
                 cb(event)
@@ -150,13 +246,17 @@ class GuiEventBus:
     def emit_task_start(self, task_id: int, action: str, file: str,
                         model_name: str, model_reason: str) -> GuiEvent:
         """Task execution started."""
-        return self.emit(EventType.TASK_START, {
-            "task_id": task_id,
-            "action": action,
-            "file": file,
-            "model_name": model_name,
-            "model_reason": model_reason,
-        })
+        return self.emit(
+            EventType.TASK_START,
+            {
+                "task_id": task_id,
+                "action": action,
+                "file": file,
+                "model_name": model_name,
+                "model_reason": model_reason,
+            },
+            task_id=str(task_id),
+        )
 
     def emit_file_edit(self, path: str, status: str, lines_added: int,
                        lines_removed: int, diff: str = "") -> GuiEvent:
@@ -182,13 +282,17 @@ class GuiEventBus:
     def emit_task_complete(self, task_id: int, success: bool, cost_usd: float,
                            n_edits: int, error: str = "") -> GuiEvent:
         """Task execution finished."""
-        return self.emit(EventType.TASK_COMPLETE, {
-            "task_id": task_id,
-            "success": success,
-            "cost_usd": cost_usd,
-            "n_edits": n_edits,
-            "error": error,
-        })
+        return self.emit(
+            EventType.TASK_COMPLETE,
+            {
+                "task_id": task_id,
+                "success": success,
+                "cost_usd": cost_usd,
+                "n_edits": n_edits,
+                "error": error,
+            },
+            task_id=str(task_id),
+        )
 
     def emit_session_done(self, completed: int, failed: int,
                           total_cost: float, elapsed: float) -> GuiEvent:
@@ -201,11 +305,15 @@ class GuiEventBus:
         })
 
     def emit_agent_thinking(self, thought: str, turn: int = 0) -> GuiEvent:
-        """Model's internal chain-of-thought during a ReAct turn."""
-        return self.emit(EventType.AGENT_THINKING, {
-            "thought": thought,
-            "turn": turn,
-        })
+        """Record internal diagnostics as developer-only, never assistant-safe."""
+        return self.emit(
+            EventType.AGENT_THINKING,
+            {
+                "thought": thought,
+                "turn": turn,
+            },
+            visibility="developer_only",
+        )
 
     def emit_agent_tool_call(self, action: str, action_input: dict,
                              observation: str, success: bool,

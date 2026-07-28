@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Task: Electron Control Bridge — AWOS</title><style>body{font:15px/1.6 system-ui;max-width:960px;margin:32px auto;padding:0 20px;color:#111}h1,h2{color:#0b3b63}code{background:#f8fafc;padding:2px 6px;border-radius:4px}li{margin:.35rem 0}</style></head>
+<body>
+<header><p>AWOS / tasks / active</p><h1>Task: Give the Assistant Safe Control of Electron</h1><p><strong>Status:</strong> active · <strong>Governing spec:</strong> <code>docs/specs/observer_control_spec.html</code></p></header>
+<h2>Steps</h2>
+<ol>
+<li>☐ Implement Electron control listener bound to localhost and token authentication. Verify unauthorized requests fail.</li>
+<li>☐ Implement real-window status action. Verify returned state matches the visible Electron instance.</li>
+<li>☐ Implement show, hide, focus, and reload actions. Verify lifecycle events are recorded.</li>
+<li>☐ Implement allowlisted internal navigation. Verify external navigation is rejected.</li>
+<li>☐ Implement semantic click and bounded fill actions. Verify unknown targets and oversized input are rejected.</li>
+<li>☐ Implement observable cancellation dispatch without killing processes.</li>
+<li>☑ Add CLI client and focused unit/integration tests.</li>
+<li>☐ Run live proof with user approval, then update checkpoint and run quality gate.</li>
+</ol>
+<h2>Safety gate</h2><p>Do not stop, restart, close, or alter the user’s current Electron run during implementation without explicit approval. Control actions must be opt-in and individually auditable.</p><p><strong>Current proof state:</strong> CLI request construction and response verification are tested. A live <code>status</code> request reached the running control server but was rejected as <code>forbidden</code> because the existing Electron process is not aligned with the current token file</strong>. Relaunch under <code>npm run dev</code> is required for live proof.</p>
+<h2>Related</h2><ul><li><a href="../../docs/research/observer_control.html">Research</a></li><li><a href="../../docs/specs/observer_control_spec.html">Spec</a></li></ul>
+</body></html>
