@@ -180,47 +180,29 @@ function waitForServer(url, maxRetries = 30, interval = 200) {
   });
 }
 
-// ── Start Python server with port fallback ────────────────────────────────
+// ── Start the canonical Python server ─────────────────────────────────────
 function startPythonServer() {
   const serverPath = path.join(ROOT, 'gui', 'server.py');
-  let port = PORT;
-  const maxTries = 10;
+  pythonServer = spawn('python3', [serverPath, '--port', String(PORT)], {
+    cwd: ROOT,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
 
-  function tryPort(currentPort) {
-    pythonServer = spawn('python3', [serverPath, '--port', String(currentPort)], {
-      cwd: ROOT,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+  pythonServer.stdout.on('data', (data) => {
+    console.log(`[server] ${data.toString().trim()}`);
+  });
 
-    pythonServer.stdout.on('data', (data) => {
-      console.log(`[server] ${data.toString().trim()}`);
-    });
+  pythonServer.stderr.on('data', (data) => {
+    console.error(`[server] ${data.toString().trim()}`);
+  });
 
-    pythonServer.stderr.on('data', (data) => {
-      const msg = data.toString().trim();
-      console.error(`[server] ${msg}`);
-      // If port in use, kill and retry
-      if (msg.includes('Address already in use') && currentPort - PORT < maxTries) {
-        pythonServer.kill();
-        const nextPort = currentPort + 1;
-        console.log(`[server] Port ${currentPort} busy, trying ${nextPort}...`);
-        tryPort(nextPort);
-      }
-    });
+  pythonServer.on('close', (code, signal) => {
+    pythonServer = null;
+    if (!isQuitting && code !== 0) {
+      console.error(`[server] Canonical agent server exited (code=${code}, signal=${signal || 'none'}); not falling back to another port`);
+    }
+  });
 
-    pythonServer.on('close', (code) => {
-      if (code !== 0 && currentPort - PORT < maxTries) {
-        // Retry on unexpected exit
-        const nextPort = currentPort + 1;
-        console.log(`[server] Restarting on port ${nextPort}...`);
-        tryPort(nextPort);
-      } else {
-        pythonServer = null;
-      }
-    });
-  }
-
-  tryPort(port);
   return pythonServer;
 }
 

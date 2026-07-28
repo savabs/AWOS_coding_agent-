@@ -21,6 +21,7 @@ function makeHarness() {
   const watchers = [];
   const timers = [];
   const children = [];
+  const spawnOptions = [];
   const logs = [];
   const supervisor = createSupervisor({
     watchFiles: files,
@@ -36,7 +37,8 @@ function makeHarness() {
       return timer;
     },
     clearTimer: (timer) => { timer.cleared = true; },
-    spawnProcess: () => {
+    spawnProcess: (_executable, _args, options) => {
+      spawnOptions.push(options);
       const child = makeChild(100 + children.length);
       children.push(child);
       return child;
@@ -45,7 +47,7 @@ function makeHarness() {
     appRoot: '/app',
     log: { log: (line) => logs.push(line), warn: () => {}, error: () => {} },
   });
-  return { files, watchers, timers, children, logs, supervisor };
+  return { files, watchers, timers, children, spawnOptions, logs, supervisor };
 }
 
 test('uses the explicit watch list and the specified debounce interval', () => {
@@ -54,6 +56,7 @@ test('uses the explicit watch list and the specified debounce interval', () => {
 
   assert.deepEqual(harness.watchers.map((watcher) => watcher.file), harness.files);
   assert.equal(harness.children.length, 1);
+  assert.equal(harness.spawnOptions[0].detached, true);
 
   harness.watchers[0].listener('change');
   harness.watchers[0].listener('change');

@@ -36,6 +36,17 @@ function existingWatchFiles(files = WATCH_FILES, exists = fs.existsSync) {
 
 function createSupervisor({
   spawnProcess = spawn,
+  terminateProcess = (processHandle, signal) => {
+    if (process.platform !== 'win32') {
+      try {
+        process.kill(-processHandle.pid, signal);
+        return;
+      } catch (_) {
+        // Fall back to the direct child if the process group already exited.
+      }
+    }
+    processHandle.kill(signal);
+  },
   watchFile = (file, listener) => fs.watch(file, listener),
   exists = fs.existsSync,
   setTimer = setTimeout,
@@ -61,6 +72,7 @@ function createSupervisor({
       cwd: appRoot,
       stdio: 'inherit',
       env: process.env,
+      detached: true,
     });
     child.once('error', (error) => {
       log.error(`[dev] Electron failed to start: ${error.message}`);
@@ -113,7 +125,7 @@ function createSupervisor({
     restarting = true;
     const childToRestart = child;
     log.log('[dev] Source change detected; restarting Electron');
-    childToRestart.kill('SIGTERM');
+    terminateProcess(childToRestart, 'SIGTERM');
     // Electron may hide to tray instead of exiting on SIGTERM. Since this
     // process owns the development child, use a bounded escalation so a
     // stale renderer cannot block the new source from becoming live.
@@ -121,7 +133,7 @@ function createSupervisor({
       forceKillTimer = null;
       if (child === childToRestart && restarting) {
         log.warn('[dev] Electron did not exit after SIGTERM; forcing shutdown');
-        childToRestart.kill('SIGKILL');
+        terminateProcess(childToRestart, 'SIGKILL');
       }
     }, 2000);
   }
@@ -158,7 +170,8 @@ function createSupervisor({
       const currentChild = child;
       child = null;
       restarting = false;
-      currentChild.kill('SIGTERM');
+      terminateProcess(currentChild, 'SIGTERM');
+      setTimer(() => terminateProcess(currentChild, 'SIGKILL'), 2000);
     }
   }
 
