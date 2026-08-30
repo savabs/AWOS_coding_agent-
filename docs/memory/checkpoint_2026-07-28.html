@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Checkpoint — AWOS 2026-07-28</title>
+<style>
+body{font:15px/1.6 system-ui;max-width:900px;margin:32px auto;padding:0 20px;color:#1e293b}header{background:#1e293b;color:#f8fafc;padding:20px;border-radius:8px}h1,h2{color:#312e81}header h1{color:#f8fafc}h2{border-bottom:1px solid #ddd;padding-bottom:5px}.sot,.next{padding:12px 16px;border-left:4px solid #4f46e5;background:#eef2ff;margin:12px 0}.next{border-color:#10b981;background:#f0fdf4}.blocked{border-color:#ef4444;background:#fef2f2}code,pre{background:#f1f5f9;padding:2px 5px}pre{padding:12px;overflow:auto}li{margin:6px 0}table{border-collapse:collapse;width:100%}th,td{text-align:left;border-bottom:1px solid #ddd;padding:7px;vertical-align:top}
+</style>
+</head>
+<body>
+<header><div>AWOS / docs / memory</div><h1>Checkpoint — 2026-07-28</h1><div>doc/checkpoint · phase/1 · topic/assistant-live-observer · IMMUTABLE</div></header>
+<main>
+<div class="sot"><strong>Source of truth for the next chat:</strong><br><code>memories/repo/project_structure.md</code>, this checkpoint, and <code>tasks/active/assistant_live_observer.md</code>.</div>
+<h2>Session summary</h2>
+<ul>
+<li>Confirmed the AWOS coding agent itself is functioning; the current problem is the missing observation bridge between AWOS and the external assistant.</li>
+<li>Built and tested the developer renderer over existing AWOS events, manifests, diffs, verification, and SSE.</li>
+<li>Ran a real coding-agent session and identified stale/inconsistent session projection between runtime records, GUI manifests, and APIs.</li>
+<li>Added chat prompt-fidelity work: OpenCode conversation history, safe request trace metadata, exact raw input preservation, UI request trace, and regression tests.</li>
+<li>Researched and specified the next building block: a durable, correlated, replayable assistant live observer based on structured event telemetry rather than images.</li>
+</ul>
+<h2>Vision and product identity</h2>
+<ul>
+<li>AWOS is a learnable operating system for autonomous work.</li>
+<li>The coding agent is App #1, not the final AWOS product.</li>
+<li>Reuse and improve the existing kernel; do not build a coding agent from scratch or copy Cursor, Zed, Hermes, or another codebase.</li>
+<li>Quality is non-negotiable. Speed and cost are tunable only after the quality floor is protected.</li>
+<li>CI repair is an optional workload/benchmark, not the project identity.</li>
+<li>OpenCode Go is only the current provider. Dynamic routing is a later learnable allocation policy.</li>
+<li>Exploration, verification, recovery, evidence, observable parallel work, and failure-driven learning are core capabilities.</li>
+<li>The interface should be simple and programmer-oriented.</li>
+</ul>
+<h2>Current state</h2>
+<table><tr><th>Area</th><th>State</th><th>Canonical location</th></tr>
+<tr><td>Live renderer</td><td>Implemented and fixture/browser tested; representative live proof and actual parallel-runtime proof remain incomplete.</td><td><code>tasks/active/live_agent_renderer.md</code></td></tr>
+<tr><td>Live coding observation</td><td>Real session observed: plan, routing, reads, tool calls, edit, tests, completion. It used one task and shallow benchmark exploration.</td><td><code>tasks/active/live_agent_renderer.md</code></td></tr>
+<tr><td>Verified projection gap</td><td>Canonical runtime session said completed while GUI manifest/API said running with no files. Cost fields also differed across event/history/session records.</td><td><code>gui/server.py</code>, <code>.awos/sessions/</code>, <code>.awos/gui/</code></td></tr>
+<tr><td>Chat prompt fidelity</td><td>Implemented and unit-tested; exact raw input is stored, OpenCode receives session history, safe prompt trace is persisted and rendered collapsed.</td><td><code>tasks/active/chat_prompt_fidelity.md</code></td></tr>
+<tr><td>Assistant live observer</td><td>Research/spec/task complete; implementation has not started.</td><td><code>tasks/active/assistant_live_observer.md</code></td></tr>
+</table>
+<h2>Important correction</h2>
+<p>The user was not reporting a broken AWOS coding task. The user wanted a way for the assistant to understand the current Electron app and backend live. During debugging, the assistant incorrectly mixed the current moat-chat issue with an older palindrome/cache worker session. The root project problem is insufficient event correlation and replay, not the agent's coding quality.</p>
+<h2>Assistant live-observer plan</h2>
+<ol>
+<li>Define a versioned event envelope with <code>event_id</code>, monotonic <code>sequence</code>, timestamp, source, type, session/chat/task/trace IDs, payload, and visibility.</li>
+<li>Persist stable IDs and sequences in the event ledger.</li>
+<li>Emit meaningful UI actions—app/view changes, prompt submitted, session selected, approvals, task controls—without logging every keystroke.</li>
+<li>Add assistant-safe payload classification, bounds, redaction, and no hidden chain-of-thought.</li>
+<li>Add cursor-based replay for missed events.</li>
+<li>Add filtered/resumable SSE using event IDs, keepalives, retry, and <code>Last-Event-ID</code>.</li>
+<li>Add a current-state snapshot containing current UI action, session, plan, tools, files, verification, errors, and cursor.</li>
+<li>Add a read-only assistant adapter such as <code>awos observe snapshot</code> and <code>awos observe events --follow</code>; keep MCP optional and adapter-level.</li>
+<li>Migrate the renderer to the shared observer contract.</li>
+<li>Run a live Electron proof with the assistant listener and verify no historical-session confusion.</li>
+</ol>
+<h2>Why this design</h2>
+<p>SSE is appropriate for server-to-listener delivery, but it is not enough by itself. A durable ledger, cursor replay, and snapshot are required because the assistant may disconnect between turns. Correlation IDs are required to join UI actions to backend execution. Structured telemetry is the primary truth; screenshots are out of scope for the first observer.</p>
+<h2>Validation completed</h2>
+<ul><li>Focused GUI/chat tests: <strong>33 passed</strong>, with one existing requests dependency warning.</li><li>Renderer/event regression suite previously passed: 34 tests plus Playwright/browser smoke.</li><li>Prompt-fidelity scoped Obsidian lint: clean.</li><li>Assistant-observer scoped Obsidian lint: clean.</li><li><code>git diff --check</code>: clean for the new artifacts.</li><li>Repository-wide Obsidian lint remains noisy with 369 pre-existing legacy/tool-directory errors; it was not treated as a feature failure.</li></ul>
+<h2>Blocked</h2>
+<div class="blocked"><strong>Live observer implementation and proof are pending.</strong><br>The next chat must implement the event envelope/cursor first, then test live reconnection, snapshots, UI correlation, and assistant consumption.</div>
+<h2>Next session starting point</h2>
+<div class="next"><strong>Start with Step 1 of <code>tasks/active/assistant_live_observer.md</code>:</strong><br>Define the versioned event envelope and stable cursor contract in the reusable event layer. Do not start with UI polish, images, model routing, or dynamic routing.</div>
+<h2>Related</h2>
+<ul><li><a href="../../memories/repo/project_structure.md">project_structure.md</a></li><li><a href="../../tasks/active/assistant_live_observer.html">assistant_live_observer</a></li><li><a href="../../docs/research/assistant_live_observer.html">assistant_live_observer research</a></li><li><a href="../../docs/specs/assistant_live_observer_spec.html">assistant_live_observer spec</a></li><li><a href="../../tasks/active/live_agent_renderer.html">live_agent_renderer</a></li><li><a href="../../tasks/active/chat_prompt_fidelity.html">chat_prompt_fidelity</a></li><li><a href="../../VISION.md">VISION</a></li></ul>
+</main>
+</body></html>

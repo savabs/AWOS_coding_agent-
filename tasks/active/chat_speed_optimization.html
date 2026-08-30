@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Speed Optimization — Task</title>
+<style>body{font-family:-apple-system,sans-serif;max-width:900px;margin:40px auto;padding:0 20px;color:#1a1a1a}
+h1{border-bottom:3px solid #e76f51;padding-bottom:10px}.pending{color:#888}.done{color:#2d6a4f;text-decoration:line-through}
+.step{padding:8px 12px;margin:4px 0;border-radius:4px}.step:nth-child(odd){background:#fafafa}
+table{border-collapse:collapse;width:100%;margin:10px 0}th,td{border:1px solid #ddd;padding:6px 10px;text-align:left}th{background:#f0f0f0}
+</style></head><body>
+<h1>📝 Task: Chat Speed Optimization</h1>
+<p><strong>Status:</strong> ACTIVE · <strong>Phase:</strong> 4 · <strong>Date:</strong> 2026-07-21</p>
+
+<h2>Checklist</h2>
+
+<div class="step"><strong class="pending">[ ] Step 1:</strong> Remove <code>max_tokens = 2048</code> hardcoded override + add dynamic sizing
+  <br>→ <code>gui_chat.py:1045</code> — delete override; add heuristic: simple q → 512, codebase q → 2048
+</div>
+
+<div class="step"><strong class="pending">[ ] Step 2:</strong> Short-circuit context for non-codebase queries
+  <br>→ <code>_read_project_context()</code> — skip SymbolIndex for generic questions
+</div>
+
+<div class="step"><strong class="pending">[ ] Step 3:</strong> Eliminate duplicate context loading
+  <br>→ <code>_stream_qa()</code> — load context once, pass to both prompt and context builders
+</div>
+
+<div class="step"><strong class="pending">[ ] Step 4:</strong> Reduce artificial time.sleep delays
+  <br>→ Cache path: 8ms → 2ms; Plan path: remove
+</div>
+
+<div class="step"><strong class="pending">[ ] Step 5:</strong> Reduce fallback timeout (6s → 4s; 20s → 12s)
+</div>
+
+<div class="step"><strong class="pending">[ ] Step 6:</strong> Run ruff lint on <code>gui_chat.py</code></div>
+
+<div class="step"><strong class="pending">[ ] Step 7:</strong> Run existing tests: <code>pytest tests/ -q -m "not integration"</code></div>
+
+<div class="step"><strong class="pending">[ ] Live proof:</strong> Run speed benchmarks — simple q under 5s, codebase q under 10s, cache hit under 100ms</div>
+
+<div class="step"><strong class="pending">[ ] Checkpoint:</strong> Write session checkpoint with timing data</div>
+
+<h2>Related</h2><ul>
+<li><a href="../../docs/research/chat_speed_optimization.html">Research</a></li>
+<li><a href="../../docs/specs/chat_speed_spec.html">Spec</a></li></ul>
+</body></html>

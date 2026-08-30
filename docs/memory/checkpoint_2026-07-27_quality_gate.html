@@ -1,0 +1,6 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Checkpoint: Quality Gate Reliability</title></head><body><h1>Checkpoint: Quality Gate Reliability</h1><p><strong>Date:</strong> 2026-07-27</p><h2>Completed</h2><ul><li>Excluded generated directories such as <code>.awos</code>, caches, and dependency trees from default Markdown discovery.</li><li>Added explicit Markdown file-list lint mode.</li><li>Changed the quality gate to lint only the current task's canonical Markdown artifact set.</li><li>Kept test failures strict and made focused test commands explicit through <code>--test-cmd</code>.</li><li>Added three regression tests.</li></ul><h2>Proof</h2><pre>python3 scripts/quality_gate.py --task tasks/active/quality_gate_reliability.md --test-cmd "python3 -m pytest tests/test_quality_gate_reliability.py -q"
+PASS: task steps
+PASS: tests (3 passed)
+PASS: live proof
+PASS: Obsidian lint (3 files)
+PASS: checkpoint</pre><h2>Known warning</h2><p>The structure-file warning was resolved by updating <code>memories/repo/project_structure.md</code>. Full-vault lint remains available for deliberate historical cleanup but is no longer confused with incremental task validation.</p></body></html>

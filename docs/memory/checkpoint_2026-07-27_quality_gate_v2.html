@@ -1,0 +1,7 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Checkpoint: Quality Gate Reliability v2</title></head><body><h1>Checkpoint: Quality Gate Reliability v2</h1><p><strong>Date:</strong> 2026-07-27</p><h2>Completed</h2><ul><li>Generated directories are excluded from default Markdown discovery.</li><li>Explicit file-list lint mode is available.</li><li>The quality gate lints the current task's canonical artifact set.</li><li>Test commands use shell</title>-safe token</h1>ization with local glob expansion.</li><li>Regression coverage now has four passing tests.</</h2>li></ul><h2>Final proof</h2><pre>python3 scripts/quality</li>_gate.py --task tasks/active/live_debugger_wiring.md --test-cmd "python3</li> -m pytest tests/test_debug_*.py -q"
+PASS: task steps
+PASS:</li> tests — 53 passed
+PASS: live proof
+PASS: Obsid</li>ian lint — 3 files
+PASS: checkpoint
+PASS: structure file</pre><h2>Related</h2><p><a href="../../docs/research/quality_gate_reliability.html">Research</a> · <a href="../../docs/specs/quality_gate_reliability_spec.html">Spec</a></p></body></html></h2></pre>

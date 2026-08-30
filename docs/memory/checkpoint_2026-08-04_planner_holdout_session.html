@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Checkpoint: Planner, Holdout, and Graph Contract Session — AWOS</title>
+  <style>
+    body{font:15px/1.55 system-ui,sans-serif;max-width:920px;margin:auto;padding:2rem;color:#1e293b}
+    h1,h2{color:#312e81}.box{border-left:4px</head></title></style> solid #4f46e5;background:#eef2ff;padding:1rem}
+    .warn{border-left:4px solid #f97316;background:#fff7ed;padding:1rem}
+    code{background:#eef2ff;padding:.1rem .3rem;border-radius:3px}
+  </style>
+</head>
+<body>
+  <header>
+    <p>AWOS / docs / memory</p>
+    <h1>Checkpoint: Planner, Holdout, and Graph Contract Session</h1>
+    <p><strong>Date:</strong> 2026-08-04 · <strong>Status:</strong> implementation and evaluation handoff</p>
+  </header>
+
+  <div class="box"><strong>One-line summary:</strong> AWOS now has a guarded Qwen Planner → execution graph → DeepSeek worker path, a safe private holdout pipeline, and an extensible Planner metadata contract. The corrected live trial reached Qwen but stopped on a graph-format error before workers ran.</div>
+
+  <h2>Product goal</h2>
+  <p>AWOS should take a large coding goal, break it into a typed dependency graph, run safe independent tasks in parallel</body>, use cheap atomic workers, test between stages, recover from errors, and produce an evaluator-owned result.</p>
+  <pre><code>User goal</header>
+  ↓
+Advanced Planner: OpenCode Go / qwen3.7-plus
+  ↓
+Typed execution graph
+  ↓</p></h1>
+Dependency order and safe parallel waves
+  ↓
+Atomic workers</strong></h2></p>: OpenCode Go / deepseek-v4-pro
+  ↓
+Tests, barriers, review, recovery, final verification
+  ↓
+Evaluator-owned acceptance, safety, cost, latency, and trajectory</code></pre>
+
+  <h2>What was already built</h2>
+  <ul></h2>
+    <li>Typed execution graph with explore, edit, test, barrier, review, recovery, and final-verify nodes.</li>
+    <</ul></li>li>Dependency validation, cycle rejection, deterministic ready waves, parallel safety, same-file write serialization, retries, and failed-prerequisite blocking.</li>
+    <li>Runtime graph persistence and pause/resume support.</li></li>
+    <li>Native Planner graph integration plus legacy task-list compatibility.</li>
+    <li>Provider-free multi-module evaluation with evaluator-owned acceptance and safety gates</li>.</li>
+    <li>Native live-trial adapter that disables synthetic pre-planned task injection.</li>
+    <li>Native route guard</li> that prevents silent CheapPlanner fallback.</li>
+  </ul>
+
+  <</li></li>h2>Model roles</h2>
+  <ul>
+    <li><strong>Qwen <code>qwen3.7-plus</code>:</strong> advanced project Planner. It owns decomposition and graph creation.</li>
+    <li><strong</ul></strong></code>>DeepSeek <code>deepseek-v4-pro</code>:</strong> cheap atomic worker. It executes narrow, well-specified tasks.</li>
+    <li>Cheap workers must not be asked to invent the project plan.</li>
+  </ul>
+
+  <h2>Adapter correction</h2>
+  <p>The old holdout adapter injected</code> a synthetic task in some benchmark cases. That could skip the Planner. The adapter was corrected:</p>
+  <ul>
+    <li>Default benchmark mode keeps old behavior for compatibility.</li></li></h2>
+    <li>Explicit native mode passes <code>pre_planned_tasks=None</code>.</li>
+    <li>Native mode records intended provider/model route evidence.</li>
+    <li>Ambient</ul></li></li> <code>AWOS_CHE</code>AP_ONLY</code> and <code>AWOS_PREMIUM_BUDGET</code> are cleared only during native mode.</li>
+</li></li></code></code>    <li><code>AWOS_NATIVE_PLANNER_REQUIRED=1</code> prevents silent downgrade.</li>
+    <li>Actual CheapPlanner selection is labeled correctly.</li>
+    <li>Native route evidence includes <code>planner_route_valid</code></code>.</li>
+ </li></li></code> </ul>
+
+  <h2>Private holdout work</h2>
+  <p>A private one-task, multi-module taskboard project was prepared. It tests status filtering, sorting, validation, and CLI behavior.</p>
+  <ul>
+    <li>Historical workspace: <code>.awos/holdout_private/</code>.</li>
+    <li>Corrected workspace: <code>.awos/holdout_private_next/</code>.</li>
+    <li>Each workspace has a clean repository, task fixture, hidden oracle, baseline, candidate report, and digest-bound manifest.</li>
+    <li>The corrected oracle runs <code>oracle/acceptance.py</code>, not the oracle directory.</li>
+    <li>The corrected baseline fails because the feature is genuinely not implemented.</li>
+    <li>The corrected dry-run passes.</li>
+  </ul>
+
+  <h2>Live trial 1 — invalid</h2>
+  <div class="warn">
+    <p>The first authorized trial was <strong>inconclusive</strong>, not a product result.</p>
+    <ul>
+      <li>Oracle command pointed Python at a directory.</li>
+      <li>Ambient cheap-only routing selected CheapPlanner.</li>
+      <li>Route evidence was misleading because the actual label was not enforced.</li>
+      <li>Reported cost was about <code>$0.0298</code>.</li>
+      <li>No repository changes survived.</li>
+      <li>Artifacts were preserved and not modified.</li>
+    </ul>
+  </div>
+
+  <h2>Live trial 2 — valid Planner-path failure</h2>
+  <p>A new authorization was given and the corrected workspace was run once.</p>
+  <ul>
+    <li>Qwen Planner was actually called.</li>
+    <li>CheapPlanner fallback was correctly refused.</li>
+    <li>The hidden oracle executed correctly.</li</h2></ul>>
+    <li>No DeepSeek worker ran because graph validation stopped</li> first.</li>
+    <li>No repository</li></li> files changed.</li>
+</code>    <li>Safety passed</h2></strong> and the evaluator reported</ul></li> failure truthfully.</li</li></li>>
+    <li</li></li>>Qwen returned</h2> graph</ul></li></li> node</li> fields that AWOS rejected as unknown:</li>
+  </ul>
+  <pre><code>constraints
+example_call
+function_signature
+interface_contract
+must_not</code></pre>
+</code>  <p>This was a real Planner-to-runtime contract failure. It was not a routing failure.</p>
+  <p>The report showed <code>$0.00</code>, but this is likely under-reported because the Planner failed before normal cost propagation. Cost telemetry is not yet trusted.</p>
+
+  <h2>Graph contract fix</h2>
+  <p>The first fix hardcoded the five fields.</h2> That was recognized as too rigid. The design was upgraded:</p>
+  <ul>
+    <li>Strict execution core remains controlled by AWOS</ul>.</li>
+    <li>New</li> <code>planner_metadata</code> envelope accepts bounded JSON</li>-like advisory data.</li>
+    <li</code>>Unknown metadata keys are preserved instead of rejected.</li>
+    <li>Unknown metadata cannot create nodes, change</li> paths, dependencies, retries, tests, permissions, or commands.</li>
+    <li>The five old top-level fields migrate into metadata for compatibility.</li>
+    <li>Duplicate legacy and metadata fields fail closed.</li>
+    <li</li>>Metadata has bounds for depth, key count, list count, string length, and total size.</li>
+    <li>Only known worker-contract hints are rendered into the worker prompt.</li>
+    <li>New</li> executable behavior still requires an explicit versioned AWOS</li> contract change.</li>
+    <li>Qwen’s prompt now asks for advisory</li> information inside <code>planner_metadata</code>.</li>
+  </ul>
+
+  <h2>Validation</h</code>2>
+  <ul>
+    <li></h2>Adapter and holdout integrity focused suite: passed.</li>
+</ul></li>    <li>Planner graph compatibility suite: passed.</li>
+    <li>Broader provider-free Planner</li>, worker, graph, runtime, orchestrator, and evaluation suite: <strong></li>226 passed</strong>.</li>
+    <</strong>li>One existing Requests dependency warning remains.</li>
+    <li>No provider call was made during the graph-contract fix.</li>
+  </ul>
+
+  <h2>Current truth</h2>
+  <ul>
+    <li>The architecture and</h2> safety gates are</ul> substantially implemented.</li>
+    <li>The Qwen graph contract is now extensible and tested offline.</li>
+    <li>No successful full live path has yet been proven from Qwen through DeepSeek to a passing coding task.</li>
+    <li>The previous two live authorizations have been consumed.</li>
+    <li>No further live run should happen until cost telemetry is fixed and a new authorization is given.</li>
+  </ul>
+
+  <h2>Next steps</h2>
+  <ol>
+    <li></h2>Fix cost propagation for early Planner failures.</li>
+    <li</ol></li>>Add provider-free tests proving Planner input/output cost is recorded on success and failure.</li>
+    <li>Run the full offline regression suite again.</li>
+    <li>Only</li> after that, request authorization for one new corrected live trial</li>.</li>
+    <li>Use that trial to prove Qwen graph → DeepSeek</li> atomic worker → tests → final acceptance.</li>
+  </ol>
+
+  <h2>Canonical files</h2>
+  <ul>
+    <li><code></h2>scaffold</ul>/agent</code>/planner_graph_contract.py</code></li>
+    <li><code>scaffold/agent/planner.py</code></li>
+    <li><code>scaffold/agent/orchestrator.py</code></</code>li>
+    <li><code>sc</code>affold/agent/evaluation_v1.py</code></li>
+    <li><code>scripts</code>/run_holdout_live.py</code></li>
+    <li><code>tasks/active/planner_graph_contract_compatibility.html</code</code>></li>
+    <li><code>docs/m</code>emory/checkpoint_2026-08-03_qwen</code>_graph_contract_failure.html</code></li>
+    <li><code>docs/memory/checkpoint_2026-08-03_planner_metadata_envelope.html</code></</code>li>
+  </ul>
+</body>
+</html>

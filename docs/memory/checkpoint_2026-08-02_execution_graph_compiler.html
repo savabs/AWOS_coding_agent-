@@ -1,0 +1,7 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Checkpoint: Execution Graph Compiler — AWOS</title><style>body{font:15px/1.6 system-ui;max-width:900px;margin:32px auto;padding:0 20px;color:#1e293b}h1,h2{color:#312e81}code{background:#f1f5f9;padding:2px 5px}</style></head><body>
+<h1>Session Checkpoint — Execution Graph Compiler</h1><p><strong>Date:</strong> 2026-08-02</p><p><strong>Immutable record:</strong> Step 1.1 complete.</p>
+<h2>Completed</h2><p>Added <code>ExecutionGraph.from_plan_tasks()</code> to compile current Planner task dictionaries into typed nodes with stable <code>task:&lt;id&gt;</code> IDs, normalized dependencies, file metadata, acceptance/evidence fields, read-only defaults, and original task metadata. Malformed tasks, duplicate IDs, invalid node types, and unknown dependencies fail closed.</p>
+<h2>Validation</h2><p><code>python3 -m pytest tests/test_execution_graph.py -q</code> — 19 passed. Diagnostics are clean for the implementation and tests.</p>
+<h2>Next</h2><p>Implement Step 1.2: a graph-aware DAG execution adapter that runs validated waves and updates node statuses without cycle forcing. Do not modify RuntimeSession or orchestrator wiring until the adapter is proven.</p>
+</body></html>

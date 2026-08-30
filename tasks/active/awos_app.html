@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task: AWOS Native App — Electron + Apple Design</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#21262d;--border:#30363d;--text:#c9d1d9;--muted:#8b949e;--accent:#58a6ff;--accent-green:#3fb950;--accent-red:#f85149;--accent-yellow:#d29922}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:20px 32px}
+header h1{font-size:20px;font-weight:600;margin-bottom:8px;color:var(--accent)}
+header .meta{font-size:12px;color:var(--muted)}
+.tag{background:var(--surface2);color:var(--accent);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace;border:1px solid var(--border)}
+.status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status.active{background:var(--accent-yellow);color:#000}
+.status.done{background:var(--accent-green);color:#000}
+main{max-width:800px;margin:0 auto;padding:32px}
+h2{font-size:17px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border);color:var(--accent)}
+p{margin-bottom:12px}
+pre{background:var(--surface);border:1px solid var(--border);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px}
+.task-item{padding:8px 12px;margin:4px 0;border-radius:4px;border-left:3px solid var(--border);background:var(--surface)}
+.task-item.done{border-left-color:var(--accent-green);opacity:.6}
+.task-item .label{font-size:12px;color:var(--muted)}
+.task-item .step-title{font-weight:600}
+.progress-bar{height:6px;background:var(--surface2);border-radius:3px;overflow:hidden;margin:12px 0}
+.progress-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent-green));transition:width .3s}
+</style>
+</head>
+<body>
+<header>
+  <h1>Task: AWOS Native App — Electron + Apple Design</h1>
+  <div class="meta">
+    <span class="tag">doc/task</span>
+    <span class="tag">phase/4</span>
+    <span class="tag">topic/native-app</span>
+    <span class="status active">active</span>
+    <time>2026-07-12</time>
+  </div>
+</header>
+<main>
+
+<h2>Summary</h2>
+<p>Ship AWOS as a real desktop application — dock icon, frameless window, native menus, Apple-inspired visual design.</p>
+
+<p><strong>Spec:</strong> <a href="../../docs/specs/awos_app_spec.html">awos_app_spec.html</a></p>
+
+<div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width: 100%"></div></div>
+
+<h2>Steps (7/7 done)</h2>
+
+<div class="task-item done"><div class="label">✅ Step 1</div><div class="step-title">Electron project scaffold (package.json + npm install)</div></div>
+<div class="task-item done"><div class="label">✅ Step 2</div><div class="step-title">Electron main process: spawn server, frameless window, native menus, dock</div></div>
+<div class="task-item done"><div class="label">✅ Step 3</div><div class="step-title">Preload bridge: dockBounce, setProgress, platform</div></div>
+<div class="task-item done"><div class="label">✅ Step 4</div><div class="step-title">Apple-inspired visual redesign: frameless title bar, reasoning sheet, event cards</div></div>
+<div class="task-item done"><div class="label">✅ Step 5</div><div class="step-title">In-app agent execution: POST /api/agent/run endpoint + command bar UI</div></div>
+<div class="task-item done"><div class="label">✅ Step 6</div><div class="step-title">Enter key triggers run, session_done resets input</div></div>
+<div class="task-item done"><div class="label">✅ Step 7</div><div class="step-title">Live proof: 7/7 UI markers + API returns {"status":"started"}</div></div>
+
+<h2>Verification</h2>
+<table>
+<tr><th>Check</th><th>Status</th></tr>
+<tr><td>Title: "AWOS Agent Console"</td><td>✅</td></tr>
+<tr><td>Frameless title bar</td><td>✅</td></tr>
+<tr><td>Reasoning sheet (thinking panel)</td><td>✅</td></tr>
+<tr><td>Apple dark background (#1a1a1e)</td><td>✅</td></tr>
+<tr><td>Apple blue accent (#0071e3)</td><td>✅</td></tr>
+<tr><td>Event cards present</td><td>✅</td></tr>
+<tr><td>Stats: Tasks/Models/Cost</td><td>✅</td></tr>
+<tr><td>No CI Rescue branding</td><td>✅</td></tr>
+<tr><td>Electron bridge (window.awos)</td><td>✅</td></tr>
+<tr><td>Electron launches + server connection</td><td>✅</td></tr>
+<tr><td>Command bar present</td><td>✅</td></tr>
+<tr><td>Goal input + Run button</td><td>✅</td></tr>
+<tr><td>Enter key triggers run</td><td>✅</td></tr>
+<tr><td>session_done resets input</td><td>✅</td></tr>
+<tr><td>POST /api/agent/run returns started</td><td>✅</td></tr>
+</table>
+
+<h2>Related</h2>
+<ul>
+  <li><a href="../../docs/specs/awos_app_spec.html">[[awos_app_spec]]</a> — spec</li>
+  <li><a href="../../docs/specs/agent_console_spec.html">[[agent_console_spec]]</a> — previous UI redesign</li>
+</ul>
+
+</main>
+</body>
+</html>

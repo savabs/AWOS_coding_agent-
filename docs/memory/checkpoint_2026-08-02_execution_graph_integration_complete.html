@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Checkpoint: Execution Graph Integration Complete — AWOS</title><style>body{font:15px/1.6 system-ui;max-width:900px;margin:32px auto;padding:0 20px;color:#1e293b}h1,h2{color:#312e81}code{background:#f1f5f9;padding:2px 5px}</style></head><body>
+<h1>Session Checkpoint — Execution Graph Integration Complete</h1><p><strong>Date:</strong> 2026-08-02</p><p><strong>Status:</strong> integration task complete.</p>
+<h2>Completed</h2><p>The typed ExecutionGraph now compiles current Planner task dictionaries, executes validated parallel waves, persists graph state in RuntimeSession, routes orchestrator parallel batches through the graph, checkpoints evidence after each wave, and supports explicit failure recovery and resume.</p>
+<h2>Focused Validation</h2><ul><li>Graph/runtime/E2E gate: <strong>56 passed</strong>.</li><li>ProjectPlanner/orchestrator regression gate: <strong>58 passed</strong>.</li><li>Known warning: one pre-existing RequestsDependencyWarning.</li></ul>
+<h2>Known Limitations</h2><p>The repository-wide Obsidian lint remains blocked by 371 pre-existing errors. The full repository is not claimed green. The orchestrator file retains unrelated pre-existing diagnostics.</p>
+<h2>Next Architecture Phase</h2><p>Use a new research/spec/task gate before adding richer Planner-native typed graph output, final verification nodes, graph-level joins, or broader runtime/UI observability.</p>
+</body></html>

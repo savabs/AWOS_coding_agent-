@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Checkpoint: Routing Learning System Repair — Research &amp; Steps 1-2</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:900px;margin:20px auto;padding:20px;background:#fafafa;color:#1e293b;line-height:1.6}
+h1{border-bottom:2px solid #e2e8f0;padding-bottom:8px;font-size:22px}
+h2{color:#4f46e5;font-size:16px;margin:20px 0 8px;border-bottom:1px solid #e2e8f0;padding-bottom:4px}
+h3{font-size:14px;margin:14px 0 4px}
+table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px}
+th{background:#f1f5f9;text-align:left;padding:6px 10px;border:1px solid #e2e8f0}
+td{padding:6px 10px;border:1px solid #e2e8f0;vertical-align:top}
+pre{background:#1e293b;color:#e2e8f0;padding:12px;border-radius:4px;font-size:12px;overflow-x:auto}
+code{font-family:monospace;font-size:12px;background:#f1f5f9;padding:1px 4px;border-radius:3px}
+ul,ol{margin:6px 0 12px 20px}
+.callout{background:#eef2ff;border-left:3px solid #4f46e5;padding:10px 14px;border-radius:0 6px 6px 0;margin:12px 0}
+.warn{background:#fef3c7;border-left:3px solid #f59e0b;padding:10px 14px;border-radius:0 6px 6px 0;margin:10px 0}
+</style>
+</head>
+<body>
+
+<h1>Checkpoint 2026-07-09 — Routing Learning System Repair</h1>
+<p><strong>Session focus:</strong> Diagnosed and began fixing AWOS's broken routing learning system. Research → Spec → Task → Implementation (Steps 1–2 of 7 complete).</p>
+
+<div class="callout">
+<strong>Strategic context:</strong> User identified that AWOS routing is mostly fixed/deterministic, not actually learning. Diagnosed three bugs preventing LinUCB from learning. Also researched OpenCode Go model offerings as a future addition (deferred until routing is fixed).
+</div>
+
+<h2>1. What was researched</h2>
+
+<h3>OpenCode Go + Zen (for future integration)</h3>
+<table>
+  <tr><th>Topic</th><th>Key Finding</th></tr>
+  <tr><td>Go pricing</td><td>$5 first month, then $10/month. 13 open-source coding models. API: <code>https://opencode.ai/zen/go/v1</code> (OpenAI-compatible). Model ID format: <code>opencode-go/&lt;model&gt;</code></td></tr>
+  <tr><td>Go models</td><td>MiMo-V2.5 ($0.14/MTok), Qwen3.7 Plus ($0.40), DeepSeek V4 Pro ($1.74), Kimi K2.7 Code ($0.95), Qwen3.7 Max ($2.50), GLM-5.2 ($1.40), MiniMax M3 ($0.30), Kimi K2.6 ($0.95), DeepSeek V4 Flash ($0.14)</td></tr>
+  <tr><td>Zen pricing</td><td>PAYG. Same prices as direct APIs for Claude/GPT/Gemini. Free models: Big Pickle, DeepSeek V4 Flash Free, MiMo-V2.5 Free, North Mini Code Free, Nemotron 3 Ultra Free (privacy risk for free tier).</td></tr>
+  <tr><td>Decision</td><td>Defer Go integration until routing learning loop is fixed. Go adds 4 valuable models at different price tiers: MiMo-V2.5 (T2 backup), Qwen3.7 Plus (T3 mid), Kimi K2.7 Code (T4 code-specialized), Qwen3.7 Max (T4 heavy).</td></tr>
+  <tr><td>Research doc</td><td><a href="../research/opencode_go_tiering.html"><code>docs/research/opencode_go_tiering.html</code></a></td></tr>
+</table>
+
+<h3>Routing Learning System — Root Cause Analysis</h3>
+<table>
+  <tr><th>Bug #</th><th>Description</th><th>Evidence</th></tr>
+  <tr><td>1</td><td><strong>N_ACTIONS mismatch discards all weights</strong><br>LinUCB weights file has <code>n_actions=4</code> (old: no OpenRouter/Sonnet). Current code has <code>N_ACTIONS=6</code>. <code>_load()</code> checks for exact match → fails → discards. Every session starts from zero.</td><td><code>.awos/linucb_weights.pkl</code>: n_actions=4, 30 updates, last saved <strong>May 24 2026</strong> (6 weeks ago). <code>ml_router.py:332-346</code></td></tr>
+  <tr><td>2</td><td><strong>ReplayGate rejects 79.5% of episodes</strong><br>Gate has threshold=0.4 with equal scoring weights. Novelty component punishes repetitive coding tasks. Boundary punishes the default model (DeepSeek, 61% of traffic). Combined score for common episodes is ~0.19 &lt; 0.40.</td><td>Simulation on 3171 episodes: admitted=649 (20.5%), rejected=2522 (79.5%). Primary reason: low_novelty (2479/2522). Only 287 unique feature vectors out of 3171.</td></tr>
+  <tr><td>3</td><td><strong>No warm-start from RewardStore</strong><br>LinUCB starts at 0 updates every session. Needs min_samples=20 admitted episodes to activate. At 20.5% admit rate, takes ~100 raw episodes. Short sessions never activate. No batch-replay mechanism exists.</td><td><code>ml_router.py:253-255</code>: is_ready() requires total_updates >= 20. <code>orchestrator.py:121-133</code>: no warm-start call.</td></tr>
+</table>
+
+<h3>RewardStore Data Picture (healthy)</h3>
+<table>
+  <tr><td>Total episodes</td><td>3171 (May 24 – Jul 8 2026)</td></tr>
+  <tr><td>Action distribution</td><td>DeepSeek 61%, OpenAI 20%, Haiku 13%, Gemini 5%, OpenRouter 1%, Sonnet 0%</td></tr>
+  <tr><td>Success rates</td><td>OpenRouter 69% (n=26), DeepSeek 56% (n=1920), OpenAI 51% (n=646), Haiku 31% (n=409), Gemini 12% (n=170)</td></tr>
+  <tr><td>Avg reward per action</td><td>OpenRouter +0.66, DeepSeek +0.52, OpenAI +0.38, Gemini +0.07, Haiku +0.06</td></tr>
+  <tr><td>Reward function</td><td>Working correctly. Produces clear gradients: costlier+worse models (Haiku) get lower reward than cheaper+better (DeepSeek).</td></tr>
+  <tr><td>Features</td><td>All 3171 episodes have valid 10-dim feature vectors. 287 unique vectors.</td></tr>
+</table>
+
+<h2>2. What was decided</h2>
+
+<ul>
+  <li><strong>Fix routing learning BEFORE adding Go models</strong> — safer approach. Fix engine, then add cylinders.</li>
+  <li><strong>4 specific fixes:</strong> weight versioning (pad/truncate), adaptive ReplayGate threshold, warm-start from RewardStore, routing_status observability</li>
+  <li><strong>Deferred:</strong> OpenCode Go integration (4 new actions) → Phase B after learning is proven</li>
+  <li><strong>Deferred:</strong> Cross-model caching → Phase C</li>
+</ul>
+
+<h2>3. What was implemented (so far)</h2>
+
+<h3>Step 1: Weight Versioning ✅</h3>
+<table>
+  <tr><th>File</th><td><code>scaffold/agent/ml_router.py</code></td></tr>
+  <tr><th>Change</th><td>Rewrote <code>_save()</code> and <code>_load()</code> methods</td></tr>
+  <tr><th>Details</th><td>
+    <ul>
+      <li><code>_save()</code>: adds <code>"format_version": 2</code> to payload</li>
+      <li><code>_load()</code>: checks format_version. V1 (no key): only loads on exact n_actions match (backward compat). V2+: handles mismatch by <strong>padding</strong> (more current actions → new actions get identity A, zero b → explore freely) or <strong>truncating</strong> (fewer current actions → drop extra).</li>
+      <li>Logs: "loaded v2: X updates, padded Y→Z actions" or "truncated Y→Z actions"</li>
+      <li>Feature dimension mismatch → still starts fresh (can't pad features)</li>
+      <li>Added guard for <code>_weights_path is None</code> in both save and load</li>
+    </ul>
+  </td></tr>
+</table>
+
+<h3>Step 2: ReplayGate Fixes ✅</h3>
+<table>
+  <tr><th>File</th><td><code>scaffold/agent/reward_store.py</code></td></tr>
+  <tr><th>Change</th><td>Reworked ReplayGate scoring and threshold logic</td></tr>
+  <tr><th>Details</th><td>
+    <ul>
+      <li><strong>Adaptive threshold</strong>: <code>threshold</code> changed from fixed attribute to <code>@property</code>. Formula: <code>max(0.15, base_threshold - 0.01 * sqrt(total_episodes))</code>. At 0 episodes=0.40 (strict), at 500=0.18, at 1600=0.15 (floor).</li>
+      <li><strong>Weighted scoring</strong>: changed from equal (1/3 each) to: <code>inform*0.4 + novelty*0.2 + boundary*0.4</code>. Novelty weight halved because coding tasks are inherently repetitive.</li>
+      <li><strong>Tracking</strong>: added <code>_total_episodes</code> and <code>_admitted_count</code> counters. Every 100 episodes: log <code>[replay_gate] N episodes processed, admit rate=X%, threshold=Y</code>.</li>
+      <li><strong>admit_rate()</strong>: new method returning fraction admitted so far.</li>
+    </ul>
+  </td></tr>
+</table>
+
+<h3>Documents Created</h3>
+<table>
+  <tr><th>Artifact</th><th>File</th><th>Status</th></tr>
+  <tr><td>Research: OpenCode Go Model Tiering</td><td><code>docs/research/opencode_go_tiering.html</code> + stub</td><td>Complete</td></tr>
+  <tr><td>Research: Routing Learning Repair</td><td><code>docs/research/routing_learning_repair.html</code> + stub</td><td>Complete</td></tr>
+  <tr><td>Spec: Routing Learning Repair</td><td><code>docs/specs/routing_learning_repair_spec.html</code> + stub</td><td>Complete</td></tr>
+  <tr><td>Task: Routing Learning Repair</td><td><code>tasks/active/routing_learning_repair.html</code></td><td>Steps 1-2/7 done</td></tr>
+</table>
+
+<h2>4. What still needs implementation</h2>
+
+<div class="warn">
+<strong>Remaining steps (3–7):</strong>
+</div>
+<table>
+  <tr><th>Step</th><th>File</th><th>Description</th></tr>
+  <tr><td>3</td><td><code>ml_router.py</code></td><td>Add <code>warm_start(reward_store, max_episodes=100) -> int</code> method — batch-replays prioritized episodes from RewardStore, skips ReplayGate</td></tr>
+  <tr><td>4</td><td><code>orchestrator.py</code></td><td>Call <code>self.ml_router.warm_start(self.reward_store, max_episodes=50)</code> after init. Log result.</td></tr>
+  <tr><td>5</td><td><code>escalation_engine.py</code></td><td>Add <code>routing_status()</code> method returning dict with linucb_ready, updates, actions, cheap-only flag, dead providers</td></tr>
+  <tr><td>6</td><td><code>tests/test_routing_learn.py</code></td><td>Unit tests: weight padding/truncation, adaptive threshold, warm_start with mock store, routing_status shape</td></tr>
+  <tr><td>7</td><td><code>scripts/demo_routing_learn.py</code></td><td>Live proof: simulate 200 routing decisions, verify LinUCB activates, weights persist, learned preferences printed</td></tr>
+</table>
+
+<h2>5. Key numbers for next session</h2>
+<table>
+  <tr><td>LinUCB weights file</td><td><code>.awos/linucb_weights.pkl</code> — n_actions=4, 30 updates, last saved May 24 (will be upgraded to v2 on next save)</td></tr>
+  <tr><td>RewardStore</td><td><code>.awos/reward_store.jsonl</code> — 3171 episodes (107 days of data)</td></tr>
+  <tr><td>Current action space</td><td>6 actions: Gemini(0), DeepSeek(1), OpenAI(2), Haiku(3), Sonnet(4), OpenRouter(5)</td></tr>
+  <tr><td>N_ACTIONS</td><td>6 (will become 10 when Go models added later)</td></tr>
+  <tr><td>min_samples for LinUCB</td><td>20 (unchanged)</td></tr>
+  <tr><td>ReplayGate base threshold</td><td>0.40 (adaptive: relaxes to 0.15 floor)</td></tr>
+</table>
+
+<h2>6. Related documents</h2>
+<ul>
+  <li>[[routing_learning_repair]] — research on the three bugs</li>
+  <li>[[routing_learning_repair_spec]] — implementation spec with 7 steps</li>
+  <li>[[opencode_go_tiering]] — OpenCode Go model research (deferred)</li>
+  <li>[[ml_router]] — LinUCBRouter implementation (changed: _save, _load)</li>
+  <li>[[reward_store]] — ReplayGate (changed: threshold, scoring, tracking)</li>
+  <li>[[escalation_engine]] — routing_status to be added</li>
+  <li>[[orchestrator]] — warm_start wiring to be done</li>
+</ul>
+
+<h2>7. Commands run</h2>
+<pre>
+# Verified LinUCB weight file state
+python3 -c "import pickle; w=pickle.load(open('.awos/linucb_weights.pkl','rb')); print(f'n_actions={w[\"n_actions\"]} updates={w.get(\"total_updates\")}')"
+→ n_actions=4, total_updates=30
+
+# Simulated ReplayGate behavior on full dataset
+→ Total: 3171; Admitted: 649 (20.5%); Rejected: 2522 (79.5%); Primary: low_novelty (2479)
+
+# Verified RewardStore data quality
+→ All 3171 episodes have features, rewards, action_ids. Per-action rewards: OR=+0.66, DS=+0.52, OA=+0.38, Haiku=+0.06, Gem=+0.07
+
+# Lint check
+ruff check scaffold/agent/ml_router.py scaffold/agent/reward_store.py --quiet
+→ exit=0 (clean)
+</pre>
+
+</body>
+</html>

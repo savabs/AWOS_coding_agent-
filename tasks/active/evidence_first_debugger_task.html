@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task: Evidence-First Debugger — AWOS</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--header:#1e293b;--header-text:#f8fafc;--success:#10b981;--warn:#f59e0b;--danger:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status-badge{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status-active{background:#f59e0b;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+main{max-width:900px;margin:0 auto;padding:32px}
+.meta-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin-bottom:24px;display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:13px}
+.meta-card .key{color:var(--muted);font-weight:600}
+h2{font-size:17px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:20px 0 8px}
+p{margin-bottom:12px}
+.step{display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border-radius:6px;margin:6px 0;border:1px solid var(--border);background:var(--surface)}
+.step.done{background:#f0fdf4;border-color:#bbf7d0}
+.step.active{background:var(--accent-light);border-color:#c7d2fe}
+.step.blocked{background:#fef2f2;border-color:#fecaca}
+.step input[type=checkbox]{flex-shrink:0;margin-top:3px;width:16px;height:16px;accent-color:var(--success)}
+.step .step-body{flex:1}
+.step .step-num{font-size:11px;color:var(--muted);margin-bottom:2px;font-family:monospace}
+.step .step-title{font-weight:600;font-size:14px;margin-bottom:4px}
+.step .step-exit{font-size:12px;color:var(--muted);font-style:italic}
+.step .step-exit strong{color:var(--text);font-style:normal}
+.step .step-notes{font-size:13px;margin-top:4px;color:var(--muted)}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px;background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px}
+.progress-bar{background:var(--surface2);border-radius:8px;height:8px;margin:8px 0;overflow:hidden}
+.progress-bar .fill{background:var(--success);height:100%;border-radius:8px;transition:.3s;width:0%}
+.progress-label{font-size:12px;color:var(--muted);margin-bottom:4px}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+footer{background:var(--surface);border-top:1px solid var(--border);padding:16px 32px;display:flex;justify-content:flex-end;gap:12px}
+.copy-btn{background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:500}
+.copy-btn.secondary{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+</style>
+</head>
+<body>
+<header>
+  <div class="breadcrumb">AWOS / tasks / active</div>
+  <h1>Task: Evidence-First Debugger</h1>
+  <div class="meta">
+    <span class="tag">doc/task</span>
+    <span class="tag">phase/1</span>
+    <span class="tag">topic/evidence-first-debugger</span>
+    <span class="tag">status/active</span>
+    <span class="status-badge status-active">IN PROGRESS</span>
+    <time>2026-07-26</time>
+  </div>
+</header>
+<main>
+<div class="meta-card">
+  <span class="key">Goal</span><span>Design and then implement an AWOS debugger that only claims issues it can support with recorded evidence, explicit proof rules, or proof-by-rerun.</span>
+  <span class="key">Spec</span><span><a href="../../docs/specs/evidence_first_debugger_spec.html">evidence_first_debugger_spec.html</a></span>
+  <span class="key">Research</span><span><a href="../../docs/research/evidence_first_debugger.html">evidence_first_debugger.html</a></span>
+  <span class="key">Phase</span><span>1 — Proper Coding Agent</span>
+  <span class="key">Started</span><span>2026-07-26</span>
+  <span class="key">Completed</span><span>2026-07-26</span>
+</div>
+<div class="progress-label" id="progress-label">12 / 12 steps complete</div>
+<div class="progress-bar"><div class="fill" id="progress-fill"></div></div>
+<h2>Steps</h2>
+<p>Each step is atomic at the task level; the spec further decomposes each step into code-facing atomic actions.</p>
+<h3>Planning checkpoint — completed in this session</h3>
+<div class="callout"><strong>Review result:</strong> The existing research and implementation outline are coherent. The first implementation gate is complete: claim scope, truth semantics, schemas, reports, and bundle layout are implemented and tested. The next gate is runtime evidence normalization.</div>
+<div class="callout"><strong>Frozen rule:</strong> A proven observation is not automatically a proven root cause. Every finding must name its claim type, proof rule, evidence references, and bounded conclusion. Heuristics may rank hypotheses but cannot produce <code>PROVEN</code>.</div>
+<div class="step done" id="step-1">
+  <input type="checkbox" checked onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 1</div>
+    <div class="step-title">Implement the frozen truth model, schemas, and bundle layout</div>
+    <div class="step-exit"><strong>Exit condition:</strong> The implementation represents claim type, <code>PROVEN</code>/<code>HYPOTHESIS</code>/<code>UNKNOWN</code>, evidence classes, versioned proof references, reports, and append-only bundles; round-trip and integrity tests pass.</div>
+    <div class="step-notes">Planning is complete in the governing spec. Implementation must now follow the claim-scoped contract: observation proof never silently becomes root-cause proof.</div>
+  </div>
+</div>
+<div class="step done" id="step-2">
+  <input type="checkbox" checked onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 2</div>
+    <div class="step-title">Normalize current runtime artifacts into debugger evidence</div>
+    <div class="step-exit"><strong>Exit condition:</strong> <code>spans.jsonl</code>, <code>telemetry.jsonl</code>, and <code>events.jsonl</code> can be read as one normalized evidence model.</div>
+    <div class="step-notes">Implemented in <code>scaffold</code>/agent/core/debug_adapters.py</code> with source references, stable IDs, timestamp validation, and preserved payloads.</div>
+  </div>
+</div>
+<div class="step done" id="step-3">
+  <input type="checkbox" checked onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 3</div>
+    <div class="step-title">Unify legacy and current event vocabularies</div>
+    <div class="step-exit"><strong>Exit condition:</strong> Old and new sessions normalize to one canonical event taxonomy without losing meaning.</div>
+    <div class="step-notes">Legacy aliases are mapped while original event names remain in the evidence payload for auditability.</div>
+  </div>
+</div>
+<div class="step done" id="step-4">
+  <input type="checkbox" checked onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 4</div>
+    <div class="step-title">Implement deterministic proof rules</div>
+    <div class="step-exit"><strong>Exit condition:</strong> Recorded verifier/test/crash/edit artifacts can produce <code>PROVEN</code> findings through explicit rules.</div>
+  </div>
+</div>
+<div class="step done" id="step-5">
+  <input type="checkbox" checked onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 5</div>
+    <div class="step-title">Integrate verification and test outputs into the rule engine</div>
+    <div class="step-exit"><strong>Exit condition:</strong> Verification/test failures generate explainable proof artifacts in debug reports.</div>
+    <div class="step-notes">Implemented in <code>scaffold/agent/core/debug_runtime.py</code> for real <code>Verifier</code> dictionaries and <code>TestResult</code> records.</div>
+  </div>
+</div>
+<div class="step done" id="step-6">
+  <input type="checkbox" checked onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 6</div>
+    <div class="step-title">Integrate fault localization as attribution-only input</div>
+    <div class="step-exit"><strong>Exit condition:</strong> Localization can rank likely causes, but cannot produce <code>PROVEN</code> findings by itself.</div>
+    <div class="step-notes">Implemented in <code>scaffold/agent/core/debug_attribution.py</code>; all localization output is a <code>ROOT_CAUSE</code> hypothesis.</div>
+  </div>
+</div>
+<div class="step done" id="step-7">
+  <input type="checkbox" checked onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 7</div>
+    <div class="step-title">Add a ranked suspicion engine for unsupported cases</div>
+    <div class="step-exit"><strong>Exit condition:</strong> Unsupported cases become ordered hypotheses rather than hallucinated bugs.</div>
+    <div class="step-notes">Implemented in <code>scaffold/agent/core/debug_suspicion.py</code> with bounded weighted signals; it cannot emit proof metadata.</div>
+  </div>
+</div>
+<div class="step done" id="step-8">
+  <input type="checkbox" checked onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 8</div>
+    <div class="step-title">Add rerun/checkpoint requests for proof-by-rerun</div>
+    <div class="step-exit"><strong>Exit condition:</strong> The debugger can describe how to reproduce a suspected issue from a session/task/event boundary.</div>
+    <div class="step-notes">Implemented in <code>scaffold/agent/core/debug_rerun.py</code>; request validation requires a source boundary and frozen inputs.</div>
+  </div>
+</div>
+<div class="step done" id="step-9">
+  <input type="checkbox" checked onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 9</div>
+    <div class="step-title">Resolve findings after rerun</div>
+    <div class="step-exit"><strong>Exit condition:</strong> Rerun outcomes update findings explicitly without overwriting non-reproducible evidence.</div>
+    <div class="step-notes">Implemented in <code>scaffold/agent/core/debug_resolution.py</code>; proven observations are preserved and root-cause reproduction remains non-proof.</div>
+  </div>
+</div>
+<div class="step done" id="step-10">
+  <input type="checkbox" checked onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 10</div>
+    <div class="step-title">Add debugger CLI/API inspection surfaces</div>
+    <div class="step-exit"><strong>Exit condition:</strong> Reports and rerun plans can be inspected programmatically without the GUI.</div>
+    <div class="step-notes">Added read-only inspection via <code>scaffold/agent/core/debug_inspection.py</code> and <code>awos debug-report &lt;session_id&gt;</code>.</div>
+  </div>
+</div>
+<div class="step done" id="step-11">
+  <input type="checkbox" checked onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 11</div>
+    <div class="step-title">Add debugger UI surfaces to the Agent Console</div>
+    <div class="step-exit"><strong>Exit condition:</strong> The app distinguishes facts, hypotheses, and unknowns clearly for both success and failure runs.</div>
+    <div class="step-notes">Added the Evidence Debugger section to <code>gui/static/agent.html</code> and read-only <code>/api/debug/&lt;session_id&gt;</code> support in <code>gui/server.py</code>.</div>
+  </div>
+</div>
+<div class="step done" id="step-12">
+  <input type="checkbox" checked onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 12</div>
+    <div class="step-title">Build the benchmark/eval suite and optional OTel/OpenInference export</div>
+    <div class="step-exit"><strong>Exit condition:</strong> The debugger’s anti-hallucination contract is benchmarked, and external export is added only after native reports are trusted.</div>
+    <div class="step-notes">Added <code>tests/test_debug_benchmark.py</code>. External telemetry export remains intentionally deferred and is not required for native truth.</div>
+  </div>
+</div>
+<h2>Prioritized Execution Order</h2>
+<ol>
+  <li><strong>P0:</strong> Implement the frozen truth/schema/bundle contract (spec steps 1–3).</li>
+  <li><strong>P1:</strong> Normalize current and legacy runtime journals (spec steps 4–6).</li>
+  <li><strong>P1:</strong> Add deterministic proof rules and anti-hallucination tests (spec steps 7–8 and 15).</li>
+  <li><strong>P1:</strong> Integrate attribution and suspicion ranking without allowing proof escalation (spec steps 9–10).</li>
+  <li><strong>P2:</strong> Add rerun/checkpoint requests and explicit resolution outcomes (spec steps 11–12).</li>
+  <li><strong>P2:</strong> Add machine-readable CLI/API inspection before UI work (spec step 13).</li>
+  <li><strong>P3:</strong> Add UI surfaces and optional external telemetry export only after native reports are trusted (spec steps 14 and 16).</li>
+</ol>
+<h2>Blocked / Decisions</h2>
+<p>This task is currently in <strong>planning-complete, implementation-not-started</strong> state. The repo now has governing research and a detailed spec, but no debugger code has been added in this session.</p>
+<h3>Decision Log</h3>
+<div class="callout"><strong>2026-07-26:</strong> Chosen architecture is a <strong>custom AWOS debugger core</strong> built on top of existing AWOS JSONL journals and informed by <strong>OpenTelemetry + OpenInference</strong>. External systems may serve as viewers or exporters, but AWOS itself remains the authority on issue truth status.</div>
+<div class="callout"><strong>2026-07-26:</strong> The debugger will separate <strong>truth classification</strong> from <strong>investigation ranking</strong>. Heuristics and confidence scores may order work, but they may not produce <code>PROVEN</code> findings without deterministic evidence or proof-by-rerun.</div>
+<h2>Related</h2>
+<ul>
+  <li><a href="../../docs/specs/evidence_first_debugger_spec.html">[[evidence_first_debugger_spec]]</a> — implementation contract</li>
+  <li><a href="../../docs/research/evidence_first_debugger.html">[[evidence_first_debugger]]</a> — background research</li>
+  <li><a href="../../VISION.md">[[VISION]]</a> — canonical identity</li>
+  <li><a href="../active/pivot_web_app_product.md">[[pivot_web_app_product]]</a> — app/interface pathway that will eventually expose debugger results</li>
+</ul>
+</main>
+<footer>
+  <button class="copy-btn secondary" onclick="copyJSON()">Copy State as JSON</button>
+  <button class="copy-btn" onclick="copyPrompt()">Copy as Prompt</button>
+</footer>
+<script>
+function updateProgress(){const boxes=[...document.querySelectorAll('.step input[type=checkbox]')];const done=boxes.filter(b=>b.checked).length;const total=boxes.length;document.getElementById('progress-label').textContent=`${done} / ${total} steps complete`;document.getElementById('progress-fill').style.width=total?`${(done/total)*100}%`:'0%';boxes.forEach((b)=>{const step=b.closest('.step');if(b.checked){step.classList.add('done');step.classList.remove('active','blocked')}})}
+function copyPrompt(){navigator.clipboard.writeText('# Task: Evidence-First Debugger\n\n'+document.querySelector('main').innerText).then(()=>{const b=document.querySelector('.copy-btn:last-child');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy as Prompt',1500)})}
+function copyJSON(){const steps=[...document.querySelectorAll('.step')].map((s,i)=>({step:i+1,title:s.querySelector('.step-title').innerText,done:s.querySelector('input[type=checkbox]').checked,exit:s.querySelector('.step-exit')?.innerText.replace('Exit condition:','').trim()||''}));navigator.clipboard.writeText(JSON.stringify({doc:'task',steps},null,2)).then(()=>{const b=document.querySelector('.copy-btn.secondary');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy State as JSON',1500)});}updateProgress();
+</script>
+</body>
+</html>

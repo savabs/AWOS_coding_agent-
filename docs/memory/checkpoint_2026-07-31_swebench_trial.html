@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Checkpoint — SWE-bench Single Trial 2026-07-31</title>
+<style>
+body{font:15px/1.6 system-ui,sans-serif;max-width:900px;margin:auto;padding:2rem;color:#1e293b}header{background:#1e293b;color:#fff;padding:1.2rem;border-radius:8px}h1{font-size:1.4rem}h2{border-bottom:1px solid #ddd;padding-bottom:.3rem;margin-top:2rem}.callout{background:#eef2ff;border-left:4px solid #4f46e5;padding:.8rem 1rem}.blocked{background:#fff1f2;border-left:4px solid #e11d48;padding:.8rem 1rem}.next{background:#f0fdf4;border-left:4px solid #16a34a;padding:.8rem 1rem}code{background:#eef2ff;padding:.1rem .3rem;border-radius:3px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:.45rem;text-align:left}
+</style>
+</head>
+<body>
+<header><div>AWOS / docs / memory</div><h1>Checkpoint — SWE-bench Single Trial</h1><div>phase/1 · topic/evaluation · 2026-07-31 · IMMUTABLE</div></header>
+<div class="callout"><strong>Source of truth:</strong> This checkpoint records the one authorized live trial after planner path-grounding repair. It is not a capability score.</div>
+<h2>Trial identity</h2>
+<table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>Task</td><td><code>sqlfluff__sqlfluff-2419</code></td></tr>
+<tr><td>Provider/model requested</td><td><code>opencode</code> / <code>deepseek-v4-pro</code></td></tr>
+<tr><td>Budget cap</td><td>$0.50</td></tr>
+<tr><td>Network policy</td><td>allowed</td></tr>
+<tr><td>Trial count</td><td>1 attempted; no retry authorized</td></tr>
+<tr><td>Workspace</td><td><code>.awos/holdout_private/swebench_2419_trial_20260731</code></td></tr>
+</table>
+<h2>Preparation completed</h2>
+<ul><li>Created a fresh isolated private workspace from the digest-consistent clean snapshot.</li><li>Copied only the manifest, fixture, repository snapshot, and baseline report; no prior candidate report was copied.</li><li>Offline live preflight passed for task identity and fixture/repository digests.</li><li>Planner and fixed-provider regression tests passed: 16/16.</li></ul>
+<h2>Observed trial outcome</h2>
+<div class="blocked"><strong>Inconclusive infrastructure failure — not a SWE-bench result.</strong><br>The orchestrator started but completed zero tasks. No patch was produced, no acceptance test ran, and no <code>candidate.json</code> report was emitted.</div>
+<ul><li>Observed failure: missing disposable environment at <code>/tmp/awos-swebench-sqlfluff-venv-2419/bin/python</code>.</li><li>Debug evidence also records invalid planner JSON: primary and fallback planner responses were not parseable.</li><li>Debug bundle: <code>.awos/debug/orch_3e4ec94b/</code>.</li><li>Evidence file: <code>.awos/debug/orch_3e4ec94b/evidence.jsonl</code>.</li><li>No acceptance, safety, truthful-report, cost, or latency result is validly available from an evaluator report.</li></ul>
+<h2>Important routing finding</h2>
+<p>The command was authorized for OpenCode Go / <code>deepseek-v4-pro</code>, but the debug evidence labels the planner failure as Gemini. This is a provider-routing contract mismatch that must be investigated before another live call.</p>
+<h2>Comparison status</h2>
+<p>The previous clean workspace comparison remains valid only as historical evidence: baseline and prior candidate were both <code>pass_at_1=0.0</code>, with no safety regression. The fresh post-repair trial has no candidate report and therefore cannot be compared.</p>
+<h2>Blocked</h2>
+<div class="blocked"><strong>Do not run another provider trial yet.</strong><br>First make the task-local environment setup deterministic, ensure the runner always emits a truthful failure report, and resolve the fixed-provider routing mismatch. Then rerun the offline tests and obtain explicit authorization for a new trial.</div>
+<h2>Next steps</h2>
+<div class="next"><strong>Priority 1 — Diagnose task-local environment setup.</strong><br>Trace the code that expects <code>/tmp/awos-swebench-sqlfluff-venv-2419/bin/python</code>; verify whether dependency installation is required or whether the fixture should use the existing interpreter.</div>
+<div class="next"><strong>Priority 2 — Verify provider routing.</strong><br>Confirm every planner/worker call on the active path uses the fixed OpenCode Go contract; add a regression test for the observed Gemini fallback.</div>
+<div class="next"><strong>Priority 3 — Preserve failed-trial reports.</strong><br>Update the live adapter only within its governing spec so orchestrator exceptions produce an evaluator-valid truthful failure bundle before returning non-zero.</div>
+<div class="next"><strong>Priority 4 — Re-run offline gates before any new live authorization.</strong><br>Do not tune prompts or rewards using this holdout result.</div>
+<h2>Validation</h2>
+<ul><li><code>python3 -m pytest tests/test_planning_exploration_v1.py tests/test_fixed_opencode_go_agent.py</code> — 16 passed, one unrelated requests warning.</li><li><code>python3 scripts/run_holdout_live.py --root ... --dry-run</code> — passed on the fresh workspace.</li><li>Live command — stopped with exit code 1; no candidate report.</li></ul>
+<h2>Related</h2>
+<ul><li><a href="../../tasks/active/small_holdout_evaluation_v1.html">small_holdout_evaluation_v1</a></li><li><a href="../../docs/specs/small_holdout_evaluation_v1_spec.html">small_holdout_evaluation_v1_spec</a></li><li><a href="checkpoint_2026-07-30_11.html">checkpoint_2026-07-30_11</a></li></ul>
+</body>
+</html>

@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Checkpoint: Typed Execution Graph — AWOS</title><style>body{font:15px/1.6 system-ui;max-width:900px;margin:32px auto;padding:0 20px;color:#1e293b}h1,h2{color:#312e81}code{background:#f1f5f9;padding:2px 5px}</style></head><body>
+<h1>Session Checkpoint — Typed Execution Graph</h1>
+<p><strong>Date:</strong> 2026-08-02</p>
+<p><strong>Immutable record:</strong> do not edit after this session; corrections belong in a later checkpoint.</p>
+<h2>Summary</h2>
+<p>Completed the first provider-free execution-graph contract slice beneath the advanced Planner and above future runtime wiring. Added typed operation nodes, deterministic dependency validation, safe ready waves, same-file write serialization, test/barrier gating, failed-prerequisite blocking, recovery insertion, bounded retry fields, and JSON persistence.</p>
+<h2>Validation</h2>
+<ul><li><code>python3 -m pytest tests/test_execution_graph.py -q</code> — 16 passed.</li><li>Diagnostics for <code>scaffold/agent/execution_graph.py</code> — clean.</li><li>Diagnostics for <code>tests/test_execution_graph.py</code> — clean after adding an explicit optional-node assertion.</li></ul>
+<h2>Files</h2>
+<ul><li><code>scaffold/agent/execution_graph.py</code></li><li><code>tests/test_execution_graph.py</code></li><li><code>tasks/active/execution_graph_task.md</code> and <code>.html</code></li><li><code>memories/repo/project_structure.md</code></li></ul>
+<h2>Next step</h2>
+<p>Finish scoped cleanup/lint, then create a separate research/spec/task triad for integrating the ExecutionGraph with the advanced Planner, ProjectPlanner persistence, DAGExecutor, RuntimeSession, orchestrator, runtime evidence, and recovery execution. Do not wire production orchestration in this first slice.</p>
+<h2>Known repository state</h2>
+<p>The workspace contains pre-existing unrelated changes and the broader selected suite previously had three RuntimeSession CLI failures. The full repository is not claimed green.</p>
+</body></html>

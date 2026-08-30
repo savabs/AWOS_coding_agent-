@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Task: AWOS Coding-Agent Capability Audit</title><style>body{font-family:system-ui;max-width:900px;margin:40px auto;padding:0 20px;line-height:1.6;color:#182230}h1,h2{color:#243b7a}.step{border:1px solid #ccd3df;border-radius:8px;padding:12px;margin:12px 0}.active{background:#eef4ff}.exit{color:#40556f}code{background:#eef1f6;padding:2px 4px}.callout{padding:12px;background:#eef4ff;border-left:4px solid #4169e1}</style></head><body>
+<h1>Task: AWOS Coding-Agent Capability Audit</h1><p><strong>Status:</strong> Done · <strong>Phase:</strong> 1 · <strong>Started:</strong> 2026-07-27 · <strong>Completed:</strong> 2026-07-27</p>
+<div class="callout"><strong>Goal:</strong> Strengthen the existing AWOS coding agent toward Hermes/Cursor/Zed-level capabilities without rebuilding a generic agent or copying their codebases.</div>
+<p><strong>Spec:</strong> <a href="../../docs/specs/coding_agent_capability_audit_spec.html">coding_agent_capability_audit_spec.html</a><br><strong>Research:</strong> <a href="../../docs/research/coding_agent_capability_audit.html">coding_agent_capability_audit.html</a></p>
+<h2>Steps</h2>
+<div class="step"><strong>1. Trace active runtime path — DONE</strong><br><span class="exit">Proof: source trace plus targeted orchestrator E2E test passed.</span></div>
+<div class="step"><strong>2. Prove OpenCode-only DeepSeek Pro baseline — DONE</strong><br><span class="exit">Proof: focused regression proved the OpenCode Go client receives the DeepSeek Pro model ID without other provider credentials.</span></div>
+<div class="step"><strong>3. Record first verified blocker — DONE</strong><br><span class="exit">Proof: source trace and failing regression proved the worker had no provider branch for <code>opencode</code>.</span></div>
+<div class="step"><strong>4. Fix confirmed OpenCode blocker — DONE</strong><br><span class="exit">Proof: OpenCode worker and architect regressions plus orchestrator E2E passed: 3 passed.</span></div>
+<div class="step"><strong>5. Fix defensive ReAct initialization — DONE</strong><br><span class="exit">Proof: ReAct, OpenCode regression, and orchestrator E2E tests passed: 18 passed.</span></div>
+<div class="step"><strong>6. Prove bounded recovery — DONE</strong><br><span class="exit">Proof: stagnation, self-verification, debugger-runtime, debugger-rules, and orchestrator tests passed: 38 passed.</span></div>
+<div class="step"><strong>7. Establish capability baseline — DONE</strong><br><span class="exit">Proof: existing representative regression slices passed 55 tests in 5.91 seconds; mocked baseline, no live model-quality claim.</span></div>
+<h2>Decision log</h2><ul><li>2026-07-27: Preserve DeepSeek Pro through OpenCode Go as the current baseline.</li><li>2026-07-27: Reuse existing AWOS modules before adding implementation.</li><li>2026-07-27: Competitor agents are capability references only; no codebase reuse.</li><li>2026-07-27: Fix only debugger/test-proven gaps in the existing agent path.</li></ul>
+<h2>Related</h2><ul><li>[[coding_agent_capability_audit_spec]]</li><li>[[coding_agent_capability_audit]]</li><li>[[VISION]]</li></ul>
+</body></html>

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Task: Native Planner Holdout Integrity — AWOS</title>
+  <style>body{font:15px/1.6 system-ui,sans-serif;max-width:900px;margin:auto;padding:2rem;color:#1e293b}h1,h2{color:#312e81}.step{border:1px solid #ddd;border-radius:7px;padding:.7rem 1rem;margin:.6rem 0}.done{background:#f0fdf4;border-color:#bbf7d0}code{background:#eef2ff;padding:.1rem .3rem;border-radius:3px}</style>
+</head>
+<body>
+<header><p>AWOS / tasks / active</p><h1>Task: Native Planner Holdout Integrity</h1><p><strong>Status:</strong> complete · <strong>Date:</strong> 2026-08-03</p></header>
+<p><strong>Governing spec:</strong> <a href="../../docs/specs/native_planner_holdout_integrity_spec.html">native_planner_holdout_integrity_spec.html</a></p>
+<p><strong>Context:</strong> The first authorized holdout was inconclusive because ambient cheap-only routing selected CheapPlanner and the oracle command targeted a directory. That trial must not be rerun under the consumed authorization.</p>
+<h2>Completed steps</h2>
+<div class="step done"><strong>1. Enforce native Planner environment policy.</strong><p>Native adapter execution removes cheap-only flags and sets <code>AWOS_NATIVE_PLANNER_REQUIRED=1</code>; the original environment is restored afterward.</p></div>
+<div class="step done"><strong>2. Disable CheapPlanner fallback under native-required policy.</strong><p>Native Planner failure returns a terminal planning failure instead of silently changing model roles.</p></div>
+<div class="step done"><strong>3. Report actual Planner route.</strong><p>The cheap branch is labeled accurately, and native route telemetry includes <code>planner_route_valid</code>.</p></div>
+<div class="step done"><strong>4. Validate oracle file references.</strong><p>The loader rejects a resolved oracle directory and accepts a file below the private oracle root.</p></div>
+<div class="step done"><strong>5. Run offline regression validation.</strong><p><code>216 passed</code> in the broader provider-free suite; no live rerun was made.</p></div>
+<h2>Safety</h2><ul><li>Historical holdout artifacts are preserved.</li><li>No credentials were logged.</li><li>No new dependencies were added.</li><li>No provider calls were made during the fix.</li></ul>
+<h2>Related</h2><ul><li><a href="../../docs/research/native_planner_holdout_integrity.html">native_planner_holdout_integrity research</a></li><li><a href="../../docs/specs/native_planner_holdout_integrity_spec.html">native_planner_holdout_integrity spec</a></li><li><a href="../../docs/memory/checkpoint_2026-08-03_holdout_trial.html">holdout trial checkpoint</a></li></ul>
+</body>
+</html>

@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Checkpoint: Execution Graph Integration Plan — AWOS</title><style>body{font:15px/1.6 system-ui;max-width:900px;margin:32px auto;padding:0 20px;color:#1e293b}h1,h2{color:#312e81}code{background:#f1f5f9;padding:2px 5px}</style></head><body>
+<h1>Session Checkpoint — Execution Graph Integration Plan</h1>
+<p><strong>Date:</strong> 2026-08-02</p>
+<p><strong>Immutable record:</strong> planning gate completed; implementation has not started.</p>
+<h2>Completed</h2>
+<p>Inspected the advanced Planner, ProjectPlanner, typed ExecutionGraph, DAGExecutor, RuntimeSession, and orchestrator batch seam. Created the required research/spec/task triad for integrating the graph into runtime execution.</p>
+<ul><li>Research: <code>docs/research/execution_graph_integration.html</code> plus Markdown stub.</li><li>Spec: <code>docs/specs/execution_graph_integration_spec.html</code> plus Markdown stub.</li><li>Task: <code>tasks/active/execution_graph_integration_task.html</code> plus Markdown stub.</li></ul>
+<h2>Key Boundary</h2><p>The advanced Planner remains the project decomposer; a deterministic compiler converts its current task dictionaries into typed graph nodes; cheap workers execute atomic nodes; RuntimeSession owns concrete graph persistence; ProjectPlanner remains GoalGraph intent/progress storage.</p>
+<h2>Next Action</h2><p>Implement task 1.1 only: deterministic compilation of existing Planner task dictionaries into typed ExecutionGraph nodes, with provider-free tests. No orchestrator wiring until that step is proven.</p>
+<h2>Known Limitation</h2><p>The repository-wide Obsidian lint remains blocked by 371 pre-existing errors outside this feature. New triad files have clean editor diagnostics.</p>
+</body></html>

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Task: Chat Prompt Fidelity — AWOS</title><style>body{font:15px/1.6 system-ui;max-width:900px;margin:32px auto;padding:0 20px;color:#1e293b}h1,h2{color:#312e81}h2{border-bottom:1px solid #ddd;padding-bottom:5px}.step{border:1px solid #ddd;border-radius:8px;padding:12px;margin:10px 0}.active{background:#eef2ff;border-left:4px solid #4f46e5}code{background:#f1f5f9;padding:2px 5px}.callout{border-left:4px solid #4f46e5;background:#eef2ff;padding:10px 14px}</style></head>
+<body><header><p>AWOS / tasks / active</p><h1>Task: Chat Prompt Fidelity</h1><p><strong>Status:</strong> active · <strong>Phase:</strong> 1 · <strong>Started:</strong> 2026-07-27</p></header>
+<div class="callout"><strong>Goal:</strong> Make the Electron chat faithfully expose the exact user input, provider prompt context, and rendered response while restoring OpenCode conversation continuity.</div>
+<p><strong>Spec:</strong> <a href="../../docs/specs/chat_prompt_fidelity_spec.html">chat_prompt_fidelity_spec.html</a> · <strong>Research:</strong> <a href="../../docs/research/chat_prompt_fidelity.html">chat_prompt_fidelity.html</a></p>
+<h2>Atomic steps</h2>
+<div class="step">☑ 1. Define bounded prompt-trace metadata → test schema and secret redaction.</div>
+<div class="step">☑ 2. Preserve exact raw user input → test moat prompt equality.</div>
+<div class="step">☑ 3. Restore OpenCode conversation history → mock provider message ordering.</div>
+<div class="step">☑ 4. Persist prompt-trace metadata → inspect saved chat JSON contract.</div>
+<div class="step">☑ 5. Render collapsed developer trace → test raw-input/trace UI regions.</div>
+<div class="step active">☐ 6. Prevent silent request reinterpretation → label assumptions or require clarification.</div>
+<div class="step active">☐ 7. Run Electron live proof → submit moat prompt and compare all stages.</div>
+<div class="step">☐ 8. Run focused tests, docs lint, and quality gate → all required checks pass.</div>
+<h2>Decisions</h2><ul><li>Do not expose hidden chain-of-thought; expose observable prompt/context metadata and assumptions only.</li><li>Keep the renderer collapsed by default to preserve a simple programmer-oriented UI.</li><li>Provider adapters remain replaceable; the contract is provider-neutral.</li></ul>
+<h2>Related</h2><ul><li><a href="../../docs/specs/chat_prompt_fidelity_spec.html">[[chat_prompt_fidelity_spec]]</a></li><li><a href="../../docs/research/chat_prompt_fidelity.html">[[chat_prompt_fidelity]]</a></li><li><a href="../../VISION.md">[[VISION]]</a></li></ul>
+</body></html>

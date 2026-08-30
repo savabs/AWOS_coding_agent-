@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task: Agent Console — Transparent Back UI</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#21262d;--border:#30363d;--text:#c9d1d9;--muted:#8b949e;--accent:#58a6ff;--accent-green:#3fb950;--accent-red:#f85149;--accent-yellow:#d29922}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:20px 32px}
+header h1{font-size:20px;font-weight:600;margin-bottom:8px;color:var(--accent)}
+header .meta{font-size:12px;color:var(--muted)}
+.tag{background:var(--surface2);color:var(--accent);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace;border:1px solid var(--border)}
+.status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status.active{background:var(--accent-yellow);color:#000}
+main{max-width:800px;margin:0 auto;padding:32px}
+h2{font-size:17px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border);color:var(--accent)}
+p{margin-bottom:12px}
+pre{background:var(--surface);border:1px solid var(--border);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px}
+.task-item{padding:8px 12px;margin:4px 0;border-radius:4px;border-left:3px solid var(--border);background:var(--surface)}
+.task-item.done{border-left-color:var(--accent-green);opacity:.6}
+.task-item .label{font-size:12px;color:var(--muted)}
+.task-item .step-title{font-weight:600}
+.progress-bar{height:6px;background:var(--surface2);border-radius:3px;overflow:hidden;margin:12px 0}
+.progress-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent-green));transition:width .3s;width:0%}
+</style>
+</head>
+<body>
+<header>
+  <h1>Task: Agent Console — Transparent Back UI</h1>
+  <div class="meta">
+    <span class="tag">doc/task</span>
+    <span class="tag">phase/4</span>
+    <span class="tag">topic/agent-console</span>
+    <span class="status active">active</span>
+    <time>2026-07-12</time>
+  </div>
+</header>
+<main>
+
+<h2>Summary</h2>
+<p>Transform agent.html from a narrow "CI Rescue dashboard" to a general <strong>Agent Console</strong> that shows the AWOS agent working transparently. Add a dedicated thinking panel for the model's chain-of-thought, rebrand the UI, and update metrics. The live event streaming infrastructure is already complete — this is the UX that makes it visible.</p>
+
+<p><strong>Spec:</strong> <a href="../../docs/specs/agent_console_spec.html">agent_console_spec.html</a></p>
+
+<div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width: 100%"></div></div>
+
+<h2>Steps</h2>
+
+<div class="task-item done" id="step1">
+  <div class="label">Step 1 — gui/static/agent.html ✅</div>
+  <div class="step-title">Rebrand UI — title, tagline, empty state from CI Rescue → Agent Console</div>
+  <p class="exit">✅ Verified: title="AWOS Agent Console", no CI Rescue branding, shows "awos run"</p>
+</div>
+
+<div class="task-item done" id="step2">
+  <div class="label">Step 2 — gui/static/agent.html ✅</div>
+  <div class="step-title">Add dedicated thinking panel for agent reasoning stream (collapsible, dimmed, auto-scroll)</div>
+  <p class="exit">✅ Verified: #thinking-panel in DOM, collapsible, thought entries with dimmed italic style</p>
+</div>
+
+<div class="task-item done" id="step3">
+  <div class="label">Step 3 — gui/static/agent.html ✅</div>
+  <div class="step-title">Update sidebar stats from CI Rescue → general agent metrics (Tasks/Models/Cost/Efficiency)</div>
+  <p class="exit">✅ Verified: Labels "Tasks","Models","Cost","Efficiency" all present in HTML</p>
+</div>
+
+<div class="task-item done" id="step4">
+  <div class="label">Step 4 — gui/static/agent.html ✅</div>
+  <div class="step-title">Wire history to general sessions API (/api/sessions instead of /api/ci-rescue/history)</div>
+  <p class="exit">✅ Verified: loadHistory() fetches /api/sessions, loadSession() replays events via /api/sessions/&lt;id&gt;/events</p>
+</div>
+
+<div class="task-item done" id="step5">
+  <div class="label">Step 5 — Live proof ✅</div>
+  <div class="step-title">Run end-to-end demo: server started, all 8 verification markers passed</div>
+  <p class="exit">✅ Verified: title ✅, thinking panel ✅, no CI Rescue ✅, awos run ✅, Tasks ✅, Models ✅, Cost ✅, Efficiency ✅</p>
+</div>
+
+<h2>Related</h2>
+<ul>
+  <li><a href="../../docs/specs/agent_console_spec.html">[[agent_console_spec]]</a> — spec</li>
+</ul>
+
+</main>
+</body>
+</html>

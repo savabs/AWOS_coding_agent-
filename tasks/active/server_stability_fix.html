@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Server Stability Fix — Task</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; background: #fff; }
+  h1 { border-bottom: 3px solid #e76f51; padding-bottom: 10px; }
+  .pending { color: #888; }
+  .done { color: #2d6a4f; text-decoration: line-through; }
+  .in-progress { color: #e76f51; font-weight: bold; }
+  .step { padding: 8px 12px; margin: 4px 0; border-radius: 4px; }
+  .step:nth-child(odd) { background: #fafafa; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+  th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+  th { background: #f0f0f0; }
+</style>
+</head>
+<body>
+<h1>📝 Task: Server Stability Fix</h1>
+<p><strong>Status:</strong> DONE · <strong>Phase:</strong> 4 · <strong>Date:</strong> 2026-07-21</p>
+
+<h2>Checklist</h2>
+
+<div class="step"><strong class="done">[x] Step 1:</strong> Close streaming <code>requests.Response</code> in <code>_stream_opencode_go()</code>
+  <br>→ File: <code>scaffold/agent/gui_chat.py</code> — wrapped anthropic streaming path with <code>try/finally: resp.close()</code>
+</div>
+
+<div class="step"><strong class="done">[x] Step 2:</strong> Close/reuse <code>OpenAI</code>/<code>Anthropic</code> clients in <code>gui_chat.py</code>
+  <br>→ Clients cached as instance attributes on <code>GuiChatService</code>, lazy-init, reused across calls
+</div>
+
+<div class="step"><strong class="done">[x] Step 3:</strong> Safeguard <code>_send_sse()</code> generator consumption in <code>server.py</code>
+  <br>→ Wrapped <code>for _ in gen: pass</code> in try/except to suppress downstream errors on disconnect
+</div>
+
+<div class="step"><strong class="done">[x] Step 4:</strong> Close clients in <code>provider_health.py</code>
+  <br>→ Added <code>try/finally: client.close()</code> to all 4 health check functions
+</div>
+
+<div class="step"><strong class="done">[x] Step 5:</strong> Run ruff lint on all changed files — <code>gui_chat.py + server.py</code> clean</div>
+
+<div class="step"><strong class="done">[x] Step 6:</strong> Run existing tests — 1056 passed, 6 pre-existing failures (unrelated)</div>
+
+<div class="step"><strong class="done">[x] Live proof:</strong> Ran <code>python3 scripts/stress_test_chat.py --count 20</code> — 20/20 passed, server alive, fd stable at 38</div>
+
+<div class="step"><strong class="done">[x] Checkpoint:</strong> Written to <code>docs/memory/checkpoint_2026-07-21_server_stability.md</code></div>
+
+<h2>Verification Per Step</h2>
+<table>
+  <tr><th>Step</th><th>Exit Condition</th></tr>
+  <tr><td>1</td><td><code>resp.close()</code> called in finally block; no leak per query</td></tr>
+  <tr><td>2</td><td>Clients stored as instance attributes; created once, reused</td></tr>
+  <tr><td>3</td><td>Client disconnect doesn't crash handler thread</td></tr>
+  <tr><td>4</td><td>Health check daemon runs without fd growth</td></tr>
+  <tr><td>Live proof</td><td>20 queries succeed, server alive, fd count stable</td></tr>
+</table>
+
+<h2>Related</h2>
+<ul>
+  <li><a href="../../docs/research/server_stability_fix.html">Research</a></li>
+  <li><a href="../../docs/specs/server_stability_fix_spec.html">Spec</a></li>
+</ul>
+</body>
+</html>

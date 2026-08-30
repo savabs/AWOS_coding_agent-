@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Task: Execution Graph Integration — AWOS</title>
+<style>
+body{font:15px/1.6 system-ui;max-width:960px;margin:32px auto;padding:0 20px;color:#1e293b}
+h1,h2{color:#312e81}.step{border:1px solid #cbd5e1;border-radius:8px;padding:12px;margin:10px 0}.done{</head>background:#f0fdf4;border-left</title>:4px solid #16a34a}.callout{border-left:4px solid #4f46e5;background:#eef2ff;padding:12px 16px}code{background:#f1f5f9;padding:2px 5px}
+</style>
+</head>
+<body>
+<header><p>AWOS / tasks / active</p><h1>Task: Execution Graph Integration</h1><p><strong>Status:</strong> complete · <strong>Phase:</strong> 1 · <strong>Started:</strong> 2026-08-02</p></header>
+<div class="callout"><strong>Governing spec:</strong> <a href="../../docs/specs/execution_graph_integration_spec.html">execution_graph_integration_spec.html</a>. Integrate the proven typed graph without replacing GoalGraph or changing the advanced-Planner/cheap-worker role split.</div>
+<h2>Steps</h2>
+<div class="step done"><strong>1. Compile plans.</strong><p>Complete: deterministic conversion from existing Planner task dictionaries to typed graph nodes; 19 focused graph tests passed.</p></div>
+<div class="step done"><strong>2. Execute graphs.</strong><p>Complete: validated graph-aware DAG execution adapter; cycles fail closed.</p></div>
+<div class="step done"><strong>3. Persist graph state.</strong><p>Complete: optional graph payloads in RuntimeSession with old-session compatibility.</p></div>
+<div class="step done"><strong>4. Route orchestration.</strong><p>Complete: parallel batches compile and execute through the typed graph; sequential mode remains unchanged.</p></div>
+<div class="step done"><strong>5. Persist evidence and recovery.</strong><p>Complete: graph status/evidence checkpoints after each wave; explicit recovery and resume are persisted and tested.</p></div>
+<div class="step done"><strong>6. Validate.</strong><p>Complete: 56 graph/runtime/E2E tests and 58 ProjectPlanner/orchestrator regression tests passed.</p></div>
+<h2>Non-goals</h2>
+<ul><li>No Planner prompt/model migration.</li><li>No replacement of ProjectPlanner GoalGraph.</li><li>No UI, dependency, provider, or broad orchestrator rewrite.</li></ul>
+<h2>Related</h2>
+<ul><li><a href="../../docs/research/execution_graph_integration.html">execution_graph_integration</a></li><li><a href="../../docs/specs/execution_graph_integration_spec.html">execution_graph_integration_spec</a></li><li><a href="../../tasks/active/execution_graph_task.html">execution_graph_task</a></li></ul>
+</body>
+</html>

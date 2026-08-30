@@ -1,0 +1,7 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Checkpoint: Orchestrator Graph Wiring — AWOS</title><style>body{font:15px/1.6 system-ui;max-width:900px;margin:32px auto;padding:0 20px;color:#1e293b}h1,h2{color:#312e81}code{background:#f1f5f9;padding:2px 5px}</style></head><body>
+<h1>Session Checkpoint — Orchestrator Graph Wiring</h1><p><strong>Date:</strong> 2026-08-02</p><p><strong>Immutable record:</strong> integration Step 1.4 complete.</p>
+<h2>Completed</h2><p>The orchestrator's parallel batch seam now compiles Planner task dictionaries into an <code>ExecutionGraph</code>, persists the graph to the active <code>RuntimeSession</code> before and after execution, invokes the existing atomic worker/verifier callback through node metadata, and leaves sequential execution unchanged.</p>
+<h2>Validation</h2><ul><li><code>python3 -m pytest tests/test_execution_graph.py tests/test_execution_graph_integration.py tests/test_runtime_session.py -q</code> — 53 passed.</li><li><code>python3 -m pytest tests/test_coding_agent_minimal_e2e.py -q</code> — 1 passed.</li></ul><p>Both commands emitted one pre-existing <code>RequestsDependencyWarning</code>. The orchestrator file also contains unrelated existing diagnostics; the new integration test is clean.</p>
+<h2>Next</h2><p>Implement Step 1.5: persist authoritative evidence and explicit recovery state through graph and RuntimeSession updates, then validate failure → recovery → resume behavior.</p>
+</body></html>

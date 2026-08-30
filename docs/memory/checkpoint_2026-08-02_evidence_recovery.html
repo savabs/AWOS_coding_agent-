@@ -1,0 +1,7 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Checkpoint: Evidence and Recovery Persistence — AWOS</title><style>body{font:15px/1.6 system-ui;max-width:900px;margin:32px auto;padding:0 20px;color:#1e293b}h1,h2{color:#312e81}code{background:#f1f5f9;padding:2px 5px}</style></head><body>
+<h1>Session Checkpoint — Evidence and Recovery Persistence</h1><p><strong>Date:</strong> 2026-08-02</p><p><strong>Immutable record:</strong> integration Step 1.5 complete.</p>
+<h2>Completed</h2><p><code>DAGExecutor.execute_graph()</code> now accepts an optional wave checkpoint callback invoked after node statuses and evidence are updated. The orchestrator supplies a callback that saves the graph to RuntimeSession after every wave. Tests prove failed nodes remain failed, ordinary descendants do not run, explicit recovery nodes can run, and recovery completion/evidence survive session reload.</p>
+<h2>Validation</h2><p><code>python3 -m pytest tests/test_execution_graph.py tests/test_execution_graph_integration.py tests/test_runtime_session.py -q</code> — 55 passed. One pre-existing RequestsDependencyWarning was emitted. Diagnostics are clean for the adapter and integration tests.</p>
+<h2>Next</h2><p>Run the final focused integration/regression validation for the complete execution-graph slice, then record exact results. The repository-wide suite is not assumed green because unrelated RuntimeSession CLI failures remain known.</p>
+</body></html>

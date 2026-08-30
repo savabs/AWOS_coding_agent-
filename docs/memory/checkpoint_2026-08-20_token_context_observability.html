@@ -1,0 +1,36 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Checkpoint 2026-08-20 Token Context Observability</title></head>
+<body>
+<h1>Checkpoint: Token and Context Observability</h1>
+<p><strong>Date:</strong> 2026-08-20</p>
+<h2>What Changed</h2>
+<ul>
+<li>Added best-effort append-only per-model-call telemetry at <code>.awos/model_calls.jsonl</code>.</li>
+<li>Instrumented primary ReAct, planner, and patch-worker OpenCode calls.</li>
+<li>Added context-category estimates, tool-history metrics, latency, identifiers, and optional provider usage fields.</li>
+<li>Added read-only <code>awos tokens</code> CLI inspection.</li>
+<li>Added provider-free live proof and focused tests.</li>
+<li>Added ReAct history compaction (<code>_compact_messages</code>) to bound prompt growth from O(turns^2).</li>
+<li>Added retrieval-first task prompt: replaced 5,000-char blind file injection with an 800-char orientation snippet + repo-map read-window pointer.</li>
+<li>Centralized the static prefix (<code>_static_prefix</code> = system + task prompt) as the invariant leading prefix that provider prefix-caching keys on.</li>
+<li>Telemetry now aggregates cache-read/cache-write/reasoning tokens; surfaced in <code>awos tokens</code>.</li>
+<li>Added observation summarization (<code>_summarize_observation</code>): run_tests, grep, read_file, shell, and error outputs are collapsed into compact high-signal observations; raw text remains the fallback for other tools.</li>
+<li>Telemetry/CLI now report <code>cache_hit_rate</code> (cache_read / input tokens) to measure provider prefix-caching effect per run.</li>
+<li>Added disk-first fail-safe file resolution (<code>resolve_file.py</code>): exact → basename → case-insensitive → grep. Index hints (repo map primary-file) are now NEVER authoritative — a stale hint falls back to real filesystem search, so an existing file can never be hidden by a bad index.</li>
+<li>Added persistent symbol index: <code>save()/load()/rebuild_changed()</code> (mtime-based incremental), line-numbered symbol bodies (<code>symbol_lines</code>) in both ast + tree-sitter parsers, <code>compact_map()</code> + <code>symbol_windows()</code>.</li>
+<li>Added <code>index_retrieval.py</code>: disk-grounded hierarchical retrieval — bounded <code>symbol_map</code> (level-1) + on-demand <code>read_windows</code> (level-2) from a per-repo persisted index; every entry verified against disk via <code>resolve_with_evidence</code>, stale entries dropped.</li>
+<li>Wired retrieval into <code>enrich_with_repo_map</code> and the ReAct task prompt (symbol map + READ WINDOWS addressing <code>read_file</code>).</li>
+<li>Added GUI chat sliding-window context in <code>gui_chat.py</code>: <code>_conversation_messages</code> keeps recent turns verbatim (env-tunable <code>AWOS_CHAT_RECENT_TURNS</code>, capped by <code>AWOS_CHAT_MSG_CHARS</code>) and collapses older turns into a single compact summary (<code>AWOS_CHAT_SUMMARY_TURNS</code>). A 20-turn chat now sends a bounded prompt instead of the full history.</li>
+<li>Added honest test verdicts in <code>test_runner.py</code>: subprocess <code>returncode</code> is captured on <code>TestResult</code> and is the authoritative pass/fail signal — a nonzero exit overrides a superficially-passing output parse (pytest/jest/vitest/generic). Added <code>_execute_targeted</code> to target changed pytest test files via <code>changed_files</code>.</li>
+<li>Added edit-safety: <code>EditFileTool</code> (ReAct path) now computes the candidate content and validates Python syntax BEFORE writing, so invalid code is never left on disk (previously wrote-then-validated). New-file creation and blank-file overwrites are also guarded.</li>
+<li>Added verifier ambiguity rejection: fuzzy tier-4 now rejects near-tie matches (runner-up within 5% of best), returning a specific "ambiguous" error instead of guessing a location.</li>
+</ul>
+<h2>Verification</h2>
+<ul>
+<li><code>pytest tests/test_symbol_index_persistence.py tests/test_symbol_index_worktree.py tests/test_react_worker.py tests/test_model_call_telemetry.py tests/test_grep_repo_map.py tests/test_resolve_file.py</code> — 67 passed.</li>
+<li><code>.venv/bin/python scripts/demo_persistent_symbol_index.py</code> — passed all 4 proof markers (persistence, cache reload, stale-path disk resolution, symbol map + read windows).</li>
+<li><code>ruff check</code> on all changed files — clean.</li>
+<li><code>pytest tests/test_gui_chat_prompt_fidelity.py tests/test_gui_chat_store.py</code> — 16 passed (sliding-window compact/bound/cap tests).</li>
+</ul>
+<h2>Next</h2><p>Honest test verdicts — exit-status-first in <code>test_runner.py</code> + use <code>changed_files</code> for targeted test selection.</p>
+</body></html>

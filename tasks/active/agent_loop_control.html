@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Task: Agent Loop Control — AWOS</title><style>body{font-family:system-ui;max-width:900px;margin:2rem auto;padding:0 1rem;line-height:1.55;color:#172033}.step{border:1px solid #ccd3df;border-radius:6px;padding:.8rem;margin:.7rem 0}code{background:#eef2f7;padding:.1rem .25rem}h1,h2{color:#243b70}</style></head><body>
+<h1>Task: Agent Loop Control</h1><p><strong>Status:</strong> active · <strong>Started:</strong> 2026-08-01 · <strong>Phase:</strong> 1</p>
+<p><strong>Goal:</strong> Improve AWOS coding-agent loop control using evidence-backed completion, focused verification, and bounded progress-aware recovery.</p>
+<p><strong>Spec:</strong> <a href="../../docs/specs/agent_loop_control_spec.html">agent_loop_control_spec.html</a><br><strong>Research:</strong> <a href="../../docs/research/agent_loop_control_comparison.html">agent_loop_control_comparison.html</a></p>
+<h2>Steps</h2><ol><li>Define the completion contract and focused tests.</li><li>Add candidate-complete and verified-complete states.</li><li>Prioritize focused verification after edits.</li><li>Feed failed verification into bounded repair.</li><li>Detect repeated successful no-op and ping-pong actions.</li><li>Separate initial, verification, and recovery budgets under one hard cap.</li><li>Run focused regression tests and update the checkpoint.</li></ol>
+<h2>Current decision</h2><p>Do not increase the default turn count first. First make completion and verification explicit, then tune the budget from measured trajectories.</p>
+<h2>Related</h2><ul><li><a href="../../docs/research/agent_loop_control_comparison.html">[[agent_loop_control_comparison]]</a></li><li><a href="../../docs/specs/agent_loop_control_spec.html">[[agent_loop_control_spec]]</a></li><li><a href="../../docs/memory/checkpoint_2026-08-01_13.md">[[checkpoint_2026-08-01_13]]</a></li></ul>
+</body></html>

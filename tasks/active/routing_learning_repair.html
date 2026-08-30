@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task: Routing Learning System Repair</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--green:#10b981;--red:#ef4444}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6;max-width:800px;margin:0 auto;padding:32px}
+h1{font-size:20px;border-bottom:2px solid var(--border);padding-bottom:8px}
+h2{font-size:16px;margin:20px 0 8px;color:var(--accent)}
+.checklist{list-style:none;padding:0}
+.checklist li{margin:8px 0;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;font-size:14px;display:flex;align-items:flex-start;gap:10px}
+.checklist li input[type=checkbox]{margin-top:3px;flex-shrink:0}
+.checklist li.done{opacity:.6}
+.checklist li.done .step-text{text-decoration:line-through}
+.meta{font-size:12px;color:var(--muted)}
+.status-badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
+.status-badge.status-active{background:#fef3c7;color:#92400e}
+.status-badge.status-done{background:#dcfce7;color:#166534}
+pre{background:#1e293b;color:#e2e8f0;padding:10px;border-radius:4px;font-size:12px;overflow-x:auto}
+code{font-family:monospace;font-size:12px}
+</style>
+</head>
+<body>
+
+<h1>Task: Routing Learning System Repair ✅</h1>
+<p class="meta">Spec: [[routing_learning_repair_spec]] &nbsp;|&nbsp; Phase 4 &nbsp;|&nbsp; <span class="status-badge status-done">DONE</span> &nbsp;|&nbsp; Completed 2026-07-15</p>
+
+<h2>Steps</h2>
+<ol class="checklist">
+  <li class="done"><input type="checkbox" checked> <span class="step-text"><strong>1. Weight versioning — format_version in save/load</strong><br>
+    <code>scaffold/agent/ml_router.py</code> — <code>_save()</code> writes <code>"format_version": 2</code>. <code>_load()</code> handles <code>n_actions</code> mismatch by padding (grow) or truncating (shrink). V1 weights with mismatch are safely discarded. Logs: "loaded v2: X updates, padded Y→Z actions".</span></li>
+
+  <li class="done"><input type="checkbox" checked> <span class="step-text"><strong>2. ReplayGate — adaptive threshold + weighted scoring</strong><br>
+    <code>scaffold/agent/reward_store.py</code> — threshold <code>max(0.15, base - 0.01*sqrt(total))</code>. Score weights: <code>0.4*inform + 0.2*novelty + 0.4*boundary</code>. Logs admit rate every 100 episodes. Admit rate improved from 20.5% → ~65%.</span></li>
+
+  <li class="done"><input type="checkbox" checked> <span class="step-text"><strong>3. LinUCB warm_start from RewardStore</strong><br>
+    <code>scaffold/agent/ml_router.py</code> — <code>warm_start(reward_store, max_episodes=100) -> int</code>. Batch-replays prioritized episodes via PER sampling. Skips ReplayGate. Skips OOB action_ids + malformed features gracefully.</span></li>
+
+  <li class="done"><input type="checkbox" checked> <span class="step-text"><strong>4. Wire warm_start in orchestrator</strong><br>
+    <code>scaffold/agent/orchestrator.py</code> — calls <code>self.ml_router.warm_start(self.reward_store, max_episodes=50)</code> after init. Logs: "[orchestrator] warm-started LinUCB with N episodes (ready=X, updates=Y)".</span></li>
+
+  <li class="done"><input type="checkbox" checked> <span class="step-text"><strong>5. EscalationEngine.routing_status()</strong><br>
+    <code>scaffold/agent/escalation_engine.py</code> — returns dict: <code>{linucb_ready, linucb_updates, actions, is_cheap_only, dead_providers}</code>. Graceful defaults when ml_router is None.</span></li>
+
+  <li class="done"><input type="checkbox" checked> <span class="step-text"><strong>6. Unit tests — 31 pass</strong><br>
+    <code>tests/test_routing_learn.py</code> — 31 tests: weight save/load/pad/truncate/v1 migration/corruption, ReplayGate adaptive threshold + scoring, warm_start (replay/empty/OOB/malformed/ready), routing_status shape/defaults, feature extraction, reward computation.</span></li>
+
+  <li class="done"><input type="checkbox" checked> <span class="step-text"><strong>7. Live proof: demo script — ALL CHECKS PASS</strong><br>
+    <code>scripts/demo_routing_learn.py</code> — 7-phase demo: seeds 200 episodes, verifies threshold relaxes (0.40→0.26, 64.5% admit rate), weights survive 4↔6 action pad/truncate, warm_start achieves is_ready=True (70 updates), routing_status returns correct snapshot, DeepSeek learns strong preference (bias=+0.46 vs Gemini=+0.33).</span></li>
+</ol>
+
+<h2>Live Proof (verified 2026-07-15)</h2>
+<p>Run: <code>python3 scripts/demo_routing_learn.py --verify</code></p>
+<p>Observed markers:</p>
+<ul>
+  <li>✅ <code>format_version=2, n_actions=4, updates=30</code></li>
+  <li>✅ <code>loaded v2: 30 updates, padded 4→6 actions</code></li>
+  <li>✅ <code>loaded v2: 30 updates, truncated 6→4 actions</code></li>
+  <li>✅ <code>warm_start: replayed 70 episodes — total_updates=70, is_ready=True</code></li>
+  <li>✅ <code>Threshold: 0.400 → 0.259, admit rate: 64.5%</code></li>
+  <li>✅ <code>DeepSeek bias=+0.4551 vs Gemini bias=+0.3275</code></li>
+  <li>✅ <code>All checks passed — routing learning system is operational.</code></li>
+</ul>
+
+<h2>Files Changed</h2>
+<ul>
+  <li><code>scaffold/agent/ml_router.py</code> — +warm_start() method (47 lines)</li>
+  <li><code>scaffold/agent/orchestrator.py</code> — warm_start wiring in __init__ (6 lines)</li>
+  <li><code>scaffold/agent/escalation_engine.py</code> — +routing_status() method (24 lines)</li>
+  <li><code>tests/test_routing_learn.py</code> — <strong>new file</strong>, 31 tests (370 lines)</li>
+  <li><code>scripts/demo_routing_learn.py</code> — <strong>new file</strong>, 7-phase live proof (340 lines)</li>
+</ul>
+
+</body>
+</html>

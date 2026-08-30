@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Task: Native Planner Trial Adapter — AWOS</title>
+  <style>
+    body{font-family:system-ui,sans-serif;max-width:900px;margin:32px auto;padding:0 20px;line-height:1.6;color:#1e293b}
+    h1,h2{color:#312e81}.step{border:1px solid #cbd5e1;border-radius:8px;padding:12px;margin:10px 0}
+    .done{background:#ecfdf5;border-left:4px solid #059669}.blocked{background:#fff7ed;border-left:4px solid #ea580c}
+  </style>
+</head>
+<body>
+  <header>
+    <p>AWOS / tasks / active</p>
+    <h1>Task: Native Planner Trial Adapter</h1>
+    <p><strong>Status:</strong> implementation complete; live trial preparation pending · <strong>Phase:</strong> 1 · <strong>Started:</strong> 2026-08-03</p>
+  </header>
+  <p><strong>Governing spec:</strong> <a href="../../docs/specs/native_planner_trial_adapter_spec.html">native_planner_trial_adapter_spec.html</a>.</p>
+  <h2>Goal</h2>
+  <p>Ensure the explicitly authorized live holdout calls the advanced OpenCode Go Qwen Planner instead of silently replacing it with a synthetic task. DeepSeek Pro remains the atomic worker model, and existing deterministic benchmark behavior remains unchanged.</p>
+  <h2>Steps</h2>
+  <div class="step done"><strong>1. Add opt-in native-Planner mode.</strong><p>Added <code>use_native_planner=False</code>; default benchmark callers retain their previous behavior.</p><p><strong>Proof:</strong> adapter and regression tests pass.</p></div>
+  <div class="step done"><strong>2. Suppress synthetic task injection in native mode.</strong><p>Native mode passes <code>pre_planned_tasks=None</code> unless the caller explicitly supplies tasks.</p><p><strong>Proof:</strong> provider-free fake-orchestrator test passes.</p></div>
+  <div class="step done"><strong>3. Emit provider/model route evidence.</strong><p>Trajectory evidence records OpenCode Go, Qwen <code>qwen3.7-plus</code> as Planner, DeepSeek <code>deepseek-v4-pro</code> as worker, and task-injection state without secrets.</p><p><strong>Proof:</strong> route-evidence assertions pass.</p></div>
+  <div class="step done"><strong>4. Enable native mode only for the live holdout command.</strong><p><code>scripts/run_holdout_live.py</code> opts in; ordinary offline benchmark callers remain unchanged.</p><p><strong>Proof:</strong> holdout and adapter tests pass without provider calls.</p></div>
+  <div class="step done"><strong>5. Run focused regression validation.</strong><p>Also isolated the minimal E2E test from ambient cheap-only routing flags so its Planner mock cannot fall through to a real provider request.</p><p><strong>Proof:</strong> <code>209 passed</code> across the relevant adapter, provider, planner, graph, runtime, project-planner, and evaluation tests; one known Requests dependency warning remains.</p></div>
+  <h2>Blockers</h2>
+  <div class="step blocked"><strong>Live trial not yet executed.</strong><p>Prepare the private/sanitized repository snapshot, one fixture, immutable baseline report, digest-bound manifest, and verified <code>OPENCODE_GO_API_KEY</code>. Then run the dry-run before considering the single authorized $1 / 30-minute trial.</p></div>
+  <h2>Related</h2>
+  <ul>
+    <li><a href="../../docs/research/native_planner_trial_adapter.html">native_planner_trial_adapter research</a></li>
+    <li><a href="../../docs/specs/native_planner_trial_adapter_spec.html">native_planner_trial_adapter spec</a></li>
+    <li><a href="../../docs/memory/checkpoint_2026-08-03_opencode_qwen_planner.html">Qwen Planner checkpoint</a></li>
+  </ul>
+</body>
+</html>
