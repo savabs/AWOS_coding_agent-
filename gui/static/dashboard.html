@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AWOS — Coding Agent Dashboard</title>
+  <link rel="stylesheet" href="/style.css" />
+  <style>
+    .dashboard-hero {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 3rem 2rem;
+      text-align: center;
+      border-radius: 12px;
+      margin-bottom: 2rem;
+    }
+    .dashboard-hero h1 {
+      font-size: 2.5rem;
+      margin: 0 0 0.5rem 0;
+    }
+    .dashboard-hero p {
+      font-size: 1.2rem;
+      opacity: 0.9;
+      margin: 0;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+    .stat-card {
+      background: white;
+      border-radius: 8px;
+      padding: 1.5rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .stat-card h3 {
+      font-size: 0.9rem;
+      color: #666;
+      margin: 0 0 0.5rem 0;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .stat-card .value {
+      font-size: 2rem;
+      font-weight: bold;
+      color: #333;
+    }
+    .stat-card .trend {
+      font-size: 0.9rem;
+      margin-top: 0.5rem;
+    }
+    .trend.positive { color: #10b981; }
+    .trend.negative { color: #ef4444; }
+    .rescue-list {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+    .rescue-item {
+      padding: 1.5rem;
+      border-bottom: 1px solid #e5e7eb;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .rescue-item:hover {
+      background: #f9fafb;
+    }
+    .rescue-item:last-child {
+      border-bottom: none;
+    }
+    .rescue-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.5rem;
+    }
+    .rescue-title {
+      font-weight: 600;
+      color: #111827;
+    }
+    .rescue-meta {
+      display: flex;
+      gap: 1rem;
+      font-size: 0.9rem;
+      color: #6b7280;
+    }
+    .rescue-stats {
+      display: flex;
+      gap: 2rem;
+      margin-top: 0.5rem;
+    }
+    .rescue-stat {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .badge {
+      display: inline-block;
+      padding: 0.25rem 0.75rem;
+      border-radius: 12px;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .badge-success {
+      background: #d1fae5;
+      color: #065f46;
+    }
+    .badge-warning {
+      background: #fef3c7;
+      color: #92400e;
+    }
+    .badge-error {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+    .empty-state {
+      text-align: center;
+      padding: 4rem 2rem;
+      color: #6b7280;
+    }
+    .empty-state h2 {
+      font-size: 1.5rem;
+      margin-bottom: 1rem;
+    }
+    .empty-state p {
+      margin-bottom: 2rem;
+    }
+    .btn-primary {
+      background: #667eea;
+      color: white;
+      border: none;
+      padding: 0.75rem 1.5rem;
+      border-radius: 6px;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn-primary:hover {
+      background: #5568d3;
+    }
+  </style>
+</head>
+<body>
+  <nav class="top-nav">
+    <div class="brand">AWOS</div>
+    <div class="tabs">
+      <button class="tab active" data-view="dashboard" id="tab-dashboard">Dashboard</button>
+      <button class="tab" data-view="chat" id="tab-chat">Chat</button>
+      <button class="tab" data-view="runs" id="tab-runs">Runs</button>
+    </div>
+    <div class="nav-meta" id="nav-meta"></div>
+  </nav>
+
+  <!-- DASHBOARD VIEW -->
+  <div class="view view-dashboard active" id="view-dashboard">
+    <div class="layout" style="max-width: 1200px; margin: 0 auto; padding: 2rem;">
+      <div class="dashboard-hero">
+        <h1>⚡ Coding Agent Dashboard</h1>
+        <p>Watch the coding agent work, inspect recovery behavior, and track failure-driven learning. CI repair is one supported benchmark workflow.</p>
+      </div>
+
+      <div class="stats-grid" id="stats-grid">
+        <div class="stat-card">
+          <h3>Total Runs</h3>
+          <div class="value" id="stat-rescues">—</div>
+          <div class="trend positive" id="trend-rescues"></div>
+        </div>
+        <div class="stat-card">
+          <h3>Tasks Completed</h3>
+          <div class="value" id="stat-tests">—</div>
+          <div class="trend positive" id="trend-tests"></div>
+        </div>
+        <div class="stat-card">
+          <h3>Total Cost</h3>
+          <div class="value" id="stat-cost">—</div>
+          <div class="trend" id="trend-cost"></div>
+        </div>
+        <div class="stat-card">
+          <h3>Savings vs Heavy Baseline</h3>
+          <div class="value" id="stat-savings">—</div>
+          <div class="trend positive" id="trend-savings"></div>
+        </div>
+      </div>
+
+      <h2 style="margin-bottom: 1rem;">🤖 Transparent Routing</h2>
+      <div class="stats-grid" id="routing-grid" style="margin-bottom: 1.5rem;">
+        <div class="stat-card">
+          <h3>Learning Status</h3>
+          <div class="value" id="routing-ready">—</div>
+          <div class="trend" id="routing-updates"></div>
+        </div>
+        <div class="stat-card">
+          <h3>Total Episodes</h3>
+          <div class="value" id="routing-episodes">—</div>
+          <div class="trend positive" id="routing-trend"></div>
+        </div>
+        <div class="stat-card">
+          <h3>Cheap Mode</h3>
+          <div class="value" id="routing-cheap">—</div>
+        </div>
+        <div class="stat-card">
+          <h3>Active Providers</h3>
+          <div class="value" id="routing-providers">—</div>
+        </div>
+      </div>
+
+      <div style="background:white;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1);padding:1.5rem;margin-bottom:2rem;">
+        <h3 style="margin:0 0 1rem;font-size:1.1rem;">Per-Model Performance</h3>
+        <div id="routing-model-perf" style="font-size:0.9rem;color:#666;">
+          Loading...
+        </div>
+      </div>
+
+      <div style="background:white;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1);padding:1.5rem;margin-bottom:2rem;">
+        <h3 style="margin:0 0 1rem;font-size:1.1rem;">Recent Routing Decisions</h3>
+        <div id="routing-history" style="font-size:0.85rem;">
+          Loading...
+        </div>
+      </div>
+
+      <h2 style="margin-bottom: 1rem;">Recent Runs</h2>
+      <div class="rescue-list" id="rescue-list">
+        <div class="empty-state">
+          <h2>No agent runs yet</h2>
+          <p>Run <code>awos worker start "fix the auth bug"</code> or <code>awos fix-ci</code> for a CI repair benchmark to get started.</p>
+          <button class="btn-primary" onclick="showInstructions()">Show Instructions</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CHAT VIEW -->
+  <div class="view view-chat" id="view-chat">
+    <div class="layout chat-layout">
+      <aside class="sidebar">
+        <button class="btn-new-chat" id="btn-new-chat">+ New chat</button>
+        <button class="btn-clear-chats" id="btn-clear-chats" title="Delete all chats">Clear all</button>
+        <div id="chat-sessions"></div>
+      </aside>
+      <div class="main chat-main">
+        <div class="chat-messages" id="chat-messages">
+          <div class="empty chat-welcome">
+            <h2>AWOS Chat</h2>
+            <p>Choose a mode, then ask anything about this project.</p>
+            <div class="mode-cards" id="mode-cards"></div>
+          </div>
+        </div>
+        <footer class="chat-composer">
+          <div class="token-bars">
+            <div class="session-token-bar" id="session-token-bar"></div>
+            <div class="live-token-meta" id="live-token-meta"></div>
+          </div>
+          <div class="mode-picker" id="mode-picker"></div>
+          <div class="composer-row">
+            <textarea id="chat-input" rows="2" placeholder="Ask a question, plan a feature, or run the agent…"></textarea>
+            <button class="btn-send" id="btn-send" title="Send">Send</button>
+          </div>
+        </footer>
+      </div>
+    </div>
+  </div>
+
+  <!-- RUNS VIEW -->
+  <div class="view view-runs" id="view-runs">
+    <div class="layout">
+      <aside class="sidebar">
+        <h2 class="sidebar-title">Runs</h2>
+        <div id="sessions"></div>
+      </aside>
+      <div class="main">
+        <header class="header" id="header">
+          <h1>Run Viewer</h1>
+          <div class="meta">Agent runs with file diffs</div>
+        </header>
+        <div class="content">
+          <div class="file-list" id="files">
+            <div class="empty">No session selected</div>
+          </div>
+          <div class="diff-panel" id="diff">
+            <div class="empty">File diffs appear here with line numbers,<br>additions in green, deletions in red.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/shared.js"></script>
+  <script src="/chat.js"></script>
+  <script src="/app.js"></script>
+  <script src="/dashboard.js"></script>
+</body>
+</html>
