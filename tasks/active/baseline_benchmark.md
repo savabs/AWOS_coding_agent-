@@ -15,7 +15,7 @@
 - [x] BASELINE.md human summary
 - [x] `scripts/run_baseline_benchmark.sh`
 - [x] `scripts/compare_baseline.py`
-- [ ] Live proof: run `./scripts/run_baseline_benchmark.sh` with API keys, observe compare output
+- [x] Live proof: run `./scripts/run_baseline_benchmark.sh` with API keys, observe compare output (DONE — sqlfluff trial passed baseline comparison with +1.0 delta)
 - [ ] Freeze baseline v2 when Outcome Judge ships
 
 ---

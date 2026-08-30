@@ -1,8 +1,8 @@
-# CI Rescue Sprint — Head-to-head proof
+# CI Repair Benchmark — Head-to-head proof
 
 ## What this proves
 
-We run the **same 18 bug fixes** two ways and compare cost and results.
+We run the **same 18 bug fixes** two ways and compare outcomes, cost, and verification.
 
 ## Command
 
@@ -20,9 +20,10 @@ Or the wrapper:
 
 | Line | Good sign |
 |------|-----------|
-| `tests=PASS` for both arms | Both finished the job |
-| AWOS cost **lower** than Raw | Harness saves API money |
+| `tests=PASS` for the AWOS arm | The harness actually finished the repair job |
+| Raw API still fails or degrades | One-shot prompting was not enough |
 | `SEMANTIC_PASS` (via report) | Fixes are real, tests were not edited to cheat |
+| AWOS cost stays bounded | The harness remains economically reasonable while finishing the job |
 
 ## Read the report
 

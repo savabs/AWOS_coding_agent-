@@ -1,4 +1,4 @@
-# Clawcode CI Rescue — proof guide
+# Clawcode CI Repair Benchmark — proof guide
 
 ## Setup (once)
 
@@ -6,7 +6,7 @@
 python3 scripts/clawcode_ci_rescue_prepare.py
 ```
 
-This creates branch `awos-ci-rescue-buggy` on clawcode with 12 broken tests and writes the 12-step mission plan.
+This creates branch `awos-ci-rescue-buggy` on clawcode with 12 broken tests and writes the 12-step benchmark mission plan.
 
 ## Run AWOS
 

@@ -66,12 +66,11 @@ footer{background:var(--surface);border-top:1px solid var(--border);padding:16px
 
 <section id="arch" class="tab-panel active">
 <h2>Current Architecture — What Exists</h2>
-<p>AWOS already has three planning primitives. All are stateless and session-scoped: they discard their state when the session ends. ProjectPlanner wraps them with a persistent Goal DAG stored on disk.</p>
+<p>AWOS already has three planning primitives. The advanced <code>Planner</code> owns project-level decomposition; cheap models are intended for atomic task execution. </code>All planning state is otherwise session-scoped and discarded when the session ends. ProjectPlanner wraps the planning/execution primitives with a persistent Goal DAG stored on disk.</p>
 
 <h3>Existing Planning Modules</h3>
 <table>
-<tr><th>Module / File</th><th>Role</th><th>Limitation</th></tr>
-<tr><td><code>scaffold/agent/planner.py</code></td><td>One-shot: user goal → list of atomic tasks</td><td>Ephemeral. Plan discarded after <code>execute_feature()</code> returns.</td></tr>
+<tr><th>Module / File</th><th>Role</th><th>Limitation</th<tr><td><code>scaffold/agent/planner.py</code></td><td>Advanced project planner: user goal → dependency-aware atomic tasks</td><td>Ephemeral without <code>ProjectPlanner</code> persistence.</td></tr>d></tr>
 <tr><td><code>scaffold/agent/task_decomposer.py</code></td><td>Reactive: breaks a failing task into 2-4 sub-tasks</td><td>Only fires on retry, no awareness of sibling tasks.</td></tr>
 <tr><td><code>scaffold/agent/dag_executor.py</code></td><td>Parallel execution of tasks with declared dependencies</td><td>No persistence; re-built from scratch each session.</td></tr>
 <tr><td><code>scaffold/agent/orchestrator.py</code></td><td>Runs the Planner→Worker→Verifier loop per task</td><td><code>_execute_single_task</code> has no access to the outer goal context.</td></tr>

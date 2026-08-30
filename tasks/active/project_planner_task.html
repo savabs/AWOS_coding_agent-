@@ -69,14 +69,14 @@ footer{background:var(--surface);border-top:1px solid var(--border);padding:16px
   <span class="key">Pre-conditions</span> <span>TaskDecomposer ✅ · DAGExecutor ✅ · Orchestrator retry hooks ✅ · ErrorPatternStore ✅</span>
 </div>
 
-<div class="progress-label" id="progress-label">0 / 9 steps complete</div>
+<div class="progress-label" id="progress-label">9 / 11 steps complete</div>
 <div class="progress-bar"><div class="fill" id="progress-fill"></div></div>
 
 <h2>Steps</h2>
 <p>Each step is atomic: changes one thing, tests one thing, proves one thing. All tests use <code>tmp_path</code> — no disk pollution. Check off as you go.</p>
 
-<div class="step active" id="step-1">
-  <input type="checkbox" onchange="updateProgress()">
+<div class="step done" id="step-1">
+  <input type="checkbox" checked onchange="updateProgress()">
   <div class="step-body">
     <div class="step-num">STEP 1</div>
     <div class="step-title">Create <code>scaffold/agent/project_planner.py</code> — GoalNode, GoalGraph, ProjectPlanner skeleton</div>
@@ -88,8 +88,8 @@ Do NOT yet implement load_or_create_goal or update_node_status — those are Ste
   </div>
 </div>
 
-<div class="step" id="step-2">
-  <input type="checkbox" onchange="updateProgress()">
+<div class="step done" id="step-2">
+  <input type="checkbox" checked onchange="updateProgress()">
   <div class="step-body">
     <div class="step-num">STEP 2</div>
     <div class="step-title">Implement <code>load_or_create_goal(description, session_id)</code> with Jaccard matching</div>
@@ -102,8 +102,8 @@ Persist new goals: write {goal_id}.json + update INDEX.json.
   </div>
 </div>
 
-<div class="step" id="step-3">
-  <input type="checkbox" onchange="updateProgress()">
+<div class="step done" id="step-3">
+  <input type="checkbox" checked onchange="updateProgress()">
   <div class="step-body">
     <div class="step-num">STEP 3</div>
     <div class="step-title">Implement <code>update_node_status()</code> with status propagation and atomic write</div>
@@ -117,8 +117,8 @@ Update INDEX.json entry: {status, updated_at}.
   </div>
 </div>
 
-<div class="step" id="step-4">
-  <input type="checkbox" onchange="updateProgress()">
+<div class="step done" id="step-4">
+  <input type="checkbox" checked onchange="updateProgress()">
   <div class="step-body">
     <div class="step-num">STEP 4</div>
     <div class="step-title">Implement <code>append_nodes(graph, new_nodes, parent_id)</code> for goal extension</div>
@@ -131,8 +131,8 @@ Persist and return updated graph.
   </div>
 </div>
 
-<div class="step" id="step-5">
-  <input type="checkbox" onchange="updateProgress()">
+<div class="step done" id="step-5">
+  <input type="checkbox" checked onchange="updateProgress()">
   <div class="step-body">
     <div class="step-num">STEP 5</div>
     <div class="step-title">Wire <code>ProjectPlanner</code> into <code>Orchestrator.__init__</code> and <code>execute_feature()</code></div>
@@ -146,8 +146,8 @@ Import guard: wrap import in try/except ImportError for backward compat.
   </div>
 </div>
 
-<div class="step" id="step-6">
-  <input type="checkbox" onchange="updateProgress()">
+<div class="step done" id="step-6">
+  <input type="checkbox" checked onchange="updateProgress()">
   <div class="step-body">
     <div class="step-num">STEP 6</div>
     <div class="step-title">Wire <code>update_node_status()</code> into <code>Orchestrator._execute_single_task()</code></div>
@@ -161,8 +161,8 @@ All calls guarded with: if hasattr(self, "_active_goal_graph") and self._active_
   </div>
 </div>
 
-<div class="step" id="step-7">
-  <input type="checkbox" onchange="updateProgress()">
+<div class="step done" id="step-7">
+  <input type="checkbox" checked onchange="updateProgress()">
   <div class="step-body">
     <div class="step-num">STEP 7</div>
     <div class="step-title">Add <code>existing_goal: GoalGraph | None = None</code> param to <code>Planner.plan()</code></div>
@@ -177,8 +177,8 @@ Fully backward compatible — default is None, no existing callers change.
   </div>
 </div>
 
-<div class="step" id="step-8">
-  <input type="checkbox" onchange="updateProgress()">
+<div class="step done" id="step-8">
+  <input type="checkbox" checked onchange="updateProgress()">
   <div class="step-body">
     <div class="step-num">STEP 8</div>
     <div class="step-title">Write <code>tests/test_project_planner.py</code> — 25+ tests</div>
@@ -198,13 +198,33 @@ All tests use pytest tmp_path fixture.
   </div>
 </div>
 
-<div class="step" id="step-9">
-  <input type="checkbox" onchange="updateProgress()">
+<div class="step done" id="step-9">
+  <input type="checkbox" checked onchange="updateProgress()">
   <div class="step-body">
     <div class="step-num">STEP 9</div>
+    <div class="step-title">Write <code>tests/test_project_planner_integration.py</code> — provider-free interrupted/resumed multi-task proof</div>
+    <div class="step-exit"><strong>Exit condition:</strong> The integration test passes without API keys or network access.</div>
+    <div class="step-notes">DONE — 2 integration tests pass; 55 ProjectPlanner unit + integration tests pass in total. No API keys or network access required.</div>
+  </div>
+</div>
+
+<div class="step done" id="step-10">
+  <input type="checkbox" checked onchange="updateProgress()">
+  <div class="step-body">
+    <div class="step-num">STEP 10</div>
+    <div class="step-title">Enforce model-role separation — advanced Planner decomposes projects; cheap models execute atomic tasks</div>
+    <div class="step-exit"><strong>Exit condition:</strong> Normal orchestration selects the advanced <code>Planner</code>; <code>CheapPlanner</code> is limited to explicit cheap-only mode or bounded fallback.</div>
+    <div class="step-notes">DONE — focused end-to-end, ProjectPlanner, and integration tests: 56 passed. The worker remains the cheap task solver.</div>
+  </div>
+</div>
+
+<div class="step"</code> id="step-11">
+  <input type="checkbox" onchange="updateProgress()"></code>
+  <div class="step-body">
+    <div class="step-num">STEP 11</div>
     <div class="step-title">Run full test suite — zero regressions</div>
     <div class="step-exit"><strong>Exit condition:</strong> <code>pytest tests/ -v --tb=short</code> shows 190+ tests passing, 0 failures, 0 errors.</div>
-    <div class="step-notes">pytest tests/ -v --tb=short 2&gt;&amp;1 | tail -20</div>
+    <div class="step-notes">Focused ProjectPlanner: 53 passed. Broader selected suite: 84 passed, 3 pre-existing RuntimeSession CLI failures remain; full-suite gate is still open.</div>
   </div>
 </div>
 

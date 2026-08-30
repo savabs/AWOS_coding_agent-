@@ -1,4 +1,4 @@
-# Task: CI Rescue Sprint Corpus v1
+# Task: CI Repair Sprint Corpus v1
 
 **Status:** active  
 **Research:** [`docs/research/ci_rescue_sprint_corpus.md`](../docs/research/ci_rescue_sprint_corpus.md)  
@@ -9,7 +9,9 @@
 
 ## Context
 
-First **Cursor-class** corpus: 28 reds, 5 modules, 18 mission tasks, pytest oracle. Synthetic `shopkit` fixture with `golden/` reference. Proves assertion + scale bar before live API sprint.
+A medium-scale **coding-agent benchmark corpus**: 28 reds, 5 modules, 18 mission tasks, pytest oracle. Synthetic `shopkit` fixture with `golden/` reference. It proves the agent can repair a non-trivial failure set before moving to larger real-repo benchmarks.
+
+Legacy `ci_rescue` filenames remain for continuity, but this corpus is a **CI repair benchmark**, not the identity of AWOS.
 
 ---
 
@@ -32,8 +34,8 @@ First **Cursor-class** corpus: 28 reds, 5 modules, 18 mission tasks, pytest orac
 
 ### Phase 3 — Live API
 
-- [x] 3.1 `awos mission start --ci-rescue` (18 tasks, worktree)
-- [x] 3.2 Assert SEMANTIC_PASS on worktree (`rs_d39c498dd4ca`, 49.7s, $0.0056)
+- [x] 3.1 `awos mission start --ci-rescue` (18 tasks, worktree benchmark mission)
+- [x] 3.2 Assert `SEMANTIC_PASS` on worktree (`rs_d39c498dd4ca`, 49.7s, $0.0056)
 - [x] 3.3 PEI pair vs raw API on same plan — see `docs/product/ci_rescue_head_to_head.md`
 
 ### Phase 4 — Real repo

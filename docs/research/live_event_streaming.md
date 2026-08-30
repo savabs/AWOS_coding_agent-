@@ -12,5 +12,5 @@ tags:
 ## Related
 - [[live_event_streaming_spec]] — implementation spec
 - [[live_event_streaming_task]] — execution checklist
-- [[CI_RESCUE_PRODUCT]] — CI Rescue wedge product spec
+- [[CI_RESCUE_PRODUCT]] — CI repair capability spec
 - [[TRANSPARENT_ROUTING]] — routing transparency UX spec

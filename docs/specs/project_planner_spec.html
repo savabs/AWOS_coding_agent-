@@ -57,6 +57,8 @@ footer{background:var(--surface);border-top:1px solid var(--border);padding:16px
 
 <h2>Goal</h2>
 <p>Give AWOS persistent memory of multi-session projects by maintaining a Goal DAG at <code>.awos/goals/</code>, so that when the user resumes work on a project the agent knows which tasks are complete, which failed, and which are still pending — without re-running completed work or losing failure history.</p>
+<h2>Model-role contract</h2>
+<p>The advanced <code></h2>Planner</code> owns project-level reasoning and decomposition. It must produce sufficiently atomic, grounded tasks for cheap execution models. Cheap models are task solvers, not the default authority for breaking down large project goals. <code>CheapPlanner</code> is permitted only for explicit cheap-only mode or as a bounded fallback when the advanced planner is unavailable.</p>
 
 <div class="callout">
 <strong>Governing research:</strong> <a href="../research/project_planner.html">project_planner.html</a><br>
@@ -67,9 +69,12 @@ footer{background:var(--surface);border-top:1px solid var(--border);padding:16px
 <table>
 <tr><th>File</th><th>Change type</th><th>Description</th></tr>
 <tr><td><code>scaffold/agent/project_planner.py</code></td><td>CREATE</td><td>New module: GoalNode, GoalGraph, ProjectPlanner classes. All persistence and graph logic lives here.</td></tr>
-<tr><td><code>scaffold/agent/orchestrator.py</code></td><td>MODIFY</td><td>Add <code>self.project_planner = ProjectPlanner()</code> in <code>__init__</code>. Call <code>project_planner.load_or_create_goal()</code> at start of <code>execute_feature()</code>. Call <code>project_planner.update_node_status()</code> after each task outcome in <code>_execute_single_task()</code>.</td></tr>
+<tr><td><code>scaffold/agent/orchestrator.py</code></td><td>MODIFY</td><td>Use the advanced <code>Planner</code> for normal project decomposition; reserve <code>CheapPlanner</code> for explicit cheap-only mode or bounded fallback. Also wire <code>ProjectPlanner</code> into <code>__init__</code>, <code>execute_feature()</code>, and task outcomes.</td></tr>
 <tr><td><code>scaffold/agent/planner.py</code></td><td>MODIFY</td><td>Add optional <code>existing_goal: GoalGraph | None = None</code> param to <code>plan()</code>. If provided, skip tasks whose IDs are already in the graph as completed nodes.</td></tr>
 <tr><td><code>tests/test_project_planner.py</code></td><td>CREATE</td><td>Unit tests: GoalNode, GoalGraph, ProjectPlanner save/load/update/merge, edge cases.</td></tr>
+<tr><td><code>tests/test_coding_agent_minimal_e2e.py</code></td><td>MODIFY</td><td>Update the planner mock boundary to the advanced planner while keeping the worker mock cheap/task-level.</td></tr>
+<tr><td><code>tests/test_project_planner_integration.py</code></td><td>MODIFY</td><td>Assert the advanced-planner/cheap-solver separation without provider calls.</td></tr>
+<tr><td><code>tests/test_project_planner_integration.py</code></td><td>CREATE</</code>td><td>Provider</td>-free multi-session</td> orchestration proof covering persistent task state and resume-style skipping.</td></tr>
 </table>
 
 <h2>Interface Contract</h2>
@@ -158,6 +163,7 @@ class ProjectPlanner:
 </pre>
 
 <h2>Implementation Steps</h2>
+<p>The integration proof is deliberately provider-free: it must not require credentials, network access, or paid model calls.</p>
 
 <div class="step">
   <div class="step-num">Step 1</div>
@@ -217,6 +223,13 @@ class ProjectPlanner:
 
 <div class="step">
   <div class="step-num">Step 9</div>
+  <div class="step-title">Write <code>tests/test_project_planner_integration.py</code> — provider-free multi-session</code> proof</div>
+  <p></p>Exercise a multi-task graph across two planner sessions. The first session creates task nodes and completes a subset; the second reloads the same graph, verifies completed tasks are excluded from the pending worklist, executes the remaining task state transitions, and verifies persistence.</p>
+  <div class="exit"><strong>Exit condition:</</strong>strong> The integration test passes without API keys or network access.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 10</div>
   <div class="step-title">Run full test suite — zero regressions</div>
   <p>Run all existing tests plus the new test file. Confirm 0 regressions against the 166 previously passing tests.</p>
   <div class="exit"><strong>Exit condition:</strong> <code>pytest tests/ -v --tb=short</code> shows 190+ tests passing (166 existing + 25+ new), 0 failures, 0 errors.</div>

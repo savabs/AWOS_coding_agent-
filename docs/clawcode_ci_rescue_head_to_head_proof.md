@@ -1,8 +1,8 @@
-# Clawcode CI Rescue — head-to-head live proof
+# Clawcode CI Repair Benchmark — head-to-head live proof
 
 ## What this proves
 
-Same 12 fixes on real **clawcode** repo (`awos-ci-rescue-buggy` branch): raw one-shot API vs AWOS harness.
+Same 12 fixes on real **clawcode** repo (`awos-ci-rescue-buggy` branch): raw one-shot API vs AWOS harness, measured as a CI repair benchmark.
 
 ## Run
 
@@ -45,4 +45,4 @@ JSON: `.awos/benchmarks/clawcode_ci_rescue_head_to_head_20260626_060456.json`
 
 ## Interpretation
 
-On this **easier** 12-bug clawcode set, both arms finished green. AWOS cost ~2× raw ($0.0046 vs $0.0022) and took longer. Contrast with practice fixture (`ci_rescue_sprint`) where raw failed and only AWOS passed — harness value shows up on harder jobs, not every run.
+On this **easier** 12-bug clawcode set, both arms finished green. AWOS cost ~2× raw ($0.0046 vs $0.0022) and took longer. Contrast with practice fixture (`ci_rescue_sprint`) where raw failed and only AWOS passed — harness value shows up on harder benchmark jobs, not every run.

@@ -1,4 +1,4 @@
-# CI Rescue Sprint — Live Proof
+# CI Repair Benchmark Sprint — Live Proof
 
 > **Spec:** [`docs/specs/ci_rescue_sprint_corpus_spec.md`](specs/ci_rescue_sprint_corpus_spec.md)
 
@@ -6,7 +6,7 @@
 
 ## Scenario
 
-Mini commerce kernel (`auth`, `billing`, `inventory`, `shipping`, `promo`) with **28 failing tests** and **7 regression greens**. Simulates an afternoon CI rescue job at Cursor-substitution scale.
+Mini commerce kernel (`auth`, `billing`, `inventory`, `shipping`, `promo`) with **28 failing tests** and **7 regression greens**. Simulates an afternoon CI repair benchmark run at coding-agent validation scale.
 
 ---
 
@@ -29,7 +29,7 @@ chmod +x scripts/demo_ci_rescue_sprint.sh
 
 ---
 
-## Live API proof (completed 2026-06-25)
+## Live benchmark API proof (completed 2026-06-25)
 
 ```bash
 python3 awos.py mission start --ci-rescue

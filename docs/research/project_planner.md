@@ -4,7 +4,7 @@
 > This file is a navigation stub for Obsidian only.
 
 ## Summary
-ProjectPlanner closes the "goal amnesia" gap in AWOS. It wraps the existing Planner + TaskDecomposer + DAGExecutor with a persistent Goal DAG stored at .awos/goals/, enabling multi-session project memory, dependency-aware execution, and plan adaptation when tasks fail.
+ProjectPlanner closes the "goal amnesia" gap in AWOS. It wraps the existing advanced Planner + TaskDecomposer + DAGExecutor with a persistent Goal DAG stored at .awos/goals/, enabling multi-session project memory, dependency-aware execution, and plan adaptation when tasks fail. The advanced Planner owns project-level decomposition; cheap models are reserved for atomic task execution.
 
 ## Problem
 Current AWOS discards its plan at session end. Every new request starts from zero — no awareness of prior work, completed tasks, or partial failures across sessions.
