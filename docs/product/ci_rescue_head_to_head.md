@@ -1,8 +1,8 @@
-# CI Rescue Sprint — AWOS vs Raw API
+# CI Repair Benchmark — AWOS vs Raw API
 
 **Generated:** 2026-06-26 (live run)
 
-Same 18 fix steps on the same broken practice repo (`ci_rescue_sprint`).
+Same 18 repair steps on the same broken practice repo (`ci_rescue_sprint`).
 
 ## Summary
 
@@ -16,11 +16,17 @@ Same 18 fix steps on the same broken practice repo (`ci_rescue_sprint`).
 
 ## Plain English result
 
-**Raw API** ran all 18 prompts and applied 18 patches. It was **cheaper** (~half the cost). But **tests still failed** — the job was not done.
+**Raw API** ran all 18 prompts and applied 18 patches. It was cheaper, but **tests still failed** — the job was not actually finished.
 
-**AWOS** ran the same 18 steps with verify-and-retry. It cost **about twice as much** (~0.6 cents vs ~0.3 cents). But **all 35 tests passed** — the job was actually finished.
+**AWOS** ran the same 18 steps with verification and retry. It cost more, but **all 35 tests passed** — the work was actually completed.
 
-So on this job: **AWOS is not cheaper, but it is the only one that delivered a working result.** That is the harness value — not saving money on a failed run, but finishing work that one-shot prompts leave broken.
+So on this benchmark: **the harness advantage is not “chat cheaper than Cursor.”**
+It is that the system can spend a little more when necessary to **finish the job correctly** through planning, verification, and recovery.
+
+That is the right lens for AWOS:
+- proper coding agent first
+- reliable recovery second
+- failure-driven learning on top
 
 ## How to re-run
 

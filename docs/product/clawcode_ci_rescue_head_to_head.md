@@ -1,8 +1,10 @@
-# Clawcode CI Rescue — AWOS vs Raw API
+# Clawcode CI Repair Benchmark — AWOS vs Raw API
 
 **Generated:** 2026-06-26T06:04:56.821191+00:00
 
-Real repo **clawcode**, branch `awos-ci-rescue-buggy`, same 12 fix steps.
+Real repo **clawcode**, branch `awos-ci-rescue-buggy`, same 12 repair steps.
+
+> **Note:** This document is a benchmark comparison artifact. It should be read as proof about the CI repair workload, not as the top-level identity of AWOS.
 
 ## Summary
 
@@ -19,6 +21,8 @@ Real repo **clawcode**, branch `awos-ci-rescue-buggy`, same 12 fix steps.
 Both passed. Compare cost and time below.
 
 - **Raw API** = 12 separate model calls, no retry loop.
-- **AWOS** = same 12 steps with verify and retry.
+- **AWOS** = same 12 steps with verification and retry.
+
+This is useful as a **CI repair benchmark** comparison because it isolates harness behavior against a repeatable workload.
 
 Raw JSON: `.awos/benchmarks/clawcode_ci_rescue_head_to_head_20260626_060456.json`

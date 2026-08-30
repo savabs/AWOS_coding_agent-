@@ -1,65 +1,83 @@
 # AWOS — Project Structure
 
-> **Canonical owner for all project metrics and identity facts.**
-> All other files must [[link]] here; they must not copy these values.
-> Product identity: see [[VISION]].
+> **Canonical owner for current project facts, phase, and active priorities.**
+> Product identity lives in [[VISION]].
 
 ---
 
 ## Identity
 
-**AWOS** is an adaptive engineering runtime — a greedy meta-AI that optimizes **quality × speed ÷ cost** on every project, shows every routing decision transparently, and gets more reliable at your codebase every week.
+**AWOS** is a learnable operating system for autonomous work.
 
-**Customer-facing tagline:** "The AI engineering system that learns your codebase."
+**Current pathway:**
+1. build a **proper coding agent**
+2. make it **self-learning from its own failures**
+3. expand that base into an **AI-operated OS**
 
-**Mission:** Build the execution and learning layer that autonomous agents rely on. Start with CI Rescue for engineering agencies. Expand to any domain where repeated work benefits from continuous adaptation.
+**Current repo focus:** the coding agent is App #1 and the main focus of this repository.
 
-**Strategic edge:** Transparent routing (show model + reasoning + past success rate + override), self-learning kernel (PromptEvolver, LiveToolSynthesizer, LinUCB, SkillLibrary) with `.awos/` state that compounds reliability. Not a Cursor competitor — a different category: unattended verified batches + compounding intelligence.
+**Build strategy:** reuse and improve the existing AWOS kernel and agent components rather than building a coding agent from scratch or copying Cursor, Zed, Hermes, or another codebase. Those products are capability benchmarks, not implementation templates.
 
-**Pivot (2026-07-03):** From "learnable OS for autonomous agents" to "adaptive engineering runtime." From black-box routing to glass-box transparency. From broad API play to CI Rescue wedge for engineering agencies.
+**Capability bar:** deliver repository understanding, planning, safe editing, tool use, verification, recovery, and a clear interface at the level expected from leading coding agents, while retaining AWOS's distinct evidence-first, resource-aware, failure-learning approach.
 
-**Moat:** Not secrecy. Transparency + learning loop + compounding `.awos/` state. Anyone can show the model name. Nobody can show your repo's success rate going from 82% to 94% over 6 months because the system learned your codebase, your error patterns, your coding style.
+**Objective:** maximize **Quality × Speed ÷ Cost**.
 
-**First product:** CI Rescue wedge. `awos fix-ci` → red tests → green. 28 tests fixed, $0.0056 total, 49 seconds. Proven on wedge corpus (semantic_pass). See [[CI_RESCUE_PRODUCT]].
+**Allowed techniques:** LLMs, ML, DL, RL, tools, verification systems, memory systems, databases, low-level optimization, GPU/CUDA work, and general software-engineering techniques — anything that improves the objective.
 
-**Coding agent:** App #1 on the kernel. Kernel is portable to research, support, ops, and custom domain agents.
+**Important correction (2026-07-26):** CI repair remains a benchmark/workflow only. It is not the defining identity of AWOS.
 
 ---
 
-## Build Sequence
+## Current Phase
 
-- Phase 0: Workflow backbone — DONE (2026-04)
-- Phase 1: Vector memory + ReAct traces — DONE (2026-05)
-- Phase 2: ML meta-controller (LinUCB) + escalation ladder — DONE (2026-05)
-- Phase 3: Self-learning loop (PromptEvolver, ToolSynth, ScaffoldEvolver) — DONE (2026-05)
-- Phase 4: Product-Market Fit — CI Rescue wedge, web app, agency pilots — **ACTIVE** (pivot 2026-07-03)
-- Phase 5: Compounding moat — three-layer memory, cross-repo learning, margin optimization — PLANNED
-- Phase 6: Platform — multi-app kernel, API layer, marketplace — DEFERRED
+| Phase | Description | Status |
+|---|---|---|
+| 0 | Workflow backbone / research-spec-task discipline | DONE |
+| 1 | Proper coding agent: planning, execution, verification, recovery | **ACTIVE** |
+| 2 | Self-learning coding agent: improve by solving prior failures | NEXT |
+| 3 | AI-operated OS expansion | LATER |
 
-**Current phase:** 4 — CI Rescue wedge + `awos.io` web app + 5 agency pilots
+**Current phase:** 1 — proper coding agent
 
 ---
 
 ## Architecture
 
-```
-Kernel (domain-agnostic)          App #1: Coding (domain-specific)
-─────────────────────────         ────────────────────────────────
-orchestrator.py                   planner.py, worker.py, verifier.py
-reward_store.py (objective)       git_manager.py, cartographer.py
-ml_router.py (LinUCB)             test_runner.py
-escalation_engine.py              symbol_index.py
+```text
+Kernel / Harness
+────────────────────────────────────────────
+orchestrator.py
+reward_store.py
+ml_router.py
+escalation_engine.py
 budget_ledger.py
 prompt_evolver.py
 live_tool_synth.py
-scaffold_evolver.py (OFF by default)
-vector_memory.py, skill_library.py
+scaffold_evolver.py
+vector_memory.py
+skill_library.py
 agent_state_manager.py
 dag_executor.py
-gui/ (server + web UI)
+execution_graph.py
+
+App #1 — Coding Agent
+────────────────────────────────────────────
+planner.py
+worker.py
+verifier.py
+git_manager.py
+cartographer.py
+test_runner.py
+ci_discovery.py
+ci_planner.py
+ci_display.py
+
+gui/ and awos-app/
+────────────────────────────────────────────
+Interfaces for talking to the coding agent
 ```
 
-**Runtime state:** `.awos/` — the OS filesystem (error patterns, skills, evolved prompts, tools, rewards, goals, memory).
+**Runtime state:** `.awos/` stores sessions, rewards, traces, memory, tools, skills, and other evolving state.
 
 ---
 
@@ -67,45 +85,45 @@ gui/ (server + web UI)
 
 | Module | Path | Purpose |
 |---|---|---|
-| CLI entry | `awos.py` | User-facing commands (`fix-ci`, `serve`, `stats`) |
-| Kernel loop | `scaffold/agent/orchestrator.py` | Plan → execute → verify → learn |
+| CLI entry | `awos.py` | Commands for running and inspecting the agent |
+| Kernel loop | `scaffold/agent/orchestrator.py` | Plan → execute → verify → learn; emits live debug bundles |
 | Objective function | `scaffold/agent/reward_store.py` | `compute_reward()` — quality × speed ÷ cost |
-| Bandit router | `scaffold/agent/ml_router.py` | LinUCB model selection |
-| Model scheduler | `scaffold/agent/escalation_engine.py` | 5-tier ladder, start cheap escalate on evidence |
-| Prompt compiler | `scaffold/agent/prompt_evolver.py` | Experience → evolved prompts |
-| Tool compiler | `scaffold/agent/live_tool_synth.py` | Failures → synthesized helpers |
-| Self-patcher | `scaffold/agent/scaffold_evolver.py` | Scaffold mutations (OFF by default — research feature) |
-| Coding execute | `scaffold/agent/worker.py` | LLM edit application |
-| Coding verify | `scaffold/agent/verifier.py` | Syntax + apply gate |
-| CI discovery | `scaffold/agent/ci_discovery.py` | Test failure discovery + parsing |
-| CI planner | `scaffold/agent/ci_planner.py` | CI goal + plan generation |
-| CI display | `scaffold/agent/ci_display.py` | Terminal output formatting |
-| Web UI | `gui/server.py` | Web server + JSON API + SSE |
-| Web dashboard | `gui/static/dashboard.html` | CI Rescue dashboard view |
-| Agent Console | `gui/static/agent.html` | Apple-inspired frameless UI: reasoning sheet, event cards, frosted sidebar, live stream |
-| Electron app | `awos-app/main.js` | Native desktop: frameless window, dock icon, native menus, Python server spawn |
-| Electron preload | `awos-app/preload.js` | Secure bridge: dockBounce, setProgress, platform info |
-| In-app agent run | `gui/server.py` POST `/api/agent/run` | Spawns `awos run` as subprocess, streams events via SSE, no terminal needed |
-| Electron config | `awos-app/package.json` | npm project with electron + electron-builder for macOS/Linux/Windows |
-| Identity doc | `VISION.md` | Canonical product vision |
+| Router | `scaffold/agent/ml_router.py` | Learnable model/policy selection from task context and outcomes; not the final quality authority |
+| Escalation | `scaffold/agent/escalation_engine.py` | Cheap-first fallback ladder |
+| Prompt learning | `scaffold/agent/prompt_evolver.py` | Failure/success → prompt refinement |
+| Tool learning | `scaffold/agent/live_tool_synth.py` | Repeated manual steps → tools |
+| Self-patching | `scaffold/agent/scaffold_evolver.py` | Controlled scaffold evolution |
+| Coding execution | `scaffold/agent/worker.py` | Edit application |
+| Coding verification | `scaffold/agent/verifier.py` | Syntax + apply + validation gates |
+| Execution graph | `scaffold/agent/execution_graph.py` | Typed provider-free execution DAG for edits, tests, barriers, reviews, recovery, and final verification; computes deterministic safe waves |
+| Evaluation v1 | `scaffold/agent/evaluation_v1.py` | Versioned fixtures, hard acceptance/safety gates, trajectories, reports, and regression comparison |
+| Holdout corpus contract | `scaffold/agent/evaluation_corpus.py` | Fail-closed private holdout manifest, digest-bound report bundles, and per-task baseline/candidate regression comparison |
+| Holdout comparison CLI | `scripts/verify_holdout_comparison.py` | Operator-only local artifact verifier with deterministic output and hard-gated exit status |
+| Private holdout setup | `scripts/init_private_holdout.py` | Creates ignored local holdout directories and metadata-only template without private data |
+| Private holdout pipeline | `scripts/run_holdout_pipeline.py` | Offline path-bound wrapper delegating to the hard-gated comparison verifier |
+| Holdout smoke proof | `scripts/run_holdout_smoke.py` | Three-task deterministic runner → bundle → manifest → comparison plumbing proof; not capability evidence |
+| Zed project skills | `.agents/skills/` | Session start, change gate, evaluation discipline, and debugging/safety instructions for AWOS development sessions |
+| Evidence debugger | `scaffold/agent/core/debug_*.py` | Evidence bundles, bounded proof, inspection, controlled reruns |
+| Web server | `gui/server.py` | Interface surface |
+| Web UI | `gui/static/agent.html`, `gui/static/dashboard.html` | Human interface to the agent |
+| Electron app | `awos-app/` | Native shell for the interface |
 
 ---
 
-## Execution Flow
+## Current Priorities
 
-```
-Goal
-  ↓
-Orchestrator (kernel)
-  ├── EscalationEngine / LinUCB → pick model (shown transparently to user)
-  ├── Planner → task DAG
-  ├── Worker → execute (Coding App)
-  ├── Verifier → quality gate (Coding App)
-  ├── compute_reward() → score outcome
-  └── Learn → .awos/ (error patterns, skills, prompts, tools, weights)
-```
-
-**User sees:** model choice + reasoning + past success rate + override option. Not a black box.
+| Priority | Focus | Status |
+|---|---|---|
+| 1 | Native graph execution | COMPLETE — native Planner graph runtime and 10-module provider-free evaluation pass (2026-08-03) |
+| **Proper coding agent reliability** | ACTIVE |
+| 2 | Assistant live observation bridge | **ACTIVE / LIVE PROOF BLOCKED** — implementation complete through replay/SSE/snapshot/CLI; Electron must be restarted — see [[assistant_live_observer]] |
+| 3 | Strong app/interface for talking to the agent | ACTIVE |
+| 4 | Verification and recovery quality | ACTIVE |
+| 5 | Typed execution graph | ACTIVE — provider-free contract, native Planner runtime, and multi-module evaluation complete; Planner uses OpenCode Go qwen3.7-plus and workers use deepseek-v4-pro (2026-08-03) |
+| 6 | Self-learning from failures | PLANNED / PARTIAL — evaluation v1 harness complete; live-agent adapter and held-out corpus remain |
+| 7 | Broader OS expansion | DEFERRED |
+| 8 | Quality gate reliability | DONE — incremental lint scope and explicit artifact mode |
+| 9 | Controlled rerun validation | DONE — shell-free local rerun executor |
 
 ---
 
@@ -115,33 +133,21 @@ Orchestrator (kernel)
 |---|---|---|
 | Model tiers | 9 (8 working, 1 down) via OpenCode Go | 2026-07-21 |
 | Working models | 8/15 validated | 2026-07-21 |
-| Chat latency | 5-8s via DeepSeek V4 Flash (primary) | 2026-07-21 |
-| Provider | OpenCode Go ($10/mo) only working provider | 2026-07-21 |
+| Chat latency | 5–8s via DeepSeek V4 Flash (primary) | 2026-07-21 |
+| Development provider | OpenCode Go ($10/mo) is the currently validated provider; architecture remains provider-agnostic | 2026-07-21 |
 | Budget spent | $2.09 of $20/mo | 2026-07-21 |
-| Total requests | 2,153 | 2026-07-21 |
-| Avg cost/req | $0.00097 | 2026-07-21 |
-| App packaging | macOS .app in dist/mac/ (~608MB) | 2026-07-21 |
+| SWE-bench Lite (dev) | 1/1 passed (sqlfluff-2419) | 2026-08-01 |
+| Total requests | 2,154 | 2026-08-01 |
+| Budget spent | $2.12 of $20/mo | 2026-08-01 |
 | Diagnostics | Timing sensors (HTTP + LLM call) | 2026-07-21 |
 | Kernel LOC | ~40K across 140 modules | 2026-07-21 |
-| Active task files | 1 (sprint1_working_app — DONE 2026-07-24) | 2026-07-24 |
-| Current phase | 4 — Product-Market Fit (Sprint 1 complete; Sprint 2 next) | 2026-07-24 |
-| Pilot customers | 0 | 2026-07-21 |
-| E2E tests | 1 (test_orchestrator_e2e — added 2026-07-24) | 2026-07-24 |
-| Dead models filtered | 5 (gemini-2.0-flash, gemini-2.5-flash, gpt-4o-mini, claude-haiku-4-5, claude-sonnet-4-6) | 2026-07-24 |
-
----
-
-## North Star Metric
-
-**Project Efficiency Index (PEI)** = (Quality × Speed) / Cost
-
-- Quality: test pass rate, success rate, rework cycles
-- Speed: time from goal to done
-- Cost: total LLM spend per project
-
-Tracked via: `performance.json`, `spans.jsonl`, `reward_store.jsonl`, `awos stats`.
-
-**Customer-facing metric:** "Your AI improved X% this month" — shown on web dashboard. Backed by PEI.
+| Active task files | 75 in `tasks/active/` (includes legacy artifacts, templates, and completed handoff artifacts) | 2026-07-29 |
+| Current phase | Phase 1 — proper coding agent | 2026-07-27 |
+| E2E tests | 3 (`tests/test_orchestrator_e2e.py`, `tests/test_coding_agent_minimal_e2e.py`, `tests/test_test_outcome_gate.py`) | 2026-07-29 |
+| Evaluation v1 tests | 13 passed; orchestrator adapter, public fixture contracts, deterministic correct/wrong/replay CLI proofs pass as designed | 2026-07-29 |
+| Dead models filtered | 5 | 2026-07-24 |
+| Observer contract tests | 49 focused tests passing | 2026-07-28 |
+| Observer API surface | `/api/observer/ui-event`, `/events`, `/stream`, `/snapshot` plus `awos observe` CLI | 2026-07-28 |
 
 ---
 
@@ -149,51 +155,26 @@ Tracked via: `performance.json`, `spans.jsonl`, `reward_store.jsonl`, `awos stat
 
 | Task | Focus | Status |
 |---|---|---|
-| **Pivot to web app product** | CI Rescue wedge + transparent routing + agency pilot | **ACTIVE** — see [[pivot_web_app_product]] |
-| **Routing learning repair** | Fix 3 bugs preventing LinUCB self-learning | **DONE** — see [[routing_learning_repair]] |
-| **Wedge v1 test rescue** | Define minimum CI Rescue sprint worth ₹2k/mo | **ACTIVE** — see [[wedge_v1_test_rescue]] |
-| **CI Rescue sprint corpus** | 28 reds, 5 modules, 18 tasks | **ACTIVE** — see [[ci_rescue_sprint_corpus]] |
-| **OpenRouter integration** | 5th LLM provider | **NEAR DONE** — 12/13 steps |
-| **Server stability** | App crashes after 2-3 queries | **DONE (2026-07-21)** — see [[checkpoint_2026-07-21_server_stability]] |
-| **Speed** | Target 3-5s per query | **DONE (2026-07-21)** — 30-47% faster, see [[checkpoint_2026-07-21_chat_speed]] |
-| **OpenCode Go 429 quota** | All 9 models failing with `GoUsageLimitError` | **DONE (2026-07-23)** — API key rotated, see [[checkpoint_2026-07-23_playwright_mcp]] |
-| **Playwright MCP** | No live eyes on the running app | **DONE (2026-07-23)** — `@playwright/mcp` installed; agent can now `browser_snapshot()`, `browser_take_screenshot()`, etc. |
-| **Model name badge bug (B1)** | Shows `ocg:deepseek-v4-flash` instead of `DeepSeek V4 Flash` | **DONE (2026-07-23)** — `gui_chat.py:1069` uses `name` from tuple |
-| **Phantom model names during streaming (B2)** | `DeepSeek V4 Pro` then `MiniMax M3` shown before real model | **DONE (2026-07-23)** — `agent.html:420, 436` start with empty `''` |
-| **M3 cost badge (B3)** | Couldn't reproduce — M3 not in dropdown | **DONE (2026-07-23)** — M3 added to dropdown; cost shows $0.0003 for 787+83 tokens |
-| **Server stability (B4)** | Alleged crash after Playwright e2e | **DONE (2026-07-23)** — 20/20 stress test passed, server alive |
-| **Error message truncation (B5)** | Long error messages cut off mid-string | **DONE (2026-07-23)** — backend yields `error` event, frontend renders styled block w/ full text + copy button |
-| **T1: Orchestrator progress invisible** | Events emitted but only titlebar dot updates | **DONE (2026-07-23)** — `connectSSE` routes 8 event types to active msg bubble with color coding |
-| **T2: Thinking mixed into bubble** | Non-reasoning models put preamble in content | **DONE (2026-07-23)** — `splitThinkingPreamble()` detects `<think>` blocks + cue phrases |
-| **T3: Thinking panel hidden** | Collapsed by default | **DONE (2026-07-23)** — now starts expanded with `▼` arrow |
-| **UI/UX: Agent Power Layer** | Glass-box UI — see [[ui_ux_priority]] for full breakdown | **PRIORITY #1** — 11 incremental steps |
-| | ├─ ✅ Syntax highlighting + copy buttons | Done |
-| | ├─ ✅ Model badge (model, TTFB, tokens, cost) | Done |
-| | ├─ ✅ Visual verification pipeline (Playwright) | Done |
-| | ├─ 1️⃣ Fix badge spacing — text runs together | 5min fix |
-| | ├─ 2️⃣ Message actions — copy full response, regenerate, delete | small |
-| | ├─ 3️⃣ Smooth streaming — debounced renders | medium |
-| | ├─ 4️⃣ Thinking panel polish — model name in header, animation | small |
-| | ├─ 5️⃣ Empty state — suggestions, quick actions | small |
-| | ├─ 6️⃣ Model selector dropdown — user picks model | medium |
-| | ├─ 7️⃣ Multi-chat sidebar — create/switch/delete chats | medium |
-| | ├─ 8️⃣ Conversation history — persist chats across reload | medium |
-| | ├─ 9️⃣ File references — show edited files in message | medium |
-| | ├─ 10️⃣ Stop button polish — immediate feedback | small |
-| | └─ 11️⃣ Page routing — settings, dashboard, sessions | large |
-| **File editor** | Monaco Editor + file IPC + native save | **PRIORITY #2** |
-| **AI + editor** | Agent reads open file, shows inline diffs | **PRIORITY #3** |
-| **Workspace mgmt** | Multiple repos, per-repo .awos/ | **PRIORITY #4** |
-| **Orchestrator E2E** | awos run executes coding via OpenCode Go | **PRIORITY #5** |
-| **Test suite** | After features stable. Validates everything. | **PRIORITY #6** |
-| **File editor** | Monaco Editor + file IPC + native save | **PRIORITY #2** |
-| **AI + editor** | Agent reads open file, shows inline diffs | **PRIORITY #3** |
-| **Workspace mgmt** | Multiple repos, per-repo .awos/ | **PRIORITY #4** |
-| **Orchestrator E2E** | awos run executes coding via OpenCode Go | **PRIORITY #5** |
-| **Test suite** | After features stable. Validates everything. | **PRIORITY #6** |
-| **Workspace mgmt** | Multiple repos, per-repo .awos/ | **PRIORITY #3** |
-| **Orchestrator E2E** | awos run executes coding via OpenCode Go | **PRIORITY #4** |
-| **Test suite** | After features stable. Validates everything. | **PRIORITY #5** |
+| **Recenter self-improving coding agent** | Align repo to coding-agent-first pathway | **ACTIVE** — see [[recenter_self_improving_coding_agent]] |
+| **Agent interface pathway** | Make the app the right interface to the coding agent | **ACTIVE** — see [[pivot_web_app_product]] |
+| **Assistant live observer** | Correlated, replayable event bridge between AWOS and the external assistant | **ACTIVE / LIVE PROOF BLOCKED** — implementation complete; stale Electron process must be quit/restarted — see [[assistant_live_observer]] |
+| **Session resume lease** | Exclusive admission for concurrent paused-session resumes | **ACTIVE / IMPLEMENTED** — lease contention and dead-owner recovery proven; broader session save locking remains out of scope |
+| **Live agent renderer** | Developer renderer over existing execution telemetry | **ACTIVE / LIVE PROOF PENDING** — see [[live_agent_renderer]] |
+| **Chat prompt fidelity** | Exact user-input and provider-request traceability | **ACTIVE / LIVE PROOF PENDING** — see [[chat_prompt_fidelity]] |
+| **Routing learning repair** | Fix bugs preventing learned routing from working properly | **DONE** — see [[routing_learning_repair]] |
+| **Wedge v1 test rescue** | Internal CI repair benchmark for the coding agent | **ACTIVE** — see [[wedge_v1_test_rescue]] |
+| **CI repair corpus** | Benchmark corpus for medium-scale coding-agent validation | **ACTIVE** — see [[ci_rescue_sprint_corpus]] |
+| **OpenRouter integration** | Additional provider support | **NEAR DONE** |
+| **Orchestrator E2E** | Strengthen end-to-end coding-agent proof | **ACTIVE / IMPORTANT** — test outcome gate complete; broader agent capabilities remain |
+| **Self-learning evaluation v1** | Measure correctness, safety, trajectories, reward, cost, latency, and regressions | **DONE for deterministic harness, live adapter, holdout manifest, report verifier, operator CLI, local workspace setup, offline pipeline, and smoke proof; private corpus and live credentialed runs next** |
+| **Small holdout evaluation v1** | Run the first real-orchestrator evaluation with one task, one trial, and bounded storage | **ACTIVE — corrected live trial reached Qwen and failed on native graph schema incompatibility; cost telemetry for early Planner failure is also pending fix; new authorization required for any rerun** |
+| **SWE-bench Lite dev v1** | Evaluate one real repository issue from the official 23-task development split | **DONE** — Task `sqlfluff__sqlfluff-2419` passed with pass_at_1=1.0 and cost ~$0.03 |
+| **Fixed OpenCode Go agent path** | Keep the initial product on one provider/model while core reliability is built | **DONE offline — OpenCode Go + deepseek-v4-pro path and tests pass; live SWE-bench retry pending planner-grounding repair** |
+| **Quality gate reliability** | Incremental lint scope and deterministic task gate | **DONE** — see [[quality_gate_reliability]] |
+| **Controlled rerun validation** | Reproduce bounded observations with local evidence | **DONE** — see [[controlled_rerun_executor]] |
+| **File editor** | Workspace editing UX | **PRIORITY** |
+| **AI + editor** | Agent sees and edits open files cleanly | **PRIORITY** |
+| **Workspace management** | Multiple repos, per-repo `.awos/` | **PRIORITY** |
 
 ---
 
@@ -201,17 +182,36 @@ Tracked via: `performance.json`, `spans.jsonl`, `reward_store.jsonl`, `awos stat
 
 | Decision | Rationale | Date |
 |---|---|---|
-| AWOS = adaptive engineering runtime (customer-facing) | Customers buy outcomes, not architecture | 2026-07-03 |
-| Glass-box routing: show models + reasoning + overrides | Trust through transparency. Moat is the learning loop, not secrecy. | 2026-07-03 |
-| Customer pays subscription, AWOS manages all API keys | Reliability compounds via learning. Cost optimization follows quality. | 2026-07-03 |
-| CI Rescue is the wedge product | Universal pain. Measurable outcome. Proven (28 → green). Unattended. | 2026-07-03 |
-| Target: engineering agencies (not individual devs, not enterprise) | Fastest path to revenue. Multiple client repos = compounding visible. | 2026-07-03 |
-| Web app is primary product surface | Zero-install experience. CLI is for power users. | 2026-07-03 |
-| ScaffoldEvolver OFF by default | Self-modifying code scares customers. Research feature only. | 2026-07-03 |
-| "90% cost reduction" claim replaced with PEI trend | Honest, defensible, provable. | 2026-07-03 |
-| Greedy objective: quality × speed ÷ cost | Encoded in `compute_reward()` | Permanent |
-| `.awos/` local state ownership | Compounding switching cost | Permanent |
-| User is architect/director, AWOS is senior engineer | UX principle: engineer feels powerful, not passive | 2026-07-03 |
+| Proper coding agent comes first | Self-learning is meaningless without a strong base agent | 2026-07-26 |
+| Self-learning means solving prior failures better | Repo/user-memory alone is not enough | 2026-07-26 |
+| AWOS can use any technique that improves Q × S ÷ Cost | This is a systems project, not an LLM-only project | 2026-07-26 |
+| App is the interface to the coding agent | UI exists to talk to and inspect the agent | 2026-07-26 |
+| CI repair is a benchmark, not the identity | Useful proving workload, wrong top-level framing | 2026-07-26 |
+| One provider and one fixed model define the initial coding agent | Use OpenCode Go exclusively with `deepseek-v4-pro` on the active product path; do not use direct DeepSeek or dynamic provider/model fallback until the core product is reliable | 2026-07-30 |
+| Dynamic routing is learnable allocation | Learn task difficulty, uncertainty, context, historical outcomes, latency, and cost to avoid overusing strong models or underpowering difficult tasks; verification remains the quality authority | 2026-07-27 |
+| Exploration is a first-class agent capability | Deep, bounded repository exploration is required for intelligent planning and safe execution | 2026-07-27 |
+| Simple programmer-oriented UI with parallel tasks | The interface should expose engineering state without becoming an overloaded dashboard | 2026-07-27 |
+| Compatible reuse is encouraged | Adopt compatible ideas and open-source components after capability, license, security, and architecture review | 2026-07-27 |
+| App #1 acceptance criteria | Strengthen the coding agent, preserve reusable kernel boundaries, improve Q × S ÷ Cost, help future autonomous workloads, and differentiate through behavior | 2026-07-27 |
+| Quality is non-negotiable; speed and cost are tunable | A slower/cheaper path and a faster/more expensive path are both valid if they meet the same quality floor; speed is never purchased by lowering quality | 2026-07-27 |
+| Differentiation must be behavioral | Demonstrate exploration, evidence, parallel work, verification, recovery, and failure-driven improvement rather than relying on product claims | 2026-07-27 |
+| Every plan must serve the full AWOS vision | AWOS is a learnable operating system for autonomous work; the coding agent, debugger, router, and benchmarks are subsystems or App #1, not the final identity. Planning must avoid narrowing AWOS into any single feature, provider, workload, or interface. | 2026-07-27 |
+| Glass-box routing remains important | Transparency helps debugging and trust | 2026-07-03 |
+| ScaffoldEvolver stays off by default | Self-modification requires hard safety gates | 2026-07-03 |
+
+---
+
+## Planning Guardrail
+
+Every new plan, specification, and implementation must be evaluated against the canonical vision in `VISION.md`:
+
+> AWOS is a learnable operating system for autonomous work. The coding agent is App #1, not the final product.
+
+Before starting work, explicitly identify how the proposed change contributes to the broader autonomous-work system. Do not let a subsystem become the project's identity by accident. Model routing, evidence-first debugging, CI repair, UI work, and provider integrations are enabling capabilities; they must remain interoperable, extensible, and useful beyond their immediate implementation.
+
+The coding agent must retain AWOS's distinctive additions rather than becoming a generic coding-agent rebuild. Before designing or writing new code, inspect the existing modules and workflows, identify what can be reused or composed, and add new implementation only for a verified capability gap. Existing AWOS capabilities—including evidence-first debugging, controlled reruns, verification, recovery, learning, resource awareness, and glass-box observability—must be treated as product value and integrated into the coding-agent workflow. Repository exploration, symbol discovery, search, dependency tracing, and evidence collection are core intelligence capabilities, not optional UI features.
+
+CI repair, test rescue, and repository maintenance are workloads and benchmarks, not kernel identity. Do not hard-code CI assumptions into reusable orchestration or learning contracts. Provider integrations are replaceable adapters; OpenCode Go is the current development provider, not a permanent dependency. Prefer simple programmer-oriented interfaces that support isolated, observable parallel tasks over dashboard-heavy surfaces.
 
 ---
 
@@ -219,13 +219,10 @@ Tracked via: `performance.json`, `spans.jsonl`, `reward_store.jsonl`, `awos stat
 
 | Idea | Replaced by | Why |
 |---|---|---|
-| "Hide model selection from customers" | Transparent routing with overrides | Trust > secrecy |
-| "AWOS API productization (Phase 5)" | CI Rescue wedge first | API layer needs proven demand |
-| "Multi-app kernel (Phase 6)" | Deferred until coding proves value | Premature expansion |
-| "Agent-making firm" as immediate goal | CI Rescue product + agency pilots | Narrow first, expand later |
-| "90% cost reduction" claims | PEI trend ("Your AI improved X% this month") | Defensible metric |
-| 90% savings projection ($30 at month 12) | Removed. PEI trend shown, not promised. | Honest positioning |
-| Model ladder refactor (top-60 tiers) | Superseded by pivot focus | CI Rescue wedge takes priority |
+| CI Rescue as project identity | CI repair as one benchmark workload | Too narrow and misleading |
+| Agency / pilot / pricing-first framing | Coding-agent-first engineering pathway | Core capability is not ready to be framed that way |
+| “Learns your codebase” as the main self-learning story | Failure-driven self-learning | Closer to the real technical ambition |
+| App as GTM shell | App as interface to the coding agent | More accurate to current mission |
 
 ---
 
@@ -235,10 +232,10 @@ Tracked via: `performance.json`, `spans.jsonl`, `reward_store.jsonl`, `awos stat
 # 1. Identity
 cat VISION.md
 
-# 2. Project facts (this file)
+# 2. Project facts
 cat memories/repo/project_structure.md
 
-# 3. App/UI state (what the user sees, what the code does)
+# 3. App/UI state
 cat memories/repo/ui_state.md
 
 # 4. Last session
@@ -247,13 +244,8 @@ ls -t docs/memory/ | head -1 | xargs cat
 # 5. Active tasks
 cat tasks/active/*.md
 
-# 6. Operational protocols (when implementing)
+# 6. Operational protocols
 cat AWOS.md
 ```
-
-**Why this works:** `ui_state.md` is a hand-curated snapshot of the running app
-— layout, components, events, model tiers, bugs. Reading it is 100× faster than
-parsing `agent.html` (582 lines) + `gui_chat.py` (1372 lines) every session.
-Update `ui_state.md` whenever the UI or routing logic changes.
 
 Do not re-read the entire codebase. Follow the links.

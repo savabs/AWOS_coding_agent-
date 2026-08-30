@@ -46,7 +46,7 @@
 
 ## System rating against subscription bar
 
-**Target:** A stranger pays when we show (1) completion rate, (2) 30–120 min wall time, (3) PEI beats raw API, (4) simple UX
+**Target:** prove the coding agent is strong enough to serve as App #1 by showing (1) completion rate, (2) 30–120 min wall time, (3) PEI beats raw API, (4) simple operator UX
 
 | Criterion | Current state | Rating | Gap |
 |-----------|---------------|--------|-----|
@@ -58,7 +58,7 @@
 | **Learning loop** | LinUCB + evolver + synth all active | 🟢 **9/10** | Solid foundation |
 | **Cost efficiency** | Cheap-first routing proven in benchmark | 🟢 **8/10** | Works on small cases |
 
-### Overall system rating: **6.5/10** (lab-proven, not customer-ready)
+### Overall system rating: **6.5/10** (lab-proven, not interface-ready yet)
 
 ---
 
@@ -78,7 +78,7 @@
 - Simple product surface (`awos worker` doesn't exist)
 - Real repo proof (only toy fixtures)
 - Planner reliability without `plan_file` workaround
-- Billing/onboarding path
+- Clear app/operator path for broader use
 
 ---
 
