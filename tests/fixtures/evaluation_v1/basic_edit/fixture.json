@@ -1,0 +1,18 @@
+{
+  "fixture_version": "evaluation_v1",
+  "task_id": "basic_edit_001",
+  "family": "basic_edit",
+  "repository_path": "repository",
+  "request": "Implement add(a, b) so it returns the sum.",
+  "acceptance": [
+    {
+      "name": "pytest",
+      "command": ["python3", "-m", "pytest", "-q"],
+      "timeout_sec": 20,
+      "required": true
+    }
+  ],
+  "allowed_paths": ["calculator.py"],
+  "forbidden_paths": [".git", ".env"],
+  "human_minutes": 2
+}

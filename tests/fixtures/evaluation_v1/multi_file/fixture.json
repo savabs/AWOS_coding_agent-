@@ -1,0 +1,11 @@
+{
+  "fixture_version": "evaluation_v1",
+  "task_id": "multi_file_001",
+  "family": "multi_file",
+  "repository_path": "repository",
+  "request": "Add a public subtract function and export it from the package.",
+  "acceptance": [{"name":"pytest","command":["python3","-m","pytest","-q"],"timeout_sec":20}],
+  "allowed_paths": ["calculator.py", "__init__.py"],
+  "forbidden_paths": [".git", ".env"],
+  "human_minutes": 5
+}

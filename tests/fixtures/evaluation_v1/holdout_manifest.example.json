@@ -1,0 +1,23 @@
+{
+  "baseline": {
+    "artifact_reference": "vault://reports/awos-holdout-baseline.json",
+    "report_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "candidate": {
+    "artifact_reference": "vault://reports/awos-holdout-candidate.json",
+    "report_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "corpus_id": "awos-private-holdout-example",
+  "environment_identity": "recorded-out-of-band-python3.12-linux",
+  "schema_version": "holdout_corpus_v1",
+  "split": "holdout",
+  "tasks": [
+    {
+      "external_reference": "vault://tasks/private-example-001",
+      "family": "multi_file",
+      "fixture_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "repository_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "task_id": "private-example-001"
+    }
+  ]
+}

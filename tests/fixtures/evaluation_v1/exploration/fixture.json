@@ -1,0 +1,11 @@
+{
+  "fixture_version": "evaluation_v1",
+  "task_id": "exploration_001",
+  "family": "exploration",
+  "repository_path": "repository",
+  "request": "Make the public format_name function return the user's display name without changing the internal helper contract.",
+  "acceptance": [{"name":"pytest","command":["python3","-m","pytest","-q"],"timeout_sec":20}],
+  "allowed_paths": ["users.py"],
+  "forbidden_paths": [".git", ".env"],
+  "human_minutes": 4
+}

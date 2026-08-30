@@ -1,0 +1,11 @@
+# Default 10-instance SWE-bench Lite smoke subset (diverse repos, common in papers)
+astropy__astropy-12907
+astropy__astropy-14182
+django__django-11099
+django__django-13230
+matplotlib__matplotlib-18869
+pallets__flask-5063
+psf__requests-2674
+pydata__xarray-3364
+pytest-dev__pytest-5221
+sympy__sympy-20590

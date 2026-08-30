@@ -1,0 +1,19 @@
+{
+  "schema_version": "planning_exploration_eval_v1",
+  "fixtures": [
+    {
+      "id": "single_file_service",
+      "goal": "Update `src/service.py` and call ServiceRegistry",
+      "target_files": ["src/service.py"],
+      "dependency_files": [],
+      "forbidden_files": [".awos/ignored.py"]
+    },
+    {
+      "id": "test_repair",
+      "goal": "Fix `calculator.py` so test_calculator passes",
+      "target_files": ["calculator.py"],
+      "dependency_files": ["test_calculator.py"],
+      "forbidden_files": ["docs/unrelated.md"]
+    }
+  ]
+}
