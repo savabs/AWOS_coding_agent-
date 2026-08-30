@@ -28,8 +28,10 @@ from typing import Optional
 
 try:
     from .reward_store import ReplayGate
+    from .fixed_provider import FIXED_MODEL
 except ImportError:
     from reward_store import ReplayGate
+    from fixed_provider import FIXED_MODEL
 
 
 
@@ -207,6 +209,28 @@ class EscalationEngine:
 
         complexity_score = self._score_complexity(task)
 
+        if os.getenv("AWOS_BENCHMARK_MODE", "").lower() in ("1", "true", "yes"):
+            benchmark_spec = next(
+                (spec for spec in LADDER if spec.model_id == FIXED_MODEL),
+                None,
+            )
+            if benchmark_spec is None or benchmark_spec.provider in dead_providers:
+                raise RuntimeError(
+                    f"Benchmark provider contract unavailable: {FIXED_MODEL}"
+                )
+            if self._effective_budget(benchmark_spec, budget_remaining) < benchmark_spec.cost_per_req:
+                raise RuntimeError(
+                    "Benchmark provider request would exceed the trial budget"
+                )
+            return EscalationDecision(
+                spec=benchmark_spec,
+                reason=f"Benchmark contract: fixed {benchmark_spec.provider}/{benchmark_spec.model_id}",
+                complexity_score=complexity_score,
+                failure_count=failure_count,
+                budget_remaining=budget_remaining,
+                forced=True,
+            )
+
         # Hard override (capped in cheap-only mode)
         if force_level is not None:
             spec = LEVEL_MAP[force_level]
@@ -288,37 +312,56 @@ class EscalationEngine:
             # The mask also filters MODELS_UNAVAILABLE — learned policy
             # would otherwise pick a dead model that was valid when the
             # weights were trained.
-            budget_mask = [
-                spec.level.value <= cap
+            # The persisted router may have a larger historical action space than
+            # the current ladder. Build a mask in that action space, but only map
+            # IDs back to candidates that exist in the current ladder.
+            budget_mask = [False] * self._ml_router.n_actions
+            for index, spec in enumerate(LADDER):
+                if index >= len(budget_mask):
+                    break
+                budget_mask[index] = (
+                    spec.level.value <= cap
+                    and self._effective_budget(spec, budget_remaining) >= spec.min_budget_remaining
+                    and spec.model_id not in MODELS_UNAVAILABLE
+                    and spec.provider not in dead_providers
+                )
+            action_id = self._ml_router.select(features, budget_mask=budget_mask)
+            ml_spec = LADDER[action_id] if 0 <= action_id < len(LADDER) else None
+            current_eligible = [
+                spec for spec in worker_ladder
+                if spec.level.value <= cap
                 and self._effective_budget(spec, budget_remaining) >= spec.min_budget_remaining
                 and spec.model_id not in MODELS_UNAVAILABLE
-                for spec in LADDER
+                and spec.provider not in dead_providers
             ]
-            action_id = self._ml_router.select(features, budget_mask=budget_mask)
-            ml_spec = LADDER[action_id]
-            if ml_spec.model_id in MODELS_UNAVAILABLE or ml_spec.level.value > cap:
-                # The learned policy picked something dead or above cap.
-                # Fall back to the cheapest non-dead available level.
-                for s in LADDER:
-                    if s.level.value <= cap and s.model_id not in MODELS_UNAVAILABLE:
-                        ml_spec = s
+            if ml_spec is None or ml_spec not in current_eligible:
+                # Stale learned action or unavailable candidate: preserve the
+                # deterministic current-ladder policy instead of crashing or
+                # calling a provider that failed the hard eligibility gate.
+                ml_spec = current_eligible[0] if current_eligible else None
+                for candidate in reversed(current_eligible):
+                    if complexity_score >= candidate.min_complexity or failure_count >= candidate.min_failures:
+                        ml_spec = candidate
                         break
-            # Apply performance veto if empirical data is stronger
-            if _perf_override is not None and _perf_override.level.value > ml_spec.level.value:
+            if ml_spec is not None:
+                # Apply performance veto if empirical data is stronger.
+                if _perf_override is not None and _perf_override.level.value > ml_spec.level.value:
+                    return EscalationDecision(
+                        spec=_perf_override,
+                        reason=f"Performance veto over LinUCB: {_perf_override.name} has higher empirical rate for task_type={task_type}",
+                        complexity_score=complexity_score,
+                        failure_count=failure_count,
+                        budget_remaining=budget_remaining,
+                    )
                 return EscalationDecision(
-                    spec=_perf_override,
-                    reason=f"Performance veto over LinUCB: {_perf_override.name} has higher empirical rate for task_type={task_type}",
+                    spec=ml_spec,
+                    reason=f"LinUCB learned policy (updates={self._ml_router.total_updates()})",
                     complexity_score=complexity_score,
                     failure_count=failure_count,
                     budget_remaining=budget_remaining,
                 )
-            return EscalationDecision(
-                spec=ml_spec,
-                reason=f"LinUCB learned policy (updates={self._ml_router.total_updates()})",
-                complexity_score=complexity_score,
-                failure_count=failure_count,
-                budget_remaining=budget_remaining,
-            )
+            # No current candidate passed the hard gate; continue to the
+            # existing heuristic path, which returns an honest decision.
 
         # ── Cold-start: performance soft hint ─────────────────────────────
         # When LinUCB has < min_samples, use empirical success matrix as a

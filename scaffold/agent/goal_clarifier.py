@@ -14,8 +14,11 @@ Research: docs/research/goal_clarification_best_practices.md
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Optional
+
+from .fixed_provider import FIXED_MODEL, create_fixed_client
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +143,7 @@ class GoalClarifier:
 
 class AmbiguityDetector:
     """
-    Phase 3: Use cheap model (DeepSeek $0.14/M) to detect goal ambiguity.
+    Phase 3: Use the fixed OpenCode Go model to detect goal ambiguity.
     
     Checks for missing:
     - Output specification (what file to create/modify?)
@@ -181,11 +184,12 @@ If IS_CLEAR is "no", list what's missing and why."""
             (is_ambiguous: bool, missing_elements: list[str])
         """
         try:
-            import litellm
-            
-            # Use DeepSeek for cheap ambiguity detection ($0.14/M vs $3/M)
-            response = litellm.completion(
-                model="deepseek/deepseek-chat",
+            if not os.getenv("OPENCODE_GO_API_KEY"):
+                return self._heuristic_detect(goal)
+
+            client = create_fixed_client()
+            response = client.chat.completions.create(
+                model=FIXED_MODEL,
                 messages=[{"role": "user", "content": self.AMBIGUITY_PROMPT.format(goal=goal)}],
                 max_tokens=500,
                 temperature=0.0,  # Deterministic
