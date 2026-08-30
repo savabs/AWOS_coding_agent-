@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": ".cursor/hooks/block-awosignore-edits.py",
+        "matcher": "Write|StrReplace|ApplyPatch|EditNotebook",
+        "failClosed": false,
+        "timeout": 10
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": ".cursor/hooks/post-edit-ruff.sh",
+        "matcher": "Write|StrReplace",
+        "timeout": 30
+      }
+    ],
+    "subagentStart": [
+      {
+        "command": ".cursor/hooks/log-subagent-start.sh",
+        "timeout": 5
+      }
+    ]
+  }
+}

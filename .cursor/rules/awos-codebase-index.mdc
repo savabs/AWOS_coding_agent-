@@ -1,0 +1,33 @@
+---
+description: AWOS codebase navigation — module map and entry points
+alwaysApply: true
+---
+
+# Codebase Index
+
+Full map: `docs/CODEBASE_INDEX.md` · Agent cold-start: `AGENT_INDEX.md`
+
+## Active code (edit here)
+
+| Layer | Path |
+|-------|------|
+| CLI | `awos.py` |
+| Kernel loop | `scaffold/agent/orchestrator.py` |
+| Planner / Worker / Verifier | `planner.py`, `worker.py`, `react_worker.py`, `verifier.py` |
+| Reward + routing | `reward_store.py`, `ml_router.py`, `escalation_engine.py` |
+| Self-learning | `prompt_evolver.py`, `live_tool_synth.py`, `scaffold_evolver.py` |
+| Sessions | `runtime_session.py`, `virtual_execution_runtime.py`, `worktree.py` |
+| Tests | `tests/test_*.py` |
+| Demos | `scripts/demo_*.sh` |
+
+## Not active kernel
+
+- `src/` — legacy TypeScript fork (indexing excluded)
+- `.awos/worktrees/` — session copies (blocked from index)
+- `compute/` — Stage 2 placeholder only
+
+## Common entry points
+
+- New CLI command → `awos.py` `build_parser()` + `cmd_*`
+- Orchestrator change → read `orchestrator.py` + `runtime_session.py`
+- Live proof → `scripts/demo_<f>.sh` + `docs/<f>_proof.md` (mandatory for kernel features)

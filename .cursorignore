@@ -1,0 +1,32 @@
+# Cursor ignore — blocks AI access AND indexing
+# See docs/CURSOR_INDEXING_SETUP.md for rationale
+
+# AWOS runtime: full-repo worktree copies (~1.3GB duplicates)
+.awos/worktrees/
+
+# Git internals
+.git/
+
+# Secrets (also in .gitignore)
+.env
+.env.*
+**/*.pem
+**/*.key
+secrets/
+
+# Aider cache
+.aider.tags.cache.v4/
+
+# IDE / tool caches
+.windsurf/
+.vscode/
+
+# Large model artifacts
+*.pkl
+*.pickle
+*.pt
+*.pth
+*.bin
+*.onnx
+models/weights/
+checkpoints/weights/

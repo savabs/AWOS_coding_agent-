@@ -1,0 +1,47 @@
+# Indexing-only ignore — files stay @-mentionable but skip semantic index
+# Reduces noise and speeds up indexing; see docs/CURSOR_INDEXING_SETUP.md
+
+# AWOS runtime state (JSONL logs, session blobs, traces)
+.awos/traces/
+.awos/sessions/
+.awos/state/
+.awos/goals/
+.awos/skills/
+.awos/*.jsonl
+.awos/*.json
+.awos/budget.json
+.awos/performance.json
+.awos/strategy_weights.json
+.awos/cache_stats.jsonl
+
+# Legacy TypeScript fork (Claude Code); active kernel is scaffold/agent/
+src/
+
+# HTML companions where thin .md stubs exist (index the .md stubs instead)
+docs/**/*.html
+tasks/**/*.html
+wiki/**/*.html
+docs/adr/**/*.html
+
+# Checkpoint archive (historical; latest checkpoints stay indexed)
+docs/memory/archive/
+
+# Generated reports
+reports/
+
+# Test fixture embedded git repos
+tests/fixtures/**/.git/
+tests/fixtures/wedge_v1/ci_rescue_sprint/.awos/
+
+# Root-level legacy tests (superseded by tests/)
+test_phase1.py
+test_phase1_integration.py
+test_e2e_pipeline.py
+test_e2e_week1.py
+test_end_to_end.py
+test_week1.py
+
+# Binary / lock noise (Cursor also ignores these by default)
+package-lock.json
+pnpm-lock.yaml
+yarn.lock

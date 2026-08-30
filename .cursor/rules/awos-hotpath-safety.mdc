@@ -1,0 +1,27 @@
+---
+description: Dogfood-protected files — crash risk if edited while AWOS is running
+globs: awos.py,scaffold/agent/worker.py,scaffold/agent/unified_agent.py,scaffold/agent/runtime_session.py,scaffold/agent/worktree.py
+alwaysApply: false
+---
+
+# Hot-Path Safety (.awosignore)
+
+These files are in `.awosignore` — the AWOS worker must not edit them during dogfood runs.
+
+| File | Risk if mid-run edit |
+|------|----------------------|
+| `orchestrator.py` | Corrupts active loop state |
+| `worker.py` | Breaks in-flight edits |
+| `awos.py` | CLI/session mismatch |
+| `runtime_session.py` | Loses pause/resume state |
+| `worktree.py` | Orphans isolated worktrees |
+
+## Rules
+
+- **Minimal diffs** — no drive-by refactors on these files
+- **Stop AWOS sessions** before editing locally if testing dogfood
+- `orchestrator.py` also loads `awos-orchestrator.mdc` for loop invariants
+
+## After edit
+
+Run targeted tests + relevant `scripts/demo_*.sh` live proof.

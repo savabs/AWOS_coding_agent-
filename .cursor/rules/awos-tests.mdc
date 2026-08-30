@@ -1,0 +1,32 @@
+---
+description: AWOS pytest conventions and test layout
+globs: tests/**/*.py
+alwaysApply: false
+---
+
+# Test Conventions
+
+Config: `pytest.ini` — 10s timeout, `integration` marker skipped by default.
+
+## Layout
+
+- Primary suite: `tests/test_*.py` (67 files)
+- Scaffold smoke: `scaffold/tests/`
+- Fixtures: `tests/fixtures/wedge_v1/`, `tests/fixtures/benchmark/`
+- Legacy root `test_*.py` — superseded; don't add new tests there
+
+## Patterns
+
+- Mock LLM calls; no real API in unit tests unless `@pytest.mark.integration`
+- `test_vector_memory.py` ignored by default (ChromaDB dependency)
+- Wedge corpus tests: `test_ci_rescue_sprint_corpus.py`, `test_code_evolution_corpus.py`
+- Self-learning: `test_p1_improvements.py` through `test_p9_confidence.py`
+
+## After kernel changes
+
+```bash
+pytest tests/test_<feature>.py -q --timeout=10
+pytest -q --timeout=10  # full suite before commit
+```
+
+Kernel/CLI features also need **live proof** (`scripts/demo_*.sh`) — unit tests alone insufficient.

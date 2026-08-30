@@ -1,0 +1,35 @@
+---
+description: awos.py CLI conventions and command structure
+globs: awos.py
+alwaysApply: false
+---
+
+# AWOS CLI (`awos.py`)
+
+## Structure
+
+- `build_parser()` defines all subcommands (~line 1133)
+- Handlers: `cmd_<command>` or `cmd_<parent>_<subcommand>`
+- Default (no args): `cmd_guide`
+
+## Command groups
+
+| Group | Commands |
+|-------|----------|
+| `worker` | start, status, resume, diff, cancel |
+| `mission` | guide, start, status |
+| `sessions` | list, show, resume |
+| `gauntlet` | list, run |
+| Top-level | run, chat, budget, stats, report, index, goals, memory, traces, performance |
+
+## Adding a command
+
+1. Add subparser in `build_parser()`
+2. Implement `cmd_<name>(args)` handler
+3. Wire dispatch in main handler block
+4. Add `tests/test_awos_sessions_cli.py`-style test
+5. Live proof if user-visible: `scripts/demo_*.sh` + proof doc
+
+## Dogfood safety
+
+`awos.py` is in `.awosignore` — AWOS worker must not edit it during dogfooding.

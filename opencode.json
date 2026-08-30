@@ -1,0 +1,130 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "shell": "/bin/bash",
+  "default_agent": "awos",
+  "instructions": [
+    "AGENTS.md",
+    "AWOS.md",
+    "VISION.md",
+    "CONVENTIONS.md",
+    ".cursor/rules/*.mdc",
+    ".github/copilot-instructions.md"
+  ],
+  "provider": {
+    "anthropic": {
+      "options": {
+        "timeout": 600000,
+        "chunkTimeout": 60000,
+        "setCacheKey": true
+      }
+    }
+  },
+  "permission": {
+    "*": "allow",
+    "bash": {
+      "*": "allow",
+      "rm -rf *": "ask",
+      "git push *": "ask",
+      "git commit --amend": "ask",
+      "pip uninstall *": "ask",
+      "docker rm *": "ask"
+    },
+    "read": {
+      "*": "allow",
+      "*.env": "allow",
+      ".awosignore": "deny"
+    },
+    "edit": {
+      "*": "allow",
+      ".awosignore": "deny"
+    },
+    "external_directory": "ask",
+    "webfetch": "allow",
+    "websearch": "allow"
+  },
+  "formatter": {
+    "ruff": {
+      "command": [
+        "ruff",
+        "check",
+        "--fix",
+        "$FILE"
+      ],
+      "extensions": [
+        ".py",
+        ".pyi"
+      ]
+    }
+  },
+  "lsp": {
+    "pyright": {
+      "command": [
+        "pyright-langserver",
+        "--stdio"
+      ],
+      "extensions": [
+        ".py",
+        ".pyi"
+      ],
+      "env": {
+        "PYRIGHT_PYTHON_FORCE_VERSION": "3.10"
+      }
+    }
+  },
+  "mcp": {
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp",
+      "enabled": false
+    },
+    "awos": {
+      "type": "local",
+      "command": [
+        "python3",
+        "mcp_server.py"
+      ],
+      "cwd": "/Users/becmachlean/BACKUP_FROM_LINUX/AWOS_coding_agent",
+      "enabled": true
+    },
+    "playwright": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@playwright/mcp",
+        "--headless",
+        "--executable-path",
+        "/usr/bin/google-chrome",
+        "--isolated",
+        "--allowed-hosts",
+        "*",
+        "--console-level",
+        "info"
+      ],
+      "enabled": false
+    }
+  },
+  "compaction": {
+    "auto": true,
+    "reserved": 10000
+  },
+  "watcher": {
+    "ignore": [
+      ".awos/**",
+      "__pycache__/**",
+      "*.pyc",
+      ".git/**",
+      "node_modules/**",
+      "logs/**",
+      "reports/**"
+    ]
+  },
+  "share": "manual",
+  "attachment": {
+    "image": {
+      "auto_resize": true,
+      "max_width": 2000,
+      "max_height": 2000
+    }
+  }
+}

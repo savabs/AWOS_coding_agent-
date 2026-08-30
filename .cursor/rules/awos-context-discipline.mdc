@@ -1,0 +1,40 @@
+---
+description: Context discipline — byte-capped output, targeted reads, token budget
+alwaysApply: true
+---
+
+# Context Discipline (Token Efficiency)
+
+## Command output — always byte-cap
+
+When executing shell commands that may produce large output, the `ShellTool` automatically caps output at 4,000 bytes. If writing commands directly, use byte caps:
+
+```bash
+# Never: unbounded output
+grep -r "pattern" .
+
+# Always: byte-capped
+grep -rn "pattern" . 2>&1 | head -c 4000
+```
+
+## Targeted reads — never dump full files
+
+| Do | Don't |
+|----|-------|
+| `read(file, offset, limit)` | `read(file)` for large files |
+| `grep("pattern", path)` first | Open a file you haven't searched first |
+| Read slices (60-200 lines) | Read files > 500 lines whole |
+| Reference existing symbols via grep | Re-read the whole project structure |
+
+## Context levels (Multi-Resolution Pipeline)
+
+The worker receives context at one of 4 levels:
+
+| Level | What's included | Token budget | When |
+|-------|----------------|-------------|------|
+| 0 | Task description only | ~50 | Typos, renames, simple syntax fixes |
+| 1 | + Module overview | ~150 | Low complexity tasks |
+| 2 | + Function signatures | ~500 | Medium complexity (default) |
+| 3 | + Code chunks + file | ~1,200 | High complexity, new features |
+
+`suggest_context_level(task)` selects the level automatically based on task complexity.

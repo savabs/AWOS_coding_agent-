@@ -1,0 +1,36 @@
+---
+description: Live proof demos and proof guides — mandatory for kernel features
+globs: scripts/demo_*.sh,docs/*_proof.md
+alwaysApply: false
+---
+
+# Live Proof Artifacts
+
+Protocol: `protocols/LIVE_PROOF_PROTOCOL.md`
+
+## Required pair per kernel feature
+
+| Artifact | Path |
+|----------|------|
+| Runnable demo | `scripts/demo_<feature>.sh` |
+| Proof guide | `docs/<feature>_proof.md` |
+
+## Proof guide must include
+
+- **Command** to run (copy-pasteable)
+- **Success markers** (2–5 strings to grep/watch for)
+- **Failure signals** (what indicates broken)
+
+## Demo script rules
+
+- `set -euo pipefail` at top
+- Must run without manual steps where possible
+- API demos: document required env vars; offer `--dry` or fixture mode if available
+
+## Definition of done
+
+- [ ] `pytest` green for code paths
+- [ ] Demo run observed with markers cited in checkpoint
+- [ ] Task step marked `[x]` only after live observation
+
+**Unit tests alone do not complete kernel/CLI/safety features.**

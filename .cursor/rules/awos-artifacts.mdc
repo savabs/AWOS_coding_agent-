@@ -1,0 +1,37 @@
+---
+description: Research → Spec → Task preflight gate for doc artifacts
+globs: docs/research/**,docs/specs/**,tasks/**
+alwaysApply: false
+---
+
+# Artifact Preflight Gate
+
+No kernel/CLI implementation until this triad exists for non-trivial work:
+
+```
+docs/research/<feature>.md  →  docs/specs/<feature>_spec.md  →  tasks/active/<task>.md
+```
+
+## Single-owner facts
+
+| Fact type | Owner |
+|-----------|-------|
+| Metrics, phase, module list | `memories/repo/project_structure.md` |
+| Identity | `VISION.md` |
+| Process detail | `AWOS.md` |
+
+Never copy numbers or phase status into research/spec — link with `[[wiki links]]`.
+
+## Spec step shape
+
+Each step: **one change, one test, one proof**. If description contains "and" → split.
+
+## HTML companions
+
+Task files and checkpoints are **Markdown-canonical** — never create an HTML companion for them. The agent's scripts (`quality_gate.py`, `obsidian_lint.py`) parse Markdown only; HTML is invisible to them.
+
+Research and specs are Markdown-canonical too; HTML rendering is optional and only for a human who will open it. If an HTML rendering exists, keep the `.md` complete and self-contained (frontmatter + full content + `## Related` wiki links) — never a bare pointer.
+
+## Write-gate
+
+Decisions are not real until written in the **same turn**. No deferred "I'll add that to the spec later."

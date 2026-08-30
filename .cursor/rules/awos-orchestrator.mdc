@@ -1,0 +1,31 @@
+---
+description: Orchestrator hot-path invariants — minimal diffs, loop order sacred
+globs: scaffold/agent/orchestrator.py
+alwaysApply: false
+---
+
+# Orchestrator Hot Path
+
+`orchestrator.py` is dogfood-protected (`.awosignore`). Treat every edit as production-critical.
+
+## Loop order (do not reorder without spec + live proof)
+
+```
+goal → clarify? → plan → review? → route → execute → verify → reward → learn → checkpoint?
+```
+
+## Invariants
+
+- **Verify before learn** — never write to `.awos/skills` or evolvers on unverified output
+- **Session state** — pause/resume via `runtime_session.py`, not ad-hoc JSON
+- **Worktree isolation** — execution mutations go through `virtual_execution_runtime.py` / `worktree.py`
+- **Stagnation** — repeated verify failures must trip stagnation breaker (don't infinite-retry)
+- **Budget** — consult `budget_ledger.py` before expensive replans
+
+## Before merge
+
+```bash
+pytest tests/test_adversarial_orchestrator.py tests/test_pause_resume_orchestrator.py tests/test_verify_fail_replan.py -q --timeout=10
+```
+
+Any behavior change → update `scripts/demo_*.sh` proof or add new live proof.

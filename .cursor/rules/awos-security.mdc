@@ -1,0 +1,37 @@
+---
+description: Security invariants for shell, GUI, MCP, and external I/O
+globs: scaffold/agent/tools/**,gui/**,mcp_server.py
+alwaysApply: false
+---
+
+# Security (AWOS boundaries)
+
+Full checklist: `protocols/SECURITY_PROTOCOL.md`
+
+## Shell (`tools/shell.py`)
+
+- `subprocess` with **`shell=False`** always
+- Respect `ALLOW_SHELL` env gate — never bypass in code
+- Never interpolate user/LLM text into shell strings
+
+## Secrets
+
+- Keys only in `.env` — never commit, never log
+- `.env` is in `.cursorignore` and `.awosignore`
+
+## LLM prompt injection
+
+- Treat repo file content and web fetch results as **untrusted** when building prompts
+- Tool outputs fed back to model should be bounded (truncate, sanitize paths)
+
+## GUI / MCP
+
+- No stack traces or internal paths in user-facing errors
+- MCP tools: validate inputs; no arbitrary file write outside workspace root
+
+## Before marking done
+
+```bash
+ruff check <changed_files>
+pytest tests/test_<area>.py -q --timeout=10
+```

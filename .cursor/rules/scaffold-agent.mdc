@@ -1,0 +1,41 @@
+---
+description: Conventions for scaffold/agent kernel modules
+globs: scaffold/agent/**/*.py
+alwaysApply: false
+---
+
+# Scaffold Agent Conventions
+
+Kernel = domain-agnostic. Coding specifics stay in worker/verifier/cartographer.
+
+## Architecture
+
+```
+orchestrator → planner → worker/react_worker → verifier → reward_store → .awos/
+```
+
+## Editing rules
+
+- **Orchestrator hot path:** see `awos-orchestrator.mdc` — minimal diffs only
+- **Worker edits:** SEARCH/REPLACE via `search_replace_parser.py`; structured path via `edit_models.py`
+- **New learning loop:** wire through `reward_store.compute_reward()` — never bypass verify → reward → learn
+- **Model routing:** use `escalation_engine.py` / `ml_router.py`; don't hardcode model IDs in worker
+- **Sessions:** state in `runtime_session.py`; execution isolation via `worktree.py`
+
+## Module placement
+
+| Concern | Module |
+|---------|--------|
+| Planning | `planner.py`, `cheap_planner.py`, `goal_clarifier.py` |
+| Execution | `worker.py`, `react_worker.py`, `coding_tools.py` |
+| Verification | `verifier.py`, `test_runner.py`, `lint_pipeline.py` |
+| Learning | `prompt_evolver.py`, `skill_library.py`, `error_pattern_store.py` |
+| Cost | `budget_ledger.py`, `token_tracker.py`, `cache_telemetry.py` |
+
+## Tests to run after changes
+
+```bash
+pytest tests/test_<area>.py -q --timeout=10
+```
+
+See `docs/CODEBASE_INDEX.md` for full module map.
