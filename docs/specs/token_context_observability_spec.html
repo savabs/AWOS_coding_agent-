@@ -1,0 +1,31 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Token and Context Observability Specification</title></head>
+<body>
+<h1>Token and Context Observability</h1>
+<h2>Goal</h2><p>Persist enough per-model-call usage and context telemetry to compare AWOS runs without changing agent behavior.</p>
+<h2>Files Affected</h2>
+<ul>
+<li><code>scaffold/agent/model_call_telemetry.py</code> — new append-only record/store.</li>
+<li><code>scaffold/agent/usage_record.py</code> — normalize optional usage and record telemetry.</li>
+<li><code>scaffold/agent/react_worker.py</code> — capture message categories, tool metrics, timing, and step metadata.</li>
+<li><code>scaffold/agent/planner.py</code> — record planner calls.</li>
+<li><code>scaffold/agent/worker.py</code> — record patch-worker calls.</li>
+<li><code>awos.py</code> — read-only token inspection command.</li>
+<li><code>tests/test_model_call_telemetry.py</code> and focused CLI/worker tests.</li>
+<li><code>scripts/demo_token_context_observability.py</code> and <code>docs/token_context_observability_proof.md</code> — provider-free live proof.</li>
+</ul>
+<h2>Atomic Steps</h2>
+<ol>
+<li>Add a typed best-effort JSONL telemetry store and provider usage normalizer.</li>
+<li>Record ReAct calls with context estimates and tool-history metrics.</li>
+<li>Record planner and patch-worker calls without changing prompts or provider selection.</li>
+<li>Add a read-only CLI aggregate/detail view.</li>
+<li>Add unit, integration-boundary, and non-interference tests.</li>
+</ol>
+<h2>Data Contract</h2>
+<p>Each record includes provider, model, request type, input/output/reasoning/cache/total tokens, estimated cost, tool-call count, tool-output size, session/task/step metadata, timestamp, latency, and approximate context categories. Missing provider fields remain null or unavailable; estimated fields are labeled.</p>
+<h2>Live Proof</h2>
+<p>Run the telemetry demo or a provider-free fixture and observe a JSONL record plus CLI aggregate containing call count, total tokens, context estimates, and unavailable-field labels.</p>
+<h2>Rollback</h2><p>Telemetry writes are best effort. Removing the telemetry hook restores prior behavior; no agent state or prompt contract changes are required.</p>
+<h2>Related</h2><ul><li><a href="../research/token_context_observability.html">Research</a></li><li><a href="../../tasks/active/token_context_observability.html">Task</a></li></ul>
+</body></html>

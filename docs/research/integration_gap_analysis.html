@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Integration Test Gap Analysis</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 950px; margin: 2em auto; padding: 0 1em; line-height: 1.6; color: #1a1a2e; }
+  h1, h2, h3 { color: #16213e; }
+  h1 { border-bottom: 3px solid #e94560; padding-bottom: 0.3em; }
+  h2 { margin-top: 2em; border-bottom: 1px solid #ddd; padding-bottom: 0.2em; }
+  .meta { color: #666; font-size: 0.9em; margin-bottom: 2em; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+  th, td { border: 1px solid #ddd; padding: 0.5em; text-align: left; }
+  th { background: #16213e; color: white; }
+  tr:nth-child(even) { background: #f8f9fa; }
+  .cat-a { background: #fff5f5; }
+  .cat-b { background: #fffef0; }
+  .cat-c { background: #f0f4ff; }
+  .cat-d { background: #fff0f0; border-left: 3px solid #e94560; }
+  .tag { display: inline-block; background: #e0e0e0; border-radius: 3px; padding: 0.1em 0.5em; font-size: 0.8em; margin: 0.1em; }
+  .check { color: #2ecc71; } .cross { color: #e94560; }
+</style>
+</head>
+<body>
+
+<h1>Integration Test Gap Analysis</h1>
+<p class="meta">
+  <strong>Date:</strong> 2026-07-06 &middot;
+  <strong>Source:</strong> <code>python scripts/progress_snapshot.py</code> + manual drill-down on all 55 failures
+</p>
+
+<h2>Executive Summary</h2>
+
+<p>
+Of 55 test failures reported by the suite:
+</p>
+<table>
+  <tr><th>Category</th><th>Count</th><th>Root cause</th><th>Fix effort</th></tr>
+  <tr class="cat-a">
+    <td><strong>A. Fixture false positives</strong></td>
+    <td>29</td>
+    <td>Fixture test files live inside <code>tests/fixtures/</code> and get collected by pytest. The code they test is <em>deliberately broken</em> (it's the CI Rescue demo data).</td>
+    <td><span class="check">~5 min</span> — add conftest or move fixtures outside tests/</td>
+  </tr>
+  <tr class="cat-b">
+    <td><strong>B. OpenRouter not in test expectations</strong></td>
+    <td>3</td>
+    <td>OpenRouter was added as 5th provider. Tests hardcode the old 4-provider set.</td>
+    <td><span class="check">~10 min</span> — update expected sets in 2 test files</td>
+  </tr>
+  <tr class="cat-c">
+    <td><strong>C. Session CLI tests out of sync</strong></td>
+    <td>6</td>
+    <td>CLI was refactored (<code>awos.py</code>). Sessions functions renamed/moved. Tests call old names.</td>
+    <td><span class="check">~30 min</span> — update test expectations for current CLI</td>
+  </tr>
+  <tr class="cat-d">
+    <td><strong>D. Pipeline integration broken</strong></td>
+    <td>9</td>
+    <td><strong>Orchestrator/planner/worker API changed but integration tests weren't updated.</strong> These test the full pipeline end-to-end.</td>
+    <td><span class="cross">~2-4 hours</span> — code + test fixes</td>
+  </tr>
+  <tr><td><strong>Total</strong></td><td><strong>47</strong></td><td colspan="2">(8 other failures are duplicates/flaky, total unique = 47)</td></tr>
+</table>
+
+<h2>Category A — Fixture False Positives (29)</h2>
+
+<p><span class="tag">NOT A BUG</span> <span class="tag">QUICK FIX</span></p>
+
+<p>
+These test files are in <code>tests/fixtures/wedge_v1/ci_rescue_sprint/tests/</code> and <code>tests/fixtures/benchmark/</code>.
+They test the <em>broken demo code</em> that AWOS is supposed to fix. They <em>should</em> fail — that's the point.
+</p>
+
+<p><strong>Fix:</strong> Add <code>conftest.py</code> to <code>tests/fixtures/</code> that collects nothing, or move the fixture test files outside <code>tests/</code> entirely.</p>
+
+<h2>Category B — OpenRouter Provider (3)</h2>
+
+<p><span class="tag">TEST UPDATE</span> <span class="tag">QUICK FIX</span></p>
+
+<table>
+  <tr><th>Test</th><th>Failure</th><th>Fix</th></tr>
+  <tr><td><code>test_never_escalates_to_sonnet</code></td><td>Expects OpenRouter ≤ OpenAI. But OpenRouter is now level 5, OpenAI is 2.</td><td>Add OpenRouter to the allowed set, or configure test to exclude OpenRouter</td></tr>
+  <tr><td><code>test_empty_dead_providers</code></td><td>Expects deepseek as default. Now gets OpenRouter.</td><td>Update expected provider</td></tr>
+  <tr><td><code>test_summary_contains_all_actions</code></td><td>Expected set missing 'openrouter'.</td><td>Add 'openrouter' to expected set</td></tr>
+</table>
+
+<h2>Category C — Session CLI (6)</h2>
+
+<p><span class="tag">TEST UPDATE</span></p>
+
+<table>
+  <tr><th>Test</th><th>Failure</th><th>Fix</th></tr>
+  <tr><td><code>test_list_empty</code></td><td>Real session directory has 145 entries, test expects empty.</td><td>Use temp directory or fixture isolation</td></tr>
+  <tr><td><code>test_fork_prints_new_id</code></td><td><code>cmd_sessions_fork</code> attribute doesn't exist on awos.py CLI.</td><td>Update function name in test</td></tr>
+  <tr><td><code>test_list_json</code></td><td>Output format changed, JSON parse fails.</td><td>Update expected format</td></tr>
+  <tr><td><code>test_sandbox_summary_*</code> (3)</td><td><code>_sandbox_summary</code> function doesn't exist in awos.py.</td><td>Update test to match current API</td></tr>
+</table>
+
+<h2>Category D — Pipeline Integration Broken ⚠️</h2>
+
+<p><span class="tag">REAL BUG</span> <span class="tag">CODE FIX NEEDED</span></p>
+
+<p>These 9 failures all stem from one root cause: <strong>the orchestrator/planner/worker API was changed and the integration tests weren't updated to match.</strong></p>
+
+<table>
+  <tr><th>Test</th><th>Root cause</th><th>What's broken</th></tr>
+  <tr>
+    <td><code>test_deliverable_e2e_suite</code></td>
+    <td><code>Orchestrator.execute_feature()</code> doesn't accept <code>extra_context</code></td>
+    <td>The <strong>full pipeline</strong> — orchestrator → planner → worker → verifier. The main e2e test can't even run.</td>
+  </tr>
+  <tr>
+    <td><code>test_http_sse_agent_creates_file</code></td>
+    <td>Same root cause — calls execute_feature with extra_context</td>
+    <td>SSE agent streaming — can't create files</td>
+  </tr>
+  <tr>
+    <td><code>test_orchestrator_create_task</code></td>
+    <td>Feature vector asserts <code>feat[3] == 1.0</code> but gets <code>0.0</code></td>
+    <td>Task feature extraction — wrong dimensions or encoding</td>
+  </tr>
+  <tr>
+    <td><code>test_classify_task</code></td>
+    <td><code>ToolPerformanceTracker.classify_task()</code> doesn't exist</td>
+    <td>Task classification — method was removed or never implemented</td>
+  </tr>
+  <tr>
+    <td><code>test_execute_create_logs_episode</code></td>
+    <td><code>Orchestrator._execute_create_task()</code> doesn't exist</td>
+    <td>Create-task pathway — method renamed to <code>_execute_single_task</code> but tests call old name</td>
+  </tr>
+  <tr>
+    <td><code>test_create_file_feature_flag</code></td>
+    <td>Feature vector assertion <code>feat[3] == 1.0</code> but gets <code>0.0</code></td>
+    <td>Feature extraction for create_file tasks</td>
+  </tr>
+  <tr>
+    <td><code>test_parse_filters_noise_issues</code></td>
+    <td><code>IntegrationReviewer._parse_response()</code> changed signature</td>
+    <td>Integration review — broken by API change</td>
+  </tr>
+  <tr>
+    <td><code>test_cheap_only_skips</code></td>
+    <td><code>IntegrationReviewer</code> returns wrong format</td>
+    <td>Integration review with cheap-only mode</td>
+  </tr>
+  <tr>
+    <td><code>test_orchestrator_replan_after_verify_fail</code></td>
+    <td>Orchestrator loop doesn't recover from verify failure</td>
+    <td><strong>Core kernel loop</strong> — verify → replan cycle is broken</td>
+  </tr>
+</table>
+
+<h2>Diagnosis</h2>
+
+<p>
+<strong>One root cause explains 8/9 Category D failures:</strong> The orchestrator's <code>execute_feature()</code> interface was changed (to add <code>extra_context</code>) but the change was never propagated to callers. Multiple pathways (<code>_execute_create_task</code>, <code>_parse_response</code>, classify_task) were renamed or removed during a refactor, and the tests — which are the only integration-level verification — were left behind.
+</p>
+
+<p>
+The 9th failure (<code>test_orchestrator_replan_after_verify_fail</code>) is the most serious: it tests that when verification fails, the orchestrator replans and retries. This is the <strong>core claim of the kernel</strong> ("verify → reward → learn"). If this doesn't work, the self-learning loop doesn't function.
+</p>
+
+<h2>What to fix first</h2>
+
+<table>
+  <tr><th>Priority</th><th>What</th><th>Estimate</th></tr>
+  <tr><td><span class="cross">P0</span></td><td>Fix the fixture collection (Category A) — 5 min, makes suite usable</td><td>5 min</td></tr>
+  <tr><td><span class="cross">P1</span></td><td>Fix test_orchestrator_replan_after_verify_fail — core kernel loop</td><td>1-2 hours</td></tr>
+  <tr><td><span class="cross">P1</span></td><td>Fix test_deliverable_e2e_suite — whole pipeline broken</td><td>1-2 hours</td></tr>
+  <tr><td><span class="cross">P2</span></td><td>Update OpenRouter test expectations (Category B)</td><td>10 min</td></tr>
+  <tr><td><span class="cross">P2</span></td><td>Update Session CLI tests (Category C)</td><td>30 min</td></tr>
+</table>
+
+<h2>Related</h2>
+<ul>
+  <li><code>scripts/progress_snapshot.py</code> — the measurement tool</li>
+  <li><code>docs/research/actual_progress_measurement.html</code> — original diagnosis</li>
+  <li><code>docs/memory/checkpoint_2026-07-06.md</code> — session checkpoint</li>
+</ul>
+
+</body>
+</html>

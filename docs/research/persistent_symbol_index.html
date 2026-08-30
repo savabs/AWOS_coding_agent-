@@ -1,0 +1,20 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Persistent Symbol Index Research</title></head>
+<body>
+<h1>Persistent Symbol Index</h1>
+<p><strong>Goal:</strong> persistent, stale-aware symbol index + hierarchical retrieval, so the worker injects a small map and reads exact line windows on demand.</p>
+<h2>Gap found</h2>
+<ul>
+<li><code>orchestrator.py:816-838</code> calls <code>SymbolIndex.load/.rebuild_changed/.save</code> — none implemented; wrapped as no-ops.</li>
+<li>Index is rebuilt from scratch every run (costly), never persisted, no line-numbered symbol bodies.</li>
+</ul>
+<h2>Leveraged</h2>
+<ul>
+<li><code>symbol_index.py</code> tree-sitter/ast parsing + dependency graph.</li>
+<li><code>resolve_file.py</code> disk-first fail-safe resolver (ground truth).</li>
+<li><code>repo_map.py</code> per-task map feed into ReAct worker.</li>
+<li><code>vector_memory.py</code> mtime staleness pattern.</li>
+</ul>
+<h2>Non-goals</h2>
+<p>No orchestrator hot-path change. No semantic/vector retrieval. No non-Python indexing.</p>
+</body></html>

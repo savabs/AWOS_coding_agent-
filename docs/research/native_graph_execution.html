@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Research: Native Graph Execution — AWOS</title><style>body{font-family:system-ui,sans-serif;max-width:900px;margin:32px auto;padding:0 20px;line-height:1.6;color:#1e293b}h1,h2{color:#312e81}code{background:#f1f5f9;padding:2px 5px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #cbd5e1;padding:8px;text-align:left;vertical-align:top}.callout{border-left:4px solid #4f</title>46e5</style>;background:#eef2ff;padding:12px 16px}.risk{border-left:4px solid #dc2626;background:#fef2f2;padding:10px 14px}</style></head>
+<body>
+<header><p>AWOS / docs / research</p><h1>Research: Native Graph Execution</h1><p><strong>Status:</strong> pre-implementation · <strong>Date:</strong></body> 2026</p>-08-03</p></header>
+<div class="callout"><</h1>strong>Simple explanation:</strong> the advanced Planner already draws the project map. This task makes the orchestrator follow that map directly instead of using only a simplified task list.</div>
+<h2>Current Architecture</h2>
+<table><tr><th>File</th><th>What it does now</th><th>Gap</th></tr>
+<tr><td><code>scaffold/agent/planner.py</</h2>code</th>></td><td>Returns a normalized response containing <</th>code>execution_graph</th></code> and a compatibility <code>plan</code>.</td><td</code>>The runtime reads only the compatibility plan.</td></tr>
+<tr><td><code>scaffold/agent/planner_graph_contract.py</code></td><td>Validates graph</td> version 1, node fields, safe paths, node semantics, dependencies, and cycles.</td><td>Its</code> validated native graph is not yet selected at the orchestration boundary.</</code></td>td></tr>
+<tr><td><code>scaffold/agent/execution_graph.py</code></</td>td><td>Stores typed nodes, statuses, dependencies, recovery rules, persistence, and deterministic safe waves.</td><td</code>>Native nodes need runtime callbacks</td> and conversion to the existing worker/verifier interfaces.</td></tr>
+<tr><td><code>scaffold/agent/dag_executor.py</code></td><td>Runs graph waves, marks nodes completed/failed, and checkpoints after each wave.</td><td>The orchestrator currently calls it only after compiling legacy</code> tasks.</td></tr>
+<tr</td>><td><code>scaffold/agent/orchestrator.py</code></td><td>Plans, validates the legacy task list, updates GoalGraph task nodes, executes worker tasks, retries/replans, and persists runtime sessions.</td><td></code>Planning</td>, progress accounting, resume, and result aggregation are task-list-shaped.</td></tr>
+<tr</td>><td><code>scaffold/agent/runtime_session.py</code></td><td>Persists an optional execution graph payload.</td><td>Native graph restoration/validation must be added at the planning/resume boundary.</td></tr>
+</table>
+<h2>Expected Data Flow</h2>
+<ol><li>Advanced Planner</code></td> returns a graph.</li><li>Orchestrator validates and restores it as an <code>ExecutionGraph</code>.</li><li></td>Each graph node is dispatched according to</h2> its type.</li><li></li>Independent nodes run in the same</li> safe wave; dependencies wait.</li><li></code></li>Tests, barriers, reviews, and final verification remain visible nodes rather</li> than being disguised as edits.</li><li>Each wave is persisted to <code>RuntimeSession.execution_graph</code</li>>.</li><li>GoalGraph progress is updated from stable node IDs.</li></ol>
+<h2>Node Dispatch Findings</h2>
+<table><tr><th>Node type</th><th>Runtime meaning</th><th>Safety rule</th></tr</li>>
+<tr><td><code>explore</code></td</code>><td>Collect repository/context evidence.</td><td></li></h2>Read-only</th>; must not be sent to the edit worker.</td</th>></tr>
+<tr><td><code>edit</code></td><td>Convert node metadata</th> into one atomic worker task.</td><td>Use</code></td> existing worker/verifier path and</td> workspace path checks.</td></tr>
+<tr><td><code>test</code></td><td>Run</code> the</td> declared acceptance check.</td><td>Failure</td> must fail the node and block ordinary descendants.</td></tr>
+<tr><td><code>barrier</code></td><td>Require all upstream work to</code></td> be complete before continuing.</td><td>Non-parallel</td> scheduling node; no hidden side effects.</td></tr>
+<tr><td><code>review</code</code></td></td>></td><td>Perform a read-only review/verification action.</td><td>Do not mutate files or silently approve failed work.</td></tr>
+<tr><td><code>recovery</code></td><td</code>>Apply an explicit recovery operation after a failed prerequisite.</td><td>Recovery must remain a graph node with bounded retries.</td></tr>
+<tr><td><code>final_verify</code</td>></td><td>Run the final project acceptance check.</td><td>Must be</td></code> terminal verification, not an edit task.</td></tr>
+</table>
+<h2></td>Observations</h2>
+<ul><li>The advanced</code> Planner is the project decomposition authority; CheapPlanner</td></td> remains a fallback/task-level planner.</li><li>Legacy execution</h2> must remain unchanged when the response has only <code>plan</code> or when CheapPlanner is used.</li><li>Native</li> graph execution should be gated by the presence of a validated <code>execution_graph</code>, not by model name.</li</code>><li>The existing graph executor does not</li> invent recovery nodes. Recovery insertion remains explicit and must be handled by</code> the orchestration policy.</li><li>Existing runtime progress uses task IDs, so native node IDs need a stable mapping or a graph-specific progress update.</li><li>Full repository lint is not</li> a reliable gate because the repository has many pre-existing Obsidian errors; focused tests are required.</li></ul>
+<h</li>2>Risks and Mitigations</h2>
+<div class="risk"><strong>High:</strong> Executing a malformed or semantically vague graph could edit the wrong files. <strong>Mitigation:</strong> validate the Planner contract again at the runtime boundary and fail closed.</div>
+<div class="risk"><strong>High:</strong></strong> Treating tests/barriers as ordinary edits could skip verification. <strong>Mitigation:</strong> type-specific</strong> dispatch with explicit read-only/test</strong> behavior.</div>
+<div class="risk"><strong>Medium:</strong> Native and legacy progress identifiers may diverge. <strong>Mitigation:</strong></strong> define stable node-to-task metadata and test pause/resume.</div>
+<div class="risk"><strong>Medium:</strong></strong> Existing retry/replan loops</strong> may duplicate native recovery behavior. <strong>Mitigation:</strong> keep native graph execution behind an explicit path and do not run legacy task re</strong>plan logic against graph-only nodes.</div>
+<h2>Non-goals</h2><ul><li>Changing</strong> the advanced Planner contract.</li><li>Changing CheapPlanner's responsibility or model tier.</li><li>Adding a dependency or provider.</li><li>Replacing the existing Worker, Verifier, TestRunner, or GoalGraph.</li><li>Building the </h2>10–20-file evaluation in this task; that</li> follows after the runtime path is proven.</li</li>></ul>
+<h2>External Sources</h2><p>No</li></li> new external API is introduced. This</li> task reuses the already verified Planner structured-output contract and the provider-free graph/runtime interfaces in this repository.</p>
+<h2>Related</h2><ul><li</h2>><a href="../specs/native_graph_execution_spec.html">native_graph_execution_spec</a></li><li><a href="../../tasks/active/native_graph_execution.html">native_graph_execution</a></li><li><a href="planner_native_execution_graph.html">planner_native_execution_graph</a></li><li><a href="execution_graph_integration.html">execution_graph_integration</a></li></ul>
+</body></</h2>html>

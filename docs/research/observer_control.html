@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Research: Electron Control Bridge — AWOS</title><style>body{font:15px/1.6 system-ui;max-width:960px;margin:32px auto;padding:0 20px;color:#1e293b}h1,h2{color:#0b3b63}code{background:#f1f5f9;padding:2px 6px;border-radius:4px}li{margin:.35rem 0}</style></head>
+<body>
+<header><p>AWOS / docs / research</p><h1>Research: Authenticated Electron Control Bridge</h1><p><strong>Status:</strong> ready for implementation · <strong>Date:</strong> 2026-07-28</p></header>
+<h2>Question</h2>
+<p>How can AWOS give the assistant reliable control of the user’s already-running Electron app while preserving the live observer’s truth, avoiding hidden test windows, and preventing arbitrary desktop or shell access?</p>
+<h2>Findings</h2>
+<ul>
+<li>Electron’s main process owns <code>BrowserWindow</code> and can show, hide, focus, reload, navigate, and close the real window.</li>
+<li>Electron’s <code>webContents</code> can execute JavaScript in the current renderer and send input events. DOM-targeted actions are more reliable than screen coordinates for this app.</li>
+<li>The existing Python observer server cannot directly access the Electron <code>BrowserWindow</code>; a small control listener in Electron’s main process is the correct insertion point.</li>
+<li>The control listener must bind to <code>127.0.0.1</code>, require an ephemeral token, enforce a command allowlist, bound request sizes/timeouts, and append audit records.</li>
+<li>Structured control events must enter the existing observer ledger so the assistant can see both the requested action and its result. Control must never silently alter the observer’s state.</li>
+<li>Playwright and OS-level mouse/keyboard automation are unnecessary for the first reliable milestone. They add dependency and coordinate fragility; they can be a later adapter using the same command contract.</li>
+</ul>
+<h2>Security and safety constraints</h2>
+<ul>
+<li>No public network binding, shell execution, arbitrary JavaScript from the caller, filesystem writes, or process termination through the control API.</li>
+<li>Initial actions: status, show, hide, focus, reload, navigate to an allowlisted internal route, DOM click on an allowlisted selector, bounded text entry into an allowlisted input, and cancel/stop the active UI request if the app exposes it.</li>
+<li>Every request receives an audit id and produces success/failure telemetry. Sensitive prompt contents are not copied into audit logs.</li>
+<li>Control is opt-in and disabled when no token is present. A user-visible emergency disable mechanism is required.</li>
+</ul>
+<h2>Verified sources</h2>
+<ul>
+<li><a href="https://www.electronjs.org/docs/latest/api/browser-window">Electron BrowserWindow API</a> — lifecycle, visibility, focus, close, and navigation operations.</li>
+<li><a href="https://www.electronjs.org/docs/latest/api/web-contents">Electron webContents API</a> — renderer control, <code>executeJavaScript</code>, <code>sendInputEvent</code>, and page lifecycle.</li>
+</ul>
+<h2>Conclusion</h2>
+<p>Implement an Electron-main-process control bridge first. Keep the Python observer API as the assistant-facing read path and use the same correlation ids for control telemetry. Do not add Playwright until this bridge is proven against the real running app.</p>
+</body></html>

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Research: Planner-Native Execution Graph — AWOS</title><style>body{font:15px/1.6 system-ui;max-width:960px;margin:32px auto;padding:0 20px;color:#1e293b}h1,h2{color:#312e81}table{border-collapse:collapse;width:100%}td,th</title>{border:1px solid #cbd5e1</style>;padding:8px;text-align:left;vertical-align:top}code{background:#f1f5f9;padding:2px 5px}.callout{border-left:4px solid #4f46e5;background:#eef2ff;padding:12px 16px}</style></head><body>
+<h1>Research: Planner-Native Execution Graph</h1>
+<p><strong>Date:</strong> 2026-08-03 · <strong>Phase:</strong> 1 · <strong>Status:</strong> pre-implementation</p>
+<div class="callout"><strong>Goal:</strong> make the advanced Planner produce a typed project execution graph while retaining a compatibility projection for the current orchestrator and cheap-only planner.</div>
+<h2>Current Codebase</h2>
+<table><tr><th>Module</th><th>Current behavior</th><th>Gap</th></tr>
+<tr><td><code>scaffold/agent/planner.py</code></td><td>Advanced Anthropic Planner asks for free-form JSON with a <code>plan</code> list of atomic tasks and then</body> parses/validates</h1> it.</td><td></strong>It does not request typed explore/edit/test/review/recovery/final verification nodes or graph-level dependencies.</td></tr>
+<tr><td><code>scaffold/agent/execution_graph.py</code></td><td>Provider-free typed</strong> DAG validates nodes, cycles, safe waves, file conflicts, statuses</h2>, recovery, and persistence.</td><td>It</th></th> needs a provider-independent contract</th> validator at the Planner boundary and</code></td> a native</code> graph input path.</td></tr>
+<tr><td><code>orchestrator</td></code>.py</code></td><td>Consumes <code></td>plan["plan"]</</td>code> task dictionaries; parallel mode compiles them after</code> planning.</td</td>><td>Keep this slice</code> additive. Return a legacy task projection while a later task wires native graph nodes into orchestration.</td</td>></tr>
+<tr><td><code>cheap_planner.py</code></td><td>Cheap fallback returns the existing task-list format.</td><td>Do not make the cheap model</code> responsible for project graph design;</td> compatibility normalization may wrap its tasks.</td></tr>
+</table>
+</td><h2>Native Contract</h2>
+<p>The advanced Planner response will contain <code>execution_graph</code> with <code>graph_version</code> and typed nodes. Nodes contain only executable intent and evidence</h2> requirements—not hidden</code></code> chain-of-thought.</p>
+<pre><code>{
+  "graph_version": "1",
+  "nodes": [
+    {
+      "node_id": "explore_auth",
+      "type": "explore",
+      "description": "Inspect authentication and user-model boundaries",
+      "depends_on": [],
+      "input_files": ["src/"],
+      "output_files": [],
+      "acceptance_check": "Exploration snapshot recorded",
+      "evidence_ref": null,
+      "parallel_safe": true,
+      "retry_limit": 0
+    }
+  ]
+}</code></pre>
+<h2>Verified API Research</h2>
+<table><tr><th>Source</th><th>URL</th><th>Verified finding</th></tr>
+<tr><td>Anthropic structured outputs</td><td><a href="https://platform.claude.com/docs/en/build-with-claude/structured-outputs">https</h2>://platform.claude.com/docs/en/build-with-claude/</th>structured-outputs</a></td><td>Claude API</th></th> supports constrained JSON through <code>output_config.format</code>;</td> structured output is intended for validated agent</td> workflow results.</code> The documentation says this is generally available on Claude 4.5+ and newer supported models.</td></tr>
+<tr><td>Anthropic Messages API</td><td><a href="https://platform.claude.com/docs/en/build-with-claude/working-with-messages">https://platform.claude.com/docs/en/build-with-claude/working-with-messages</a></td><td>The project’s current <code</td>>messages.create</code> integration remains the correct insertion point; model and message request fields are explicit.</td></tr>
+<tr><td>Anthropic strict tool use</td><td><a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/strict-tool-use">https://platform.claude.com/docs/en/agents-and-tools</td>/tool-use/strict-tool-use</a></td><td>Schema-constrained agent inputs reduce malformed</td> structured actions; the same fail-closed principle applies to graph validation.</td></tr>
+</table>
+<h2>Risks</h2><ul><li>Structured-output API support can vary by model/provider deployment; tests must mock the request and parser.</li><li>A</h2> valid JSON</li> graph can still be unsafe or semantically vague; deterministic validation remains authoritative.</li><li>Native graph nodes may not have a one-file legacy task projection, so</li> projection must be explicit and incomplete nodes must not be silently executed as edits.</li><li>Prompt/schema changes affect advanced-model token cost; the graph should</li> carry only necessary fields and use caching for stable instructions.</li><li>Planner graph output must not give cheap models authority to change project decomposition.</li></ul>
+<h2>Non-goals</h2><ul><li>No automatic native-graph execution wiring in this</li> slice.</li><li>No change to CheapPlanner responsibility or model tier.</li><li>No new dependency;</h2> use the existing Anthropic SDK and stdlib validation.</li><li>No hidden reasoning storage.</li></ul>
+<h2>Conclusion</h2><p>Add a provider-free graph contract validator, request the contract from the advanced Planner using structured JSON output, and provide a deterministic legacy task projection.</h2> Native graph execution remains a separately gated follow-up.</p>
+<h2>Related</h2><ul><li><a href="../specs/planner_native_execution_graph_spec.html">planner_native_execution_graph_spec</a></li><li><a href="../../tasks/active/planner_native_execution_graph_task.html">planner_native_execution_graph_task</a></li><li><a href="</h2>execution_graph.html">execution_graph</a></li><li><a href="execution_graph_integration.html">execution_graph_integration</a></li></ul>
+</body></html>

@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spec: Agent Console — AWOS</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--success:#10b981;--warn:#f59e0b;--danger:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status.active{background:#f59e0b;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+main{max-width:800px;margin:0 auto;padding:32px}
+h2{font-size:17px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px}
+p code,li code,td code{background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px;font-size:12px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.step{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin:10px 0}
+.step .step-num{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:4px}
+.step .step-title{font-weight:600;margin-bottom:6px}
+.step .step-done{color:var(--success);font-size:12px;margin-top:6px}
+.step .exit{font-size:12px;color:var(--muted);margin-top:6px;font-style:italic}
+.step .exit strong{color:var(--text)}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb">AWOS / docs / specs</div>
+  <h1>Spec: Agent Console — Transparent Back UI</h1>
+  <div class="meta">
+    <span class="tag">doc/spec</span>
+    <span class="tag">phase/4</span>
+    <span class="tag">topic/agent-console</span>
+    <span class="status active">active</span>
+    <time>2026-07-12</time>
+  </div>
+</header>
+
+<main>
+
+<h2>Goal</h2>
+<p>Transform the web UI from a "CI Rescue dashboard" into a general <strong>Agent Console</strong> that shows the AWOS agent working transparently — thinking, routing, editing files, running tests — so users can <em>feel</em> the autonomous engineer at work, like an automatic watch with a transparent back.</p>
+
+<div class="callout">
+<strong>Governing research:</strong> Code audit of gui_events.py, orchestrator.py, agent.html, server.py completed 2026-07-12.<br>
+<strong>Task file:</strong> <a href="../../tasks/active/agent_console.html">agent_console.html</a>
+</div>
+
+<h2>Files Affected</h2>
+<table>
+<tr><th>File</th><th>Change type</th><th>Description</th></tr>
+<tr><td><code>gui/static/agent.html</code></td><td>modify</td><td>Rebrand from CI Rescue Agent → Agent Console. Add thinking panel, update metrics, general session history.</td></tr>
+</table>
+
+<h2>Implementation Steps</h2>
+
+<div class="step">
+  <div class="step-num">Step 1</div>
+  <div class="step-title">Rebrand UI — title, tagline, empty state from CI Rescue → Agent Console</div>
+  <p>In <code>gui/static/agent.html</code>:</p>
+  <ul>
+    <li>Change <code>&lt;title&gt;</code> from "AWOS — CI Rescue Agent" → "AWOS Agent Console"</li>
+    <li>Change <code>.logo</code> text from "🔧 AWOS" → "⚡ AWOS" and tagline from "CI Rescue Agent" → "Self-Improving Coding Agent"</li>
+    <li>Change empty state title from "Welcome to AWOS CI Rescue" → "Welcome to AWOS Agent Console"</li>
+    <li>Change empty state text from "run <code>awos fix-ci</code>" → "run <code>awos run</code> or open the chat to start working"</li>
+    <li>Update view tab labels</li>
+  </ul>
+  <div class="exit"><strong>Exit condition:</strong> Open /agent in browser — title reads "AWOS Agent Console", empty state says "run awos run", no CI Rescue branding visible.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 2</div>
+  <div class="step-title">Add dedicated thinking panel for agent reasoning stream</div>
+  <p>Add a collapsible "Agent Reasoning" panel between the main header and the terminal. This is the <strong>transparent back</strong> — it shows the model's chain-of-thought in real-time via <code>agent_thinking</code> events.</p>
+  <ul>
+    <li>HTML: Add <code>&lt;div id="thinking-panel"&gt;</code> with a toggle header "🧠 Agent Reasoning" + collapse/expand button</li>
+    <li>CSS: Dimmed background (<code>#1c2333</code>), italic text, monospace font, max-height with scroll, smooth transition on collapse</li>
+    <li>JS: In <code>handleAgentEvent</code>, route <code>agent_thinking</code> events to the thinking panel <em>in addition to</em> the terminal log</li>
+    <li>Add auto-scroll to bottom on new thought</li>
+    <li>Show thought count badge</li>
+  </ul>
+  <div class="exit"><strong>Exit condition:</strong> During a live session, agent_thinking events appear in the dedicated panel with dimmed italic styling, auto-scroll works, panel is collapsible.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 3</div>
+  <div class="step-title">Update sidebar stats from CI Rescue → general agent metrics</div>
+  <p>Replace CI Rescue-specific stat cards with general agent metrics:</p>
+  <table>
+    <tr><th>Old (CI Rescue)</th><th>New (Agent Console)</th></tr>
+    <tr><td>Rescues</td><td>Tasks</td></tr>
+    <tr><td>Tests Fixed</td><td>Models Used (unique)</td></tr>
+    <tr><td>Cost</td><td>Cost</td></tr>
+    <tr><td>Savings</td><td>Efficiency (PEI)</td></tr>
+  </table>
+  <p>Update <code>updateStats()</code> to track: task count, unique models used, total cost, tasks/time ratio. Update <code>loadStats()</code> to fetch from <code>/api/sessions</code> and compute agent metrics instead of <code>/api/ci-rescue/stats</code>.</p>
+  <div class="exit"><strong>Exit condition:</strong> Sidebar shows Tasks/Models/Cost/Efficiency with real values during/after a session.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 4</div>
+  <div class="step-title">Wire history to general sessions API</div>
+  <p>Change <code>loadHistory()</code> from <code>/api/ci-rescue/history</code> to <code>/api/sessions</code> so all agent sessions appear, not just CI Rescue ones.</p>
+  <ul>
+    <li><code>loadHistory()</code> fetches <code>/api/sessions</code> (already returns all manifest sessions via GuiEventBus.list_sessions)</li>
+    <li>Keep the history list structure but show goal, status, task count, cost</li>
+    <li>Remove CI Rescue filter — show every session the agent has run</li>
+  </ul>
+  <div class="exit"><strong>Exit condition:</strong> History list shows all agent sessions regardless of goal, click loads session events.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 5</div>
+  <div class="step-title">Live proof: end-to-end demo with observable markers</div>
+  <p>Run the existing <code>scripts/demo_agent_interface.sh</code> (or update it) and verify:</p>
+  <ul>
+    <li>Open <code>http://localhost:8765/agent</code> — title reads "AWOS Agent Console"</li>
+    <li>Empty state says "Welcome to AWOS Agent Console"</li>
+    <li>During a session: thinking panel shows agent reasoning with dimmed italic text</li>
+    <li>Sidebar shows Tasks/Models/Cost/Efficiency values updating live</li>
+    <li>All event types render correctly (plan, model_routed, task, file_edit, test_result)</li>
+  </ul>
+  <div class="exit"><strong>Exit condition:</strong> Demo script runs without errors, all markers observed in browser.</div>
+</div>
+
+<h2>Edge Cases</h2>
+<ul>
+  <li><strong>No active session:</strong> Empty state with welcome message, idle keepalive from SSE, thinking panel hidden</li>
+  <li><strong>Session ends:</strong> Thinking panel shows final state, terminal shows session_done event, stats frozen</li>
+  <li><strong>Rapid fire thoughts:</strong> Thinking panel auto-scrolls but user can scroll up to read; new thoughts append at bottom</li>
+  <li><strong>Collapsed thinking panel:</strong> Events still route to terminal, just hidden from thinking panel</li>
+  <li><strong>No agent_thinking events:</strong> Panel shows empty state "Waiting for agent reasoning..."</li>
+  <li><strong>Multiple sessions:</strong> History lists all, clicking loads that session's events</li>
+</ul>
+
+<h2>Testing Plan</h2>
+<table>
+<tr><th>Test</th><th>Method</th><th>Expected</th></tr>
+<tr><td>Rebranding</td><td>Open /agent in browser</td><td>Title = "AWOS Agent Console", no CI Rescue references</td></tr>
+<tr><td>Thinking panel</td><td>Run awos run + observe SSE</td><td>agent_thinking events appear in panel with dimmed italic style</td></tr>
+<tr><td>Stats update</td><td>During session</td><td>Tasks/Models/Cost/Efficiency update live</td></tr>
+<tr><td>History</td><td>After 2+ sessions</td><td>All sessions appear in sidebar</td></tr>
+</table>
+
+<h2>Live Proof</h2>
+<p><strong>Command:</strong> <code>bash scripts/demo_agent_interface.sh</code></p>
+<p><strong>Success markers (watch for):</strong></p>
+<ul>
+  <li><code>AWOS Agent Console</code> in browser tab title</li>
+  <li>🧠 Thinking panel shows dimmed reasoning text during session</li>
+  <li>Sidebar shows Tasks/Models/Cost/Efficiency live</li>
+  <li>All event types render correctly</li>
+</ul>
+
+<h2>Related</h2>
+<ul>
+  <li><a href="../../tasks/active/agent_console.html">[[agent_console]]</a> — task file</li>
+  <li><a href="#">[[gui_events]]</a> — event system (already complete)</li>
+  <li><a href="../../docs/memory/checkpoint_2026-07-10_routing_repair.md">[[checkpoint_2026-07-10]]</a> — previous context engineering work</li>
+</ul>
+
+</main>
+</body>
+</html>

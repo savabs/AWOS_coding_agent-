@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Spec: Native Planner</head> Trial Adapter — AWOS</title>
+  <style>body{font-family:system-ui,sans-serif;max-width:900px;margin:32px auto;padding:0 20px;line-height:1.6;color:#1e293b}h1,h2{color:#312e81}.step{border:1px solid #cbd5e1;border-radius:8px;padding:12px;margin:10px 0}.done{background:#ecfdf5;border-left:4px solid #059669}</style>
+</head>
+<body>
+  <header><p>AWOS / docs / specs</p><h1>Spec: Native Planner Trial Adapter</h1><p><strong>Status:</strong> complete · <strong>Phase:</strong> 1 · <strong>Date:</strong> 2026-08-03</p></header>
+  <h2>Goal</h2>
+  <p>Make the explicitly authorized live holdout execute the OpenCode Go Qwen native Planner path instead of silently injecting a pre-planned task, while preserving existing deterministic benchmark behavior.</p>
+  <h2>Files Affected</h2>
+  <ul>
+    <li><code>scaffold/agent/evaluation_v1.py</code> — opt-in native Planner mode and route evidence.</li>
+    <li><code>scripts/run_holdout_live.py</code> — enable native Planner mode for the live command.</li>
+    <li><code>tests/test_native_planner_trial_adapter.py</code> — provider-free adapter behavior and evidence tests.</li>
+    <li><code>tests/test_coding_agent_minimal_e2e.py</code> — isolate ambient routing flags so the regression test cannot reach a real provider.</li>
+    <li><code>memories/repo/project_structure.md</code> — record the adapter correction and live-trial blocker.</li>
+    <li><code>tasks/active/native_planner_trial_adapter.html</code> — record atomic-step completion.</li>
+    <li><code>docs/memory/checkpoint_2026-08-03.md</code> — record session state.</li>
+  </ul>
+  <p><strong>Not changed:</strong> Planner model routing, worker routing, holdout digest logic, credentials, baseline artifacts, or live workspaces.</p>
+  <h2>Atomic Steps</h2>
+  <div class="step done"><strong>1 — Add opt-in native-Planner flag.</strong> Default remains false, preserving benchmark behavior.</div>
+  <div class="step done"><strong>2 — Suppress synthetic injection in native mode.</strong> Native mode passes no generated tasks unless explicitly supplied by the caller.</div>
+  <div class="step done"><strong>3 — Emit route evidence.</strong> Record provider, Qwen Planner model, DeepSeek worker model, and injection state without secrets.</div>
+  <div class="step done"><strong>4 — Enable native mode only for live holdout.</strong> The live command opts in; ordinary benchmark callers do not.</div>
+  <div class="step done"><strong>5 — Run offline regression validation.</strong> Keep the minimal E2E test deterministic even when ambient cheap-only environment flags are set.</div>
+  <h2>Acceptance</h2>
+  <p>The relevant offline suite passed with <strong>209 passed</strong> and one known dependency warning. The holdout dry-run remains correctly blocked until its immutable baseline report and private workspace are populated.</p>
+  <h2>Related</h2>
+  <ul>
+    <li><a href="../research/native_planner_trial_adapter.html">native_planner_trial_adapter research</a></li>
+    <li><a href="../../tasks/active/native_planner_trial_adapter.html">native_planner_trial_adapter task</a></li>
+    <li><a href="../memory/checkpoint_2026-08-03.html">session checkpoint</a></li>
+  </ul>
+</body>
+</html>

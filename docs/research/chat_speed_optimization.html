@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Speed Optimization — Research</title>
+<style>body{font-family:-apple-system,sans-serif;max-width:900px;margin:40px auto;padding:0 20px;color:#1a1a1a}
+h1{border-bottom:3px solid #e76f51;padding-bottom:10px}h2{margin-top:25px;color:#e76f51}
+table{border-collapse:collapse;width:100%;margin:10px 0}th,td{border:1px solid #ddd;padding:6px 10px;text-align:left}th{background:#f0f0f0}
+.win{background:#d4edda;padding:2px 6px;border-radius:3px}.bug{background:#f8d7da;padding:2px 6px;border-radius:3px}
+pre{background:#f5f5f5;padding:10px;border-radius:4px;font-size:.85em}code{background:#f0f0f0;padding:1px 4px;border-radius:3px}
+</style></head><body>
+<h1>🔬 Research: Chat Speed Optimization</h1><p><strong>Phase:</strong>4 · <strong>Priority:</strong> #2 (now #1 after stability fix)</p>
+
+<h2>Current Performance</h2>
+<table><tr><th>Metric</th><th>Value</th><th>Target</th></tr>
+<tr><td>Small query (no context)</td><td>2.7s</td><td>✅ within 3s</td></tr>
+<tr><td>Codebase query (12K context)</td><td><strong>15.9s</strong></td><td>🔴 target 5-8s</td></tr>
+<tr><td>TTFB (large context)</td><td>3.8s</td><td>target ~2s</td></tr>
+<tr><td>Cache hit response</td><td>~250ms</td><td>could be ~50ms</td></tr></table>
+
+<h2>Root Causes Found</h2>
+
+<h3>1. <span class="bug">BUG: max_tokens forced to 2048</span></h3>
+<p><code>gui_chat.py line 1045: max_tokens = 2048</code> — hardcoded override ignores the parameter passed by caller.</p>
+<p>Impact: Every query can generate up to 2048 output tokens. A simple "What is Python?" generates 200+ tokens unnecessarily. With 256 cap it'd be ~7s; with 2048 it's ~16s. The model generates longer responses with the larger cap.</p>
+
+<h3>2. Context overhead: 12K chars of project docs on every query</h3>
+<p><code>_read_project_context()</code> always loads VISION.md (2K), project_structure.md (2K), README (2K), plus SymbolIndex-matched files (2-6K). This is 3K+ input tokens that add ~1.5s to TTFB. For "What is Python?" queries, this context is irrelevant.</p>
+
+<h3>3. <span class="win">Duplicate context loading</span></h3>
+<p><code>_build_qa_prompt()</code> calls <code>_read_project_context()</code>. Then <code>_stream_qa()</code> also calls <code>_qa_context_blob()</code> which calls <code>_read_project_context()</code> again. Same context loaded twice per query.</p>
+
+<h3>4. Artificial time.sleep delays</h3>
+<table><tr><th>Location</th><th>Delay</th><th>Purpose</th></tr>
+<tr><td>gui_chat:529 (cache path)</td><td>8ms/chunk</td><td>Simulated typing for cache hits</td></tr>
+<tr><td>gui_chat:402 (plan path)</td><td>12ms/chunk</td><td>Simulated typing for plan display</td></tr></table>
+<p>Cache hit: ~25 chunks × 8ms = 200ms artificial delay. Plan: ~40 chunks × 12ms = 480ms.</p>
+
+<h3>5. 20s total timeout in fallback chain</h3>
+<p><code>_stream_opencode_go</code> has 6s per-model timeout and 20s total. If MiniMax M3 goes down, the chain tries 8 more models × 6s = up to 20s before failing.</p>
+
+<h2>Fix Strategy (ordered by impact/cost ratio)</h2>
+<ol>
+<li><strong>Remove max_tokens override</strong> — 1-line fix, restores caller control. Add dynamic sizing based on query complexity.</li>
+<li><strong>Short-circuit context for non-codebase queries</strong> — Skip SymbolIndex and project docs for generic questions.</li>
+<li><strong>Eliminate duplicate context loading</strong> — Load once per query in _stream_qa, pass to both _build_qa_prompt and _qa_context_blob.</li>
+<li><strong>Reduce/remove artificial delays</strong> — Use 2ms instead of 8ms for cache, remove for plan path.</li>
+<li><strong>Reduce fallback timeout</strong> — 4s per model, 12s total (from 6s/20s).</li>
+</ol>
+
+<h2>Related</h2><ul><li><a href="chat_speed_spec.html">Spec</a></li></ul>
+</body></html>

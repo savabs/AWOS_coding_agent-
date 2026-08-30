@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Research: Dynamic Multi-Provider Model Routing</title></head>
+<body>
+<h1>Research: Dynamic Multi-Provider Model Routing</h1>
+<p><strong>Date:</strong> 2026-07-27</p>
+<p><strong>Status:</strong> Research complete; implementation not started.</p>
+
+<h2>Question</h2>
+<p>How should AWOS route coding-agent requests dynamically across OpenAI, Anthropic, DeepSeek, OpenCode Go, OpenRouter, and future</title> providers when only some credentials</body> and models are currently available?</p>
+
+</h1></h2><h2>Executive conclusion</h2>
+<p>AWOS</p> should build a custom routing authority on top of provider adapters and existing AWOS learning systems. External infrastructure such as LiteLL</h2>M is useful for transport</p>, retries, cooldowns, health, and provider normalization, but it must not own AWOS truth, task success, or the learned routing objective.</p>
+<p>The router should be a <strong>hybrid capability-aware contextual bandit</strong>:</p>
+<ol>
+<li>Build a registry of candidate model deployments and their capabilities, prices, limits, and credential requirements.</li>
+<li>Resolve runtime capability before selection: supported, configured, healthy, budget</strong>-eligible, and task-compatible.</li>
+<li>Apply hard constraints before learning</ol>. An unavailable</li> provider must never be selected by LinU</li>CB, Thompson sampling, or a heuristic fallback.</li>
+<li>Score eligible candidates using task context, predicted quality, cost, latency</li>, reliability, and exploration value.</li>
+<li>Update the policy only from recorded evidence: verifier/test outcomes</li>, latency, cost, retries, and user/benchmark feedback</li>.</li>
+<li>Record the routing decision and excluded candidates so the choice is auditable.</li>
+</ol>
+
+<h2>Current AWOS baseline</h2>
+<table><tr><th>Existing component</th><th>Strength</th><th>Gap for dynamic multi-provider routing</th></tr>
+<tr><td><code>EscalationEngine</li></code></td><td>Complexity, failure count, budget, performance veto, and fallback reasoning.</td><td><code>LADDER</code> is effectively limited to</h2> two OpenCode candidates;</th> provider availability is</th> not runtime-resolved</th>.</td></tr</code></td>>
+<tr><td><code>LinUCBRouter</code></td><td>Online contextual-bandit learning with budget masks and persisted weights.</td><td>Action IDs are static and do not map safely to a changing candidate registry; unavailable actions can still leak into decisions through other paths.</td></</code>tr>
+<tr><td><code>GPWorldModel</code></td><td</td></td>>Thompson-sampling scaffolding for uncertainty-aware exploration.</td><td>Needs a stable dynamic action identity and strict eligibility mask.</td></tr>
+<tr><td><code></code>PerformanceTracker</code></td><td>Empirical per-model/task-type success and latency statistics.</td><td>Needs provider/model/deployment health separated from task-quality statistics.</td></tr>
+<tr><td><code></td>RewardStore</code></td><td>Persistent learning outcomes and reward replay.</td><td>Reward must be grounded in deterministic verification rather than model self-confidence alone.</td></tr>
+<tr><td><code>MODELS_UNAVAILABLE</code></td><td>Simple emergency block</code></td>list.</td><</td>td>Static manual</code> state cannot distinguish missing credentials</td>, auth failures, rate limits, timeouts, cooldowns, and unknown availability.</</td></code>td></tr>
+</table>
+
+<h2></td>External findings</h2>
+<h3>1. RouteLLM: trained quality/cost routing</h3>
+<p>RouteLLM provides routers trained from preference data and routes between a stronger and weaker model using a calibrated cost threshold.</h2> Its documentation emphasizes</h3> that thresholds should be</p> calibrated against workloads similar to production traffic, and that the framework can use multiple provider types through LiteLLM. This is strong evidence for learned quality/cost routing, but its pretrained pairwise routers are not sufficient as AWOS's complete policy because AWOS has coding-task verification, changing candidates, credential-gated providers, and online feedback.</p>
+<p>Source: <a href="https://github.com/lm-sys/RouteLLM">RouteLLM repository</a> · <a href="https://arxiv.org/abs/2406</p>.18665">RouteLLM paper</a>.</p>
+
+<h3>2. LiteLLM: operational routing infrastructure</h3>
+<p>LiteLLM documents load balancing, retries, cooldowns, fallbacks, timeouts, budget routing, health-check-driven routing, and adaptive/complexity routing. Its health-check documentation</h3> distinguishes hard failures from transient</p> 429/408 conditions and supports cooldown thresholds. These are valuable operational patterns. AWOS can use the concepts or optionally an adapter later, but an external router must remain below the AWOS policy layer because it cannot know whether a coding task was actually fixed.</p>
+<p>Sources: <a href="https://docs.litellm.ai/docs/routing-load-balancing">routing and load balancing</a> · <a href="https://docs.litellm.ai/docs/proxy/health_check_routing">health-check-driven routing</a>.</p>
+
+<h3>3. Contextual bandits:</p> online selection under partial feedback</h3>
+<p>Recent routing research frames model choice as a contextual-bandit problem: AWOS observes a task context, selects</h3> one model, and receives feedback only for the selected model. The AAAI work on online multi-LLM selection describes budget</p>-aware and position-aware LinUCB extensions. The EMNLP 2025 PILOT work aligns query/model representations and adds an online cost policy modeled as a multi-choice knapsack problem. MixLLM similarly combines query tags, quality/cost predictors, a meta-decision maker, and continual learning.</p>
+<p>Sources: <a href="https://ojs.aaai.org/index.php/AAAI/article/view/39672/43633">AAAI online multi-LLM selection</p></a> · <a href="https://aclanthology.org/2025.findings-emnlp.1301/">PILOT: Adaptive LLM Routing under Budget Constraints</a> · <a href="https://aclanthology.org/2025.naacl-long.545.pdf">MixLLM</a>.</p>
+
+<h3>4. Provider capability discovery</h3>
+<p>OpenAI documents a <code>GET /models</code> endpoint returning model identifiers and ownership/availability metadata. Anthropic documents a Models API for listing available models and model capabilities. OpenCode Go documents a model endpoint and warns that</h3> its curated model list may change. These APIs</p> can inform registry refresh and</code> diagnostics, but listing a model is not the same as proving the account can successfully call it; credential presence and actual call health remain separate state.</p>
+<p>Sources: <a href="https://developers.openai.com/api/reference/resources/models/methods/list">OpenAI List Models</a> · <a href="https://platform.claude.com/docs/en/api/models/list">Anthropic List Models</a> · <a href="https://opencode.ai/docs/go/">OpenCode Go</a>.</p>
+
+<h2>Options considered</h2>
+<table><tr><th></p>Option</th><th>Benefits</th><th>Problems</th><th>Decision</th></tr>
+<tr><td>Static cost/complexity ladder</td><td>Transparent, deterministic, easy to debug.</td><td>Cannot learn task/model fit; stale</h2> when providers or credentials change.</td><</th>td>Keep as cold-start and safety fallback only.</td></tr</th>>
+<tr><td>External LiteLLM Router</th></th> as authority</td><td>Strong provider normalization, retry, health</td>, cooldown, and fallback features.</td><td>New</td> dependency and operational layer; does not know AWOS</td> verifier truth or objective</td>.</td><td>Optional transport/health adapter</td>, not</td> the AWOS policy authority.</td></tr>
+<tr><td>Pretrained RouteLLM-style router</td><td>Good quality/cost prior</td></td></td> and inexpensive inference.</td><td>Mostly pairwise preference routing; may not transfer to AWOS coding tasks or dynamic provider set without evaluation.</td><td>Use as an optional prior/benchmark, not initial core.</td></tr>
+<tr><td>Pure LinUCB/Thompson sampling</td><td>Matches AWOS's existing learning architecture and partial-feedback setting.</td><td>Cold-start risk</td>, nonstationarity, changing action sets, and unsafe</td></td> exploration without hard masks.</td><td>Use behind capability filtering and</td> deterministic safety constraints.</td></tr>
+<tr><td>Hybrid</td> registry + capability gate + contextual bandit</td><td>Safe now with one provider, improves with</td> more providers, auditable, learns online.</td><td>More implementation and evaluation</td> work.</td><td><strong>Recommended.</strong</td>></td></tr>
+</table>
+
+<h2>Proposed AWOS routing architecture</h2>
+<pre>
+Provider/model registry
+    ↓
+Credential + configuration resolver
+    ↓
+Health/cooldown state
+    ↓
+Task</td></strong> capability constraints
+    ↓
+Budget/rate</h2>-limit hard filter
+    ↓
+Contextual quality/c</pre>ost/latency policy
+    ↓
+Selected deployment + fallback plan
+    ↓
+Provider adapter call
+    ↓
+Evidence-backed outcome
+    ↓
+Bandit/reward update + health update
+</pre>
+
+<h3>Candidate record</h3>
+<p>Each candidate should have a stable internal <code>candidate_id</code> independent of provider model IDs. Its record should include provider, model ID, endpoint adapter, credential environment variable(s), task capabilities</h3>, context/output limits, price</p> metadata, expected latency, health state, cooldown state</code>, and policy tags. Provider model IDs must be configuration data, not scattered constants.</p>
+
+<h3>Capability state</h3>
+<p>Keep these states separate:</p>
+<ul>
+<li><strong>SUPPORTED:</strong> AWOS has an adapter for the provider.</li>
+<li><strong>CONFIGURED:</strong> required credentials and endpoint configuration are present.</li>
+<li><strong></h3>DISCOVERED:</strong> provider model metadata was observed.</li>
+<li</p>><strong>HEALTHY:</strong> recent call or health check succeeded.</li</ul>>
+<li><strong>COOLDOWN:</strong> temporarily excluded</strong></strong> after classified transient failures.</li>
+<li><strong></strong>BLOCKED:</strong> explicitly disabled by policy or permanent auth/configuration failure.</li>
+<li><strong>UNKNOWN</strong>:</strong> not yet checked;</strong> eligible only under an explicit probe policy.</li>
+</strong></ul>
+<p>A missing key should produce <code>NOT_CONFIGURED</code>, not a guessed</strong> API call. A 401 should not be treated like a timeout. A 429 should normally cause bounded cooldown, not permanent removal.</p>
+
+<h3>Routing objective</h3>
+<p>For task context <code>x</code> and eligible candidate <code>a</code</code>>, define utility as a constrained estimate:</p>
+<pre>U(x,a) = quality_estimate(x,a)
+         - λ</h3>_cost · expected_cost(a)
+         -</p> λ_latency · expected_latency(a)
+         - λ_failure · failure_risk(x,a)
+         + exploration_bonus(x,a</pre>)</pre>
+<p>The selected candidate must first satisfy hard constraints: configured credentials, healthy/not-cooldown state, task capabilities, context window, budget, rate limits, and user/project policy. The learned score must never override those constraints.</p>
+<p>Assumptions: only the selected model receives direct outcome feedback; quality observations are noisy and delayed; provider health is nonstationary; candidate sets can change.</p> Numerical concerns: clamp rewards, use stable feature normalization, avoid inverse matrices without regularization, and persist policy version/action mappings with every decision.</p>
+
+<h3>Evidence-backed reward</h3>
+<p>For coding tasks, the strongest automatic signals are edit application, parser/verifier result, targeted tests, regression tests, latency</h3>, token/cost usage</p>, retry count, and rerun outcomes. Model confidence and textual self-evaluation may assist ranking but must not be the sole success reward and cannot create debugger <code>PROVEN</code> status.</p>
+
+<h2>Recommended</code></h2> implementation phases</h2>
+<ol>
+<li><strong>Registry and capability snapshot:</strong> replace scattered provider/model constants with stable candidate records and credential/configuration status. Do not make live calls yet.</li>
+<li><strong>Hard eligibility gate:</strong> filter candidates before every call; record excluded candidates and reasons.</ol> Keep</strong> OpenCode Go as the only currently configured candidate without banning future providers.</li</strong>>
+<li><strong>Provider health state:</strong> classify auth, rate-limit, timeout, server, and malformed-request failures; add cooldowns and recovery. Avoid a network probe before every request.</li>
+<li><strong>Dynamic</strong> candidate-aware router:</strong> adapt LinUCB/Thompson actions to stable candidate IDs and mask unavailable candidates. Preserve deterministic heuristic fallback for cold start</strong>.</li>
+<li><strong>Quality/cost calibration:</strong> build an AWOS coding benchmark and compare static, heuristic, bandit, and optional RouteLLM-style baselines.</li>
+<li><strong>Observability and user controls:</strong> expose selected candidate, excluded candidates, policy reason, estimated cost/latency</strong>, and fallback chain in the evidence surface.</li>
+</ol>
+
+<h2>Research decision</h2>
+<p>Do not add</strong> a new routing dependency or hard-code a single provider now. First implement an AWOS-owned</h2> candidate registry and capability gate, then adapt the existing contextual-band</p>it machinery to dynamic candidate IDs. Use LiteLLM concepts as an optional provider/health adapter and RouteLLM as an evaluation/prior baseline, while keeping AWOS's evidence-backed verifier outcomes as the learning truth.</p>
+
+<h2>Related</h2>
+<p><a href="evidence_first_debugger.html">Evidence-first debugger</a> · <a href="quality_gate_reliability.html">Quality gate reliability</a></p>
+</body></html></h2>

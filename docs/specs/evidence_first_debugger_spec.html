@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spec: Evidence-First Debugger — AWOS</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--success:#10b981;--warn:#f59e0b;--danger:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status.active{background:#f59e0b;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+main{max-width:900px;margin:0 auto;padding:32px}
+h2{font-size:17px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px}
+p code,li code,td code{background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px;font-size:12px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.step{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin:10px 0}
+.step .step-num{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:4px}
+.step .step-title{font-weight:600;margin-bottom:6px}
+.step .exit{font-size:12px;color:var(--muted);margin-top:6px;font-style:italic}
+.step .exit strong{color:var(--text)}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+footer{background:var(--surface);border-top:1px solid var(--border);padding:16px 32px;display:flex;justify-content:flex-end;gap:12px}
+.copy-btn{background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:500}
+.copy-btn.secondary{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+</style>
+</head>
+<body>
+<header>
+  <div class="breadcrumb">AWOS / docs / specs</div>
+  <h1>Spec: Evidence-First Debugger</h1>
+  <div class="meta">
+    <span class="tag">doc/spec</span>
+    <span class="tag">phase/1</span>
+    <span class="tag">topic/evidence-first-debugger</span>
+    <span class="status active">active</span>
+    <time>2026-07-26</time>
+  </div>
+</header>
+<main>
+<h2>Goal</h2>
+<p>Create an AWOS debugging subsystem that records agent runs as structured evidence, distinguishes <code>PROVEN</code> issues from <code>HYPOTHESIS</code> and <code>UNKNOWN</code>, and supports proof-by-rerun so the coding agent stops hallucinating unsupported bug claims.</p>
+<div class="callout">
+<strong>Governing research:</strong> <a href="../research/evidence_first_debugger.html">evidence_first_debugger.html</a><br>
+<strong>Task file:</strong> <a href="../../tasks/active/evidence_first_debugger_task.html">evidence_first_debugger_task.html</a>
+</div>
+<h2>Normative Truth Contract — Frozen Planning Version</h2>
+<p>This contract is the authority for all debugger implementations and reports. A finding is always a claim about a defined subject; status must never describe a vague session-level impression.</p>
+<h3>Claim scope</h3>
+<table>
+<tr><th>Claim type</th><th>Example</th><th>What may be proven</th></tr>
+<tr><td><code>OBSERVATION</code></td><td>A test command exited nonzero and emitted a traceback.</td><td>The recorded command outcome and captured output, if the artifact is valid.</td></tr>
+<tr><td><code>DIAGNOSIS</code></td><td>The parser rejected a specific file at a specific location.</td><td>The tool-reported diagnostic, including its source location.</td></tr>
+<tr><td><code>ROOT_CAUSE</code></td><td>A specific edit caused the test failure.</td><td>Only when a rule or controlled rerun establishes the required causal relationship.</td></tr>
+<tr><td><code>REMEDIATION</code></td><td>A proposed patch will fix the failure.</td><td>Only after validation demonstrates the expected outcome; a plan alone is a hypothesis.</td></tr>
+</table>
+<h3>Status semantics</h3>
+<ul>
+  <li><code>PROVEN</code>: the exact claim has at least one valid proof record. The record names the rule, evidence IDs, source artifact references, and environment/run identity. A proven observation does not promote related causal claims.</li>
+  <li><code>HYPOTHESIS</code>: the claim is supported by non-proof signals or an incomplete proof attempt and is worth investigating. It must be presented as a candidate, never as an established issue.</li>
+  <li><code>UNKNOWN</code>: available evidence is absent, invalid, contradictory, out of scope, or too weak to justify even a ranked hypothesis.</li>
+</ul>
+<h3>Evidence classes</h3>
+<table>
+<tr><th>Class</th><th>Meaning</th><th>Can prove a claim alone?</th></tr>
+<tr><td><code>DIRECT_OBSERVATION</code></td><td>Raw output or event from a real tool, process, verifier, parser, test runner, or edit operation.</td><td>Only when a matching deterministic rule accepts it and the claim scope matches.</td></tr>
+<tr><td><code>DERIVED_PROOF</code></td><td>Auditable result produced by a versioned deterministic proof rule from direct observations.</td><td>Yes, for the exact rule-scoped claim.</td></tr>
+<tr><td><code>RERUN_REPRODUCTION</code></td><td>A later controlled run that reproduces a prior claim under recorded equivalence conditions.</td><td>Yes for reproducibility; causal claims require the stronger causal rule.</td></tr>
+<tr><td><code>ATTRIBUTION_SIGNAL</code></td><td>Fault localization, similarity, recency, repeated failure, model judgment, or ranking score.</td><td>No.</td></tr>
+<tr><td><code>EVIDENCE_GAP</code></td><td>Missing, corrupt, truncated, redacted, conflicting, or unavailable evidence.</td><td>No; it constrains the result toward <code>UNKNOWN</code>.</td></tr>
+</table>
+<h3>Proof and transition rules</h3>
+<ol>
+  <li>A proof rule must declare its ID and version, accepted evidence classes, claim type, required fields, and scope of conclusion.</li>
+  <li><code>PROVEN</code> is permitted only when all required evidence references resolve to valid, integrity-checkable artifacts and the rule passes.</li>
+  <li>A nonzero exit proves a process failure, not its root cause. A failing test proves a test failure, not automatically the faulty line.</li>
+  <li>Heuristic or LLM-only evidence may create or rank <code>HYPOTHESIS</code> findings, never <code>PROVEN</code> findings.</li>
+  <li>Failed, divergent, or inconclusive reruns append validation evidence. They do not delete or silently rewrite the original finding.</li>
+  <li>Evidence conflicts produce separate linked claims or an explicit conflict record; the engine must not hide disagreement by merging it.</li>
+  <li>Finding history is append-only. Any later interpretation must reference the prior finding and the new evidence.</li>
+</ol>
+<h3>Required proof record</h3>
+<p>Every <code>PROVEN</code> finding must carry: <code>finding_id</code>, claim type and subject, status, <code>proof_rule_id</code>, proof-rule version, evidence IDs, source paths plus offsets or event IDs, artifact hashes when available, run/environment identity, observed timestamp, and a human-readable bounded conclusion.</p>
+<h2>Files Affected</h2>
+<table>
+<tr><th>File group</th><th>Change type</th><th>Description</th></tr>
+<tr><td><code>scaffold/agent/core/debug_schema.py</code>, <code>debug_report.py</code>, <code>debug_journal.py</code>, <code>debug_rules.py</code></td><td>create</td><td>Canonical evidence, finding, report, and persistence model for the debugger.</td></tr>
+<tr><td><code>scaffold/agent/core/observability.py</code>, <code>scaffold/agent/gui_events.py</code>, <code>scaffold/agent/telemetry_log.py</code></td><td>modify</td><td>Normalize current runtime artifacts into debugger-readable evidence and unify schema boundaries.</td></tr>
+<tr><td><code>scaffold/agent/fault_localizer.py</code>, <code>scaffold/agent/orchestrator.py</code>, <code>scaffold/agent/live_renderer.py</code></td><td>modify</td><td>Feed attribution inputs, canonical event emission, and rerun hooks into the debugger pipeline.</td></tr>
+<tr><td><code>gui/server.py</code>, <code>scaffold/agent/gui_chat.py</code>, <code>gui/static/agent.html</code></td><td>modify</td><td>Add debugger inspection surfaces, status rendering, and evidence access in the app.</td></tr>
+<tr><td><code>awos.py</code> and/or dedicated debugger endpoints</td><td>modify</td><td>Add inspection/reporting/rerun commands or APIs for the debugger.</td></tr>
+<tr><td><code>tests/test_debug_*.py</code>, benchmark fixtures under <code>tests/fixtures/</code></td><td>create</td><td>Prove truth classification, schema compatibility, rerun logic, and anti-hallucination constraints.</td></tr>
+<tr><td><code>docs/research/evidence_first_debugger.*</code>, <code>docs/specs/evidence_first_debugger_spec.*</code>, <code>tasks/active/evidence_first_debugger_task.*</code></td><td>create</td><td>Research/spec/task triad for this feature.</td></tr>
+</table>
+<h2>Implementation Steps</h2>
+<p>Each step is atomic: changes one thing, tests one thing, proves one thing.</p>
+<div class="step">
+  <div class="step-num">Step 1</div>
+  <div class="step-title">Create the canonical debugger truth model</div>
+  <p>Create <code>scaffold/agent/core/debug_schema.py</code> with the core enums and dataclasses for <code>FindingStatus</code> (<code>PROVEN</code>, <code>HYPOTHESIS</code>, <code>UNKNOWN</code>), <code>EvidenceKind</code>, <code>FailureStage</code>, <code>DebugEvidence</code>, and <code>DebugFinding</code>. Truth status must be explicit and serializable.</p>
+  <div class="exit"><strong>Exit condition:</strong> A unit test proves schema round-trips through JSON without collapsing <code>PROVEN</code>, <code>HYPOTHESIS</code>, and <code>UNKNOWN</code> into the same representation.</div>
+</div>
+<div class="step">
+  <div class="step-num">Step 2</div>
+  <div class="step-title">Create the canonical debug report model</div>
+  <p>Create <code>scaffold/agent/core/debug_report.py</code> with task-level and session-level report objects that group findings, artifact references, normalized cause chains, and rerun outcomes.</p>
+  <div class="exit"><strong>Exit condition:</strong> A unit test creates a session report with multiple task findings and confirms deterministic serialization/deserialization.</div>
+</div>
+<div class="step">
+  <div class="step-num">Step 3</div>
+  <div class="step-title">Create an append-only debugger journal and bundle layout</div>
+  <p>Create <code>scaffold/agent/core/debug_journal.py</code> and a canonical disk layout under <code>.awos/debug/&lt;session_id&gt;/</code> for findings, evidence references, manifest data, and rerun outcomes.</p>
+  <div class="exit"><strong>Exit condition:</strong> A test run writes a valid debug bundle with a manifest and at least one append-only findings/evidence artifact file.</div>
+</div>
+<div class="step">
+  <div class="step-num">Step 4</div>
+  <div class="step-title">Adapt <code>TaskSpan</code> records into debugger evidence</div>
+  <p>Add an adapter that converts <code>TaskSpan</code> data from <code>scaffold/agent/core/observability.py</code> into normalized <code>DebugEvidence</code> records for latency, model routing, cost, and attempt facts.</p>
+  <div class="exit"><strong>Exit condition:</strong> A fixture <code>TaskSpan</code> produces evidence records with stable IDs and preserved routing/timing fields.</div>
+</div>
+<div class="step">
+  <div class="step-num">Step 5</div>
+  <div class="step-title">Adapt <code>GuiEventBus</code> events into debugger evidence</div>
+  <p>Add an adapter for <code>.awos/gui/&lt;session&gt;/events.jsonl</code> so the debugger can consume ordered runtime events such as session start, plan generation, model routing, task start, file edit, test result, task complete, session done, and synthetic crash error events.</p>
+  <div class="exit"><strong>Exit condition:</strong> A sample <code>events.jsonl</code> file normalizes into ordered evidence items with event type, timestamp, payload, and source reference.</div>
+</div>
+<div class="step">
+  <div class="step-num">Step 6</div>
+  <div class="step-title">Normalize legacy and current event vocabularies into one canonical taxonomy</div>
+  <p>Introduce a compatibility layer that maps legacy names like <code>planning_done</code>, <code>worker_start</code>, <code>worker_done</code>, <code>verify_result</code>, <code>task_done</code>, <code>retry_notice</code>, and <code>file_change</code> into the same canonical schema used by <code>GuiEventBus</code> and the debugger core.</p>
+  <div class="exit"><strong>Exit condition:</strong> A compatibility test proves that old and new session artifacts normalize to identical canonical event/evidence structures.</div>
+</div>
+<div class="step">
+  <div class="step-num">Step 7</div>
+  <div class="step-title">Create deterministic proof rules for runtime failures</div>
+  <p>Create <code>scaffold/agent/core/debug_rules.py</code> with deterministic rules for nonzero subprocess exit, verifier rejection, failing test with traceback, syntax/parser/import failure, and failed edit application. These are the first allowed paths to <code>PROVEN</code>.</p>
+  <div class="exit"><strong>Exit condition:</strong> Tests prove that each supported failure class yields <code>PROVEN</code> only when the corresponding recorded artifact exists.</div>
+</div>
+<div class="step">
+  <div class="step-num">Step 8</div>
+  <div class="step-title">Adapt verification and test artifacts into proof evidence</div>
+  <p>Wire verifier/test/build outputs from existing runtime components and <code>TaskTelemetry</code> into the deterministic rule engine so verification failures and test failures produce explainable evidence bundles.</p>
+  <div class="exit"><strong>Exit condition:</strong> An integration test proves that a failing verification or failing test produces a <code>PROVEN</code> finding with artifact references to the concrete output that triggered it.</div>
+</div>
+<div class="step">
+  <div class="step-num">Step 9</div>
+  <div class="step-title">Integrate <code>FaultLocalizer</code> as attribution input only</div>
+  <p>Feed <code>FaultLocalizer.localize()</code> results into debugger attribution as ranked candidate causes, but explicitly prevent localization confidence from creating <code>PROVEN</code> findings by itself.</p>
+  <div class="exit"><strong>Exit condition:</strong> A test proves that localization-only evidence can produce ranked <code>HYPOTHESIS</code> findings but never upgrades them to <code>PROVEN</code>.</div>
+</div>
+<div class="step">
+  <div class="step-num">Step 10</div>
+  <div class="step-title">Create a ranked suspicion engine for non-proof signals</div>
+  <p>Implement investigation ordering over stack traces, verifier/test alignment, localization rank, recent edits, repeated failures, and stage consistency. This engine is for prioritization only.</p>
+  <div class="exit"><strong>Exit condition:</strong> A deterministic fixture produces a stable ranking order across repeated runs, while all findings remain <code>HYPOTHESIS</code> or <code>UNKNOWN</code> without proof artifacts.</div>
+</div>
+<div class="step">
+  <div class="step-num">Step 11</div>
+  <div class="step-title">Create a rerun/checkpoint request model</div>
+  <p>Define the debugger’s proof-by-rerun request format: which session/task/event boundary is being resumed from, which inputs are frozen, which runtime capabilities are required, and where new evidence should be attached.</p>
+  <div class="exit"><strong>Exit condition:</strong> A unit test proves that the rerun request format can represent session-, task-, or event-scoped repro attempts without ambiguity.</div>
+</div>
+<div class="step">
+  <div class="step-num">Step 12</div>
+  <div class="step-title">Implement proof-by-rerun status resolution</div>
+  <p>Add logic that updates findings after reproduction attempts: reproduced failures can upgrade or confirm a finding, non-reproduced failures remain non-proven, and divergent reruns are recorded as separate evidence rather than silently overwriting the prior record.</p>
+  <div class="exit"><strong>Exit condition:</strong> Integration tests prove that rerun outcomes update finding status according to explicit rules and never silently convert missing proof into proof.</div>
+</div>
+<div class="step">
+  <div class="step-num">Step 13</div>
+  <div class="step-title">Add debugger CLI/API inspection surfaces</div>
+  <p>Add a low-friction way to inspect reports and rerun plans, either via <code>awos.py</code> commands, server endpoints, or both. The first phase should prioritize machine-readable output for the coding agent over polished UX.</p>
+  <div class="exit"><strong>Exit condition:</strong> A debug report for a saved session can be retrieved and inspected without opening the web UI.</div>
+</div>
+<div class="step">
+  <div class="step-num">Step 14</div>
+  <div class="step-title">Add debugger UI surfaces to the Agent Console</div>
+  <p>Extend the app so users can see debugger findings, evidence references, proof status, failure stage, and rerun result directly in the main interface. The UI should clearly separate facts from hypotheses.</p>
+  <div class="exit"><strong>Exit condition:</strong> A clean success run and a failing run both render debugger status in the UI, and the failure run visibly distinguishes <code>PROVEN</code> from <code>HYPOTHESIS</code>.</div>
+</div>
+<div class="step">
+  <div class="step-num">Step 15</div>
+  <div class="step-title">Create a debugger benchmark and anti-hallucination regression suite</div>
+  <p>Add fixtures and tests that cover process crashes, verifier rejection, failing tests, syntax errors, localization-only suspicion, missing-artifact cases, and rerun divergence. The suite must explicitly guard the no-hallucinated-proof contract.</p>
+  <div class="exit"><strong>Exit condition:</strong> A regression test proves that unsupported cases remain <code>HYPOTHESIS</code> or <code>UNKNOWN</code> instead of incorrectly becoming <code>PROVEN</code>.</div>
+</div>
+<div class="step">
+  <div class="step-num">Step 16</div>
+  <div class="step-title">Add optional OpenTelemetry/OpenInference export</div>
+  <p>Once native AWOS reports are stable, add optional export or dual-write so external observability systems can ingest the traces. AWOS’s local debug report remains the source of truth; the export is a transport/viewer integration.</p>
+  <div class="exit"><strong>Exit condition:</strong> A test proves that one session can be exported with correlated OpenTelemetry/OpenInference metadata while the native AWOS debug bundle remains authoritative.</div>
+</div>
+<h2>Edge Cases</h2>
+<ul>
+  <li>No verifier/test/build artifact exists — the debugger must emit <code>UNKNOWN</code> or a low-priority <code>HYPOTHESIS</code>, not a proven failure.</li>
+  <li>Multiple proof artifacts disagree — the debugger must preserve both findings or preserve precedence rules explicitly, not silently merge them.</li>
+  <li>Telemetry files are truncated or partially corrupt — ingestion should record an evidence gap rather than invent a failure.</li>
+  <li>A subprocess crashes before <code>session_done</code> — the synthetic crash event from <code>gui/server.py</code> must remain attached as explicit evidence.</li>
+  <li>Legacy event names appear in historical sessions — normalization must preserve meaning without breaking modern sessions.</li>
+  <li>Rerun diverges because of nondeterminism, provider variance, or changed workspace state — the original finding must not be overwritten.</li>
+  <li>Prompt/tool content is sensitive — export and UI paths need redaction controls without destroying structural evidence.</li>
+</ul>
+<h2>Testing Plan</h2>
+<table>
+<tr><th>Test</th><th>Input</th><th>Expected output</th><th>File</th></tr>
+<tr><td>Schema truth-state round trip</td><td><code>DebugFinding(status=PROVEN/HYPOTHESIS/UNKNOWN)</code></td><td>Status preserved exactly after serialization</td><td><code>tests/test_debug_schema.py</code></td></tr>
+<tr><td>Legacy/current event normalization</td><td>Old and new event names for the same logical run</td><td>One canonical normalized event/evidence representation</td><td><code>tests/test_debug_event_adapter.py</code></td></tr>
+<tr><td>Deterministic proof rule: failing test</td><td>Recorded failing pytest output</td><td><code>PROVEN</code> finding with traceback artifact</td><td><code>tests/test_debug_rules.py</code></td></tr>
+<tr><td>Deterministic proof rule: verifier rejection</td><td>Recorded verification failure output</td><td><code>PROVEN</code> finding with verifier artifact</td><td><code>tests/test_debug_rules.py</code></td></tr>
+<tr><td>Localization-only suspicion</td><td><code>FaultLocalizer</code> result with no failing artifact</td><td><code>HYPOTHESIS</code>, never <code>PROVEN</code></td><td><code>tests/test_debug_attribution.py</code></td></tr>
+<tr><td>Crash-without-session-done</td><td>Tracked subprocess exits nonzero and SSE emits synthetic error</td><td>Debugger records a crash finding with evidence reference</td><td><code>tests/test_debug_integration.py</code></td></tr>
+<tr><td>Rerun confirms failure</td><td>Reproducible failing boundary</td><td>Finding confirmed or upgraded according to explicit rule</td><td><code>tests/test_debug_rerun.py</code></td></tr>
+<tr><td>Rerun does not reproduce</td><td>Divergent or non-reproducible rerun</td><td>Finding remains non-proven and rerun divergence is recorded</td><td><code>tests/test_debug_rerun.py</code></td></tr>
+<tr><td>Anti-hallucination guard</td><td>Only heuristic signals, no proof artifacts</td><td>Suite fails if the debugger emits <code>PROVEN</code></td><td><code>tests/test_debug_honesty.py</code></td></tr>
+</table>
+<h2>Related</h2>
+<ul>
+  <li><a href="../research/evidence_first_debugger.html">[[evidence_first_debugger]]</a> — governing research</li>
+  <li><a href="../../tasks/active/evidence_first_debugger_task.html">[[evidence_first_debugger_task]]</a> — execution checklist</li>
+  <li><a href="../../VISION.md">[[VISION]]</a> — canonical identity</li>
+  <li><a href="../../tasks/active/pivot_web_app_product.md">[[pivot_web_app_product]]</a> — app/interface pathway</li>
+</ul>
+</main>
+<footer>
+  <button class="copy-btn secondary" onclick="copyJSON()">Copy Steps as JSON</button>
+  <button class="copy-btn" onclick="copyPrompt()">Copy as Prompt</button>
+</footer>
+<script>
+function copyPrompt(){navigator.clipboard.writeText('# Spec: Evidence-First Debugger\n\n'+document.querySelector('main').innerText).then(()=>{const b=document.querySelector('.copy-btn:last-child');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy as Prompt',1500)})}
+function copyJSON(){const steps=[...document.querySelectorAll('.step')].map((s,i)=>({step:i+1,title:s.querySelector('.step-title').innerText,exit:s.querySelector('.exit').innerText.replace('Exit condition:','').trim()}));navigator.clipboard.writeText(JSON.stringify({doc:'spec',steps},null,2)).then(()=>{const b=document.querySelector('.copy-btn.secondary');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy Steps as JSON',1500)})}
+</script>
+</body>
+</html>

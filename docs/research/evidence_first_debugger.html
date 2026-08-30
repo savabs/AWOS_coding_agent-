@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Research: Evidence-First Debugger — AWOS</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--warn:#f59e0b}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status.active{background:#f59e0b;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+nav.tabs{background:var(--surface);border-bottom:1px solid var(--border);padding:0 32px;display:flex;gap:0;overflow-x:auto}
+nav.tabs button{background:none;border:none;border-bottom:2px solid transparent;padding:12px 16px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;white-space:nowrap}
+nav.tabs button.active{color:var(--accent);border-bottom-color:var(--accent)}
+main{max-width:900px;margin:0 auto;padding:32px}
+section.tab-panel{display:none}
+section.tab-panel.active{display:block}
+h2{font-size:17px;font-weight:600;margin:24px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px}
+p code,li code,td code{background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px;font-size:12px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+.risk-high{background:#fef2f2;border-left:3px solid #ef4444;padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+.risk-med{background:#fef3c7;border-left:3px solid var(--warn);padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+footer{background:var(--surface);border-top:1px solid var(--border);padding:16px 32px;display:flex;justify-content:flex-end;gap:12px}
+.copy-btn{background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:500}
+.copy-btn.secondary{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+</style>
+</head>
+<body>
+<header>
+  <div class="breadcrumb">AWOS / docs / research</div>
+  <h1>Research: Evidence-First Debugger</h1>
+  <div class="meta">
+    <span class="tag">doc/research</span>
+    <span class="tag">phase/1</span>
+    <span class="tag">topic/evidence-first-debugger</span>
+    <span class="status active">active</span>
+    <time>2026-07-26</time>
+  </div>
+</header>
+<nav class="tabs">
+  <button class="active" onclick="show(this,'arch')">Architecture</button>
+  <button onclick="show(this,'obs')">Observations</button>
+  <button onclick="show(this,'risks')">Risks</button>
+  <button onclick="show(this,'sources')">Sources</button>
+</nav>
+<main>
+<section id="arch" class="tab-panel active">
+<h2>Current Architecture</h2>
+<p>AWOS already has several strong debugging primitives, but they are split across different runtime artifacts and UI surfaces. Today the repo can record <em>what happened</em>; it cannot yet make a disciplined claim about <em>what issue is proven</em>, <em>what is only a hypothesis</em>, and <em>what remains unknown</em>.</p>
+<div class="callout"><strong>Research conclusion:</strong> AWOS should build a <strong>custom evidence-first debugger core</strong> on top of <strong>OpenTelemetry + OpenInference</strong> style telemetry concepts, while keeping AWOS itself as the authority on truth classification. External backends may visualize or store telemetry, but they should not decide whether an issue is proven.</div>
+<h3>Relevant Modules</h3>
+<table>
+<tr><th>Module / File</th><th>Role</th><th>Interface (key functions/classes)</th></tr>
+<tr><td><code>scaffold/agent/core/observability.py</code></td><td>Append-only task-level observability store for timing, routing, token, and cost facts.</td><td><code>TaskSpan</code>, <code>ObservabilityStore.record()</code>, <code>get_recent()</code>, <code>metrics()</code>, <code>queue_state()</code>, <code>inference_report()</code></td></tr>
+<tr><td><code>scaffold/agent/gui_events.py</code></td><td>Per-session structured event bus written to <code>.awos/gui/&lt;session&gt;/events.jsonl</code> for UI replay and live streaming.</td><td><code>EventType</code>, <code>GuiEventBus.emit_*()</code>, <code>session_done()</code>, <code>record_file_change()</code></td></tr>
+<tr><td><code>scaffold/agent/telemetry_log.py</code></td><td>Backend-only improvement telemetry with richer task/session outcome fields than the UI event stream.</td><td><code>TaskTelemetry</code>, <code>SessionTelemetry</code>, <code>TelemetryLogger.log_task()</code>, <code>log_session()</code></td></tr>
+<tr><td><code>scaffold/agent/fault_localizer.py</code></td><td>Heuristic hierarchical repo → file → symbol → line ranking used to narrow likely fault locations.</td><td><code>FaultLocalizer.localize()</code>, <code>to_context_block()</code></td></tr>
+<tr><td><code>scaffold/agent/live_renderer.py</code></td><td>Legacy/TTY execution renderer with its own event vocabulary for planning, worker, verification, retry, and completion.</td><td><code>session_start()</code>, <code>planning_done()</code>, <code>worker_start()</code>, <code>worker_done()</code>, <code>verify_result()</code>, <code>retry_notice()</code>, <code>task_done()</code></td></tr>
+<tr><td><code>scaffold/agent/orchestrator.py</code></td><td>Primary execution loop that emits test/session completion events and already has natural insertion points for debugger hooks.</td><td><code>execute_feature()</code>, <code>_execute_task_via_react()</code>, <code>_execute_single_task()</code></td></tr>
+<tr><td><code>gui/server.py</code></td><td>SSE endpoint that tails the latest session’s <code>events.jsonl</code> and emits synthetic crash errors when a subprocess dies unexpectedly.</td><td><code>_handle_sse_events()</code>, <code>_sse_send()</code></td></tr>
+<tr><td><code>scaffold/agent/gui_chat.py</code></td><td>UI-facing progress formatter that still understands a mixed vocabulary of legacy and current event names.</td><td><code>_format_agent_event()</code>, agent progress streaming logic</td></tr>
+</table>
+<h3>Current Evidence Surfaces</h3>
+<pre><code>.awos/
+├── spans.jsonl                  # task-level timing/routing/cost facts
+├── telemetry.jsonl              # richer verify/retry/failure/task analytics
+└── gui/
+    └── &lt;session_id&gt;/
+        ├── events.jsonl         # ordered per-session event journal
+        └── manifest.json        # file-change/session summary for UI</code></pre>
+<h3>Current Data Flow</h3>
+<ol>
+  <li>The orchestrator executes tasks and emits structured UI events through <code>GuiEventBus</code>, which appends to <code>.awos/gui/&lt;session&gt;/events.jsonl</code>.</li>
+  <li>Task-level quantitative facts are separately written as <code>TaskSpan</code> records to <code>.awos/spans.jsonl</code>.</li>
+  <li>Improvement-oriented task/session analytics are separately written as <code>TaskTelemetry</code> / <code>SessionTelemetry</code> to <code>.awos/telemetry.jsonl</code>.</li>
+  <li><code>gui/server.py</code> tails the most recent session file by byte offset and streams events to the frontend over SSE. If the subprocess exits without <code>session_done</code>, the server emits a synthetic <code>error</code> event.</li>
+  <li><code>gui_chat.py</code> and <code>agent.html</code> render the event stream, but currently the UI is a viewer of low-level events rather than a debugger with truth classes, cause chains, or proof bundles.</li>
+  <li><code>FaultLocalizer</code> can rank likely fault locations, but its output is currently heuristic context for the worker, not a canonical debugging artifact.</li>
+</ol>
+<h3>Architecture Direction</h3>
+<p>The debugger should not replace the current stores. It should sit above them as a <strong>unifying interpretation layer</strong>:</p>
+<pre><code>runtime artifacts  →  normalized debug evidence  →  finding / report engine  →  rerun / validation  →  UI + exports
+
+spans.jsonl        →  evidence items             →  PROVEN / HYPOTHESIS / UNKNOWN
+telemetry.jsonl    →  evidence graph             →  root-cause attribution
+ui events.jsonl    →  artifact bundle            →  proof-by-rerun decisions</code></pre>
+</section>
+<section id="obs" class="tab-panel">
+<h2>Observations</h2>
+<p>These are concrete findings from the current repo and from external research. They are the basis for the debugger plan.</p>
+<h3>Key Findings</h3>
+<ul>
+  <li><strong>AWOS already uses append-only evidence stores.</strong> <code>ObservabilityStore</code> appends JSONL task spans, and <code>GuiEventBus</code> appends per-session event journals. This is a strong base for a debugger because append-only records preserve causality and post-hoc auditability.</li>
+  <li><strong>Crash evidence is already partially first-class.</strong> <code>gui/server.py</code> detects subprocess death without <code>session_done</code> and emits a synthetic <code>error</code> event. That means AWOS already has one concrete pattern where runtime behavior is converted into a user-visible failure fact.</li>
+  <li><strong><code>TaskTelemetry</code> is richer than the UI event stream.</strong> It already captures <code>verify_passed</code>, <code>verify_attempts</code>, <code>retry_count</code>, <code>failure_stage</code>, <code>failure_reason</code>, test counts, diff stats, and stage traces. This is exactly the kind of structured evidence a debugger should consume.</li>
+  <li><strong><code>FaultLocalizer</code> is useful, but heuristic.</strong> Its own design is confidence-based and combines stack-trace mentions, vector similarity, keyword matching, and recency. This makes it good for ranking likely root causes, but not for proving truth.</li>
+  <li><strong>Schema drift already exists between event producers and consumers.</strong> <code>LiveRenderer</code> and older specs reference names like <code>planning_done</code>, <code>worker_start</code>, <code>worker_done</code>, <code>verify_result</code>, <code>task_done</code>, and <code>retry_notice</code>; <code>GuiEventBus</code> currently defines <code>plan_generated</code>, <code>test_result</code>, <code>task_complete</code>, <code>session_done</code>, and <code>error</code>. <code>gui_chat.py</code> still formats several legacy names. A debugger cannot be trusted without a canonical event/evidence schema.</li>
+  <li><strong>The current UI is a trace viewer, not yet a debugger.</strong> It can show model routing, tool calls, file edits, test results, and session completion, but it cannot currently answer: “what issue is proven, by which evidence, at which stage, with what confidence, and did rerun confirm it?”</li>
+  <li><strong>External tooling consistently separates tracing from judgment.</strong> OpenTelemetry and OpenInference standardize telemetry transport and semantics; Phoenix, Langfuse, and Logfire visualize traces; Laminar emphasizes replay/rerun loops; AgentDebugX adds diagnose → attribute → recover on top of traces. None of them alone solves AWOS’s truth-classification problem.</li>
+</ul>
+<h3>Option Survey</h3>
+<table>
+<tr><th>Option</th><th>Pros</th><th>Cons</th><th>Conclusion</th></tr>
+<tr><td>Fully custom from scratch</td><td>Maximum control over truth model and rerun semantics.</td><td>Rebuilds solved telemetry plumbing and viewer patterns.</td><td>Too expensive; wrong use of effort.</td></tr>
+<tr><td>Use an external product as “the debugger”</td><td>Fast initial traces and dashboards.</td><td>Truth decisions, rerun semantics, and AWOS-specific recovery logic stay outside AWOS.</td><td>Too weak for the requested evidence-first behavior.</td></tr>
+<tr><td><strong>Hybrid: custom AWOS debugger core + external standards/backends</strong></td><td>AWOS owns proof logic; standard tooling can carry or visualize telemetry.</td><td>Requires a schema boundary and integration discipline.</td><td><strong>Recommended.</strong></td></tr>
+</table>
+<h3>Math / Algorithm Survey</h3>
+<p>The debugger should use <strong>two separate computations</strong>:</p>
+<ol>
+  <li><strong>Truth classification</strong> — deterministic whenever possible.</li>
+  <li><strong>Investigation ranking</strong> — probabilistic/heuristic, but never allowed to claim proof by itself.</li>
+</ol>
+<p>Recommended first-phase truth model:</p>
+<pre><code>status(finding, evidence_set) =
+  PROVEN      if ∃ deterministic proof rule that fires on recorded evidence
+  HYPOTHESIS  if no proof rule fires and investigation_score ≥ τ
+  UNKNOWN     otherwise</code></pre>
+<p>Recommended first-phase ranking model:</p>
+<pre><code>investigation_score =
+  w1 * stack_trace_match
++ w2 * verifier_or_test_alignment
++ w3 * fault_localizer_rank
++ w4 * recent_edit_overlap
++ w5 * repeated_failure_prior
++ w6 * stage_consistency</code></pre>
+<p><strong>Important constraint:</strong> <code>investigation_score</code> is used only to order what AWOS looks at next. It must never upgrade a finding from <code>HYPOTHESIS</code> to <code>PROVEN</code> without a proof artifact.</p>
+<p>First-phase proof rules should be simple and auditable, for example:</p>
+<ul>
+  <li>nonzero subprocess exit with captured stderr/output</li>
+  <li>verifier rejection with recorded issue list</li>
+  <li>failing test with traceback</li>
+  <li>syntax/parser/import error raised by a real toolchain</li>
+  <li>failed edit application where the exact search/replace or patch mismatch is recorded</li>
+</ul>
+<p>Only after the deterministic layer is stable should AWOS consider learned or LLM-assisted attribution. Even then, those systems should emit hypotheses and rerun plans, not truth directly.</p>
+<h3>Prioritized Next-Step Backlog</h3>
+<p>The plan is ordered by trust dependency, not by UI visibility. No detector, attribution model, or external exporter should be implemented before the truth contract and evidence boundary are stable.</p>
+<table>
+<tr><th>Priority</th><th>Work package</th><th>Purpose</th><th>Exit proof</th></tr>
+<tr><td><strong>P0</strong></td><td>Freeze claim scope, statuses, evidence classes, and proof rules</td><td>Define exactly what AWOS may call <code>PROVEN</code>, including the difference between an observed failure and a suspected cause.</td><td>Normative spec examples show accepted and rejected proof claims.</td></tr>
+<tr><td><strong>P0</strong></td><td>Freeze canonical schemas and append-only bundle layout</td><td>Give every evidence item, finding, artifact, report, and rerun a stable identity and source reference.</td><td>Representative bundle can be serialized, inspected, and replayed without ambiguity.</td></tr>
+<tr><td><strong>P1</strong></td><td>Normalize existing journals</td><td>Convert spans, telemetry, GUI events, and legacy event names into one evidence vocabulary without losing source provenance.</td><td>Historical and current fixtures produce equivalent canonical structures.</td></tr>
+<tr><td><strong>P1</strong></td><td>Implement deterministic proof rules</td><td>Turn captured process, verifier, test, parser, and edit failures into narrowly scoped proven observations.</td><td>Rules refuse proof when required artifacts are absent, corrupt, or out of scope.</td></tr>
+<tr><td><strong>P1</strong></td><td>Build the anti-hallucination regression suite</td><td>Make unsupported claims fail tests before any UI or model integration is attempted.</td><td>Heuristic-only fixtures never emit <code>PROVEN</code>.</td></tr>
+<tr><td><strong>P2</strong></td><td>Add rerun/checkpoint validation</td><td>Use controlled reproduction to strengthen or refute hypotheses while preserving the original evidence history.</td><td>Reproduced, divergent, and inconclusive reruns have distinct outcomes.</td></tr>
+<tr><td><strong>P2</strong></td><td>Add CLI/API inspection</td><td>Make the evidence and proof surface available to the coding agent in machine-readable form.</td><td>A saved session report can be queried without the web UI.</td></tr>
+<tr><td><strong>P3</strong></td><td>Add UI and optional OTel/OpenInference export</td><td>Expose trusted reports to humans and external viewers only after the native authority is tested.</td><td>Rendered/exported views retain AWOS status and evidence links.</td></tr>
+</table>
+<h3>Frozen Planning Decisions</h3>
+<ul>
+  <li><strong>Claim scope is mandatory.</strong> A recorded failing test can prove that the test failed; it does not automatically prove which file, symbol, model decision, or edit caused the failure.</li>
+  <li><strong>Proof is claim-scoped.</strong> <code>PROVEN</code> applies to a specific claim backed by named evidence and a versioned rule, never to an entire session or broad narrative.</li>
+  <li><strong>Evidence absence is not evidence of success.</strong> Missing, truncated, redacted, or contradictory inputs produce an evidence gap and may result in <code>UNKNOWN</code>, not an invented conclusion.</li>
+  <li><strong>Rerun evidence is additive.</strong> A divergent rerun cannot silently erase an earlier observation; it creates a new validation record linked to the original finding.</li>
+  <li><strong>Attribution remains separate.</strong> <code>FaultLocalizer</code>, scores, LLM judgments, recency, and similarity can rank investigation work but cannot satisfy a proof rule by themselves.</li>
+</ul>
+<h3>Data Requirements</h3>
+<table>
+<tr><th>Source</th><th>Owner</th><th>Freshness</th><th>Why the debugger needs it</th></tr>
+<tr><td><code>.awos/gui/&lt;session&gt;/events.jsonl</code></td><td><code>GuiEventBus</code></td><td>live / append-only</td><td>Ordered task/session event timeline, file edits, tool calls, crash/error surfaces.</td></tr>
+<tr><td><code>.awos/spans.jsonl</code></td><td><code>ObservabilityStore</code></td><td>live / append-only</td><td>Timing, routing, attempts, tokens, and cost facts for each task execution.</td></tr>
+<tr><td><code>.awos/telemetry.jsonl</code></td><td><code>TelemetryLogger</code></td><td>live / append-only</td><td>Verification, failure stage, test counts, retry counts, reward, and stage trace metadata.</td></tr>
+<tr><td>Verifier outputs and test/build stderr/stdout</td><td>runtime tools</td><td>per-run</td><td>Proof artifacts for deterministic issue classes.</td></tr>
+<tr><td>File diffs / manifest</td><td><code>GuiEventBus</code> + diff pipeline</td><td>per-run</td><td>Evidence for edit-related failures and change impact.</td></tr>
+<tr><td>Fault localization output</td><td><code>FaultLocalizer</code></td><td>on demand</td><td>Root-cause ranking input and snippet extraction for investigations.</td></tr>
+<tr><td>Rerun/checkpoint metadata</td><td>future debugger core</td><td>per-investigation</td><td>Needed to prove or refute a hypothesis by reproduction.</td></tr>
+</table>
+<h3>Adopted External Concepts</h3>
+<ul>
+  <li><strong>OpenTelemetry</strong> should be the base model for spans, logs, metrics, exceptions, and exporters.</li>
+  <li><strong>OpenInference</strong> should provide the semantic categories for <code>AGENT</code>, <code>LLM</code>, <code>TOOL</code>, <code>EVALUATOR</code>, and related spans.</li>
+  <li><strong>Phoenix / Langfuse / Logfire</strong> are good visualization or backend candidates, but none should become the source of truth for issue classification.</li>
+  <li><strong>Laminar</strong> contributes the strongest replay-loop idea: read trace → change system → rerun from a cached or checkpointed boundary → compare.</li>
+  <li><strong>AgentDebugX</strong> contributes a useful pipeline vocabulary: detect → attribute → recover → rerun, but AWOS should keep its own runtime-native implementation.</li>
+</ul>
+</section>
+<section id="risks" class="tab-panel">
+<h2>Risks</h2>
+<div class="risk-high"><strong>HIGH:</strong> Heuristic attribution could be mistaken for proof.<br><strong>Mitigation:</strong> Keep truth classification separate from ranking. No confidence score, localizer output, or LLM judgment may produce <code>PROVEN</code> on its own.</div>
+<div class="risk-high"><strong>HIGH:</strong> Dual event vocabularies can make the debugger internally inconsistent.<br><strong>Mitigation:</strong> Introduce a canonical event/evidence schema plus explicit legacy adapters. Add compatibility tests so old and new session artifacts normalize to one model.</div>
+<div class="risk-high"><strong>HIGH:</strong> Replay/rerun can become misleading if nondeterminism is ignored.<br><strong>Mitigation:</strong> Treat reruns as additional evidence, not perfect replay magic. Record enough context to explain the rerun boundary, environment, and divergence.</div>
+<div class="risk-med"><strong>MEDIUM:</strong> Prompt/tool content capture may leak sensitive data.<br><strong>Mitigation:</strong> Define content-redaction settings from day one. Separate structural telemetry from raw content capture.</div>
+<div class="risk-med"><strong>MEDIUM:</strong> Raw telemetry volume may grow quickly.<br><strong>Mitigation:</strong> Keep append-only stores, but add report bundling, retention policies, and summary views so the debugger reads normalized artifacts rather than rescanning everything every time.</div>
+<div class="risk-med"><strong>MEDIUM:</strong> UI trust could improve slower than backend truth quality.<br><strong>Mitigation:</strong> Make the first debugger surfaces simple: show finding status, evidence references, and rerun result before building advanced visualizations.</div>
+<h3>Open Questions</h3>
+<ul>
+  <li><strong>Must resolve before implementation:</strong> What is the canonical on-disk debug bundle format under <code>.awos/debug/</code>, and how does it link sessions, tasks, evidence, findings, and reruns?</li>
+  <li><strong>Must resolve before implementation:</strong> What is the minimum checkpoint granularity for proof-by-rerun: whole session, task boundary, or per-event?</li>
+  <li><strong>Can resolve during implementation:</strong> Should AWOS dual-write native debug bundles and OTel/OpenInference spans immediately, or first build native bundles and add external export later?</li>
+  <li><strong>Can resolve during implementation:</strong> Which CLI and UI surfaces are mandatory in phase 1, and which can wait until the backend truth model is validated?</li>
+  <li><strong>Can resolve during implementation:</strong> How much raw prompt/tool/request content should be stored by default, and what redaction or opt-in settings are needed?</li>
+</ul>
+</section>
+<section id="sources" class="tab-panel">
+<h2>External Sources</h2>
+<table>
+<tr><th>Source</th><th>Key finding</th><th>Accessed</th></tr>
+<tr><td><a href="https://opentelemetry.io/docs/languages/python/instrumentation/">OpenTelemetry Python instrumentation</a></td><td>Manual instrumentation supports spans, events, attributes, exception recording, logs, and metrics. This is the right base transport/instrumentation model.</td><td>2026-07-26</td></tr>
+<tr><td><a href="https://arize-ai.github.io/openinference/spec/">OpenInference specification</a></td><td>Defines AI-native span kinds such as <code>AGENT</code>, <code>LLM</code>, <code>TOOL</code>, <code>EVALUATOR</code>, and structured attributes on top of OpenTelemetry.</td><td>2026-07-26</td></tr>
+<tr><td><a href="https://arize.com/docs/phoenix/tracing/llm-traces">Phoenix tracing overview</a></td><td>Phoenix accepts OTLP traces and emphasizes viewing tool calls, parameters, token usage, exceptions, and retrieved documents. Good candidate viewer/backend, not the truth engine.</td><td>2026-07-26</td></tr>
+<tr><td><a href="https://langfuse.com/docs/observability/overview">Langfuse observability overview</a></td><td>Strong model for traces, sessions, attributes, and async background trace ingestion. Useful pattern for grouping investigations across runs.</td><td>2026-07-26</td></tr>
+<tr><td><a href="https://laminar.sh/docs/debugger/introduction">Laminar debugger introduction</a></td><td>The strongest idea is replay/rerun from a recorded trace boundary to accelerate debugging. Important workflow inspiration for AWOS proof-by-rerun.</td><td>2026-07-26</td></tr>
+<tr><td><a href="https://pydantic.dev/docs/ai/integrations/logfire/?intent=research%20advanced%20debugger%20for%20an%20autonomous%20coding%20agent&amp;stack=python%20agent%20runtime&amp;harness=AWOS%20coding%20agent">Pydantic Logfire AI integration</a></td><td>Shows a full-stack OTel-based AI observability approach, including model spans, HTTP traces, alternative OTLP backends, and content-capture controls.</td><td>2026-07-26</td></tr>
+<tr><td><a href="https://raw.githubusercontent.com/AgentDebugX/AgentDebugX/main/README.md">AgentDebugX README</a></td><td>Provides a mature diagnose → attribute → recover → rerun vocabulary and emphasizes that traces alone are not enough; debugging needs attribution and validation loops.</td><td>2026-07-26</td></tr>
+</table>
+<h2>Related</h2>
+<ul>
+  <li><a href="../specs/evidence_first_debugger_spec.html">[[evidence_first_debugger_spec]]</a> — implementation spec</li>
+  <li><a href="../../tasks/active/evidence_first_debugger_task.html">[[evidence_first_debugger_task]]</a> — execution checklist</li>
+  <li><a href="../../VISION.md">[[VISION]]</a> — canonical identity</li>
+  <li><a href="../../tasks/active/pivot_web_app_product.md">[[pivot_web_app_product]]</a> — app/interface pathway that the debugger will eventually surface through</li>
+</ul>
+</section>
+</main>
+<footer>
+  <button class="copy-btn secondary" onclick="copyJSON()">Copy as JSON</button>
+  <button class="copy-btn" onclick="copyPrompt()">Copy as Prompt</button>
+</footer>
+<script>
+function show(btn,id){document.querySelectorAll('.tab-panel').forEach(s=>s.classList.remove('active'));document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));document.getElementById(id).classList.add('active');btn.classList.add('active')}
+function copyPrompt(){const t=document.querySelector('.tab-panel.active').innerText;navigator.clipboard.writeText('# Research: Evidence-First Debugger\n\n'+t).then(()=>{const b=document.querySelector('.copy-btn:last-child');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy as Prompt',1500)})}
+function copyJSON(){const s={};document.querySelectorAll('.tab-panel').forEach(p=>{s[p.id]=p.innerText.trim()});navigator.clipboard.writeText(JSON.stringify({doc:'research',...s},null,2)).then(()=>{const b=document.querySelector('.copy-btn.secondary');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy as JSON',1500)})}
+</script>
+</body>
+</html>

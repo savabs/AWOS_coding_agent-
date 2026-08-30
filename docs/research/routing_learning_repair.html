@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Research: Routing Learning System Repair — AWOS</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--warn:#f59e0b;--green:#10b981;--red:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status.active{background:#f59e0b;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+nav.tabs{background:var(--surface);border-bottom:1px solid var(--border);padding:0 32px;display:flex;gap:0;overflow-x:auto}
+nav.tabs button{background:none;border:none;border-bottom:2px solid transparent;padding:12px 16px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;white-space:nowrap}
+nav.tabs button.active{color:var(--accent);border-bottom-color:var(--accent)}
+main{max-width:960px;margin:0 auto;padding:32px}
+section.tab-panel{display:none}
+section.tab-panel.active{display:block}
+h2{font-size:17px;font-weight:600;margin:24px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent)}
+p,ul,ol{margin-bottom:12px}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px}
+p code,li code,td code{background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px;font-size:12px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+.win{background:#f0fdf4;border-left:3px solid var(--green);padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+.risk-high{background:#fef2f2;border-left:3px solid var(--red);padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+.risk-med{background:#fef3c7;border-left:3px solid var(--warn);padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb">AWOS / docs / research</div>
+  <h1>Research: Routing Learning System Repair</h1>
+  <div class="meta">
+    <span class="tag">doc/research</span>
+    <span class="tag">phase/4</span>
+    <span class="tag">topic/routing</span>
+    <span class="tag">topic/linucb</span>
+    <span class="status active">active</span>
+    <time>2026-07-09</time>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="active" onclick="show(this,'diagnosis')">Diagnosis</button>
+  <button onclick="show(this,'replaygate')">ReplayGate Analysis</button>
+  <button onclick="show(this,'fixes')">Fix Design</button>
+  <button onclick="show(this,'sources')">Sources</button>
+</nav>
+
+<main>
+
+<section id="diagnosis" class="tab-panel active">
+
+<h2>Root Cause: Learning System Stalled Since May 24</h2>
+
+<p>The AWOS routing system has <strong>three bugs</strong> that collectively prevent LinUCB from learning:</p>
+
+<h3>Bug 1: N_ACTIONS mismatch silently discards all weights</h3>
+<table>
+  <tr><th>Component</th><th>What happens</th></tr>
+  <tr><td><code>ml_router.py:50</code></td><td><code>N_ACTIONS = 6</code> (current: Gemini, DeepSeek, OpenAI, Haiku, Sonnet, OpenRouter)</td></tr>
+  <tr><td><code>.awos/linucb_weights.pkl</code></td><td>Stored with <code>n_actions=4</code> (old: no OpenRouter, no Sonnet). <strong>Last modified: May 24.</strong></td></tr>
+  <tr><td><code>_load()</code> at line 332</td><td><code>payload.get("n_actions") == self.n_actions</code> → 4 ≠ 6 → discarded</td></tr>
+  <tr><td>Result</td><td>Every session starts with <code>_total_updates = 0</code>. LinUCB never activates.</td></tr>
+</table>
+
+<h3>Bug 2: ReplayGate rejects 79.5% of episodes</h3>
+<table>
+  <tr><th>Metric</th><th>Value</th></tr>
+  <tr><td>Total episodes</td><td>3171</td></tr>
+  <tr><td>Admitted (passed gate)</td><td>649 (20.5%)</td></tr>
+  <tr><td>Rejected</td><td>2522 (79.5%)</td></tr>
+  <tr><td>Primary rejection reason</td><td><code>low_novelty</code> (2479 out of 2522)</td></tr>
+  <tr><td>Unique feature vectors</td><td>Only 287 out of 3171 episodes</td></tr>
+</table>
+<p>The ReplayGate has <code>threshold=0.4</code> and scores each episode on informativeness, novelty, and boundary. Since most coding tasks produce similar feature vectors (same keywords like "add", "fix", "implement"), the <strong>novelty component is always near zero</strong> for common tasks. For DeepSeek (61% of all episodes), the <strong>boundary component is also near zero</strong> because it's the majority action. Combined with a 0.4 threshold, most episodes get rejected.</p>
+
+<h3>Bug 3: No warm-start from RewardStore data</h3>
+<p>LinUCB starts at 0 updates every time. It needs <code>min_samples=20</code> admitted episodes before activating. At 20.5% admit rate, that takes ~100 raw episodes. In shorter sessions, it never activates. There's no mechanism to batch-replay existing RewardStore episodes to prime the router.</p>
+
+<h3>Current Data Picture</h3>
+<table>
+  <tr><th>Metric</th><th>Value</th></tr>
+  <tr><td>Total episodes in RewardStore</td><td>3171 (May 24 – Jul 8)</td></tr>
+  <tr><td>Features stored</td><td>✓ All 3171 have valid 10-dim feature vectors</td></tr>
+  <tr><td>Rewards stored</td><td>✓ Range -0.35 to +1.00, well-balanced</td></tr>
+  <tr><td>Action diversity</td><td>DeepSeek 61%, OpenAI 20%, Haiku 13%, Gemini 5%, OpenRouter 1%</td></tr>
+  <tr><td>LinUCB weights file</td><td><strong>n_actions=4, 30 updates, last saved May 24</strong></td></tr>
+  <tr><td>Reward function</td><td>Produces clear gradients: OpenRouter=+0.66, DeepSeek=+0.52, OpenAI=+0.38, Haiku=+0.06</td></tr>
+</table>
+
+<div class="win">
+  <strong>The data is GOOD.</strong> The reward function produces useful signal. The features are diverse enough (287 unique vectors). The problem is purely in the <strong>learning pipeline</strong> — the data is collected but never reaches the ML router.
+</div>
+
+</section>
+
+<section id="replaygate" class="tab-panel">
+
+<h2>ReplayGate Deep Dive</h2>
+
+<h3>Gate Scoring Formula</h3>
+<pre>
+score = (informativeness + novelty + boundary) / 3
+
+informativeness = min(|reward| / 1.0, 1.0)
+  → For rewards in [-0.35, 1.0]: inform = [0.0, 1.0], mean ≈ 0.41
+
+novelty = min(min_euclidean_dist / 0.75, 1.0)
+  → Features are in [0,1], 10-dim. Typical distance between vectors ≈ 0.1-0.5
+  → So novelty = min(0.3/0.75, 1.0) ≈ 0.4 for "normal" tasks
+  → After 50 episodes, novelty drops to ~0.15 (most seen)
+
+boundary = 1.0 - own_action_count / max_action_count
+  → For DeepSeek (owns 61%): boundary ≈ 0.0
+  → For OpenRouter (owns 0.8%): boundary ≈ 0.99
+
+Typical score for a DeepSeek episode (61% of data):
+  score = (0.41 + 0.15 + 0.01) / 3 = 0.19  → REJECTED (threshold=0.40)
+
+Typical score for an OpenRouter episode (0.8% of data):
+  score = (0.60 + 0.15 + 0.98) / 3 = 0.58  → ADMITTED
+</pre>
+
+<h3>Why This Is Wrong</h3>
+<ul>
+  <li><strong>Novelty punishes common task types</strong> — coding tasks ARE repetitive by nature. We <em>want</em> LinUCB to learn from common tasks, not ignore them.</li>
+  <li><strong>Boundary punishes the default model</strong> — DeepSeek does 61% of work because it's the DEFAULT. It needs the MOST learning, not the least.</li>
+  <li><strong>Missing data biases LinUCB</strong> — If only rare actions get admitted, LinUCB learns to recommend rare actions even when inappropriate.</li>
+</ul>
+
+<h3>Proposed Fix: Adaptive Threshold</h3>
+<pre>
+threshold = max(0.15, 0.40 - 0.01 * sqrt(total_episodes))
+  At     0 episodes: threshold = 0.40 (strict — prevents overfit)
+  At   500 episodes: threshold = 0.18 (lenient — accepts most data)
+  At  1600 episodes: threshold = 0.15 (floor — accepts almost everything)
+</pre>
+<p>This keeps strict filtering when data is scarce (cold-start safety), then relaxes as the volume grows and overfitting risk decreases.</p>
+
+</section>
+
+<section id="fixes" class="tab-panel">
+
+<h2>Fix Design</h2>
+
+<h3>Fix 1: Weight File Versioning</h3>
+<p><strong>File:</strong> <code>scaffold/agent/ml_router.py</code></p>
+<p><strong>Change:</strong> Add <code>format_version</code> to saved weights. On load, handle n_actions mismatch by <strong>padding</strong> or <strong>truncating</strong> matrices instead of discarding.</p>
+
+<h4>Padding Strategy (more actions than stored)</h4>
+<pre>
+If stored n_actions=4 but current n_actions=10:
+  - Keep actions 0-3 learned weights as-is
+  - Actions 4-9 start with identity A matrix and zero b vector
+  - Log: "Loaded v2 weights: 30 updates, padded 4→10 actions"
+</pre>
+<p>New actions start exploring freely (identity matrix = no prior). No learning is lost.</p>
+
+<h4>Truncation Strategy (fewer actions than stored)</h4>
+<pre>
+If stored n_actions=10 but current n_actions=4:
+  - Drop actions 4-9 (models that no longer exist)
+  - Keep actions 0-3
+  - Log: "Loaded v2 weights: truncated 10→4 actions"
+</pre>
+
+<h4>Format Version Check</h4>
+<pre>
+payload = {"format_version": 2, "n_actions": ..., ...}
+if "format_version" not in payload or payload["format_version"] < 2:
+    # Try to migrate old format
+    if payload.get("n_actions") == self.n_actions:
+        # Old format but matches — load as-is
+        ...
+    else:
+        logger.warning("[linucb] dropping v1 weights — needs manual migration")
+</pre>
+
+<h3>Fix 2: Adaptive ReplayGate Threshold</h3>
+<p><strong>File:</strong> <code>scaffold/agent/reward_store.py</code></p>
+<pre>
+def __init__(self, threshold: float = 0.40, ...):
+    self._base_threshold = threshold
+    ...
+
+def _adaptive_threshold(self, total_episodes: int) -> float:
+    """Tight at cold-start, relaxes as data grows."""
+    return max(0.15, self._base_threshold - 0.01 * total_episodes**0.5)
+</pre>
+
+<p>Also: <strong>novelty weight is halved</strong> (contributes 1/6 instead of 1/3 to the score). This reduces the penalty for repetitive coding tasks.</p>
+
+<pre>
+score = (informativeness * 0.4) + (novelty * 0.2) + (boundary * 0.4)
+</pre>
+
+<h3>Fix 3: Warm-Start from RewardStore</h3>
+<p><strong>File:</strong> <code>scaffold/agent/ml_router.py</code>, <code>scaffold/agent/orchestrator.py</code></p>
+
+<p>Add method to LinUCBRouter:</p>
+<pre>
+def warm_start(self, reward_store, max_episodes: int = 100) -> int:
+    """Batch-replay episodes from RewardStore to prime weights.
+    Returns number of episodes replayed."""
+</pre>
+
+<p>Call from orchestrator AFTER RewardStore and LinUCBRouter are created:</p>
+<pre>
+# orchestrator.py __init__:
+self.ml_router.warm_start(self.reward_store, max_episodes=100)
+</pre>
+
+<p>Warm-start skips ReplayGate (these are historical episodes, trust them). Uses <code>get_prioritized()</code> for maximum learning per episode.</p>
+
+<h3>Fix 4: Observability</h3>
+<p>Add a <code>routing_status</code> method to EscalationEngine that returns:</p>
+<pre>
+{
+  "linucb_ready": bool,
+  "linucb_updates": int,
+  "replaygate_admit_rate": float,
+  "action_weights": {action_name: {feature: weight}},
+  "top_recommendation_per_type": {task_type: action_name}
+}
+</pre>
+
+<p>Wire to <code>awos routing status</code> CLI command.</p>
+
+</section>
+
+<section id="sources" class="tab-panel">
+
+<h2>Evidence</h2>
+<table>
+  <tr><th>Source</th><th>Finding</th><th>Accessed</th></tr>
+  <tr><td>scaffold/agent/ml_router.py:326-346</td><td>_load() discards weights on n_actions mismatch</td><td>2026-07-09</td></tr>
+  <tr><td>scaffold/agent/reward_store.py:184-259</td><td>ReplayGate scoring and admit logic</td><td>2026-07-09</td></tr>
+  <tr><td>.awos/linucb_weights.pkl</td><td>n_actions=4, 30 updates, last saved May 24</td><td>2026-07-09</td></tr>
+  <tr><td>.awos/reward_store.jsonl</td><td>3171 episodes with features, rewards, outcomes</td><td>2026-07-09</td></tr>
+  <tr><td>ReplayGate simulation</td><td>79.5% rejected, 20.5% admitted with threshold=0.4</td><td>2026-07-09</td></tr>
+  <tr><td>scaffold/agent/orchestrator.py:122-133</td><td>LinUCBRouter and EscalationEngine wired at init</td><td>2026-07-09</td></tr>
+  <tr><td>Li et al., 2010. WWW.</td><td>LinUCB algorithm reference</td><td>Prior</td></tr>
+</table>
+
+<h2>Related</h2>
+<ul>
+  <li>[[ml_router]] — LinUCB implementation</li>
+  <li>[[escalation_engine]] — EscalationEngine + replay gate integration</li>
+  <li>[[reward_store]] — RewardStore + ReplayGate implementation</li>
+  <li>[[orchestrator]] — orchestrator wiring</li>
+  <li>[[model_tiering]] — existing model tier research</li>
+  <li>[[opencode_go_tiering]] — OpenCode Go research (deferred until routing is fixed)</li>
+</ul>
+
+</section>
+
+</main>
+
+<footer>
+  <button class="copy-btn secondary" onclick="copyJSON()">Copy as JSON</button>
+  <button class="copy-btn" onclick="copyPrompt()">Copy as Prompt</button>
+</footer>
+<script>
+function show(btn,id){document.querySelectorAll('.tab-panel').forEach(s=>s.classList.remove('active'));document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));document.getElementById(id).classList.add('active');btn.classList.add('active')}
+function copyPrompt(){const t=document.querySelector('.tab-panel.active').innerText;navigator.clipboard.writeText('# Research: Routing Learning Repair\n\n'+t).then(()=>alert('Copied'))}
+function copyJSON(){const s={};document.querySelectorAll('.tab-panel').forEach(p=>{s[p.id]=p.innerText.trim()});navigator.clipboard.writeText(JSON.stringify({doc:'research',...s},null,2)).then(()=>alert('Copied'))}
+</script>
+</body>
+</html>

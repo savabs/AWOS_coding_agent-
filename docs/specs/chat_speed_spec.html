@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Speed Optimization — Spec</title>
+<style>body{font-family:-apple-system,sans-serif;max-width:900px;margin:40px auto;padding:0 20px;color:#1a1a1a}
+h1{border-bottom:3px solid #2a9d8f;padding-bottom:10px}h2{margin-top:25px;color:#2a9d8f}
+.step{background:#f8f9fa;border-left:4px solid #2a9d8f;padding:12px 15px;margin:12px 0;border-radius:0 6px 6px 0}
+.step h3{margin:0 0 6px 0}table{border-collapse:collapse;width:100%;margin:10px 0}
+th,td{border:1px solid #ddd;padding:6px 10px;text-align:left;font-size:.9em}th{background:#f0f0f0}
+.affected{background:#e8f4f8;padding:2px 6px;border-radius:3px}
+.live-proof{background:#e6ffe6;border-left:4px solid #2d6a4f;padding:15px;margin:15px 0}
+pre{background:#f5f5f5;padding:10px;border-radius:4px;font-size:.85em}
+</style></head><body>
+<h1>📋 Spec: Chat Speed Optimization</h1><p><strong>Phase:</strong>4 · <strong>Priority:</strong> #1 (after stability fix)</p>
+
+<h2>Goal</h2><p>Reduce chat response time from 7-16s to 3-5s for typical queries. Target: codebase queries under 8s, simple queries under 3s.</p>
+
+<h2>Files Affected</h2><table>
+<tr><td class="affected">scaffold/agent/gui_chat.py</td><td>All 5 fixes</td></tr></table>
+
+<div class="step"><h3>Step 1: Remove max_tokens hardcoded override + dynamic sizing</h3>
+<p><strong>What:</strong> Delete line 1045 <code>max_tokens = 2048</code>. Add logic to choose max_tokens based on query type: 256 for simple questions, 2048 for codebase/architecture questions.</p>
+<p><strong>Heuristic:</strong> If query contains project-specific keywords (AWOS, orchestrator, kernel, scaffold, agent, routing, verify, CI, rescue) → 2048. Otherwise → 512.</p>
+<p><strong>Verify:</strong> Simple "What is Python?" uses 512 tokens and completes under 5s. Codebase query uses 2048.</p>
+</div>
+
+<div class="step"><h3>Step 2: Short-circuit context for non-codebase queries</h3>
+<p><strong>What:</strong> In <code>_read_project_context()</code>, skip SymbolIndex loading for generic questions. Check if query has project-specific keywords; only load SymbolIndex if it does.</p>
+<p><strong>Verify:</strong> "What is Python?" — no SymbolIndex loaded, context under 4K chars. "How does orchestrator work?" — SymbolIndex loaded.</p>
+</div>
+
+<div class="step"><h3>Step 3: Eliminate duplicate context loading</h3>
+<p><strong>What:</strong> In <code>_stream_qa()</code>, load context once, pass to both <code>_build_qa_prompt()</code> and <code>_qa_context_blob()</code>. Modify <code>_build_qa_prompt</code> to accept optional pre-loaded context.</p>
+<p><strong>Verify:</strong> <code>_read_project_context()</code> called exactly once per query.</p>
+</div>
+
+<div class="step"><h3>Step 4: Reduce artificial time.sleep delays</h3>
+<p><strong>What:</strong> Cache path: <code>time.sleep(0.008)</code> → <code>time.sleep(0.002)</code>. Plan path: remove entirely (use real streaming speed).</p>
+<p><strong>Verify:</strong> Cache hit response under 100ms (was ~250ms). Plan display at natural speed.</p>
+</div>
+
+<div class="step"><h3>Step 5: Reduce fallback timeout</h3>
+<p><strong>What:</strong> Per-model timeout: 6s → 4s. Total timeout: 20s → 12s. The primary model (MiniMax M3) responds in ~1.6s. 6s is generous for a timeout.</p>
+<p><strong>Verify:</strong> Fallback chain completes within 12s when primary model fails.</p>
+</div>
+
+<h2>Testing Plan</h2><table>
+<tr><th>Test</th><th>What it proves</th></tr>
+<tr><td>"What is Python?" → under 5s</td><td>Simple queries fast with 512 tok cap + no SymbolIndex</td></tr>
+<tr><td>"How does orchestrator work?" → under 8s</td><td>Codebase queries fast with SymbolIndex + 2048 cap</td></tr>
+<tr><td>Cache hit → under 100ms</td><td>Reduced artificial delays</td></tr>
+<tr><td>Second query → faster than first</td><td>Connection reuse working</td></tr></table>
+
+<div class="live-proof"><h2>Live Proof</h2>
+<p><strong>Command:</strong> <code>python3 scripts/profile_chat_speed.py</code></p>
+<p><strong>Success markers:</strong></p><ul>
+<li>✅ Simple query total time under 5s (was 6-7s)</li>
+<li>✅ Codebase query total time under 10s (was 16s)</li>
+<li>✅ max_tokens honors caller parameter (not forced to 2048)</li>
+<li>✅ No duplicate _read_project_context calls</li>
+<li>✅ Cache hit under 100ms</li></ul></div>
+
+<h2>Related</h2><ul><li><a href="chat_speed_optimization.html">Research</a></li></ul>
+</body></html>

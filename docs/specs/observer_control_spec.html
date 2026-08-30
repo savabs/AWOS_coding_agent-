@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Spec: Electron Control Bridge — AWOS</title><style>body{font:15px/1.6 system-ui;max-width:960px;margin:32px auto;padding:0 20px;color:#111}h1,h2{color:#0b3b63}code{background:#f8fafc;padding:2px 6px;border-radius:4px}li{margin:.35rem 0}</style></head>
+<body>
+<header><p>AWOS / docs / specs</p><h1>Spec: Authenticated Electron Control Bridge</h1><p><strong>Status:</strong> active · <strong>Date:</strong> 2026-07-28</p></header>
+<h2>Goal</h2><p>Allow the assistant to operate the user’s actual running Electron window through a bounded, auditable local API while preserving the observer as the source of truth.</p>
+<h2>Non-goals</h2><ul><li>No arbitrary shell commands.</li><li>No arbitrary JavaScript supplied by callers.</li><li>No OS-wide mouse or keyboard automation.</li><li>No Playwright dependency in this milestone.</li><li>No automatic stopping or restarting of a user’s active agent run.</li></ul>
+<h2>Contract</h2>
+<p>Electron main process listens only on <code>127.0.0.1</code> at a dedicated control port. Requests require <code>X-AWOS-CONTROL-TOKEN</code>. JSON body limit is bounded. Responses include <code>status</code>, <code>request_id</code>, <code>action</code>, and a safe result/error summary.</p>
+<pre>{"action":"show|hide|focus|status|reload|navigate|click|fill|cancel","target":"...","value":"...","chat_id":"optional","trace_id":"optional"}</pre>
+<h2>Allowed action semantics</h2>
+<ol>
+<li><strong>status:</strong> return window visibility/focus/loading/current internal route.</li>
+<li><strong>show/focus/hide:</strong> operate the real main window.</li>
+<li><strong>reload:</strong> reload the current renderer and emit lifecycle events.</li>
+<li><strong>navigate:</strong> only allow known local AWOS routes such as <code>/agent</code> and <code>/renderer</code>.</li>
+<li><strong>click:</strong> click only registered semantic controls by action id, not arbitrary selectors.</li>
+<li><strong>fill:</strong> fill only registered safe text inputs, with a maximum length and no password fields.</li>
+<li><strong>cancel:</strong> request cancellation through the app’s existing UI/backend cancellation path; never kill a process.</li>
+</ol>
+<h2>Atomic implementation steps</h2>
+<ol>
+<li>Add token loading and request authentication in the Electron main process; prove unauthorized requests fail.</li>
+<li>Add a single <code>status</code> action; prove it reports the real running window.</li>
+<li>Add show, hide, focus, and reload actions; prove each changes the real window and emits audit telemetry.</li>
+<li>Add allowlisted internal navigation; prove external URLs are rejected.</li>
+<li>Add semantic renderer action dispatch for click and bounded fill; prove unknown targets and oversized values are rejected.</li>
+<li>Add cancellation dispatch without process termination; prove a cancellation request is observable.</li>
+<li>Add CLI commands and focused integration tests against a live Electron instance.</li>
+<li>Run the quality gate and complete a live user-approved control proof.</li>
+</ol>
+<h2>Exit criteria</h2><ul><li>Assistant can query and operate the actual Electron window, not a second test window.</li><li>Every action is authenticated, bounded, observable, and auditable.</li><li>Denied actions leave no ambiguous partial state.</li><li>Control can be disabled without deleting observer data or touching the active agent run.</li></ul>
+</body></html>

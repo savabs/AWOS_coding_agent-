@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spec: AWOS Native App — Electron + Apple Design</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--success:#10b981;--warn:#f59e0b;--danger:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status.active{background:#f59e0b;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+main{max-width:800px;margin:0 auto;padding:32px}
+h2{font-size:17px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px}
+p code,li code,td code{background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px;font-size:12px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.step{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin:10px 0}
+.step .step-num{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:4px}
+.step .step-title{font-weight:600;margin-bottom:6px}
+.step .exit{font-size:12px;color:var(--muted);margin-top:6px;font-style:italic}
+.step .exit strong{color:var(--text)}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <div class="breadcrumb">AWOS / docs / specs</div>
+  <h1>Spec: AWOS Native App — Electron + Apple Design</h1>
+  <div class="meta">
+    <span class="tag">doc/spec</span>
+    <span class="tag">phase/4</span>
+    <span class="tag">topic/native-app</span>
+    <span class="status active">active</span>
+    <time>2026-07-12</time>
+  </div>
+</header>
+<main>
+
+<h2>Goal</h2>
+<p>Ship AWOS as a real desktop application — dock icon, frameless window, native menus, Apple-inspired visual design. The agent console becomes a finished product you can download and open, not a URL you visit.</p>
+
+<h2>Files Affected</h2>
+<table>
+<tr><th>File</th><th>Change</th><th>Description</th></tr>
+<tr><td><code>awos-app/package.json</code></td><td>create</td><td>Electron project + electron-builder</td></tr>
+<tr><td><code>awos-app/main.js</code></td><td>create</td><td>Main process: spawn Python server, BrowserWindow, menus, dock</td></tr>
+<tr><td><code>awos-app/preload.js</code></td><td>create</td><td>Context bridge for IPC</td></tr>
+<tr><td><code>gui/static/agent.html</code></td><td>redesign</td><td>Apple-inspired frameless layout, thinking sheet, fluid animations</td></tr>
+</table>
+
+<h2>Design Language (Apple-Inspired)</h2>
+<table>
+<tr><th>Element</th><th>Value</th></tr>
+<tr><td>Background</td><td><code>#1a1a1e</code> — warm dark, not cold</td></tr>
+<tr><td>Surface</td><td><code>#252529</code> with <code>backdrop-filter: blur(20px)</code></td></tr>
+<tr><td>Text primary</td><td><code>#f5f5f7</code></td></tr>
+<tr><td>Text secondary</td><td><code>#86868b</code></td></tr>
+<tr><td>Accent</td><td><code>#0071e3</code> (Apple blue)</td></tr>
+<tr><td>Success</td><td><code>#30d158</code></td></tr>
+<tr><td>Error</td><td><code>#ff453a</code></td></tr>
+<tr><td>Font</td><td><code>-apple-system, 'SF Pro Text', sans-serif</code></td></tr>
+<tr><td>Code font</td><td><code>'SF Mono', 'Menlo', monospace</code></td></tr>
+<tr><td>Corner radius</td><td>10px (cards), 6px (small elements)</td></tr>
+<tr><td>Animation</td><td><code>0.3s cubic-bezier(0.22, 1, 0.36, 1)</code></td></tr>
+<tr><td>Shadows</td><td><code>0 2px 10px rgba(0,0,0,0.3)</code></td></tr>
+</table>
+
+<h2>Implementation Steps</h2>
+
+<div class="step">
+  <div class="step-num">Step 1: awos-app scaffolding</div>
+  <div class="step-title">Create awos-app/package.json + install Electron</div>
+  <p>Create <code>awos-app/package.json</code> with Electron dependency and electron-builder for packaging. Run npm install.</p>
+  <div class="exit"><strong>Exit:</strong> <code>node_modules/electron</code> installed, <code>npm start</code> prints "Electron"</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 2: Electron main process</div>
+  <div class="step-title">Create awos-app/main.js</div>
+  <p>Main process that:</p>
+  <ul>
+    <li>Spawns <code>gui/server.py</code> as child process on port 8765</li>
+    <li>Polls <code>http://localhost:8765/agent</code> until ready</li>
+    <li>Creates frameless <code>BrowserWindow</code> (1200×800, vibrancy, transparent)</li>
+    <li>Loads agent console URL</li>
+    <li>Sets app menu (File, Edit, View, Window, Help)</li>
+    <li>Handles dock bounce on activity via IPC</li>
+    <li>Cleanup on app quit (kill Python server)</li>
+  </ul>
+  <div class="exit"><strong>Exit:</strong> <code>npm start</code> opens frameless window showing agent console</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 3: HTML redesign</div>
+  <div class="step-title">Redesign gui/static/agent.html</div>
+  <p>Complete visual overhaul:</p>
+  <ul>
+    <li>Frameless title bar with traffic light dots (non-functional, decorative for web, functional in Electron)</li>
+    <li>Left sidebar with frosted glass effect, narrower (260px)</li>
+    <li>Main content with generous padding</li>
+    <li>Thinking panel → "Reasoning Sheet" — slides up from bottom with blur backdrop</li>
+    <li>Event stream → structured cards with smooth entrance animations</li>
+    <li>Apple color palette + typography</li>
+    <li>All existing JS event handling preserved and enhanced</li>
+  </ul>
+  <div class="exit"><strong>Exit:</strong> Open agent.html in browser — Apple-inspired design, thinking sheet, cards animate in</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 4: Live proof</div>
+  <div class="step-title">Run end-to-end verification</div>
+  <p>Launch the app, verify:</p>
+  <ul>
+    <li>Window opens with frameless title bar</li>
+    <li>Agent console loads with Apple-inspired design</li>
+    <li>Dock icon visible</li>
+    <li>Native menus work</li>
+    <li>Quit cleans up Python server</li>
+  </ul>
+  <div class="exit"><strong>Exit:</strong> All markers observed</div>
+</div>
+
+</main>
+</body>
+</html>

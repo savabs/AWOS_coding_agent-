@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spec: Routing Learning System Repair — AWOS</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--green:#10b981}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+time{font-size:12px;opacity:.5;margin-left:auto}
+main{max-width:900px;margin:0 auto;padding:32px}
+h2{font-size:17px;font-weight:600;margin:24px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent)}
+p{margin-bottom:12px}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:'JetBrains Mono',monospace;font-size:12px}
+p code,li code{background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px;font-size:12px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border)}
+.step{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;margin:12px 0}
+.step h3{margin:0 0 8px;font-size:13px;color:var(--muted)}
+.step h3 .num{display:inline-block;background:var(--accent);color:#fff;width:24px;height:24px;text-align:center;line-height:24px;border-radius:12px;margin-right:8px;font-size:11px}
+.step .files{font-size:12px;color:var(--muted);margin-bottom:6px}
+.step .test{color:var(--green);font-size:12px}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb">AWOS / docs / specs</div>
+  <h1>Spec: Routing Learning System Repair</h1>
+  <div class="meta">
+    <span class="tag">doc/spec</span>
+    <span class="tag">phase/4</span>
+    <span class="tag">topic/routing</span>
+    <time>2026-07-09</time>
+  </div>
+</header>
+
+<main>
+
+<h2>Goal</h2>
+<p>Fix three bugs that prevent AWOS's LinUCB contextual bandit from learning — weight persistence, ReplayGate over-filtering, and missing warm-start — so the routing system measurably improves over time.</p>
+
+<h2>Files Affected</h2>
+<table>
+  <tr><th>File</th><th>Changes</th></tr>
+  <tr><td><code>scaffold/agent/ml_router.py</code></td><td>Weight versioning (save/load), warm_start method, logging</td></tr>
+  <tr><td><code>scaffold/agent/reward_store.py</code></td><td>ReplayGate adaptive threshold, weighted scoring</td></tr>
+  <tr><td><code>scaffold/agent/escalation_engine.py</code></td><td>routing_status() method for observability</td></tr>
+  <tr><td><code>scaffold/agent/orchestrator.py</code></td><td>Call warm_start on init; log LinUCB status</td></tr>
+</table>
+
+<h2>Ordered Steps</h2>
+
+<div class="step">
+  <h3><span class="num">1</span> Weight versioning — add format_version to save/load</h3>
+  <div class="files">File: <code>scaffold/agent/ml_router.py</code></div>
+  <p>Change <code>_save()</code> to include <code>"format_version": 2</code>. Change <code>_load()</code> to:</p>
+  <ol>
+    <li>Check <code>format_version</code> in loaded payload</li>
+    <li>If <code>n_actions</code> differs from <code>self.n_actions</code>: <strong>pad</strong> (more current actions) or <strong>truncate</strong> (fewer current actions)</li>
+    <li><strong>Pad:</strong> actions 0..stored-1 keep their learned <code>A</code>/<code>b</code>. New actions get identity <code>A</code> (noise) and zero <code>b</code>.</li>
+    <li><strong>Truncate:</strong> only keep first <code>self.n_actions</code> action matrices. Log which were dropped.</li>
+    <li>Log exact outcome: "loaded v2: 30 updates, padded 4→6 actions"</li>
+  </ol>
+  <div class="test">Unit test: weights survive n_actions change (4→6, 6→4)</div>
+</div>
+
+<div class="step">
+  <h3><span class="num">2</span> ReplayGate — adaptive threshold</h3>
+  <div class="files">File: <code>scaffold/agent/reward_store.py</code></div>
+  <p>Change <code>ReplayGate</code>:</p>
+  <ol>
+    <li>Add <code>_total_episodes</code> counter to track volume</li>
+    <li>Compute threshold: <code>max(0.15, self._base_threshold - 0.01 * sqrt(self._total_episodes))</code></li>
+    <li>Change scoring from equal weights to: <code>score = informativeness * 0.4 + novelty * 0.2 + boundary * 0.4</code></li>
+    <li>Log admit rate periodically (every 100 episodes)</li>
+  </ol>
+  <div class="test">Unit test: threshold decreases with volume; verify scoring weights</div>
+</div>
+
+<div class="step">
+  <h3><span class="num">3</span> LinUCB warm_start from RewardStore</h3>
+  <div class="files">File: <code>scaffold/agent/ml_router.py</code></div>
+  <p>Add method <code>warm_start(reward_store, max_episodes=100) -> int</code>:</p>
+  <ol>
+    <li>Get prioritized episodes from RewardStore (<code>get_prioritized(max_episodes)</code>)</li>
+    <li>For each episode: extract features + action_id + reward → call <code>update()</code></li>
+    <li>Return number of episodes replayed</li>
+    <li>Skip ReplayGate — these are historical, trusted episodes</li>
+  </ol>
+  <div class="test">Unit test: warm_start loads from mock store, verifies _total_updates > 0</div>
+</div>
+
+<div class="step">
+  <h3><span class="num">4</span> Wire warm_start in orchestrator</h3>
+  <div class="files">File: <code>scaffold/agent/orchestrator.py</code></div>
+  <p>In <code>Orchestrator.__init__</code>, after creating LinUCBRouter and RewardStore:</p>
+  <pre>replayed = self.ml_router.warm_start(self.reward_store, max_episodes=50)
+logger.info("[orchestrator] warm-started LinUCB with %d episodes", replayed)</pre>
+  <div class="test">Unit test: orchestrator init calls warm_start</div>
+</div>
+
+<div class="step">
+  <h3><span class="num">5</span> Add routing_status() to EscalationEngine</h3>
+  <div class="files">File: <code>scaffold/agent/escalation_engine.py</code></div>
+  <p>Add <code>routing_status() -> dict</code> that returns:</p>
+  <pre>{
+  "linucb_ready": bool,
+  "linucb_updates": int,
+  "actions": {action_name: total_updates},
+  "is_cheap_only": bool,
+  "dead_providers": list[str]
+}</pre>
+  <div class="test">Unit test: routing_status dict shape after known inputs</div>
+</div>
+
+<h2>Live Proof</h2>
+<div class="callout">
+  <strong>Demo:</strong> <code>python scripts/demo_routing_learn.sh</code> — simulates 200 routing decisions, verifies LinUCB activates within 20 episodes, persists weights across restarts, and shows learned action preferences.
+</div>
+<p><strong>Success markers:</strong></p>
+<ul>
+  <li>Log line: <code>[linucb] loaded v2: X updates, padded Y→Z actions</code></li>
+  <li>Log line: <code>[orchestrator] warm-started LinUCB with N episodes</code></li>
+  <li>Log line: <code>[linucb] is_ready=True</code> after ≤20 updates</li>
+  <li><code>.awos/linucb_weights.pkl</code> updated with <code>format_version: 2</code></li>
+  <li>Weights file survives N_ACTIONS change test</li>
+</ul>
+
+<h2>Edge Cases</h2>
+<ul>
+  <li>RewardStore empty on first run → warm_start returns 0, no crash</li>
+  <li>Weights file corrupted → log warning, start fresh, save corrected v2</li>
+  <li>n_actions < 0 or 0 → no-op (shouldn't happen, guarded by init)</li>
+  <li>Action ID out of bounds in warm_start → skip that episode, log warning</li>
+  <li>Concurrent writes to weights file → accept occasional loss (low-impact, next save overwrites)</li>
+</ul>
+
+</main>
+
+</body>
+</html>

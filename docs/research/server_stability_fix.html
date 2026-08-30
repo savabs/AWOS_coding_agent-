@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Server Stability Fix — Research</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; background: #fff; }
+  h1 { border-bottom: 3px solid #e63946; padding-bottom: 10px; }
+  h2 { margin-top: 30px; color: #e63946; }
+  table { border-collapse: collapse; width: 100%; margin: 15px 0; }
+  th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
+  th { background: #f8f9fa; font-weight: 600; }
+  .critical { background: #ffe0e0; padding: 2px 6px; border-radius: 3px; }
+  .high { background: #fff3cd; padding: 2px 6px; border-radius: 3px; }
+  pre { background: #f5f5f5; padding: 12px; border-radius: 6px; overflow-x: auto; }
+  code { background: #f0f0f0; padding: 2px 5px; border-radius: 3px; font-size: 0.9em; }
+</style>
+</head>
+<body>
+<h1>🔬 Research: Server Stability Fix</h1>
+<p><strong>Phase:</strong> 4 · <strong>Date:</strong> 2026-07-21 · <strong>Priority:</strong> CRITICAL (#1)</p>
+
+<h2>Problem</h2>
+<p>AWOS server (<code>gui/server.py</code>) crashes after 2–3 chat queries. Users cannot sustain a session.</p>
+
+<h2>Root Cause: HTTP Client Connection Leaks</h2>
+<p>Every chat query creates multiple HTTP client objects that are <strong>never closed</strong>. After 2–3 queries, accumulated unclosed connections exhaust file descriptors, crashing the server.</p>
+
+<h3>Leak Vector 1: <code>requests.Response(stream=True)</code></h3>
+<table>
+  <tr><th>File</th><td><code>scaffold/agent/gui_chat.py</code>, lines 1061–1085</td></tr>
+  <tr><th>Function</th><td><code>_stream_opencode_go()</code> — anthropic protocol streaming</td></tr>
+  <tr><th>Impact</th><td><span class="critical">CRITICAL</span> — 1–3 TCP sockets leaked per query</td></tr>
+</table>
+<p>Each anthropic-protocol model tier opens a streaming <code>requests.Response</code>. <code>resp.close()</code> is never called. The loop exhausts the <code>urllib3</code> connection pool (default: 10) after ~3 queries × 3 anthropic tiers = 9 connections.</p>
+
+<h3>Leak Vector 2: <code>openai.OpenAI()</code> clients</h3>
+<table>
+  <tr><th>File</th><td><code>scaffold/agent/gui_chat.py</code>, lines 951 (<code>_stream_deepseek</code>) and 1034 (<code>_stream_opencode_go</code>)</td></tr>
+  <tr><th>Impact</th><td><span class="critical">CRITICAL</span> — 2 <code>httpx.Client</code> pools leaked per query</td></tr>
+</table>
+<p>The <code>openai.OpenAI()</code> constructor wraps an <code>httpx.Client</code> with a connection pool. Fresh clients created per-call, never closed. In a multi-threaded server, <code>httpx.Client.__del__</code> timing is unpredictable and can raise <code>RuntimeError</code>.</p>
+
+<h3>Leak Vector 3: <code>Anthropic()</code> client</h3>
+<table>
+  <tr><th>File</th><td><code>scaffold/agent/gui_chat.py</code>, line 979 (<code>_stream_anthropic</code>)</td></tr>
+  <tr><th>Impact</th><td><span class="high">HIGH</span> — 1 <code>httpx.Client</code> pool leaked per query</td></tr>
+</table>
+<p>Same <code>httpx</code> leak pattern as OpenAI clients. The stream context manager is correct but the client object itself is never closed.</p>
+
+<h2>Secondary: <code>_send_sse()</code> Exception Propagation</h2>
+<table>
+  <tr><th>File</th><td><code>gui/server.py</code>, lines 122–134</td></tr>
+  <tr><th>Issue</th><td>When client disconnects, the consumption loop <code>for _ in gen: pass</code> re-enters the generator. Downstream errors (<code>OSError</code>, <code>RuntimeError</code>) propagate uncaught.</td></tr>
+</table>
+
+<h2>Tertiary: <code>provider_health.py</code> Client Leaks</h2>
+<p>4 check functions (<code>check_deepseek</code>, <code>check_anthropic</code>, <code>check_openai</code>, <code>check_opencode_go</code>) create <code>OpenAI</code>/<code>Anthropic</code> clients every 300s via daemon thread. Never closed. Compounds over time.</p>
+
+<h2>Fix Strategy (4 Atomic Steps)</h2>
+<ol>
+  <li><strong>Close streaming <code>requests.Response</code></strong> — wrap anthropic streaming path in try/finally with <code>resp.close()</code></li>
+  <li><strong>Reuse or close <code>OpenAI</code>/<code>Anthropic</code> clients</strong> — use <code>with</code> context managers or store as instance attributes on <code>GuiChatService</code></li>
+  <li><strong>Safeguard <code>_send_sse()</code> generator consumption</strong> — catch and suppress exceptions during client disconnect cleanup</li>
+  <li><strong>Close <code>provider_health.py</code> clients</strong> — add try/finally close to each health check function</li>
+</ol>
+
+<h2>Related</h2>
+<ul>
+  <li><a href="server_stability_fix_spec.html">Server Stability Fix — Spec</a></li>
+  <li><a href="../../scaffold/agent/gui_chat.py">gui_chat.py</a></li>
+  <li><a href="../../gui/server.py">server.py</a></li>
+  <li><a href="../../scaffold/agent/provider_health.py">provider_health.py</a></li>
+</ul>
+</body>
+</html>

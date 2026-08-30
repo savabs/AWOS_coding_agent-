@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Spec: AWOS Coding-Agent Capability Audit</title></head>
+<body>
+<h1>Spec: AWOS Coding-Agent Capability Audit and Baseline Hardening</h1>
+<p><strong>Status:</strong> Active | <strong>Date:</strong> 2026-07-27</p>
+<blockquote><strong>Governing principle:</strong> Make the existing AWOS coding agent reliable and capable. Do not create a parallel generic agent. Preserve the current DeepSeek Pro through OpenCode Go baseline. Use competitor agents as capability benchmarks, not implementation sources.</blockquote>
+<h2>Goal</h2>
+<p>Prove the active AWOS coding-agent path can complete representative coding tasks with safe edits, verification, evidence-backed diagnosis, and bounded recovery, then fix only confirmed gaps.</p>
+<h2>Files initially in scope</h2>
+<ul>
+<li><code>scaffold/agent/orchestrator.py</code></li>
+<li><code>scaffold/agent/cheap_planner.py</code></li>
+<li><code>scaffold/agent/worker.py</code></li>
+<li><code>scaffold/agent/react_worker.py</code></li>
+<li><code>scaffold/agent/verifier.py</code></li>
+<li><code>scaffold/agent/test_runner.py</code></li>
+<li><code>scaffold/agent/core/debug_*.py</code></li>
+<li>Focused tests under <code>tests/</code></li>
+</ul>
+<p>No file is modified unless a task step identifies a reproduced gap.</p>
+<h2>Atomic implementation steps</h2>
+<</title>ol</body>>
+<li><strong>Trace the active runtime path.</strong> Identify the exact planner, worker, verifier, model, and evidence components used by <code>Orchestrator.execute_feature</code>. Exit: a test or trace names each active component and confirms whether DeepSeek Pro through OpenCode Go is selected.</li>
+<li><strong>Prove the OpenCode-only baseline.</strong> Run an isolated representative coding task with mocked transport and only OpenCode Go configured. Exit: the task reaches planning, edit, verification, and final evidence without other provider credentials.</li>
+<li><strong>Record the first verified blocker.</strong> Use debugger evidence to classify the earliest failure. Exit: the blocker is <code>PROVEN</code>, or the baseline is explicitly marked passing.</li>
+<li><strong>Fix only the reproduced provider blocker.</strong> Modify the smallest existing component owning the confirmed OpenCode failure. Exit: the focused OpenCode regression passes.</li>
+<li><strong>Fix defensive ReAct initialization.</strong> Make <code>ReActWorker.execute_task()</code> safely handle controlled construction where optional state is absent, without changing normal runtime behavior. Exit: the mocked ReAct test and normal E2E pass.</li>
+<li><strong>Prove bounded recovery.</strong> Inject a bounded edit or test failure and verify the existing recovery and debugger path. Exit: recovery produces evidence and either a verified success or honest terminal failure.</li>
+<li><strong>Establish capability baseline.</strong> Run representative tasks covering repository inspection, multi-file change, test repair, and failure recovery. Exit: results include success, latency, cost, retries, and evidence status.</li>
+</ol>
+<h2>Acceptance criteria</h2>
+<ul>
+<li>DeepSeek Pro through OpenCode Go remains usable.</li>
+<li>No missing provider credential causes an unapproved API call.</li>
+<li>Existing AWOS debugging and verification are present in results.</li>
+<li>No unsupported issue is reported as proven.</li>
+<li>New code is limited to verified gaps.</li>
+<li>Results improve strong coding-agent capabilities without narrowing AWOS beyond App #1.</li>
+</ul>
+<h2>Related</h2>
+<ul><li>[[coding_agent_capability_audit]]</li><li>[[VISION]]</li></ul>
+</body>
+</html>

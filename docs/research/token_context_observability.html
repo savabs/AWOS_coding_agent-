@@ -1,0 +1,22 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Token and Context Observability Research</title></head>
+<body>
+<h1>Token and Context Observability</h1>
+<p><strong>Phase:</strong> Stage 1 coding agent. <strong>Date:</strong> 2026-08-20.</p>
+<h2>Verified Current State</h2>
+<ul>
+<li><code>scaffold/agent/usage_record.py</code> normalizes provider input/output usage and updates the token tracker and budget ledger.</li>
+<li><code>scaffold/agent/react_worker.py</code> has the complete message history, provider/model, response, and model-call boundary.</li>
+<li><code>scaffold/agent/planner.py</code> and <code>worker.py</code> contain additional primary-path model calls.</li>
+<li><code>.awos/cache_stats.jsonl</code> already stores provider-specific cache telemetry, but no provider-neutral per-call record exists.</li>
+<li><code>awos.py</code> exposes aggregate budget totals but not individual model-call or context-category records.</li>
+</ul>
+<h2>Insertion Point</h2>
+<p>Add a best-effort append-only model-call record beside the existing usage normalization. Pass optional session, task, step, prompt, and message metadata only where already available. Telemetry failures must never affect model behavior.</p>
+<h2>Non-Goals</h2>
+<p>No routing, memory, repository indexing, prompt redesign, model changes, tool behavior changes, or verifier changes.</p>
+<h2>Risks</h2>
+<ul><li>Provider usage schemas differ and may omit reasoning/cache fields.</li><li>Context category counts are estimates unless the provider supplies segmented counts.</li><li>Persistent writes must be best effort and bounded.</li></ul>
+<h2>Related</h2>
+<ul><li><a href="../specs/token_context_observability_spec.html">Implementation spec</a></li><li><a href="../../tasks/active/token_context_observability.html">Task</a></li></ul>
+</body></html>

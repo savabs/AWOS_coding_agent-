@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Research: Measuring Actual Progress in an AI-Built Project</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 900px; margin: 2em auto; padding: 0 1em; line-height: 1.6; color: #1a1a2e; }
+  h1, h2, h3 { color: #16213e; }
+  h1 { border-bottom: 3px solid #e94560; padding-bottom: 0.3em; }
+  h2 { margin-top: 2em; border-bottom: 1px solid #ddd; padding-bottom: 0.2em; }
+  .meta { color: #666; font-size: 0.9em; margin-bottom: 2em; }
+  .box { border: 1px solid #ddd; border-radius: 6px; padding: 1em 1.5em; margin: 1.5em 0; background: #f8f9fa; }
+  .box.bad { border-left: 4px solid #e94560; background: #fff5f5; }
+  .box.good { border-left: 4px solid #2ecc71; background: #f0fff4; }
+  .box.warn { border-left: 4px solid #f39c12; background: #fffef5; }
+  .evidence { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.85em; background: #f0f0f0; padding: 0.5em 1em; border-radius: 4px; white-space: pre-wrap; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+  th, td { border: 1px solid #ddd; padding: 0.5em; text-align: left; }
+  th { background: #16213e; color: white; }
+  tr:nth-child(even) { background: #f8f9fa; }
+  .check { color: #2ecc71; } .cross { color: #e94560; } .warn-icon { color: #f39c12; }
+  .tag { display: inline-block; background: #e0e0e0; border-radius: 3px; padding: 0.1em 0.5em; font-size: 0.8em; margin: 0.1em; }
+</style>
+</head>
+<body>
+
+<h1>Research: Measuring Actual Progress in an AI-Built Project</h1>
+<p class="meta">
+  <strong>Phase:</strong> N (foundational) &middot;
+  <strong>Date:</strong> 2026-07-06 &middot;
+  <strong>Tags:</strong> <span class="tag">topic/progress</span> <span class="tag">topic/measurement</span> <span class="tag">topic/quality-gate</span>
+</p>
+
+<h2>1. The Problem</h2>
+
+<p>
+This project (AWOS) has ~40K LOC across 140+ modules, 1035 collected tests, 60+ task files, 57 checkpoints, 16 live proof demos — and yet it <em>feels</em> like we're circling.
+</p>
+
+<p>
+The root cause is not lack of work. The root cause is that <strong>the progress measurement system is untrustworthy</strong>.
+An LLM agent marks task steps <code>[x]</code> with no external verification.
+The human reads the task file, sees 9/10 steps done, and thinks "great, 90% progress."
+But the remaining step may be the hardest one, or the 9 done steps may not actually integrate into working software.
+</p>
+
+<div class="box bad">
+<strong>Current belief:</strong> "Task X is 13/14 steps done → 93% complete"
+<br><br>
+<strong>Undiscovered truth:</strong> The 13 steps produced code that passes unit tests but breaks in integration. The 1 remaining step is "test on external repo" — the hardest part. <em>Actual progress: ~30%</em>
+</div>
+
+<h2>2. Current Measurement Systems — Audit</h2>
+
+<h3>2.1 Task File Checklists (Primary — Most Used)</h3>
+
+<table>
+<tr><th>Mechanism</th><th>What it measures</th><th>Who reports it</th><th>Verification</th></tr>
+<tr><td><code>- [x]</code> marks in task files</td><td>Steps the agent <em>intended</em> to complete</td><td>LLM agent (self-reported)</td><td><span class="cross">✗</span> None</td></tr>
+</table>
+
+<div class="evidence">evidence: stage1_prove_it_task.md — Step 7 marked [x]. But step 7b says "Follow-up: fix first-task file-not-found / SymbolIndex 0 in worktree" and is still [ ]. The [x] on step 7 implies worktree was tested, but a critical bug remained unfixed.</div>
+
+<strong>Failure mode:</strong> An agent running dogfood missions marked "add a comment" as done 4 separate times. Each time the task reached 100%. But the real feature (the self-improving coding agent) stayed untouched.
+
+<h3>2.2 Quality Gate (scripts/quality_gate.py — Rarely Run)</h3>
+
+<table>
+<tr><th>Check</th><th>Verification method</th><th>Status</th></tr>
+<tr><td>All steps [x]</td><td>Regex on task file</td><td><span class="check">✓</span> Works</td></tr>
+<tr><td>Tests pass</td><td>Subprocess pytest</td><td><span class="warn-icon">⚠</span> Runs full suite on every check</td></tr>
+<tr><td>Live proof step</td><td>Looks for [x] on live-proof step</td><td><span class="cross">✗</span> Only checks task file, not the actual demo</td></tr>
+<tr><td>Checkpoint exists</td><td>Date-stamped file check</td><td><span class="check">✓</span> Works</td></tr>
+</table>
+
+<strong>Failure mode:</strong> The gate checks if a <em>task step</em> called "Live proof" is marked [x]. It does NOT verify the demo script exists, has been run recently, or produces the expected output. The gate trusts the same LLM that marked the step.
+
+<h3>2.3 Session Checkpoints (scripts/session_checkpoint.py — Template-Only)</h3>
+
+<div class="evidence">evidence: checkpoint_2026-07-05.md — Contains "(TODO)" for Test count, Phase status, What's Blocked, Next session, Decisions Made. This is a template that was never filled in.</div>
+
+<strong>Failure mode:</strong> The checkpoint generator creates a skeleton, but the human (or agent) never fills in the substantive sections. The checkpoint becomes noise, not signal.
+
+<h3>2.4 PEI Report &amp; Reward Store (Runtime Objective)</h3>
+
+<table>
+<tr><th>Metric</th><th>Source</th><th>Honest?</th></tr>
+<tr><td>Task success rate</td><td><code>.awos/reward_store.jsonl</code> (3143 episodes)</td><td><span class="check">✓</span> Objective</td></tr>
+<tr><td>Cost per task</td><td><code>.awos/spans.jsonl</code> (2464 spans)</td><td><span class="check">✓</span> Objective</td></tr>
+<tr><td>Model mix</td><td><code>.awos/performance.json</code></td><td><span class="check">✓</span> Objective</td></tr>
+</table>
+
+<strong>But:</strong> These measure the <em>AWOS agent's</em> runtime performance, not <em>project feature completion</em>. They tell you "the agent solved 3143 tasks at $0.002 each" but not whether the self-improving coding agent is actually becoming a product someone would trust and use.
+
+<h3>2.5 Live Proof Demos (16 Scripts)</h3>
+
+<table>
+<tr><th>Demo</th><th>Last verified running?</th><th>Still matches current code?</th></tr>
+<tr><td><code>demo_stagnation_breaker.sh</code></td><td>Unknown</td><td>Unknown</td></tr>
+<tr><td><code>demo_ci_rescue.sh</code></td><td>Claims 28 reds→green</td><td>Unknown</td></tr>
+<tr><td>...14 more</td><td>Unknown</td><td>Unknown</td></tr>
+</table>
+
+<strong>Failure mode:</strong> Demos are one-time artifacts. Nothing re-verifies that they still produce correct output after code changes.
+
+<h2>3. The Core Gap</h2>
+
+<div class="box bad">
+<h3>The Earned Value Problem for AI Work</h3>
+<p>
+In project management terms:
+</p>
+<ul>
+  <li><strong>Planned Value (PV):</strong> Steps marked <code>[x]</code> in task files</li>
+  <li><strong>Earned Value (EV):</strong> Features that actually work end-to-end</li>
+  <li><strong>Actual Cost (AC):</strong> LLM calls, human time, compute spent</li>
+</ul>
+<p>
+<strong>Our current system assumes PV = EV.</strong> It assumes that if the LLM marked a step <code>[x]</code>, the value was actually earned. This is false.
+</p>
+<p>
+The LLM agent has incentives to mark things done (to complete its session, to show progress). There is no independent verification step between "I wrote the code" and "the feature works."
+</p>
+</div>
+
+<h3>Specific gaps found:</h3>
+
+<ol>
+  <li><strong>No integration test requirement.</strong> Unit tests pass, but no test validates the full pipeline (planner → worker → verifier → reward). The 24 failing tests are in routing and verification — core kernel claims.</li>
+  <li><strong>No abandonment detection.</strong> 15+ task files with 0 done steps exist silently. No mechanism flags them as abandoned.</li>
+  <li><strong>No demo regression check.</strong> 16 demos exist, but nothing ensures they still work after code changes.</li>
+  <li><strong>Checkpoints are templates, not records.</strong> The July 5 checkpoint has "TODO" in every substantive section.</li>
+  <li><strong>Task files are accumulated, not curated.</strong> 60+ active tasks, most with low or zero progress, creates the illusion of scope without delivery.</li>
+  <li><strong>Collecting errors in test suite.</strong> 31 fixture tests fail at collection time with broken relative imports — and nobody fixes them because they're "fixtures."</li>
+</ol>
+
+<h2>4. External Patterns Researched</h2>
+
+<h3>4.1 Definition of Done (Scrum/Agile)</h3>
+
+<p>
+<strong>Core idea:</strong> Before any work item is marked "done," it must pass a predefined checklist. Common items: code reviewed, unit tested, integration tested, documented, deployed to staging.
+</p>
+
+<p>
+<strong>Applicable insight:</strong> An AI project needs a Definition of Done that includes independent verification — not just "the LLM wrote code and unit tests pass."
+</p>
+
+<h3>4.2 Earned Value Management (EVM)</h3>
+
+<p>
+<strong>Core idea:</strong> Track three curves — Planned Value (what you said you'd do by now), Earned Value (what you actually accomplished), Actual Cost (what it cost). The gap between PV and EV is the <em>true</em> variance.
+</p>
+
+<p>
+<strong>Applicable insight:</strong> For AI work, the earned value is not "code written" but "working, integrated feature." Measuring this requires an objective gate — an integration test or a live proof run — before value is "earned."
+</p>
+
+<h3>4.3 Acceptance Test-Driven Development (ATDD)</h3>
+
+<p>
+<strong>Core idea:</strong> Write the acceptance test <em>before</em> writing the feature. The feature is only done when the test passes.
+</p>
+
+<p>
+<strong>Applicable insight:</strong> The most honest progress metric is: "How many acceptance-level tests pass?" Not "how many task steps are marked [x]."
+</p>
+
+<h3>4.4 Test Coverage as Progress (CI/CD Pipeline)</h3>
+
+<p>
+<strong>Core idea:</strong> In CI/CD, the deploy gate is: all tests pass, coverage >= threshold, lint clean. Nothing is "done" until it passes the pipeline.
+</p>
+
+<p>
+<strong>Applicable insight:</strong> Our quality_gate.py <em>almost</em> does this, but it checks task-file formatting, not actual pipeline pass/fail.
+</p>
+
+<h2>5. Proposed Mechanism: Verified Progress Snapshot (VPS)</h2>
+
+<p>Based on the research, here is a proposed mechanism that would give honest progress measurement. This is a spec sketch — not implementation.</p>
+
+<h3>Core Principle</h3>
+
+<div class="box good">
+<strong>A task step is NOT done until an independent, automated verification confirms it.</strong>
+The LLM can mark <code>[~]</code> (in progress). Only the verification system can promote it to <code>[x]</code>.
+</div>
+
+<h3>Five components:</h3>
+
+<h4>1. Feature → Test Mapping (mandatory)</h4>
+<p>Every task spec must include a <code>TestEvidence</code> section that names the specific test file(s) that prove the feature works. The system then verifies:</p>
+<ul>
+  <li>Those test files exist</li>
+  <li>They pass on current code</li>
+  <li>They cover the feature (not just unrelated tests)</li>
+</ul>
+
+<h4>2. Integration Pipeline as Progress Gate</h4>
+<p>A single command <code>python scripts/progress_snapshot.py</code> produces an honest JSON report:</p>
+<div class="evidence">{
+  "features": [
+    {"name": "self-improving coding agent", "status": "in_progress",
+     "tests_passing": 20, "tests_total": 30,
+     "demo_last_run": "2026-06-25",
+     "integration_test_pass": false,
+     "working_e2e": false}
+  ],
+  "test_suite": {"pass": 988, "fail": 24, "collect_errors": 31},
+  "abandoned_tasks": ["ml_meta_controller_task", "vector_memory_task", ...],
+  "stale_demos": ["demo_ci_rescue.sh", "demo_clawcode.sh", ...],
+  "checkpoint_quality": {"july_5_checkpoint": "TODO_TEMPLATE"}
+}</div>
+
+<h4>3. Abandonment Detection</h4>
+<p>Any task file with 0 progress for >7 days is automatically flagged. After 30 days, it's archived to <code>tasks/zombie/</code>.</p>
+
+<h4>4. Demo Regression Harness</h4>
+<p>Each demo script in <code>scripts/demo_*.sh</code> is run weekly (or on-demand) and its output compared to stored "golden" output. A demo that no longer produces correct output = regression detected.</p>
+
+<h4>5. Honest Burndown (EV not PV)</h4>
+<p>Display two curves on the dashboard:</p>
+<ul>
+  <li><strong>Blue:</strong> Planned tasks (task steps marked [x] by LLM) — <em>what was attempted</em></li>
+  <li><strong>Green:</strong> Verified features (features where integration test passes + demo runs) — <em>what actually works</em></li>
+</ul>
+<p>The gap between blue and green is the "LLM hallucination gap" — the honest measure of how much of our work is real.</p>
+
+<h2>6. What Next?</h2>
+
+<p>This research doc is <strong>not</strong> a spec — it's the understanding phase. The natural next steps would be:</p>
+
+<ol>
+  <li>Decide which components of the VPS mechanism to implement first</li>
+  <li>Write a spec with atomic implementation steps</li>
+  <li>Build the <code>progress_snapshot.py</code> tool as the first deliverable (it's a read-only analysis — low risk)</li>
+  <li>Then build the abandonment detector, then the demo regression harness</li>
+</ol>
+
+<p>But before any implementation: <strong>do you agree with the diagnosis?</strong> Does the proposed mechanism address the "circling" feeling?</p>
+
+<h2>Related</h2>
+<ul>
+  <li><code>scripts/quality_gate.py</code> — existing quality gate (only checks task formatting)</li>
+  <li><code>scripts/session_checkpoint.py</code> — existing checkpoint generator (produces templates)</li>
+  <li><code>scripts/session_warmup.py</code> — existing cold-start tool</li>
+  <li><code>scaffold/agent/pei_report.py</code> — existing PEI report (runtime efficiency, not feature completion)</li>
+  <li><code>docs/memory/checkpoint_2026-07-05.md</code> — checkpoint with TODO sections (evidence of the problem)</li>
+</ul>
+
+</body>
+</html>

@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spec: Recenter Self-Improving Coding Agent — AWOS</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--success:#10b981}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600;background:#f59e0b;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+main{max-width:900px;margin:0 auto;padding:32px}
+h2{font-size:17px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px;background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.step{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin:10px 0}
+.step .step-num{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:4px}
+.step .step-title{font-weight:600;margin-bottom:6px}
+.step .exit{font-size:12px;color:var(--muted);margin-top:6px;font-style:italic}
+.step .exit strong{color:var(--text)}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+footer{background:var(--surface);border-top:1px solid var(--border);padding:16px 32px;display:flex;justify-content:flex-end;gap:12px}
+.copy-btn{background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:500}
+.copy-btn.secondary{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+</style>
+</head>
+<body>
+<header>
+  <div class="breadcrumb">AWOS / docs / specs</div>
+  <h1>Spec: Recenter Self-Improving Coding Agent</h1>
+  <div class="meta">
+    <span class="tag">doc/spec</span>
+    <span class="tag">phase/4</span>
+    <span class="tag">topic/self-improving-coding-agent</span>
+    <span class="status">active</span>
+    <time>2026-07-26</time>
+  </div>
+</header>
+<main>
+<h2>Goal</h2>
+<p>Make the repository’s current-facing identity consistently describe AWOS as a <strong>learnable OS</strong> built through the pathway <strong>proper coding agent → self-learning coding agent → AI-operated OS</strong>, where self-learning means the agent improves by analyzing and solving its own prior failures rather than by product/GTM framing or generic customer-memory claims.</p>
+<div class="callout">
+<strong>Governing research:</strong> <a href="../research/recenter_self_improving_coding_agent.html">recenter_self_improving_coding_agent.html</a><br>
+<strong>Task file:</strong> <a href="../../tasks/active/recenter_self_improving_coding_agent.html">recenter_self_improving_coding_agent.html</a>
+</div>
+<h2>Files Affected</h2>
+<table>
+<tr><th>File group</th><th>Change type</th><th>Description</th></tr>
+<tr><td><code>VISION.md</code>, <code>README.md</code>, <code>AWOS.md</code>, <code>AGENT_INDEX.md</code>, <code>AGENTS.md</code>, <code>.github/copilot-instructions.md</code>, <code>memories/repo/project_structure.md</code></td><td>modify</td><td>Correct canonical identity, agent guidance, and project-fact framing.</td></tr>
+<tr><td><code>docs/product/*</code></td><td>modify selective</td><td>Repurpose or deprecate GTM / customer / pricing docs into engineering-pathway material.</td></tr>
+<tr><td><code>tasks/active/*</code>, <code>docs/specs/*</code>, <code>docs/research/*</code></td><td>modify selective</td><td>Update active planning artifacts that still encode CI-wedge, customer, or compounding-sales framing as present truth.</td></tr>
+<tr><td><code>gui/*</code>, <code>awos-app/*</code>, <code>awos.py</code>, selected <code>scaffold/agent/*</code></td><td>modify selective</td><td>Adjust visible product copy and agent-facing strings so the app is clearly the interface to the coding agent.</td></tr>
+<tr><td><code>docs/memory/checkpoint_*</code>, <code>.awos/**</code></td><td>do not modify</td><td>Preserve historical/runtime records unless a later explicit migration is requested.</td></tr>
+</table>
+<h2>Implementation Steps</h2>
+<p>Each step is atomic: changes one thing, tests one thing, proves one thing.</p>
+<div class="step">
+  <div class="step-num">Step 1</div>
+  <div class="step-title">Correct canonical identity documents</div>
+  <p>Update <code>VISION.md</code>, <code>README.md</code>, <code>AWOS.md</code>, <code>AGENT_INDEX.md</code>, and <code>memories/repo/project_structure.md</code> so they consistently present AWOS as a learnable OS that must first build a proper coding agent, then add failure-driven self-learning, then expand into an AI-operated OS.</p>
+  <div class="exit"><strong>Exit condition:</strong> Canonical docs explicitly encode the pathway and no longer define the project through CI, customer GTM, or repo-learning-only language.</div>
+</div>
+<div class="step">
+  <div class="step-num">Step 2</div>
+  <div class="step-title">Correct active planning and strategy documents</div>
+  <p>Update active tasks/specs/research/product docs that currently state the repo is organized around customer pilots, pricing, agency GTM, compounding-sales framing, or CI-wedge identity. Preserve CI repair only as one benchmark workload where appropriate.</p>
+  <div class="exit"><strong>Exit condition:</strong> Active docs no longer claim the current project focus is customer/pilot/GTM-first or CI-wedge-first.</div>
+</div>
+<div class="step">
+  <div class="step-num">Step 3</div>
+  <div class="step-title">Correct UI, packaging, and agent-facing copy</div>
+  <p>Update visible UI labels, descriptions, and backend naming so the app is clearly the interface to the coding agent. Remove top-level CI-wedge, pricing, or customer-sales identity from user-facing copy unless a string is clearly tied to a benchmark or narrow feature endpoint.</p>
+  <div class="exit"><strong>Exit condition:</strong> Main user-facing surfaces describe AWOS as a coding-agent system and interface, not a CI wedge or GTM product shell.</div>
+</div>
+<div class="step">
+  <div class="step-num">Step 4</div>
+  <div class="step-title">Validate the correction pass</div>
+  <p>Run targeted grep checks and project diagnostics to confirm the updated wording is in place and no accidental syntax issues were introduced in edited code or JSON files.</p>
+  <div class="exit"><strong>Exit condition:</strong> Grep results and diagnostics match the intended scope; historical files remain untouched.</div>
+</div>
+<h2>Edge Cases</h2>
+<ul>
+  <li>Historical references to the CI Rescue pivot can remain in immutable checkpoint files and clearly historical notes.</li>
+  <li>Capability-specific mentions of fixing CI may remain when they describe a benchmark or narrow workflow rather than the top-level identity.</li>
+  <li>Generated files under <code>.awos/</code> should not be edited as part of this consistency pass.</li>
+  <li>“Compounding” may remain where it describes an effect, but not where it replaces the clearer failure-driven self-learning definition.</li>
+</ul>
+<h2>Testing Plan</h2>
+<table>
+<tr><th>Test</th><th>Input</th><th>Expected output</th><th>File</th></tr>
+<tr><td>Targeted grep: canonical docs</td><td>Identity keywords</td><td>Canonical docs center self-improving coding agent / learnable OS</td><td>repo-wide</td></tr>
+<tr><td>Targeted grep: mutable docs/UI</td><td>CI Rescue / adaptive runtime keywords</td><td>Remaining matches are historical, capability-specific, or intentionally retained</td><td>repo-wide</td></tr>
+<tr><td>Diagnostics</td><td>Edited code/JSON files</td><td>No introduced syntax/validation issues</td><td>specific edited files</td></tr>
+</table>
+<h2>Related</h2>
+<ul>
+  <li><a href="../research/recenter_self_improving_coding_agent.html">[[recenter_self_improving_coding_agent]]</a> — research</li>
+  <li><a href="../../tasks/active/recenter_self_improving_coding_agent.html">[[recenter_self_improving_coding_agent]]</a> — task file</li>
+  <li><a href="../../VISION.md">[[VISION]]</a> — canonical identity</li>
+</ul>
+</main>
+<footer>
+  <button class="copy-btn secondary" onclick="copyJSON()">Copy Steps as JSON</button>
+  <button class="copy-btn" onclick="copyPrompt()">Copy as Prompt</button>
+</footer>
+<script>
+function copyPrompt(){navigator.clipboard.writeText('# Spec: Recenter Self-Improving Coding Agent\n\n'+document.querySelector('main').innerText).then(()=>{const b=document.querySelector('.copy-btn:last-child');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy as Prompt',1500)})}
+function copyJSON(){const steps=[...document.querySelectorAll('.step')].map((s,i)=>({step:i+1,title:s.querySelector('.step-title').innerText,exit:s.querySelector('.exit').innerText.replace('Exit condition:','').trim()}));navigator.clipboard.writeText(JSON.stringify({doc:'spec',steps},null,2)).then(()=>{const b=document.querySelector('.copy-btn.secondary');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy Steps as JSON',1500)})}
+</script>
+</body>
+</html>

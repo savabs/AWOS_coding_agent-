@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Research: OpenCode Go + Zen Model Tiering — AWOS</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--warn:#f59e0b;--green:#10b981;--red:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status.active{background:#f59e0b;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+nav.tabs{background:var(--surface);border-bottom:1px solid var(--border);padding:0 32px;display:flex;gap:0;overflow-x:auto}
+nav.tabs button{background:none;border:none;border-bottom:2px solid transparent;padding:12px 16px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;white-space:nowrap}
+nav.tabs button.active{color:var(--accent);border-bottom-color:var(--accent)}
+main{max-width:960px;margin:0 auto;padding:32px}
+section.tab-panel{display:none}
+section.tab-panel.active{display:block}
+h2{font-size:17px;font-weight:600;margin:24px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px}
+p code,li code,td code{background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px;font-size:12px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+.win{background:#f0fdf4;border-left:3px solid var(--green);padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+.risk-high{background:#fef2f2;border-left:3px solid var(--red);padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+.risk-med{background:#fef3c7;border-left:3px solid var(--warn);padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+.tier-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin:8px 0}
+.tier-label{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:2px 8px;border-radius:4px;display:inline-block;margin-bottom:6px}
+.t0{background:#f0fdf4;color:#166534}
+.t1{background:#dcfce7;color:#166534}
+.t2{background:#dbeafe;color:#1e40af}
+.t3{background:#fef3c7;color:#92400e}
+.t4{background:#fce7f3;color:#9d174d}
+.t5{background:#fef2f2;color:#991b1b}
+.badge-value{background:#f0fdf4;color:#166534;font-size:11px;font-weight:700;padding:2px 6px;border-radius:4px}
+.badge-warn{background:#fef3c7;color:#92400e;font-size:11px;font-weight:700;padding:2px 6px;border-radius:4px}
+.model-id{font-family:monospace;font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb">AWOS / docs / research</div>
+  <h1>Research: OpenCode Go + Zen — Model Offerings &amp; AWOS Tier Integration</h1>
+  <div class="meta">
+    <span class="tag">doc/research</span>
+    <span class="tag">phase/4</span>
+    <span class="tag">topic/model-tiering</span>
+    <span class="tag">topic/opencode-go</span>
+    <span class="status active">active</span>
+    <time>2026-07-09</time>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="active" onclick="showTab('overview',this)">Overview</button>
+  <button onclick="showTab('go-models',this)">Go Models</button>
+  <button onclick="showTab('zen-models',this)">Zen (PAYG)</button>
+  <button onclick="showTab('tier-map',this)">AWOS Tier Map</button>
+  <button onclick="showTab('integration',this)">Integration Plan</button>
+  <button onclick="showTab('sources',this)">Sources</button>
+</nav>
+
+<main>
+
+<!-- ═══ OVERVIEW ═══ -->
+<section id="overview" class="tab-panel active">
+  <h2>What is OpenCode?</h2>
+  <p>OpenCode (<a href="https://opencode.ai">opencode.ai</a>) is an open-source AI coding agent by <strong>Anomaly</strong> (not the archived <code>opencode-ai/opencode</code> repo). It offers two paid tiers:</p>
+
+  <h3>Go Subscription</h3>
+  <div class="win">
+    <strong>Best for AWOS:</strong> $10/month flat subscription. Generous usage limits ($60/mo value). Access to 13 open-source coding models including DeepSeek V4 Flash, MiMo-V2.5, Qwen3.7 Plus, Kimi K2.7 Code, GLM-5.2, and more.
+  </div>
+  <ul>
+    <li><strong>Price:</strong> $5 first month, then $10/month</li>
+    <li><strong>Limits:</strong> $12/5hr, $30/week, $60/month (in dollar value, not request count)</li>
+    <li><strong>API:</strong> OpenAI-compatible at <code>https://opencode.ai/zen/go/v1/chat/completions</code></li>
+    <li><strong>Model ID format:</strong> <code>opencode-go/&lt;model-id&gt;</code></li>
+    <li><strong>Auth:</strong> Bearer token from <a href="https://opencode.ai/auth">console</a></li>
+    <li><strong>Fallback:</strong> Can use Zen balance when limits are exceeded</li>
+    <li><strong>Privacy:</strong> US/EU/Singapore hosting. Zero-retention policy. No training on your data.</li>
+  </ul>
+
+  <h3>Zen (Pay-as-you-go)</h3>
+  <p>Curated model gateway with verified provider configurations. PAYG pricing with $20 auto-reload. Access to proprietary models (Claude, GPT, Gemini) <strong>but</strong> at higher prices than direct API (e.g., Claude Sonnet 4.5 at $3/$15 via Zen vs $3/$15 direct). Also includes <strong>free models</strong>.</p>
+  <p><strong>Verdict for AWOS:</strong> Zen pricing is generally same or higher than direct provider APIs. Not cost-effective to route through Zen for models we already have direct keys for. However, the <strong>free models</strong> on Zen (DeepSeek V4 Flash Free, MiMo-V2.5 Free, Big Pickle, etc.) could be useful as T0 alternatives.</p>
+
+  <h2>Key Finding</h2>
+  <div class="callout">
+    <strong>OpenCode Go is the valuable addition for AWOS.</strong> $10/month flat gives access to ~13 open-source coding models with generous limits. The key models of interest are <strong>MiMo-V2.5 ($0.14/MTok)</strong> — same price as DeepSeek V4 Flash, <strong>Qwen3.7 Plus ($0.40/MTok)</strong> — strong mid-tier open model, and <strong>Kimi K2.7 Code ($0.95/MTok)</strong> — code-specialized model. Plus it serves as <strong>backup routing</strong> when direct DeepSeek/Gemini APIs are down.
+  </div>
+
+  <h2>Model Quality Context</h2>
+  <p>From the existing Aider polyglot benchmark data (May 2026):</p>
+  <ul>
+    <li><strong>DeepSeek V4 Flash</strong> (aka deepseek-chat) — <strong>70.2%</strong> at $0.14/MTok (also on Go)</li>
+    <li><strong>Kimi K2</strong> — <strong>59.1%</strong> at $0.002/req on OpenRouter (Kimi K2.7 Code is newer)</li>
+    <li><strong>Qwen3 32B</strong> — <strong>40.0%</strong> at $0.76/run (Qwen3.7 Plus/Max are newer)</li>
+    <li><strong>MiMo-V2.5</strong> (predecessor) — similar class to DeepSeek Flash, open-weight</li>
+  </ul>
+  <p>Go model quality <strong>unverified</strong> for newer releases (Qwen3.7, Kimi 2.7, GLM-5.2, MiMo-V2.5-Pro). These need Aider polyglot or SWE-bench results to be properly tiered.</p>
+</section>
+
+<!-- ═══ GO MODELS ═══ -->
+<section id="go-models" class="tab-panel">
+  <h2>OpenCode Go — All Models</h2>
+  <p>Pricing sourced from <a href="https://opencode.ai/docs/go/">opencode.ai/docs/go/</a> (retrieved 2026-07-09). All prices in $/MTok.</p>
+
+  <table>
+    <tr>
+      <th>Model</th>
+      <th>AWOS Model ID</th>
+      <th>Input $/MTok</th>
+      <th>Output $/MTok</th>
+      <th>Cached Read</th>
+      <th>Req/5hr</th>
+      <th class="placeholder">AWOS Tier</th>
+    </tr>
+    <tr>
+      <td><strong>DeepSeek V4 Flash</strong></td>
+      <td class="model-id">opencode-go/deepseek-v4-flash</td>
+      <td>$0.14</td><td>$0.28</td><td>$0.0028</td>
+      <td>31,650</td>
+      <td><span class="tier-label t2">T2</span> (same as direct DS)</td>
+    </tr>
+    <tr>
+      <td><strong>MiMo-V2.5</strong></td>
+      <td class="model-id">opencode-go/mimo-v2.5</td>
+      <td>$0.14</td><td>$0.28</td><td>$0.0028</td>
+      <td>30,100</td>
+      <td><span class="tier-label t2">T2 alt</span></td>
+    </tr>
+    <tr>
+      <td><strong>MiMo-V2.5-Pro</strong></td>
+      <td class="model-id">opencode-go/mimo-v2.5-pro</td>
+      <td>$1.74</td><td>$3.48</td><td>$0.0145</td>
+      <td>3,250</td>
+      <td><span class="tier-label t3">T3</span></td>
+    </tr>
+    <tr>
+      <td><strong>Qwen3.7 Plus</strong></td>
+      <td class="model-id">opencode-go/qwen3.7-plus</td>
+      <td>$0.40</td><td>$1.60</td><td>$0.04</td>
+      <td>4,300</td>
+      <td><span class="tier-label t3">T3 ★</span></td>
+    </tr>
+    <tr>
+      <td><strong>Qwen3.6 Plus</strong></td>
+      <td class="model-id">opencode-go/qwen3.6-plus</td>
+      <td>$0.50</td><td>$3.00</td><td>$0.05</td>
+      <td>3,300</td>
+      <td><span class="tier-label t3">T3</span></td>
+    </tr>
+    <tr>
+      <td><strong>MiniMax M3</strong></td>
+      <td class="model-id">opencode-go/minimax-m3</td>
+      <td>$0.30</td><td>$1.20</td><td>$0.06</td>
+      <td>3,200</td>
+      <td><span class="tier-label t3">T3</span></td>
+    </tr>
+    <tr>
+      <td><strong>MiniMax M2.7</strong></td>
+      <td class="model-id">opencode-go/minimax-m2.7</td>
+      <td>$0.30</td><td>$1.20</td><td>$0.06</td>
+      <td>3,400</td>
+      <td><span class="tier-label t3">T3</span></td>
+    </tr>
+    <tr>
+      <td><strong>DeepSeek V4 Pro</strong></td>
+      <td class="model-id">opencode-go/deepseek-v4-pro</td>
+      <td>$1.74</td><td>$3.48</td><td>$0.0145</td>
+      <td>3,450</td>
+      <td><span class="tier-label t3">T3 thinking</span></td>
+    </tr>
+    <tr>
+      <td><strong>Kimi K2.7 Code</strong></td>
+      <td class="model-id">opencode-go/kimi-k2.7-code</td>
+      <td>$0.95</td><td>$4.00</td><td>$0.19</td>
+      <td>1,350</td>
+      <td><span class="tier-label t4">T4 ★</span></td>
+    </tr>
+    <tr>
+      <td><strong>Kimi K2.6</strong></td>
+      <td class="model-id">opencode-go/kimi-k2.6</td>
+      <td>$0.95</td><td>$4.00</td><td>$0.16</td>
+      <td>1,150</td>
+      <td><span class="tier-label t4">T4</span></td>
+    </tr>
+    <tr>
+      <td><strong>Qwen3.7 Max</strong></td>
+      <td class="model-id">opencode-go/qwen3.7-max</td>
+      <td>$2.50</td><td>$7.50</td><td>$0.50</td>
+      <td>950</td>
+      <td><span class="tier-label t4">T4 (heavy)</span></td>
+    </tr>
+    <tr>
+      <td><strong>GLM-5.2</strong></td>
+      <td class="model-id">opencode-go/glm-5.2</td>
+      <td>$1.40</td><td>$4.40</td><td>$0.26</td>
+      <td>880</td>
+      <td><span class="tier-label t4">T4</span></td>
+    </tr>
+    <tr>
+      <td><strong>GLM-5.1</strong></td>
+      <td class="model-id">opencode-go/glm-5.1</td>
+      <td>$1.40</td><td>$4.40</td><td>$0.26</td>
+      <td>880</td>
+      <td><span class="tier-label t4">T4</span></td>
+    </tr>
+  </table>
+
+  <h3>Monthly Cost Calculation</h3>
+  <p>At $10/month for Go, vs direct API for DeepSeek Flash at ~$0.001/req:</p>
+  <ul>
+    <li><strong>~10,000 requests/month</strong> on DeepSeek via Go = $10 flat (vs ~$0.14/MTok direct = ~$2-5 actual cost)</li>
+    <li><strong>Go is not cheaper than direct DeepSeek per-request</strong> — it is a <em>convenience + backup</em> tier</li>
+    <li><strong>Value prop:</strong> ONE API key, 13 models, reliable hosting, fallback from dead providers, access to models we don't have direct keys for (GLM, Kimi, Qwen Max, MiMo)</li>
+  </ul>
+</section>
+
+<!-- ═══ ZEN ═══ -->
+<section id="zen-models" class="tab-panel">
+  <h2>Zen — Model Selection for AWOS</h2>
+  <p>Zen has a huge model catalog (Claude, GPT, Gemini, open models). For AWOS, most of the proprietary models are <strong>same price or more expensive</strong> than direct API. The <strong>free models</strong> are the unique value.</p>
+
+  <h3>Free Models (usable without spending balance)</h3>
+  <table>
+    <tr><th>Model</th><th>Notes</th></tr>
+    <tr><td><strong>DeepSeek V4 Flash Free</strong></td><td>Limited-time free. Same model as T2 default.</td></tr>
+    <tr><td><strong>MiMo-V2.5 Free</strong></td><td>Limited-time free. Open-weight model.</td></tr>
+    <tr><td><strong>Big Pickle</strong></td><td>Stealth model, free limited-time.</td></tr>
+    <tr><td><strong>North Mini Code Free</strong></td><td>Cohere's free coding model.</td></tr>
+    <tr><td><strong>Nemotron 3 Ultra Free</strong></td><td>NVIDIA free endpoint (trial only).</td></tr>
+  </table>
+  <div class="risk-med">
+    <strong>Privacy warning:</strong> Free models may use your data for model improvement. Only use for non-sensitive code.
+  </div>
+
+  <h3>Proprietary Models via Zen (PAYG — not free)</h3>
+  <p>Same pricing as direct API for Claude/GPT/Gemini. No cost advantage for routing through Zen vs direct. Skip for models we already have API keys for.</p>
+  <table>
+    <tr><th>Model via Zen</th><th>Input $/MTok</th><th>Direct API</th><th>Use Zen instead?</th></tr>
+    <tr><td>Claude Sonnet 4.5</td><td>$3.00</td><td>$3.00 (direct)</td><td>❌ Same price</td></tr>
+    <tr><td>Claude Opus 4.5</td><td>$5.00</td><td>$5.00 (direct)</td><td>❌ Same price</td></tr>
+    <tr><td>GPT-5.4</td><td>$2.50</td><td>$2.50 (direct)</td><td>❌ Same price</td></tr>
+    <tr><td>GPT-5.4 Mini</td><td>$0.75</td><td>$0.75 (direct)</td><td>❌ Same price</td></tr>
+  </table>
+</section>
+
+<!-- ═══ TIER MAP ═══ -->
+<section id="tier-map" class="tab-panel">
+  <h2>Proposed AWOS Tier Integration with OpenCode Go</h2>
+
+  <p>Adding OpenCode Go as a new provider in the AWOS escalation ladder. The `opencode-go/` prefix is already used by the system prompt (model ID: <code>opencode-go/deepseek-v4-flash</code>).</p>
+
+  <h3>Current Ladder (6 levels)</h3>
+  <pre>
+L0  Gemini Flash-Lite       $0.001/req  google     — Q&A, routing
+L1  DeepSeek V4 Flash       $0.001/req  deepseek   — default worker
+L2  OpenRouter              $0.002/req  openrouter — 200+ model catalog
+L3  GPT-4o-mini             $0.003/req  openai     — fallback
+L4  Claude Haiku 4.5        $0.017/req  anthropic  — BLOCKED cheap-only
+L5  Claude Sonnet 4.6       $0.050/req  anthropic  — BLOCKED cheap-only
+  </pre>
+
+  <h3>Proposed Ladder with OpenCode Go</h3>
+  <p>Two integration strategies:</p>
+
+  <h4>Strategy A: OpenCode Go replaces/upgrades L2 (OpenRouter)</h4>
+  <p>Since Go gives us 13 well-tested coding models with better reliability than raw OpenRouter, we can position it <strong>above or alongside OpenRouter</strong>.</p>
+
+  <pre>
+L0  Gemini Flash-Lite        $0.001/req  google         — Q&A
+L1  DeepSeek V4 Flash        $0.001/req  deepseek       — default worker
+L2  OpenRouter               $0.002/req  openrouter     — 200+ catalog fallback
+<b>L2b OpenCode Go (MiMo-V2.5) $0.001/req  opencode-go    — T2 backup (same price)</b>
+<b>L3  OpenCode Go (Qwen3.7+)$0.002/req  opencode-go    — mid-tier open model</b>
+L4  GPT-4o-mini              $0.003/req  openai         — fallback
+L5  Claude Haiku 4.5         $0.017/req  anthropic      — BLOCKED cheap-only
+L6  Claude Sonnet 4.6        $0.050/req  anthropic      — BLOCKED cheap-only
+  </pre>
+
+  <h4>Strategy B: Add OpenCode Go as a separate provider within the rotation</h4>
+  <p>Simpler: add <code>opencode-go</code> to <code>_CHEAP_ROTATION</code> alongside DeepSeek/OpenRouter/OpenAI.</p>
+
+  <pre>
+_CHEAP_ROTATION = [
+    EscalationLevel.DEEPSEEK,
+    EscalationLevel.OPENROUTER,
+    <b>EscalationLevel.OPENCODE_GO,   # NEW</b>
+    EscalationLevel.OPENAI,
+]
+  </pre>
+
+  <h3>Model Routing Map (Detailed)</h3>
+
+  <table>
+    <tr><th>AWOS Tier</th><th>Go Model</th><th>When to use</th><th>Why valuable</th></tr>
+    <tr>
+      <td><span class="tier-label t2">T2</span></td>
+      <td><strong>MiMo-V2.5</strong> ($0.14/$0.28)</td>
+      <td>Backup when DeepSeek API is down. Same pricing.</td>
+      <td>Zero extra cost on Go subscription. Same price tier.</td>
+    </tr>
+    <tr>
+      <td><span class="tier-label t3">T3</span></td>
+      <td><strong>Qwen3.7 Plus</strong> ($0.40/$1.60)</td>
+      <td>Mid-complexity coding tasks. Better than Gemini Flash for code.</td>
+      <td>2.8× cheaper than Gemini Flash for potentially higher quality. Strong open model.</td>
+    </tr>
+    <tr>
+      <td><span class="tier-label t3">T3</span></td>
+      <td><strong>DeepSeek V4 Pro</strong> ($1.74/$3.48)</td>
+      <td>Thinking mode for complex single-file problems.</td>
+      <td>Cheaper than direct DS Pro (same price actually). Backup to direct.</td>
+    </tr>
+    <tr>
+      <td><span class="tier-label t4">T4</span></td>
+      <td><strong>Kimi K2.7 Code</strong> ($0.95/$4.00)</td>
+      <td>Complex multi-file code tasks. Code-specialized.</td>
+      <td>Matches Gemini Pro pricing range. Code-specialized architecture.</td>
+    </tr>
+    <tr>
+      <td><span class="tier-label t4">T4</span></td>
+      <td><strong>Qwen3.7 Max</strong> ($2.50/$7.50)</td>
+      <td>Hardest problems within Go limits. Max-quality open model.</td>
+      <td>Cheaper than Sonnet ($3/$15). Strong reasoning benchmarked model.</td>
+    </tr>
+  </table>
+
+  <h3>Cost Comparison: Go vs Direct APIs (monthly)</h3>
+  <table>
+    <tr><th>Use case</th><th>Go cost</th><th>Direct API cost</th><th>Winner</th></tr>
+    <tr><td>DeepSeek Flash only (~10K req/mo)</td><td>$10/mo (flat)</td><td>~$2-5/mo</td><td>Direct cheaper</td></tr>
+    <tr><td>MiMo-V2.5 backup (2K req/mo)</td><td>$10/mo (shared)</td><td>N/A (no direct key)</td><td>Go wins</td></tr>
+    <tr><td>Qwen3.7 Plus (1K req/mo)</td><td>$10/mo (shared)</td><td>N/A (no direct key)</td><td>Go wins</td></tr>
+    <tr><td>Kimi K2.7 Code (500 req/mo)</td><td>$10/mo (shared)</td><td>N/A (no direct key)</td><td>Go wins</td></tr>
+    <tr><td>All of the above mixed</td><td><strong>$10/mo total</strong></td><td>~$5-15/mo</td><td><strong>Go wins</strong></td></tr>
+  </table>
+
+  <div class="win">
+    <strong>Bottom line:</strong> Go is $10/month flat. If you use even 2 models you don't have direct keys for, it pays for itself. The real value is <strong>access + reliability + fallback</strong> — not per-request cost savings on DeepSeek Flash.
+  </div>
+
+  <h3>Limits Risk</h3>
+  <div class="risk-med">
+    <strong>Go limits can be hit.</strong> $60/month cap means ~8,000 DeepSeek Flash requests or ~1,000 Qwen3.7 Max requests before hitting the wall. <strong>Mitigation:</strong> Use Go as a backup/rotation tier, not the primary workhorse. Track usage and fall back to direct APIs when Go limits are near exhaustion.
+  </div>
+</section>
+
+<!-- ═══ INTEGRATION ═══ -->
+<section id="integration" class="tab-panel">
+  <h2>How to Integrate OpenCode Go into AWOS</h2>
+
+  <h3>1. Add Provider to Escalation Engine</h3>
+  <p>Add new <code>EscalationLevel.OPENCODE_GO</code> to <code>escalation_engine.py</code>:</p>
+  <pre>class EscalationLevel(Enum):
+    GEMINI_FLASH = 0
+    DEEPSEEK     = 1
+    <b>OPENCODE_GO  = 2  # NEW — replaces old slot</b>
+    OPENROUTER   = 3  # shifted
+    OPENAI       = 4  # shifted
+    HAIKU        = 5  # shifted
+    SONNET       = 6  # shifted</pre>
+
+  <p>Add ModelSpec for Go models, e.g.:</p>
+  <pre>ModelSpec(
+    level=EscalationLevel.OPENCODE_GO,
+    name="OpenCode Go (MiMo-V2.5)",
+    model_id="opencode-go/mimo-v2.5",
+    provider="opencode-go",
+    cost_per_req=0.001,
+    input_price=0.14,
+    output_price=0.28,
+    min_complexity=0,
+    min_budget_remaining=0.0,
+    min_failures=0,
+),</pre>
+
+  <h3>2. Add Model Specs (3-4 Go models at different tiers)</h3>
+  <p>We want multiple Go models at different ladder rungs. Best approach: <strong>model rotation within the same provider level</strong>, similar to how <code>_CHEAP_ROTATION</code> works. Or just add the Go API as a fallback at each tier level.</p>
+
+  <h3>3. Add Worker Provider</h3>
+  <p>In <code>react_worker.py</code> / <code>worker.py</code>, add an <code>opencode-go</code> provider branch similar to <code>openrouter</code>:</p>
+  <pre>if provider == "opencode-go":
+    client = OpenAI(
+        base_url="https://opencode.ai/zen/go/v1",
+        api_key=os.getenv("OPENCODE_GO_API_KEY"),
+    )</pre>
+
+  <h3>4. Add to ML Router Action Space</h3>
+  <p>In <code>ml_router.py</code>, bump <code>N_ACTIONS</code> from 6 to 7, add <code>"opencode_go"</code> to <code>ACTION_NAMES</code>.</p>
+
+  <h3>5. Add API Key to Env</h3>
+  <p><code>OPENCODE_GO_API_KEY</code> — get from <a href="https://opencode.ai/auth">opencode.ai/auth</a> after subscribing to Go.</p>
+
+  <h2>Open Questions</h2>
+  <ul>
+    <li><strong>Need benchmark data for newer Go models</strong> — Qwen3.7 Plus/Max, GLM-5.2, MiMo-V2.5-Pro. Their Aider polyglot scores are unknown. Need to run or find benchmarks before committing to tier placement.</li>
+    <li><strong>Does Go support streaming?</strong> — OpenAI-compatible API suggests yes, but need to verify for AWOS streaming paths.</li>
+    <li><strong>Can Go handle AWOS context sizes?</strong> — DeepSeek Flash handles 128K. Most models have 128K-1M context windows. Need to check per-model limits.</li>
+  </ul>
+
+  <h2>Priority for AWOS</h2>
+  <p><strong>HIGH:</strong> Add OpenCode Go as a <em>fallback/rotation provider</em> within the existing T2/T3 tiers. This is easy and protects against DeepSeek API outages.</p>
+  <p><strong>MEDIUM:</strong> Add Qwen3.7 Plus and Kimi K2.7 Code as specific model options after benchmark validation.</p>
+  <p><strong>LOW:</strong> Use Zen free models (data privacy concerns). Skip Zen PAYG for proprietary models.</p>
+</section>
+
+<!-- ═══ SOURCES ═══ -->
+<section id="sources" class="tab-panel">
+  <h2>External Sources</h2>
+  <table>
+    <tr><th>Source</th><th>Key finding</th><th>Accessed</th></tr>
+    <tr>
+      <td><a href="https://opencode.ai/go">opencode.ai/go</a></td>
+      <td>Go subscription: $5/mo first, $10/mo after. 13 open coding models, $60/mo usage cap. API via opencode.ai/zen/go/v1</td>
+      <td>2026-07-09</td>
+    </tr>
+    <tr>
+      <td><a href="https://opencode.ai/docs/go/">opencode.ai/docs/go/</a></td>
+      <td>Full model list, pricing table, usage limits, endpoints, privacy policy</td>
+      <td>2026-07-09</td>
+    </tr>
+    <tr>
+      <td><a href="https://opencode.ai/zen">opencode.ai/zen</a></td>
+      <td>Zen PAYG: curated models, free limited-time models, team features, BYOK</td>
+      <td>2026-07-09</td>
+    </tr>
+    <tr>
+      <td><a href="https://opencode.ai/docs/zen/">opencode.ai/docs/zen/</a></td>
+      <td>Full Zen pricing table, all models with prices per MTok, deprecation schedule</td>
+      <td>2026-07-09</td>
+    </tr>
+    <tr>
+      <td><a href="https://opencode.ai">opencode.ai</a></td>
+      <td>OpenCode overview: open-source AI coding agent by Anomaly, 160K GitHub stars</td>
+      <td>2026-07-09</td>
+    </tr>
+    <tr>
+      <td><a href="https://github.com/anomalyco/opencode">github.com/anomalyco/opencode</a></td>
+      <td>Source code, config, providers supported</td>
+      <td>2026-07-09</td>
+    </tr>
+    <tr>
+      <td>Existing <code>docs/research/model_tiering.html</code></td>
+      <td>DeepSeek V4 Flash 70.2% polyglot at $0.14/MTok. Kimi K2 59.1% via OpenRouter.</td>
+      <td>2026-05-13</td>
+    </tr>
+  </table>
+
+  <h2>Related</h2>
+  <ul>
+    <li><a href="model_tiering.html">[[model_tiering]]</a> — existing AWOS model tier research</li>
+    <li><a href="openrouter_integration.md">[[openrouter_integration]]</a> — how OpenRouter was integrated</li>
+    <li><a href="../../memories/repo/models_pricing_catalog.md">[[models_pricing_catalog]]</a> — canonical pricing truth</li>
+    <li><a href="../../memories/repo/project_structure.md">[[project_structure]]</a> — active phase and metrics</li>
+  </ul>
+</section>
+
+</main>
+
+<footer>
+  <button class="copy-btn secondary" onclick="copyJSON()">Copy as JSON</button>
+  <button class="copy-btn" onclick="copyPrompt()">Copy as Prompt</button>
+</footer>
+<script>
+function showTab(id, btn) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('nav.tabs button').forEach(b => b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  btn.classList.add('active');
+}
+function copyPrompt(){const t=document.querySelector('.tab-panel.active').innerText;navigator.clipboard.writeText('# Research: OpenCode Go + Zen Tiering\n\n'+t).then(()=>{const b=document.querySelector('.copy-btn:last-child');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy as Prompt',1500)})}
+function copyJSON(){const s={};document.querySelectorAll('.tab-panel').forEach(p=>{s[p.id]=p.innerText.trim()});navigator.clipboard.writeText(JSON.stringify({doc:'research',feature:'opencode_go_tiering',...s},null,2)).then(()=>{const b=document.querySelector('.copy-btn.secondary');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy as JSON',1500)})}
+</script>
+</body>
+</html>

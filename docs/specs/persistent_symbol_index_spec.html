@@ -1,0 +1,32 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Persistent Symbol Index Spec</title></head>
+<body>
+<h1>Persistent Symbol Index — Spec</h1>
+<p><strong>Goal:</strong> persistent stale-aware symbol index + hierarchical retrieval feeding the ReAct worker, grounded disk-first.</p>
+<h2>Files affected</h2>
+<ul>
+<li><code>scaffold/agent/symbol_index.py</code> — persistence, line-numbered bodies, compact map.</li>
+<li><code>scaffold/agent/index_retrieval.py</code> — new retrieval layer (disk-grounded, bounded).</li>
+<li><code>scaffold/agent/repo_map.py</code> — ingest retrieval into ReAct context.</li>
+<li><code>types/tests</code> — new unit tests, demo, proof.</li>
+</ul>
+<h2>Atomic steps</h2>
+<ol>
+<li>Extend <code>FileSymbols</code> with <code>symbol_lines</code> (name → (start,end)) recorded by both parsers.</li>
+<li>Record per-file mtime during build.</li>
+<li>Implement <code>save()</code>/<code>load()</code>/<code>rebuild_changed()</code> (mtime reparse + deleted-file drop, atomic JSON).</li>
+<li>Add <code>compact_map()</code> (bounded one-line-per-symbol) and <code>symbol_windows()</code>.</li>
+<li>Add <code>index_retrieval.py</code>: resolve index entries disk-first; emit compact map + read windows; drop stale.</li>
+<li>Wire into <code>enrich_with_repo_map</code>.</li>
+<li>Tests + live proof.</li>
+</ol>
+<h2>Behavior contract</h2>
+<ul>
+<li>Index path never authoritative: every entry grounded via <code>resolve_with_evidence</code> before injection.</li>
+<li>Rebuild only changed files; deleted files removed.</li>
+<li>Map bounded (default 40 symbols); windows point to exact lines.</li>
+<li>Failure to load persist → fallback to fresh build, never crash.</li>
+</ul>
+<h2>Live proof</h2>
+<p>Build once, verify <code>.awos/symbol_index.json</code> exists, second build loads from cache, modifies file → reparse happens, stale path resolves to real disk file.</p>
+</body></html>

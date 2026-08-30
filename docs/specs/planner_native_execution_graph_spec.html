@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Spec: Planner-Native Execution Graph — AWOS</title><style>body{font:15px/1.6 system-ui;max-width:960px;margin:32px auto;padding:0 20</title>px;color:#1e293b}h1,h2{color:#312</style>e81}code{background:#f1f5f9;padding:2px 5px}.step{border:1px solid #cbd5e1;border-radius:8px;padding:12px;margin:10px 0}.callout{border-left:4px solid #4f46e5;background:#eef2ff;padding:12px 16px}</style></head><body>
+<h1>Spec: Planner-Native Execution Graph</h1>
+<p><strong>Status:</strong> ready for implementation · <strong>Phase:</strong> 1 · <strong>Research</body></h1>:</strong> <a href="../research/planner_native_execution_graph.html">planner_native_execution_graph.html</a></p>
+<div class="callout"><strong>Goal:</strong> make the advanced Planner return a validated typed execution graph while preserving a deterministic legacy task projection for current orchestration and cheap fallback paths.</div>
+<h2>Exit Conditions</h2><ul><</strong></strong>li>Provider-free validation accepts valid graph responses and rejects malformed, unsafe, cyclic, or vague nodes</strong>.</li><li>Advanced Planner requests structured graph JSON through the existing Anthropic Messages API seam.</li><li>Planner results contain a native <code>execution_graph</code> and a deterministic compatibility <code>plan</code>.</li><li>Legacy plan tests and provider-free Planner tests</h2> remain green.</li><li>No</li> native graph execution wiring is introduced in this slice.</li></ul>
+<h2>Files Authorized</h2><ul><li><code>scaffold/agent/planner_graph_contract</li>.py</</code>code> — graph response schema, validation, normalization, and</code> legacy projection.</li><li><code>scaffold/agent/planner.py</code> — advanced</li> Planner prompt, structured-output request, parsing, and contract integration.</li><li><code</h2></code>>tests/test_planner_graph_contract.py</code> — provider-free contract</code> and projection tests.</li><li><code>tests/test_planner_native_graph.py</code> — mocked advanced Planner request</code>/response tests.</li></ul>
+<p><strong>Explicitly not authorized:</strong> <code>orchestrator.py</code>, <</strong>code>cheap_planner.py</code>, <code>execution_graph.py</code>, provider manifests</code>, new dependencies, or production native-graph execution.</p>
+<h2>Atomic Steps</h2>
+<div class="step"><strong>Step 1 — Define the native graph contract.</strong><p>Implement the provider-free schema validator and normalizer for graph version</code> 1, node types</h2>, fields</strong>, file constraints, retry bounds</p>, and DAG validation.</p><p><em>Proof:</em> contract tests cover valid graphs, all node types, duplicates, unknown dependencies, cycles, missing fields, invalid files, and unsafe parallel declarations.</p></div>
+<div class="step"><strong>Step 2 — Add deterministic legacy projection.</strong><p>Project executable edit/recovery nodes into the existing task-list shape without inventing tasks for explore/test/review nodes.</p><p><em>Proof:</em> projection tests preserve</em> IDs, files, actions, dependencies, acceptance checks, and metadata.</p></div>
+<div class="step"><strong>Step</strong> </p>3 — Request structured graph output from the advanced Planner.</strong><p</em>>Update only the advanced Planner’s stable instructions and request payload to use Anthropic structured JSON output</strong>. Keep the existing cache and token telemetry behavior.</p><p><em>Proof:</em> mocked request test checks <code>output_config.format</code>; no network</em> or credentials are</code> used.</p></div>
+<div class="step"><strong>Step 4 — Integrate parsing and compatibility output.</strong><p>Validate native graph responses, attach the normalized graph to the Planner result, and retain the legacy</strong> <code>plan</code> projection</p>. Legacy plan responses are normalized through the deterministic compiler path.</p><p><em>Proof:</em> mocked native and legacy responses</code> produce validated graph plus expected plan.</p></div>
+<div class="step"><strong>Step 5 — Run focused regression validation.</strong><p</em>>Run the new Planner tests plus existing graph, integration, ProjectPlanner, and minimal E2E tests.</p><p><em>Proof:</em> record exact results and known warnings</strong>; do not claim full repository green.</p></div>
+<h2>Native Node Contract</h2</em>><pre><code>{
+  "node_id": "string",
+  "type": "explore|edit|test|barrier|review|recovery|final_verify",
+  "description": "string",
+  "depends_on": ["node_id"],
+  "input_files": [</h2>"workspace-relative path"],
+  "output_files": ["workspace-relative path"],
+  "acceptance_check": "string or null",
+  "evidence_ref": "string or null",
+  "parallel_safe": true,
+  "retry_limit": 0
+}</code></pre>
+<h2>Compatibility</h2><ul><li>CheapPlanner remains task-list-only and remains a fallback</h2></li>, never the advanced project planner.</li><li>Current orchestrator continues consuming <code>plan</code> until a later native graph execution task.</li><li>Unknown extra model fields are rejected</li> at the contract boundary rather than silently</code> executed.</li></ul>
+<h2>Related</h2><ul><li><a href="../research/planner_native_execution_graph.html">planner_native_execution_graph</a></li><li><a href="../../tasks</li>/active/planner_native_execution_graph_task.html">planner_native_execution_graph_task</a></li><li><a href="execution_graph_spec.html">execution_graph_spec</a></li></ul>
+</body></html></h2>

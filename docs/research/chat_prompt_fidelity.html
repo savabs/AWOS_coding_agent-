@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Research: Chat Prompt Fidelity — AWOS</title>
+<style>body{font:15px/1.6 system-ui;max-width:900px;margin:32px auto;padding:0 20px;color:#1e293b}h1,h2{color:#312e81}h2{border-bottom:1px solid #ddd;padding-bottom:5px}code,pre{background:#f1f5f9;padding:2px 5px}pre{padding:12px;overflow:auto}.callout{border-left:4px solid #4f46e5;background:#eef2ff;padding:10px 14px}.risk{border-left:4px solid #ef4444;background:#fef2f2;padding:10px 14px}</style>
+</head>
+<body>
+<header><p>AWOS / docs / research</p><h1>Chat Prompt Fidelity</h1><p><strong>Status:</strong> active · <strong>Phase:</strong> 1 · <strong>Observed:</strong> 2026-07-27</p></header>
+<section>
+<h2>Research question</h2>
+<p>Why can the Electron chat experience appear disconnected from the exact text a user entered, and how can AWOS expose the transformation from raw input to provider request to rendered response?</p>
+<div class="callout"><strong>Scope boundary:</strong> This is a chat observability and context-continuity problem. It is not a request to improve the model's strategic answer about AWOS's moat.</div>
+</section>
+<section>
+<h2>Current architecture</h2>
+<ul>
+<li><code>gui/static/chat.js</code> reads the textarea value, trims it, sends <code>message</code>, <code>mode</code>, and <code>chat_id</code> to <code>/api/chat/stream</code>, and renders saved user content.</li>
+<li><code>gui/server.py</code> routes the request to <code>GuiChatService.handle_message_stream()</code>.</li>
+<li><code>scaffold/agent/gui_chat.py</code> stores chat sessions in <code>.awos/gui_chat/</code>, builds QA prompts, selects the provider, and emits streaming metadata.</li>
+<li><code>_conversation_messages()</code> exists and excludes the just-appended message, but the OpenCode Go branch currently constructs only a system message and a new user message.</li>
+<li><code>gui/static/shared.js</code> applies lightweight Markdown formatting to visible message content. It does not replace ordinary words such as <code>not</code> with <code>now</code>.</li>
+</ul>
+<h2>Verified data flow</h2>
+<ol>
+<li>User enters text in <code>#chat-input</code>.</li>
+<li><code>sendMessage()</code> trims it and posts the raw value as <code>message</code>.</li>
+<li><code>GuiChatService</code> appends the raw value to the chat session.</li>
+<li><code>_build_qa_prompt()</code> adds project context and the question label.</li>
+<li>OpenCode Go receives <code>messages=[system,user]</code> rather than the full session message list.</li>
+<li>The provider response is streamed and saved as the assistant message.</li>
+<li>The UI renders stored message content, but does not expose the provider prompt or transformation stages.</li>
+</ol>
+<h2>Observed incident</h2>
+<p>Chat record <code>.awos/gui_chat/chat_ab963c5a.json</code> preserves the exact input:</p>
+<pre>lets not tell me whats the most important moat of this project</pre>
+<p>The assistant response begins by assuming that <code>not</code> means <code>now</code>. The saved record reports <code>mode=auto</code>, <code>handler=qa</code>, <code>model=qwen3.7-plus</code>, and <code>memory_turns=0</code>. The raw user message was not rewritten in storage; the user cannot currently see the prompt/context boundary that led to the interpretation.</p>
+<h2>Key findings</h2>
+<ul>
+<li><strong>Input preservation:</strong> the saved user content is exact.</li>
+<li><strong>Rendering:</strong> the current Markdown renderer changes formatting only; it is not the source of semantic word substitution.</li>
+<li><strong>Provider continuity:</strong> the OpenCode Go request path omits prior chat turns despite the service's session-memory design.</li>
+<li><strong>Observability:</strong> the UI shows the final response but not a distinct raw-input, normalized-input, provider-prompt, or interpretation view.</li>
+<li><strong>Mode:</strong> the incident was routed to QA, not the coding-agent execution path.</li>
+</ul>
+<h2>Risks</h2>
+<div class="risk"><strong>High:</strong> Users cannot distinguish their exact request from provider interpretation.<br><strong>Mitigation:</strong> Preserve and render raw input separately; expose provider prompt metadata without exposing hidden chain-of-thought.</div>
+<div class="risk"><strong>Medium:</strong> Adding full prompts to every message can expose secrets or create excessive UI noise.<br><strong>Mitigation:</strong> redact secret-like values, show a collapsed developer-only trace, and expose structured metadata rather than private reasoning.</div>
+<h2>Research conclusion</h2>
+<p>The first fix should establish a glass-box message contract: raw user input is immutable, provider request context is inspectable in a bounded trace, interpretation is labeled as interpretation, and the OpenCode path receives the intended conversation history. This strengthens AWOS's evidence-first interface without coupling the kernel to one provider.</p>
+<h2>Internal sources</h2>
+<ul>
+<li><code>VISION.md</code> — glass-box observability, quality floor, and provider-agnostic architecture.</li>
+<li><code>scaffold/agent/gui_chat.py</code> — chat storage, prompt assembly, provider branches, and session history.</li>
+<li><code>gui/static/chat.js</code> — input submission and message rendering.</li>
+<li><code>gui/static/shared.js</code> — Markdown-only display transformation.</li>
+<li><code>.awos/gui_chat/chat_ab963c5a.json</code> — exact live incident record.</li>
+</ul>
+<h2>Related</h2>
+<ul><li><a href="../specs/chat_prompt_fidelity_spec.html">chat_prompt_fidelity_spec.html</a></li><li><a href="../../tasks/active/chat_prompt_fidelity.html">chat_prompt_fidelity.html</a></li><li><a href="../../VISION.md">VISION.md</a></li></ul>
+</body></html>
