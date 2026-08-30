@@ -37,6 +37,254 @@ class SessionStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+class SandboxPolicyError(ValueError):
+    """Raised when a sandbox policy is unknown, unsafe, or unsupported."""
+
+
+class SandboxIsolationLevel(str, Enum):
+    WORKTREE_ONLY = "worktree_only"
+    PROCESS_ISOLATED = "process_isolated"
+    CONTAINER_ISOLATED = "container_isolated"
+
+
+class SandboxNetworkMode(str, Enum):
+    DENY = "deny"
+    ALLOW_DECLARED = "allow_declared"
+
+
+class SandboxApprovalMode(str, Enum):
+    RISKY = "risky"
+    ALWAYS = "always"
+
+
+@dataclass(frozen=True)
+class SandboxPolicy:
+    """Explicit, serializable execution policy with conservative defaults.
+
+    This schema describes the guarantee the executor must provide; it does not
+    create isolation by itself.  Unsupported guarantees are rejected rather
+    than silently downgraded.
+    """
+
+    policy_version: str = "sandbox_v1"
+    isolation_level: SandboxIsolationLevel | str = SandboxIsolationLevel.WORKTREE_ONLY
+    network_mode: SandboxNetworkMode | str = SandboxNetworkMode.DENY
+    writable_roots: tuple[str, ...] = ("workspace",)
+    command_timeout_seconds: int = 30
+    max_output_bytes: int = 1_048_576
+    approval_mode: SandboxApprovalMode | str = SandboxApprovalMode.RISKY
+
+    def __post_init__(self) -> None:
+        try:
+            object.__setattr__(self, "isolation_level", SandboxIsolationLevel(self.isolation_level))
+            object.__setattr__(self, "network_mode", SandboxNetworkMode(self.network_mode))
+            object.__setattr__(self, "approval_mode", SandboxApprovalMode(self.approval_mode))
+        except (TypeError, ValueError) as exc:
+            raise SandboxPolicyError(f"unknown sandbox policy value: {exc}") from exc
+
+        if self.policy_version != "sandbox_v1":
+            raise SandboxPolicyError(f"unsupported sandbox policy version: {self.policy_version!r}")
+        if self.isolation_level == SandboxIsolationLevel.CONTAINER_ISOLATED:
+            raise SandboxPolicyError(
+                "container_isolated is unavailable: no container backend is active"
+            )
+        if not self.writable_roots:
+            raise SandboxPolicyError("writable_roots must contain at least one root")
+        if any(not isinstance(root, str) or not root.strip() for root in self.writable_roots):
+            raise SandboxPolicyError("writable_roots must contain non-empty strings")
+        for root in self.writable_roots:
+            normalized = root.replace("\\", "/")
+            if normalized.startswith("/") or normalized == ".." or normalized.startswith("../"):
+                raise SandboxPolicyError(f"writable root escapes workspace: {root!r}")
+        if isinstance(self.command_timeout_seconds, bool) or self.command_timeout_seconds <= 0:
+            raise SandboxPolicyError("command_timeout_seconds must be positive")
+        if isinstance(self.max_output_bytes, bool) or self.max_output_bytes <= 0:
+            raise SandboxPolicyError("max_output_bytes must be positive")
+
+    def to_dict(self) -> dict[str, object]:
+        approval_mode = SandboxApprovalMode(self.approval_mode)
+        isolation_level = SandboxIsolationLevel(self.isolation_level)
+        network_mode = SandboxNetworkMode(self.network_mode)
+        return {
+            "approval_mode": approval_mode.value,
+            "command_timeout_seconds": self.command_timeout_seconds,
+            "isolation_level": isolation_level.value,
+            "max_output_bytes": self.max_output_bytes,
+            "network_mode": network_mode.value,
+            "policy_version": self.policy_version,
+            "writable_roots": list(self.writable_roots),
+        }
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))
+
+    def digest(self) -> str:
+        return hashlib.sha256(self.to_json().encode("utf-8")).hexdigest()
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SandboxPolicy":
+        if not isinstance(data, dict):
+            raise SandboxPolicyError("sandbox policy must be an object")
+        expected = {
+            "approval_mode",
+            "command_timeout_seconds",
+            "isolation_level",
+            "max_output_bytes",
+            "network_mode",
+            "policy_version",
+            "writable_roots",
+        }
+        unknown = set(data) - expected
+        missing = expected - set(data)
+        if unknown or missing:
+            raise SandboxPolicyError(
+                f"sandbox policy schema mismatch; unknown={sorted(unknown)}, missing={sorted(missing)}"
+            )
+        roots = data["writable_roots"]
+        if not isinstance(roots, (list, tuple)):
+            raise SandboxPolicyError("writable_roots must be a list")
+        return cls(
+            policy_version=data["policy_version"],
+            isolation_level=data["isolation_level"],
+            network_mode=data["network_mode"],
+            writable_roots=tuple(roots),
+            command_timeout_seconds=data["command_timeout_seconds"],
+            max_output_bytes=data["max_output_bytes"],
+            approval_mode=data["approval_mode"],
+        )
+
+
+class SandboxPathError(ValueError):
+    """Raised when a requested path cannot be proven inside the workspace."""
+
+
+def resolve_workspace_path(workspace_root: str | Path, requested_path: str | Path) -> Path:
+    """Resolve a workspace-relative path without permitting filesystem escape."""
+    root = Path(workspace_root).resolve(strict=True)
+    requested = Path(requested_path)
+    requested_text = str(requested_path)
+    normalized = requested_text.replace("\\", "/")
+
+    if "\x00" in requested_text:
+        raise SandboxPathError("path contains NUL")
+    if requested.is_absolute() or normalized.startswith("/"):
+        raise SandboxPathError(f"absolute path is not allowed: {requested_path!r}")
+    parts = tuple(part for part in normalized.split("/") if part not in ("", "."))
+    if ".." in parts:
+        raise SandboxPathError(f"path traversal is not allowed: {requested_path!r}")
+
+    candidate = (root / Path(*parts)).resolve(strict=False)
+    if candidate != root and root not in candidate.parents:
+        raise SandboxPathError(f"path escapes workspace: {requested_path!r}")
+    return candidate
+
+
+@dataclass(frozen=True)
+class SandboxSecurityEvidence:
+    """Append-only audit record for one sandbox action attempt."""
+
+    evidence_id: str = ""
+    session_id: str = ""
+    policy_version: str = ""
+    policy_digest: str = ""
+    isolation_level: str = ""
+    action_digest: str = ""
+    approval_status: str = ""
+    command: str = ""
+    arguments: tuple[str, ...] = ()
+    paths: tuple[str, ...] = ()
+    environment_identity: dict[str, str] = field(default_factory=dict)
+    result_status: str = "unknown"
+    exit_status: Optional[int] = None
+    timed_out: bool = False
+    output_digest: Optional[str] = None
+    cleanup_state: str = "unknown"
+    observed_at: str = ""
+
+    def __post_init__(self) -> None:
+        required = {
+            "evidence_id": self.evidence_id,
+            "session_id": self.session_id,
+            "policy_version": self.policy_version,
+            "policy_digest": self.policy_digest,
+            "isolation_level": self.isolation_level,
+            "action_digest": self.action_digest,
+            "command": self.command,
+            "observed_at": self.observed_at,
+        }
+        missing = [name for name, value in required.items() if not value]
+        if missing:
+            raise ValueError(f"sandbox evidence missing required fields: {', '.join(missing)}")
+        if self.approval_status not in {"approved", "denied", "not_required"}:
+            raise ValueError(f"unknown approval status: {self.approval_status!r}")
+        if self.result_status not in {"success", "failed", "timed_out", "unknown"}:
+            raise ValueError(f"unknown result status: {self.result_status!r}")
+        if self.cleanup_state not in {"active", "cleaned", "cleanup_failed", "unknown"}:
+            raise ValueError(f"unknown cleanup state: {self.cleanup_state!r}")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "action_digest": self.action_digest,
+            "approval_status": self.approval_status,
+            "arguments": list(self.arguments),
+            "cleanup_state": self.cleanup_state,
+            "command": self.command,
+            "environment_identity": dict(self.environment_identity),
+            "evidence_id": self.evidence_id,
+            "exit_status": self.exit_status,
+            "isolation_level": self.isolation_level,
+            "observed_at": self.observed_at,
+            "output_digest": self.output_digest,
+            "paths": list(self.paths),
+            "policy_digest": self.policy_digest,
+            "policy_version": self.policy_version,
+            "result_status": self.result_status,
+            "session_id": self.session_id,
+            "timed_out": self.timed_out,
+        }
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SandboxSecurityEvidence":
+        expected = set(cls.__dataclass_fields__)
+        if set(data) != expected:
+            raise ValueError("sandbox evidence schema mismatch")
+        values = dict(data)
+        values["arguments"] = tuple(values["arguments"])
+        values["paths"] = tuple(values["paths"])
+        return cls(**values)
+
+
+class SandboxEvidenceStore:
+    """Durable append-only JSONL store for sandbox security evidence."""
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def record(self, evidence: SandboxSecurityEvidence) -> None:
+        line = evidence.to_json() + "\n"
+        with self.path.open("a", encoding="utf-8") as handle:
+            handle.write(line)
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    def read(self) -> list[SandboxSecurityEvidence]:
+        if not self.path.exists():
+            return []
+        records = []
+        for line_number, line in enumerate(self.path.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.strip():
+                continue
+            try:
+                records.append(SandboxSecurityEvidence.from_dict(json.loads(line)))
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                raise ValueError(f"invalid sandbox evidence at {self.path}:{line_number}") from exc
+        return records
+
+
 @dataclass
 class SessionProgress:
     completed_task_ids: list[Any] = field(default_factory=list)
@@ -67,6 +315,10 @@ class SessionSandbox:
     feature_id: Optional[str] = None
     worktree_path: Optional[str] = None
     branch: Optional[str] = None
+    isolation_level: str = "worktree_only"
+    policy_version: Optional[str] = None
+    policy_digest: Optional[str] = None
+    cleanup_state: str = "not_created"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -80,6 +332,10 @@ class SessionSandbox:
             feature_id=data.get("feature_id"),
             worktree_path=data.get("worktree_path"),
             branch=data.get("branch"),
+            isolation_level=data.get("isolation_level", "worktree_only"),
+            policy_version=data.get("policy_version"),
+            policy_digest=data.get("policy_digest"),
+            cleanup_state=data.get("cleanup_state", "not_created"),
         )
 
 
@@ -102,6 +358,7 @@ class RuntimeSession:
     cancel_requested: bool = False
     goal_hash: str = ""
     pause_reason: Optional[str] = None  # "STAGNATION", "BUDGET", "USER", etc.
+    execution_graph: Optional[dict[str, Any]] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -122,6 +379,7 @@ class RuntimeSession:
             "parent_session_id": self.parent_session_id,
             "cancel_requested": self.cancel_requested,
             "pause_reason": self.pause_reason,
+            "execution_graph": self.execution_graph,
         }
 
     @classmethod
@@ -136,6 +394,9 @@ class RuntimeSession:
         spent = budget.get("spent_usd", 0.0)
 
         goal = data.get("goal", "")
+        execution_graph = data.get("execution_graph")
+        if execution_graph is not None and not isinstance(execution_graph, dict):
+            raise ValueError("execution_graph must be an object or null")
         return cls(
             schema_version=int(data.get("schema_version", _SCHEMA_VERSION)),
             session_id=data.get("session_id", ""),
@@ -154,11 +415,73 @@ class RuntimeSession:
             cancel_requested=bool(data.get("cancel_requested", False)),
             goal_hash=data.get("goal_hash") or goal_hash(goal),
             pause_reason=data.get("pause_reason"),
+            execution_graph=execution_graph,
         )
 
 
 class SessionResumeError(Exception):
     """Raised when resume preconditions are not met."""
+
+
+class _SessionLease:
+    """Process-exclusive admission lease for a session transition."""
+
+    def __init__(self, path: Path, session_id: str) -> None:
+        self.path = path
+        self.session_id = session_id
+        self._held = False
+
+    def acquire(self) -> None:
+        payload = json.dumps({"pid": os.getpid(), "session_id": self.session_id})
+        try:
+            fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError as exc:
+            if self._owner_is_dead():
+                try:
+                    self.path.unlink()
+                except FileNotFoundError:
+                    pass
+                return self.acquire()
+            raise SessionResumeError(
+                f"session {self.session_id} is already being resumed"
+            ) from exc
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except Exception:
+            self.path.unlink(missing_ok=True)
+            raise
+        self._held = True
+
+    def release(self) -> None:
+        if self._held:
+            self.path.unlink(missing_ok=True)
+            self._held = False
+
+    def _owner_is_dead(self) -> bool:
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            pid = data["pid"]
+            if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+                return False
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+            return False
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        except (OSError, PermissionError):
+            return False
+        return False
+
+    def __enter__(self) -> "_SessionLease":
+        self.acquire()
+        return self
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        self.release()
 
 
 def _now_iso() -> str:
@@ -275,16 +598,17 @@ class RuntimeSessionStore:
 
     def begin_resume(self, session_id: str) -> RuntimeSession:
         """Load a paused session and mark it running."""
-        session = self.load(session_id)
-        if session.status != SessionStatus.PAUSED:
-            raise SessionResumeError(
-                f"cannot resume session {session_id} with status {session.status.value}"
-            )
-        session.status = SessionStatus.RUNNING
-        session.paused_at = None
-        session.cancel_requested = False
-        self.save(session)
-        return session
+        with _SessionLease(self._lease_path(session_id), session_id):
+            session = self.load(session_id)
+            if session.status != SessionStatus.PAUSED:
+                raise SessionResumeError(
+                    f"cannot resume session {session_id} with status {session.status.value}"
+                )
+            session.status = SessionStatus.RUNNING
+            session.paused_at = None
+            session.cancel_requested = False
+            self.save(session)
+            return session
 
     def fork(self, session_id: str, new_goal: Optional[str] = None) -> RuntimeSession:
         parent = self.load(session_id)
@@ -367,6 +691,10 @@ class RuntimeSessionStore:
     def _path(self, session_id: str) -> Path:
         validate_session_id(session_id)
         return self.sessions_dir / f"{session_id}.json"
+
+    def _lease_path(self, session_id: str) -> Path:
+        validate_session_id(session_id)
+        return self.sessions_dir / f"{session_id}.lease"
 
     def _atomic_write(self, path: Path, data: dict[str, Any]) -> None:
         tmp = path.with_suffix(path.suffix + ".tmp")

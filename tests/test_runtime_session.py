@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
+from scaffold.agent.execution_graph import ExecutionGraph
 from scaffold.agent.runtime_session import (
     RuntimeSession,
     RuntimeSessionStore,
@@ -201,6 +200,35 @@ class TestResume:
         with pytest.raises(SessionResumeError):
             store.begin_resume(session.session_id)
 
+    def test_resume_rejects_existing_live_lease_without_mutating_session(self, store):
+        session = store.create("lease contention")
+        store.finalize(session, SessionStatus.PAUSED)
+        lease = store._lease_path(session.session_id)
+
+        with lease.open("x", encoding="utf-8") as handle:
+            import json
+            import os
+
+            json.dump({"pid": os.getpid(), "session_id": session.session_id}, handle)
+            with pytest.raises(SessionResumeError, match="already being resumed"):
+                store.begin_resume(session.session_id)
+
+        assert store.load(session.session_id).status == SessionStatus.PAUSED
+
+    def test_resume_reclaims_dead_owner_lease(self, store):
+        session = store.create("dead lease")
+        store.finalize(session, SessionStatus.PAUSED)
+        lease = store._lease_path(session.session_id)
+        lease.write_text(
+            '{"pid": 2147483647, "session_id": "' + session.session_id + '"}',
+            encoding="utf-8",
+        )
+
+        resumed = store.begin_resume(session.session_id)
+
+        assert resumed.status == SessionStatus.RUNNING
+        assert not lease.exists()
+
 
 class TestCancel:
     def test_request_cancel_flag(self, store):
@@ -236,6 +264,33 @@ class TestFromDict:
         assert session.progress.completed_task_ids == []
         assert session.budget["spent_usd"] == 0.0
         assert session.sandbox.enabled is False
+        assert session.execution_graph is None
+
+    def test_execution_graph_round_trip(self):
+        graph = ExecutionGraph.from_plan_tasks(
+            [{"task_id": 1, "file": "app.py", "action": "Implement feature"}]
+        )
+        session = RuntimeSession(
+            session_id="rs_" + "e" * 12,
+            goal="graph persistence",
+            execution_graph=graph.to_dict(),
+        )
+
+        restored = RuntimeSession.from_dict(session.to_dict())
+
+        assert restored.execution_graph == graph.to_dict()
+        assert restored.execution_graph is not None
+        assert ExecutionGraph.from_dict(restored.execution_graph).get_node("task:1") is not None
+
+    def test_invalid_execution_graph_payload_is_rejected(self):
+        with pytest.raises(ValueError, match="execution_graph must be an object"):
+            RuntimeSession.from_dict(
+                {
+                    "session_id": "rs_" + "f" * 12,
+                    "goal": "invalid graph",
+                    "execution_graph": ["not an object"],
+                }
+            )
 
     def test_from_dict_invalid_status_defaults_pending(self):
         session = RuntimeSession.from_dict(
