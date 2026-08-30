@@ -25,6 +25,8 @@ class GitManager:
         self.original_branch: Optional[str] = None
         self.file_backups: Dict[str, str] = {}   # path → original content
         self.modified_files: list = []            # files touched this run
+        self.worktree_path: Optional[Path] = None
+        self.cleanup_state: str = "not_created"
 
     # ── Git helpers ───────────────────────────────────────────────────────────
 
@@ -52,6 +54,44 @@ class GitManager:
         return out.strip() if ok and out.strip() else "main"
 
     # ── Public API ────────────────────────────────────────────────────────────
+
+    def create_worktree(self, worktree_path: str | Path) -> Path:
+        """Create a disposable detached worktree and record its ownership."""
+        if not self.is_git_repo or self.git_root is None:
+            raise RuntimeError("disposable worktree requires a git repository")
+        if self.worktree_path is not None and self.cleanup_state != "cleaned":
+            raise RuntimeError("a sandbox worktree is already active")
+
+        path = Path(worktree_path).resolve()
+        if path.exists():
+            raise FileExistsError(f"sandbox worktree already exists: {path}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        ok, output = self._git("worktree", "add", "--detach", str(path), "HEAD")
+        if not ok or not path.exists():
+            self.cleanup_state = "create_failed"
+            raise RuntimeError(f"could not create sandbox worktree: {output}")
+
+        self.worktree_path = path
+        self.cleanup_state = "active"
+        return path
+
+    def cleanup_worktree(self) -> bool:
+        """Remove the owned worktree; repeated cleanup is safe and observable."""
+        if self.cleanup_state == "cleaned":
+            return True
+        if self.worktree_path is None:
+            self.cleanup_state = "cleaned"
+            return True
+        if not self.is_git_repo:
+            self.cleanup_state = "cleanup_failed"
+            return False
+
+        ok, _ = self._git("worktree", "remove", "--force", str(self.worktree_path))
+        if ok and not self.worktree_path.exists():
+            self.cleanup_state = "cleaned"
+            return True
+        self.cleanup_state = "cleanup_failed"
+        return False
 
     def setup(self, goal: str) -> str:
         """
@@ -144,4 +184,6 @@ class GitManager:
             "original_branch": self.original_branch,
             "files_backed_up": len(self.file_backups),
             "files_modified": len(self.modified_files),
+            "worktree_path": str(self.worktree_path) if self.worktree_path else None,
+            "cleanup_state": self.cleanup_state,
         }

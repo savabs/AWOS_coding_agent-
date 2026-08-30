@@ -18,17 +18,101 @@ from typing import Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
+
+def _test_result_failed(test_result: Any) -> bool:
+    """Return whether executed test evidence disproves task correctness."""
+    if test_result is None or getattr(test_result, "no_tests_found", False):
+        return False
+    return bool(
+        getattr(test_result, "timed_out", False)
+        or getattr(test_result, "failed", 0) > 0
+        or getattr(test_result, "errors", 0) > 0
+        or getattr(test_result, "pass_rate", 0.0) < 1.0
+    )
+
+
+def validate_plan_contract(
+    tasks: list[dict],
+    project_root: str,
+    snapshot: dict[str, Any] | None = None,
+    *,
+    strict: bool = False,
+) -> tuple[bool, list[str]]:
+    """Validate grounded, atomic planner output before execution."""
+    root = Path(project_root).resolve()
+    from .core.path_contract import PathContractError, require_grounded_path
+
+    grounded = set((snapshot or {}).get("candidate_files", []))
+    grounded.update((snapshot or {}).get("hit_files", []))
+    grounded.update((snapshot or {}).get("test_files", []))
+    errors: list[str] = []
+    for index, task in enumerate(tasks):
+        label = f"task {task.get('task_id', index + 1)}"
+        file_value = task.get("file")
+        files_value = task.get("files")
+        if not isinstance(file_value, str) or not file_value.strip():
+            errors.append(f"{label} must identify one primary file")
+            continue
+        if isinstance(files_value, list) and len(files_value) != 1:
+            errors.append(f"{label} must change one primary file")
+        is_create = str(task.get("task_type", "")).lower() in {"create", "create_file"}
+        try:
+            if strict:
+                canonical_file = require_grounded_path(
+                    file_value,
+                    root,
+                    snapshot,
+                    allow_create=is_create,
+                )
+            else:
+                from .core.path_contract import canonical_workspace_path
+
+                canonical_file = canonical_workspace_path(file_value, root)
+                if not is_create and not (root / canonical_file).is_file():
+                    raise PathContractError(f"workspace file does not exist: {canonical_file}")
+        except (PathContractError, OSError) as exc:
+            canonical_file = None
+            errors.append(f"{label} {exc}")
+        if strict:
+            if not task.get("acceptance_check"):
+                errors.append(f"{label} requires acceptance_check")
+            if not task.get("evidence_ref"):
+                errors.append(f"{label} requires evidence_ref")
+            evidence_ref = str(task.get("evidence_ref", ""))
+            snapshot_id = str((snapshot or {}).get("snapshot_id", ""))
+            if snapshot_id and evidence_ref not in {f"snapshot:{snapshot_id}", snapshot_id}:
+                errors.append(f"{label} evidence_ref is not linked to the exploration snapshot")
+            if canonical_file is not None and grounded:
+                canonical_grounded = set()
+                for candidate in grounded:
+                    try:
+                        from .core.path_contract import canonical_workspace_path
+
+                        canonical_grounded.add(canonical_workspace_path(candidate, root))
+                    except (PathContractError, OSError):
+                        continue
+                if canonical_file not in canonical_grounded:
+                    errors.append(
+                        f"{label} file is not grounded in exploration evidence: {file_value}"
+                    )
+    return not errors, errors
+
+
 try:
     from .agent_state_manager import AgentStateManager
     from .cheap_planner import CheapPlanner
     from .confidence_calibrator import ConfidenceCalibrator
     from .core.observability import ObservabilityStore, TaskSpan, new_span
+    from .core.debug_journal import DebugJournal
+    from .core.debug_runtime import findings_from_test_result, findings_from_verifier_result
+    from .core.debug_schema import DebugEvidence, EvidenceKind, FailureStage
     from .core.performance_tracker import ToolPerformanceTracker
     from .core.reasoning import ReasoningSession, ReasoningTrace, ReasoningTraceStore
     from .critic_engine import CriticEngine, max_critic_rounds
     from .dag_executor import DAGExecutor
     from .error_pattern_store import ErrorPatternStore, make_error_pattern
     from .escalation_engine import EscalationEngine, is_cheap_only
+    from .fixed_provider import FIXED_MODEL
     from .example_store import ExampleStore
     from .exploration_phase import enrich_codebase_context, exploration_enabled, run_exploration
     from .git_manager import GitManager
@@ -51,6 +135,7 @@ try:
     from .symbol_index import SymbolIndex
     from .task_decomposer import TaskDecomposer
     from .test_runner import TestRunner
+    from .token_tracker import TokenTracker
     from .verifier import Verifier
     from .worker import Worker
 except ImportError:
@@ -58,12 +143,16 @@ except ImportError:
     from cheap_planner import CheapPlanner
     from confidence_calibrator import ConfidenceCalibrator
     from core.observability import ObservabilityStore, new_span
+    from core.debug_journal import DebugJournal
+    from core.debug_runtime import findings_from_test_result, findings_from_verifier_result
+    from core.debug_schema import DebugEvidence, EvidenceKind, FailureStage
     from core.performance_tracker import ToolPerformanceTracker
     from core.reasoning import ReasoningSession, ReasoningTrace, ReasoningTraceStore
     from critic_engine import CriticEngine
     from dag_executor import DAGExecutor
     from error_pattern_store import ErrorPatternStore, make_error_pattern
     from escalation_engine import EscalationEngine, is_cheap_only
+    from fixed_provider import FIXED_MODEL
     from example_store import ExampleStore
     from exploration_phase import enrich_codebase_context, exploration_enabled, run_exploration
     from git_manager import GitManager
@@ -85,6 +174,7 @@ except ImportError:
     from symbol_index import SymbolIndex
     from task_decomposer import TaskDecomposer
     from test_runner import TestRunner
+    from token_tracker import TokenTracker
     from verifier import Verifier
     from worker import Worker
 
@@ -104,14 +194,28 @@ class Orchestrator:
         Args:
             tracker: TokenTracker instance for cost monitoring (optional)
         """
-        self.planner = CheapPlanner()
+        print("[INIT] Orchestrator starting...", flush=True)
+        configured_budget = float(
+            os.getenv("AWOS_BUDGET_USD", os.getenv("AWOS_MONTHLY_BUDGET", "20.0"))
+        )
+        benchmark_mode = os.getenv("AWOS_BENCHMARK_MODE", "").lower() in ("1", "true", "yes")
+        if tracker is None and benchmark_mode:
+            tracker = TokenTracker(monthly_budget=configured_budget)
+            logger.info("[budget] created trial-local tracker with cap=$%.2f", configured_budget)
+        # Project-level decomposition belongs to the advanced Planner. Keep it
+        # lazy so explicit cheap-only and provider-free execution paths do not
+        # require advanced-planner credentials during construction.
+        self.planner = None
+        self._planner_label = "Planner"
         self.worker = Worker()
         self.verifier = Verifier()
+        print("[INIT] Core components done", flush=True)
         self.tracker = tracker
         self.performance = ToolPerformanceTracker(persist_dir=".awos")
         self.trace_store = ReasoningTraceStore(persist_dir=".awos/traces")
         self.integration_reviewer = IntegrationReviewer()
         self.reward_store = RewardStore()
+        print("[INIT] RewardStore ready", flush=True)
         self.ml_router = build_ml_router(
             min_samples=20,
             weights_path=Path(".awos") / "linucb_weights.pkl",
@@ -122,13 +226,14 @@ class Orchestrator:
 
         # ── Warm-start LinUCB from historical RewardStore data ───────────
         replayed = self.ml_router.warm_start(self.reward_store, max_episodes=50)
+        print(f"[INIT] ML router warm-started ({replayed} episodes)", flush=True)
         logger.info(
             "[orchestrator] warm-started LinUCB with %d episodes (ready=%s, updates=%d)",
             replayed, self.ml_router.is_ready(), self.ml_router.total_updates(),
         )
 
         self.escalation = EscalationEngine(
-            monthly_budget=getattr(tracker, 'monthly_budget', 20.0) if tracker else 20.0,
+            monthly_budget=getattr(tracker, 'monthly_budget', configured_budget) if tracker else configured_budget,
             performance_tracker=self.performance,
             ml_router=self.ml_router,
         )
@@ -171,6 +276,7 @@ class Orchestrator:
             project_root=".",
             env_file=".env",
         )
+        print("[INIT] Self-learning components done", flush=True)
         self._pause_requested = False
         self._runtime_session = None
         self._runtime_store = None
@@ -208,6 +314,65 @@ class Orchestrator:
     def _runtime_session_enabled(self) -> bool:
         return os.getenv("AWOS_RUNTIME_SESSION", "").lower() in ("1", "true", "yes")
 
+    def _debug_emit(
+        self,
+        event_type: str,
+        *,
+        task_id: str = "",
+        payload: Optional[dict] = None,
+        stage: FailureStage = FailureStage.SESSION,
+    ) -> None:
+        """Best-effort bridge from live orchestration into the debug journal.
+
+        Debug persistence is diagnostic infrastructure: a write failure must be
+        visible in logs but must never change the agent's execution result.
+        """
+        journal = getattr(self, "_debug_journal", None)
+        if journal is None:
+            return
+        try:
+            event_id = f"{journal.session_id}:{event_type}:{task_id}:{time.time_ns()}"
+            evidence = DebugEvidence(
+                evidence_id=f"event:{event_id}",
+                kind=EvidenceKind.DIRECT_OBSERVATION,
+                source="orchestrator",
+                observed_at=time.time(),
+                source_ref=f"orchestrator:{event_type}",
+                event_id=event_id,
+                payload={
+                    "normalized_event_type": event_type,
+                    "session_id": journal.session_id,
+                    "task_id": task_id,
+                    "failure_stage": stage.value,
+                    **(payload or {}),
+                },
+            )
+            journal.append_evidence(evidence)
+        except Exception as exc:
+            logger.warning("[debug] failed to append %s evidence: %s", event_type, exc)
+
+    def _debug_record_result(self, evidence, findings) -> None:
+        """Persist adapter output without allowing diagnostics to interrupt work."""
+        journal = getattr(self, "_debug_journal", None)
+        if journal is None:
+            return
+        try:
+            journal.append_evidence(evidence)
+            for finding in findings:
+                journal.append_finding(finding)
+        except Exception as exc:
+            logger.warning("[debug] failed to append result evidence: %s", exc)
+
+    def _debug_finish(self, *, success: bool, tasks_completed: int = 0, tasks_failed: int = 0) -> None:
+        self._debug_emit(
+            "session_done",
+            payload={
+                "success": success,
+                "tasks_completed": tasks_completed,
+                "tasks_failed": tasks_failed,
+            },
+        )
+
     def _cheap_call(self, prompt: str) -> str:
         """
         Fire a cheap LLM call for critique generation (Phase 5B ReflexionMemory).
@@ -220,53 +385,16 @@ class Orchestrator:
         for attempt in range(3):
             try:
                 worker = self.worker
-                # Try OpenCode Go FIRST (has quota, cheapest)
                 if hasattr(worker, "opencode_client") and worker.opencode_client is not None:
                     response = worker.opencode_client.chat.completions.create(
-                        model="qwen3.7-plus",  # Qwen for reasoning quality on aux calls
+                        model=FIXED_MODEL,
                         messages=[{"role": "user", "content": prompt}],
-                        max_tokens=4096,  # Enough for reasoning + content
+                        max_tokens=4096,
                         temperature=0.3,
                     )
                     return response.choices[0].message.content or ""
-                # Try DeepSeek / OpenAI-compatible
-                if hasattr(worker, "client") and worker.client is not None:
-                    response = worker.client.chat.completions.create(
-                        model="deepseek-chat",
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=120,
-                        temperature=0.3,
-                    )
-                    return response.choices[0].message.content or ""
-                # Fallback: OpenRouter (cheap, diverse models)
-                if hasattr(worker, "openrouter_client") and worker.openrouter_client is not None:
-                    response = worker.openrouter_client.chat.completions.create(
-                        model="openrouter/auto",
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=120,
-                        temperature=0.3,
-                        extra_headers={
-                            "HTTP-Referer": "https://github.com/999-sbpatel/AWOS_coding_agent",
-                            "X-OpenRouter-Title": "AWOS",
-                        },
-                    )
-                    return response.choices[0].message.content or ""
-                # Fallback: OpenAI mini (cheap-only — no Haiku)
-                if hasattr(worker, "openai_client") and worker.openai_client is not None:
-                    response = worker.openai_client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=120,
-                        temperature=0.3,
-                    )
-                    return response.choices[0].message.content or ""
-                if not is_cheap_only() and hasattr(worker, "anthropic_client") and worker.anthropic_client is not None:
-                    response = worker.anthropic_client.messages.create(
-                        model="claude-haiku-4-5",
-                        max_tokens=120,
-                        messages=[{"role": "user", "content": prompt}],
-                    )
-                    return response.content[0].text or ""
+                # The initial product has no alternate provider path.
+                return ""
             except Exception as exc:
                 last_exc = exc
                 if attempt < 2:
@@ -522,6 +650,17 @@ class Orchestrator:
             return best
         return max(candidates, key=lambda c: c.get("_critic_confidence", 0.0))
 
+    def _pause_for_stagnation(self, task_id: Any) -> None:
+        """Stop execution after repeated failures without requiring runtime sessions."""
+        print("\n[BREAKER] Stagnation detected: same error pattern repeating")
+        print(f"[BREAKER] Task {task_id} stuck — stopping execution")
+        if self._runtime_session is not None and self._runtime_store is not None:
+            from .runtime_session import SessionStatus
+            self._runtime_session.pause_reason = "STAGNATION"
+            print(f"[BREAKER] Review: awos sessions show {self._runtime_session.session_id}")
+            self._runtime_store.finalize(self._runtime_session, SessionStatus.PAUSED)
+        self._pause_requested = True
+
     def execute_feature(
         self,
         goal: str,
@@ -532,6 +671,11 @@ class Orchestrator:
         resume: bool = False,
         session_id: Optional[str] = None,
         auto_approve_plan: bool = False,
+        chat_id: Optional[str] = None,
+        trace_id: Optional[str] = None,
+        extra_context: Optional[str] = None,
+        cancel_event: Any = None,
+        on_runtime_session: Any = None,
     ) -> dict:
         """
         Execute a complete feature request end-to-end.
@@ -554,6 +698,7 @@ class Orchestrator:
             }
         """
 
+        print("[EXEC] execute_feature() starting", flush=True)
         start_time = time.time()
         self.execution_log = []  # Reset log for each run
 
@@ -561,6 +706,13 @@ class Orchestrator:
         session = ReasoningSession(
             session_id=f"orch_{uuid.uuid4().hex[:8]}",
             goal=goal,
+        )
+        # The debugger is run-scoped and does not depend on GUI/runtime-session
+        # flags, so every normal orchestrator invocation leaves an audit bundle.
+        self._debug_journal = DebugJournal(session_id=session.session_id)
+        self._debug_emit(
+            "session_start",
+            payload={"goal": goal, "codebase_root": str(Path(codebase_root).resolve())},
         )
 
         # ── Phase 6: VectorMemory — index codebase for semantic retrieval ──
@@ -607,6 +759,8 @@ class Orchestrator:
                 self._runtime_session = self._runtime_store.create(goal, repo_root)
             self._runtime_session.status = SessionStatus.RUNNING
             self._runtime_store.save(self._runtime_session)
+            if on_runtime_session:
+                on_runtime_session(self._runtime_session.session_id)
             print(
                 f"[SESSION] Runtime session {self._runtime_session.session_id} "
                 f"({self._runtime_session.status.value})"
@@ -618,7 +772,12 @@ class Orchestrator:
             except ImportError:
                 from gui_events import GuiEventBus
             _session_id = self._runtime_session.session_id
-            self._gui_bus = GuiEventBus(_session_id, goal)
+            self._gui_bus = GuiEventBus(
+                _session_id,
+                goal,
+                chat_id=chat_id,
+                trace_id=trace_id,
+            )
             self._gui_bus.emit_session_start(goal, repo_root)
             print(f"[EVENTS] GuiEventBus started for session {_session_id}")
 
@@ -650,6 +809,9 @@ class Orchestrator:
         # Auto-discover codebase context if not provided
         if codebase_context is None:
             codebase_context = self._discover_codebase_context(codebase_root)
+        if extra_context:
+            codebase_context = dict(codebase_context or {})
+            codebase_context["chat_context"] = extra_context
 
         # Build/Load symbol index for cross-file awareness (Phase 3)
         _index_path = str(Path(".awos") / "symbol_index.json")
@@ -717,6 +879,7 @@ class Orchestrator:
             print(f"[EXPLORE] {n_hits} grep hit(s) across {n_files} file(s)")
 
         # Phase 1: Planning — skip if caller already built a cheap plan
+        native_execution_graph = None
         if pre_planned_tasks is not None:
             tasks = pre_planned_tasks
             print(f"\n[PLANNER] Using pre-built plan: {len(tasks)} tasks")
@@ -727,25 +890,60 @@ class Orchestrator:
             try:
                 with _live.spinner("Planning…"):
                     if is_cheap_only():
+                        self._planner_label = "CheapPlanner"
                         plan = CheapPlanner().plan(
                             goal, codebase_context, tracker=self.tracker,
                         )
                         print("[PLANNER] Cheap-only mode — using OpenCode Go (DeepSeek V4 Flash)")
                     else:
+                        # The advanced planner owns project decomposition. Cheap
+                        # models remain task-level solvers, not the default
+                        # authority for breaking down a large goal.
+                        self.planner = Planner()
+                        self._planner_label = "Planner"
                         plan = self.planner.plan(
                             goal, codebase_context,
                             tracker=self.tracker,
                             existing_goal=self._active_goal_graph,
                         )
             except Exception as _primary_err:
+                if os.getenv("AWOS_NATIVE_PLANNER_REQUIRED", "") == "1":
+                    self._planner_label = "NativePlannerUnavailable"
+                    logger.error("[planner] native Planner failed; refusing CheapPlanner fallback: %s", _primary_err)
+                    self._debug_emit(
+                        "planning_error",
+                        payload={"error": str(_primary_err), "native_planner_required": True},
+                        stage=FailureStage.PLANNING,
+                    )
+                    self._debug_finish(success=False)
+                    return {
+                        "success": False,
+                        "goal": goal,
+                        "tasks_completed": 0,
+                        "tasks_failed": 0,
+                        "total_tasks": 0,
+                        "total_cost": 0,
+                        "execution_log": self.execution_log,
+                        "errors": [f"Native Planner failed: {str(_primary_err)}"],
+                        "time_elapsed": time.time() - start_time,
+                        "debug_session_id": session.session_id,
+                    }
                 logger.warning("[planner] primary planner failed (%s) — trying CheapPlanner", _primary_err)
                 try:
                     with _live.spinner("Planning (fallback)…"):
-                        plan = CheapPlanner().plan(
+                        self.planner = CheapPlanner()
+                        self._planner_label = "CheapPlanner (fallback)"
+                        plan = self.planner.plan(
                             goal, codebase_context, tracker=self.tracker,
                         )
                     print("[PLANNER] Fell back to CheapPlanner (OpenCode Go / DeepSeek V4 Flash)")
                 except Exception as e:
+                    self._debug_emit(
+                        "planning_error",
+                        payload={"error": f"primary={_primary_err}; fallback={e}"},
+                        stage=FailureStage.PLANNING,
+                    )
+                    self._debug_finish(success=False)
                     return {
                         "success": False,
                         "goal": goal,
@@ -755,12 +953,88 @@ class Orchestrator:
                         "total_cost": 0,
                         "execution_log": self.execution_log,
                         "errors": [f"Planning failed (primary: {_primary_err}; fallback: {str(e)})"],
-                        "time_elapsed": time.time() - start_time
+                        "time_elapsed": time.time() - start_time,
+                        "debug_session_id": session.session_id,
                     }
+
             tasks = plan.get("plan", [])
+            persisted_graph = (
+                self._runtime_session.execution_graph
+                if resume and self._runtime_session is not None
+                else None
+            )
+            graph_payload = persisted_graph or plan.get("execution_graph")
+            if graph_payload is not None:
+                try:
+                    native_execution_graph = self._restore_native_execution_graph(
+                        graph_payload
+                    )
+                    print(
+                        f"[PLANNER] Using native execution graph: "
+                        f"{len(native_execution_graph.nodes)} nodes"
+                    )
+                except Exception as exc:
+                    reason = f"Native execution graph rejected: {exc}"
+                    self._debug_emit(
+                        "plan_invalid",
+                        payload={"errors": [reason]},
+                        stage=FailureStage.PLANNING,
+                    )
+                    self._debug_finish(success=False)
+                    return {
+                        "success": False,
+                        "goal": goal,
+                        "tasks_completed": 0,
+                        "tasks_failed": 0,
+                        "total_tasks": 0,
+                        "execution_log": [{"task_id": "graph", "status": "failed", "reason": reason}],
+                        "errors": [reason],
+                        "time_elapsed": time.time() - start_time,
+                        "debug_session_id": session.session_id,
+                    }
+            if _exploration_data:
+                snapshot_ref = f"snapshot:{_exploration_data.get('snapshot_id', '')}"
+                tasks = [
+                    {
+                        **task,
+                        "acceptance_check": task.get("acceptance_check", "repository test suite"),
+                        "evidence_ref": task.get("evidence_ref", snapshot_ref),
+                    }
+                    for task in tasks
+                ]
             print(f"[PLANNER] Generated {len(tasks)} tasks:")
             for task in tasks:
                 print(f"  Task {task['task_id']}: {task['action']} (complexity: {task['complexity']})")
+
+        if native_execution_graph is not None:
+            plan_valid, plan_errors = True, []
+        else:
+            plan_valid, plan_errors = validate_plan_contract(
+                tasks,
+                codebase_root,
+                _exploration_data,
+                strict=pre_planned_tasks is None and bool(_exploration_data),
+            )
+        if not plan_valid:
+            reason = "Plan contract rejected: " + "; ".join(plan_errors)
+            self._debug_emit(
+                "plan_invalid",
+                payload={"errors": plan_errors, "snapshot_id": _exploration_data.get("snapshot_id", "")},
+                stage=FailureStage.PLANNING,
+            )
+            self._debug_finish(success=False)
+            return {
+                "success": False,
+                "goal": goal,
+                "tasks_completed": 0,
+                "tasks_failed": len(tasks),
+                "total_tasks": len(tasks),
+                "total_cost": 0,
+                "execution_log": [{"task_id": "plan", "status": "failed", "reason": reason}],
+                "errors": [reason],
+                "time_elapsed": time.time() - start_time,
+                "debug_session_id": session.session_id,
+            }
 
         # ── GuiEventBus: plan_generated ─────────────────────────────────────
         if self._gui_bus:
@@ -796,8 +1070,8 @@ class Orchestrator:
                     plan=tasks,
                     files_to_modify=files_to_modify,
                     acceptance_criteria=acceptance,
-                    interactive=True,
-                    auto_approve=auto_approve_plan,
+                    interactive=os.getenv("AWOS_BENCHMARK_MODE", "").lower() not in ("1", "true", "yes"),
+                    auto_approve=auto_approve_plan or os.getenv("AWOS_BENCHMARK_MODE", "").lower() in ("1", "true", "yes"),
                 )
 
                 if not review_result.approved:
@@ -808,6 +1082,12 @@ class Orchestrator:
                     elif review_result.rejection_reason:
                         print(f"\n[PLAN REVIEW] Plan rejected: {review_result.rejection_reason}")
 
+                    self._debug_emit(
+                        "plan_rejected",
+                        payload={"feedback": review_result.feedback, "reason": review_result.rejection_reason},
+                        stage=FailureStage.PLANNING,
+                    )
+                    self._debug_finish(success=False)
                     return {
                         "success": False,
                         "goal": goal,
@@ -824,11 +1104,29 @@ class Orchestrator:
                 print("\n[PLAN REVIEW] ✓ Plan approved, proceeding with execution")
 
             except Exception as exc:
-                logger.warning("[PLAN REVIEW] Failed (%s), proceeding without review", exc)
+                logger.warning("[PLAN REVIEW] Failed (%s)", exc)
+                if os.getenv("AWOS_PLAN_REVIEW_FAIL_CLOSED", "").lower() in ("1", "true", "yes"):
+                    self._debug_emit(
+                        "plan_review_error",
+                        payload={"error": type(exc).__name__},
+                        stage=FailureStage.PLANNING,
+                    )
+                    self._debug_finish(success=False)
+                    return {
+                        "success": False,
+                        "goal": goal,
+                        "tasks_completed": 0,
+                        "tasks_failed": len(tasks),
+                        "total_tasks": len(tasks),
+                        "total_cost": 0,
+                        "execution_log": [{"task_id": "plan_review", "status": "failed", "reason": str(exc)[:300]}],
+                        "errors": [f"Plan review unavailable: {type(exc).__name__}"],
+                        "time_elapsed": time.time() - start_time,
+                    }
 
         _live.planning_done(
             tasks,
-            model="CheapPlanner" if is_cheap_only() else self.planner.__class__.__name__,
+            model="CheapPlanner" if is_cheap_only() else self._planner_label,
         )
 
         if self._runtime_session and self._runtime_store:
@@ -837,17 +1135,33 @@ class Orchestrator:
 
         # ── Phase 5C: Ensure every task has a GoalNode in the graph ──
         if hasattr(self, "_active_goal_graph") and self._active_goal_graph is not None:
+            goal_tasks = list(tasks)
+            if native_execution_graph is not None:
+                goal_tasks = [
+                    {
+                        "task_id": node.node_id,
+                        "action": node.description,
+                        "file": (node.output_files[0] if node.output_files else "native://" + node.node_id),
+                        "node_type": node.node_type.value,
+                    }
+                    for node in native_execution_graph.nodes.values()
+                ]
             self.project_planner.ensure_task_nodes(
-                self._active_goal_graph, tasks, session_id=session.session_id,
+                self._active_goal_graph, goal_tasks, session_id=session.session_id,
             )
 
         # Phase 2: Execution with Retry + Simplification
         decomposition_depth = 0
-        max_decomposition = 2
+        benchmark_mode = os.getenv("AWOS_BENCHMARK_MODE", "").lower() in ("1", "true", "yes")
+        max_decomposition = 0 if benchmark_mode else 2
         replan_depth = 0
-        max_replan = 1
+        max_replan = 0 if benchmark_mode else 1
         tasks_to_run = list(tasks)
-        total_tasks_all_cycles = len(tasks)
+        total_tasks_all_cycles = (
+            len(native_execution_graph.nodes)
+            if native_execution_graph is not None
+            else len(tasks)
+        )
 
         # ── Multi-session resume ────────────────────────────────────────
         self._current_state = self.state_manager.load(goal)
@@ -873,9 +1187,16 @@ class Orchestrator:
         # ── Budget hard stop before execution ───────────────────────────
         from scaffold.agent.budget_ledger import get_ledger
         _ledger = get_ledger()
-        _allowed, _reason = _ledger.check_budget(estimated_cost=0.01)
+        _budget_cap = float(os.getenv("AWOS_BUDGET_USD", os.getenv("AWOS_MONTHLY_BUDGET", "20.0")))
+        _allowed, _reason = _ledger.check_budget(estimated_cost=0.01, monthly_budget=_budget_cap)
         if not _allowed:
             print(f"[BUDGET] ⛔ Cannot start execution — {_reason}")
+            self._debug_emit(
+                "budget_block",
+                payload={"error": _reason},
+                stage=FailureStage.EXECUTION,
+            )
+            self._debug_finish(success=False, tasks_failed=len(tasks))
             return {
                 "success": False,
                 "goal": goal,
@@ -885,6 +1206,7 @@ class Orchestrator:
                 "execution_log": [{"task_id": "all", "status": "failed", "reason": _reason}],
                 "errors": [_reason],
                 "time_elapsed": time.time() - start_time,
+                "debug_session_id": session.session_id,
             }
         elif _reason:
             print(f"[BUDGET] {_reason}")
@@ -899,6 +1221,8 @@ class Orchestrator:
             _live=_live,
             _total_tasks=len(tasks),
             exploration=_exploration_data,
+            debug_journal=self._debug_journal,
+            native_execution_graph=native_execution_graph,
         )
 
         while True:
@@ -925,28 +1249,31 @@ class Orchestrator:
 
                     # ── Stagnation breaker ──────────────────────────────────
                     if self._check_stagnation(r):
-                        from .runtime_session import SessionStatus
-                        self._runtime_session.pause_reason = "STAGNATION"
-                        print("\n[BREAKER] Stagnation detected: same error pattern repeating")
-                        print(f"[BREAKER] Task {r['task_id']} stuck — auto-pausing session")
-                        print(f"[BREAKER] Review: awos sessions show {self._runtime_session.session_id}")
-                        self._runtime_store.finalize(self._runtime_session, SessionStatus.PAUSED)
-                        self._pause_requested = True
+                        self._pause_for_stagnation(r["task_id"])
                         tasks_completed = sum(1 for res in results if res["success"])
                         tasks_failed = sum(1 for res in results if not res["success"])
                         break
 
-            if self._pause_requested and self._runtime_session and self._runtime_store:
-                from .runtime_session import SessionStatus
-                print("[SESSION] Pause requested — stopping after last checkpoint")
-                self._runtime_store.finalize(self._runtime_session, SessionStatus.PAUSED)
+            if self._pause_requested:
+                if self._runtime_session is not None and self._runtime_store is not None:
+                    from .runtime_session import SessionStatus
+                    print("[SESSION] Pause requested — stopping after last checkpoint")
+                    self._runtime_store.finalize(self._runtime_session, SessionStatus.PAUSED)
                 tasks_completed = sum(1 for r in results if r["success"])
                 tasks_failed = sum(1 for r in results if not r["success"])
                 break
 
             cycle_completed = sum(1 for r in results if r["success"])
             cycle_failed = sum(1 for r in results if not r["success"])
-            failed_tasks = [r["task"] for r in results if not r["success"]]
+            failed_tasks = [r.get("task", {}) for r in results if not r["success"]]
+
+            # Native graphs already contain the Planner's dependency, verification,
+            # and recovery decisions. Do not apply legacy task replan/decomposition
+            # loops to graph-only nodes.
+            if native_execution_graph is not None:
+                tasks_completed = cycle_completed
+                tasks_failed = cycle_failed
+                break
 
             # ── Verify-fail → replan (before decomposition) ─────────────────
             if replan_depth < max_replan and os.getenv("AWOS_REPLAN_DISABLE", "").lower() not in (
@@ -974,6 +1301,14 @@ class Orchestrator:
                     replan_depth += 1
                     continue
 
+            # Test evidence is terminal for this execution: a discovered test
+            # failure/error/timeout has already rolled back the edit and must not
+            # trigger speculative replanning or decomposition.
+            if any(r.get("failure_kind") == "test_fail" for r in results):
+                tasks_completed = cycle_completed
+                tasks_failed = cycle_failed
+                break
+
             # ── Retry with Simplification ────────────────────────────────────
             if failed_tasks and decomposition_depth < max_decomposition:
                 new_tasks = []
@@ -996,6 +1331,11 @@ class Orchestrator:
 
         elapsed = time.time() - start_time
         overall_success = tasks_failed == 0
+        self._debug_finish(
+            success=overall_success,
+            tasks_completed=tasks_completed,
+            tasks_failed=tasks_failed,
+        )
 
         # ── Phase 1: Observability — print metrics summary after execution ──
         print()
@@ -1197,18 +1537,174 @@ class Orchestrator:
             "tasks_failed": tasks_failed,
             "total_tasks": len(tasks),
             "execution_log": self.execution_log,
+            "total_cost": self.tracker.get_budget_status().get("total_cost", 0.0) if self.tracker else 0.0,
             "errors": [log["reason"] for log in self.execution_log if log["status"] == "failed"],
             "time_elapsed": elapsed,
             "integration_review": review,
             "runtime_session_id": (
                 self._runtime_session.session_id if self._runtime_session else None
             ),
+            "debug_session_id": session.session_id,
             "worktree_path": (
                 self._runtime_session.sandbox.worktree_path
                 if self._runtime_session and self._runtime_session.sandbox.enabled
                 else None
             ),
         }
+
+    def _restore_native_execution_graph(self, payload: dict) -> Any:
+        """Validate and restore a Planner-owned native graph at runtime."""
+        try:
+            from .execution_graph import ExecutionGraph, ExecutionNode, ExecutionNodeType
+            from .planner_graph_contract import validate_planner_graph
+        except ImportError:
+            from execution_graph import ExecutionGraph, ExecutionNode, ExecutionNodeType
+            from planner_graph_contract import validate_planner_graph
+
+        normalized = validate_planner_graph(payload)
+        nodes = []
+        for raw in normalized["nodes"]:
+            node_type = ExecutionNodeType(raw["type"])
+            nodes.append(
+                ExecutionNode(
+                    node_id=raw["node_id"],
+                    node_type=node_type,
+                    description=raw["description"],
+                    depends_on=list(raw["depends_on"]),
+                    input_files=list(raw["input_files"]),
+                    output_files=list(raw["output_files"]),
+                    acceptance_check=raw["acceptance_check"],
+                    evidence_ref=raw["evidence_ref"],
+                    retry_limit=raw["retry_limit"],
+                    read_only=node_type not in {ExecutionNodeType.EDIT, ExecutionNodeType.RECOVERY},
+                    metadata={
+                        "planner_node": dict(raw),
+                        "planner_metadata": dict(raw.get("planner_metadata", {})),
+                    },
+                )
+            )
+        return ExecutionGraph(nodes)
+
+    @staticmethod
+    def _native_node_task(node: Any) -> dict:
+        """Convert one native edit/recovery node into an atomic worker task."""
+        raw = dict(node.metadata.get("planner_node", {}))
+        output_files = list(node.output_files)
+        if not output_files:
+            raise ValueError(f"native node {node.node_id} requires an output file")
+        planner_metadata = dict(node.metadata.get("planner_metadata", {}))
+        return {
+            "task_id": node.node_id,
+            "task_type": "edit_file",
+            "file": output_files[0],
+            "files": [output_files[0]],
+            "action": node.description,
+            "complexity": raw.get("complexity", "medium"),
+            "depends_on": list(node.depends_on),
+            "acceptance_check": node.acceptance_check,
+            "evidence_ref": node.evidence_ref,
+            "node_type": node.node_type.value,
+            "retry_limit": node.retry_limit,
+            "parallel_safe": bool(raw.get("parallel_safe", False)),
+            **{
+                field: planner_metadata[field]
+                for field in (
+                    "function_signature",
+                    "interface_contract",
+                    "constraints",
+                    "must_not",
+                    "example_call",
+                )
+                if field in planner_metadata
+            },
+        }
+
+    def _run_native_graph_batch(self, graph: Any, ctx: dict) -> List[dict]:
+        """Execute one Planner-native graph through the typed DAG runtime."""
+        runtime_session = getattr(self, "_runtime_session", None)
+        runtime_store = getattr(self, "_runtime_store", None)
+        if runtime_session is not None and runtime_store is not None:
+            runtime_session.execution_graph = graph.to_dict()
+            runtime_store.save(runtime_session)
+
+        def run_node(node: Any) -> dict:
+            from .execution_graph import ExecutionNodeType
+
+            if node.node_type in {ExecutionNodeType.EDIT, ExecutionNodeType.RECOVERY}:
+                result = self._execute_single_task(self._native_node_task(node), ctx)
+                return {**result, "task_id": node.node_id}
+
+            if node.node_type in {ExecutionNodeType.TEST, ExecutionNodeType.FINAL_VERIFY}:
+                runner = TestRunner(project_root=ctx["codebase_root"])
+                test_result = runner.run(changed_files=list(node.input_files))
+                passed = not _test_result_failed(test_result)
+                return {
+                    "task_id": node.node_id,
+                    "success": passed,
+                    "test_result": test_result,
+                    "evidence_ref": node.evidence_ref or f"test:{node.node_id}",
+                    "error": "native verification failed" if not passed else "",
+                }
+
+            if node.node_type == ExecutionNodeType.EXPLORE:
+                evidence = ctx.get("exploration") or {}
+                return {
+                    "task_id": node.node_id,
+                    "success": True,
+                    "evidence_ref": node.evidence_ref or f"exploration:{evidence.get('snapshot_id', node.node_id)}",
+                }
+
+            if node.node_type == ExecutionNodeType.REVIEW:
+                review = self.integration_reviewer.review(ctx["codebase_root"], self.execution_log)
+                passed = bool(review.get("passed", False))
+                return {
+                    "task_id": node.node_id,
+                    "success": passed,
+                    "evidence_ref": node.evidence_ref or f"review:{node.node_id}",
+                    "error": "native review failed" if not passed else "",
+                    "review": review,
+                }
+
+            # A barrier has no work of its own; dependency completion is its proof.
+            return {
+                "task_id": node.node_id,
+                "success": True,
+                "evidence_ref": node.evidence_ref or f"barrier:{node.node_id}",
+            }
+
+        def checkpoint_graph(current_graph: Any, _wave_results: list[dict]) -> None:
+            active_goal = getattr(self, "_active_goal_graph", None)
+            session = ctx.get("session")
+            session_id = getattr(session, "session_id", "native-graph")
+            if active_goal is not None:
+                for result in _wave_results:
+                    try:
+                        goal_node = self.project_planner.find_node_for_task(
+                            active_goal, result["node_id"]
+                        )
+                        if goal_node is not None:
+                            self.project_planner.update_node_status(
+                                active_goal,
+                                goal_node.goal_id,
+                                "completed" if result.get("success") else "failed",
+                                session_id,
+                                task_id=result["node_id"],
+                            )
+                    except Exception as exc:
+                        logger.warning("[GoalGraph] native node update failed: %s", exc)
+            if runtime_session is not None and runtime_store is not None:
+                runtime_session.execution_graph = current_graph.to_dict()
+                runtime_store.save(runtime_session)
+
+        results = DAGExecutor([]).execute_graph(
+            graph,
+            run_node,
+            on_wave_complete=checkpoint_graph,
+        )
+        if runtime_session is not None and runtime_store is not None:
+            runtime_session.execution_graph = graph.to_dict()
+            runtime_store.save(runtime_session)
+        return results
 
     # ── Batch / Parallel Execution ─────────────────────────────────────────────
 
@@ -1232,13 +1728,47 @@ class Orchestrator:
         def run_one(task):
             return self._execute_single_task(task, ctx)
 
+        if ctx.get("native_execution_graph") is not None:
+            return self._run_native_graph_batch(ctx["native_execution_graph"], ctx)
+
         if use_parallel:
-            dag = DAGExecutor(tasks)
+            try:
+                from .execution_graph import ExecutionGraph
+            except ImportError:
+                from execution_graph import ExecutionGraph
+
+            graph = ExecutionGraph.from_plan_tasks(tasks)
+            runtime_session = getattr(self, "_runtime_session", None)
+            runtime_store = getattr(self, "_runtime_store", None)
+            if runtime_session is not None and runtime_store is not None:
+                runtime_session.execution_graph = graph.to_dict()
+                runtime_store.save(runtime_session)
+
             print(
-                f"[DAG] {len(tasks)} task(s) → {dag.wave_count} wave(s), "
-                f"parallelism_score={dag.parallelism_score:.2f}"
+                f"[GRAPH] {len(tasks)} task(s) → "
+                f"{len(graph.ready_waves())} ready wave(s)"
             )
-            return dag.execute(run_one)
+
+            def run_node(node):
+                planner_task = node.metadata.get("planner_task")
+                if not isinstance(planner_task, dict):
+                    raise ValueError(f"graph node {node.node_id} has no planner task metadata")
+                return run_one(dict(planner_task))
+
+            def checkpoint_graph(current_graph, _wave_results):
+                if runtime_session is not None and runtime_store is not None:
+                    runtime_session.execution_graph = current_graph.to_dict()
+                    runtime_store.save(runtime_session)
+
+            results = DAGExecutor([]).execute_graph(
+                graph,
+                run_node,
+                on_wave_complete=checkpoint_graph,
+            )
+            if runtime_session is not None and runtime_store is not None:
+                runtime_session.execution_graph = graph.to_dict()
+                runtime_store.save(runtime_session)
+            return results
 
         # Sequential with context chaining (Ralph Loop pattern):
         # pass each task's applied change into the next task's context
@@ -1353,6 +1883,36 @@ class Orchestrator:
         if _live_t:
             _live_t.worker_done(success, n_edits=len(files_changed))
 
+        if test_result is not None:
+            try:
+                react_test_evidence, react_test_findings = findings_from_test_result(
+                    test_result,
+                    session_id=session.session_id,
+                    task_id=str(task_id),
+                    source_ref=f"test:{session.session_id}:{task_id}",
+                )
+                self._debug_record_result(react_test_evidence, react_test_findings)
+            except Exception as exc:
+                logger.warning("[debug] ReAct test result adaptation failed: %s", exc)
+        if test_result is not None and not getattr(test_result, "no_tests_found", True):
+            print(
+                f"[TASK {task_id}] Tests: {test_result.passed} passed, "
+                f"{test_result.failed} failed (pass_rate={test_result.pass_rate:.2%})"
+            )
+            if _live_t:
+                _live_t.test_result(test_result.passed, test_result.passed + test_result.failed)
+            # ── GuiEventBus: test_result ────────────────────────────────
+            if self._gui_bus:
+                self._gui_bus.emit_test_result(
+                    test_name=task.get("action", f"task_{task_id}"),
+                    passed=test_result.failed == 0,
+                    duration=test_result.duration_sec if hasattr(test_result, 'duration_sec') else 0.0,
+                    output=test_result.output if hasattr(test_result, 'output') else "",
+                )
+            task["test_result"] = test_result
+            if _test_result_failed(test_result):
+                success = False
+
         if success:
             print(f"[TASK {task_id}] REACT OK: {react_result.get('summary', 'done')[:200]}")
             for rel in files_changed:
@@ -1373,7 +1933,11 @@ class Orchestrator:
                 cost=float(_task_usage.get("cost_usd", 0)) or esc_decision.spec.cost_per_req,
             )
         else:
-            err = react_result.get("error", "ReAct worker failed")
+            err = (
+                "Executed tests failed"
+                if _test_result_failed(test_result)
+                else react_result.get("error", "ReAct worker failed")
+            )
             print(f"[TASK {task_id}] REACT FAILED: {err}")
             for rel in files_changed:
                 git.rollback_file(os.path.join(codebase_root, rel))
@@ -1391,27 +1955,8 @@ class Orchestrator:
                 success=False,
                 latency_ms=(_time.time() - _task_ts) * 1000,
                 cost=float(_task_usage.get("cost_usd", 0)) or esc_decision.spec.cost_per_req,
-                error_type="react_fail",
+                error_type=("tests_failed" if _test_result_failed(test_result) else "react_fail"),
             )
-
-        if test_result is not None and not getattr(test_result, "no_tests_found", True):
-            print(
-                f"[TASK {task_id}] Tests: {test_result.passed} passed, "
-                f"{test_result.failed} failed (pass_rate={test_result.pass_rate:.2%})"
-            )
-            if _live_t:
-                _live_t.test_result(test_result.passed, test_result.passed + test_result.failed)
-            # ── GuiEventBus: test_result ────────────────────────────────
-            if self._gui_bus:
-                self._gui_bus.emit_test_result(
-                    test_name=task.get("action", f"task_{task_id}"),
-                    passed=test_result.failed == 0,
-                    duration=test_result.duration_sec if hasattr(test_result, 'duration_sec') else 0.0,
-                    output=test_result.output if hasattr(test_result, 'output') else "",
-                )
-            task["test_result"] = test_result
-            if test_result.failed > 0:
-                success = False
 
         _cost = float(_task_usage.get("cost_usd", 0)) or esc_decision.spec.cost_per_req
         _aid = esc_decision.spec.level.value
@@ -1457,6 +2002,12 @@ class Orchestrator:
                 error="" if _success else (react_result.get("error", "")),
             )
 
+        self._debug_emit(
+            "task_complete",
+            task_id=str(task_id),
+            payload={"success": _success, "files_changed": files_changed, "react": True},
+            stage=FailureStage.EXECUTION,
+        )
         out = {"task_id": task_id, "success": _success, "task": task, "react": True}
         if not _success:
             out["failure_kind"] = "react_fail"
@@ -1481,6 +2032,12 @@ class Orchestrator:
         session = ctx["session"]
 
         task_id = task["task_id"]
+        self._debug_emit(
+            "task_start",
+            task_id=str(task_id),
+            payload={"action": task.get("action", ""), "file": task.get("file", "")},
+            stage=FailureStage.EXECUTION,
+        )
 
         # Resolve short filenames to full paths intelligently
         from .file_resolver import resolve_file
@@ -1539,6 +2096,12 @@ class Orchestrator:
                     "status": "failed",
                     "reason": f"File not found: {file_path}",
                 })
+                self._debug_emit(
+                    "task_complete",
+                    task_id=str(task_id),
+                    payload={"success": False, "error": f"File not found: {file_path}"},
+                    stage=FailureStage.EXECUTION,
+                )
                 return {
                     "task_id": task_id,
                     "success": False,
@@ -1592,6 +2155,12 @@ class Orchestrator:
         _allowed, _reason = _ledger.check_budget(estimated_cost=0.05)
         if not _allowed:
             print(f"[BUDGET] ⛔ Skipping task {task_id} — {_reason}")
+            self._debug_emit(
+                "task_complete",
+                task_id=str(task_id),
+                payload={"success": False, "error": f"Budget block: {_reason}"},
+                stage=FailureStage.EXECUTION,
+            )
             self.execution_log.append({
                 "task_id": task_id,
                 "status": "failed",
@@ -1759,7 +2328,6 @@ class Orchestrator:
                     skill_library=self.skill_library,
                     vector_chunks=_vector_chunks,
                     prompt_evolver=self.prompt_evolver,
-                    context_assembly=_context_assembly,
                 )
                 try:
                     from .usage_record import merge_result_usage
@@ -1890,6 +2458,12 @@ class Orchestrator:
             print(_span.one_liner())
             if _live_t:
                 _live_t.task_done(False, elapsed=time.time() - _task_ts)
+            self._debug_emit(
+                "task_complete",
+                task_id=str(task_id),
+                payload={"success": False, "error": "Worker could not generate valid SEARCH/REPLACE"},
+                stage=FailureStage.EXECUTION,
+            )
             return {
                 "task_id": task_id,
                 "success": False,
@@ -1911,6 +2485,15 @@ class Orchestrator:
                 file_path=file_path,
                 check_type="syntax",
             )
+            verifier_evidence, verifier_findings = findings_from_verifier_result(
+                result,
+                file_path=file_path,
+                session_id=session.session_id,
+                task_id=str(task_id),
+                attempt=verify_attempt,
+                source_ref=f"verifier:{session.session_id}:{task_id}:{verify_attempt}",
+            )
+            self._debug_record_result(verifier_evidence, verifier_findings)
 
             if result["success"] and result["applied"]:
                 print(f"[TASK {task_id}] VERIFIED: Change applied successfully")
@@ -1929,7 +2512,6 @@ class Orchestrator:
                         tracker=self.tracker,
                         attempt=verify_attempt + 1,
                         symbol_index=sym_index,
-                        context_assembly=_context_assembly,
                     )
                     if search_replace.get("success"):
                         continue
@@ -1962,6 +2544,61 @@ class Orchestrator:
                 )
             except Exception as _vm_exc:
                 logger.warning("[VectorMemory] store_outcome failed: %s", _vm_exc)
+
+        # ── TestRunner: run tests after successful verification ────────────
+        test_result = None
+        test_run_error = False
+        if verify_success:
+            try:
+                self.test_runner = TestRunner(project_root=codebase_root)
+                test_result = self.test_runner.run(changed_files=[task["file"]])
+                task["test_result"] = test_result
+                test_evidence, test_findings = findings_from_test_result(
+                    test_result,
+                    session_id=session.session_id,
+                    task_id=str(task_id),
+                    source_ref=f"test:{session.session_id}:{task_id}",
+                )
+                self._debug_record_result(test_evidence, test_findings)
+                if not test_result.no_tests_found:
+                    print(
+                        f"[TASK {task_id}] Tests: {test_result.passed} passed, "
+                        f"{test_result.failed} failed (pass_rate={test_result.pass_rate:.2%})"
+                    )
+                    if _live_t:
+                        _live_t.test_result(test_result.passed, test_result.passed + test_result.failed)
+                    # ── P8: test failure reflection ─────────────────────
+                    if test_result.failed > 0:
+                        try:
+                            self.post_mortem.reflect(
+                                task,
+                                f"{test_result.failed} test(s) failed (pass_rate={test_result.pass_rate:.0%})",
+                                FailureType.TEST_FAIL,
+                            )
+                        except Exception as _pme:
+                            logger.debug("[post_mortem] test_fail reflect: %s", _pme)
+            except Exception as exc:
+                test_run_error = True
+                logger.warning("[TASK %s] TestRunner error: %s", task_id, exc)
+                self._debug_emit(
+                    "test_error",
+                    task_id=str(task_id),
+                    payload={"error": str(exc), "output": str(exc)},
+                    stage=FailureStage.TEST,
+                )
+                task["test_result"] = None
+
+        if verify_success and (test_run_error or _test_result_failed(test_result)):
+            verify_success = False
+            print(f"[TASK {task_id}] Tests failed — rolling back '{task['file']}'")
+            try:
+                self.post_mortem.reflect(
+                    task,
+                    "Executed tests disproved the change",
+                    FailureType.TEST_FAIL,
+                )
+            except Exception as _pme:
+                logger.debug("[post_mortem] test outcome reflect: %s", _pme)
 
         if verify_success:
             self._update_task_node(task_id, "completed", session.session_id)
@@ -1999,7 +2636,11 @@ class Orchestrator:
             self.execution_log.append({
                 "task_id": task_id,
                 "status": "failed",
-                "reason": "Verification failed — file restored",
+                "reason": (
+                    "Tests failed — file restored"
+                    if test_run_error or _test_result_failed(test_result)
+                    else "Verification failed — file restored"
+                ),
             })
             _latency_ms = (_time.time() - _span.worker_start_ts) * 1000 if _span.worker_start_ts else None
             self.performance.record(
@@ -2009,36 +2650,12 @@ class Orchestrator:
                 success=False,
                 latency_ms=_latency_ms,
                 cost=float(_task_usage.get("cost_usd", 0)) or esc_decision.spec.cost_per_req,
-                error_type="verification_failed",
+                error_type=(
+                    "tests_failed"
+                    if test_run_error or _test_result_failed(test_result)
+                    else "verification_failed"
+                ),
             )
-
-        # ── TestRunner: run tests after successful verification ────────────
-        test_result = None
-        if verify_success:
-            try:
-                self.test_runner = TestRunner(project_root=codebase_root)
-                test_result = self.test_runner.run(changed_files=[task["file"]])
-                task["test_result"] = test_result
-                if not test_result.no_tests_found:
-                    print(
-                        f"[TASK {task_id}] Tests: {test_result.passed} passed, "
-                        f"{test_result.failed} failed (pass_rate={test_result.pass_rate:.2%})"
-                    )
-                    if _live_t:
-                        _live_t.test_result(test_result.passed, test_result.passed + test_result.failed)
-                    # ── P8: test failure reflection ─────────────────────
-                    if test_result.failed > 0:
-                        try:
-                            self.post_mortem.reflect(
-                                task,
-                                f"{test_result.failed} test(s) failed (pass_rate={test_result.pass_rate:.0%})",
-                                FailureType.TEST_FAIL,
-                            )
-                        except Exception as _pme:
-                            logger.debug("[post_mortem] test_fail reflect: %s", _pme)
-            except Exception as exc:
-                logger.warning("[TASK %s] TestRunner error: %s", task_id, exc)
-                task["test_result"] = None
 
         # ── Log to RewardStore & update ML router ──────────────────────────
         _cost = float(_task_usage.get("cost_usd", 0)) or esc_decision.spec.cost_per_req
@@ -2104,6 +2721,17 @@ class Orchestrator:
 
         if _live_t:
             _live_t.task_done(verify_success, elapsed=time.time() - _task_ts)
+        self._debug_emit(
+            "task_complete",
+            task_id=str(task_id),
+            payload={
+                "success": verify_success,
+                "verify_success": verify_success,
+                "test_result": bool(test_result),
+                "file": task.get("file", ""),
+            },
+            stage=FailureStage.VERIFICATION,
+        )
         out = {
             "task_id": task_id,
             "success": verify_success,
@@ -2111,7 +2739,11 @@ class Orchestrator:
             "_applied_context": _applied_context,
         }
         if not verify_success:
-            out["failure_kind"] = "verify_fail"
+            out["failure_kind"] = (
+                "test_fail"
+                if test_run_error or _test_result_failed(test_result)
+                else "verify_fail"
+            )
             out["verify_error"] = _verify_error
         return out
 

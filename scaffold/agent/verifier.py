@@ -157,6 +157,18 @@ class Verifier:
             original_content, search_text, replace_text
         )
         if not matched:
+            if match_tier == "ambiguous":
+                return {
+                    "success": False,
+                    "applied": False,
+                    "errors": ["SEARCH string matches multiple similar locations — ambiguous"],
+                    "needs_retry": True,
+                    "error_context": (
+                        "Your SEARCH block is ambiguous: multiple blocks in the file are "
+                        "too similar to pick one reliably. Make the SEARCH block more "
+                        "specific (more surrounding context) and try again."
+                    ),
+                }
             nearby_hint = self._find_nearby_content(original_content, search_text)
             return {
                 "success": False,
@@ -380,12 +392,22 @@ class Verifier:
 
         # Tier 4: difflib fuzzy (≥85% similarity on stripped content)
         s_stripped = "\n".join(l.strip() for l in s_lines if l.strip())
-        best_ratio, best_start = 0.0, -1
+        # Collect all candidate windows with their similarity ratios.
+        scored: list[tuple[float, int]] = []
         for i in range(max(1, len(o_lines) - n + 1)):
             cand = "\n".join(l.strip() for l in o_lines[i:i + n] if l.strip())
             ratio = difflib.SequenceMatcher(None, s_stripped, cand).ratio()
-            if ratio > best_ratio:
-                best_ratio, best_start = ratio, i
+            scored.append((ratio, i))
+        if not scored:
+            return False, original_content, "none"
+        scored.sort(reverse=True, key=lambda pair: pair[0])
+        best_ratio, best_start = scored[0]
+        # Reject ambiguous matches: if the runner-up is within 5% of the best,
+        # we cannot reliably tell which location the LLM intended.
+        if len(scored) > 1:
+            second_ratio = scored[1][0]
+            if best_ratio >= 0.85 and (best_ratio - second_ratio) < 0.05:
+                return False, original_content, "ambiguous"
         if best_ratio >= 0.85 and best_start >= 0:
             new_lines = o_lines[:best_start] + r_lines + o_lines[best_start + n:]
             return True, "\n".join(new_lines), f"fuzzy({best_ratio:.0%})"
