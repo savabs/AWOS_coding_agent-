@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -79,7 +80,10 @@ def main() -> int:
 
     passed = 0
     for node_id in must_pass:
-        cmd = f"python3 -m pytest {node_id} -q --tb=line"
+        cmd = (
+            f"{shlex.quote(sys.executable)} -m pytest "
+            f"{node_id} -q --tb=line --color=no"
+        )
         code, out = _run(cmd, root)
         if code == 0:
             passed += 1

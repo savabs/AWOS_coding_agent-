@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -38,6 +39,12 @@ def isolated_test_environment():
         (state / "tmp").mkdir()
         yield {
             **os.environ,
+            # Output of this subprocess is parsed, not displayed. A parent
+            # environment with FORCE_COLOR set would wrap every summary in
+            # ANSI escapes and silently defeat the parsers.
+            "PY_COLORS": "0",
+            "NO_COLOR": "1",
+            "FORCE_COLOR": "0",
             "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONPYCACHEPREFIX": str(state / "pycache"),
             "HYPOTHESIS_STORAGE_DIRECTORY": str(state / "hypothesis"),
@@ -70,6 +77,9 @@ class TestResult:
     test_command: List[str] = field(default_factory=list)
     no_tests_found: bool = False
     returncode: Optional[int] = None  # subprocess exit code (authoritative when present)
+    # Set when the test command itself could not be run (missing binary, etc).
+    # This is the absence of test evidence, NOT evidence that tests failed.
+    execution_error: Optional[str] = None
 
 
 class TestRunner:
@@ -81,11 +91,16 @@ class TestRunner:
         self.timeout_sec = timeout_sec
 
     def pytest_command(self) -> List[str]:
-        """Return a structured pytest command using the configured interpreter."""
-        interpreter = os.getenv("AWOS_TEST_PYTHON", "").strip()
-        if interpreter:
-            return [interpreter, "-m", "pytest", "-p", "no:cacheprovider"]
-        return ["pytest", "-p", "no:cacheprovider"]
+        """Return a structured pytest command using the configured interpreter.
+
+        Defaults to the interpreter currently running AWOS rather than a bare
+        ``pytest`` binary. The bare name is absent from PATH whenever the
+        project environment is a non-activated virtualenv — the common case —
+        and a missing binary used to surface as a zero pass_rate that the
+        outcome gate could not distinguish from a genuine test failure.
+        """
+        interpreter = os.getenv("AWOS_TEST_PYTHON", "").strip() or sys.executable
+        return [interpreter, "-m", "pytest", "-p", "no:cacheprovider", "--color=no"]
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -245,6 +260,7 @@ class TestRunner:
             return TestResult(
                 raw_output=f"Command not found: {e}",
                 test_command=command,
+                execution_error=f"Command not found: {e}",
             )
 
         returncode = getattr(result, "returncode", None)

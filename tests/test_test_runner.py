@@ -41,7 +41,14 @@ class TestDetection:
         cfg = runner.detect()
         assert cfg is not None
         assert cfg.runner == "pytest"
-        assert cfg.command == ["pytest", "--tb=short", "-q"]
+        # Assert the contract, not a literal: pytest must run under a real
+        # interpreter (never a bare `pytest` binary, which is absent from PATH
+        # in a non-activated virtualenv), with colour off because this output
+        # is parsed rather than displayed.
+        assert cfg.command[1:3] == ["-m", "pytest"]
+        assert Path(cfg.command[0]).name.startswith("python")
+        assert "--color=no" in cfg.command
+        assert cfg.command[-2:] == ["--tb=short", "-q"]
 
     def test_detect_pyproject_pytest(self, tmp_project):
         Path(tmp_project, "pyproject.toml").write_text("[tool.pytest.ini_options]\n")

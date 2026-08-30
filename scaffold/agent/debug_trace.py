@@ -24,6 +24,7 @@ from __future__ import annotations
 import functools
 import logging
 import os
+import sys
 import time
 from typing import Any, Callable, Optional
 
@@ -101,6 +102,7 @@ def startup_banner() -> None:
     print(
         f"[DEBUGGER] PID={os.getpid()} commit={commit} "
         f"python={sys.version.split()[0]} AWOS_TRACE={_TRACE_LEVEL}",
+        file=sys.stderr,
         flush=True,
     )
 
@@ -111,6 +113,10 @@ def install_fault_handler() -> None:
         import faulthandler
         import signal
         faulthandler.register(signal.SIGUSR1)
-        print("[DEBUGGER] faulthandler installed — kill -USR1 <pid> for traceback", flush=True)
+        print(
+            "[DEBUGGER] faulthandler installed — kill -USR1 <pid> for traceback",
+            file=sys.stderr,
+            flush=True,
+        )
     except Exception:
         pass

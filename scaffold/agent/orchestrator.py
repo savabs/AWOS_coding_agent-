@@ -23,6 +23,11 @@ def _test_result_failed(test_result: Any) -> bool:
     """Return whether executed test evidence disproves task correctness."""
     if test_result is None or getattr(test_result, "no_tests_found", False):
         return False
+    # An execution error means we never obtained test evidence. It must not be
+    # laundered into "the tests disproved this change" — the orchestrator
+    # reports it separately via test_run_error.
+    if getattr(test_result, "execution_error", None):
+        return False
     return bool(
         getattr(test_result, "timed_out", False)
         or getattr(test_result, "failed", 0) > 0
@@ -2560,7 +2565,23 @@ class Orchestrator:
                     source_ref=f"test:{session.session_id}:{task_id}",
                 )
                 self._debug_record_result(test_evidence, test_findings)
-                if not test_result.no_tests_found:
+                if test_result.execution_error:
+                    test_run_error = True
+                    logger.error(
+                        "[TASK %s] Test command could not be executed: %s",
+                        task_id,
+                        test_result.execution_error,
+                    )
+                    self._debug_emit(
+                        "test_error",
+                        task_id=str(task_id),
+                        payload={
+                            "error": test_result.execution_error,
+                            "output": test_result.raw_output,
+                        },
+                        stage=FailureStage.TEST,
+                    )
+                elif not test_result.no_tests_found:
                     print(
                         f"[TASK {task_id}] Tests: {test_result.passed} passed, "
                         f"{test_result.failed} failed (pass_rate={test_result.pass_rate:.2%})"
@@ -2590,11 +2611,16 @@ class Orchestrator:
 
         if verify_success and (test_run_error or _test_result_failed(test_result)):
             verify_success = False
-            print(f"[TASK {task_id}] Tests failed — rolling back '{task['file']}'")
+            _gate_reason = (
+                "Test command could not be executed"
+                if test_run_error
+                else "Executed tests disproved the change"
+            )
+            print(f"[TASK {task_id}] {_gate_reason} — rolling back '{task['file']}'")
             try:
                 self.post_mortem.reflect(
                     task,
-                    "Executed tests disproved the change",
+                    _gate_reason,
                     FailureType.TEST_FAIL,
                 )
             except Exception as _pme:
@@ -2637,8 +2663,10 @@ class Orchestrator:
                 "task_id": task_id,
                 "status": "failed",
                 "reason": (
-                    "Tests failed — file restored"
-                    if test_run_error or _test_result_failed(test_result)
+                    "Tests could not be executed — file restored"
+                    if test_run_error
+                    else "Tests failed — file restored"
+                    if _test_result_failed(test_result)
                     else "Verification failed — file restored"
                 ),
             })
@@ -2651,8 +2679,10 @@ class Orchestrator:
                 latency_ms=_latency_ms,
                 cost=float(_task_usage.get("cost_usd", 0)) or esc_decision.spec.cost_per_req,
                 error_type=(
-                    "tests_failed"
-                    if test_run_error or _test_result_failed(test_result)
+                    "test_run_error"
+                    if test_run_error
+                    else "tests_failed"
+                    if _test_result_failed(test_result)
                     else "verification_failed"
                 ),
             )
