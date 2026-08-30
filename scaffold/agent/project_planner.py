@@ -121,18 +121,20 @@ class GoalGraph:
         # Kahn's algorithm: find all pending nodes with no pending/in_progress parents
         pending = [
             n for n in self.nodes.values()
-            if n.status in ("pending", "in_progress", "stalled")
+            if (n.goal_id != self.root_id or not n.child_ids)
+            and n.status in ("pending", "in_progress", "stalled")
         ]
         # Filter to those whose real parents are all completed (root excluded)
         ready = []
         for node in pending:
             real_parents = [pid for pid in node.parent_ids if pid != self.root_id]
             parents_done = (
-                all(
-                    self.nodes.get(pid, GoalNode(goal_id=pid, description="")).status == "completed"
-                    for pid in real_parents
-                ) if real_parents else True
-            )
+                    all(
+                        (parent := self.nodes.get(pid)) is not None
+                        and parent.status == "completed"
+                        for pid in real_parents
+                    ) if real_parents else True
+                )
             if parents_done:
                 ready.append(node)
 
@@ -353,10 +355,10 @@ class ProjectPlanner:
             root = graph.get_node(graph.root_id)
             if root is not None:
                 all_done = all(
-                    graph.get_node(cid) is not None
-                    and graph.get_node(cid).status == "completed"
-                    for cid in root.child_ids
-                )
+                        (child := graph.get_node(cid)) is not None
+                        and child.status == "completed"
+                        for cid in root.child_ids
+                    )
                 if all_done and root.child_ids:
                     root.status = "completed"
                     root.completed_at = GoalNode._now()

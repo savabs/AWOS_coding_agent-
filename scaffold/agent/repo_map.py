@@ -14,6 +14,7 @@ from typing import Any
 
 from .exploration_phase import _extract_keywords, run_exploration
 from .project_spatial import build_directory_tree
+from .resolve_file import resolve_with_evidence
 from .tools.filesystem import GrepTool
 
 _SKIP_SCAN_DIRS = frozenset({
@@ -144,23 +145,33 @@ def build_repo_map(
 
     anchors: list[dict[str, Any]] = []
     pf_name = Path(primary_file).name if primary_file else ""
+    resolved_pf: Path | None = None
     if primary_file:
-        pf = Path(primary_file)
-        if not pf.is_absolute():
-            pf = root / pf
-        anchors.extend(_scan_file_anchors(pf, root, max_lines=max_anchors))
-        # Targeted grep inside primary file for argparse / subparser lines
-        tool = GrepTool()
-        for sym in ("def cmd_stats", "stats.add_argument", 'add_argument("--savings"', "sub.add_parser(\"stats\""):
-            gr = tool.execute(
-                {
-                    "pattern": sym,
-                    "root": str(root),
-                    "path": str(pf.relative_to(root)),
-                    "literal": "true",
-                    "max_results": 5,
-                }
-            )
+        evidence = resolve_with_evidence(root, primary_file)
+        if evidence.get("path"):
+            resolved_pf = Path(str(evidence["path"]))
+        if resolved_pf is None and not evidence.get("path"):
+            # Hint failed to resolve to a real file. Fall back to scanning the
+            # hinted name across the tree so a stale index hint cannot hide a
+            # file that actually exists elsewhere in the repo.
+            for candidate in root.rglob("*.py"):
+                if candidate.is_file() and candidate.name.lower() == pf_name.lower():
+                    resolved_pf = candidate
+                    break
+        if resolved_pf is not None:
+            anchors.extend(_scan_file_anchors(resolved_pf, root, max_lines=max_anchors))
+            # Targeted grep inside primary file for argparse / subparser lines
+            tool = GrepTool()
+            for sym in ("def cmd_stats", "stats.add_argument", 'add_argument("--savings"', "sub.add_parser(\"stats\""):
+                gr = tool.execute(
+                    {
+                        "pattern": sym,
+                        "root": str(root),
+                        "path": str(resolved_pf.relative_to(root)),
+                        "literal": "true",
+                        "max_results": 5,
+                    }
+                )
             if gr.success:
                 for hit in gr.data.get("hits") or []:
                     key = (hit["file"], hit["line"])
@@ -288,6 +299,21 @@ def enrich_with_repo_map(
         merged["repo_map"] = repo_map.get("summary", "")
         merged["repo_map_hits"] = repo_map.get("grep_hits", [])
         merged["repo_map_anchors"] = repo_map.get("anchors", [])
+    if os.getenv("AWOS_SYMBOL_INDEX", "1").lower() in ("1", "true", "yes"):
+        try:
+            from .index_retrieval import retrieve
+
+            retrieval = retrieve(
+                project_root,
+                primary_file=primary_file,
+            )
+            merged["symbol_map"] = retrieval.get("symbol_map", "")
+            merged["symbol_read_windows"] = retrieval.get("read_windows", [])
+            merged["symbol_stale_dropped"] = retrieval.get("stale_dropped", 0)
+        except Exception:
+            # Index retrieval must never break the agent loop.
+            merged["symbol_map"] = ""
+            merged["symbol_read_windows"] = []
     if os.getenv("AWOS_EXPLORATION_PHASE", "1").lower() in ("1", "true", "yes"):
         exploration = run_exploration(goal, str(project_root))
         merged = {**merged, **{k: v for k, v in exploration.items() if k != "exploration_summary"}}

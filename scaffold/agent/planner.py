@@ -1,15 +1,24 @@
 """
 Planner Module: Converts user goals into atomic JSON task blueprints.
 
-Uses Sonnet for high-quality reasoning and structured output generation.
-Each planning call costs ~$0.03-0.05 and produces a reusable execution plan.
+Uses Qwen through OpenCode Go for high-quality project reasoning and native graph generation.
+Atomic execution remains on the cheaper DeepSeek Pro worker path.
 """
 
 import json
-import os
-from anthropic import Anthropic
-from typing import Optional, Any
 import logging
+import os
+import time
+from typing import Any, Optional
+
+try:
+    from .fixed_provider import PLANNER_MODEL, create_fixed_client
+    from .model_call_telemetry import extract_optional_usage, record_model_call
+    from .planner_graph_contract import normalize_planner_response
+except ImportError:
+    from fixed_provider import PLANNER_MODEL, create_fixed_client
+    from model_call_telemetry import extract_optional_usage, record_model_call
+    from planner_graph_contract import normalize_planner_response
 
 logger = logging.getLogger(__name__)
 
@@ -26,15 +35,13 @@ _MAX_SIMPLE_GOAL_WORDS = 10
 
 
 class Planner:
-    """Uses Claude Sonnet to break down user goals into atomic micro-tasks."""
-    
+    """Use OpenCode Go Qwen for project-level execution-graph planning."""
+
     def __init__(self, api_key: Optional[str] = None):
-        """Initialize Planner with Anthropic API client."""
-        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
-        if not self.api_key:
-            raise ValueError("ANTHROPIC_API_KEY not set")
-        self.client = Anthropic(api_key=self.api_key)
-        self.model = "claude-sonnet-4-6"
+        """Initialize the advanced Planner through the fixed OpenCode Go client."""
+        self.api_key = api_key or os.getenv("OPENCODE_GO_API_KEY")
+        self.client = create_fixed_client(self.api_key)
+        self.model = PLANNER_MODEL
     
     def plan(self, goal: str, codebase_context: dict, tracker=None, existing_goal: Any = None) -> dict:
         """
@@ -63,47 +70,62 @@ class Planner:
             }
         """
         
-        # Build context summary for Sonnet
+        # Build context summary for the advanced Qwen Planner.
         modules = codebase_context.get("modules", "Unknown")
         architecture = codebase_context.get("architecture", "Unknown")
         symbols = codebase_context.get("symbols", [])
         symbols_str = "\n".join(symbols[:30]) if symbols else "(none extracted)"
         
         # Stable system instructions — cached after first call (90% savings on repeat planning)
-        system_instructions = """You are an expert software architect. Break down user goals into atomic micro-tasks that can each be executed independently by a junior AI model in 1-5 minutes.
+        system_instructions = """You are an expert software architect. Design a complete typed execution graph for the user's project goal. The graph will be executed by cheap atomic task solvers, so every edit node must be narrow, grounded, and independently understandable.
 
 CONSTRAINTS:
-1. Each task must change ONLY ONE file
-2. Each task must be simple enough for a junior model to handle with 50 lines of context
-3. Tasks should be ordered so dependencies are handled first
-4. Each task needs: file path, specific action, complexity level (low/medium/high)
-5. Total tasks should be 2-5 for typical features
-6. For EVERY task that creates or modifies a function/class, you MUST include a machine-enforceable contract
+1. Each edit or recovery node must change ONLY ONE file
+2. Each edit node must be simple enough for a cheap model to handle with 50 lines of context
+3. Dependencies must express the real project order; independent branches should remain parallel-safe
+4. Use node types explore, edit, test, barrier, review, recovery, and final_verify
+5. Test nodes require an acceptance_check; barrier and final_verify nodes are not parallel-safe
+6. Every edit/recovery node requires exactly one output file
+7. Every node requires all runtime fields from the requested JSON schema; the typed contract fields below are optional and must be emitted only for code-changing nodes
+8. For EVERY edit or recovery node that creates or modifies a function/class, include the typed contract fields below
 
-CONTRACT FIELDS (include whenever the task touches code — omit for pure documentation tasks):
-- function_signature: exact Python signature the output must contain (e.g. "def verify_jwt(token: str) -> Optional[UserClaims]:")
+PLANNER METADATA (include inside the planner_metadata object whenever the task touches code; omit for pure documentation tasks):
+- function_signature: exact Python signature the output must contain
 - interface_contract: one-line description of how this function is called from outside
 - constraints: list of behavior rules the implementation MUST follow
-- must_not: list of things the implementation must NOT do (prevents hallucinated patterns)
+- must_not: list of things the implementation must NOT do
 - example_call: a concrete example of calling this function
+- You may add other bounded advisory metadata keys when useful. Do not add new execution fields, node types, permissions, commands, or dependency semantics.
 
 OUTPUT FORMAT - REQUIRED JSON (no markdown, no extra text):
 {
-  "plan": [
-    {
-      "task_id": 1,
-      "file": "path/to/file.py",
-      "action": "specific action description",
-      "complexity": "low|medium|high",
-      "function_signature": "exact signature (optional)",
-      "interface_contract": "how it's called (optional)",
-      "constraints": ["rule 1", "rule 2"],
-      "must_not": ["forbidden pattern 1"],
-      "example_call": "user = foo(bar) (optional)"
-    }
-  ],
-  "reasoning": "Why this decomposition works",
-  "total_tasks": 2
+  "execution_graph": {
+    "graph_version": "1",
+    "nodes": [
+      {
+        "node_id": "edit_auth_service",
+        "type": "edit",
+        "description": "Implement one narrowly scoped change",
+        "depends_on": [],
+        "input_files": ["src/auth.py"],
+        "output_files": ["src/auth.py"],
+        "acceptance_check": "pytest tests/test_auth.py",
+        "evidence_ref": null,
+        "parallel_safe": true,
+        "retry_limit": 1,
+        "complexity": "medium",
+        "planner_metadata": {
+          "function_signature": "def verify_jwt(token: str) -> Optional[UserClaims]:",
+          "interface_contract": "Callable from the request handler with an Authorization header value.",
+          "constraints": ["Raise AuthError for expired tokens"],
+          "must_not": ["Do not invent new error types"],
+          "example_call": "verify_jwt(request.headers['Authorization'])",
+          "future_advisory_hint": "Optional bounded guidance; never an execution instruction"
+        }
+      }
+    ]
+  },
+  "reasoning": "Explain the project decomposition briefly"
 }
 
 Output ONLY valid JSON. No markdown, no explanation before or after."""
@@ -117,23 +139,31 @@ Architecture: {architecture}
 Key symbols (file::class/def):
 {symbols_str}"""
         
-        # Call Sonnet with prompt caching on the stable system block
-        response = self.client.messages.create(
+        # Call Qwen through the OpenCode Go OpenAI-compatible client.
+        started_at = time.perf_counter()
+        response = self.client.chat.completions.create(
             model=self.model,
-            max_tokens=1536,
-            system=[
-                {
-                    "type": "text",
-                    "text": system_instructions,
-                    "cache_control": {"type": "ephemeral"}  # Cache this block — 90% off on repeat calls
-                }
-            ],
+            max_tokens=4096,
             messages=[
-                {
-                    "role": "user",
-                    "content": user_prompt
-                }
-            ]
+                {"role": "system", "content": system_instructions},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format={"type": "json_object"},
+            extra_body={"thinking": {"type": "disabled"}},
+        )
+        usage = getattr(response, "usage", None)
+        record_model_call(
+            provider="opencode",
+            model=self.model,
+            request_type="planner",
+            input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
+            output_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+            **extract_optional_usage(usage),
+            messages=[
+                {"role": "system", "content": system_instructions},
+                {"role": "user", "content": user_prompt},
+            ],
+            started_at=started_at,
         )
         
         # Cache telemetry
@@ -149,8 +179,15 @@ Key symbols (file::class/def):
         except Exception:
             pass  # Don't fail planning if telemetry breaks
         
-        # Extract response
-        response_text = response.content[0].text.strip()
+        # Extract the OpenAI-compatible OpenCode Go message content.
+        try:
+            message = response.choices[0].message
+        except (AttributeError, IndexError, TypeError):
+            message = None
+        response_text = getattr(message, "content", "") or ""
+        if not response_text.strip():
+            raise ValueError("OpenCode Go returned empty Planner response content")
+        response_text = response_text.strip()
         
         # Parse JSON
         try:
@@ -162,11 +199,18 @@ Key symbols (file::class/def):
             
             result = json.loads(response_text)
         except json.JSONDecodeError as e:
-            raise ValueError(f"Sonnet returned invalid JSON: {response_text[:200]}... Error: {e}")
+            raise ValueError(
+                f"OpenCode Go ({self.model}) returned invalid JSON: "
+                f"{response_text[:200]}... Error: {e}"
+            )
         
-        # Validate structure
-        if "plan" not in result or not isinstance(result["plan"], list):
-            raise ValueError(f"Invalid plan structure: {result}")
+        # Validate and normalize native graph output. Legacy task-list responses
+        # remain accepted for provider compatibility and are wrapped deterministically.
+        native_graph_response = "execution_graph" in result
+        try:
+            result = normalize_planner_response(result)
+        except ValueError as exc:
+            raise ValueError(f"Invalid execution graph structure: {exc}") from exc
 
         for task in result["plan"]:
             required = ["task_id", "file", "action", "complexity"]
@@ -187,28 +231,37 @@ Key symbols (file::class/def):
             result["plan"] = self._filter_completed_tasks(result["plan"], existing_goal)
             result["total_tasks"] = len(result["plan"])
 
-        # ── Phase 5D: decompose complex refactoring tasks into atomic sub-tasks ──
-        result["plan"] = self._decompose_refactoring_tasks(result["plan"])
-        result["total_tasks"] = len(result["plan"])
+        # ── Phase 5D: decompose legacy task-list responses only ──
+        # Native graph node IDs are canonical and must not be renumbered by the
+        # compatibility refactoring post-processor.
+        if not native_graph_response:
+            result["plan"] = self._decompose_refactoring_tasks(result["plan"])
+            result["total_tasks"] = len(result["plan"])
 
         # Record cost if tracker provided
         if tracker:
-            # Estimate tokens (Sonnet ~11 input, ~27 output per 1k)
-            # For simplicity, use response.usage if available
-            input_tokens = response.usage.input_tokens
-            output_tokens = response.usage.output_tokens
-
-            cost = (
-                (input_tokens / 1_000_000) * 3 +   # Sonnet input: $3 per 1M
-                (output_tokens / 1_000_000) * 15    # Sonnet output: $15 per 1M
+            # Qwen3.7 Plus pricing metadata from the OpenCode Go model registry.
+            usage = getattr(response, "usage", None)
+            input_tokens = int(
+                getattr(usage, "prompt_tokens", None)
+                or getattr(usage, "input_tokens", None)
+                or len(user_prompt) // 4
             )
-
+            output_tokens = int(
+                getattr(usage, "completion_tokens", None)
+                or getattr(usage, "output_tokens", None)
+                or len(response_text) // 4
+            )
+            cost = (
+                (input_tokens / 1_000_000) * 0.40
+                + (output_tokens / 1_000_000) * 1.60
+            )
             tracker.record(
                 request_type="planning",
-                model="Claude Sonnet 3.5",
+                model=f"OpenCode Go {self.model}",
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
-                cost=cost
+                cost=cost,
             )
 
         return result

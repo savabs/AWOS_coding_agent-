@@ -17,7 +17,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from .test_runner import TestRunner
+from .test_runner import TestRunner, isolated_test_environment
 from .tools.base import Tool, ToolRegistry, ToolResult
 from .tools.code_runner import PythonRunnerTool
 from .tools.fetch_url import FetchURLTool
@@ -216,24 +216,40 @@ class EditFileTool(Tool, WorkspacePathMixin):
         old_string = args.get("old_string", "")
         new_string = args.get("new_string", "")
 
+        # Compute the candidate content WITHOUT writing, so we can validate it
+        # (syntax, multi-match safety) before any file mutation.
         if not path.exists():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(new_string, encoding="utf-8")
+            # New file creation.
+            if not new_string.strip():
+                return ToolResult.fail("new_string is empty — cannot create an empty file")
+            candidate = new_string
+            created = True
         elif old_string.strip():
             content = path.read_text(encoding="utf-8")
             if old_string not in content:
                 return ToolResult.fail(f"SEARCH text not found in {path}")
             if content.count(old_string) > 1:
                 return ToolResult.fail(f"SEARCH text matches multiple locations in {path}")
-            path.write_text(content.replace(old_string, new_string), encoding="utf-8")
+            candidate = content.replace(old_string, new_string)
+            created = False
         else:
-            path.write_text(new_string, encoding="utf-8")
+            # Empty old_string on an existing file: overwrite with new_string.
+            if not new_string.strip():
+                return ToolResult.fail("new_string is empty — refusing to blank an existing file")
+            candidate = new_string
+            created = False
 
+        # Validate BEFORE writing: never leave invalid content on disk.
         if path.suffix == ".py":
             try:
-                compile(path.read_text(encoding="utf-8"), str(path), "exec")
+                compile(candidate, str(path), "exec")
             except SyntaxError as exc:
-                return ToolResult.fail(f"Edit produced invalid Python: {exc}")
+                return ToolResult.fail(f"Edit would produce invalid Python: {exc}")
+
+        # Safe to persist now.
+        if created:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(candidate, encoding="utf-8")
 
         rel = str(path.relative_to(self.project_root))
         if self._on_change:
@@ -241,7 +257,7 @@ class EditFileTool(Tool, WorkspacePathMixin):
 
         return ToolResult.ok(
             text=f"Applied edit to {rel}",
-            data={"path": rel, "created": not bool(old_string.strip())},
+            data={"path": rel, "created": created},
         )
 
 
@@ -278,23 +294,26 @@ class RunTestsTool(Tool, WorkspacePathMixin):
             return ToolResult.fail(
                 "Tests blocked — set AWOS_SAFE_TO_RUN_TESTS=1 to enable run_tests tool."
             )
-        result = self._runner.run()
         paths = str(args.get("paths", "")).strip()
         if paths:
             import subprocess
             parts = [p.strip() for p in paths.split(",") if p.strip()]
-            cmd = ["pytest", "--tb=short", "-q", *parts]
+            cmd = [*self._runner.pytest_command(), "--tb=short", "-q", *parts]
             try:
-                proc = subprocess.run(
-                    cmd,
-                    cwd=str(self.project_root),
-                    capture_output=True,
-                    text=True,
-                    timeout=self._runner.timeout_sec,
-                )
+                with isolated_test_environment() as env:
+                    proc = subprocess.run(
+                        cmd,
+                        cwd=str(self.project_root),
+                        capture_output=True,
+                        text=True,
+                        timeout=self._runner.timeout_sec,
+                        env=env,
+                    )
             except subprocess.TimeoutExpired:
                 return ToolResult.fail("Tests timed out.")
             result = self._runner._parse_pytest(proc.stdout or "", proc.stderr or "", cmd)
+        else:
+            result = self._runner.run()
         summary = (
             f"Tests: {result.passed} passed, {result.failed} failed, "
             f"{result.errors} errors (pass_rate={result.pass_rate:.0%})"
@@ -367,39 +386,62 @@ class FinishTool(Tool):
         return ToolResult.ok(text=summary, data={"finished": True, "summary": summary})
 
 
+AGENT_PROFILES = {"explore", "build", "benchmark"}
+
+
 def build_coding_tool_registry(
     project_root: str | Path,
     on_file_change: Optional[Callable[[str], None]] = None,
+    *,
+    profile: str = "build",
 ) -> ToolRegistry:
-    """Build a workspace-scoped tool registry for ReAct coding."""
+    """Build a workspace-scoped registry for an explicit agent capability profile.
+
+    ``build`` preserves the historical autonomous tool set.  ``explore`` and
+    ``benchmark`` are intentionally narrower: unavailable tools are absent from
+    the model catalog and therefore cannot be reached through normal dispatch.
+    """
+    normalized_profile = str(profile or "").strip().lower()
+    if normalized_profile not in AGENT_PROFILES:
+        raise ValueError(
+            f"Unknown agent profile {profile!r}; expected one of {sorted(AGENT_PROFILES)}"
+        )
+
     root = Path(project_root).resolve()
     registry = ToolRegistry()
-    # Shell FIRST — bash-only editing (sed, python -c, cat)
-    registry.register(WorkspaceShellTool(root))
+
+    # All profiles can inspect the workspace.  The benchmark profile is still
+    # autonomous, but its autonomy is limited to the audited task surface.
     registry.register(WorkspaceReadFileTool(root))
-    registry.register(WorkspaceWriteFileTool(root, on_change=on_file_change))
-    registry.register(EditFileTool(root, on_change=on_file_change))
     registry.register(WorkspaceGrepTool(root))
     registry.register(WorkspaceFindFilesTool(root))
     registry.register(WorkspaceListDirTool(root))
-    registry.register(RunTestsTool(root))
-    if research_tools_enabled():
-        registry.register(WebSearchTool())
-        registry.register(FetchURLTool())
-    if github_tools_enabled():
-        registry.register(GitHubSearchReposTool())
-        registry.register(GitHubReadFileTool())
-        registry.register(GitHubListIssuesTool())
-        registry.register(GitHubSearchCodeTool())
-        if github_write_enabled():
-            registry.register(GitHubCreateIssueTool())
-    if hf_tools_enabled():
-        registry.register(HFSearchModelsTool())
-        registry.register(HFSearchDatasetsTool())
-        registry.register(HFModelInfoTool())
-        registry.register(WorkspaceHFDownloadFileTool(root, on_change=on_file_change))
-    if code_runner_enabled():
-        registry.register(PythonRunnerTool())
+
+    if normalized_profile in {"build", "benchmark"}:
+        registry.register(WorkspaceWriteFileTool(root, on_change=on_file_change))
+        registry.register(EditFileTool(root, on_change=on_file_change))
+        registry.register(RunTestsTool(root))
+
+    if normalized_profile == "build":
+        registry.register(WorkspaceShellTool(root))
+        if research_tools_enabled():
+            registry.register(WebSearchTool())
+            registry.register(FetchURLTool())
+        if github_tools_enabled():
+            registry.register(GitHubSearchReposTool())
+            registry.register(GitHubReadFileTool())
+            registry.register(GitHubListIssuesTool())
+            registry.register(GitHubSearchCodeTool())
+            if github_write_enabled():
+                registry.register(GitHubCreateIssueTool())
+        if hf_tools_enabled():
+            registry.register(HFSearchModelsTool())
+            registry.register(HFSearchDatasetsTool())
+            registry.register(HFModelInfoTool())
+            registry.register(WorkspaceHFDownloadFileTool(root, on_change=on_file_change))
+        if code_runner_enabled():
+            registry.register(PythonRunnerTool())
+
     registry.register(FinishTool())
     return registry
 

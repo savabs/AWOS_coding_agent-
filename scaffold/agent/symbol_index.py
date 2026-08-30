@@ -13,8 +13,8 @@ Strategy:
 """
 
 import ast
+import json
 import os
-import re
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,7 +28,8 @@ try:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         import tree_sitter_python as _tspython
-        from tree_sitter import Language, Parser as _TSParser
+        from tree_sitter import Language
+        from tree_sitter import Parser as _TSParser
         _PY_LANG = Language(_tspython.language())
         _TS_PARSER = _TSParser(_PY_LANG)
         _TS_AVAILABLE = True
@@ -65,6 +66,7 @@ class FileSymbols:
     signatures: Dict[str, str] = field(default_factory=dict)  # name → signature line
     imports: List[str] = field(default_factory=list)       # ["os", "pathlib", ...]
     from_imports: Dict[str, List[str]] = field(default_factory=dict)  # "module" → ["names"]
+    symbol_lines: Dict[str, tuple[int, int]] = field(default_factory=dict)  # name → (start, end) line
 
 
 class SymbolIndex:
@@ -75,6 +77,11 @@ class SymbolIndex:
         idx = SymbolIndex(codebase_root)
         idx.build()                               # scan all .py files
         ctx = idx.get_context_for_task(file, action)  # worker-ready string
+
+    Persistence:
+        idx.save(path)                            # atomic JSON snapshot
+        idx = SymbolIndex.load(path, codebase_root)
+        idx.rebuild_changed()                     # reparse mtime-changed files
     """
 
     def __init__(self, codebase_root: str):
@@ -82,6 +89,7 @@ class SymbolIndex:
         self._cache: Dict[str, FileSymbols] = {}     # path → FileSymbols
         self._dep_graph: Dict[str, Set[str]] = {}    # file → {files it imports}
         self._rev_graph: Dict[str, Set[str]] = {}    # file → {files that import it}
+        self._file_mtimes: Dict[str, float] = {}     # path → mtime at last parse
         self._built = False
 
     # ── Build ─────────────────────────────────────────────────────────────────
@@ -95,9 +103,143 @@ class SymbolIndex:
 
         for path in py_files:
             self._parse_file(str(path))
+            self._file_mtimes[str(path)] = self._mtime(path)
 
         self._build_dep_graph()
         self._built = True
+
+    # ── Persistence ─────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _mtime(path: Path) -> float:
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def save(self, path: str) -> None:
+        """Atomically persist the index snapshot (cache + mtimes) to JSON."""
+        payload = {
+            "root": str(self.root.resolve()),
+            "file_mtimes": {p: self._file_mtimes.get(p, self._mtime(Path(p))) for p in self._cache},
+            "files": {
+                p: {
+                    "classes": s.classes,
+                    "functions": s.functions,
+                    "signatures": s.signatures,
+                    "imports": s.imports,
+                    "from_imports": s.from_imports,
+                    "symbol_lines": {
+                        k: [v[0], v[1]] for k, v in s.symbol_lines.items()
+                    },
+                }
+                for p, s in self._cache.items()
+            },
+        }
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        os.replace(str(tmp), str(target))
+
+    @classmethod
+    def load(cls, path: str, codebase_root: str = "") -> "SymbolIndex":
+        """Load a persisted index snapshot. Raises if missing/corrupt."""
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        root = codebase_root or payload["root"]
+        idx = cls(root)
+        for rel, data in payload["files"].items():
+            p = Path(rel)
+            if not p.is_absolute():
+                p = idx.root / p
+            fp = str(p)
+            idx._cache[fp] = FileSymbols(
+                file_path=fp,
+                classes=list(data.get("classes", [])),
+                functions=list(data.get("functions", [])),
+                signatures=dict(data.get("signatures", {})),
+                imports=list(data.get("imports", [])),
+                from_imports=dict(data.get("from_imports", {})),
+                symbol_lines={
+                    k: (int(v[0]), int(v[1]))
+                    for k, v in data.get("symbol_lines", {}).items()
+                    if isinstance(v, (list, tuple)) and len(v) >= 2
+                },
+            )
+            idx._file_mtimes[fp] = float(payload["file_mtimes"].get(rel, 0.0))
+        idx._build_dep_graph()
+        idx._built = True
+        return idx
+
+    def rebuild_changed(self) -> int:
+        """Reparse files whose mtime changed; drop files that no longer exist.
+
+        Returns the number of changed files reparsed. Files present in the
+        on-disk tree but missing from cache are also parsed.
+        """
+        changed = 0
+        present: Set[str] = set()
+        for py_file in sorted(self.root.rglob("*.py")):
+            if not should_index_py_file(py_file, self.root):
+                continue
+            key = str(py_file)
+            present.add(key)
+            if self._file_mtimes.get(key) != self._mtime(py_file):
+                self._cache.pop(key, None)
+                self._parse_file(key)
+                self._file_mtimes[key] = self._mtime(py_file)
+                changed += 1
+        # Drop cache entries whose on-disk file is gone; keep path-drifted files
+        # that still physically exist (the disk-first resolver validates later).
+        for key in list(self._cache):
+            p = Path(key)
+            if p.is_file():
+                continue
+            try:
+                rel = p.resolve().relative_to(self.root.resolve())
+            except ValueError:
+                rel = None
+            if rel is not None and (self.root / rel).is_file():
+                continue  # path drift only — file still exists on disk
+            self._cache.pop(key, None)
+            self._file_mtimes.pop(key, None)
+        self._build_dep_graph()
+        self._built = True
+        return changed
+
+    def compact_map(self, limit: int = 40) -> str:
+        """Compact per-symbol map: 'file.py::symbol start-end' per line (bounded)."""
+        lines: List[str] = []
+        for fp in sorted(self._cache):
+            if len(lines) >= limit:
+                break
+            syms = self._cache[fp]
+            rel = _rel(fp, self.root)
+            for name in syms.functions + syms.classes:
+                if len(lines) >= limit:
+                    break
+                span = syms.symbol_lines.get(name)
+                if span:
+                    lines.append(f"{rel}::{name} {span[0]}-{span[1]}")
+                else:
+                    lines.append(f"{rel}::{name}")
+        return "\n".join(lines)
+
+    def symbol_windows(self, file_path: str, limit: int = 20) -> List[dict]:
+        """Return on-demand read windows for a file: [{symbol, start, end}]."""
+        syms = self._parse_file(file_path)
+        rel = _rel(file_path, self.root)
+        windows: List[dict] = []
+        for name in syms.functions + syms.classes:
+            span = syms.symbol_lines.get(name)
+            if not span:
+                continue
+            windows.append(
+                {"file": rel, "symbol": name, "start": span[0], "end": span[1]}
+            )
+            if len(windows) >= limit:
+                break
+        return windows
 
     def _parse_file(self, file_path: str) -> FileSymbols:
         """Parse one file; cache and return FileSymbols."""
@@ -136,6 +278,7 @@ class SymbolIndex:
                         syms.classes.append(name)
                         sig = lines[node.start_point[0]] if node.start_point[0] < len(lines) else ""
                         syms.signatures[name] = sig.strip()
+                        syms.symbol_lines[name] = (node.start_point[0] + 1, node.end_point[0] + 1)
                     for child in node.children:
                         walk(child, class_ctx=name)
 
@@ -149,6 +292,7 @@ class SymbolIndex:
                         syms.functions.append(qualified)
                         sig = lines[node.start_point[0]] if node.start_point[0] < len(lines) else ""
                         syms.signatures[qualified] = sig.strip()
+                        syms.symbol_lines[qualified] = (node.start_point[0] + 1, node.end_point[0] + 1)
                     for child in node.children:
                         walk(child, class_ctx=class_ctx)
 
@@ -211,11 +355,13 @@ class SymbolIndex:
                 syms.classes.append(node.name)
                 if node.lineno <= len(lines):
                     syms.signatures[node.name] = lines[node.lineno - 1].strip()
+                syms.symbol_lines[node.name] = (node.lineno, getattr(node, "end_lineno", node.lineno))
 
             elif isinstance(node, ast.FunctionDef):
                 syms.functions.append(node.name)
                 if node.lineno <= len(lines):
                     syms.signatures[node.name] = lines[node.lineno - 1].strip()
+                syms.symbol_lines[node.name] = (node.lineno, getattr(node, "end_lineno", node.lineno))
 
             elif isinstance(node, ast.Import):
                 for alias in node.names:
@@ -327,7 +473,9 @@ def _node_name(node) -> Optional[str]:
 
 
 def _rel(path: str, root: Path) -> str:
+    p = Path(path).expanduser().resolve()
+    r = root.expanduser().resolve()
     try:
-        return str(Path(path).relative_to(root))
+        return str(p.relative_to(r))
     except ValueError:
-        return Path(path).name
+        return p.name
