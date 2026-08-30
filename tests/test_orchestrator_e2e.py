@@ -95,6 +95,8 @@ def temp_repo(tmp_path, monkeypatch):
     # Env setup — same pattern as test_pause_resume_orchestrator
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("AWOS_RUNTIME_SESSION", "true")
+    monkeypatch.setenv("AWOS_BENCHMARK_MODE", "1")
+    monkeypatch.setenv("AWOS_BUDGET_USD", "0.50")
     monkeypatch.setenv("AWOS_LEARNING_DISABLE", "true")
     monkeypatch.setenv("AWOS_MCTS_DISABLE", "true")
     # DO NOT set AWOS_E2E=1 — we want the worker to go through real flow
@@ -115,7 +117,26 @@ def temp_repo(tmp_path, monkeypatch):
     mock_client = _make_mock_openai_client(canned)
     import openai as _openai
     monkeypatch.setattr(_openai, "OpenAI", lambda *a, **kw: mock_client)
+    # Worker modules import OpenAI directly, so patch their bound constructors
+    # as well; patching the package attribute alone is too late for them.
+    import scaffold.agent.worker as _worker
+    import scaffold.agent.react_worker as _react_worker
+    monkeypatch.setattr(_worker, "OpenAI", lambda *a, **kw: mock_client)
+    monkeypatch.setattr(_react_worker, "OpenAI", lambda *a, **kw: mock_client)
     return repo, target, str(target)
+
+
+def test_stagnation_without_runtime_session_sets_pause_without_dereference():
+    from scaffold.agent.orchestrator import Orchestrator
+
+    orchestrator = Orchestrator.__new__(Orchestrator)
+    orchestrator._runtime_session = None
+    orchestrator._runtime_store = None
+    orchestrator._pause_requested = False
+
+    orchestrator._pause_for_stagnation(1)
+
+    assert orchestrator._pause_requested is True
 
 
 class TestOrchestratorE2E:
@@ -195,7 +216,31 @@ class TestOrchestratorE2E:
         # 1. The orchestrator reported success
         assert result.get("success") is True, f"Orchestrator failed: {result.get('errors')}"
 
-        # 2. The file was actually changed (the worker really executed the tool)
+        # 2. The successful result must expose the same cost that the live
+        # tracker accumulated; the evaluator adapter consumes this field.
+        assert orch.tracker is not None
+        tracked_cost = orch.tracker.get_budget_status()["total_cost"]
+        assert tracked_cost > 0.0
+        assert result["total_cost"] == pytest.approx(tracked_cost)
+
+        # 3. Every live run now creates an evidence-first debugger bundle,
+        # independent of the optional runtime-session/GUI event stream.
+        debug_id = result.get("debug_session_id")
+        assert debug_id, "No debug session ID returned"
+        debug_root = Path.cwd() / ".awos" / "debug"
+        from scaffold.agent.core.debug_inspection import inspect_debug_bundle
+        debug_report = inspect_debug_bundle(debug_root, debug_id)
+        assert debug_report.session_id == debug_id
+        assert debug_report.metadata["evidence_count"] >= 1
+        from scaffold.agent.core.debug_journal import DebugJournal
+        live_evidence = DebugJournal(debug_root, debug_id).read_evidence()
+        assert any(item.source == "orchestrator" for item in live_evidence)
+        assert any(
+            item.payload.get("normalized_event_type") == "session_done"
+            for item in live_evidence
+        )
+
+        # 4. The file was actually changed (the worker really executed the tool)
         # NOTE: the runtime session puts the changes in a worktree, not the
         # original repo. So we read from the worktree via the session.
         rs_id = result.get("runtime_session_id")

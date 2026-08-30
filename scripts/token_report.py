@@ -28,6 +28,32 @@ PRICING = {
 DEFAULT_MODEL = "claude-sonnet-4-5"
 
 
+def context_metrics(text: str, budget_chars: int = 12000) -> dict:
+    """Return deterministic size metrics for a generated task-context packet."""
+    characters = len(text)
+    estimated_tokens = characters // 4
+    return {
+        "characters": characters,
+        "estimated_tokens": estimated_tokens,
+        "budget_chars": budget_chars,
+        "within_budget": characters <= budget_chars,
+    }
+
+
+def verified_task_metrics(records: list[dict]) -> dict:
+    """Measure cost per verified task, the primary efficiency metric for AWOS."""
+    tasks = len(records)
+    verified = sum(1 for record in records if record.get("verified") is True)
+    total_cost = round(sum(float(record.get("cost", 0.0)) for record in records), 8)
+    return {
+        "tasks": tasks,
+        "verified_tasks": verified,
+        "verification_rate": round(verified / tasks * 100, 2) if tasks else 0.0,
+        "total_cost": total_cost,
+        "cost_per_verified_task": round(total_cost / verified, 8) if verified else None,
+    }
+
+
 def parse_history(path: Path) -> list[dict]:
     """Extract usage blocks from .aider.llm.history JSON-lines or mixed format."""
     records = []
@@ -80,8 +106,23 @@ def cache_hit_rate(records: list[dict]) -> float:
 def main():
     parser = argparse.ArgumentParser(description="Token usage report from Aider LLM history")
     parser.add_argument("--history", default=".aider.llm.history", help="Path to LLM history file")
+    parser.add_argument("--context", help="Path to a generated task-context packet")
+    parser.add_argument("--context-budget", type=int, default=12000, help="Context packet character budget")
+    parser.add_argument("--verified-records", help="JSON file containing [{verified, cost}, ...]")
+    parser.add_argument("--metrics-only", action="store_true", help="Print context/task metrics without history")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show per-request breakdown")
     args = parser.parse_args()
+
+    if args.context:
+        context_path = Path(args.context)
+        metrics = context_metrics(context_path.read_text(encoding="utf-8"), args.context_budget)
+        print(json.dumps({"context": str(context_path), **metrics}, sort_keys=True))
+    if args.verified_records:
+        records_path = Path(args.verified_records)
+        records = json.loads(records_path.read_text(encoding="utf-8"))
+        print(json.dumps({"verified_tasks": verified_task_metrics(records)}, sort_keys=True))
+    if args.metrics_only:
+        return
 
     history_path = Path(args.history)
     if not history_path.exists():

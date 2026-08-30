@@ -41,6 +41,7 @@ def test_failure_signature_distinguishes_kind():
 def test_check_stagnation_trips_at_threshold(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "test-key")
     
     from scaffold.agent.orchestrator import Orchestrator
     
@@ -67,6 +68,7 @@ def test_check_stagnation_trips_at_threshold(monkeypatch):
 def test_check_stagnation_ignores_success(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "test-key")
     
     from scaffold.agent.orchestrator import Orchestrator
     
@@ -84,6 +86,7 @@ def test_stagnation_breaker_integration(tmp_path, monkeypatch):
     
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "test-key")
     monkeypatch.setenv("AWOS_RUNTIME_SESSION", "true")
     monkeypatch.setenv("AWOS_USE_WORKTREE", "false")
     monkeypatch.setenv("AWOS_STAGNATION_THRESHOLD", "2")

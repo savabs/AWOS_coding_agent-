@@ -26,6 +26,14 @@ import re
 import sys
 from pathlib import Path
 
+EXCLUDED_DIRS = {
+    ".git",
+    ".awos",
+    ".pytest_cache",
+    "__pycache__",
+    "node_modules",
+}
+
 try:
     import yaml
 
@@ -41,13 +49,30 @@ def get_vault_root(start: Path) -> Path:
     return start
 
 
+def _is_excluded(path: Path) -> bool:
+    return any(part in EXCLUDED_DIRS for part in path.parts)
+
+
 def collect_markdown_files(root: Path, subtree: Path | None = None) -> list[Path]:
     search_root = subtree if subtree else root
     return [
         f
         for f in search_root.rglob("*.md")
-        if ".git" not in f.parts and "node_modules" not in f.parts
+        if not _is_excluded(f)
     ]
+
+
+def collect_explicit_files(root: Path, values: list[str]) -> list[Path]:
+    """Resolve an explicit file list, ignoring missing/non-Markdown paths."""
+    files: list[Path] = []
+    for value in values:
+        path = Path(value)
+        if not path.is_absolute():
+            path = root / path
+        path = path.resolve()
+        if path.suffix.lower() == ".md" and path.is_file() and not _is_excluded(path):
+            files.append(path)
+    return files
 
 
 def parse_frontmatter(content: str) -> tuple[dict | None, bool]:
@@ -195,6 +220,12 @@ def main():
         action="store_true",
         help="Auto-add missing frontmatter stubs (FM01 only)",
     )
+    parser.add_argument(
+        "--files",
+        nargs="+",
+        default=None,
+        help="Lint only these Markdown files (incremental mode)",
+    )
     args = parser.parse_args()
 
     vault_root = get_vault_root(Path.cwd())
@@ -214,8 +245,12 @@ def main():
             if target:
                 all_links.setdefault(target, []).append(str(f.relative_to(vault_root)))
 
-    # Determine scan target
-    scan_files = collect_markdown_files(vault_root, subtree) if subtree else all_files
+    # Determine scan target. Explicit files are for incremental gates; the
+    # default remains a full-vault audit, excluding generated directories.
+    if args.files:
+        scan_files = collect_explicit_files(vault_root, args.files)
+    else:
+        scan_files = collect_markdown_files(vault_root, subtree) if subtree else all_files
 
     all_findings = []
     fixed = 0

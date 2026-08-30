@@ -326,6 +326,36 @@ class GuiChatService:
             meta.update(extra)
         return meta
 
+    def _prompt_trace(
+        self,
+        *,
+        message: str,
+        mode: str,
+        provider: str,
+        model: str,
+        session: ChatSession,
+        system: str,
+        user: str,
+    ) -> dict[str, Any]:
+        """Return bounded, secret-safe request metadata for developer inspection."""
+        provider_messages = self._provider_messages(system, user, session)
+        return {
+            "raw_user_input": message,
+            "mode": mode,
+            "provider": provider,
+            "model": model,
+            "prior_turns": len(self._conversation_messages(session)) // 2,
+            "provider_message_roles": [m["role"] for m in provider_messages],
+            "system_chars": len(system),
+            "user_prompt_chars": len(user),
+        }
+
+    def _provider_messages(
+        self, system: str, user: str, session: ChatSession
+    ) -> list[dict[str, str]]:
+        """Build the provider request while preserving bounded chat history."""
+        return self._llm_messages(system, user, session)
+
     def _tracker_to_usage(self, tracker: Any) -> None:
         """Copy TokenTracker totals into last-usage fields."""
         prompt = completion = 0
@@ -358,6 +388,7 @@ class GuiChatService:
             yield {"event": "error", "data": err}
             return
 
+        trace_id = f"trace_{uuid.uuid4().hex}"
         user_msg = ChatMessage(role="user", content=message, mode=mode)
         session.messages.append(user_msg)
 
@@ -366,7 +397,12 @@ class GuiChatService:
 
         yield {
             "event": "start",
-            "data": {"chat_id": session.chat_id, "mode": mode, "mode_label": MODE_LABELS.get(mode, mode)},
+            "data": {
+                "chat_id": session.chat_id,
+                "trace_id": trace_id,
+                "mode": mode,
+                "mode_label": MODE_LABELS.get(mode, mode),
+            },
         }
 
         reply_text = ""
@@ -410,7 +446,7 @@ class GuiChatService:
                 classification = self._classify_intent(message)
                 if classification == "task":
                     # Route to agent mode — full orchestrator
-                    for evt in self._stream_agent(message, session, cancel):
+                    for evt in self._stream_agent(message, session, cancel, trace_id=trace_id):
                         if evt["event"] in ("progress", "token", "status"):
                             yield evt
                         elif evt["event"] == "_complete":
@@ -431,7 +467,7 @@ class GuiChatService:
                             cancelled = True
                             break
             else:
-                for evt in self._stream_agent(message, session, cancel):
+                for evt in self._stream_agent(message, session, cancel, trace_id=trace_id):
                     if evt["event"] in ("progress", "token", "status"):
                         yield evt
                     elif evt["event"] == "_complete":
@@ -470,6 +506,7 @@ class GuiChatService:
             "event": done_event,
             "data": {
                 "chat_id": session.chat_id,
+                "trace_id": trace_id,
                 "mode": mode,
                 "mode_label": MODE_LABELS.get(mode, mode),
                 "reply": reply_text,
@@ -518,6 +555,15 @@ class GuiChatService:
                 handler="qa",
                 extra={"memory_turns": prior_turns},
             )
+            meta["prompt_trace"] = self._prompt_trace(
+                message=message,
+                mode="qa",
+                provider="cache",
+                model="cache",
+                session=session,
+                system=system,
+                user=user,
+            )
             yield {"event": "status", "data": {"message": "Cache hit — instant reply", "cache_hit": True}}
             partial = ""
             for chunk in _chunk_text(cached, size=8):
@@ -549,6 +595,7 @@ class GuiChatService:
         first_token = True
         # OpenCode Go first — only provider with credits
         opencode_key = os.getenv("OPENCODE_GO_API_KEY")
+        provider_name = "opencode_go" if opencode_key else "unknown"
         if opencode_key:
             opencode_base = os.getenv("OPENCODE_GO_BASE_URL", "https://opencode.ai/zen/go/v1")
             oc_model = "qwen3.7-plus"
@@ -564,7 +611,7 @@ class GuiChatService:
                 # All supported models accept this path.
                 resp = oc_client.chat.completions.create(
                     model=oc_model,
-                    messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                    messages=self._provider_messages(system, user, session),
                     max_tokens=3000,  # enough for reasoning + answer
                     temperature=0.3,
                     stream=True,
@@ -587,6 +634,7 @@ class GuiChatService:
                 yield {"event": "error", "data": {"error": str(exc)}}
                 model = oc_model
         elif os.getenv("DEEPSEEK_API_KEY") or is_cheap_only():
+            provider_name = "deepseek"
             for token in self._stream_deepseek(system, user, session):
                 if cancel.is_set():
                     break
@@ -597,6 +645,7 @@ class GuiChatService:
                 yield {"event": "token", "data": {"content": token}}
             model = self._last_model
         elif os.getenv("ANTHROPIC_API_KEY"):
+            provider_name = "anthropic"
             for token in self._stream_anthropic(system, user, session):
                 if cancel.is_set():
                     break
@@ -645,6 +694,15 @@ class GuiChatService:
             handler="qa",
             extra={"memory_turns": prior_turns},
         )
+        meta["prompt_trace"] = self._prompt_trace(
+            message=message,
+            mode="qa",
+            provider=provider_name,
+            model=model,
+            session=session,
+            system=system,
+            user=user,
+        )
         yield {"event": "usage", "data": meta}
         yield {"event": "_complete", "data": {"text": text, "meta": meta}}
 
@@ -656,7 +714,11 @@ class GuiChatService:
         return "\n".join(f"{m['role']}: {m['content']}" for m in prior)
 
     def _stream_agent(
-        self, message: str, session: ChatSession, cancel: threading.Event
+        self,
+        message: str,
+        session: ChatSession,
+        cancel: threading.Event,
+        trace_id: Optional[str] = None,
     ) -> Iterator[dict[str, Any]]:
         gui_root = Path(self.codebase_root) / ".awos" / "gui"
         known = {p.name for p in gui_root.glob("orch_*")} if gui_root.is_dir() else set()
@@ -665,7 +727,7 @@ class GuiChatService:
 
         def _run() -> None:
             try:
-                text, meta = self._run_agent(message, session, cancel)
+                text, meta = self._run_agent(message, session, cancel, trace_id=trace_id)
                 result_holder["text"] = text
                 result_holder["meta"] = meta
             except Exception as exc:
@@ -694,7 +756,13 @@ class GuiChatService:
                     active_sid = candidates[0].name
                     yield {
                         "event": "progress",
-                        "data": {"type": "session_start", "session_id": active_sid, "goal": message},
+                        "data": {
+                            "type": "session_start",
+                            "session_id": active_sid,
+                            "chat_id": session.chat_id,
+                            "trace_id": trace_id,
+                            "goal": message,
+                        },
                     }
 
             if active_sid:
@@ -785,6 +853,7 @@ class GuiChatService:
 
         user_msg = ChatMessage(role="user", content=message, mode=mode)
         session.messages.append(user_msg)
+        trace_id = f"trace_{uuid.uuid4().hex}"
 
         try:
             if mode == "qa":
@@ -792,7 +861,7 @@ class GuiChatService:
             elif mode == "plan":
                 reply_text, meta = self._run_plan(message)
             else:
-                reply_text, meta = self._run_agent(message, session)
+                reply_text, meta = self._run_agent(message, session, trace_id=trace_id)
         except Exception as exc:
             reply_text = f"Error: {exc}"
             meta = {"success": False, "error": str(exc)}
@@ -811,6 +880,7 @@ class GuiChatService:
         return {
             "status": 200,
             "chat_id": session.chat_id,
+            "trace_id": trace_id,
             "mode": mode,
             "mode_label": MODE_LABELS.get(mode, mode),
             "reply": reply_text,
@@ -830,12 +900,41 @@ class GuiChatService:
         return self.store.create(title=title), None
 
     def _conversation_messages(self, session: ChatSession, max_turns: int = 12) -> list[dict[str, str]]:
-        """Prior turns for LLM context (excludes the message just appended)."""
+        """Prior turns for LLM context (excludes the message just appended).
+
+        Bounded sliding-window: recent ``max_turns`` are kept verbatim (each
+        truncated to a sane length), while older turns are collapsed into a
+        single compact summary message so context is preserved without letting
+        the prompt grow without bound.
+        """
         prior = session.messages[:-1] if session.messages else []
+        recent_turns = int(os.getenv("AWOS_CHAT_RECENT_TURNS", str(max_turns)))
+        summary_limit = int(os.getenv("AWOS_CHAT_SUMMARY_TURNS", "200"))
+        msg_cap = int(os.getenv("AWOS_CHAT_MSG_CHARS", "4000"))
+
+        # Split prior into (older -> summarize) and (recent -> keep verbatim).
+        recent_msgs = prior[-recent_turns * 2 :]
+        older_msgs = prior[: len(prior) - len(recent_msgs)] if len(prior) > len(recent_msgs) else []
+
         msgs: list[dict[str, str]] = []
-        for m in prior[-max_turns * 2 :]:
+        if older_msgs:
+            summary_lines: list[str] = []
+            for m in older_msgs[-summary_limit:]:
+                if m.role not in ("user", "assistant") or not m.content.strip():
+                    continue
+                text = m.content.strip().replace("\n", " ")[:120]
+                summary_lines.append(f"[{m.role}] {text}")
+            if summary_lines:
+                msgs.append(
+                    {
+                        "role": "user",
+                        "content": "Earlier conversation (compact):\n" + "\n".join(summary_lines),
+                    }
+                )
+
+        for m in recent_msgs:
             if m.role in ("user", "assistant") and m.content.strip():
-                msgs.append({"role": m.role, "content": m.content[:4000]})
+                msgs.append({"role": m.role, "content": m.content[:msg_cap]})
         return msgs
 
     def _read_soul_context(self, max_chars: int = 2000) -> str:
@@ -872,6 +971,8 @@ class GuiChatService:
             "a persistent execution kernel optimizing quality × speed ÷ cost. "
             "Models are replaceable; intelligence compounds. Coding is App #1. "
             "Answer clearly in prose. Use conversation history when relevant. "
+            "Preserve the user's wording exactly; never silently rewrite or correct intent. "
+            "If wording is ambiguous, ask for clarification or label the interpretation as an assumption. "
             "Do not propose file edits unless explicitly asked."
         )
         blocks = [f"Project context:\n{context}"]
@@ -1130,6 +1231,7 @@ class GuiChatService:
         message: str,
         session: Optional[ChatSession] = None,
         cancel: Optional[threading.Event] = None,
+        trace_id: Optional[str] = None,
     ) -> tuple[str, dict[str, Any]]:
         from scaffold.agent.orchestrator import Orchestrator
         from scaffold.agent.token_tracker import TokenTracker
@@ -1157,6 +1259,8 @@ class GuiChatService:
             extra_context=extra,
             cancel_event=cancel,
             on_runtime_session=_on_runtime_session,
+            chat_id=session.chat_id if session else None,
+            trace_id=trace_id,
         )
 
         run_id = result.get("session_id", "")

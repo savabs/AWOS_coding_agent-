@@ -17,7 +17,9 @@ Usage:
 """
 
 import argparse
+import glob
 import re
+import shlex
 import subprocess
 import sys
 from datetime import date
@@ -102,11 +104,23 @@ def check_live_proof(task_path: Path) -> tuple[bool, str]:
     return True, "Live proof not required for this task (no kernel/CLI keywords)"
 
 
+def _test_command_args(test_cmd: str, root: Path) -> list[str]:
+    """Parse a test command and expand local file globs without a shell."""
+    args: list[str] = []
+    for token in shlex.split(test_cmd):
+        matches = glob.glob(str(root / token)) if any(char in token for char in "*?[") else []
+        if matches:
+            args.extend(str(Path(match).relative_to(root)) for match in sorted(matches))
+        else:
+            args.append(token)
+    return args
+
+
 def run_tests(test_cmd: str, root: Path) -> tuple[bool, str]:
     """Run the test suite."""
     try:
         result = subprocess.run(
-            test_cmd.split(),
+            _test_command_args(test_cmd, root),
             cwd=root,
             capture_output=True,
             text=True,
@@ -121,18 +135,38 @@ def run_tests(test_cmd: str, root: Path) -> tuple[bool, str]:
     except subprocess.TimeoutExpired:
         return False, "Tests timed out after 5 minutes"
     except FileNotFoundError:
-        return False, f"Test command not found: {test_cmd.split()[0]}"
+        return False, f"Test command not found: {_test_command_args(test_cmd, root)[0]}"
 
 
-def run_obsidian_lint(root: Path) -> tuple[bool, str]:
-    """Run obsidian lint and check for errors."""
+def _task_artifact_paths(root: Path, task_path: Path) -> list[Path]:
+    """Return the Markdown sidecars belonging to one HTML-first task triad."""
+    stem = task_path.stem
+    if stem.endswith("_task"):
+        feature = stem[:-5]
+    else:
+        feature = stem
+    candidates = [
+        task_path,
+        task_path.with_suffix(".html"),
+        root / "docs" / "research" / f"{feature}.md",
+        root / "docs" / "specs" / f"{feature}_spec.md",
+    ]
+    return [path for path in candidates if path.is_file() and path.suffix == ".md"]
+
+
+def run_obsidian_lint(root: Path, task_path: Path | None = None) -> tuple[bool, str]:
+    """Run incremental artifact lint, or full lint when no task is supplied."""
     lint_script = root / "scripts" / "obsidian_lint.py"
     if not lint_script.exists():
         return True, "obsidian_lint.py not found — skipping"
 
     try:
+        command = [sys.executable, str(lint_script)]
+        if task_path is not None:
+            artifact_paths = _task_artifact_paths(root, task_path)
+            command.extend(["--files", *[str(path) for path in artifact_paths]])
         result = subprocess.run(
-            [sys.executable, str(lint_script)],
+            command,
             cwd=root,
             capture_output=True,
             text=True,
@@ -186,8 +220,8 @@ def main():
     parser.add_argument("--skip-tests", action="store_true", help="Skip running tests")
     parser.add_argument(
         "--test-cmd",
-        default="pytest --tb=short -q",
-        help="Test command to run (default: pytest --tb=short -q)",
+        default="python -m pytest --tb=short -q",
+        help="Test command to run (default: python -m pytest --tb=short -q)",
     )
     args = parser.parse_args()
 
@@ -221,7 +255,7 @@ def main():
     results.append(("PASS" if ok else "FAIL", "Live proof", msg))
 
     # Check 4: Obsidian lint
-    ok, msg = run_obsidian_lint(root)
+    ok, msg = run_obsidian_lint(root, task_path)
     results.append(("PASS" if ok else "FAIL", "Obsidian lint", msg))
 
     # Check 5: Checkpoint

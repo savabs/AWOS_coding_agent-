@@ -57,7 +57,7 @@ from datetime import datetime, timedelta
 # ── 1. Load .env ──────────────────────────────────────────────────────────────
 try:
     from dotenv import load_dotenv
-    load_dotenv(Path(__file__).parent / ".env")
+    load_dotenv(Path(__file__).resolve().parent / ".env")
 except ImportError:
     pass
 
@@ -230,6 +230,55 @@ def cmd_budget(args):
     print(f"  Remaining: ${remaining:.2f}")
     if status.get("cache_hits"):
         print(f"  Cache:     {status['cache_hits']} hits, saved ${status.get('cache_savings', 0):.4f}")
+
+
+def cmd_tokens(args):
+    """Show persisted per-model-call token and context telemetry."""
+    from scaffold.agent.model_call_telemetry import ModelCallTelemetryStore
+
+    store = ModelCallTelemetryStore(args.store)
+    records = store.read()
+    if args.session:
+        records = [r for r in records if r.get("session_id") == args.session]
+    if args.task:
+        records = [r for r in records if r.get("task_id") == args.task]
+    if args.last:
+        records = records[-args.last:]
+    summary = store.aggregate(records)
+    if args.json:
+        print(json.dumps({"summary": summary, "records": records}, indent=2, sort_keys=True))
+        return
+
+    print("AWOS Token Usage")
+    print(f"  Calls:                 {summary['calls']}")
+    print(f"  Input tokens:          {summary['input_tokens']:,}")
+    print(f"  Output tokens:         {summary['output_tokens']:,}")
+    print(f"  Total tokens:          {summary['total_tokens']:,}")
+    print(f"  Estimated cost:        ${summary['estimated_cost_usd']:.6f}")
+    print(f"  Average latency:       {summary['average_latency_ms']:.1f} ms")
+    cache_read = summary.get("cache_read_tokens", 0)
+    cache_write = summary.get("cache_write_tokens", 0)
+    reasoning = summary.get("reasoning_tokens", 0)
+    if cache_read or cache_write:
+        print(f"  Cache read tokens:     {cache_read:,}")
+        print(f"  Cache write tokens:    {cache_write:,}")
+        hit_rate = summary.get("cache_hit_rate", 0.0)
+        print(f"  Cache hit rate:        {hit_rate:.1%}")
+    if reasoning:
+        print(f"  Reasoning tokens:      {reasoning:,}")
+    print("  Context estimates:")
+    for name, value in summary["context"].items():
+        print(f"    {name}: {value:,} tokens")
+    print(f"  Tool calls:            {summary['tool_calls']}")
+    print(f"  Tool output characters: {summary['tool_output_chars']:,}")
+    unavailable = sum(
+        1 for r in records
+        if r.get("reasoning_tokens") is None
+        or r.get("cache_read_tokens") is None
+        or r.get("cache_write_tokens") is None
+    )
+    if unavailable:
+        print(f"  Provider fields unavailable: {unavailable} call(s)")
 
 
 def cmd_debug_report(args):
@@ -1542,6 +1591,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     # budget
     sub.add_parser("budget", help="Month-to-date budget status")
+
+    # per-model-call token/context telemetry
+    tokens = sub.add_parser("tokens", help="Inspect per-model-call token telemetry")
+    tokens.add_argument("--json", action="store_true", help="Output records and summary as JSON")
+    tokens.add_argument("--last", type=int, help="Show only the last N calls")
+    tokens.add_argument("--session", help="Filter by runtime session ID")
+    tokens.add_argument("--task", help="Filter by task ID")
+    tokens.add_argument("--store", default=".awos", help="Path to .awos store (default: .awos)")
 
     # debug
     sub.add_parser("debug", help="Show running processes + git commit")

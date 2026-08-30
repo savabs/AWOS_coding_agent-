@@ -350,3 +350,53 @@ class TestComputeRewardFloat:
         # Ensure bool still works exactly as before
         assert compute_reward(True, 1, 0.001) == 0.999
         assert compute_reward(False, 1, 0.001) == pytest.approx(-0.0539, 0.0001)
+
+
+# ── Exit-status-first + changed_files targeting ─────────────────────────────
+
+class TestExitStatusFirst:
+    def test_pytest_nonzero_returncode_overrides_passing_output(self):
+        runner = TestRunner(".")
+        res = runner._parse_pytest(
+            "2 passed in 0.05s", "", ["pytest"], returncode=1
+        )
+        assert res.failed == 1
+        assert res.returncode == 1
+
+    def test_pytest_zero_returncode_keeps_passing_output(self):
+        runner = TestRunner(".")
+        res = runner._parse_pytest(
+            "2 passed in 0.05s", "", ["pytest"], returncode=0
+        )
+        assert res.failed == 0
+        assert res.passed == 2
+
+    def test_pytest_nonzero_with_reported_failure_not_overwritten(self):
+        runner = TestRunner(".")
+        res = runner._parse_pytest(
+            "1 passed, 1 failed in 0.05s", "", ["pytest"], returncode=1
+        )
+        assert res.failed == 1  # already failed; exit code agrees
+
+    def test_generic_nonzero_overrides_passing(self):
+        runner = TestRunner(".")
+        res = runner._parse_generic("5 passed", "", ["cmd"], returncode=2)
+        assert res.failed == 1
+        assert res.returncode == 2
+
+
+class TestChangedFilesTargeting:
+    def test_pytest_targets_changed_test_files(self, tmp_project):
+        Path(tmp_project, "pytest.ini").write_text("[pytest]\n")
+        runner = TestRunner(tmp_project)
+        cfg = runner.detect()
+        command = runner._execute_targeted(cfg, ["src/a.py", "tests/test_a.py"])
+        assert "tests/test_a.py" in command
+
+    def test_pytest_ignores_non_test_changed_files(self, tmp_project):
+        Path(tmp_project, "pytest.ini").write_text("[pytest]\n")
+        runner = TestRunner(tmp_project)
+        cfg = runner.detect()
+        command = runner._execute_targeted(cfg, ["src/a.py", "src/b.py"])
+        # no test targets -> fall back to base command
+        assert not any("src/" in c for c in command)
