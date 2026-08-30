@@ -9,6 +9,7 @@ import difflib
 import json
 import os
 import re
+import time
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -18,10 +19,14 @@ from openai import OpenAI  # For DeepSeek API access
 try:
     from .budget_ledger import get_ledger
     from .escalation_engine import is_cheap_only
+    from .fixed_provider import FIXED_MODEL, create_fixed_client
+    from .model_call_telemetry import extract_optional_usage, record_model_call
     from .usage_record import empty_usage, merge_usage, record_api_usage
 except ImportError:
     from budget_ledger import get_ledger
     from escalation_engine import is_cheap_only
+    from fixed_provider import FIXED_MODEL, create_fixed_client
+    from model_call_telemetry import extract_optional_usage, record_model_call
     from usage_record import empty_usage, merge_usage, record_api_usage
 
 _MONTHLY_BUDGET = float(os.getenv("AWOS_MONTHLY_BUDGET", "20.0"))
@@ -45,41 +50,17 @@ class Worker:
     MAX_CONTEXT_TOKENS_BLOCK_B: int = 2000
 
     def __init__(self, api_key: Optional[str] = None, model: str = "deepseek-chat"):
-        """Initialize Worker with DeepSeek primary and multiple fallbacks."""
-        deepseek_key = api_key or os.getenv("DEEPSEEK_API_KEY")
-        anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-        openai_key = os.getenv("OPENAI_API_KEY")
+        """Initialize the fixed OpenCode Go worker for the initial product."""
         opencode_key = os.getenv("OPENCODE_GO_API_KEY")
+        if not opencode_key:
+            raise ValueError("Set OPENCODE_GO_API_KEY for the active coding-agent path")
 
-        # OpenCode Go (primary — single provider for all models)
-        if opencode_key:
-            self.opencode_client = OpenAI(api_key=opencode_key, base_url="https://opencode.ai/zen/go/v1")
-        else:
-            self.opencode_client = None
-
-        # DeepSeek (direct API — legacy, keep for fallback)
-        if deepseek_key:
-            self.client = OpenAI(api_key=deepseek_key, base_url="https://api.deepseek.com")
-        else:
-            self.client = None
-
-        # Anthropic (Haiku / Sonnet)
-        if anthropic_key:
-            self.anthropic_client = Anthropic(api_key=anthropic_key)
-        else:
-            self.anthropic_client = None
-
-        # OpenAI direct (GPT-4o-mini etc.)
-        if openai_key:
-            self.openai_client = OpenAI(api_key=openai_key, base_url="https://api.openai.com/v1")
-        else:
-            self.openai_client = None
-
-        if not any([self.opencode_client, self.client, self.anthropic_client, self.openai_client]):
-            raise ValueError("Set at least one of: OPENCODE_GO_API_KEY, DEEPSEEK_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY")
-
-        self.model = model
-        self.fallback_model = "claude-haiku-4-5"
+        self.opencode_client = create_fixed_client(opencode_key)
+        self.client = None
+        self.anthropic_client = None
+        self.openai_client = None
+        self.model = FIXED_MODEL
+        self.fallback_model = FIXED_MODEL
         self._dead_providers: set = set()
 
     @staticmethod
@@ -459,21 +440,60 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
         if _usage_accum is None:
             _usage_accum = empty_usage()
 
-        # Determine which provider/model to use (EscalationEngine or defaults)
-        if model_spec is not None:
-            use_provider = model_spec.provider
-            use_model    = model_spec.model_id
-            inp_price    = model_spec.input_price
-            out_price    = model_spec.output_price
-            model_label  = model_spec.name
-        else:
-            use_provider = "deepseek" if self.client else "anthropic"
-            use_model    = self.model
-            inp_price, out_price = 0.14, 0.28
-            model_label  = "DeepSeek"
+        # The initial product ignores dynamic escalation and uses one fixed path.
+        use_provider = "opencode"
+        use_model = FIXED_MODEL
+        inp_price, out_price = 0.435, 0.87
+        model_label = "DeepSeek V4 Pro"
 
         # Call the right provider
-        if use_provider == "deepseek" and self.client and "deepseek" not in self._dead_providers:
+        if use_provider == "opencode" and self.opencode_client and "opencode" not in self._dead_providers:
+            _allowed, _reason = get_ledger().check_budget(model_spec.cost_per_req if model_spec else 0.002, _MONTHLY_BUDGET)
+            if not _allowed:
+                raise RuntimeError(f"[BUDGET HARD STOP] {_reason}")
+            try:
+                started_at = time.perf_counter()
+                response = self.opencode_client.chat.completions.create(
+                    model=use_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=4096,
+                    temperature=0.3,
+                )
+                response_text = response.choices[0].message.content
+                model_used = model_label
+                inp = response.usage.prompt_tokens
+                out = response.usage.completion_tokens
+                merge_usage(_usage_accum, record_api_usage(
+                    request_type="execution",
+                    model=model_label,
+                    input_tokens=inp,
+                    output_tokens=out,
+                    input_price=inp_price,
+                    output_price=out_price,
+                    tracker=tracker,
+                ))
+                record_model_call(
+                    provider=use_provider,
+                    model=use_model,
+                    request_type="execution",
+                    input_tokens=inp,
+                    output_tokens=out,
+                    input_price=inp_price,
+                    output_price=out_price,
+                    **extract_optional_usage(response.usage),
+                    prompt=prompt,
+                    task_id=str(task.get("task_id")) if task.get("task_id") is not None else None,
+                    started_at=started_at,
+                )
+            except Exception as e:
+                err_str = str(e)
+                if self._is_permanent_failure(err_str):
+                    self._dead_providers.add("opencode")
+                    print(f"[CIRCUIT] opencode tripped — {err_str[:60]}")
+                else:
+                    print(f"[WORKER] {model_label} failed (attempt {attempt}): {err_str[:80]}")
+
+        elif use_provider == "deepseek" and self.client and "deepseek" not in self._dead_providers:
             _allowed, _reason = get_ledger().check_budget(model_spec.cost_per_req if model_spec else 0.001, _MONTHLY_BUDGET)
             if not _allowed:
                 raise RuntimeError(f"[BUDGET HARD STOP] {_reason}")
@@ -889,44 +909,14 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
             f"Describe the solution in 3-5 sentences (no code):"
         )
         try:
-            if model_spec is not None and model_spec.provider == "anthropic" and self.anthropic_client and "anthropic" not in self._dead_providers:
-                resp = self.anthropic_client.messages.create(
-                    model=model_spec.model_id,
-                    max_tokens=400,
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                return resp.content[0].text.strip()
-            elif model_spec is not None and model_spec.provider == "openai" and self.openai_client and "openai" not in self._dead_providers:
-                resp = self.openai_client.chat.completions.create(
-                    model=model_spec.model_id,
+            if self.opencode_client and "opencode" not in self._dead_providers:
+                resp = self.opencode_client.chat.completions.create(
+                    model=FIXED_MODEL,
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=400,
                     temperature=0.1,
                 )
                 return resp.choices[0].message.content.strip()
-            elif self.client and "deepseek" not in self._dead_providers:
-                resp = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=400,
-                    temperature=0.1,
-                )
-                return resp.choices[0].message.content.strip()
-            elif self.openai_client and "openai" not in self._dead_providers:
-                resp = self.openai_client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=400,
-                    temperature=0.1,
-                )
-                return resp.choices[0].message.content.strip()
-            elif self.anthropic_client and "anthropic" not in self._dead_providers:
-                resp = self.anthropic_client.messages.create(
-                    model="claude-haiku-4-5",
-                    max_tokens=400,
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                return resp.content[0].text.strip()
         except Exception:
             pass
         return ""
