@@ -20,6 +20,18 @@ from typing import Any
 from .base import Tool, ToolResult
 
 
+_SKIP_SEARCH_DIRS = {".awos", ".git", "__pycache__", ".venv", "venv", "node_modules"}
+
+
+def _infer_literal(pattern: str, literal: Any = None) -> bool:
+    """Infer literal mode for code snippets unless the caller explicitly decides."""
+    if literal is not None:
+        if isinstance(literal, bool):
+            return literal
+        return str(literal).strip().lower() in ("true", "1", "yes")
+    return bool(re.search(r"[.()\[\]{}\"'=<>:+*/\\-]", pattern))
+
+
 class ReadFileTool(Tool):
     """Read the contents of a local file."""
 
@@ -237,17 +249,29 @@ class GrepTool(Tool):
         pattern = args["pattern"].strip()
         root = Path(args.get("root", ".")).expanduser().resolve()
         file_glob = args.get("file_glob", "*")
-        literal = str(args.get("literal", "false")).lower() in ("true", "1", "yes")
+        literal = _infer_literal(pattern, args.get("literal"))
         max_results = int(args.get("max_results", 40))
+        requested_path = args.get("path")
 
         try:
             regex = re.compile(re.escape(pattern) if literal else pattern, re.IGNORECASE)
         except re.error as e:
             return ToolResult.fail(f"Invalid regex: {e}")
 
+        if requested_path:
+            candidate = Path(str(requested_path)).expanduser()
+            if not candidate.is_absolute():
+                candidate = root / candidate
+            candidate = candidate.resolve()
+            if not candidate.exists() or not candidate.is_file():
+                return ToolResult.fail(f"File not found: {candidate}")
+            filepaths = [candidate]
+        else:
+            filepaths = sorted(root.rglob(file_glob))
+
         hits: list[dict] = []
-        for filepath in sorted(root.rglob(file_glob)):
-            if not filepath.is_file():
+        for filepath in filepaths:
+            if not filepath.is_file() or any(part in _SKIP_SEARCH_DIRS for part in filepath.relative_to(root).parts):
                 continue
             try:
                 text = filepath.read_text(encoding="utf-8", errors="replace")
@@ -270,5 +294,5 @@ class GrepTool(Tool):
 
         return ToolResult.ok(
             text="\n".join(lines),
-            data={"pattern": pattern, "hits": hits},
+            data={"pattern": pattern, "literal": literal, "hits": hits},
         )

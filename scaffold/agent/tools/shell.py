@@ -15,7 +15,10 @@ from __future__ import annotations
 
 import os
 import re
+import signal
 import subprocess
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from .base import Tool, ToolResult
@@ -40,6 +43,66 @@ _SAFE_PATTERNS = re.compile(
 # These operators change the command graph or redirect data. Keep them behind
 # the explicit ALLOW_SHELL/allow_destructive escape hatch.
 _UNSAFE_SYNTAX = re.compile(r"[;&|<>`\n\r]|\$\(|\$\{", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class BoundedCommandResult:
+    """Result of a process-group-supervised command."""
+
+    returncode: int | None
+    stdout: str
+    stderr: str
+    timed_out: bool = False
+    output_limited: bool = False
+
+
+def _truncate_output(value: bytes, max_output_bytes: int) -> tuple[str, bool]:
+    limited = len(value) > max_output_bytes
+    return value[:max_output_bytes].decode("utf-8", errors="replace"), limited
+
+
+def run_bounded_command(
+    command: str,
+    cwd: str | Path,
+    timeout_seconds: float,
+    max_output_bytes: int = 1_048_576,
+    env: dict[str, str] | None = None,
+) -> BoundedCommandResult:
+    """Run a command in its own process group with bounded result output."""
+    if timeout_seconds <= 0:
+        raise ValueError("timeout_seconds must be positive")
+    if max_output_bytes <= 0:
+        raise ValueError("max_output_bytes must be positive")
+
+    process = subprocess.Popen(
+        command,
+        shell=True,
+        cwd=str(cwd),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    timed_out = False
+    try:
+        stdout, stderr = process.communicate(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        stdout, stderr = process.communicate()
+
+    bounded_stdout, stdout_limited = _truncate_output(stdout, max_output_bytes)
+    bounded_stderr, stderr_limited = _truncate_output(stderr, max_output_bytes)
+    return BoundedCommandResult(
+        returncode=None if timed_out else process.returncode,
+        stdout=bounded_stdout,
+        stderr=bounded_stderr,
+        timed_out=timed_out,
+        output_limited=stdout_limited or stderr_limited,
+    )
 
 
 class ShellTool(Tool):
@@ -74,7 +137,8 @@ class ShellTool(Tool):
     def execute(self, args: dict[str, Any]) -> ToolResult:
         command = args["command"].strip()
         cwd = args.get("cwd", os.getcwd())
-        timeout = int(args.get("timeout", 30))
+        timeout = float(args.get("timeout", 30))
+        max_output_bytes = int(args.get("max_output_bytes", 1_048_576))
         allow_destructive = str(args.get("allow_destructive", "false")).lower() in ("true", "1", "yes")
 
         # Safety gate
@@ -88,34 +152,40 @@ class ShellTool(Tool):
                 )
 
         try:
-            proc = subprocess.run(
+            result = run_bounded_command(
                 command,
-                shell=True,
-                capture_output=True,
-                text=True,
                 cwd=cwd,
-                timeout=timeout,
+                timeout_seconds=timeout,
+                max_output_bytes=max_output_bytes,
             )
-        except subprocess.TimeoutExpired:
-            return ToolResult.fail(f"Command timed out after {timeout}s: {command!r}")
-        except Exception as e:
-            return ToolResult.fail(f"Command execution failed: {e}")
+        except (OSError, ValueError) as exc:
+            return ToolResult.fail(f"Command execution failed: {exc}")
 
-        output = proc.stdout + (f"\n[stderr]\n{proc.stderr}" if proc.stderr.strip() else "")
-        success = proc.returncode == 0
-
-        if success:
-            return ToolResult.ok(
-                text=output or "(no output)",
-                data={"command": command, "returncode": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr},
-            )
-        else:
+        output = result.stdout + (f"\n[stderr]\n{result.stderr}" if result.stderr.strip() else "")
+        if result.timed_out:
             return ToolResult(
                 success=False,
                 text=output,
-                error=f"Command exited with code {proc.returncode}",
-                data={"command": command, "returncode": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr},
+                error=f"Command timed out after {timeout}s: {command!r}",
+                data={"command": command, "returncode": None, "stdout": result.stdout, "stderr": result.stderr, "timed_out": True},
             )
+
+        success = result.returncode == 0
+        data = {
+            "command": command,
+            "returncode": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "output_limited": result.output_limited,
+        }
+        if success:
+            return ToolResult.ok(text=output or "(no output)", data=data)
+        return ToolResult(
+            success=False,
+            text=output,
+            error=f"Command exited with code {result.returncode}",
+            data=data,
+        )
 
     @staticmethod
     def _is_safe(command: str) -> bool:

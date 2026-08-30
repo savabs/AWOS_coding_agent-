@@ -3,9 +3,43 @@ HITLConsent: Human-in-the-loop approval gate.
 Default: DENY (user must explicitly approve).
 """
 
-from pathlib import Path
-import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from datetime import datetime
+import hashlib
+import json
+from pathlib import Path
+from typing import Iterable
+import xml.etree.ElementTree as ET
+
+
+@dataclass(frozen=True)
+class ActionApproval:
+    """A decision bound to one session, policy, and exact action digest."""
+
+    session_id: str
+    policy_digest: str
+    action_digest: str
+    approved: bool
+
+
+def _action_digest(
+    session_id: str,
+    policy_digest: str,
+    command: str,
+    arguments: Iterable[str],
+    paths: Iterable[str],
+) -> str:
+    if not session_id or not policy_digest or not command:
+        raise ValueError("session_id, policy_digest, and command are required")
+    payload = {
+        "arguments": [str(argument) for argument in arguments],
+        "command": command,
+        "paths": [str(path) for path in paths],
+        "policy_digest": policy_digest,
+        "session_id": session_id,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 class HITLConsent:
@@ -29,6 +63,49 @@ class HITLConsent:
         for f in manifest_data["files_involved"]:
             print(f"  - {f}")
         print("\n" + "=" * 60)
+
+    def create_action_approval(
+        self,
+        session_id: str,
+        policy_digest: str,
+        command: str,
+        arguments: Iterable[str] = (),
+        paths: Iterable[str] = (),
+        approved: bool = False,
+    ) -> ActionApproval:
+        """Create a decision whose approval cannot be reused for another action."""
+        return ActionApproval(
+            session_id=session_id,
+            policy_digest=policy_digest,
+            action_digest=_action_digest(
+                session_id, policy_digest, command, arguments, paths
+            ),
+            approved=bool(approved),
+        )
+
+    def validate_action_approval(
+        self,
+        approval: ActionApproval,
+        session_id: str,
+        policy_digest: str,
+        command: str,
+        arguments: Iterable[str] = (),
+        paths: Iterable[str] = (),
+    ) -> bool:
+        """Return true only when the approved identity exactly matches."""
+        if not isinstance(approval, ActionApproval) or not approval.approved:
+            return False
+        try:
+            expected = _action_digest(
+                session_id, policy_digest, command, arguments, paths
+            )
+        except (TypeError, ValueError):
+            return False
+        return (
+            approval.session_id == session_id
+            and approval.policy_digest == policy_digest
+            and approval.action_digest == expected
+        )
 
     def request_approval(self) -> bool:
         """
