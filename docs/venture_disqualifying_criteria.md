@@ -60,9 +60,20 @@ and is usually the ideal shape.
 → Would have killed AWOS.
 
 ### D3 — Distribution must not require persuasion
-Discovery comes from a channel that delivers pre-qualified strangers: search,
-marketplace, integration, word of mouth. Kill if the only route to a customer is
-you convincing them — enterprise sales, demos, cold outreach, partnership deals.
+Discovery must come from a channel that delivers pre-qualified strangers. Kill if
+the only route to a customer is you convincing them — enterprise sales, demos,
+cold outreach, partnership deals.
+
+**Constrained by D8.** Since single-platform dependency is an absolute no-go, the
+surviving channels are ones nobody can revoke: search and content, documentation
+that ranks, word of mouth, being the obvious answer in a forum thread. A
+marketplace listing may be *a* channel but never the only one, and never the
+thing billing runs through.
+
+**Known cost, accepted:** this is slower than marketplace-led distribution and
+puts the acquisition problem on you. It buys durability — nothing can switch you
+off — at the price of a longer ramp. Budget for that rather than being surprised
+by it.
 → Would have killed the AWOS pilot plan (cold outreach in Discord/Twitter).
 
 ### D4 — The core bet must be falsifiable before building
@@ -88,12 +99,40 @@ have this answered before building, not after. Unknown counts as failed.
 ### D8 — Hard no-gos
 Any one of these kills the candidate outright:
 
+**Chosen deliberately as absolutes 2026-08-31, and reaffirmed after an
+assistant attempt to soften them was withdrawn as mistaken.** No exceptions.
+
 | Risk | Line |
 |---|---|
-| **ToS-violating scraping** | out entirely, even where enforcement is rare |
+| **ToS-violating scraping** | out entirely, even where enforcement is rare. Official APIs, licensed data and open data only. |
 | **Regulated advice** | financial, legal, medical, tax advice where being wrong carries liability |
-| **Single point of failure** | one platform or irreplaceable API that can end the business overnight *with no alternative*. Marketplace-for-discovery is fine **if you own billing and the customer relationship**. |
-| **PII as the substance** | profile scraping, background checks, health records. Incidental account data through a processor (Paddle/Stripe) is fine. |
+| **Single-platform dependency** | out entirely. No business that lives inside one marketplace or on one irreplaceable API. You own billing and the customer relationship, always. |
+| **Handling personal data** | out entirely, including customer emails. The payment processor holds identity; you hold an opaque customer id and a licence key, and nothing else. |
+
+### What these four converge on
+
+They do not empty the field. They select an archetype:
+
+> **Sell software or data. Do not run a hosted service that holds people's stuff.**
+
+Shapes that survive all four:
+
+- **Licence-key software** — desktop, CLI, or self-hosted. Processor takes the
+  payment and holds the email; you ship a key against an opaque id.
+- **API products with opaque keys** — no account, no profile, key maps to plan.
+- **Data products** — licensed or open sources, cleaned and packaged, sold as
+  files or an endpoint. No accounts required at all.
+- **Self-hosted / on-prem tools** — the customer runs it, their data never
+  reaches you.
+
+Shapes that die: conventional SaaS with user accounts, marketplace-locked
+businesses (Shopify-app-only, extension-only), ToS-dependent scraping, and
+regulated-advice domains.
+
+**These constraints are coherent with the operating constraint, not in tension
+with it.** No PII means no DPDP/GDPR duties, no deletion requests, no breach
+liability — all of which are support work requiring judgment. Self-hosted also
+sidesteps D7 entirely, since the customer pays their own infrastructure.
 
 → tirramind edged into two of these: a sanctions match published at 0.95
 confidence against a named entity, and merchant-of-record duties for a product
