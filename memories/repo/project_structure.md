@@ -28,6 +28,21 @@
 
 ---
 
+## Status — 2026-08-31
+
+**AWOS is no longer being pursued as a revenue product.** Measured against its
+own June bar on 2026-08-31 and lost to a single API call to the model it wraps.
+It remains a tool and a portfolio piece; the write-up is publishable.
+
+Active work has moved to selecting a next venture under explicit disqualifying
+criteria. See [[checkpoint_2026-08-31_bar_test_and_pivot]],
+[[venture_disqualifying_criteria]], [[venture_scan_protocol]].
+
+The phase table below describes AWOS's own development and is retained as
+historical context.
+
+---
+
 ## Current Phase
 
 | Phase | Description | Status |
