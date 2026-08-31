@@ -12,7 +12,8 @@ import json
 import os
 from typing import Optional
 
-from .fixed_provider import FIXED_MODEL, create_fixed_client
+from .fixed_provider import (FIXED_MODEL, create_fixed_client, fixed_api_key,
+                             provider_extra_kwargs)
 
 
 def _response_shape(message: object | None) -> str:
@@ -40,7 +41,7 @@ class CheapPlanner:
             api_key: OpenCode Go API key. Reads OPENCODE_GO_API_KEY.
             model: Ignored for the active product path; the fixed model is used.
         """
-        self.api_key = api_key or os.getenv("OPENCODE_GO_API_KEY")
+        self.api_key = api_key or fixed_api_key()
         self.client = create_fixed_client(self.api_key)
         self.model_name = FIXED_MODEL
 
@@ -118,8 +119,7 @@ RESPOND WITH ONLY JSON (no markdown, no text before/after):
                 model=self.model_name,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=4096,
-                response_format={"type": "json_object"},
-                extra_body={"thinking": {"type": "disabled"}},
+                **provider_extra_kwargs(),
             )
             try:
                 message = response.choices[0].message

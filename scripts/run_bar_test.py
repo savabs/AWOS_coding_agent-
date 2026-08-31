@@ -115,7 +115,9 @@ def arm_a(ws: Path, timeout_s: int) -> dict:
         "AWOS_PROVIDER": "anthropic",
         "AWOS_SAFE_TO_RUN_TESTS": "1",
         "AWOS_TEST_PYTHON": str(TARGET_PY),
-        "AWOS_CHEAP_ONLY": "1",
+        # AWOS_CHEAP_ONLY deliberately NOT set: it routes to CheapPlanner
+        # instead of the advanced Planner, which changes what is being
+        # measured. Both ladder levels are the same model here anyway.
     }
     before = _budget_total()
     t0 = time.time()

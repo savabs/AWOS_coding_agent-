@@ -23,14 +23,14 @@ except ImportError:
 
 try:
     from .coding_tools import ToolResult, build_coding_tool_registry, format_tool_catalog
-    from .fixed_provider import FIXED_MODEL, create_fixed_client
+    from .fixed_provider import FIXED_MODEL, create_fixed_client, provider_extra_kwargs
     from .model_call_telemetry import extract_optional_usage, record_model_call
     from .repo_map import enrich_with_repo_map
     from .test_runner import TestResult, TestRunner
     from .usage_record import empty_usage, merge_usage, record_api_usage
 except ImportError:
     from coding_tools import ToolResult, build_coding_tool_registry, format_tool_catalog
-    from fixed_provider import FIXED_MODEL, create_fixed_client
+    from fixed_provider import FIXED_MODEL, create_fixed_client, provider_extra_kwargs
     from model_call_telemetry import extract_optional_usage, record_model_call
     from repo_map import enrich_with_repo_map
     from test_runner import TestResult, TestRunner
@@ -194,17 +194,14 @@ class ReActWorker:
             self._dead_providers: set[str] = set()
             return
 
-        opencode_key = os.getenv("OPENCODE_GO_API_KEY")
-        if not opencode_key:
-            raise ValueError("Set OPENCODE_GO_API_KEY for the active coding-agent path")
-
+        # Client for the single fixed provider selected by AWOS_PROVIDER.
         self.client = None
         self.anthropic_client = None
         self.openai_client = None
         self.gemini_client = None
         self.openrouter_client = None
         self.gemini_key = None
-        self.opencode_client = create_fixed_client(opencode_key)
+        self.opencode_client = create_fixed_client()
 
         self.model = FIXED_MODEL
         # Pre-populate dead providers from missing API keys so escalation engine skips them
@@ -356,7 +353,9 @@ class ReActWorker:
                 )
             merge_usage(usage, turn_usage)
 
-            parsed = self._parse_action(raw)
+            # Turn 1 has produced no observations yet, so a bare prose reply
+            # cannot be a considered answer to a coding task.
+            parsed = self._parse_action(raw, allow_plain_finish=turn > 1)
             if parsed is None:
                 obs = (
                     "Invalid response format. Reply with JSON only:\n"
@@ -724,7 +723,7 @@ STEPS:
 4. Run the relevant available test; do not install dependencies in benchmark mode
 5. finish with summary when done"""
 
-    def _parse_action(self, raw: str) -> Optional[dict[str, Any]]:
+    def _parse_action(self, raw: str, *, allow_plain_finish: bool = True) -> Optional[dict[str, Any]]:
         raw = raw.strip()
         # Strip markdown fences
         fence = re.search(r"```(?:json)?\s*(.*?)```", raw, re.DOTALL)
@@ -758,7 +757,12 @@ STEPS:
         # instead of JSON, treat it as a direct answer. No retry, no
         # "Invalid response format" loop. This is what allows the LLM
         # to simply answer a question without forcing tool calls.
-        if raw and "{" not in raw[:3]:
+        # Only when the model has already acted. On a coding task a plain-text
+        # first reply is a preamble ("Let me start by examining the file"), not
+        # an answer. Treating it as finish ends the loop on turn 1 without a
+        # single action. This fallback is only safe when the provider is not
+        # forcing JSON via response_format, which not every provider supports.
+        if raw and "{" not in raw[:3] and allow_plain_finish:
             return {
                 "thought": raw[:200],
                 "action": "finish",
@@ -1029,8 +1033,7 @@ STEPS:
                 model=model_id,
                 messages=messages,
                 max_tokens=1500,
-                response_format={"type": "json_object"},
-                extra_body={"thinking": {"type": "disabled"}},
+                **provider_extra_kwargs(),
             )
             content = getattr(resp.choices[0].message, "content", None)
             if not isinstance(content, str) or not content.strip():

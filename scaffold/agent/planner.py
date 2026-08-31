@@ -12,11 +12,15 @@ import time
 from typing import Any, Optional
 
 try:
-    from .fixed_provider import PLANNER_MODEL, create_fixed_client
+    from .fixed_provider import (PLANNER_MODEL, create_fixed_client,
+                                 fixed_api_key, provider_extra_kwargs,
+                                 PLANNER_MAX_TOKENS)
     from .model_call_telemetry import extract_optional_usage, record_model_call
     from .planner_graph_contract import normalize_planner_response
 except ImportError:
-    from fixed_provider import PLANNER_MODEL, create_fixed_client
+    from fixed_provider import (PLANNER_MODEL, create_fixed_client,
+                                fixed_api_key, provider_extra_kwargs,
+                                PLANNER_MAX_TOKENS)
     from model_call_telemetry import extract_optional_usage, record_model_call
     from planner_graph_contract import normalize_planner_response
 
@@ -39,7 +43,7 @@ class Planner:
 
     def __init__(self, api_key: Optional[str] = None):
         """Initialize the advanced Planner through the fixed OpenCode Go client."""
-        self.api_key = api_key or os.getenv("OPENCODE_GO_API_KEY")
+        self.api_key = api_key or fixed_api_key()
         self.client = create_fixed_client(self.api_key)
         self.model = PLANNER_MODEL
     
@@ -143,13 +147,12 @@ Key symbols (file::class/def):
         started_at = time.perf_counter()
         response = self.client.chat.completions.create(
             model=self.model,
-            max_tokens=4096,
+            max_tokens=PLANNER_MAX_TOKENS,
             messages=[
                 {"role": "system", "content": system_instructions},
                 {"role": "user", "content": user_prompt},
             ],
-            response_format={"type": "json_object"},
-            extra_body={"thinking": {"type": "disabled"}},
+            **provider_extra_kwargs(),
         )
         usage = getattr(response, "usage", None)
         record_model_call(

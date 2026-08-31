@@ -28,10 +28,10 @@ from typing import Optional
 
 try:
     from .reward_store import ReplayGate
-    from .fixed_provider import FIXED_MODEL
+    from .fixed_provider import CHEAP_MODEL, CHEAP_PRICE, FIXED_MODEL, WORKER_PRICE
 except ImportError:
     from reward_store import ReplayGate
-    from fixed_provider import FIXED_MODEL
+    from fixed_provider import CHEAP_MODEL, CHEAP_PRICE, FIXED_MODEL, WORKER_PRICE
 
 
 
@@ -71,12 +71,14 @@ LADDER: list[ModelSpec] = [
     # L0: Default worker — DeepSeek V4 Flash (cheap, fast, good enough for most subtasks)
     ModelSpec(
         level=EscalationLevel.DEEPSEEK,
-        name="DeepSeek V4 Flash",
-        model_id="deepseek-v4-flash",
+        name=CHEAP_MODEL,
+        model_id=CHEAP_MODEL,
+        # "opencode" is the dispatch key for the single fixed-provider path,
+        # not literally OpenCode Go — the endpoint follows AWOS_PROVIDER.
         provider="opencode",
         cost_per_req=0.001,
-        input_price=0.14,
-        output_price=0.28,
+        input_price=CHEAP_PRICE[0],
+        output_price=CHEAP_PRICE[1],
         min_complexity=0,
         min_budget_remaining=0.0,
         min_failures=0,
@@ -85,12 +87,12 @@ LADDER: list[ModelSpec] = [
     #     or task complexity is high)
     ModelSpec(
         level=EscalationLevel.OPENCODE,
-        name="DeepSeek V4 Pro",
-        model_id="deepseek-v4-pro",
+        name=FIXED_MODEL,
+        model_id=FIXED_MODEL,
         provider="opencode",
         cost_per_req=0.002,
-        input_price=0.44,
-        output_price=0.88,
+        input_price=WORKER_PRICE[0],
+        output_price=WORKER_PRICE[1],
         min_complexity=6,  # Only for complex tasks
         min_budget_remaining=0.0,
         min_failures=1,     # Use after 1 Flash failure

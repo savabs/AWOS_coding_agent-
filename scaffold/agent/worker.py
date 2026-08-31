@@ -51,11 +51,9 @@ class Worker:
 
     def __init__(self, api_key: Optional[str] = None, model: str = "deepseek-chat"):
         """Initialize the fixed OpenCode Go worker for the initial product."""
-        opencode_key = os.getenv("OPENCODE_GO_API_KEY")
-        if not opencode_key:
-            raise ValueError("Set OPENCODE_GO_API_KEY for the active coding-agent path")
-
-        self.opencode_client = create_fixed_client(opencode_key)
+        # Client for the single fixed provider selected by AWOS_PROVIDER.
+        # create_fixed_client raises a profile-specific error when its key is unset.
+        self.opencode_client = create_fixed_client()
         self.client = None
         self.anthropic_client = None
         self.openai_client = None

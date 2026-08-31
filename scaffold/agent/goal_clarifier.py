@@ -18,7 +18,7 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
-from .fixed_provider import FIXED_MODEL, create_fixed_client
+from .fixed_provider import FIXED_MODEL, create_fixed_client, fixed_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +184,7 @@ If IS_CLEAR is "no", list what's missing and why."""
             (is_ambiguous: bool, missing_elements: list[str])
         """
         try:
-            if not os.getenv("OPENCODE_GO_API_KEY"):
+            if not fixed_api_key():
                 return self._heuristic_detect(goal)
 
             client = create_fixed_client()
