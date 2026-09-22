@@ -1,0 +1,48 @@
+{
+  "root_id": "g_6a256b8dd998",
+  "nodes": {
+    "g_6a256b8dd998": {
+      "goal_id": "g_6a256b8dd998",
+      "description": "In scaffold/agent/escalation_engine.py add a short # comment above max_allowed_level explaining it caps the model ladder in cheap-only mode",
+      "parent_ids": [],
+      "child_ids": [
+        "g_906ab8ec22c2"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-17T10:53:45Z",
+      "updated_at": "2026-06-17T10:53:53Z",
+      "completed_at": "2026-06-17T10:53:53Z",
+      "session_ids": [
+        "orch_4f0b317a"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_906ab8ec22c2": {
+      "goal_id": "g_906ab8ec22c2",
+      "description": "Add a comment above max_allowed_level explaining its purpose in cheap-only mode.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "scaffold/agent/escalation_engine.py",
+          "action": "Add a comment above max_allowed_level explaining its purpose in cheap-only mode.",
+          "complexity": "low",
+          "file": "scaffold/agent/escalation_engine.py"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-17T10:53:50Z",
+      "updated_at": "2026-06-17T10:53:53Z",
+      "completed_at": "2026-06-17T10:53:53Z",
+      "session_ids": [
+        "orch_4f0b317a"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

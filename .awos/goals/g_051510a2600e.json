@@ -1,0 +1,105 @@
+{
+  "root_id": "g_051510a2600e",
+  "nodes": {
+    "g_051510a2600e": {
+      "goal_id": "g_051510a2600e",
+      "description": "Add a simple config module to read settings",
+      "parent_ids": [],
+      "child_ids": [
+        "g_a98ca3967525",
+        "g_7331edca3138"
+      ],
+      "tasks": [],
+      "status": "in_progress",
+      "created_at": "2026-05-20T07:37:36Z",
+      "updated_at": "2026-05-20T15:47:46Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_70c84617",
+        "orch_d1542e6c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_a98ca3967525": {
+      "goal_id": "g_a98ca3967525",
+      "description": "Create a new config module with a load_config function that reads settings from a config.json file and returns them as a dictionary. Include default values if the file is missing.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "config.py",
+          "action": "Create a new config module with a load_config function that reads settings from a config.json file and returns them as a dictionary. Include default values if the file is missing.",
+          "complexity": "low",
+          "function_signature": "def load_config(config_path: str = 'config.json') -> dict:",
+          "interface_contract": "Called at application startup to retrieve a settings dictionary; safe to call multiple times",
+          "constraints": [
+            "Must return a dict in all cases, never None",
+            "Must provide default values if config.json does not exist",
+            "Must handle JSON decode errors gracefully by returning defaults",
+            "Default dict must include at least keys: 'debug' (bool, False), 'log_level' (str, 'INFO'), 'app_name' (str, 'MyApp')"
+          ],
+          "must_not": [
+            "Must not raise an exception if the file is missing or malformed",
+            "Must not use global mutable state or module-level side effects",
+            "Must not import from utils.py or main.py"
+          ],
+          "example_call": "settings = load_config('config.json')"
+        }
+      ],
+      "status": "pending",
+      "created_at": "2026-05-20T15:47:46Z",
+      "updated_at": "2026-05-20T15:47:46Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_d1542e6c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_7331edca3138": {
+      "goal_id": "g_7331edca3138",
+      "description": "Import load_config from config module and call it inside the existing main function, storing the result in a local variable named 'settings', then print the app_name value from settings.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "file": "main.py",
+          "action": "Import load_config from config module and call it inside the existing main function, storing the result in a local variable named 'settings', then print the app_name value from settings.",
+          "complexity": "low",
+          "function_signature": "def main() -> None:",
+          "interface_contract": "Entry point of the application; now initializes config before other logic",
+          "constraints": [
+            "Must call load_config() as the first statement inside main()",
+            "Must store result in a variable named 'settings'",
+            "Must print settings['app_name'] to stdout",
+            "Must preserve any existing logic already inside main()"
+          ],
+          "must_not": [
+            "Must not call load_config() at module level outside of main()",
+            "Must not hardcode any config values",
+            "Must not remove or alter the existing import of format_string from utils"
+          ],
+          "example_call": "main()"
+        }
+      ],
+      "status": "failed",
+      "created_at": "2026-05-20T15:47:46Z",
+      "updated_at": "2026-05-21T16:20:14Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_d1542e6c",
+        "orch_8f13e93e",
+        "orch_59d5ba70",
+        "orch_05c11df9",
+        "orch_a6bec061",
+        "orch_22370e89",
+        "orch_b1b11afd"
+      ],
+      "failure_count": 6,
+      "critique_ids": []
+    }
+  }
+}

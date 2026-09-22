@@ -1,0 +1,114 @@
+{
+  "root_id": "g_3a9d4c8d3b01",
+  "nodes": {
+    "g_3a9d4c8d3b01": {
+      "goal_id": "g_3a9d4c8d3b01",
+      "description": "add median function",
+      "parent_ids": [],
+      "child_ids": [
+        "g_4e4b0d597728",
+        "g_0908fbfb8adc"
+      ],
+      "tasks": [],
+      "status": "in_progress",
+      "created_at": "2026-09-22T19:57:24Z",
+      "updated_at": "2026-09-22T19:57:28Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_00df95b9",
+        "orch_5df508cc"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_4e4b0d597728": {
+      "goal_id": "g_4e4b0d597728",
+      "description": "Add a median function that computes the median of a list",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "src/math_utils.py",
+          "action": "Add a median function that computes the median of a list",
+          "complexity": "medium",
+          "constraints": [
+            "handle empty list with ValueError",
+            "handle even and odd length"
+          ],
+          "must_not": [
+            "modify existing functions",
+            "import new libraries"
+          ]
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-09-22T19:57:24Z",
+      "updated_at": "2026-09-22T20:14:19Z",
+      "completed_at": "2026-09-22T20:14:19Z",
+      "session_ids": [
+        "orch_00df95b9",
+        "orch_37295ec9",
+        "orch_a1afb60a",
+        "orch_51e0307a",
+        "orch_d278fecd",
+        "orch_5d66fe74",
+        "orch_4d79a902",
+        "orch_c13e8d9a",
+        "orch_4abf78f3",
+        "orch_1cdf6555",
+        "orch_934391d5",
+        "orch_ff5f597f",
+        "orch_c3c5d9e3",
+        "orch_7f7adb8f",
+        "orch_ac325e92",
+        "orch_de5d5d2d",
+        "orch_a81390da",
+        "orch_6f3f7106",
+        "orch_86a2e100",
+        "orch_6e7867d2",
+        "orch_3c409a81",
+        "orch_7350f50b",
+        "orch_84c043f5",
+        "orch_039680b5",
+        "orch_d8a97af8",
+        "orch_dd8c7f66",
+        "orch_9c888fbe"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_0908fbfb8adc": {
+      "goal_id": "g_0908fbfb8adc",
+      "description": "Add a normalize function that scales values to [0,1]",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "file": "src/math_utils.py",
+          "action": "Add a normalize function that scales values to [0,1]",
+          "complexity": "medium",
+          "must_not": [
+            "remove clamp",
+            "modify existing functions"
+          ]
+        }
+      ],
+      "status": "failed",
+      "created_at": "2026-09-22T19:57:28Z",
+      "updated_at": "2026-09-22T20:01:29Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_5df508cc",
+        "orch_e99fc186",
+        "orch_36772bb9",
+        "orch_a02ce27c",
+        "orch_1e5f5fb0",
+        "orch_a72cfada"
+      ],
+      "failure_count": 6,
+      "critique_ids": []
+    }
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "root_id": "g_568959cdb4b1",
+  "nodes": {
+    "g_568959cdb4b1": {
+      "goal_id": "g_568959cdb4b1",
+      "description": "Add comment above _try_cheap_fallback in worker.py",
+      "parent_ids": [],
+      "child_ids": [
+        "g_4c3b4c82b67a"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-21T06:25:01Z",
+      "updated_at": "2026-06-21T06:25:03Z",
+      "completed_at": "2026-06-21T06:25:03Z",
+      "session_ids": [
+        "orch_997f83f7"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_4c3b4c82b67a": {
+      "goal_id": "g_4c3b4c82b67a",
+      "description": "Add comment above `_try_cheap_fallback` explaining cheap providers",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "worker.py",
+          "file": "worker.py",
+          "action": "Add comment above `_try_cheap_fallback` explaining cheap providers",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-21T06:25:01Z",
+      "updated_at": "2026-06-21T06:25:03Z",
+      "completed_at": "2026-06-21T06:25:03Z",
+      "session_ids": [
+        "orch_997f83f7"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

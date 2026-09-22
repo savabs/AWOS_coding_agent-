@@ -1,0 +1,48 @@
+{
+  "root_id": "g_fa68f7e5336b",
+  "nodes": {
+    "g_fa68f7e5336b": {
+      "goal_id": "g_fa68f7e5336b",
+      "description": "In scaffold/agent/mcts_policy.py add a one-line docstring to mcts_enabled explaining it controls whether MCTS fallback runs after worker failure",
+      "parent_ids": [],
+      "child_ids": [
+        "g_93b88fcfa9cd"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-18T04:16:56Z",
+      "updated_at": "2026-06-18T04:17:05Z",
+      "completed_at": "2026-06-18T04:17:05Z",
+      "session_ids": [
+        "orch_28218063"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_93b88fcfa9cd": {
+      "goal_id": "g_93b88fcfa9cd",
+      "description": "Add a one-line docstring to the `mcts_enabled` function, explaining it controls whether MCTS fallback runs after worker failure.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "scaffold/agent/mcts_policy.py",
+          "action": "Add a one-line docstring to the `mcts_enabled` function, explaining it controls whether MCTS fallback runs after worker failure.",
+          "complexity": "low",
+          "file": "scaffold/agent/mcts_policy.py"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-18T04:17:01Z",
+      "updated_at": "2026-06-18T04:17:05Z",
+      "completed_at": "2026-06-18T04:17:05Z",
+      "session_ids": [
+        "orch_28218063"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

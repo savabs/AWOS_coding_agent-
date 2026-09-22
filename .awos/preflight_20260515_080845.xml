@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='utf-8'?>
+<preflight-manifest timestamp="2026-05-15T08:08:45.276771">
+  <task>Refactor module</task>
+  <complexity score="5" interpretation="moderate" />
+  <model-tier tier-name="Claude-Haiku (Balanced)" provider="anthropic" model="claude-3-5-haiku" max-tokens="8000" temperature="0.7" />
+  <cost-estimate usd="0.002400" input-tokens="2000" output-tokens="1000" />
+  <repository path="/home/becmachlean/2024/projects/AWOS_coding_agent" />
+  <files-involved />
+  <consent-status>pending</consent-status>
+</preflight-manifest>

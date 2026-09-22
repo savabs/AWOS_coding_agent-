@@ -307,6 +307,20 @@ OUTPUT: JSON only, no prose outside the JSON.
         cost = (inp / 1_000_000) * 1.00 + (out / 1_000_000) * 5.00
         if tracker:
             tracker.record("critic", "Haiku Critic", inp, out, cost)
+        
+        # Cache telemetry
+        try:
+            from .cache_telemetry import CacheTelemetryStore, extract_cache_stats_anthropic
+            cache_store = CacheTelemetryStore()
+            cache_event = extract_cache_stats_anthropic(
+                response=resp.model_dump(),
+                component="critic",
+                model=model,
+            )
+            cache_store.record(cache_event)
+        except Exception:
+            pass  # Don't fail critique if telemetry breaks
+        
         return text, f"Haiku({model})", cost
 
     # ── Private: Response parsing ─────────────────────────────────────────────

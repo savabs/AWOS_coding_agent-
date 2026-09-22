@@ -1,0 +1,82 @@
+{
+  "root_id": "g_e85e521ffeba",
+  "nodes": {
+    "g_e85e521ffeba": {
+      "goal_id": "g_e85e521ffeba",
+      "description": "add input validation to math_utils",
+      "parent_ids": [],
+      "child_ids": [
+        "g_201a28782637"
+      ],
+      "tasks": [],
+      "status": "in_progress",
+      "created_at": "2026-05-19T10:23:27Z",
+      "updated_at": "2026-05-19T10:23:27Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_a085cea0"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_201a28782637": {
+      "goal_id": "g_201a28782637",
+      "description": "Add input validation",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "src/math_utils.py",
+          "action": "Add input validation",
+          "complexity": "medium",
+          "must_not": [
+            "break existing tests",
+            "change return types"
+          ]
+        }
+      ],
+      "status": "failed",
+      "created_at": "2026-05-19T10:23:27Z",
+      "updated_at": "2026-05-26T06:59:47Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_a085cea0",
+        "orch_cc645295",
+        "orch_0b0530c9",
+        "orch_6fd7cb30",
+        "orch_5b92de0c",
+        "orch_7e67e15d",
+        "orch_f9deb292",
+        "orch_4d76f83f",
+        "orch_efc80367",
+        "orch_eae36354",
+        "orch_4f526dc2",
+        "orch_c3ea1d3f",
+        "orch_0577d415",
+        "orch_700f47c3",
+        "orch_8e8d2265",
+        "orch_c942ee61",
+        "orch_b75ba37d",
+        "orch_bc1e4bcc",
+        "orch_a3f60cbb",
+        "orch_a52ade14",
+        "orch_bca99291",
+        "orch_44ba51f4",
+        "orch_e9304d91",
+        "orch_af78fb30",
+        "orch_583748b4",
+        "orch_ad27b624",
+        "orch_dd3db0b6",
+        "orch_17b0d841",
+        "orch_939ed168",
+        "orch_a654dc27",
+        "orch_2b7cf24f",
+        "orch_730ccce8",
+        "orch_49d8be2c"
+      ],
+      "failure_count": 33,
+      "critique_ids": []
+    }
+  }
+}

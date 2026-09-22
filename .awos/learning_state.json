@@ -1,0 +1,138 @@
+{
+  "sessions_completed": 14,
+  "active_version": 1,
+  "last_evolution_session": 10,
+  "recent_sessions": [
+    {
+      "success": true,
+      "cost_usd": 0.00155605,
+      "tasks_failed": 0,
+      "tasks_total": 1,
+      "used_candidate_prompt": false,
+      "recorded_at": "2026-06-17T10:53:33Z"
+    },
+    {
+      "success": true,
+      "cost_usd": 0.0012170800000000002,
+      "tasks_failed": 0,
+      "tasks_total": 1,
+      "used_candidate_prompt": false,
+      "recorded_at": "2026-06-17T10:53:44Z"
+    },
+    {
+      "success": true,
+      "cost_usd": 0.00148769,
+      "tasks_failed": 0,
+      "tasks_total": 1,
+      "used_candidate_prompt": false,
+      "recorded_at": "2026-06-17T10:53:55Z"
+    },
+    {
+      "success": true,
+      "cost_usd": 0.0014591,
+      "tasks_failed": 0,
+      "tasks_total": 1,
+      "used_candidate_prompt": true,
+      "recorded_at": "2026-06-18T04:16:41Z"
+    },
+    {
+      "success": true,
+      "cost_usd": 0.0009478500000000001,
+      "tasks_failed": 0,
+      "tasks_total": 1,
+      "used_candidate_prompt": true,
+      "recorded_at": "2026-06-18T04:16:55Z"
+    },
+    {
+      "success": true,
+      "cost_usd": 0.0009708000000000001,
+      "tasks_failed": 0,
+      "tasks_total": 1,
+      "used_candidate_prompt": true,
+      "recorded_at": "2026-06-18T04:17:10Z"
+    },
+    {
+      "success": true,
+      "cost_usd": 0.00117222,
+      "tasks_failed": 0,
+      "tasks_total": 1,
+      "used_candidate_prompt": true,
+      "recorded_at": "2026-06-18T04:17:25Z"
+    },
+    {
+      "success": true,
+      "cost_usd": 0.00133746,
+      "tasks_failed": 0,
+      "tasks_total": 1,
+      "used_candidate_prompt": true,
+      "recorded_at": "2026-06-18T04:17:39Z"
+    },
+    {
+      "success": true,
+      "cost_usd": 0.0013777300000000002,
+      "tasks_failed": 0,
+      "tasks_total": 2,
+      "used_candidate_prompt": false,
+      "recorded_at": "2026-06-18T04:19:13Z"
+    },
+    {
+      "success": true,
+      "cost_usd": 0.00951463,
+      "tasks_failed": 0,
+      "tasks_total": 2,
+      "used_candidate_prompt": false,
+      "recorded_at": "2026-06-18T07:41:48Z"
+    },
+    {
+      "success": false,
+      "cost_usd": 0.0,
+      "tasks_failed": 0,
+      "tasks_total": 0,
+      "used_candidate_prompt": true,
+      "recorded_at": "2026-06-18T08:31:06Z"
+    },
+    {
+      "success": true,
+      "cost_usd": 0.0,
+      "tasks_failed": 0,
+      "tasks_total": 2,
+      "used_candidate_prompt": true,
+      "recorded_at": "2026-06-18T08:31:10Z"
+    },
+    {
+      "success": true,
+      "cost_usd": 0.00263634,
+      "tasks_failed": 0,
+      "tasks_total": 2,
+      "used_candidate_prompt": true,
+      "recorded_at": "2026-06-18T08:32:21Z"
+    },
+    {
+      "success": false,
+      "cost_usd": 0.0,
+      "tasks_failed": 4,
+      "tasks_total": 4,
+      "used_candidate_prompt": true,
+      "recorded_at": "2026-06-18T08:35:21Z"
+    }
+  ],
+  "candidate": {
+    "version": 2,
+    "started_session": 10,
+    "accept_window": 5,
+    "sessions_evaluated": 4,
+    "baseline_kpi": {
+      "success_rate": 1.0,
+      "cost_per_task": 0.000968,
+      "failure_rate": 0.0,
+      "n": 5
+    }
+  },
+  "last_accepted_version": 1,
+  "last_candidate_kpi": {
+    "success_rate": 1.0,
+    "cost_per_task": 0.001177,
+    "failure_rate": 0.0,
+    "n": 5
+  }
+}

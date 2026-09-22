@@ -1,0 +1,48 @@
+{
+  "chat_id": "chat_3dfa6661",
+  "title": "lets create a file that gives us intsruction on how to code \u2026",
+  "created_at": "2026-06-15T13:22:46.656792Z",
+  "updated_at": "2026-06-15T14:18:40.857095Z",
+  "messages": [
+    {
+      "role": "user",
+      "content": "lets create a file that gives us intsruction on how to code a GPU kernel",
+      "mode": "qa",
+      "timestamp": "2026-06-15T13:22:46.657499Z",
+      "meta": {}
+    },
+    {
+      "role": "assistant",
+      "content": "_Stopped by user._",
+      "mode": "qa",
+      "timestamp": "2026-06-15T13:22:53.035943Z",
+      "meta": {
+        "cancelled": true,
+        "success": false
+      }
+    },
+    {
+      "role": "user",
+      "content": "lets create a file that gives us intsruction on how to code a GPU kernel",
+      "mode": "agent",
+      "timestamp": "2026-06-15T14:18:03.630922Z",
+      "meta": {}
+    },
+    {
+      "role": "assistant",
+      "content": "_Stopped by user._",
+      "mode": "agent",
+      "timestamp": "2026-06-15T14:18:40.857041Z",
+      "meta": {
+        "cancelled": true,
+        "success": false,
+        "agent_may_continue": true
+      }
+    }
+  ],
+  "token_stats": {
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "root_id": "g_a52c0da8a52c",
+  "nodes": {
+    "g_a52c0da8a52c": {
+      "goal_id": "g_a52c0da8a52c",
+      "description": "In scaffold/agent/stability_gate.py add a one-line docstring to should_check explaining it gates scaffold evolution checks by session count",
+      "parent_ids": [],
+      "child_ids": [
+        "g_35924023941b"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-17T10:53:34Z",
+      "updated_at": "2026-06-17T10:53:42Z",
+      "completed_at": "2026-06-17T10:53:42Z",
+      "session_ids": [
+        "orch_f0fe1f2c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_35924023941b": {
+      "goal_id": "g_35924023941b",
+      "description": "Add a one-line docstring to the `should_check` function.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "scaffold/agent/stability_gate.py",
+          "action": "Add a one-line docstring to the `should_check` function.",
+          "function_signature": "def should_check(...):",
+          "constraints": [
+            "The docstring should explain that it gates scaffold evolution checks by session count."
+          ],
+          "complexity": "low",
+          "file": "scaffold/agent/stability_gate.py"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-17T10:53:39Z",
+      "updated_at": "2026-06-17T10:53:42Z",
+      "completed_at": "2026-06-17T10:53:42Z",
+      "session_ids": [
+        "orch_f0fe1f2c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

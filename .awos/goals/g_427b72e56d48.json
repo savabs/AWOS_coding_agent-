@@ -1,0 +1,46 @@
+{
+  "root_id": "g_427b72e56d48",
+  "nodes": {
+    "g_427b72e56d48": {
+      "goal_id": "g_427b72e56d48",
+      "description": "In file scaffold/agent/budget_ledger.py add a one-line comment above get_status explaining it returns month-to-date budget status",
+      "parent_ids": [],
+      "child_ids": [
+        "g_3374b2ea5f58"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-12T07:43:35Z",
+      "updated_at": "2026-06-12T07:43:42Z",
+      "completed_at": "2026-06-12T07:43:42Z",
+      "session_ids": [
+        "orch_62461cf7"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_3374b2ea5f58": {
+      "goal_id": "g_3374b2ea5f58",
+      "description": "Add a one-line comment `\"\"\"Returns the month-to-date budget status.\"\"\"` above the `get_status` function definition.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "scaffold/agent/budget_ledger.py",
+          "action": "Add a one-line comment `\"\"\"Returns the month-to-date budget status.\"\"\"` above the `get_status` function definition.",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-12T07:43:38Z",
+      "updated_at": "2026-06-12T07:43:42Z",
+      "completed_at": "2026-06-12T07:43:42Z",
+      "session_ids": [
+        "orch_62461cf7"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

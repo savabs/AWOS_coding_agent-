@@ -1,0 +1,25 @@
+{
+  "timestamp": "2026-06-26T04:33:39.342423+00:00",
+  "raw": {
+    "arm": "raw",
+    "tasks_done": 18,
+    "tasks_total": 18,
+    "all_tests_pass": false,
+    "semantic_pass": false,
+    "cost_usd": 0.002734,
+    "wall_sec": 49.44,
+    "error": ""
+  },
+  "awos": {
+    "arm": "awos",
+    "tasks_done": 18,
+    "tasks_total": 18,
+    "all_tests_pass": true,
+    "semantic_pass": false,
+    "cost_usd": 0.005565,
+    "wall_sec": 81.32,
+    "error": ""
+  },
+  "awos_cheaper": false,
+  "cost_ratio": 2.035
+}

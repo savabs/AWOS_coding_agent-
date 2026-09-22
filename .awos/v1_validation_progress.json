@@ -1,0 +1,412 @@
+{
+  "suite": "v1_self_validation",
+  "started_at": "2026-06-16T08:16:09.208484+00:00",
+  "updated_at": "2026-06-18T04:17:25.168242+00:00",
+  "runs": [
+    {
+      "task_id": "v1-02",
+      "goal": "In scaffold/agent/escalation_engine.py add a one-line docstring to is_cheap_only() explaining it returns True when premium models are halted",
+      "file": "scaffold/agent/escalation_engine.py",
+      "success": true,
+      "cost_usd": 0.0,
+      "tokens": 0,
+      "elapsed_s": 41.3,
+      "tasks_completed": 1,
+      "tasks_total": 1,
+      "error": "",
+      "ran_at": "2026-06-16T08:16:09.208484+00:00"
+    },
+    {
+      "task_id": "v1-05",
+      "goal": "In scaffold/agent/run_diagnostics.py add a short # comment above print_visual_diff explaining it shows the applied patch in the terminal",
+      "file": "scaffold/agent/run_diagnostics.py",
+      "success": true,
+      "cost_usd": 0.0,
+      "tokens": 0,
+      "elapsed_s": 17.6,
+      "tasks_completed": 1,
+      "tasks_total": 1,
+      "error": "",
+      "ran_at": "2026-06-16T08:16:50.515943+00:00"
+    },
+    {
+      "task_id": "v1-06",
+      "goal": "In scaffold/agent/verifier.py add a one-line docstring to _check_edit_fidelity explaining it rejects edits that miss comment-above or symbol-placement goals",
+      "file": "scaffold/agent/verifier.py",
+      "success": true,
+      "cost_usd": 0.0,
+      "tokens": 0,
+      "elapsed_s": 20.9,
+      "tasks_completed": 1,
+      "tasks_total": 1,
+      "error": "",
+      "ran_at": "2026-06-16T08:17:08.162603+00:00"
+    },
+    {
+      "task_id": "v1-07",
+      "goal": "In scaffold/agent/usage_record.py add a short # comment above merge_result_usage explaining it merges worker API usage into a task accumulator",
+      "file": "scaffold/agent/usage_record.py",
+      "success": true,
+      "cost_usd": 0.0,
+      "tokens": 0,
+      "elapsed_s": 31.0,
+      "tasks_completed": 1,
+      "tasks_total": 1,
+      "error": "",
+      "ran_at": "2026-06-16T08:17:44.070599+00:00"
+    },
+    {
+      "task_id": "v1-08",
+      "goal": "In scaffold/agent/run_diagnostics.py add a one-line docstring to TaskDiagnostic.record explaining it appends a stage entry to the diagnostic trace",
+      "file": "scaffold/agent/run_diagnostics.py",
+      "success": true,
+      "cost_usd": 0.0,
+      "tokens": 0,
+      "elapsed_s": 18.4,
+      "tasks_completed": 1,
+      "tasks_total": 1,
+      "error": "",
+      "ran_at": "2026-06-16T08:18:15.120000+00:00"
+    },
+    {
+      "task_id": "v1-09",
+      "goal": "In scaffold/agent/cheap_planner.py add a short # comment above _normalize_plan_paths explaining it fixes bare filenames to scaffold/agent paths",
+      "file": "scaffold/agent/cheap_planner.py",
+      "success": true,
+      "cost_usd": 0.0,
+      "tokens": 0,
+      "elapsed_s": 16.3,
+      "tasks_completed": 1,
+      "tasks_total": 1,
+      "error": "",
+      "ran_at": "2026-06-16T08:18:33.512924+00:00"
+    },
+    {
+      "task_id": "v1-10",
+      "goal": "In scaffold/agent/integration_reviewer.py add a one-line docstring to _is_cheap_only explaining it reads AWOS_CHEAP_ONLY from the environment",
+      "file": "scaffold/agent/integration_reviewer.py",
+      "success": true,
+      "cost_usd": 0.0,
+      "tokens": 0,
+      "elapsed_s": 16.5,
+      "tasks_completed": 1,
+      "tasks_total": 1,
+      "error": "",
+      "ran_at": "2026-06-16T08:18:49.798493+00:00"
+    },
+    {
+      "task_id": "v1-11",
+      "goal": "In scaffold/agent/orchestrator.py add a one-line docstring to _cheap_call explaining it calls the cheap LLM tier with retries",
+      "file": "scaffold/agent/orchestrator.py",
+      "success": true,
+      "cost_usd": 0.0,
+      "tokens": 0,
+      "elapsed_s": 16.6,
+      "tasks_completed": 1,
+      "tasks_total": 1,
+      "error": "",
+      "ran_at": "2026-06-16T08:19:06.332452+00:00"
+    },
+    {
+      "task_id": "v1-12",
+      "goal": "In scaffold/agent/pei_report.py add a short module-level docstring explaining PEI uses tokens as the primary cost measure",
+      "file": "scaffold/agent/pei_report.py",
+      "success": true,
+      "cost_usd": 0.0,
+      "tokens": 0,
+      "elapsed_s": 18.0,
+      "tasks_completed": 1,
+      "tasks_total": 1,
+      "error": "",
+      "ran_at": "2026-06-16T08:19:22.926636+00:00"
+    },
+    {
+      "task_id": "v1-13",
+      "goal": "In scaffold/agent/prompt_evolver.py add a one-line docstring to should_evolve explaining it triggers prompt evolution every N sessions",
+      "file": "scaffold/agent/prompt_evolver.py",
+      "success": true,
+      "cost_usd": 0.0,
+      "tokens": 0,
+      "elapsed_s": 15.0,
+      "tasks_completed": 1,
+      "tasks_total": 1,
+      "error": "",
+      "ran_at": "2026-06-16T08:19:40.954232+00:00"
+    },
+    {
+      "task_id": "v1-14",
+      "goal": "In scaffold/agent/stability_gate.py add a one-line docstring to should_check explaining it gates scaffold evolution checks by session count",
+      "file": "scaffold/agent/stability_gate.py",
+      "success": true,
+      "cost_usd": 0.0,
+      "tokens": 0,
+      "elapsed_s": 17.2,
+      "tasks_completed": 1,
+      "tasks_total": 1,
+      "error": "",
+      "ran_at": "2026-06-16T08:19:55.913973+00:00"
+    },
+    {
+      "task_id": "v1-15",
+      "goal": "In scaffold/agent/escalation_engine.py add a short # comment above max_allowed_level explaining it caps the model ladder in cheap-only mode",
+      "file": "scaffold/agent/escalation_engine.py",
+      "success": true,
+      "cost_usd": 0.0,
+      "tokens": 0,
+      "elapsed_s": 16.2,
+      "tasks_completed": 1,
+      "tasks_total": 1,
+      "error": "",
+      "ran_at": "2026-06-16T08:20:13.148036+00:00"
+    },
+    {
+      "task_id": "v1-13",
+      "goal": "In scaffold/agent/prompt_evolver.py add a one-line docstring to should_evolve explaining it triggers prompt evolution every N sessions",
+      "file": "scaffold/agent/prompt_evolver.py",
+      "success": true,
+      "cost_usd": 0.0,
+      "tokens": 0,
+      "elapsed_s": 41.8,
+      "tasks_completed": 1,
+      "tasks_total": 1,
+      "error": "",
+      "ran_at": "2026-06-17T10:52:52.173534+00:00"
+    },
+    {
+      "task_id": "v1-14",
+      "goal": "In scaffold/agent/stability_gate.py add a one-line docstring to should_check explaining it gates scaffold evolution checks by session count",
+      "file": "scaffold/agent/stability_gate.py",
+      "success": true,
+      "cost_usd": 0.0,
+      "tokens": 0,
+      "elapsed_s": 10.9,
+      "tasks_completed": 1,
+      "tasks_total": 1,
+      "error": "",
+      "ran_at": "2026-06-17T10:53:33.970452+00:00"
+    },
+    {
+      "task_id": "v1-15",
+      "goal": "In scaffold/agent/escalation_engine.py add a short # comment above max_allowed_level explaining it caps the model ladder in cheap-only mode",
+      "file": "scaffold/agent/escalation_engine.py",
+      "success": true,
+      "cost_usd": 0.0,
+      "tokens": 0,
+      "elapsed_s": 13.0,
+      "tasks_completed": 1,
+      "tasks_total": 1,
+      "error": "",
+      "ran_at": "2026-06-17T10:53:44.863113+00:00"
+    },
+    {
+      "task_id": "v1-16",
+      "goal": "In scaffold/agent/runtime_session.py add a one-line docstring to RuntimeSessionStore.list_sessions explaining it returns durable sessions sorted by updated time",
+      "file": "scaffold/agent/runtime_session.py",
+      "success": true,
+      "cost_usd": 0.0,
+      "tokens": 0,
+      "elapsed_s": 34.4,
+      "tasks_completed": 1,
+      "tasks_total": 1,
+      "error": "",
+      "ran_at": "2026-06-18T04:16:07.196947+00:00"
+    },
+    {
+      "task_id": "v1-17",
+      "goal": "In scaffold/agent/learning_policy.py add a one-line docstring to apply_kernel_defaults explaining it enables runtime sessions, learning, and MCTS unless opted out",
+      "file": "scaffold/agent/learning_policy.py",
+      "success": true,
+      "cost_usd": 0.0,
+      "tokens": 0,
+      "elapsed_s": 14.1,
+      "tasks_completed": 1,
+      "tasks_total": 1,
+      "error": "",
+      "ran_at": "2026-06-18T04:16:41.556257+00:00"
+    },
+    {
+      "task_id": "v1-18",
+      "goal": "In scaffold/agent/mcts_policy.py add a one-line docstring to mcts_enabled explaining it controls whether MCTS fallback runs after worker failure",
+      "file": "scaffold/agent/mcts_policy.py",
+      "success": true,
+      "cost_usd": 0.0,
+      "tokens": 0,
+      "elapsed_s": 14.7,
+      "tasks_completed": 1,
+      "tasks_total": 1,
+      "error": "",
+      "ran_at": "2026-06-18T04:16:55.629265+00:00"
+    },
+    {
+      "task_id": "v1-19",
+      "goal": "In scaffold/agent/worktree.py add a one-line docstring to register_worktree explaining it reattaches a persisted worktree path for session resume",
+      "file": "scaffold/agent/worktree.py",
+      "success": true,
+      "cost_usd": 0.0,
+      "tokens": 0,
+      "elapsed_s": 14.9,
+      "tasks_completed": 1,
+      "tasks_total": 1,
+      "error": "",
+      "ran_at": "2026-06-18T04:17:10.312686+00:00"
+    },
+    {
+      "task_id": "v1-20",
+      "goal": "In scaffold/agent/token_tracker.py add a one-line docstring to check_guard explaining it blocks requests when the monthly budget cap is exceeded",
+      "file": "scaffold/agent/token_tracker.py",
+      "success": true,
+      "cost_usd": 0.0,
+      "tokens": 0,
+      "elapsed_s": 13.9,
+      "tasks_completed": 1,
+      "tasks_total": 1,
+      "error": "",
+      "ran_at": "2026-06-18T04:17:25.168242+00:00"
+    }
+  ],
+  "by_id": {
+    "v1-01": {
+      "status": "completed",
+      "last_run": "2026-06-12T08:50:51.017578+00:00",
+      "cost_usd": null,
+      "elapsed_s": null,
+      "error": "",
+      "notes": "completed during manual v1 validation before task queue"
+    },
+    "v1-03": {
+      "status": "completed",
+      "last_run": "2026-06-12T08:50:51.017578+00:00",
+      "cost_usd": null,
+      "elapsed_s": null,
+      "error": "",
+      "notes": "completed during manual v1 validation before task queue"
+    },
+    "v1-04": {
+      "status": "completed",
+      "last_run": "2026-06-12T08:50:51.017578+00:00",
+      "cost_usd": null,
+      "elapsed_s": null,
+      "error": "",
+      "notes": "completed during manual v1 validation before task queue"
+    },
+    "v1-02": {
+      "status": "completed",
+      "last_run": "2026-06-16T08:16:09.208484+00:00",
+      "cost_usd": 0.0,
+      "elapsed_s": 41.3,
+      "error": ""
+    },
+    "v1-05": {
+      "status": "completed",
+      "last_run": "2026-06-16T08:16:50.515943+00:00",
+      "cost_usd": 0.0,
+      "elapsed_s": 17.6,
+      "error": ""
+    },
+    "v1-06": {
+      "status": "completed",
+      "last_run": "2026-06-16T08:17:08.162603+00:00",
+      "cost_usd": 0.0,
+      "elapsed_s": 20.9,
+      "error": ""
+    },
+    "v1-07": {
+      "status": "completed",
+      "last_run": "2026-06-16T08:17:44.070599+00:00",
+      "cost_usd": 0.0,
+      "elapsed_s": 31.0,
+      "error": ""
+    },
+    "v1-08": {
+      "status": "completed",
+      "last_run": "2026-06-16T08:18:15.120000+00:00",
+      "cost_usd": 0.0,
+      "elapsed_s": 18.4,
+      "error": ""
+    },
+    "v1-09": {
+      "status": "completed",
+      "last_run": "2026-06-16T08:18:33.512924+00:00",
+      "cost_usd": 0.0,
+      "elapsed_s": 16.3,
+      "error": ""
+    },
+    "v1-10": {
+      "status": "completed",
+      "last_run": "2026-06-16T08:18:49.798493+00:00",
+      "cost_usd": 0.0,
+      "elapsed_s": 16.5,
+      "error": ""
+    },
+    "v1-11": {
+      "status": "completed",
+      "last_run": "2026-06-16T08:19:06.332452+00:00",
+      "cost_usd": 0.0,
+      "elapsed_s": 16.6,
+      "error": ""
+    },
+    "v1-12": {
+      "status": "completed",
+      "last_run": "2026-06-16T08:19:22.926636+00:00",
+      "cost_usd": 0.0,
+      "elapsed_s": 18.0,
+      "error": ""
+    },
+    "v1-13": {
+      "status": "completed",
+      "last_run": "2026-06-17T10:52:52.173534+00:00",
+      "cost_usd": 0.0,
+      "elapsed_s": 41.8,
+      "error": ""
+    },
+    "v1-14": {
+      "status": "completed",
+      "last_run": "2026-06-17T10:53:33.970452+00:00",
+      "cost_usd": 0.0,
+      "elapsed_s": 10.9,
+      "error": ""
+    },
+    "v1-15": {
+      "status": "completed",
+      "last_run": "2026-06-17T10:53:44.863113+00:00",
+      "cost_usd": 0.0,
+      "elapsed_s": 13.0,
+      "error": ""
+    },
+    "v1-16": {
+      "status": "completed",
+      "last_run": "2026-06-18T04:16:07.196947+00:00",
+      "cost_usd": 0.0,
+      "elapsed_s": 34.4,
+      "error": ""
+    },
+    "v1-17": {
+      "status": "completed",
+      "last_run": "2026-06-18T04:16:41.556257+00:00",
+      "cost_usd": 0.0,
+      "elapsed_s": 14.1,
+      "error": ""
+    },
+    "v1-18": {
+      "status": "completed",
+      "last_run": "2026-06-18T04:16:55.629265+00:00",
+      "cost_usd": 0.0,
+      "elapsed_s": 14.7,
+      "error": ""
+    },
+    "v1-19": {
+      "status": "completed",
+      "last_run": "2026-06-18T04:17:10.312686+00:00",
+      "cost_usd": 0.0,
+      "elapsed_s": 14.9,
+      "error": ""
+    },
+    "v1-20": {
+      "status": "completed",
+      "last_run": "2026-06-18T04:17:25.168242+00:00",
+      "cost_usd": 0.0,
+      "elapsed_s": 13.9,
+      "error": ""
+    }
+  }
+}

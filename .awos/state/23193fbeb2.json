@@ -1,0 +1,20 @@
+{
+  "goal": "Add a one-line docstring to the _extract_context method in worker.py",
+  "goal_hash": "23193fbeb2",
+  "started_at": "2026-05-27T13:51:39",
+  "last_updated": "2026-05-27T13:51:39",
+  "completed_task_ids": [],
+  "failed_task_ids": [
+    1,
+    "1_1",
+    "1_2",
+    "1_1_1",
+    "1_1_2",
+    "1_2_1",
+    "1_2_2"
+  ],
+  "session_ids": [
+    "orch_a3760caf"
+  ],
+  "status": "failed"
+}

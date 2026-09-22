@@ -1,0 +1,33 @@
+{
+  "session_id": "db25df3b",
+  "strategy": "hybrid",
+  "messages": [
+    {
+      "role": "user",
+      "content": "explain me this project in very simple terms",
+      "tokens": 61,
+      "timestamp": "2026-05-16T01:38:07.302736"
+    },
+    {
+      "role": "assistant",
+      "content": "\ud83e\udd14 I didn't quite understand: \"explain me this project in very simple terms\"\n\nTry asking me things like:\n- \"What should I work on?\"\n- \"Show me the plan\"\n- \"Run the next task\"\n- \"Do 5 more tasks\"\n\nOr type \"help\" for more examples!",
+      "tokens": 157,
+      "timestamp": "2026-05-16T01:38:07.312508"
+    },
+    {
+      "role": "user",
+      "content": "help",
+      "tokens": 51,
+      "timestamp": "2026-05-16T01:38:18.769672"
+    },
+    {
+      "role": "assistant",
+      "content": "\ud83e\udd16 **Workflow Assistant**\n\nI understand natural language! Just ask me things like:\n\n**Status & Planning:**\n- \"What's my status?\" / \"Where am I?\" / \"Show progress\"\n- \"What should I work on?\" / \"What's next?\"\n- \"Show me the plan\" / \"What tasks are there?\"\n\n**Execution:**\n- \"Let's do the next step\" / \"Proceed\"\n- \"Run 5 tasks\" / \"Do 3 more\" / \"Auto-execute 10\"\n\n**Control:**\n- \"Help\" / \"What can you do?\"\n- \"Exit\" / \"Quit\" / \"Done\"\n\n**Examples:**\n```\n> what's my current status?\n> show me the plan\n> what should i work on?\n> run the next task\n> execute 3 tasks\n> can i see the plan?\n> i'm done, exit\n```\n\nI'll figure out what you mean and do it! \ud83d\ude80",
+      "tokens": 261,
+      "timestamp": "2026-05-16T01:38:18.769857"
+    }
+  ],
+  "summary": null,
+  "total_tokens": 530,
+  "message_count": 4
+}

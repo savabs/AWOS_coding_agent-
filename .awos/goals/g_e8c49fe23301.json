@@ -1,0 +1,48 @@
+{
+  "root_id": "g_e8c49fe23301",
+  "nodes": {
+    "g_e8c49fe23301": {
+      "goal_id": "g_e8c49fe23301",
+      "description": "In scaffold/agent/pei_report.py add a short module-level docstring explaining PEI uses tokens as the primary cost measure",
+      "parent_ids": [],
+      "child_ids": [
+        "g_138e2275053d"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-16T08:19:23Z",
+      "updated_at": "2026-06-16T08:19:34Z",
+      "completed_at": "2026-06-16T08:19:34Z",
+      "session_ids": [
+        "orch_ad80c00b"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_138e2275053d": {
+      "goal_id": "g_138e2275053d",
+      "description": "Add a module-level docstring explaining that PEI uses tokens as the primary cost measure.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "scaffold/agent/pei_report.py",
+          "action": "Add a module-level docstring explaining that PEI uses tokens as the primary cost measure.",
+          "complexity": "low",
+          "file": "scaffold/agent/pei_report.py"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-16T08:19:29Z",
+      "updated_at": "2026-06-16T08:19:34Z",
+      "completed_at": "2026-06-16T08:19:34Z",
+      "session_ids": [
+        "orch_ad80c00b"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

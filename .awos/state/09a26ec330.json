@@ -1,0 +1,40 @@
+{
+  "goal": "Add a __repr__ method to the ErrorPattern dataclass in scaffold/agent/error_pattern_store.py that returns: 'ErrorPattern(file=X, type=Y, ts=Z)'",
+  "goal_hash": "09a26ec330",
+  "started_at": "2026-05-20T21:06:36",
+  "last_updated": "2026-05-21T22:21:49",
+  "completed_task_ids": [
+    "1_1",
+    "1_2",
+    "1_3"
+  ],
+  "failed_task_ids": [
+    1,
+    "1_1_1",
+    "1_1_2",
+    "1_2_1",
+    "1_2_2",
+    "1_3_1",
+    "1_3_2"
+  ],
+  "session_ids": [
+    "orch_70475bf1",
+    "orch_1477652b",
+    "orch_0d486161",
+    "orch_13283a1c",
+    "orch_d619049a",
+    "orch_916c5f69",
+    "orch_e41f93e4",
+    "orch_bbcce3b3",
+    "orch_aeb6132a",
+    "orch_dc6b245c",
+    "orch_07ddd29e",
+    "orch_dd9e7d2a",
+    "orch_52cc28c9",
+    "orch_0ed6154e",
+    "orch_6525a5dd",
+    "orch_1c1b72a8",
+    "orch_b377de50"
+  ],
+  "status": "complete"
+}

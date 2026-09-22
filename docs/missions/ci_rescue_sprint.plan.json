@@ -1,0 +1,146 @@
+[
+  {
+    "task_id": 1,
+    "task_type": "edit_file",
+    "path": "auth.py",
+    "file": "auth.py",
+    "action": "Fix verify_password to compare hash_password(plain) with hashed, not plain",
+    "complexity": "low"
+  },
+  {
+    "task_id": 2,
+    "task_type": "edit_file",
+    "path": "auth.py",
+    "file": "auth.py",
+    "action": "Fix token_fingerprint to return first 8 characters only",
+    "complexity": "low"
+  },
+  {
+    "task_id": 3,
+    "task_type": "edit_file",
+    "path": "auth.py",
+    "file": "auth.py",
+    "action": "Fix is_session_valid: session valid when now < expires_at",
+    "complexity": "low"
+  },
+  {
+    "task_id": 4,
+    "task_type": "edit_file",
+    "path": "auth.py",
+    "file": "auth.py",
+    "action": "Fix role_can_checkout to allow staff role",
+    "complexity": "low"
+  },
+  {
+    "task_id": 5,
+    "task_type": "edit_file",
+    "path": "billing.py",
+    "file": "billing.py",
+    "action": "Fix line_total to multiply unit_price by quantity",
+    "complexity": "low"
+  },
+  {
+    "task_id": 6,
+    "task_type": "edit_file",
+    "path": "billing.py",
+    "file": "billing.py",
+    "action": "Fix apply_coupon: single /100 for percent discount",
+    "complexity": "low"
+  },
+  {
+    "task_id": 7,
+    "task_type": "edit_file",
+    "path": "billing.py",
+    "file": "billing.py",
+    "action": "Fix invoice_total to include tax_rate via round_money",
+    "complexity": "medium"
+  },
+  {
+    "task_id": 8,
+    "task_type": "edit_file",
+    "path": "billing.py",
+    "file": "billing.py",
+    "action": "Fix round_money to use Decimal ROUND_HALF_UP",
+    "complexity": "medium"
+  },
+  {
+    "task_id": 9,
+    "task_type": "edit_file",
+    "path": "billing.py",
+    "file": "billing.py",
+    "action": "Fix currency_split so last part absorbs remainder and sum equals total",
+    "complexity": "medium"
+  },
+  {
+    "task_id": 10,
+    "task_type": "edit_file",
+    "path": "inventory.py",
+    "file": "inventory.py",
+    "action": "Fix sku_normalize: strip whitespace and uppercase",
+    "complexity": "low"
+  },
+  {
+    "task_id": 11,
+    "task_type": "edit_file",
+    "path": "inventory.py",
+    "file": "inventory.py",
+    "action": "Fix stock_available: on_hand minus reserved without off-by-one",
+    "complexity": "low"
+  },
+  {
+    "task_id": 12,
+    "task_type": "edit_file",
+    "path": "inventory.py",
+    "file": "inventory.py",
+    "action": "Fix reserve_stock to increment reserved by qty",
+    "complexity": "medium"
+  },
+  {
+    "task_id": 13,
+    "task_type": "edit_file",
+    "path": "inventory.py",
+    "file": "inventory.py",
+    "action": "Fix release_stock: decrement reserved only, do not add to on_hand",
+    "complexity": "medium"
+  },
+  {
+    "task_id": 14,
+    "task_type": "edit_file",
+    "path": "inventory.py",
+    "file": "inventory.py",
+    "action": "Fix reorder_point: True when available <= needed",
+    "complexity": "low"
+  },
+  {
+    "task_id": 15,
+    "task_type": "edit_file",
+    "path": "shipping.py",
+    "file": "shipping.py",
+    "action": "Fix shipping_cost top tier to 25.0 for weight above 5kg",
+    "complexity": "low"
+  },
+  {
+    "task_id": 16,
+    "task_type": "edit_file",
+    "path": "shipping.py",
+    "file": "shipping.py",
+    "action": "Fix qualifies_free_shipping to use >= threshold; delivery_days express max(1, base-1)",
+    "complexity": "medium"
+  },
+  {
+    "task_id": 17,
+    "task_type": "edit_file",
+    "path": "shipping.py",
+    "file": "shipping.py",
+    "action": "Fix can_ship_international to reject blocked country codes",
+    "complexity": "low"
+  },
+  {
+    "task_id": 18,
+    "task_type": "edit_file",
+    "path": "promo.py",
+    "file": "promo.py",
+    "action": "Fix stackable compound discount, min_order_for_promo >=, loyalty_points round, bundle_discount 0 for single item",
+    "complexity": "high"
+  }
+]

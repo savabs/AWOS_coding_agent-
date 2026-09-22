@@ -1,0 +1,94 @@
+{
+  "session_id": "orch_569f2dbe",
+  "goal": "create docs/e2e_via_http_guide.md about deliverable routing",
+  "status": "completed",
+  "started_at": "2026-06-13T21:18:01Z",
+  "files": [
+    {
+      "path": "docs/e2e_via_http_guide.md",
+      "status": "modified",
+      "lines_added": 8,
+      "lines_removed": 0,
+      "hunks": [
+        {
+          "old_start": 0,
+          "old_count": 0,
+          "new_start": 1,
+          "new_count": 8,
+          "lines": [
+            {
+              "type": "header",
+              "content": "@@ -0,0 +1,8 @@",
+              "old_line_no": null,
+              "new_line_no": null
+            },
+            {
+              "type": "add",
+              "content": "# E2E Deliverable",
+              "old_line_no": null,
+              "new_line_no": 1
+            },
+            {
+              "type": "add",
+              "content": "",
+              "old_line_no": null,
+              "new_line_no": 2
+            },
+            {
+              "type": "add",
+              "content": "**Goal:** create docs/e2e_via_http_guide.md about deliverable routing",
+              "old_line_no": null,
+              "new_line_no": 3
+            },
+            {
+              "type": "add",
+              "content": "",
+              "old_line_no": null,
+              "new_line_no": 4
+            },
+            {
+              "type": "add",
+              "content": "**Path:** `docs/e2e_via_http_guide.md`",
+              "old_line_no": null,
+              "new_line_no": 5
+            },
+            {
+              "type": "add",
+              "content": "",
+              "old_line_no": null,
+              "new_line_no": 6
+            },
+            {
+              "type": "add",
+              "content": "This file was written by the automated deliverable E2E harness (mock LLM).",
+              "old_line_no": null,
+              "new_line_no": 7
+            },
+            {
+              "type": "add",
+              "content": "Timestamp: 1781385482",
+              "old_line_no": null,
+              "new_line_no": 8
+            }
+          ]
+        }
+      ],
+      "unified_diff": "--- docs/e2e_via_http_guide.md (before)\n+++ docs/e2e_via_http_guide.md (after)\n@@ -0,0 +1,8 @@\n+# E2E Deliverable\n\n+\n\n+**Goal:** create docs/e2e_via_http_guide.md about deliverable routing\n\n+\n\n+**Path:** `docs/e2e_via_http_guide.md`\n\n+\n\n+This file was written by the automated deliverable E2E harness (mock LLM).\n\n+Timestamp: 1781385482\n",
+      "before_excerpt": "",
+      "after_excerpt": "# E2E Deliverable\n\n**Goal:** create docs/e2e_via_http_guide.md about deliverable routing\n\n**Path:** `docs/e2e_via_http_guide.md`\n\nThis file was written by the automated deliverable E2E harness (mock LLM).\nTimestamp: 1781385482\n"
+    }
+  ],
+  "summary": {
+    "total_files": 1,
+    "created": 0,
+    "modified": 1,
+    "deleted": 0,
+    "lines_added": 8,
+    "lines_removed": 0
+  },
+  "completed_at": "2026-06-13T21:18:01Z",
+  "tasks_completed": 1,
+  "tasks_failed": 0,
+  "total_cost_usd": 0.0,
+  "elapsed_sec": 0.0009427070617675781
+}

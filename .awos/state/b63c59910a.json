@@ -1,0 +1,14 @@
+{
+  "goal": "Add a one-line docstring to the _extract_context method in scaffold/agent/worker.py",
+  "goal_hash": "b63c59910a",
+  "started_at": "2026-05-27T13:52:38",
+  "last_updated": "2026-05-27T13:52:50",
+  "completed_task_ids": [
+    1
+  ],
+  "failed_task_ids": [],
+  "session_ids": [
+    "orch_e15051dd"
+  ],
+  "status": "complete"
+}

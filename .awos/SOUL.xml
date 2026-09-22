@@ -1,0 +1,86 @@
+<?xml version='1.0' encoding='utf-8'?>
+<soul>
+  <metadata>
+    <project-name>AWOS — Learnable OS for Autonomous Work</project-name>
+    <created>2026-05-15T08:08:50.413118</created>
+    <last-updated>2026-06-12T08:45:00</last-updated>
+    <version>1.2</version>
+    <checkpoint>docs/memory/checkpoint_2026-06-12.md</checkpoint>
+  </metadata>
+
+  <identity>
+    AWOS is a learnable operating system for autonomous work — not a Cursor competitor.
+    Coding agent is App #1. North star: maximize Quality × Speed ÷ Cost (PEI).
+    GTM: agency-first (~1,000 niche users). See VISION.md and docs/NICHE_GTM.md.
+  </identity>
+
+  <rules>
+    <rule id="cheap-only-v1">AWOS_CHEAP_ONLY=true and AWOS_PREMIUM_BUDGET=0 during v1 self-validation</rule>
+    <rule id="full-paths">Goals must use full paths: scaffold/agent/&lt;file&gt;.py and name the target symbol</rule>
+    <rule id="no-premium-leak">Never route to Haiku/Sonnet when cheap-only is active</rule>
+    <rule id="tokens-primary">Measure real API tokens; derive cost from token counts, not flat tier estimates</rule>
+    <rule id="verify-visually">After each successful run: check APPLIED CHANGE box + git diff</rule>
+    <rule id="no-outreach-until-volume">No agency outreach until 10–15 validation runs pass cost + quality criteria</rule>
+  </rules>
+
+  <patterns>
+    <pattern id="wrong-planner-path">
+      <symptom>Planner emits ./escalation_engine.py instead of scaffold/agent/escalation_engine.py</symptom>
+      <fix>cheap_planner._normalize_plan_paths(); always include full path in goal</fix>
+    </pattern>
+    <pattern id="comment-above-fidelity">
+      <symptom>Goal asks for # comment above symbol; worker edits inner docstring only</symptom>
+      <fix>verifier._check_edit_fidelity() rejects; re-run worker with error context</fix>
+    </pattern>
+    <pattern id="integration-reviewer-noise">
+      <symptom>Integration review flags hallucinated import/call-chain issues on truncated diffs</symptom>
+      <fix>Filter noise; tune reviewer — known issue as of 2026-06-12</fix>
+    </pattern>
+    <pattern id="metrics-panel-skew">
+      <symptom>Rolling METRICS panel shows high cost from historical premium spans</symptom>
+      <fix>Trust awos budget and [OBS] line for new cheap-only runs</fix>
+    </pattern>
+  </patterns>
+
+  <decisions>
+    <decision date="2026-06-12" id="token-first-pei">
+      PEI reporting uses real API tokens as primary cost measure (usage_record.py, pei_report.py)
+    </decision>
+    <decision date="2026-06-12" id="visual-diff-ux">
+      print_visual_diff() in run_diagnostics.py — shown after successful verify in orchestrator
+    </decision>
+    <decision date="2026-06-12" id="v1-validation-gate">
+      Self-validate on own repo before agency outreach; log in docs/V1_VALIDATION.md
+    </decision>
+    <decision date="2026-06-08" id="vision-v1">
+      AWOS = learnable OS kernel; coding is App #1; niche agent-making firm GTM
+    </decision>
+  </decisions>
+
+  <v1-validation status="in-progress">
+    <task-queue>docs/v1_validation_tasks.json</task-queue>
+    <progress-file>.awos/v1_validation_progress.json</progress-file>
+    <cli>awos validate · awos validate run</cli>
+    <queue-completed>3</queue-completed>
+    <queue-pending>12</queue-pending>
+    <runs-target>15</runs-target>
+    <success-rate>5/6 manual goals (83%)</success-rate>
+    <avg-cost-per-task>~0.001 USD</avg-cost-per-task>
+    <cost-pass>true</cost-pass>
+    <quality-pass>true</quality-pass>
+    <volume-pass>false</volume-pass>
+    <outreach-ready>false</outreach-ready>
+  </v1-validation>
+
+  <cost-history>
+    <record date="2026-06-12" task="v1 validation session" model="deepseek-chat" cost="0.0096" tokens="64529" note="cheap-only era total via awos budget" />
+    <record date="2026-05-15" task="Fix memory leak" model="claude-3-5-haiku" cost="0.002400" tokens="84" />
+  </cost-history>
+
+  <not-yet-built>
+    <item>session_dreaming.py auto-updates (placeholder only)</item>
+    <item>PER wired into production loop</item>
+    <item>PromptEvolver compounding (0 guidelines evolved)</item>
+    <item>MCTS traces in production</item>
+  </not-yet-built>
+</soul>

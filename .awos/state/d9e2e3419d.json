@@ -1,0 +1,36 @@
+{
+  "goal": "create docs/e2e_uncensored_agent_guide.md about uncensored local agents",
+  "goal_hash": "d9e2e3419d",
+  "started_at": "2026-06-14T13:44:44",
+  "last_updated": "2026-06-21T12:31:58",
+  "completed_task_ids": [
+    1
+  ],
+  "failed_task_ids": [
+    1,
+    "1_1",
+    "1_2",
+    "1_1_1",
+    "1_1_2",
+    "1_2_1",
+    "1_2_2"
+  ],
+  "session_ids": [
+    "orch_7101432f",
+    "orch_4fc471e3",
+    "orch_c116c260",
+    "orch_06049acc",
+    "orch_7d76d7e7",
+    "orch_e5bc274b",
+    "orch_0f9b0e16",
+    "orch_8b925887",
+    "orch_143d6fd6",
+    "orch_90a87b3a",
+    "orch_08bce298",
+    "orch_1837af61",
+    "orch_c82092fe",
+    "orch_7eb67e8c",
+    "orch_c0b21458"
+  ],
+  "status": "failed"
+}

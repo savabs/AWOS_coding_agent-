@@ -6,25 +6,39 @@ AWOS — Learnable Operating System for Autonomous Work
 AWOS is a greedy meta-AI that optimizes quality × speed ÷ cost on every project.
 The coding agent is App #1 on the kernel. See VISION.md for full identity.
 
-Usage:
-    awos run <goal>              Execute a feature goal (Coding App)
-    awos chat                    Interactive session
+Usage (primary interface):
+    awos worker start "<goal>"       Start work on a coding goal
+    awos worker status                List all work sessions
+    awos worker resume [session_id]   Continue paused work
+    awos worker diff [session_id]     Show sandbox changes
+    awos worker cancel [session_id]   Stop active work
+
+Advanced commands:
+    awos run <goal>              Execute via orchestrator directly (power users)
     awos stats                   Self-learning observability report
+    awos stats --savings         Efficiency estimate versus heavier-routing baseline
     awos stats --json            JSON output (for piping/scripts)
-    awos report                  PEI scorecard — client-facing proof of value
+    awos report                  PEI scorecard — quality × speed ÷ cost summary
     awos report --html PATH      Write HTML report to file
     awos budget                  Month-to-date budget status
-    awos performance             Tool success matrix (model × task type)
+    awos debug                   Show running processes + git commit
+    awos models                  List registered models + availability
+    awos sessions list           Runtime sessions (pause/resume internals)
+    awos sessions resume <rs_id> Resume a paused session by ID
+    awos mission guide           Real workload mission playbook (lab tool)
+    awos mission start           Start Stage 1 worktree mission
+    awos mission start --ci-rescue  Optional CI repair workload benchmark
+    awos gauntlet list           Stage 1 risk gauntlet scenarios (lab tool)
+    awos gauntlet run <ID>       Run gauntlet G1–G6
     awos memory search <query>   Search past interactions
-    awos memory stats            Show memory usage
     awos traces list             List reasoning trace sessions
-    awos traces show <id>        Display a trace session
     awos index                   (Re)build semantic codebase index
-    awos goals                   List multi-session goals
+    awos observe snapshot        Read the current assistant-safe state
+    awos observe events          Read a bounded assistant-safe event range
 
 Environment:
     AWOS_DEBUG=1                 Verbose mode
-    AWOS_MONTHLY_BUDGET=50       Higher budget cap
+    AWOS_MONTHLY_BUDGET=50       Higher budget cap (default: $20)
     AWOS_PROMPT_EVOLUTION=true   Enable PromptEvolver
     AWOS_TOOL_SYNTHESIS=true     Enable LiveToolSynthesizer
     AWOS_SCAFFOLD_EVOLUTION=true Enable ScaffoldEvolver
@@ -34,7 +48,9 @@ import argparse
 import os
 import sys
 import json
-import shutil
+import signal
+import subprocess
+import time
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -42,6 +58,13 @@ from datetime import datetime, timedelta
 try:
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).parent / ".env")
+except ImportError:
+    pass
+
+# ── 1.5. Debugger: identify which commit is actually running ──────────────────
+try:
+    from scaffold.agent.debug_trace import startup_banner as _debug_banner
+    _debug_banner()
 except ImportError:
     pass
 
@@ -229,6 +252,103 @@ def cmd_budget(args):
         print(f"  Cache:     {status['cache_hits']} hits, saved ${status.get('cache_savings', 0):.4f}")
 
 
+def cmd_debug_report(args):
+    """Print a saved evidence-first debugger report as JSON."""
+    from scaffold.agent.core.debug_inspection import inspect_debug_bundle
+
+    try:
+        report = inspect_debug_bundle(args.root, args.session_id)
+    except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+
+    payload = report.to_dict()
+    indent = 2 if getattr(args, "pretty", False) else None
+    print(json.dumps(payload, sort_keys=True, indent=indent))
+
+
+def cmd_debug(args):
+    """Show running processes, git commit, and code version."""
+    import subprocess
+    # Git commit
+    commit = "unknown"
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=2,
+        )
+        if r.returncode == 0:
+            commit = r.stdout.strip()
+    except Exception:
+        pass
+    print(f"Commit: {commit}")
+
+    # Modified files (unstaged) — tells us if code is stale
+    r = subprocess.run(
+        ["git", "diff", "--name-only"],
+        capture_output=True, text=True, timeout=2,
+    )
+    modified = [f for f in r.stdout.strip().split("\n") if f]
+    if modified:
+        print("\nModified (not yet committed):")
+        for f in modified[:10]:
+            print(f"  M {f}")
+        if len(modified) > 10:
+            print(f"  ... and {len(modified)-10} more")
+    else:
+        print("Working tree clean — code matches commit.")
+
+    # Running processes
+    print("\nRunning processes:")
+    try:
+        r = subprocess.run(
+            ["ps", "-ef"], capture_output=True, text=True, timeout=2,
+        )
+        for line in r.stdout.split("\n"):
+            if "gui/server" in line and "grep" not in line:
+                parts = line.split()
+                pid = parts[1]
+                started = parts[6] if len(parts) > 6 else "?"
+                print(f"  gui/server   PID={pid}  started={started}")
+            if "awos run" in line and "grep" not in line:
+                parts = line.split()
+                pid = parts[1]
+                started = parts[6] if len(parts) > 6 else "?"
+                goal = " ".join(parts[10:])[:60] if len(parts) > 10 else "?"
+                print(f"  awos run     PID={pid}  started={started}  goal={goal}")
+    except Exception:
+        pass
+    print("\nTip: kill -USR1 <pid> to dump Python traceback (faulthandler)")
+
+
+def cmd_models(args):
+    """List registered models with availability + dead-model filter."""
+    from escalation_engine import LADDER, MODELS_UNAVAILABLE
+
+    print("Models in the escalation ladder:")
+    print(f"  {'LEVEL':<12} {'NAME':<22} {'MODEL_ID':<28} {'PROVIDER':<10} {'STATUS'}")
+    print(f"  {'-'*12} {'-'*22} {'-'*28} {'-'*10} {'-'*10}")
+    for spec in LADDER:
+        status = "DEAD" if spec.model_id in MODELS_UNAVAILABLE else "OK"
+        print(f"  {spec.level.name:<12} {spec.name:<22} {spec.model_id:<28} {spec.provider:<10} {status}")
+    print()
+    print(f"MODELS_UNAVAILABLE: {sorted(MODELS_UNAVAILABLE)}")
+    print()
+    # Live check: query OpenCode Go catalog for the working model
+    opencode_key = os.getenv("OPENCODE_GO_API_KEY")
+    if opencode_key:
+        try:
+            from openai import OpenAI
+            c = OpenAI(api_key=opencode_key, base_url=os.getenv("OPENCODE_GO_BASE_URL", "https://opencode.ai/zen/go/v1"))
+            models = [m.id for m in c.models.list()]
+            print(f"OpenCode Go catalog: {len(models)} models available")
+            for m in models:
+                marker = " ← in use" if m == "deepseek-v4-flash" else ""
+                print(f"  - {m}{marker}")
+        except Exception as exc:
+            print(f"OpenCode Go catalog query failed: {exc}")
+
+
 def cmd_performance(args):
     """Print the tool performance success matrix."""
     from scaffold.agent.core.performance_tracker import ToolPerformanceTracker
@@ -288,27 +408,480 @@ def cmd_index(args):
     print(f"Indexed {stats['files']} files → {stats['chunks']} chunks")
 
 
-def cmd_run(args):
-    """Execute a feature goal via the Orchestrator."""
+def _sessions_store():
+    from scaffold.agent.runtime_session import RuntimeSessionStore
+    return RuntimeSessionStore()
+
+
+def cmd_sessions_list(args):
+    """List durable runtime sessions."""
+    from scaffold.agent.runtime_session import SessionStatus
+
+    store = _sessions_store()
+    status = getattr(args, "status", None)
+    status_enum = SessionStatus(status) if status else None
+    sessions = store.list_sessions(status=status_enum)
+    if not sessions:
+        print("No runtime sessions found.")
+        return
+
+    print(f"\n{'─'*72}")
+    print(f"  RUNTIME SESSIONS  ({len(sessions)} total)")
+    print(f"{'─'*72}")
+    for s in sessions[: getattr(args, "limit", 20)]:
+        done = len(s.progress.completed_task_ids)
+        total = s.progress.total_tasks or "?"
+        sandbox = ""
+        if s.sandbox.enabled and s.sandbox.worktree_path:
+            sandbox = f"  worktree={s.sandbox.worktree_path}"
+        print(
+            f"  {s.session_id}  [{s.status.value:9}]  "
+            f"{done}/{total} tasks  {s.goal[:40]}{'…' if len(s.goal) > 40 else ''}{sandbox}"
+        )
+    print()
+
+
+def cmd_sessions_show(args):
+    """Show one runtime session."""
+
+    store = _sessions_store()
+    try:
+        s = store.load(args.session_id)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Session not found: {exc}")
+        raise SystemExit(1)
+
+    print(f"\nSession:   {s.session_id}")
+    status_display = s.status.value
+    if s.pause_reason:
+        status_display += f" ({s.pause_reason})"
+    print(f"Status:    {status_display}")
+    print(f"Goal:      {s.goal}")
+    print(f"Root:      {s.codebase_root}")
+    print(f"Progress:  {s.progress.completed_task_ids} done / {s.progress.total_tasks} total")
+    if s.sandbox.enabled:
+        print(f"Sandbox:   worktree={s.sandbox.worktree_path or 'n/a'}  branch={s.sandbox.branch or 'n/a'}")
+    if s.paused_at:
+        print(f"Paused at: {s.paused_at}")
+    print()
+
+
+def cmd_sessions_resume(args):
+    """Resume a paused runtime session."""
+    from scaffold.agent.runtime_session import SessionStatus
+
+    store = _sessions_store()
+    try:
+        rs = store.load(args.session_id)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Session not found: {exc}")
+        raise SystemExit(1)
+    if rs.status != SessionStatus.PAUSED:
+        print(f"Session {args.session_id} is {rs.status.value} — only paused sessions can resume.")
+        raise SystemExit(1)
+
+    from scaffold.agent.learning_policy import apply_kernel_defaults
     from scaffold.agent.orchestrator import Orchestrator
     from scaffold.agent.token_tracker import TokenTracker
 
+    apply_kernel_defaults()
+    os.environ.setdefault("AWOS_LEARNING_DISABLE", "true")
     tracker = TokenTracker(monthly_budget=float(os.getenv("AWOS_MONTHLY_BUDGET", "20.0")))
     orch = Orchestrator(tracker=tracker)
-    result = orch.execute_feature(
-        goal=args.goal,
-        codebase_root=".",
-        resume=getattr(args, "resume", False),
+    _prev = signal.getsignal(signal.SIGINT)
+
+    def _on_sigint(*_):
+        orch._pause_requested = True
+        print("\n[SESSION] SIGINT — pausing after current task…", flush=True)
+
+    signal.signal(signal.SIGINT, _on_sigint)
+    try:
+        result = orch.execute_feature(
+            goal=rs.goal,
+            codebase_root=rs.codebase_root or ".",
+            session_id=rs.session_id,
+            resume=True,
+        )
+    except KeyboardInterrupt:
+        print("\n[SESSION] Interrupted — partial progress saved.")
+        raise SystemExit(130)
+    finally:
+        signal.signal(signal.SIGINT, _prev)
+
+    _print_run_result(result)
+
+
+def _print_run_result(result: dict) -> None:
+    """Print run results using the premium agent TUI."""
+    from scaffold.agent.agent_tui import print_result_banner
+
+    success = result.get("success", False)
+    completed = result.get("tasks_completed", 0)
+    failed = result.get("tasks_failed", 0)
+    total = completed + failed
+    if total == 0:
+        total = result.get("total_tasks", completed)
+    cost = float(result.get("total_cost", result.get("cost_usd", 0.0)))
+    elapsed = float(result.get("elapsed", result.get("elapsed_seconds", 0.0)))
+    model = str(result.get("model_used", result.get("model", "DeepSeek V4")))
+
+    # Show errors if any
+    errors = result.get("errors", [])
+    if errors:
+        for e in errors[:3]:
+            print(f"  ✗ {e}")
+        if len(errors) > 3:
+            print(f"  ... and {len(errors) - 3} more errors")
+        print()
+
+    # Session ID
+    session_id = result.get("runtime_session_id")
+    if session_id:
+        print(f"  Session: {session_id}")
+
+    print_result_banner(
+        success=success,
+        tasks=total,
+        cost=cost,
+        elapsed=elapsed,
+        model=model,
     )
 
-    print(f"\nGoal:     {result['goal']}")
-    print(f"Success:  {'✓' if result['success'] else '✗'}")
-    completed = result.get('tasks_completed', 0)
-    total = result.get('total_tasks', result.get('tasks_failed', 0) + completed)
-    print(f"Tasks:    {completed}/{total} completed")
-    if result.get("errors"):
-        for e in result["errors"][:5]:
-            print(f"  ✗ {e}")
+
+def cmd_run(args):
+    """Execute a feature goal via the Orchestrator."""
+    from scaffold.agent.agent_tui import print_goal_banner
+    from scaffold.agent.learning_policy import apply_kernel_defaults
+    from scaffold.agent.orchestrator import Orchestrator
+    from scaffold.agent.token_tracker import TokenTracker
+
+    apply_kernel_defaults()
+    goal = getattr(args, "goal", None)
+    session_id = getattr(args, "session_id", None)
+    if not goal:
+        from scaffold.agent.runtime_session import RuntimeSessionStore
+        if session_id:
+            try:
+                goal = RuntimeSessionStore().load(session_id).goal
+            except FileNotFoundError:
+                print(f"Session not found: {session_id}")
+                raise SystemExit(1)
+    if not goal:
+        print("Provide a goal or --session <rs_id>.")
+        raise SystemExit(1)
+
+    # ── Premium banner ──────────────────────────────────────────────────
+    print_goal_banner(goal)
+
+    tracker = TokenTracker(monthly_budget=float(os.getenv("AWOS_MONTHLY_BUDGET", "20.0")))
+    orch = Orchestrator(tracker=tracker)
+
+    _prev = signal.getsignal(signal.SIGINT)
+
+    def _on_sigint(*_):
+        orch._pause_requested = True
+        print("\n[SESSION] SIGINT — pausing after current task…", flush=True)
+
+    if os.getenv("AWOS_RUNTIME_SESSION", "").lower() in ("1", "true", "yes"):
+        signal.signal(signal.SIGINT, _on_sigint)
+    run_kwargs = dict(
+        goal=goal,
+        codebase_root=getattr(args, "root", ".") or ".",
+        resume=getattr(args, "resume", False) and not session_id,
+        session_id=session_id,
+        auto_approve_plan=getattr(args, "auto_approve", False),
+    )
+    pre_planned = getattr(args, "pre_planned_tasks", None)
+    if pre_planned is not None:
+        run_kwargs["pre_planned_tasks"] = pre_planned
+    try:
+        result = orch.execute_feature(**run_kwargs)
+    except KeyboardInterrupt:
+        print("\n[SESSION] Interrupted — partial progress saved.")
+        raise SystemExit(130)
+    finally:
+        signal.signal(signal.SIGINT, _prev)
+
+    _print_run_result(result)
+
+
+def _awos_repo_root() -> Path:
+    return Path(__file__).resolve().parent
+
+
+def _missions_dir() -> Path:
+    return _awos_repo_root() / "docs" / "missions"
+
+
+def _mission_kwargs(args) -> dict:
+    return dict(
+        long=getattr(args, "long", False),
+        clawcode=getattr(args, "clawcode", False),
+        ci_rescue=getattr(args, "ci_rescue", False),
+        clawcode_ci_rescue=getattr(args, "clawcode_ci_rescue", False),
+        config=getattr(args, "config", None),
+    )
+
+
+def _load_mission_config(
+    *,
+    long: bool = False,
+    clawcode: bool = False,
+    ci_rescue: bool = False,
+    clawcode_ci_rescue: bool = False,
+    config: str | None = None,
+) -> dict:
+    if config:
+        path = Path(config).expanduser()
+        if not path.is_absolute():
+            path = _awos_repo_root() / path
+        if not path.is_file():
+            print(f"Error: mission config not found: {path}", file=sys.stderr)
+            raise SystemExit(1)
+        return json.loads(path.read_text(encoding="utf-8"))
+    flags = sum([bool(long), bool(clawcode), bool(ci_rescue), bool(clawcode_ci_rescue)])
+    if flags > 1:
+        print("Error: use only one mission flag (--long, --clawcode, --ci-rescue, --clawcode-ci-rescue)", file=sys.stderr)
+        raise SystemExit(1)
+    if clawcode_ci_rescue:
+        name = "clawcode_ci_rescue.json"
+    elif clawcode:
+        name = "stage1_phase_d_clawcode.json"
+    elif ci_rescue:
+        name = "ci_rescue_sprint.json"
+    elif long:
+        name = "stage1_long_workload.json"
+    else:
+        name = "stage1_real_workload.json"
+    return json.loads((_missions_dir() / name).read_text(encoding="utf-8"))
+
+
+def _mission_codebase_root(cfg: dict) -> str:
+    """Resolve target repo path from mission config (relative to AWOS repo root)."""
+    root = cfg.get("codebase_root", ".")
+    path = Path(root).expanduser()
+    if not path.is_absolute():
+        path = _awos_repo_root() / path
+    path = path.resolve()
+    if not path.is_dir():
+        print(f"Error: codebase_root not found: {path}", file=sys.stderr)
+        raise SystemExit(1)
+    return str(path)
+
+
+def _ensure_git_repo(repo_path: str) -> None:
+    """Initialize git in fixture repos that are not yet versioned."""
+    p = Path(repo_path)
+    if (p / ".git").exists():
+        return
+    print(f"[MISSION] Initializing git repo at {repo_path}")
+    subprocess.run(["git", "init", "-q"], cwd=repo_path, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=repo_path, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "mission buggy baseline"],
+        cwd=repo_path,
+        check=True,
+    )
+
+
+def get_latest_mission_session(
+    *,
+    long: bool = False,
+    clawcode: bool = False,
+    ci_rescue: bool = False,
+    config: str | None = None,
+):
+    """Return most recent runtime session for a mission goal, or None."""
+    from scaffold.agent.runtime_session import RuntimeSessionStore, goal_hash
+
+    cfg = _load_mission_config(long=long, clawcode=clawcode, ci_rescue=ci_rescue, config=config)
+    gh = goal_hash(cfg["goal"])
+    matches = [s for s in RuntimeSessionStore().list_sessions() if s.goal_hash == gh]
+    if not matches:
+        return None
+    matches.sort(key=lambda s: s.updated_at or "", reverse=True)
+    return matches[0]
+
+
+def load_mission_plan(cfg: dict, missions_dir: Path | None = None) -> list | None:
+    """Load pre-planned tasks from mission config (inline plan or plan_file)."""
+    base = missions_dir or _missions_dir()
+    raw: list | None = None
+    if isinstance(cfg.get("plan"), list):
+        raw = cfg["plan"]
+    elif plan_file := cfg.get("plan_file"):
+        data = json.loads((base / plan_file).read_text(encoding="utf-8"))
+        raw = data if isinstance(data, list) else data.get("plan", [])
+    if not raw:
+        return None
+    from scaffold.agent.plan_actions import normalize_plan
+    return normalize_plan(raw, ".")
+
+
+def cmd_mission_guide(args):
+    """Real workload mission playbook."""
+    cfg = _load_mission_config(**_mission_kwargs(args))
+    print(
+        f"""
+╔══════════════════════════════════════════════════════════════════╗
+║  STAGE 1 REAL WORKLOAD MISSION                                   ║
+╚══════════════════════════════════════════════════════════════════╝
+
+WHAT WE ARE PROVING
+  A real multi-step coding goal runs in an isolated git worktree,
+  can pause (Ctrl+C), resume hours later, and leaves main repo clean.
+
+YOUR MISSION GOAL ({cfg.get('id', 'mission')}, cheap-only, worktree sandbox):
+  {cfg['goal'][:200]}…
+
+STEP 1 — START
+  awos mission start              # 5-task quick mission
+  awos mission start --long       # 8-task fixed plan (~10–30 min)
+  awos mission start --ci-rescue  # 18-task CI repair benchmark sprint (28 reds)
+
+STEP 2 — PAUSE (when task 2 finishes, or whenever)
+  Press Ctrl+C once. Wait for "[SESSION] Pause requested".
+
+STEP 3 — CHECK
+  awos sessions list --status paused
+  awos sessions show rs_<id>    # must show Sandbox worktree path
+
+STEP 4 — RESUME (same day or hours later)
+  awos sessions resume rs_<id>
+
+STEP 5 — VERIFY SUCCESS
+  awos sessions show rs_<id>    # status: completed
+  git status                    # main repo clean
+  ls .awos/worktrees/           # your sandbox diff lives here
+
+SUCCESS CRITERIA
+"""
+    )
+    for c in cfg.get("success_criteria", []):
+        print(f"  • {c}")
+    print("\nFull spec: docs/specs/stage1_real_workload_mission.md\n")
+
+
+def cmd_mission_start(args):
+    """Launch the configured real workload mission."""
+    cfg = _load_mission_config(**_mission_kwargs(args))
+    for k, v in cfg.get("env", {}).items():
+        os.environ[k] = str(v)
+    from scaffold.agent.learning_policy import apply_kernel_defaults
+    apply_kernel_defaults()
+    codebase_root = _mission_codebase_root(cfg)
+    if cfg.get("ensure_git"):
+        _ensure_git_repo(codebase_root)
+    print(f"Mission: {cfg.get('title', cfg.get('id'))}")
+    print(f"Target:  {codebase_root}")
+    print(f"Env: AWOS_USE_WORKTREE={os.getenv('AWOS_USE_WORKTREE')}  AWOS_CHEAP_ONLY={os.getenv('AWOS_CHEAP_ONLY')}")
+    print(f"Pause hint: {cfg.get('pause_hint', 'Ctrl+C after a task completes')}\n")
+    plan = load_mission_plan(cfg)
+    if plan:
+        print(f"[MISSION] Pre-planned task list: {len(plan)} tasks (planner skipped)\n")
+    ns = argparse.Namespace(
+        goal=cfg["goal"],
+        resume=False,
+        session_id=None,
+        root=codebase_root,
+        pre_planned_tasks=plan,
+        mission_config=cfg,
+    )
+    cmd_run(ns)
+    _maybe_run_mission_assertions(cfg, ns)
+
+
+def _maybe_run_mission_assertions(cfg: dict, args) -> None:
+    """Post-run wedge assertions when mission config includes goal_assertions."""
+    if not cfg.get("goal_assertions"):
+        return
+    from scaffold.agent.runtime_session import RuntimeSessionStore, goal_hash
+
+    gh = goal_hash(cfg["goal"])
+    matches = [s for s in RuntimeSessionStore().list_sessions() if s.goal_hash == gh]
+    if not matches:
+        print("[MISSION] No session for post-run assertions — skip wedge assert")
+        return
+    matches.sort(key=lambda s: s.updated_at or "", reverse=True)
+    session = matches[0]
+    if not session.sandbox.worktree_path:
+        print("[MISSION] No worktree for post-run assertions — skip wedge assert")
+        return
+    goal_file = cfg.get("goal_assertions_file")
+    if goal_file:
+        assert_path = Path(goal_file)
+        if not assert_path.is_absolute():
+            assert_path = _awos_repo_root() / assert_path
+    else:
+        root = _mission_codebase_root(cfg)
+        assert_path = Path(root) / "wedge_goal.json"
+    if not assert_path.is_file():
+        print(f"[MISSION] Assertions file not found: {assert_path}")
+        return
+    print(f"\n[MISSION] Post-run wedge assertions on {session.sandbox.worktree_path}")
+    script = _awos_repo_root() / "scripts" / "wedge_v1_assert.py"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--root",
+            session.sandbox.worktree_path,
+            "--assertions",
+            str(assert_path),
+        ],
+        cwd=_awos_repo_root(),
+    )
+    if result.returncode != 0:
+        print("[MISSION] Wedge assertions FAILED — see output above")
+        raise SystemExit(result.returncode)
+
+
+def cmd_mission_status(args):
+    """Show mission-related runtime sessions."""
+    cfg = _load_mission_config(**_mission_kwargs(args))
+    from scaffold.agent.runtime_session import RuntimeSessionStore, goal_hash
+
+    store = RuntimeSessionStore()
+    gh = goal_hash(cfg["goal"])
+    matches = [s for s in store.list_sessions() if s.goal_hash == gh]
+    if not matches:
+        print("No sessions for current mission goal yet. Run: awos mission start")
+        return
+    print(f"\nMission sessions ({len(matches)}):\n")
+    for s in matches:
+        sandbox = ""
+        if s.sandbox.enabled and s.sandbox.worktree_path:
+            sandbox = f"  sandbox={s.sandbox.worktree_path}"
+        print(
+            f"  {s.session_id}  [{s.status.value}]  "
+            f"{len(s.progress.completed_task_ids)}/{s.progress.total_tasks} tasks{sandbox}"
+        )
+        if s.status.value == "paused":
+            print(f"    → resume: awos sessions resume {s.session_id}")
+    print()
+
+
+def cmd_guide(args):
+    """Premium welcome screen for AWOS."""
+    from scaffold.agent.agent_tui import print_welcome
+    print_welcome()
+
+
+def cmd_gauntlet_list(args):
+    """List Stage 1 risk gauntlet scenarios."""
+    import subprocess
+    script = Path(__file__).resolve().parent / "scripts" / "stage1_gauntlet_runner.py"
+    subprocess.run([sys.executable, str(script), "list"], check=False)
+
+
+def cmd_gauntlet_run(args):
+    """Run one risk gauntlet scenario."""
+    import subprocess
+    script = Path(__file__).resolve().parent / "scripts" / "stage1_gauntlet_runner.py"
+    rc = subprocess.run(
+        [sys.executable, str(script), "run", args.scenario_id.upper()]
+    ).returncode
+    raise SystemExit(rc)
 
 
 def cmd_agent(args):
@@ -392,21 +965,19 @@ def cmd_agent(args):
 
 
 def cmd_stats(args):
-    """Show self-learning observability report."""
-    import sys
-    sys.path.insert(0, str(Path(__file__).parent / "scaffold" / "agent"))
-    from self_learning_metrics import SelfLearningMetrics
-    store = getattr(args, "store", ".awos")
-    metrics = SelfLearningMetrics(store_path=store)
-    if getattr(args, "json", False):
-        import json
-        print(json.dumps(metrics.snapshot().to_dict(), indent=2))
-    else:
-        metrics.print_report()
+    """Premium learning health + performance report."""
+    from scaffold.agent.agent_tui import print_stats
+    print_stats()
+
+
+def cmd_metrics(args):
+    """Net Velocity Dashboard — the metrics that matter for agent progress."""
+    from scaffold.agent.agent_tui import print_metrics
+    print_metrics()
 
 
 def cmd_report(args):
-    """Generate client-facing PEI (Project Efficiency Index) scorecard."""
+    """Generate a PEI (Project Efficiency Index) scorecard."""
     import sys
     sys.path.insert(0, str(Path(__file__).parent / "scaffold" / "agent"))
     from pei_report import PEIReport
@@ -461,18 +1032,596 @@ def cmd_goals(args):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Worker commands (Phase C — simple product surface)
+# ═════════════════════════════════════════════════════════════════════════════
+
+def cmd_worker_start(args):
+    """Start work on a goal (simple interface)."""
+    if not args.goal or not args.goal.strip():
+        print("Error: Goal required", file=sys.stderr)
+        print("Usage: awos worker start \"your goal here\"", file=sys.stderr)
+        sys.exit(1)
+    
+    # Map to orchestrator run with runtime session
+    root = getattr(args, "root", ".") or "."
+    root_path = Path(root).expanduser().resolve()
+    if not root_path.is_dir():
+        print(f"Error: --root not found: {root_path}", file=sys.stderr)
+        sys.exit(1)
+
+    wrapped_args = argparse.Namespace(
+        goal=args.goal,
+        resume=False,
+        session_id=None,
+        root=str(root_path),
+        pre_planned_tasks=None,
+        auto_approve=getattr(args, "auto_approve", False),
+    )
+    
+    print(f"Starting work: {args.goal}")
+    print(f"Target repo: {root_path}")
+    if getattr(args, "auto_approve", False):
+        print("[AUTO-APPROVE] Plans will be executed without review")
+    print("Ctrl+C to pause anytime\n")
+    
+    cmd_run(wrapped_args)
+
+
+def cmd_worker_status(args):
+    """List all work sessions."""
+    
+    store = _sessions_store()
+    sessions = store.list_sessions()
+    
+    if not sessions:
+        print("No active work.")
+        print("\nStart work with: awos worker start \"your goal\"")
+        return
+    
+    print(f"\n{len(sessions)} session(s):\n")
+    for s in sessions:
+        prog = s.progress
+        cost = s.budget.get("spent_usd", 0)
+        goal_short = (s.goal[:40] + "...") if len(s.goal) > 40 else s.goal
+        
+        status_display = s.status.value
+        if s.pause_reason:
+            status_display += f" ({s.pause_reason})"
+        
+        print(f"{s.session_id}  {status_display:15s}  {len(prog.completed_task_ids)}/{prog.total_tasks} tasks  ${cost:.3f}  \"{goal_short}\"")
+        
+        if s.sandbox.enabled and s.sandbox.worktree_path:
+            print(f"  └─ sandbox: {s.sandbox.worktree_path}")
+    
+    print()
+
+
+def cmd_worker_resume(args):
+    """Resume paused work."""
+    from runtime_session import SessionStatus
+    
+    store = _sessions_store()
+    session_id = args.session_id
+    
+    if not session_id:
+        # Find latest paused
+        sessions = [s for s in store.list_sessions() if s.status == SessionStatus.PAUSED]
+        if not sessions:
+            print("No paused work found.")
+            print("\nStart new work with: awos worker start \"your goal\"")
+            sys.exit(1)
+        if len(sessions) > 1:
+            print("Multiple paused sessions found. Specify one:\n")
+            for s in sessions:
+                print(f"  awos worker resume {s.session_id}")
+            sys.exit(1)
+        session_id = sessions[0].session_id
+    
+    # Load session
+    try:
+        session = store.load(session_id)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Session not found: {exc}", file=sys.stderr)
+        sys.exit(1)
+    
+    if session.status != SessionStatus.PAUSED:
+        if session.status == SessionStatus.COMPLETED:
+            print(f"Session {session_id} already completed.")
+            print(f"\nReview changes with: awos worker diff {session_id}")
+            sys.exit(1)
+        elif session.status == SessionStatus.CANCELLED:
+            print(f"Session {session_id} was cancelled.")
+            sys.exit(1)
+        else:
+            print(f"Session {session_id} is {session.status.value} (not paused).")
+            sys.exit(1)
+    
+    print(f"Resuming: {session.goal}")
+    print(f"Session: {session_id}")
+    if session.sandbox.worktree_path:
+        print(f"Sandbox: {session.sandbox.worktree_path}")
+    print()
+    
+    # Resume
+    wrapped_args = argparse.Namespace(
+        goal=session.goal,
+        resume=True,
+        session_id=session_id,
+        root=".",
+        pre_planned_tasks=None,
+    )
+    cmd_run(wrapped_args)
+
+
+def cmd_worker_diff(args):
+    """Show sandbox changes."""
+    import subprocess
+    
+    store = _sessions_store()
+    session_id = args.session_id
+    
+    if not session_id:
+        # Latest session
+        sessions = store.list_sessions()
+        if not sessions:
+            print("No work history.")
+            sys.exit(1)
+        session = max(sessions, key=lambda s: s.updated_at)
+        session_id = session.session_id
+    else:
+        try:
+            session = store.load(session_id)
+        except (FileNotFoundError, ValueError) as exc:
+            print(f"Session not found: {exc}", file=sys.stderr)
+            sys.exit(1)
+    
+    if not session.sandbox.enabled or not session.sandbox.worktree_path:
+        print(f"Session {session_id} has no sandbox.")
+        sys.exit(1)
+    
+    worktree = Path(session.sandbox.worktree_path)
+    if not worktree.exists():
+        print(f"Sandbox missing: {worktree}")
+        sys.exit(1)
+    
+    print(f"Session: {session_id}")
+    print(f"Sandbox: {worktree}")
+    print("\nChanges vs main:\n")
+    
+    # git diff main
+    try:
+        result = subprocess.run(
+            ["git", "diff", "main"],
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+        )
+        if result.stdout:
+            print(result.stdout)
+        else:
+            print("(no changes)")
+    except Exception as exc:
+        print(f"Error running git diff: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_worker_cancel(args):
+    """Cancel active/paused work."""
+    from runtime_session import SessionStatus
+    
+    store = _sessions_store()
+    session_id = args.session_id
+    
+    if not session_id:
+        # Find latest active or paused
+        sessions = [s for s in store.list_sessions() if s.status in (SessionStatus.RUNNING, SessionStatus.PAUSED)]
+        if not sessions:
+            print("No active work to cancel.")
+            sys.exit(1)
+        if len(sessions) > 1:
+            print("Multiple active sessions. Specify one:\n")
+            for s in sessions:
+                print(f"  awos worker cancel {s.session_id}")
+            sys.exit(1)
+        session_id = sessions[0].session_id
+    
+    try:
+        session = store.load(session_id)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Session not found: {exc}", file=sys.stderr)
+        sys.exit(1)
+    
+    if session.status == SessionStatus.CANCELLED:
+        print(f"Session {session_id} already cancelled.")
+        sys.exit(0)
+    
+    if session.status == SessionStatus.COMPLETED:
+        print(f"Session {session_id} already completed (cannot cancel).")
+        sys.exit(1)
+    
+    # Finalize as cancelled
+    store.finalize(session, SessionStatus.CANCELLED)
+    
+    print(f"Session {session_id} cancelled")
+    if session.sandbox.worktree_path:
+        print(f"Sandbox kept at: {session.sandbox.worktree_path}")
+    print()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Serve command (web dashboard)
+# ═════════════════════════════════════════════════════════════════════════════
+
+def cmd_serve(args):
+    """Start the AWOS web dashboard server."""
+    import subprocess
+    port = getattr(args, "port", 8765)
+    host = getattr(args, "host", "127.0.0.1")
+    
+    print("Starting AWOS web dashboard...")
+    print(f"  Dashboard: http://{host}:{port}")
+    print("  Press Ctrl+C to stop\n")
+    
+    server_script = Path(__file__).parent / "gui" / "server.py"
+    try:
+        subprocess.run(
+            [sys.executable, str(server_script), "--port", str(port), "--host", host],
+            cwd=str(Path(__file__).parent),
+        )
+    except KeyboardInterrupt:
+        print("\nServer stopped.")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# CI repair command (supported coding-agent workflow)
+# ═════════════════════════════════════════════════════════════════════════════
+
+def cmd_fix_ci(args):
+    """One-command CI repair benchmark workflow for any Python repo."""
+    import time
+    from scaffold.agent.ci_discovery import CIDiscovery
+    from scaffold.agent.ci_planner import generate_ci_goal, generate_ci_plan
+    from scaffold.agent.ci_tui import (
+        print_banner, print_no_failures, print_discovery_start,
+        print_discovery_results, print_plan, print_results,
+    )
+
+    repo_root = getattr(args, "root", ".") or "."
+    repo_path = Path(repo_root).expanduser().resolve()
+    if not repo_path.is_dir():
+        print(f"Error: --root not found: {repo_path}", file=sys.stderr)
+        sys.exit(1)
+
+    # ── Banner ──────────────────────────────────────────────────────────
+    print_banner()
+
+    # 1. Discover failures (with spinner)
+    discovery = CIDiscovery(str(repo_path))
+    with print_discovery_start():
+        result = discovery.discover()
+
+    if result.no_tests_found:
+        print_no_failures()
+        print("[CI] No test framework detected. Ensure pytest is installed.")
+        return
+
+    if result.failure_count == 0:
+        print_no_failures()
+        return
+
+    # 2. Show discovery results
+    failures = [
+        {
+            "module": f.module,
+            "test_name": f.test_name,
+            "test_file": f.test_file,
+            "error_msg": f.error_msg,
+            "line_number": f.line_number,
+            "error_type": f.error_type,
+        }
+        for f in result.failures
+    ]
+    print_discovery_results(failures)
+    print()
+
+    # 3. Generate goal + plan (estimate cost: ~₹0.001 per task)
+    goal = generate_ci_goal(failures)
+    plan = generate_ci_plan(failures)
+    estimated_cost = len(plan) * 0.001
+    print_plan(plan, estimated_cost_usd=estimated_cost)
+
+    # 4. Set environment for CI repair workflow
+    os.environ["AWOS_CHEAP_ONLY"] = "true"
+    os.environ["AWOS_SAFE_TO_RUN_TESTS"] = "1"
+    os.environ["AWOS_ENABLE_CLARIFICATION"] = ""
+
+    # 5. Call orchestrator
+    print("\n  [dim]⚡ Starting CI repair benchmark...[/]\n")
+    start_time = time.time()
+
+    wrapped_args = argparse.Namespace(
+        goal=goal,
+        root=str(repo_path),
+        pre_planned_tasks=plan,
+        auto_approve=True,
+        resume=False,
+        session_id=None,
+    )
+
+    try:
+        cmd_run(wrapped_args)
+    except SystemExit:
+        pass
+
+    elapsed = time.time() - start_time
+    cost_usd = len(plan) * 0.001  # estimated cost
+
+    # 6. Show rich results
+    results_dict = {
+        "completed": len(plan),  # approximate
+        "failed": 0,
+        "elapsed": elapsed,
+        "cost_usd": cost_usd,
+    }
+    print_results(failures, results_dict, elapsed, cost_usd)
+
+
+def _observer_session_id(requested: str | None) -> str | None:
+    """Resolve an optional session from the non-mutating current snapshot."""
+    from gui.server import build_observer_snapshot
+
+    snapshot = build_observer_snapshot(requested)
+    if snapshot.get("status") == "ambiguous":
+        raise SystemExit("Multiple active sessions; pass --session RS_ID")
+    session = snapshot.get("session") or {}
+    return session.get("session_id")
+
+
+def cmd_observe_snapshot(args):
+    """Print the current assistant-safe observer snapshot as JSON."""
+    from gui.server import build_observer_snapshot
+
+    snapshot = build_observer_snapshot(getattr(args, "session_id", None))
+    print(json.dumps(snapshot, indent=2, sort_keys=True))
+
+
+def cmd_observe_events(args):
+    """Print assistant-safe events, optionally following one explicit stream."""
+    from gui.server import read_observer_events
+
+    session_id = _observer_session_id(getattr(args, "session_id", None))
+    if not session_id:
+        print(json.dumps({"status": "idle", "events": []}, indent=2))
+        return
+
+    cursor = getattr(args, "after", None)
+    event_types = set(getattr(args, "event_type", []) or []) or None
+    while True:
+        result = read_observer_events(
+            session_id,
+            after=cursor,
+            limit=getattr(args, "limit", 100),
+            event_types=event_types,
+        )
+        print(json.dumps(result, indent=2, sort_keys=True), flush=True)
+        if result.get("gap"):
+            return
+        next_cursor = result.get("next_cursor")
+        if not getattr(args, "follow", False):
+            return
+        if next_cursor != cursor:
+            cursor = next_cursor
+        time.sleep(0.5)
+
+
+def cmd_control(args):
+    """Operate the authenticated local Electron control bridge."""
+    from gui.observer_client import ControlClientError, send_control, verify_control_result
+
+    try:
+        response = send_control(
+            args.control_action,
+            target=getattr(args, "target", None),
+            value=getattr(args, "value", None),
+            port=args.port,
+            token_file=args.token_file,
+        )
+        response = verify_control_result(
+            response,
+            args.control_action,
+            target=getattr(args, "target", None),
+            value=getattr(args, "value", None),
+        )
+    except ControlClientError as exc:
+        raise SystemExit(f"control error: {exc}") from exc
+    print(json.dumps(response, indent=2, sort_keys=True))
+
+
+def cmd_observe_follow(args):
+    """Follow the current UI action into exactly one backend event ledger."""
+    from gui.server import read_observer_events, resolve_observer_session
+
+    chat_id = getattr(args, "chat_id", None)
+    trace_id = getattr(args, "trace_id", None)
+    session_id = getattr(args, "session_id", None)
+    ui_cursor = None
+    backend_cursor = None
+    follow = bool(getattr(args, "follow", False))
+
+    def emit(stream: str, payload: dict) -> None:
+        print(json.dumps({"stream": stream, **payload}, sort_keys=True), flush=True)
+
+    while True:
+        if not session_id and not chat_id and not trace_id:
+            ui_result = read_observer_events("ui", limit=200)
+            ui_events = ui_result.get("events", [])
+            ui_cursor = ui_result.get("next_cursor")
+            latest = next(
+                (event for event in reversed(ui_events)
+                 if event.get("chat_id") or event.get("trace_id")),
+                None,
+            )
+            if latest:
+                chat_id = latest.get("chat_id")
+                trace_id = latest.get("trace_id")
+                emit("ui", latest)
+            elif not follow:
+                emit("observer", {"status": "idle", "reason": "no correlated UI action"})
+                return
+
+        if not session_id and (chat_id or trace_id):
+            resolution = resolve_observer_session(chat_id=chat_id, trace_id=trace_id)
+            emit("resolution", resolution)
+            if resolution.get("status") == "resolved":
+                session_id = resolution["session_id"]
+            elif not follow:
+                return
+
+        if session_id:
+            result = read_observer_events(
+                session_id,
+                after=backend_cursor,
+                limit=getattr(args, "limit", 100),
+            )
+            if result.get("gap"):
+                emit("backend", result)
+                return
+            for event in result.get("events", []):
+                emit("backend", event)
+            backend_cursor = result.get("next_cursor")
+            if not follow:
+                return
+
+        if not follow:
+            return
+
+        time.sleep(0.5)
+        if not session_id:
+            ui_result = read_observer_events("ui", after=ui_cursor, limit=200)
+            if ui_result.get("gap"):
+                emit("ui", ui_result)
+                return
+            ui_cursor = ui_result.get("next_cursor")
+            for event in ui_result.get("events", []):
+                if event.get("chat_id") or event.get("trace_id"):
+                    chat_id = event.get("chat_id") or chat_id
+                    trace_id = event.get("trace_id") or trace_id
+                    emit("ui", event)
+                    break
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Argument parser
 # ═════════════════════════════════════════════════════════════════════════════
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="awos",
-        description="AWOS — AI Coding Agent",
+        description="AWOS — self-improving coding agent harness",
     )
     sub = parser.add_subparsers(dest="command", help="Available commands")
 
+    # serve (web dashboard)
+    serve = sub.add_parser("serve", help="Start the AWOS web dashboard")
+    serve.add_argument("--port", type=int, default=8765, help="Port to run on (default: 8765)")
+    serve.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
+
+    # fix-ci (optional coding-agent workload adapter)
+    fix_ci = sub.add_parser("fix-ci", help="Optional CI repair workload for any Python repo")
+    fix_ci.add_argument(
+        "--root",
+        default=".",
+        help="Target repo path (default: current directory)",
+    )
+
+    # worker (Phase C — simple product surface)
+    worker = sub.add_parser("worker", help="Simple coding worker interface")
+    worker_sub = worker.add_subparsers(dest="worker_cmd", required=True)
+    
+    w_start = worker_sub.add_parser("start", help="Start work on a goal")
+    w_start.add_argument("goal", help="What to build/fix")
+    w_start.add_argument(
+        "--root",
+        default=".",
+        help="Target repo path (default: current directory)",
+    )
+    w_start.add_argument(
+        "--auto-approve",
+        action="store_true",
+        help="Auto-approve plans without interactive review (useful for scripts)",
+    )
+    
+    worker_sub.add_parser("status", help="List all work sessions")
+    
+    w_resume = worker_sub.add_parser("resume", help="Resume paused work")
+    w_resume.add_argument("session_id", nargs="?", help="Session ID (optional, defaults to latest paused)")
+    
+    w_diff = worker_sub.add_parser("diff", help="Show sandbox changes")
+    w_diff.add_argument("session_id", nargs="?", help="Session ID (optional, defaults to latest)")
+    
+    w_cancel = worker_sub.add_parser("cancel", help="Cancel active/paused work")
+    w_cancel.add_argument("session_id", nargs="?", help="Session ID (optional, defaults to latest active)")
+
+    # mission
+    mis = sub.add_parser("mission", help="Stage 1 real workload mission (worktree + pause/resume)")
+    mis_sub = mis.add_subparsers(dest="mission_cmd", required=True)
+    p_guide = mis_sub.add_parser("guide", help="Mission playbook")
+    p_guide.add_argument("--long", action="store_true", help="Long mission playbook")
+    p_guide.add_argument("--clawcode", action="store_true", help="Phase D clawcode mission playbook")
+    p_guide.add_argument("--ci-rescue", action="store_true", help="Optional CI repair workload benchmark playbook")
+    p_guide.add_argument("--config", metavar="PATH", help="Mission JSON config path")
+    p_start = mis_sub.add_parser("start", help="Start mission (worktree, cheap-only)")
+    p_start.add_argument("--long", action="store_true", help="8-task long workload mission (AWOS repo)")
+    p_start.add_argument("--clawcode", action="store_true", help="Phase D: 14-task mission on clawcode repo")
+    p_start.add_argument("--ci-rescue", action="store_true", dest="ci_rescue", help="Optional CI repair workload benchmark")
+    p_start.add_argument("--clawcode-ci-rescue", action="store_true", dest="clawcode_ci_rescue", help="Optional CI repair workload on the clawcode repo")
+    p_start.add_argument("--config", metavar="PATH", help="Mission JSON config (e.g. docs/missions/ci_rescue_sprint.json)")
+    p_status = mis_sub.add_parser("status", help="Mission session progress")
+    p_status.add_argument("--long", action="store_true", help="Show long-mission sessions")
+    p_status.add_argument("--clawcode", action="store_true", help="Show clawcode mission sessions")
+    p_status.add_argument("--ci-rescue", action="store_true", dest="ci_rescue", help="Show optional CI repair workload sessions")
+    p_status.add_argument("--clawcode-ci-rescue", action="store_true", dest="clawcode_ci_rescue", help="Show optional clawcode CI repair workload sessions")
+    p_status.add_argument("--config", metavar="PATH", help="Mission JSON config path")
+
+    # guide
+    sub.add_parser("guide", help="What AWOS is and how to run commands")
+
     # chat
     sub.add_parser("chat", help="Interactive session")
+
+    # assistant observer (read-only)
+    observe = sub.add_parser("observe", help="Read-only live observer contract")
+    observe_sub = observe.add_subparsers(dest="observe_cmd", required=True)
+    observe_snapshot = observe_sub.add_parser("snapshot", help="Show current state")
+    observe_snapshot.add_argument("--session", dest="session_id", metavar="RS_ID")
+    observe_events = observe_sub.add_parser("events", help="Read observer events")
+    observe_events.add_argument("--session", dest="session_id", metavar="RS_ID")
+    observe_events.add_argument("--after", metavar="EVENT_ID", help="Resume after an event ID")
+    observe_events.add_argument("--limit", type=int, default=100, help="Maximum events to return")
+    observe_events.add_argument("--type", dest="event_type", action="append", help="Filter by event type (repeatable)")
+    observe_events.add_argument("--follow", action="store_true", help="Poll for later events")
+    observe_follow = observe_sub.add_parser("follow", help="Join current UI action to backend events")
+    observe_follow.add_argument("--session", dest="session_id", metavar="RS_ID")
+    observe_follow.add_argument("--chat", dest="chat_id", metavar="CHAT_ID")
+    observe_follow.add_argument("--trace", dest="trace_id", metavar="TRACE_ID")
+    observe_follow.add_argument("--limit", type=int, default=100, help="Maximum backend events per read")
+    observe_follow.add_argument("--follow", action="store_true", help="Continue polling for later UI/backend events")
+
+    # assistant control (authenticated local Electron bridge)
+    control = sub.add_parser("control", help="Operate the running Electron app safely")
+    control_sub = control.add_subparsers(dest="control_action", required=True)
+    for action in ("status", "show", "hide", "focus", "reload"):
+        control_sub.add_parser(action, help=f"Electron control action: {action}")
+    navigate = control_sub.add_parser("navigate", help="Navigate to an allowlisted internal route")
+    navigate.add_argument("target", choices=("/agent", "/renderer"))
+    click = control_sub.add_parser("click", help="Click an allowlisted semantic target")
+    click.add_argument("target", choices=("prompt_submit", "prompt_focus", "command_palette"))
+    fill = control_sub.add_parser("fill", help="Fill an allowlisted text input without submitting")
+    fill.add_argument("target", choices=("prompt",))
+    fill.add_argument("value")
+    for action_parser in control_sub.choices.values():
+        action_parser.add_argument("--port", type=int, default=8766, help="Electron control port")
+        action_parser.add_argument("--token-file", default=None, help="Control token JSON path")
 
     # memory search
     mem_search = sub.add_parser("memory", help="Vector memory commands")
@@ -494,6 +1643,24 @@ def build_parser() -> argparse.ArgumentParser:
     # budget
     sub.add_parser("budget", help="Month-to-date budget status")
 
+    # debug
+    sub.add_parser("debug", help="Show running processes + git commit")
+
+    # debug-report (machine-readable evidence report)
+    debug_report = sub.add_parser(
+        "debug-report", help="Inspect a saved debugger bundle as JSON"
+    )
+    debug_report.add_argument("session_id", help="Debugger session ID")
+    debug_report.add_argument(
+        "--root", default=".awos/debug", help="Debugger bundle root"
+    )
+    debug_report.add_argument(
+        "--pretty", action="store_true", help="Pretty-print JSON"
+    )
+
+    # models
+    sub.add_parser("models", help="List registered models + availability")
+
     # performance
     perf = sub.add_parser("performance", help="Tool success matrix per model × task type")
     perf.add_argument("--window", type=int, default=200, help="Last N records to include")
@@ -504,8 +1671,28 @@ def build_parser() -> argparse.ArgumentParser:
 
     # run
     run = sub.add_parser("run", help="Execute a feature goal")
-    run.add_argument("goal", help="Feature description (quote if multi-word)")
+    run.add_argument("goal", nargs="?", help="Feature description (quote if multi-word)")
     run.add_argument("--resume", action="store_true", help="Resume from last run for this goal")
+    run.add_argument("--session", dest="session_id", metavar="RS_ID", help="Resume this runtime session")
+    run.add_argument("--root", default=".", help="Target repo path (default: current directory)")
+
+    # sessions — durable pause/resume (RuntimeSession)
+    sess = sub.add_parser("sessions", help="Runtime session commands (pause/resume)")
+    sess_sub = sess.add_subparsers(dest="sessions_cmd", required=True)
+    sess_list = sess_sub.add_parser("list", help="List runtime sessions")
+    sess_list.add_argument("--status", choices=["pending", "running", "paused", "completed", "failed", "cancelled"])
+    sess_list.add_argument("--limit", type=int, default=20)
+    sess_show = sess_sub.add_parser("show", help="Show session details")
+    sess_show.add_argument("session_id", metavar="RS_ID")
+    sess_resume = sess_sub.add_parser("resume", help="Resume a paused session")
+    sess_resume.add_argument("session_id", metavar="RS_ID")
+
+    # gauntlet
+    gnt = sub.add_parser("gauntlet", help="Stage 1 risk gauntlet stress tests")
+    gnt_sub = gnt.add_subparsers(dest="gauntlet_cmd", required=True)
+    gnt_sub.add_parser("list", help="List scenarios")
+    gnt_run = gnt_sub.add_parser("run", help="Run scenario by ID")
+    gnt_run.add_argument("scenario_id", metavar="ID", help="e.g. G2, G6")
 
     # agent — tool-using loop (the model drives its own turns)
     agent = sub.add_parser("agent", help="Execute a goal via the tool-using agent loop")
@@ -534,9 +1721,13 @@ def build_parser() -> argparse.ArgumentParser:
     stats = sub.add_parser("stats", help="Self-learning observability report")
     stats.add_argument("--json", action="store_true", help="Output as JSON")
     stats.add_argument("--store", default=".awos", help="Path to .awos store (default: .awos)")
+    stats.add_argument("--savings", action="store_true", help="Show efficiency estimate versus heavier-routing baseline")
+
+    # metrics (Phase 4 — Net Velocity Dashboard)
+    sub.add_parser("metrics", help="Net Velocity Dashboard — quality, cost, time saved")
 
     # report
-    rpt = sub.add_parser("report", help="PEI scorecard — client-facing proof of value")
+    rpt = sub.add_parser("report", help="PEI scorecard — quality × speed ÷ cost summary")
     rpt.add_argument("--json", action="store_true", help="Output as JSON")
     rpt.add_argument("--html", metavar="PATH", help="Write HTML report to file")
     rpt.add_argument("--project", help="Project name for report header")
@@ -548,21 +1739,50 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main():
+    # Common typo: guantlet → gauntlet
+    if len(sys.argv) > 1 and sys.argv[1].lower() == "guantlet":
+        print("Note: use 'gauntlet' (not 'guantlet').", file=sys.stderr)
+        sys.argv[1] = "gauntlet"
+
     parser = build_parser()
-    args = parser.parse_args()
+    try:
+        args = parser.parse_args()
+    except SystemExit as exc:
+        if exc.code != 0 and len(sys.argv) > 1:
+            cmd = sys.argv[1].lower()
+            if "guant" in cmd and cmd != "gauntlet":
+                print("\nDid you mean:  python3 awos.py gauntlet list", file=sys.stderr)
+            print("Run:  python3 awos.py guide", file=sys.stderr)
+        raise
 
     if not args.command:
-        # Default to interactive chat
-        cmd_chat(args)
+        cmd_guide(argparse.Namespace())
         return
 
-    handler = globals().get(f"cmd_{args.command}")
-    if handler is None:
-        # Handle nested commands (memory search, traces show, etc.)
-        if args.command == "memory" and args.mem_cmd:
-            handler = globals().get(f"cmd_memory_{args.mem_cmd}")
-        elif args.command == "traces" and args.trace_cmd:
-            handler = globals().get(f"cmd_traces_{args.trace_cmd}")
+    handler = None
+    if args.command == "memory" and getattr(args, "mem_cmd", None):
+        handler = globals().get(f"cmd_memory_{args.mem_cmd}")
+    elif args.command == "traces" and getattr(args, "trace_cmd", None):
+        handler = globals().get(f"cmd_traces_{args.trace_cmd}")
+    elif args.command == "sessions" and getattr(args, "sessions_cmd", None):
+        handler = globals().get(f"cmd_sessions_{args.sessions_cmd}")
+    elif args.command == "worker" and getattr(args, "worker_cmd", None):
+        handler = globals().get(f"cmd_worker_{args.worker_cmd}")
+    elif args.command == "observe" and getattr(args, "observe_cmd", None):
+        handler = globals().get(f"cmd_observe_{args.observe_cmd}")
+    elif args.command == "control":
+        handler = cmd_control
+    elif args.command == "gauntlet":
+        handler = cmd_gauntlet_run if getattr(args, "gauntlet_cmd", None) == "run" else cmd_gauntlet_list
+    elif args.command == "mission":
+        _mission = {"guide": cmd_mission_guide, "start": cmd_mission_start, "status": cmd_mission_status}
+        handler = _mission.get(getattr(args, "mission_cmd", ""))
+    elif args.command == "fix-ci":
+        handler = cmd_fix_ci
+    elif args.command == "serve":
+        handler = cmd_serve
+    else:
+        handler = globals().get(f"cmd_{args.command}")
 
     if handler is None:
         parser.print_help()

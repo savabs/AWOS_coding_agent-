@@ -54,8 +54,11 @@ secrets/
 .cache/
 *.cache
 
-# AWOS runtime state (traces, skills, preflight manifests, ledgers)
-.awos/
+# NOT ignored: .awos/ is tracked deliberately. It holds the learning data the
+# whole system compounds on — reward_store.jsonl, error_patterns.jsonl, skills
+# and goals — not disposable scratch. Ignoring it would untrack that history.
+# Cassettes recorded for the benchmark live under .awos/cassettes/ and are also
+# meant to be committed, so a recorded comparison replays for free.
 
 # Model artifacts (large files — store separately)
 *.pkl
@@ -101,3 +104,7 @@ node_modules/
 .Spotlight-V100
 .Trashes
 ehthumbs.db
+
+# Wedge fixture runtime (mission worktrees / local git)
+tests/fixtures/wedge_v1/ci_rescue_sprint/.git/
+tests/fixtures/wedge_v1/ci_rescue_sprint/.awos/

@@ -1,0 +1,80 @@
+{
+  "root_id": "g_edb451c624a9",
+  "nodes": {
+    "g_edb451c624a9": {
+      "goal_id": "g_edb451c624a9",
+      "description": "Add docstrings to _check_syntax and _check_contract_compliance methods in scaffold/agent/verifier.py",
+      "parent_ids": [],
+      "child_ids": [
+        "g_ddda42d6b90b",
+        "g_c7b9a73c916e"
+      ],
+      "tasks": [],
+      "status": "in_progress",
+      "created_at": "2026-05-27T08:24:03Z",
+      "updated_at": "2026-05-27T08:24:11Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_b2dd1587"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_ddda42d6b90b": {
+      "goal_id": "g_ddda42d6b90b",
+      "description": "Add a docstring to the `_check_syntax` method, describing its purpose, arguments, and return value.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "scaffold/agent/verifier.py",
+          "action": "Add a docstring to the `_check_syntax` method, describing its purpose, arguments, and return value.",
+          "complexity": "low",
+          "test_result": {
+            "passed": 0,
+            "failed": 0,
+            "errors": 0,
+            "pass_rate": 0.0,
+            "raw_output": "Tests skipped — set AWOS_SAFE_TO_RUN_TESTS=1 to enable.",
+            "timed_out": false,
+            "test_command": [],
+            "no_tests_found": true
+          }
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-05-27T08:24:11Z",
+      "updated_at": "2026-05-27T08:24:19Z",
+      "completed_at": "2026-05-27T08:24:19Z",
+      "session_ids": [
+        "orch_b2dd1587"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_c7b9a73c916e": {
+      "goal_id": "g_c7b9a73c916e",
+      "description": "Add a docstring to the `_check_contract_compliance` method, describing its purpose, arguments, and return value.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "file": "scaffold/agent/verifier.py",
+          "action": "Add a docstring to the `_check_contract_compliance` method, describing its purpose, arguments, and return value.",
+          "complexity": "low"
+        }
+      ],
+      "status": "failed",
+      "created_at": "2026-05-27T08:24:11Z",
+      "updated_at": "2026-05-27T08:24:31Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_b2dd1587"
+      ],
+      "failure_count": 1,
+      "critique_ids": []
+    }
+  }
+}

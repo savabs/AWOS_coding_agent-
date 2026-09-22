@@ -1,0 +1,17 @@
+# .aider.conf.yml — token-optimal configuration (you control cost vs quality via make copilot TIER=…)
+# Rationale: docs/specs/token_efficiency_spec.html · daily loop: WORKFLOW.md
+
+model: claude-sonnet-4-5
+weak-model: claude-haiku-3-5
+# Smaller model responses = fewer output tokens vs whole-file rewrites
+edit-format: diff
+cache-prompts: true
+cache-keepalive-pings: 3
+map-tokens: 512
+map-refresh: files
+map-multiplier-no-files: 1
+max-chat-history-tokens: 6144
+analytics-disable: true
+llm-history-file: .aider.llm.history
+read: CONVENTIONS.md
+dark-mode: true
