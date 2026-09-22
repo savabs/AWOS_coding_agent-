@@ -54,6 +54,9 @@ secrets/
 .cache/
 *.cache
 
+# AWOS runtime state (traces, skills, preflight manifests, ledgers)
+.awos/
+
 # Model artifacts (large files — store separately)
 *.pkl
 *.pickle

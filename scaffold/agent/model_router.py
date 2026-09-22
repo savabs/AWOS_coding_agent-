@@ -129,9 +129,6 @@ if __name__ == "__main__":
     4. Cache hits are critical (30%+ target)
     5. Local analysis skips 40%+ of API calls (free)
     """)
-# Quick test
-if __name__ == "__main__":
-    router = ModelRouter()
 
     print("\n" + "=" * 80)
     print("COST-SAFE MODEL ROUTER (Output Cost Capped at $5/MTok)")
