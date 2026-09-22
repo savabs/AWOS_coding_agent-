@@ -62,6 +62,26 @@ if os.getenv("_GOOGLE_API_KEY_SHADOW"):
 # Subcommand handlers
 # ═════════════════════════════════════════════════════════════════════════════
 
+def _load_vector_memory():
+    """
+    Import the VectorMemory backend, or exit with a readable message.
+
+    memory/vector_memory.py imports chromadb at module scope, so a missing
+    optional dependency otherwise surfaces as a raw ModuleNotFoundError
+    traceback. Mirrors the VectorMemoryUnavailableError contract that
+    scaffold/agent/vector_memory.py already offers its callers.
+    """
+    try:
+        from memory.vector_memory import VectorMemory
+    except ImportError as exc:
+        sys.exit(
+            f"Vector memory is unavailable: {exc}.\n"
+            "It needs the optional semantic-memory extras. Install them with:\n"
+            "    pip install chromadb sentence-transformers"
+        )
+    return VectorMemory
+
+
 def cmd_chat(args):
     """Start interactive chat session."""
     from unified_agent import main
@@ -71,7 +91,7 @@ def cmd_chat(args):
 def cmd_memory_search(args):
     """Search vector memory for past interactions."""
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
-    from memory.vector_memory import VectorMemory
+    VectorMemory = _load_vector_memory()
 
     vm = VectorMemory(persist_dir=".awos/memory")
     results = vm.retrieve(args.query, n_results=args.n)
@@ -92,7 +112,7 @@ def cmd_memory_search(args):
 def cmd_memory_stats(args):
     """Show vector memory statistics."""
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
-    from memory.vector_memory import VectorMemory
+    VectorMemory = _load_vector_memory()
 
     vm = VectorMemory(persist_dir=".awos/memory")
     stats = vm.stats()
@@ -259,7 +279,7 @@ def cmd_performance(args):
 def cmd_index(args):
     """(Re)build the semantic codebase index."""
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
-    from memory.vector_memory import VectorMemory
+    VectorMemory = _load_vector_memory()
     from memory.codebase_index import CodebaseIndex
 
     vm = VectorMemory(persist_dir=".awos/memory")
