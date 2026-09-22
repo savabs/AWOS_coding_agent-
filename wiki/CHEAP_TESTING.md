@@ -100,8 +100,18 @@ key for each.
 ```bash
 export OPENROUTER_API_KEY=sk-or-...
 export AWOS_AGENT_MODEL=anthropic/claude-haiku-4.5   # ids are vendor-prefixed
+
+python3 scripts/check_backend.py     # one call, ~$0.0002 — do this first
 awos agent "add retry to fetch()" --max-cost 0.25
 ```
+
+`check_backend.py` makes a single tiny request and answers the four questions
+that otherwise surface twelve cases into a run: is a backend configured, can
+this machine reach it, is the key accepted, and does the model actually call
+tools. The last is the one worth paying a fraction of a cent to learn — a
+model without tool calling does not error, it replies in prose and the loop
+ends on turn one having changed nothing, which reads as a hopeless agent
+rather than a wrong model.
 
 Two things to know:
 
