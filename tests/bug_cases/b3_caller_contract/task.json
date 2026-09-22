@@ -1,0 +1,7 @@
+{
+  "action": "parse() is called with a keyword argument it does not accept. Support it.",
+  "file": "buggy.py",
+  "task_id": 1,
+  "complexity": "medium",
+  "notes": "api.py shows the required signature."
+}

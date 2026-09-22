@@ -1,0 +1,7 @@
+{
+  "action": "serialize() reads a field name that no longer exists on the model. Use the current name.",
+  "file": "buggy.py",
+  "task_id": 1,
+  "complexity": "medium",
+  "notes": "models.py renamed the field; buggy.py still uses the old one."
+}

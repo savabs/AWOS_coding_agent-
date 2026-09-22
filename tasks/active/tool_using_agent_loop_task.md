@@ -55,8 +55,14 @@ benchmark to measure it with.
 
 ## Next
 
-- [ ] Benchmark cases in `tests/bug_cases/` so `benchmark_runner.py` can measure
-      this loop against the single-shot Worker on identical tasks
+- [x] Benchmark cases in `tests/bug_cases/` — 12 cases across four tiers, each
+      validated to fail on `buggy.py` and pass on `fix.py`, with the six
+      multi-file cases checked to genuinely require their `context/`
+- [x] `scripts/bench_executors.py` — single-shot vs agent-loop on identical
+      cases, cassette-backed so a recorded comparison re-runs free
+- [ ] Record a real comparison and report the numbers (needs one API key or a
+      local model; the harness is proven with oracle and do-nothing stubs,
+      12/12 and 0/12 respectively)
 - [ ] Multi-file tasks: lift `planner.py:76` once the loop is the executor
 - [ ] Context compaction for runs that exceed the model's window
 
