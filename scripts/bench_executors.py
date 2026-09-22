@@ -50,6 +50,17 @@ from typing import Any, Optional
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scaffold"))
 
+# Credentials and AWOS_AGENT_MODEL usually live in .env, which awos.py loads on
+# its own. Without this, a key set there is invisible here and the run would
+# fall back to a different model than the one configured — and price itself
+# against that wrong model in the preflight.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(REPO_ROOT / ".env")
+except ImportError:
+    pass
+
 from agent.bench_cases import BugCase, discover_cases, load_case, run_case_tests, stage_case
 
 
