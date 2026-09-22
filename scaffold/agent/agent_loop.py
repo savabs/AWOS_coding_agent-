@@ -52,15 +52,36 @@ PRICES: dict[str, tuple[float, float]] = {
 }
 
 
+def _price_for(model: str) -> Optional[tuple[float, float]]:
+    """
+    Look up a model's prices, tolerating the ways ids are written.
+
+    A gateway prefixes the vendor and often punctuates differently —
+    OpenRouter's "anthropic/claude-haiku-4.5" is this table's
+    "claude-haiku-4-5" — and a dated release appends a suffix. Matching only
+    the literal id would silently price those at zero, which reads as "free"
+    in a cost preflight.
+
+    A gateway's own margin is not modelled, so a routed price is an
+    approximation of the underlying model's direct price.
+    """
+    candidates = [model, model.rsplit("/", 1)[-1]]
+    candidates += [c.replace(".", "-") for c in list(candidates)]
+
+    for candidate in candidates:
+        if candidate in PRICES:
+            return PRICES[candidate]
+    for candidate in candidates:
+        # Prefix match so "claude-sonnet-4-6-20260101" prices like its family.
+        for name, prices in PRICES.items():
+            if candidate.startswith(name):
+                return prices
+    return None
+
+
 def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     """Cost in USD for a token count, 0.0 for an unpriced or free model."""
-    prices = PRICES.get(model)
-    if prices is None:
-        # Prefix match so "claude-sonnet-4-6-20260101" prices like its family.
-        for name, candidate in PRICES.items():
-            if model.startswith(name):
-                prices = candidate
-                break
+    prices = _price_for(model)
     if prices is None:
         return 0.0
     price_in, price_out = prices
@@ -489,23 +510,78 @@ def _synthetic_failure(message: str) -> Any:
     return ToolResult.fail(message)
 
 
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+
+def _build_openrouter(api_key: str, model: Optional[str]) -> ModelClient:
+    """
+    OpenRouter: one key, many vendors, OpenAI-compatible wire format.
+
+    No default model. OpenRouter ids are vendor-prefixed and its catalogue
+    changes, so guessing one produces a confusing 404 at the first turn rather
+    than a clear message here. The loop is driven by tool calls, so the chosen
+    model must support them — many cheap open models do not.
+    """
+    chosen = model or os.getenv("AWOS_AGENT_MODEL")
+    if not chosen:
+        raise RuntimeError(
+            "OPENROUTER_API_KEY is set but no model was chosen. OpenRouter ids "
+            "are vendor-prefixed, e.g.\n"
+            "  AWOS_AGENT_MODEL=anthropic/claude-haiku-4.5\n"
+            "  AWOS_AGENT_MODEL=deepseek/deepseek-chat\n"
+            "Pick one that supports tool calling; see https://openrouter.ai/models"
+        )
+
+    from openai import OpenAI
+
+    # Optional attribution headers. OpenRouter uses them for its rankings page
+    # and neither is required, so they are only sent when configured.
+    headers = {}
+    if os.getenv("OPENROUTER_SITE_URL"):
+        headers["HTTP-Referer"] = os.environ["OPENROUTER_SITE_URL"]
+    if os.getenv("OPENROUTER_APP_NAME"):
+        headers["X-Title"] = os.environ["OPENROUTER_APP_NAME"]
+
+    return OpenAIToolClient(
+        OpenAI(
+            api_key=api_key,
+            base_url=OPENROUTER_BASE_URL,
+            default_headers=headers or None,
+        ),
+        chosen,
+    )
+
+
 def build_client_from_env(model: Optional[str] = None) -> ModelClient:
     """
     Construct a ModelClient from whatever credentials the environment carries.
 
-    Anthropic is preferred because its native tool use is the better-tested
-    path; DeepSeek (OpenAI-compatible) is the cheap fallback, consistent with
-    the escalation ladder's ordering.
+    Order, first match wins:
+      1. AWOS_BASE_URL      any OpenAI-compatible endpoint, local or hosted
+      2. OPENROUTER_API_KEY one key across vendors
+      3. ANTHROPIC_API_KEY  native tool use, the better-tested path
+      4. DEEPSEEK_API_KEY   the cheap tier
+      5. OPENAI_API_KEY
 
-    Raises RuntimeError when no usable key is present, so a caller can report
-    that plainly rather than failing deep inside a turn.
+    AWOS_PROVIDER pins one explicitly (local, openrouter, anthropic, deepseek,
+    openai) for an environment holding several keys, so which backend runs is
+    never a matter of guessing the precedence.
+
+    Raises RuntimeError when nothing usable is configured, so a caller can
+    report that plainly rather than failing deep inside a turn.
     """
+    provider = os.getenv("AWOS_PROVIDER", "").strip().lower()
+
+    def _want(name: str) -> bool:
+        """True when this backend should be tried: pinned, or nothing pinned."""
+        return provider in ("", name)
+
     # A local or self-hosted OpenAI-compatible endpoint (Ollama, LM Studio,
     # vLLM, llama.cpp) wins outright when configured: unlimited, free, and it
     # needs no credential, so iterating on the loop never touches a key.
     #   AWOS_BASE_URL=http://localhost:11434/v1 AWOS_AGENT_MODEL=qwen2.5-coder
     base_url = os.getenv("AWOS_BASE_URL")
-    if base_url:
+    if base_url and _want("local"):
         from openai import OpenAI
 
         return OpenAIToolClient(
@@ -514,8 +590,12 @@ def build_client_from_env(model: Optional[str] = None) -> ModelClient:
             model or os.getenv("AWOS_AGENT_MODEL", "qwen2.5-coder"),
         )
 
+    openrouter_key = os.getenv("OPENROUTER_API_KEY")
+    if openrouter_key and _want("openrouter"):
+        return _build_openrouter(openrouter_key, model)
+
     anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-    if anthropic_key:
+    if anthropic_key and _want("anthropic"):
         from anthropic import Anthropic
 
         return AnthropicToolClient(
@@ -524,7 +604,7 @@ def build_client_from_env(model: Optional[str] = None) -> ModelClient:
         )
 
     deepseek_key = os.getenv("DEEPSEEK_API_KEY")
-    if deepseek_key:
+    if deepseek_key and _want("deepseek"):
         from openai import OpenAI
 
         return OpenAIToolClient(
@@ -533,7 +613,7 @@ def build_client_from_env(model: Optional[str] = None) -> ModelClient:
         )
 
     openai_key = os.getenv("OPENAI_API_KEY")
-    if openai_key:
+    if openai_key and _want("openai"):
         from openai import OpenAI
 
         return OpenAIToolClient(
@@ -541,11 +621,18 @@ def build_client_from_env(model: Optional[str] = None) -> ModelClient:
             model or os.getenv("AWOS_AGENT_MODEL", "gpt-4o-mini"),
         )
 
+    if provider:
+        raise RuntimeError(
+            f"AWOS_PROVIDER={provider} but its credential is not set. "
+            "Unset AWOS_PROVIDER to fall back to whatever else is configured."
+        )
+
     raise RuntimeError(
         "No model backend configured. Pick one:\n"
         "  free, no key   AWOS_BASE_URL=http://localhost:11434/v1  (Ollama etc.)\n"
         "  free, no key   AWOS_CASSETTE=<file>   (replay a recorded run)\n"
-        "  paid           ANTHROPIC_API_KEY / DEEPSEEK_API_KEY / OPENAI_API_KEY\n"
+        "  one key, many models   OPENROUTER_API_KEY + AWOS_AGENT_MODEL\n"
+        "  direct         ANTHROPIC_API_KEY / DEEPSEEK_API_KEY / OPENAI_API_KEY\n"
         "awos.py loads a .env file, so these can live there."
     )
 

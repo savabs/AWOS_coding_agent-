@@ -91,6 +91,40 @@ architecture.
 
 ---
 
+## Via OpenRouter — one key, many models
+
+OpenRouter is OpenAI-compatible, so it runs through the same client as a local
+model. It is the least fiddly way to reach several vendors without holding a
+key for each.
+
+```bash
+export OPENROUTER_API_KEY=sk-or-...
+export AWOS_AGENT_MODEL=anthropic/claude-haiku-4.5   # ids are vendor-prefixed
+awos agent "add retry to fetch()" --max-cost 0.25
+```
+
+Two things to know:
+
+- **There is no default model.** Ids are vendor-prefixed and the catalogue
+  changes, so guessing one would fail as a confusing 404 at the first turn
+  rather than a clear message up front.
+- **The model must support tool calling.** The loop is driven by tool calls;
+  a model without them will talk instead of acting. Several cheap open models
+  on OpenRouter do not support it.
+
+Cost estimates strip the vendor prefix and normalise punctuation, so
+`anthropic/claude-haiku-4.5` prices as `claude-haiku-4-5`. OpenRouter's own
+margin is not modelled, so a routed estimate approximates the underlying
+model's direct price.
+
+When several backends are configured the order is `AWOS_BASE_URL` >
+`OPENROUTER_API_KEY` > `ANTHROPIC` > `DEEPSEEK` > `OPENAI`. Set
+`AWOS_PROVIDER` to pin one and remove the guesswork; pinning a backend whose
+key is missing is an error rather than a silent fallback to a different
+vendor's bill.
+
+---
+
 ## Tier 3 — a paid API, capped
 
 For recording cassettes and for measuring real capability. Always with a
