@@ -1,0 +1,325 @@
+{
+  "timestamp": "2026-09-22T22:12:18.593761+00:00",
+  "total_cases": 12,
+  "cases": [
+    {
+      "case": "a1_off_by_one_page",
+      "tier": "A",
+      "multi_file": false,
+      "single_shot": {
+        "solved": true,
+        "latency_sec": 5.07,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 561,
+        "output_tokens": 408,
+        "cost_usd": 0.0,
+        "detail": ""
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 18.31,
+        "llm_calls": 6,
+        "tool_calls": 6,
+        "input_tokens": 15154,
+        "output_tokens": 1303,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "a2_mutable_default",
+      "tier": "A",
+      "multi_file": false,
+      "single_shot": {
+        "solved": true,
+        "latency_sec": 4.81,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 529,
+        "output_tokens": 313,
+        "cost_usd": 0.0,
+        "detail": ""
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 10.62,
+        "llm_calls": 5,
+        "tool_calls": 5,
+        "input_tokens": 11355,
+        "output_tokens": 662,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "a3_integer_midpoint",
+      "tier": "A",
+      "multi_file": false,
+      "single_shot": {
+        "solved": true,
+        "latency_sec": 4.14,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 530,
+        "output_tokens": 267,
+        "cost_usd": 0.0,
+        "detail": ""
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 10.12,
+        "llm_calls": 5,
+        "tool_calls": 5,
+        "input_tokens": 11621,
+        "output_tokens": 720,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "a4_empty_input_crash",
+      "tier": "A",
+      "multi_file": false,
+      "single_shot": {
+        "solved": true,
+        "latency_sec": 3.44,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 544,
+        "output_tokens": 272,
+        "cost_usd": 0.0,
+        "detail": ""
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 10.09,
+        "llm_calls": 5,
+        "tool_calls": 6,
+        "input_tokens": 12231,
+        "output_tokens": 737,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "b1_constant_mismatch",
+      "tier": "B",
+      "multi_file": true,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 5.98,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 531,
+        "output_tokens": 449,
+        "cost_usd": 0.0,
+        "detail": "\u001b[31m\u001b[31m\u001b[1m3 failed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m"
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 12.2,
+        "llm_calls": 6,
+        "tool_calls": 8,
+        "input_tokens": 15450,
+        "output_tokens": 852,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "b2_schema_drift",
+      "tier": "B",
+      "multi_file": true,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 4.43,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 540,
+        "output_tokens": 297,
+        "cost_usd": 0.0,
+        "detail": "\u001b[31m\u001b[31m\u001b[1m2 failed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m"
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 11.43,
+        "llm_calls": 6,
+        "tool_calls": 6,
+        "input_tokens": 14548,
+        "output_tokens": 773,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "b3_caller_contract",
+      "tier": "B",
+      "multi_file": true,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 3.32,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 534,
+        "output_tokens": 218,
+        "cost_usd": 0.0,
+        "detail": "\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m3 passed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m"
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 15.22,
+        "llm_calls": 6,
+        "tool_calls": 6,
+        "input_tokens": 14964,
+        "output_tokens": 1015,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "b4_enum_extension",
+      "tier": "B",
+      "multi_file": true,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 12.31,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 1155,
+        "output_tokens": 921,
+        "cost_usd": 0.0,
+        "detail": "\u001b[31m\u001b[31m\u001b[1m2 failed\u001b[0m, \u001b[32m1 passed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m"
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 17.77,
+        "llm_calls": 7,
+        "tool_calls": 8,
+        "input_tokens": 19068,
+        "output_tokens": 1194,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "c1_reuse_existing_helper",
+      "tier": "C",
+      "multi_file": true,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 5.66,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 537,
+        "output_tokens": 455,
+        "cost_usd": 0.0,
+        "detail": "\u001b[31m\u001b[31m\u001b[1m3 failed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m"
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 15.75,
+        "llm_calls": 7,
+        "tool_calls": 9,
+        "input_tokens": 18415,
+        "output_tokens": 1234,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "c2_use_project_error_type",
+      "tier": "C",
+      "multi_file": true,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 12.42,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 1127,
+        "output_tokens": 832,
+        "cost_usd": 0.0,
+        "detail": "\u001b[31m\u001b[31m\u001b[1m1 error\u001b[0m\u001b[31m in 0.09s\u001b[0m\u001b[0m"
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 11.14,
+        "llm_calls": 6,
+        "tool_calls": 6,
+        "input_tokens": 14787,
+        "output_tokens": 747,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "d1_contract_only_in_tests",
+      "tier": "D",
+      "multi_file": false,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 6.75,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 528,
+        "output_tokens": 532,
+        "cost_usd": 0.0,
+        "detail": "\u001b[31m\u001b[31m\u001b[1m6 failed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m"
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 10.78,
+        "llm_calls": 5,
+        "tool_calls": 5,
+        "input_tokens": 11960,
+        "output_tokens": 967,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "d2_fix_belongs_in_the_helper",
+      "tier": "D",
+      "multi_file": false,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 5.84,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 595,
+        "output_tokens": 509,
+        "cost_usd": 0.0,
+        "detail": "\u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m4 passed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m"
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 14.49,
+        "llm_calls": 5,
+        "tool_calls": 5,
+        "input_tokens": 12991,
+        "output_tokens": 1560,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    }
+  ],
+  "single_shot": {
+    "solved": 4,
+    "pass_rate": 0.333,
+    "self_contained_solved": 4,
+    "self_contained_total": 6,
+    "multi_file_solved": 0,
+    "multi_file_total": 6,
+    "cost_usd": 0.0
+  },
+  "agent_loop": {
+    "solved": 12,
+    "pass_rate": 1.0,
+    "self_contained_solved": 6,
+    "self_contained_total": 6,
+    "multi_file_solved": 6,
+    "multi_file_total": 6,
+    "cost_usd": 0.0
+  },
+  "delta_pass_rate": 0.667
+}

@@ -308,6 +308,27 @@ class TestCostControls(unittest.TestCase):
         self.assertLess(outcome.turns, 10)
         self.assertGreaterEqual(outcome.cost_usd, 2.00)
 
+    def test_cost_cap_still_trips_while_recording(self):
+        # Recording is the one mode that spends real money; the wrapper must
+        # not hide the model and price the run as a free replay.
+        project = _project()
+        inner = _CountingClient([
+            _reply(("read_file", {"path": "calc.py"}), tokens=(500_000, 200_000))
+            for _ in range(10)
+        ])
+        inner.model = "claude-sonnet-4-6"
+        with tempfile.TemporaryDirectory() as tmp:
+            recording = RecordingClient(inner, Path(tmp) / "c.json")
+            outcome = AgentLoop(
+                build_coding_registry(str(project)),
+                recording,
+                max_turns=10,
+                max_cost_usd=2.00,
+            ).run("task")
+
+        self.assertEqual(outcome.stop_reason, "cost_cap")
+        self.assertGreater(outcome.cost_usd, 0.0)
+
     def test_no_cap_means_no_cost_stop(self):
         project = _project()
         loop = AgentLoop(build_coding_registry(str(project)), _CountingClient(_script()))

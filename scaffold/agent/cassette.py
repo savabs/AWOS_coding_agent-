@@ -70,9 +70,14 @@ def _fingerprint(
         {"system": system, "messages": messages}, sort_keys=True, default=str
     )
     if root:
+        # Tool output may show the root as given or resolved; on macOS those
+        # differ (/var → /private/var). Longest first, so the resolved form is
+        # not left with a stray "/private" prefix.
+        given = str(Path(root).expanduser())
         resolved = str(Path(root).expanduser().resolve())
-        blob = blob.replace(json.dumps(resolved)[1:-1], ROOT_TOKEN)
-        blob = blob.replace(resolved, ROOT_TOKEN)
+        for form in sorted({given, resolved}, key=len, reverse=True):
+            blob = blob.replace(json.dumps(form)[1:-1], ROOT_TOKEN)
+            blob = blob.replace(form, ROOT_TOKEN)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:24]
 
 
@@ -154,6 +159,12 @@ class RecordingClient:
         meta = dict(meta or {})
         meta.setdefault("root_normalised", bool(root))
         self.cassette = Cassette(path=Path(path), meta=meta)
+
+    @property
+    def model(self) -> Optional[str]:
+        # Recording spends real money. Without this, AgentLoop prices the
+        # wrapper as "replay" — $0 — and --max-cost can never trip.
+        return getattr(self.inner, "model", None)
 
     def complete(self, system, messages, registry) -> ModelReply:
         reply = self.inner.complete(system, messages, registry)
