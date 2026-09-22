@@ -101,6 +101,25 @@ awos agent "add retry to fetch()" --max-cost 0.25
 ```
 
 The run aborts with `stop_reason="cost_cap"` once it has spent that much.
+
+`scripts/bench_executors.py` states what a run will cost before it starts, and
+will not spend unconfirmed:
+
+```
+  Cost preflight
+  cases            12
+  model            claude-haiku-4-5
+  tokens (est.)    55,200 in / 12,960 out
+  basis            measured from existing cassettes
+  estimate         $0.12
+  hard ceiling     $3.60  (--max-cost per case)
+```
+
+The estimate comes from existing cassettes when there are enough of them to
+measure, and from a stated assumption otherwise — the `basis` line always says
+which. Replaying is reported as free and never prompts. A paid run in a
+non-interactive shell refuses without `--yes`, so CI cannot spend by accident.
+The hard ceiling, not the estimate, is the number that actually bounds a run.
 Distinct from `BudgetLedger`'s monthly cap: this bounds *one* run, which is
 what makes it safe to point a benchmark at a paid model and walk away.
 
