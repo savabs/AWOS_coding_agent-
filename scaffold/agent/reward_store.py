@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import random
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -392,18 +393,29 @@ class RewardStore:
         weights = [abs(e.reward) ** alpha for e in episodes]
         total_w = sum(weights)
         if total_w == 0:
-            import random
             return random.sample(episodes, min(n, len(episodes)))
-        import random
-        probs = [w / total_w for w in weights]
-        chosen: list[Episode] = []
-        population = list(range(len(episodes)))
-        indices = random.choices(population, weights=probs, k=min(n, len(episodes)))
-        seen: set[int] = set()
-        for i in indices:
-            if i not in seen:
-                seen.add(i)
-                chosen.append(episodes[i])
+
+        # Weighted sampling WITHOUT replacement (Efraimidis-Spirakis): give each
+        # episode the key u ** (1 / w) and keep the n largest. Selection stays
+        # proportional to weight, but every draw is distinct — random.choices
+        # samples with replacement, so de-duplicating its output silently
+        # returned fewer than n episodes (~41% of draws at n=5 over 20 uniform
+        # episodes), starving the replay batch that trains the router.
+        keyed = [
+            (random.random() ** (1.0 / w), e)
+            for w, e in zip(weights, episodes)
+            if w > 0
+        ]
+        keyed.sort(key=lambda pair: pair[0], reverse=True)
+        chosen = [e for _, e in keyed[:n]]
+
+        # Weight 0 means |reward| == 0; those rank below any weighted episode but
+        # still count toward n when the weighted pool cannot fill the batch.
+        if len(chosen) < n:
+            picked = {id(e) for e in chosen}
+            chosen.extend(
+                e for w, e in zip(weights, episodes) if w <= 0 and id(e) not in picked
+            )
         return chosen[:n]
 
     def surprise_scores(self, window: int = 100) -> list[tuple[str, float]]:
