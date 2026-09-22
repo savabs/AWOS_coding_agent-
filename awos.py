@@ -321,9 +321,26 @@ def cmd_agent(args):
     from scaffold.agent.budget_ledger import get_ledger
     from scaffold.agent.git_manager import GitManager
 
+    from scaffold.agent.cassette import wrap_for_cassette
+
+    cassette_path = getattr(args, "cassette", None) or os.getenv("AWOS_CASSETTE")
+    mode = "record" if getattr(args, "record", False) else os.getenv("AWOS_CASSETTE_MODE", "replay")
+
+    # Replaying needs no credentials at all, so only build a real client when
+    # we are actually going to talk to a model.
+    client = None
+    if not cassette_path or mode == "record":
+        try:
+            client = build_client_from_env(getattr(args, "model", None))
+        except RuntimeError as exc:
+            sys.exit(str(exc))
+
     try:
-        client = build_client_from_env(getattr(args, "model", None))
-    except RuntimeError as exc:
+        # root normalisation keeps a cassette usable from a different checkout
+        client = wrap_for_cassette(
+            client, path=cassette_path, mode=mode, root=getattr(args, "root", ".")
+        )
+    except FileNotFoundError as exc:
         sys.exit(str(exc))
 
     root = getattr(args, "root", ".")
@@ -343,11 +360,15 @@ def cmd_agent(args):
         elif kind == "tool":
             print(f"      {'ok ' if payload['ok'] else 'ERR'} {payload['name']}")
 
+    if cassette_path:
+        print(f"Cassette: {cassette_path} ({'recording' if mode == 'record' else 'replaying'})")
+
     loop = AgentLoop(
         registry=registry,
         client=client,
         max_turns=getattr(args, "max_turns", 12),
         ledger=get_ledger(),
+        max_cost_usd=getattr(args, "max_cost", None),
         on_event=show if not getattr(args, "quiet", False) else None,
     )
     outcome = loop.run(args.goal)
@@ -355,7 +376,8 @@ def cmd_agent(args):
     print(f"\nResult:   {'✓' if outcome.success else '✗'} ({outcome.stop_reason})")
     print(f"Turns:    {outcome.turns}   Tool calls: {outcome.tool_calls} "
           f"({outcome.failed_tool_calls} failed)")
-    print(f"Tokens:   {outcome.input_tokens} in / {outcome.output_tokens} out")
+    print(f"Tokens:   {outcome.input_tokens} in / {outcome.output_tokens} out"
+          f"   Cost: ${outcome.cost_usd:.4f}")
     print(f"Elapsed:  {outcome.elapsed_sec:.1f}s")
     if outcome.files_touched:
         print("Files:")
@@ -498,6 +520,12 @@ def build_parser() -> argparse.ArgumentParser:
                        dest="rollback_on_failure",
                        help="Undo all edits if the loop does not finish successfully")
     agent.add_argument("--quiet", action="store_true", help="Suppress per-turn output")
+    agent.add_argument("--cassette", default=None, metavar="PATH",
+                       help="Replay model replies from this file (free, no API key)")
+    agent.add_argument("--record", action="store_true",
+                       help="Call the real model and save its replies to --cassette")
+    agent.add_argument("--max-cost", type=float, default=None, dest="max_cost",
+                       metavar="USD", help="Abort the run once it has cost this much")
 
     # goals
     sub.add_parser("goals", help="List tracked goals and their status")

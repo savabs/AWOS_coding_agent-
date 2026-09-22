@@ -37,6 +37,35 @@ DEFAULT_MAX_TURNS = 12
 DEFAULT_MAX_REPEATS = 3
 DEFAULT_TOOL_RESULT_CHARS = 8000
 
+#: USD per million tokens, (input, output). A local runtime or a replayed
+#: cassette costs nothing, so both are priced at zero and a cost cap simply
+#: never trips for them.
+PRICES: dict[str, tuple[float, float]] = {
+    "local": (0.0, 0.0),
+    "replay": (0.0, 0.0),
+    "deepseek-chat": (0.14, 0.28),
+    "deepseek-reasoner": (0.55, 2.19),
+    "gemini-2.0-flash": (0.10, 0.40),
+    "gpt-4o-mini": (0.15, 0.60),
+    "claude-haiku-4-5": (1.00, 5.00),
+    "claude-sonnet-4-6": (3.00, 15.00),
+}
+
+
+def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    """Cost in USD for a token count, 0.0 for an unpriced or free model."""
+    prices = PRICES.get(model)
+    if prices is None:
+        # Prefix match so "claude-sonnet-4-6-20260101" prices like its family.
+        for name, candidate in PRICES.items():
+            if model.startswith(name):
+                prices = candidate
+                break
+    if prices is None:
+        return 0.0
+    price_in, price_out = prices
+    return (input_tokens * price_in + output_tokens * price_out) / 1_000_000
+
 
 SYSTEM_PROMPT = """You are a coding agent working in a real repository.
 
@@ -246,6 +275,7 @@ class LoopOutcome:
     failed_tool_calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    cost_usd: float = 0.0
     final_message: str = ""
     files_touched: list[str] = field(default_factory=list)
     transcript: list[dict[str, Any]] = field(default_factory=list)
@@ -260,6 +290,7 @@ class LoopOutcome:
             "failed_tool_calls": self.failed_tool_calls,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
+            "cost_usd": round(self.cost_usd, 6),
             "final_message": self.final_message,
             "files_touched": self.files_touched,
             "elapsed_sec": round(self.elapsed_sec, 2),
@@ -279,6 +310,7 @@ class AgentLoop:
         ledger: Any = None,
         monthly_budget: Optional[float] = None,
         cost_per_turn_estimate: float = 0.01,
+        max_cost_usd: Optional[float] = None,
         on_event: Any = None,
     ) -> None:
         self.registry = registry
@@ -293,7 +325,19 @@ class AgentLoop:
             else float(os.getenv("AWOS_MONTHLY_BUDGET", "20.0"))
         )
         self.cost_per_turn_estimate = cost_per_turn_estimate
+        # A hard ceiling for ONE run, distinct from BudgetLedger's monthly cap.
+        # This is what makes it safe to point a benchmark at a paid model.
+        self.max_cost_usd = (
+            max_cost_usd
+            if max_cost_usd is not None
+            else _float_env("AWOS_MAX_RUN_COST", None)
+        )
         self.on_event = on_event
+
+    @property
+    def model_name(self) -> str:
+        """Model id behind the client, for pricing. 'replay' when cassetted."""
+        return getattr(self.client, "model", None) or "replay"
 
     def _emit(self, kind: str, **payload: Any) -> None:
         if self.on_event:
@@ -344,7 +388,21 @@ class AgentLoop:
 
             outcome.input_tokens += reply.input_tokens
             outcome.output_tokens += reply.output_tokens
+            outcome.cost_usd = estimate_cost(
+                self.model_name, outcome.input_tokens, outcome.output_tokens
+            )
             self._emit("turn", turn=turn, text=reply.text, calls=len(reply.tool_calls))
+
+            if self.max_cost_usd is not None and outcome.cost_usd >= self.max_cost_usd:
+                # Checked after the turn is accounted for, so the reported cost
+                # is what was actually spent rather than what was projected.
+                outcome.stop_reason = "cost_cap"
+                outcome.final_message = (
+                    f"Stopped at ${outcome.cost_usd:.4f}, the ${self.max_cost_usd:.4f} "
+                    "per-run cap."
+                )
+                self._emit("cost_cap", cost_usd=outcome.cost_usd)
+                break
 
             # No tool calls means the model considers the work finished.
             if not reply.tool_calls:
@@ -410,6 +468,18 @@ class AgentLoop:
         return outcome
 
 
+def _float_env(name: str, default: Optional[float]) -> Optional[float]:
+    """Read a float from the environment, ignoring an unparseable value."""
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning("[agent_loop] %s=%r is not a number; ignoring", name, raw)
+        return default
+
+
 def _synthetic_failure(message: str) -> Any:
     """A ToolResult-shaped failure produced by the loop rather than a tool."""
     try:
@@ -430,6 +500,20 @@ def build_client_from_env(model: Optional[str] = None) -> ModelClient:
     Raises RuntimeError when no usable key is present, so a caller can report
     that plainly rather than failing deep inside a turn.
     """
+    # A local or self-hosted OpenAI-compatible endpoint (Ollama, LM Studio,
+    # vLLM, llama.cpp) wins outright when configured: unlimited, free, and it
+    # needs no credential, so iterating on the loop never touches a key.
+    #   AWOS_BASE_URL=http://localhost:11434/v1 AWOS_AGENT_MODEL=qwen2.5-coder
+    base_url = os.getenv("AWOS_BASE_URL")
+    if base_url:
+        from openai import OpenAI
+
+        return OpenAIToolClient(
+            # Local servers ignore the key but the SDK insists on one.
+            OpenAI(api_key=os.getenv("AWOS_BASE_URL_KEY", "not-needed"), base_url=base_url),
+            model or os.getenv("AWOS_AGENT_MODEL", "qwen2.5-coder"),
+        )
+
     anthropic_key = os.getenv("ANTHROPIC_API_KEY")
     if anthropic_key:
         from anthropic import Anthropic
@@ -458,8 +542,11 @@ def build_client_from_env(model: Optional[str] = None) -> ModelClient:
         )
 
     raise RuntimeError(
-        "No model credentials found. Set one of ANTHROPIC_API_KEY, "
-        "DEEPSEEK_API_KEY or OPENAI_API_KEY (a .env file is loaded by awos.py)."
+        "No model backend configured. Pick one:\n"
+        "  free, no key   AWOS_BASE_URL=http://localhost:11434/v1  (Ollama etc.)\n"
+        "  free, no key   AWOS_CASSETTE=<file>   (replay a recorded run)\n"
+        "  paid           ANTHROPIC_API_KEY / DEEPSEEK_API_KEY / OPENAI_API_KEY\n"
+        "awos.py loads a .env file, so these can live there."
     )
 
 
