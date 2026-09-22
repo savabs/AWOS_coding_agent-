@@ -29,6 +29,7 @@ try:
     from .core.reasoning import ReasoningTrace, ReasoningSession, ReasoningTraceStore
     from .core.observability import ObservabilityStore, new_span, TaskSpan
     from .task_decomposer import TaskDecomposer
+    from .task_schema import task_files
     from .dag_executor import DAGExecutor
     from .agent_state_manager import AgentStateManager
     from .reward_store import RewardStore, compute_reward
@@ -63,6 +64,7 @@ except ImportError:
     from core.reasoning import ReasoningTrace, ReasoningSession, ReasoningTraceStore
     from core.observability import ObservabilityStore, new_span, TaskSpan
     from task_decomposer import TaskDecomposer
+    from task_schema import task_files
     from dag_executor import DAGExecutor
     from agent_state_manager import AgentStateManager
     from reward_store import RewardStore, compute_reward
@@ -100,6 +102,10 @@ class Orchestrator:
         Args:
             tracker: TokenTracker instance for cost monitoring (optional)
         """
+        # Multi-file tasks stay off here by default: this pipeline executes
+        # through Worker, which is handed one file's text and returns one
+        # SEARCH/REPLACE block. Set AWOS_MULTI_FILE_TASKS=1 only with an
+        # executor that can edit several files itself.
         self.planner = Planner()
         self.worker = Worker()
         self.verifier = Verifier()
@@ -1220,7 +1226,9 @@ class Orchestrator:
         if verify_success:
             try:
                 self.test_runner = TestRunner(project_root=codebase_root)
-                test_result = self.test_runner.run(changed_files=[task["file"]])
+                # Every file the task touched, so a multi-file change is covered
+                # by the tests for all of it rather than only its primary file.
+                test_result = self.test_runner.run(changed_files=task_files(task))
                 task["test_result"] = test_result
                 if not test_result.no_tests_found:
                     print(

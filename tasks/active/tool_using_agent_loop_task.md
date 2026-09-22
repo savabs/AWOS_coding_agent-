@@ -63,7 +63,11 @@ benchmark to measure it with.
 - [ ] Record a real comparison and report the numbers (needs one API key or a
       local model; the harness is proven with oracle and do-nothing stubs,
       12/12 and 0/12 respectively)
-- [ ] Multi-file tasks: lift `planner.py:76` once the loop is the executor
+- [x] Multi-file tasks: `planner.py`'s one-file rule is now opt-in via
+      `Planner(allow_multi_file=True)` / `AWOS_MULTI_FILE_TASKS=1`. Additive —
+      `file` still means the primary file for the ~30 call sites that read it,
+      and `files` carries the set. `DAGExecutor` now serialises on every shared
+      file, not just the primary one
 - [ ] Context compaction for runs that exceed the model's window
 
 ## Notes

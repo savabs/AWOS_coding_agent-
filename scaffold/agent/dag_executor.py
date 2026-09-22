@@ -13,6 +13,11 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable
 
+try:
+    from .task_schema import task_files
+except ImportError:
+    from task_schema import task_files
+
 logger = logging.getLogger(__name__)
 
 MAX_WORKERS = 4  # cap concurrent LLM API calls
@@ -125,12 +130,17 @@ class DAGExecutor:
         deps: dict[Any, set] = {t["task_id"]: set() for t in tasks}
 
         # ── Implicit deps: same-file ordering ─────────────────────────────────
+        # Every file a task touches, not just its primary one. A task editing
+        # [auth.py, test_auth.py] and another editing [test_auth.py] overlap and
+        # must be sequenced; keying on the primary file alone would schedule
+        # them into the same wave and let two threads write one file at once.
         by_file: dict[str, list] = {}
         for t in tasks:
-            by_file.setdefault(t.get("file", ""), []).append(t["task_id"])
+            for path in task_files(t):
+                by_file.setdefault(path, []).append(t["task_id"])
 
         for file_task_ids in by_file.values():
-            ordered = sorted(file_task_ids, key=str)
+            ordered = sorted(dict.fromkeys(file_task_ids), key=str)
             for i in range(1, len(ordered)):
                 deps[ordered[i]].add(ordered[i - 1])
 
