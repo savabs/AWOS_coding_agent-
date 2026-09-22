@@ -20,7 +20,28 @@ from typing import Any
 from .base import Tool, ToolResult
 
 
-class ReadFileTool(Tool):
+class _RootedTool(Tool):
+    """
+    Mixin giving a filesystem tool a project root to resolve against.
+
+    Without it, a relative path means "relative to wherever the process was
+    started", which differs from EditFileTool's project_root — so `read_file`
+    and `edit_file` in the same registry would disagree about what "calc.py"
+    means. Defaults to the process cwd, preserving prior behaviour for every
+    existing caller.
+    """
+
+    def __init__(self, project_root: str = ".") -> None:
+        self.project_root = Path(project_root).expanduser().resolve()
+
+    def _resolve(self, raw: str) -> Path:
+        path = Path(str(raw).strip()).expanduser()
+        if not path.is_absolute():
+            path = self.project_root / path
+        return path.resolve()
+
+
+class ReadFileTool(_RootedTool):
     """Read the contents of a local file."""
 
     @property
@@ -45,7 +66,7 @@ class ReadFileTool(Tool):
         return []
 
     def execute(self, args: dict[str, Any]) -> ToolResult:
-        path = Path(args["path"].strip()).expanduser().resolve()
+        path = self._resolve(args["path"])
         if not path.exists():
             return ToolResult.fail(f"File not found: {path}")
         if not path.is_file():
@@ -72,7 +93,7 @@ class ReadFileTool(Tool):
         )
 
 
-class WriteFileTool(Tool):
+class WriteFileTool(_RootedTool):
     """Write (create or overwrite) a local file."""
 
     @property
@@ -91,7 +112,7 @@ class WriteFileTool(Tool):
         }
 
     def execute(self, args: dict[str, Any]) -> ToolResult:
-        path = Path(args["path"].strip()).expanduser().resolve()
+        path = self._resolve(args["path"])
         content = args.get("content", "")
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -104,7 +125,7 @@ class WriteFileTool(Tool):
         )
 
 
-class ListDirTool(Tool):
+class ListDirTool(_RootedTool):
     """List the contents of a directory."""
 
     @property
@@ -126,7 +147,7 @@ class ListDirTool(Tool):
         return []
 
     def execute(self, args: dict[str, Any]) -> ToolResult:
-        dir_path = Path(args.get("path", ".")).expanduser().resolve()
+        dir_path = self._resolve(args.get("path", "."))
         recursive = str(args.get("recursive", "false")).lower() in ("true", "1", "yes")
 
         if not dir_path.exists():
@@ -158,7 +179,7 @@ class ListDirTool(Tool):
         )
 
 
-class FindFilesTool(Tool):
+class FindFilesTool(_RootedTool):
     """Find files matching a glob pattern under a directory."""
 
     @property
@@ -184,7 +205,7 @@ class FindFilesTool(Tool):
 
     def execute(self, args: dict[str, Any]) -> ToolResult:
         pattern = args["pattern"].strip()
-        root = Path(args.get("root", ".")).expanduser().resolve()
+        root = self._resolve(args.get("root", "."))
         max_results = int(args.get("max_results", 50))
 
         if not root.exists():
@@ -207,7 +228,7 @@ class FindFilesTool(Tool):
         )
 
 
-class GrepTool(Tool):
+class GrepTool(_RootedTool):
     """Search for a regex or literal pattern across files in a directory."""
 
     @property
@@ -235,7 +256,7 @@ class GrepTool(Tool):
 
     def execute(self, args: dict[str, Any]) -> ToolResult:
         pattern = args["pattern"].strip()
-        root = Path(args.get("root", ".")).expanduser().resolve()
+        root = self._resolve(args.get("root", "."))
         file_glob = args.get("file_glob", "*")
         literal = str(args.get("literal", "false")).lower() in ("true", "1", "yes")
         max_results = int(args.get("max_results", 40))

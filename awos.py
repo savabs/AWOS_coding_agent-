@@ -311,6 +311,64 @@ def cmd_run(args):
             print(f"  ✗ {e}")
 
 
+def cmd_agent(args):
+    """Execute a goal via the tool-using agent loop."""
+    from scaffold.agent.agent_loop import (
+        AgentLoop,
+        build_client_from_env,
+        build_coding_registry,
+    )
+    from scaffold.agent.budget_ledger import get_ledger
+    from scaffold.agent.git_manager import GitManager
+
+    try:
+        client = build_client_from_env(getattr(args, "model", None))
+    except RuntimeError as exc:
+        sys.exit(str(exc))
+
+    root = getattr(args, "root", ".")
+    registry = build_coding_registry(root, allow_shell=getattr(args, "allow_shell", False))
+
+    # Same rollback guarantee the Orchestrator gives its worker: a loop that
+    # edits autonomously must be undoable.
+    git = GitManager(root)
+    branch = git.setup(args.goal)
+    print(f"Tools:    {', '.join(registry.names())}")
+    print(f"Safety:   {('branch ' + branch) if branch else 'file snapshots'}")
+    print(f"Goal:     {args.goal}\n")
+
+    def show(kind, payload):
+        if kind == "turn" and payload.get("text"):
+            print(f"  [turn {payload['turn']}] {payload['text'][:160]}")
+        elif kind == "tool":
+            print(f"      {'ok ' if payload['ok'] else 'ERR'} {payload['name']}")
+
+    loop = AgentLoop(
+        registry=registry,
+        client=client,
+        max_turns=getattr(args, "max_turns", 12),
+        ledger=get_ledger(),
+        on_event=show if not getattr(args, "quiet", False) else None,
+    )
+    outcome = loop.run(args.goal)
+
+    print(f"\nResult:   {'✓' if outcome.success else '✗'} ({outcome.stop_reason})")
+    print(f"Turns:    {outcome.turns}   Tool calls: {outcome.tool_calls} "
+          f"({outcome.failed_tool_calls} failed)")
+    print(f"Tokens:   {outcome.input_tokens} in / {outcome.output_tokens} out")
+    print(f"Elapsed:  {outcome.elapsed_sec:.1f}s")
+    if outcome.files_touched:
+        print("Files:")
+        for path in outcome.files_touched:
+            print(f"  - {path}")
+    if outcome.final_message:
+        print(f"\n{outcome.final_message}")
+
+    if not outcome.success and getattr(args, "rollback_on_failure", False):
+        git.rollback_all()
+        print("\nRolled back — the loop did not finish successfully.")
+
+
 def cmd_stats(args):
     """Show self-learning observability report."""
     import sys
@@ -426,6 +484,20 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="Execute a feature goal")
     run.add_argument("goal", help="Feature description (quote if multi-word)")
     run.add_argument("--resume", action="store_true", help="Resume from last run for this goal")
+
+    # agent — tool-using loop (the model drives its own turns)
+    agent = sub.add_parser("agent", help="Execute a goal via the tool-using agent loop")
+    agent.add_argument("goal", help="What to do (quote if multi-word)")
+    agent.add_argument("--root", default=".", help="Project root to work in")
+    agent.add_argument("--model", default=None, help="Override the model id")
+    agent.add_argument("--max-turns", type=int, default=12, dest="max_turns",
+                       help="Stop after this many turns (default 12)")
+    agent.add_argument("--allow-shell", action="store_true", dest="allow_shell",
+                       help="Give the agent the shell tool (still gated by ALLOW_SHELL)")
+    agent.add_argument("--rollback-on-failure", action="store_true",
+                       dest="rollback_on_failure",
+                       help="Undo all edits if the loop does not finish successfully")
+    agent.add_argument("--quiet", action="store_true", help="Suppress per-turn output")
 
     # goals
     sub.add_parser("goals", help="List tracked goals and their status")

@@ -61,6 +61,50 @@ class Tool(ABC):
         """Parameter schema: {param_name: description}. Override to declare params."""
         return {}
 
+    @property
+    def required_parameters(self) -> list[str]:
+        """
+        Names the caller must supply, for the tool-calling schema.
+
+        Most tools here list optional arguments in `parameters` too (read_file
+        documents start_line/end_line; grep documents max_results) and narrow
+        the real requirements by overriding `validate()`. Marking all of
+        `parameters` required would force a model to pass every optional
+        argument on every call, so the default asks `validate()` what it
+        actually enforces: a name is required if omitting every argument
+        produces an error mentioning it.
+
+        Override this property directly for a tool whose validation messages do
+        not name the offending parameter.
+        """
+        try:
+            errors = " ".join(self.validate({}))
+        except Exception:
+            # A validate() that cannot survive empty input tells us nothing;
+            # fall back to the conservative reading.
+            return list(self.parameters)
+        return [name for name in self.parameters if name in errors]
+
+    @property
+    def input_schema(self) -> dict[str, Any]:
+        """
+        JSON Schema for tool-calling APIs (Anthropic `input_schema`, OpenAI
+        `function.parameters`).
+
+        Derived from `parameters`, which describes arguments but carries no
+        types, so everything defaults to string — correct for the existing
+        tools, all of which take strings. Override this property for a tool
+        needing richer types or nested objects.
+        """
+        return {
+            "type": "object",
+            "properties": {
+                name: {"type": "string", "description": desc}
+                for name, desc in self.parameters.items()
+            },
+            "required": self.required_parameters,
+        }
+
     def validate(self, args: dict[str, Any]) -> list[str]:
         """
         Return list of validation errors.
@@ -130,6 +174,35 @@ class ToolRegistry:
             }
             for t in self._tools.values()
         ]
+
+    def anthropic_schemas(self) -> list[dict[str, Any]]:
+        """Tool definitions in Anthropic Messages API form."""
+        return [
+            {
+                "name": t.name,
+                "description": t.description,
+                "input_schema": t.input_schema,
+            }
+            for t in self._tools.values()
+        ]
+
+    def openai_schemas(self) -> list[dict[str, Any]]:
+        """Tool definitions in OpenAI-compatible function-calling form."""
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": t.input_schema,
+                },
+            }
+            for t in self._tools.values()
+        ]
+
+    def names(self) -> list[str]:
+        """Registered tool names, in registration order."""
+        return list(self._tools)
 
     def __len__(self) -> int:
         return len(self._tools)
