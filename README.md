@@ -1,3 +1,9 @@
+---
+title: "AWOS — Learnable Operating System for Autonomous Work"
+tags:
+  - doc/wiki
+---
+
 # AWOS — Learnable Operating System for Autonomous Work
 
 > **An AI that is greedy to finish your projects — well, fast, and cheap — and gets better every time.**

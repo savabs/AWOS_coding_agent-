@@ -1,3 +1,9 @@
+---
+title: "AWOS Agent Index — Cold-Start Reference"
+tags:
+  - doc/wiki
+---
+
 # AWOS Agent Index — Cold-Start Reference
 
 > **This file is for the agent, not the human.**

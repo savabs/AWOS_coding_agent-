@@ -1,3 +1,10 @@
+---
+title: "Budget Hard Stop Task"
+tags:
+  - doc/task
+  - status/active
+---
+
 # Budget Hard Stop Task
 
 ## Status: PENDING
@@ -26,3 +33,8 @@
 ## Estimated effort
 1–2 hours. All logic already exists in `BudgetLedger.check_budget()`.
 This task is purely wiring — no new logic required.
+
+## Related
+
+- _(add links to related documents here)_
+

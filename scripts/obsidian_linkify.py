@@ -122,6 +122,9 @@ def check_frontmatter_fields(fm: str, required: list[str]) -> list[str]:
     return missing
 
 
+# A complete markdown inline link: [text](target)
+MARKDOWN_LINK_PATTERN = re.compile(r"\[[^\]\n]*\]\([^)\n]*\)")
+
 # Patterns that look like bare file path references
 BARE_PATH_PATTERN = re.compile(
     r"""
@@ -164,7 +167,23 @@ def convert_bare_paths_to_wiki_links(
         if in_code_block or line.startswith("    ") or "`" in line:
             new_lines.append(line)
         else:
-            new_lines.append(BARE_PATH_PATTERN.sub(replace_match, line))
+            # Mask whole markdown links before substituting. The BARE_PATH_PATTERN
+            # lookbehind only rejects a path sitting directly after "(", so in
+            # [docs/x.md](../docs/x.md) it rewrote BOTH the link text and the
+            # "../"-prefixed target, yielding [[[x]]](../[[x]]) — broken markdown
+            # and a broken wiki link. Masking preserves the original intent of
+            # leaving established markdown links alone.
+            stash: list[str] = []
+
+            def _mask(m: re.Match) -> str:
+                stash.append(m.group(0))
+                return f"\x00{len(stash) - 1}\x00"
+
+            masked = MARKDOWN_LINK_PATTERN.sub(_mask, line)
+            converted = BARE_PATH_PATTERN.sub(replace_match, masked)
+            for i, original in enumerate(stash):
+                converted = converted.replace(f"\x00{i}\x00", original)
+            new_lines.append(converted)
 
     return "\n".join(new_lines), changes
 
@@ -175,7 +194,10 @@ def has_related_section(content: str) -> bool:
 
 def add_related_section_stub(content: str) -> str:
     """Add a ## Related section stub at the end."""
-    stub = "\n## Related\n\n- (add [[wiki links]] to related documents here)\n"
+    # The placeholder must not use [[...]] syntax: obsidian_lint resolves every
+    # wiki link against the vault, so a literal "[[wiki links]]" in the stub
+    # registered as a broken link in each file this stub was added to.
+    stub = "\n## Related\n\n- _(add links to related documents here)_\n"
     return content.rstrip() + "\n" + stub + "\n"
 
 

@@ -1,3 +1,9 @@
+---
+title: "AWOS MCP Server — Research"
+tags:
+  - doc/research
+---
+
 # AWOS MCP Server — Research
 
 ## What is MCP?
@@ -72,3 +78,8 @@ asyncio.run(main())
 - `mcp` — install via `pip install mcp`
 - `asyncio` — stdlib
 - All AWOS modules already available
+
+## Related
+
+- _(add links to related documents here)_
+

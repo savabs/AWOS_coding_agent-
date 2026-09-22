@@ -1,3 +1,9 @@
+---
+title: "Multi-Session Agent — Research"
+tags:
+  - doc/research
+---
+
 # Multi-Session Agent — Research
 
 ## Problem
@@ -46,3 +52,8 @@ On next `awos run --goal "add user authentication"`:
 
 ## State dir: `.awos/state/`
 Already exists — used by AWOS for other state. New state files go here.
+
+## Related
+
+- _(add links to related documents here)_
+

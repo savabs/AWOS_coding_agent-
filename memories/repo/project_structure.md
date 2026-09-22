@@ -1,3 +1,9 @@
+---
+title: "AWOS — Project Structure"
+tags:
+  - doc/wiki
+---
+
 # AWOS — Project Structure
 
 > **Canonical owner for all project metrics and identity facts.**

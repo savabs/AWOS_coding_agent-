@@ -1,3 +1,9 @@
+---
+title: "ML Meta-Controller Spec"
+tags:
+  - doc/spec
+---
+
 # ML Meta-Controller Spec
 
 ## New Files
@@ -57,3 +63,8 @@ Change: EscalationEngine.record_outcome() also calls ml_router.update()
 4. EscalationEngine works identically when ml_router=None (pure heuristic mode)
 5. After 20 updates, is_ready() returns True and select() is used
 6. Weights saved to .awos/linucb_weights.pkl and reloaded correctly
+
+## Related
+
+- _(add links to related documents here)_
+

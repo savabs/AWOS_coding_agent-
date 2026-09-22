@@ -284,3 +284,8 @@ Performance impact         Very Low   Faster (smaller tokens)
 **Verdict: IMPLEMENT THIS WEEK** ✅
 
 **Next: Choose integration option and allocate 1 hour**
+
+## Related
+
+- _(add links to related documents here)_
+

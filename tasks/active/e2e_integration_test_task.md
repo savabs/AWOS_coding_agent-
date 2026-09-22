@@ -1,3 +1,10 @@
+---
+title: "E2E Integration Test Task"
+tags:
+  - doc/task
+  - status/active
+---
+
 # E2E Integration Test Task
 
 ## Status: PENDING
@@ -33,3 +40,8 @@
 
 ## Estimated effort
 2–3 hours
+
+## Related
+
+- _(add links to related documents here)_
+

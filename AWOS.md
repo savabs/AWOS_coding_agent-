@@ -1,3 +1,9 @@
+---
+title: "AWOS — Agent Workflow Operating System"
+tags:
+  - doc/wiki
+---
+
 # AWOS — Agent Workflow Operating System
 
 > **Operational protocols for work executed on the AWOS kernel.**
