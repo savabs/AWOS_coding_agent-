@@ -10,6 +10,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import List, Optional
 
 from anthropic import Anthropic  # For Haiku/Sonnet/Opus
@@ -25,6 +26,42 @@ except ImportError:
     from usage_record import empty_usage, merge_usage, record_api_usage
 
 _MONTHLY_BUDGET = float(os.getenv("AWOS_MONTHLY_BUDGET", "20.0"))
+
+_OPENAI_BASE_URL = "https://api.openai.com/v1"
+_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+
+class _OpenRouterOpenAI:
+    """
+    An OpenAI client pointed at OpenRouter, which namespaces model ids by
+    vendor ("openai/gpt-4o-mini"). Call sites keep passing bare OpenAI ids.
+    """
+
+    def __init__(self, inner: OpenAI) -> None:
+        self._inner = inner
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    def _create(self, *, model: str, **kwargs):
+        if "/" not in model:
+            model = f"openai/{model}"
+        return self._inner.chat.completions.create(model=model, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+def _build_openai_client(api_key: str):
+    """
+    OpenAI client for OPENAI_API_KEY, sent where that key actually works.
+
+    Hard-coding api.openai.com sent an OpenRouter key (sk-or-…) there — a 401
+    on every call. OPENAI_BASE_URL, the SDK's own convention, wins when set.
+    """
+    base_url = os.getenv("OPENAI_BASE_URL") or (
+        _OPENROUTER_BASE_URL if api_key.startswith("sk-or-") else _OPENAI_BASE_URL
+    )
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    return _OpenRouterOpenAI(client) if "openrouter.ai" in base_url else client
 
 
 @dataclass
@@ -69,11 +106,9 @@ class Worker:
         else:
             self.anthropic_client = None
 
-        # OpenAI direct (GPT-4o-mini etc.)
-        if openai_key:
-            self.openai_client = OpenAI(api_key=openai_key, base_url="https://api.openai.com/v1")
-        else:
-            self.openai_client = None
+        # OpenAI (GPT-4o-mini etc.) — direct, or via OpenRouter when the key or
+        # OPENAI_BASE_URL says so
+        self.openai_client = _build_openai_client(openai_key) if openai_key else None
 
         if not any([self.opencode_client, self.client, self.anthropic_client, self.openai_client]):
             raise ValueError("Set at least one of: OPENCODE_GO_API_KEY, DEEPSEEK_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY")
@@ -90,8 +125,16 @@ class Worker:
             "credit balance is too low",
             "your credit balance",
             "insufficient_quota",
+            "insufficient balance",  # DeepSeek's 402
             "payment required",
             "billing",
+            # A rejected key stays rejected for the life of this process;
+            # retrying it just adds a failed round-trip to every task.
+            "error code: 401",
+            "error code: 402",
+            "incorrect api key",
+            "invalid api key",
+            "invalid x-api-key",
         ))
 
     def _try_cheap_fallback(

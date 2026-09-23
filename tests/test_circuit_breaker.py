@@ -67,6 +67,50 @@ class TestIsPermanentFailure:
         from scaffold.agent.worker import Worker
         assert not Worker._is_permanent_failure("Internal server error 500")
 
+    def test_deepseek_insufficient_balance(self):
+        from scaffold.agent.worker import Worker
+        assert Worker._is_permanent_failure(
+            "Error code: 402 - {'error': {'message': 'Insufficient Balance'}}"
+        )
+
+    def test_rejected_key(self):
+        from scaffold.agent.worker import Worker
+        assert Worker._is_permanent_failure(
+            "Error code: 401 - {'error': {'message': 'Incorrect API key provided: sk-or-v1***'}}"
+        )
+
+
+# ── OpenAI client routing ────────────────────────────────────────────────────
+
+class TestOpenAIClientRouting:
+    def _build(self, monkeypatch, key, base_url=None):
+        from scaffold.agent import worker
+        if base_url:
+            monkeypatch.setenv("OPENAI_BASE_URL", base_url)
+        else:
+            monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+        return worker._build_openai_client(key)
+
+    def test_openai_key_goes_to_openai(self, monkeypatch):
+        client = self._build(monkeypatch, "sk-proj-test")
+        assert "api.openai.com" in str(client.base_url)
+
+    def test_openrouter_key_goes_to_openrouter(self, monkeypatch):
+        client = self._build(monkeypatch, "sk-or-v1-test")
+        assert "openrouter.ai" in str(client.base_url)
+
+    def test_base_url_env_wins(self, monkeypatch):
+        client = self._build(monkeypatch, "sk-test", "http://localhost:8000/v1")
+        assert "localhost:8000" in str(client.base_url)
+
+    def test_openrouter_namespaces_bare_model_ids(self, monkeypatch):
+        client = self._build(monkeypatch, "sk-or-v1-test")
+        client._inner = MagicMock()
+        client.chat.completions.create(model="gpt-4o-mini", messages=[])
+        client.chat.completions.create(model="anthropic/claude-haiku-4.5", messages=[])
+        models = [c.kwargs["model"] for c in client._inner.chat.completions.create.call_args_list]
+        assert models == ["openai/gpt-4o-mini", "anthropic/claude-haiku-4.5"]
+
 
 # ── Dead-provider gating in Worker.execute_task ───────────────────────────────
 
