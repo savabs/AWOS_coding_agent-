@@ -80,6 +80,20 @@ class TestForecast(unittest.TestCase):
         self.assertEqual(forecast.estimated_usd, 0.0)
         self.assertIn("no API calls", forecast.basis)
 
+    def test_replay_still_costs_for_uncassetted_arms(self):
+        # Only the agent arm is cassetted; single and react call the model live.
+        for arms in ({"agent", "single"}, {"agent", "react"}):
+            forecast = bench.forecast_cost(
+                CASES, arms, "claude-haiku-4-5", "/tmp/anything", record=False, max_cost=None
+            )
+            self.assertFalse(forecast.free, arms)
+            self.assertGreater(forecast.estimated_usd, 0.0, arms)
+
+    def test_react_arm_is_costed(self):
+        agent = bench.forecast_cost(CASES, {"agent"}, "claude-haiku-4-5", None, record=False, max_cost=None)
+        both = bench.forecast_cost(CASES, {"agent", "react"}, "claude-haiku-4-5", None, record=False, max_cost=None)
+        self.assertGreater(both.estimated_usd, agent.estimated_usd)
+
     def test_live_run_estimates_from_assumptions_when_nothing_measured(self):
         forecast = bench.forecast_cost(
             CASES, {"agent"}, "claude-haiku-4-5", None, record=False, max_cost=None

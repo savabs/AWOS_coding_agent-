@@ -44,6 +44,10 @@ PRICES: dict[str, tuple[float, float]] = {
     "local": (0.0, 0.0),
     "replay": (0.0, 0.0),
     "deepseek-chat": (0.14, 0.28),
+    # Escalation-ladder models, at OpenRouter's prices on 2026-09-23.
+    "deepseek-v4-flash": (0.089, 0.177),
+    "deepseek-v4-pro": (0.955, 1.911),
+    "qwen3.7-plus": (0.32, 1.28),
     "deepseek-reasoner": (0.55, 2.19),
     "gemini-2.0-flash": (0.10, 0.40),
     "gpt-4o-mini": (0.15, 0.60),

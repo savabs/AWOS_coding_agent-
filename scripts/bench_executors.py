@@ -85,6 +85,15 @@ class CaseOutcome:
     multi_file: bool
     single_shot: ArmResult = field(default_factory=ArmResult)
     agent_loop: ArmResult = field(default_factory=ArmResult)
+    react: ArmResult = field(default_factory=ArmResult)
+
+
+#: (--arms name, CaseOutcome field, report label)
+ARMS = (
+    ("single", "single_shot", "single-shot"),
+    ("agent", "agent_loop", "agent-loop"),
+    ("react", "react", "react"),
+)
 
 
 # ── Arms ──────────────────────────────────────────────────────────────────────
@@ -167,6 +176,61 @@ def run_agent_loop(
         if not passed:
             result.detail = f"{outcome.stop_reason}: {_last_failure_line(output)}"
 
+    return result
+
+
+def run_react(case: BugCase, model: str) -> ArmResult:
+    """
+    ReActWorker — the executor Orchestrator uses by default (AWOS_REACT_WORKER=1).
+    Same staged project, same prompt, same model as the agent loop; it differs
+    in driving tools through JSON-in-text rather than native tool calls.
+    """
+    from agent.agent_loop import _price_for
+    from agent.escalation_engine import EscalationLevel, ModelSpec
+    from agent.react_worker import ReActWorker
+
+    price_in, price_out = _price_for(model) or (0.0, 0.0)
+    spec = ModelSpec(
+        level=EscalationLevel.OPENROUTER, name=model, model_id=model,
+        provider="openrouter", cost_per_req=0.0,
+        input_price=price_in, output_price=price_out,
+        min_complexity=0, min_budget_remaining=0.0, min_failures=0,
+    )
+
+    result = ArmResult()
+    started = time.monotonic()
+    with tempfile.TemporaryDirectory() as tmp:
+        project = stage_case(case, tmp)
+        try:
+            outcome = ReActWorker().execute_task(
+                task={"task_id": 1, "action": _prompt_for(case), "file": case.target_file},
+                file_content=case.buggy_source,
+                codebase_context={"modules": "benchmark"},
+                project_root=str(project),
+                model_spec=spec,
+            )
+        except Exception as exc:
+            result.detail = f"{type(exc).__name__}: {exc}"[:160]
+            result.latency_sec = round(time.monotonic() - started, 2)
+            return result
+
+        steps = outcome.get("steps") or []
+        # ReActWorker reports usage as top-level keys, not under "usage".
+        usage = outcome
+        result.latency_sec = round(time.monotonic() - started, 2)
+        result.llm_calls = len(steps)
+        result.tool_calls = sum(1 for st in steps if getattr(st, "action", "") not in ("finish", "parse_error"))
+        result.input_tokens = int(usage.get("input_tokens", 0) or 0)
+        result.output_tokens = int(usage.get("output_tokens", 0) or 0)
+        result.cost_usd = float(usage.get("cost_usd", 0.0) or 0.0)
+
+        # Score the file ReAct actually left behind, not what it claimed.
+        edited = (project / "buggy.py").read_text(encoding="utf-8")
+        passed, output = run_case_tests(case, source=edited)
+        result.solved = passed
+        if not passed:
+            reason = outcome.get("error") or "finished"
+            result.detail = f"{reason}: {_last_failure_line(output)}"[:160]
     return result
 
 
@@ -258,11 +322,14 @@ def forecast_cost(
         basis="", model=model, cases=len(case_names), arms=set(arms)
     )
 
-    # Replaying a cassette makes no API call at all.
+    # Only the agent arm is cassetted: replaying makes it free, while single
+    # and react still call the model live.
     if cassette_dir and not record:
-        forecast.free = True
-        forecast.basis = "replaying cassettes — no API calls"
-        return forecast
+        arms = set(arms) - {"agent"}
+        if not arms:
+            forecast.free = True
+            forecast.basis = "replaying cassettes — no API calls"
+            return forecast
 
     per_case_in = per_case_out = 0
     if "agent" in arms:
@@ -276,6 +343,11 @@ def forecast_cost(
             forecast.basis = (
                 f"assumed {ASSUMED_TURNS_PER_CASE} turns/case — no cassettes to measure"
             )
+    if "react" in arms:
+        per_case_in += ASSUMED_TURNS_PER_CASE * ASSUMED_INPUT_PER_TURN
+        per_case_out += ASSUMED_TURNS_PER_CASE * ASSUMED_OUTPUT_PER_TURN
+        if not forecast.basis:
+            forecast.basis = f"assumed {ASSUMED_TURNS_PER_CASE} turns/case"
     if "single" in arms:
         per_case_in += ASSUMED_SINGLE_SHOT_INPUT
         per_case_out += ASSUMED_SINGLE_SHOT_OUTPUT
@@ -388,23 +460,17 @@ def make_client_factory(cassette_dir: Optional[str], record: bool, model: Option
 def print_report(outcomes: list[CaseOutcome], arms: set[str]) -> dict[str, Any]:
     total = len(outcomes)
     print(f"\n{'=' * 78}")
-    print(f"  {'case':<30} {'tier':<6} {'single-shot':<14} {'agent-loop':<14}")
+    shown = [(name, key, label) for name, key, label in ARMS if name in arms]
+    print(f"  {'case':<30} {'tier':<6} " + "".join(f"{label:<14}" for _, _, label in shown))
     print(f"  {'-' * 74}")
     for o in outcomes:
-        ss = (
-            f"{'PASS' if o.single_shot.solved else 'fail':<5}"
-            f"{o.single_shot.llm_calls:>3} call"
-            if "single" in arms
-            else "   —"
-        )
-        al = (
-            f"{'PASS' if o.agent_loop.solved else 'fail':<5}"
-            f"{o.agent_loop.llm_calls:>3}t/{o.agent_loop.tool_calls}c"
-            if "agent" in arms
-            else "   —"
-        )
+        cells = []
+        for name, key, _ in shown:
+            r = getattr(o, key)
+            calls = f"{r.llm_calls:>3} call" if name == "single" else f"{r.llm_calls:>3}t/{r.tool_calls}c"
+            cells.append(f"{'PASS' if r.solved else 'fail':<5}{calls}")
         marker = "*" if o.multi_file else " "
-        print(f"  {o.case:<30}{marker}{o.tier:<5} {ss:<14} {al:<14}")
+        print(f"  {o.case:<30}{marker}{o.tier:<5} " + "".join(f"{c:<14}" for c in cells))
 
     summary: dict[str, Any] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -413,8 +479,7 @@ def print_report(outcomes: list[CaseOutcome], arms: set[str]) -> dict[str, Any]:
     }
 
     print(f"  {'-' * 74}")
-    for label, key in (("single-shot", "single_shot"), ("agent-loop", "agent_loop")):
-        arm_key = "single" if key == "single_shot" else "agent"
+    for arm_key, key, label in ARMS:
         if arm_key not in arms:
             continue
         results = [getattr(o, key) for o in outcomes]
@@ -441,11 +506,15 @@ def print_report(outcomes: list[CaseOutcome], arms: set[str]) -> dict[str, Any]:
             "cost_usd": round(cost, 6),
         }
 
-    if arms == {"single", "agent"} and total:
+    if {"single", "agent"} <= arms and total:
         delta = summary["agent_loop"]["pass_rate"] - summary["single_shot"]["pass_rate"]
         summary["delta_pass_rate"] = round(delta, 3)
         print(f"  {'-' * 74}")
         print(f"  {'delta':<14} {delta:+.0%} (agent-loop minus single-shot)")
+    if {"react", "agent"} <= arms and total:
+        delta = summary["agent_loop"]["pass_rate"] - summary["react"]["pass_rate"]
+        summary["delta_agent_vs_react"] = round(delta, 3)
+        print(f"  {'delta':<14} {delta:+.0%} (agent-loop minus react)")
     print(f"{'=' * 78}")
     print("  * = multi-file case: the answer lives in a file single-shot never sees\n")
     return summary
@@ -458,8 +527,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cases-dir", default="tests/bug_cases")
     parser.add_argument("--case", action="append", help="Run only these cases (repeatable)")
-    parser.add_argument("--arms", default="agent", choices=["agent", "single", "both"],
-                        help="Which executors to run (default: agent)")
+    parser.add_argument("--arms", default="agent",
+                        help="Comma-separated executors: agent, single, react; "
+                             "or 'both' (single+agent) / 'all' (default: agent)")
     parser.add_argument("--cassette-dir", default=None,
                         help="Replay per-case cassettes from here (free, no API key)")
     parser.add_argument("--record", action="store_true",
@@ -483,13 +553,22 @@ def main() -> int:
         print(f"No cases found in {args.cases_dir}")
         return 1
 
-    arms = {"agent", "single"} if args.arms == "both" else {args.arms}
+    arms = {"both": {"agent", "single"}, "all": {name for name, _, _ in ARMS}}.get(
+        args.arms, {a.strip() for a in args.arms.split(",") if a.strip()}
+    )
+    unknown = arms - {name for name, _, _ in ARMS}
+    if unknown:
+        print(f"Unknown arm(s): {', '.join(sorted(unknown))}")
+        return 2
+    model = args.model or os.getenv("AWOS_AGENT_MODEL", "claude-sonnet-4-6")
+    if "react" in arms and args.cassette_dir and not args.record:
+        print("Note: the react arm has no cassettes; it calls the model live.")
 
     # Forecast and confirm before constructing a client or spending anything.
     forecast = forecast_cost(
         [d.name for d in case_dirs],
         arms,
-        args.model or os.getenv("AWOS_AGENT_MODEL", "claude-sonnet-4-6"),
+        model,
         args.cassette_dir,
         args.record,
         args.max_cost,
@@ -526,12 +605,16 @@ def main() -> int:
             outcome.agent_loop = run_agent_loop(
                 case, client_factory, args.max_turns, args.max_cost
             )
+        if "react" in arms:
+            outcome.react = run_react(case, model)
 
         flags = []
         if "single" in arms:
             flags.append(f"ss={'PASS' if outcome.single_shot.solved else 'fail'}")
         if "agent" in arms:
             flags.append(f"agent={'PASS' if outcome.agent_loop.solved else 'fail'}")
+        if "react" in arms:
+            flags.append(f"react={'PASS' if outcome.react.solved else 'fail'}")
         print(" ".join(flags))
         outcomes.append(outcome)
 
