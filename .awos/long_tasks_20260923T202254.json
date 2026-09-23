@@ -1,0 +1,82 @@
+[
+  {
+    "name": "config_env_migration",
+    "kind": "migration",
+    "solved": false,
+    "hidden": {
+      "passed": 2,
+      "failed": 20,
+      "errors": 0,
+      "ok": false,
+      "summary": "20 failed, 2 passed in 0.22s"
+    },
+    "visible_tests_ok": true,
+    "orchestrator_success": true,
+    "tasks_completed": 2,
+    "tasks_failed": 0,
+    "files_changed": 4,
+    "cost_usd": 0.0447,
+    "minutes": 11.1,
+    "timed_out": false
+  },
+  {
+    "name": "invoice_data_report",
+    "kind": "data",
+    "solved": false,
+    "hidden": {
+      "passed": 0,
+      "failed": 0,
+      "errors": 9,
+      "ok": false,
+      "summary": "9 errors in 0.07s"
+    },
+    "visible_tests_ok": true,
+    "orchestrator_success": false,
+    "tasks_completed": 0,
+    "tasks_failed": 6,
+    "files_changed": 1,
+    "cost_usd": 0.0793,
+    "minutes": 17.5,
+    "timed_out": false
+  },
+  {
+    "name": "orders_export_filters",
+    "kind": "feature",
+    "solved": false,
+    "hidden": {
+      "passed": 9,
+      "failed": 5,
+      "errors": 0,
+      "ok": false,
+      "summary": "5 failed, 9 passed in 0.82s"
+    },
+    "visible_tests_ok": true,
+    "orchestrator_success": true,
+    "tasks_completed": 3,
+    "tasks_failed": 0,
+    "files_changed": 6,
+    "cost_usd": 0.026,
+    "minutes": 5.8,
+    "timed_out": false
+  },
+  {
+    "name": "timezone_report_bug",
+    "kind": "debugging",
+    "solved": false,
+    "hidden": {
+      "passed": 5,
+      "failed": 5,
+      "errors": 0,
+      "ok": false,
+      "summary": "5 failed, 5 passed in 0.10s"
+    },
+    "visible_tests_ok": true,
+    "orchestrator_success": true,
+    "tasks_completed": 2,
+    "tasks_failed": 0,
+    "files_changed": 4,
+    "cost_usd": 0.0434,
+    "minutes": 9.3,
+    "timed_out": false
+  }
+]
