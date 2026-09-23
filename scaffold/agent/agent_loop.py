@@ -24,9 +24,11 @@ Usage:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol
@@ -48,6 +50,28 @@ NUDGE_MESSAGE = (
 )
 ELIDED_PREFIX = "[earlier tool output elided"
 DEFAULT_MAX_REPEATS = 3
+
+#: Tools whose successful call may change the workspace. Repeating a call is
+#: only "stuck" when nothing changed in between: re-running the tests after
+#: every edit is the same call each time and is exactly what a long task needs.
+STATE_CHANGING_TOOLS = frozenset({"edit_file", "write_file", "run_command", "shell"})
+#: Of those, the ones that say nothing reliable about what they changed. Their
+#: output is no signal either: pytest prints its run time, so a stuck model
+#: re-running it without editing reset every repeat count and ran to
+#: max_turns. What a command changed is read off the workspace instead.
+COMMAND_TOOLS = frozenset({"run_command", "shell"})
+#: Not workspace state: VCS internals, environments and tool caches, which
+#: pytest and friends rewrite on every run.
+FINGERPRINT_SKIP_DIRS = frozenset({
+    ".git", ".hg", ".svn", ".venv", "venv", "node_modules", "__pycache__",
+    ".pytest_cache", ".mypy_cache", ".ruff_cache", ".tox", ".awos",
+})
+#: Past this many files a walk per command costs more than it tells; the loop
+#: falls back to comparing the command's output.
+FINGERPRINT_MAX_FILES = 20000
+#: Durations in command output ("in 0.12s", "real 0m1.3s", "15ms"), masked
+#: before outputs are compared when the workspace cannot be watched.
+_TIMING = re.compile(r"\b\d+m\d+(?:\.\d+)?s\b|\b\d+(?:\.\d+)?\s*(?:ms|s|sec|secs|seconds)\b")
 DEFAULT_TOOL_RESULT_CHARS = 8000
 
 #: USD per million tokens, (input, output). A local runtime or a replayed
@@ -299,6 +323,76 @@ def _render_result(result: Any) -> str:
     return body or "(no output)"
 
 
+# ── Workspace watch ──────────────────────────────────────────────────────────
+
+
+class WorkspaceWatch:
+    """
+    What a command changed in the workspace, from a stat walk before and after.
+
+    Only files whose size or mtime moved are read, and one whose content hashes
+    the same as the last time it was seen is not a change: a report script
+    that rewrites the same CSV on every run changed nothing the second time.
+    """
+
+    def __init__(self, root: str) -> None:
+        self.root = os.path.abspath(root)
+        #: rel path -> (stat it was hashed at, digest)
+        self._hashes: dict[str, tuple[tuple[int, int], Optional[str]]] = {}
+
+    def snapshot(self) -> Optional[dict[str, tuple[int, int]]]:
+        """rel path -> (size, mtime_ns), or None when the tree is too big to watch."""
+        found: dict[str, tuple[int, int]] = {}
+        stack = [self.root]
+        while stack:
+            current = stack.pop()
+            try:
+                entries = list(os.scandir(current))
+            except OSError:
+                continue
+            for entry in entries:
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        if entry.name not in FINGERPRINT_SKIP_DIRS:
+                            stack.append(entry.path)
+                        continue
+                    st = entry.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                found[os.path.relpath(entry.path, self.root)] = (st.st_size, st.st_mtime_ns)
+                if len(found) > FINGERPRINT_MAX_FILES:
+                    return None
+        return found
+
+    def changed(self, before: Optional[dict], after: Optional[dict]) -> Optional[list[str]]:
+        """Rel paths whose content differs, or None when either walk was abandoned."""
+        if before is None or after is None:
+            return None
+        changed = []
+        for rel in sorted(set(before) | set(after)):
+            if before.get(rel) == after.get(rel):
+                continue
+            if rel not in after:
+                self._hashes.pop(rel, None)
+                changed.append(rel)
+                continue
+            digest = self._digest(rel)
+            known = self._hashes.get(rel)
+            # A hash taken at another stat than `before` predates some other
+            # change to the file, so it cannot vouch for this one.
+            if digest is None or known is None or known[0] != before.get(rel) or known[1] != digest:
+                changed.append(rel)
+            self._hashes[rel] = (after[rel], digest)
+        return changed
+
+    def _digest(self, rel: str) -> Optional[str]:
+        try:
+            with open(os.path.join(self.root, rel), "rb") as fh:
+                return hashlib.sha1(fh.read()).hexdigest()
+        except OSError:
+            return None
+
+
 # ── The loop ─────────────────────────────────────────────────────────────────
 
 
@@ -316,6 +410,9 @@ class LoopOutcome:
     cost_usd: float = 0.0
     final_message: str = ""
     files_touched: list[str] = field(default_factory=list)
+    #: Files a run_command/shell call created, changed or deleted (absolute
+    #: paths). Kept apart from files_touched: those went through edit_file.
+    files_written: list[str] = field(default_factory=list)
     transcript: list[dict[str, Any]] = field(default_factory=list)
     elapsed_sec: float = 0.0
     nudges: int = 0
@@ -333,6 +430,7 @@ class LoopOutcome:
             "cost_usd": round(self.cost_usd, 6),
             "final_message": self.final_message,
             "files_touched": self.files_touched,
+            "files_written": self.files_written,
             "elapsed_sec": round(self.elapsed_sec, 2),
             "nudges": self.nudges,
             "elided_results": self.elided_results,
@@ -414,8 +512,18 @@ class AgentLoop:
         messages: list[dict[str, Any]] = [{"role": "user", "content": prompt}]
 
         outcome = LoopOutcome(success=False, stop_reason="max_turns")
-        seen_calls: dict[str, int] = {}
+        # Keyed on (signature, state_version): the count resets whenever the
+        # workspace may have changed, so only truly identical repeats add up.
+        seen_calls: dict[tuple[str, int], int] = {}
+        state_version = 0
+        # A command changes the state only if it changed the workspace. Without
+        # a root to watch, fall back to its output: signature -> the output it
+        # gave last time, timings masked, whatever ran in between.
+        root = getattr(self.registry, "project_root", None)
+        watch = WorkspaceWatch(root) if root else None
+        last_output: dict[str, str] = {}
         touched: list[str] = []
+        written: list[str] = []
 
         for turn in range(1, self.max_turns + 1):
             outcome.turns = turn
@@ -457,7 +565,8 @@ class AgentLoop:
 
             # No tool calls means the model considers the work finished.
             if not reply.tool_calls:
-                if self.require_edits and not touched and outcome.nudges < MAX_NUDGES:
+                if (self.require_edits and not touched and not written
+                        and outcome.nudges < MAX_NUDGES):
                     # An empty finish on a task that needs changes is almost
                     # always the model giving up early, not a finished task.
                     outcome.nudges += 1
@@ -481,16 +590,17 @@ class AgentLoop:
             results = []
             for call in reply.tool_calls:
                 signature = f"{call.name}:{json.dumps(call.arguments, sort_keys=True, default=str)}"
-                seen_calls[signature] = seen_calls.get(signature, 0) + 1
+                key = (signature, state_version)
+                seen_calls[key] = seen_calls.get(key, 0) + 1
 
-                if seen_calls[signature] > self.max_repeats:
+                if seen_calls[key] > self.max_repeats:
                     # Same call, same arguments, over and over: the model is
                     # stuck. Say so in-band so it can change approach, and stop
                     # if it does not.
                     results.append(
                         _synthetic_failure(
                             f"You have called {call.name} with these exact arguments "
-                            f"{seen_calls[signature]} times and the result has not "
+                            f"{seen_calls[key]} times and the result has not "
                             "changed. Try a different approach."
                         )
                     )
@@ -498,10 +608,28 @@ class AgentLoop:
                     outcome.stop_reason = "repeated_tool_call"
                     continue
 
+                is_command = call.name in COMMAND_TOOLS
+                before = watch.snapshot() if watch and is_command else None
                 result = self.registry.execute(call.name, call.arguments)
                 outcome.tool_calls += 1
                 if not result.success:
                     outcome.failed_tool_calls += 1
+                if is_command:
+                    # A failing command can still have written files.
+                    changed = watch.changed(before, watch.snapshot()) if watch else None
+                    if changed is None:
+                        output = _TIMING.sub("<t>", str(getattr(result, "text", "") or ""))
+                        if result.success and last_output.get(signature) != output:
+                            state_version += 1
+                        last_output[signature] = output
+                    elif changed:
+                        state_version += 1
+                        for rel in changed:
+                            path = os.path.join(watch.root, rel)
+                            if path not in written:
+                                written.append(path)
+                elif call.name in STATE_CHANGING_TOOLS and result.success:
+                    state_version += 1
                 if call.name == "edit_file" and result.success:
                     path = result.data.get("path")
                     if path and path not in touched:
@@ -527,6 +655,7 @@ class AgentLoop:
             messages.extend(self.client.format_tool_results(reply.tool_calls, results))
 
         outcome.files_touched = touched
+        outcome.files_written = written
         outcome.elapsed_sec = time.monotonic() - started
         self._emit("done", **outcome.to_dict())
         return outcome
@@ -790,11 +919,14 @@ def build_coding_registry(
     # means the same file to read_file and to edit_file.
     registry = ToolRegistry()
     registry.sandbox = sandbox  # shared with the caller's own verification
+    registry.project_root = project_root  # watched by the loop for command changes
+    # confine: reads outside the project (a symlinked ~/.env, ~/.zshrc) run on
+    # the host, where the sandbox's deny rules do not reach.
     for tool in (
-        ReadFileTool(project_root=project_root),
-        ListDirTool(project_root=project_root),
-        FindFilesTool(project_root=project_root),
-        GrepTool(project_root=project_root),
+        ReadFileTool(project_root=project_root, confine=True),
+        ListDirTool(project_root=project_root, confine=True),
+        FindFilesTool(project_root=project_root, confine=True),
+        GrepTool(project_root=project_root, confine=True),
         EditFileTool(project_root=project_root),
         RunTestsTool(project_root=project_root, sandbox=sandbox),
     ):

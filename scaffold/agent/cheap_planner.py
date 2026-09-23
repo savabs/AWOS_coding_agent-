@@ -60,10 +60,17 @@ class CheapPlanner:
 
         modules = codebase_context.get("modules", "Unknown")
         architecture = codebase_context.get("architecture", "Unknown")
-        files = codebase_context.get("files", [])[:10]
+        # The orchestrator already caps this at 30; cutting to 10 hid
+        # ledger/summary.py from a "monthly summary" goal.
+        files = codebase_context.get("files", [])[:30]
         symbols = codebase_context.get("symbols", [])
         symbols_str = "\n".join(symbols[:20]) if symbols else "(none)"
 
+        # You see file and symbol names, not code. A planner that guesses
+        # mechanisms ("lru_cache parse_date", "raise click errors" in an
+        # argparse app) sends the executor after the wrong thing, while the
+        # executor can read the code and measure behaviour in its sandbox.
+        # So tasks carry outcomes and checks; the executor picks the how.
         prompt = f"""You are a code improvement expert. Break down this goal into 1-4 atomic micro-tasks.
 
 GOAL: {goal}
@@ -74,8 +81,13 @@ CODEBASE:
 - Key files: {", ".join(files)}
 - Key symbols:\n{symbols_str}
 
+WHO EXECUTES: an agent that reads the code, edits files, runs the tests, and
+can run arbitrary commands in a sandbox (run_command) to reproduce, time,
+profile and try behaviour. You have only seen the names above, not the code.
+
 RULES:
-1. Each task changes ONE file only
+1. Each task names ONE primary file in "file". The task may touch other files
+   only when rule 10 applies.
 2. Tasks are simple enough for DeepSeek to handle
 3. Order tasks so dependencies are handled first
 4. Estimate complexity: low (minor change), medium (refactor), high (new feature)
@@ -86,12 +98,31 @@ RULES:
    fixing it belong in the same task.
 7. Existing tests are the contract. Never plan to change their assertions to
    make them pass.
+8. State OUTCOMES and acceptance, not mechanisms: each "action" says what must
+   be true when the task is done and how to check it (a command to run, a test,
+   an observable behaviour). Never name a library, function, framework or
+   technique that is not shown in the CODEBASE section above — the executor
+   reads the code and chooses how.
+9. Performance goals ("faster", "slow", "takes forever", "Nx"): plan exactly ONE
+   task that says to measure first (time and profile the slow path with
+   run_command), fix the biggest measured costs, re-measure against the target,
+   and keep every result identical to before. Never split performance work by
+   guessed hotspot.
+10. Goals that touch many places (migrations, renames, "everywhere", "all"):
+   say so in the task — "find every place that ... — search the whole
+   codebase" — instead of listing guessed files. "file" is still ONE real
+   path from the Key files list, the best place to start; never leave it
+   empty or write a placeholder such as "multiple files".
+11. Carry every explicit requirement of the goal into the tasks VERBATIM:
+   flags and option names, error behaviour, exit codes, boundaries
+   (inclusive/exclusive), formats, and "unchanged when ..." guarantees. Every
+   requirement the user stated must appear in at least one task's "action".
 
 RESPOND WITH ONLY JSON (no markdown, no text before/after). One task per
 independent change; add more entries only for genuinely separate changes:
 {{
   "plan": [
-    {{"task_id": 1, "file": "path/file.py", "action": "specific action", "complexity": "low"}}
+    {{"task_id": 1, "file": "path/file.py", "action": "outcome to reach and how to check it", "complexity": "low"}}
   ],
   "reasoning": "Brief explanation",
   "total_tasks": 1

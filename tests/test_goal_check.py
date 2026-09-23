@@ -67,9 +67,10 @@ def test_missing_is_capped_and_blank_actions_dropped():
 @pytest.mark.parametrize("value", ['"false"', '"False"', '"0"', '"no"', "0", "false", "null"])
 def test_string_or_falsy_complete_is_not_complete(value):
     # bool("false") is True: a model quoting its boolean must not pass a
-    # partial change.
+    # partial change. With nothing listed missing, "not complete" is no usable
+    # verdict (the checker is asked again), and above all not a "complete" one.
     v = parse_verdict(f'{{"complete": {value}, "missing": [], "reasoning": "r"}}')
-    assert v.complete is False
+    assert v is None
 
 
 @pytest.mark.parametrize("value", ['"true"', '"True"', '"yes"', "true", "1"])
@@ -99,7 +100,7 @@ def test_readonly_registry_has_no_edit_tool(tmp_path):
     for name in ("read_file", "list_dir", "find_files", "grep", "run_tests"):
         assert registry.get(name) is not None, name
     assert registry.get("edit_file") is None and registry.get("write_file") is None
-    # The sandbox lets run_command write the workspace, so the checker never gets it.
+    # run_command writes its workspace: only offered with a sandbox over a copy.
     assert registry.get("run_command") is None and registry.get("shell") is None
 
 
@@ -167,7 +168,7 @@ def test_a_real_verdict_is_verified():
 
 
 def test_max_turns_from_env(monkeypatch):
-    assert GoalChecker(client=object()).max_turns == 25
+    assert GoalChecker(client=object()).max_turns == 40
     monkeypatch.setenv("AWOS_GOAL_CHECK_MAX_TURNS", "7")
     assert GoalChecker(client=object()).max_turns == 7
 
@@ -184,6 +185,374 @@ def test_working_tree_changes_lists_modified_and_untracked(tmp_path):
     files, diff = working_tree_changes(str(tmp_path))
     assert files == ["config.py", "new.py"]
     assert "+A = 2" in diff and "new.py" in diff
+
+
+# ── Structured verdict: the submit_verdict tool ─────────────────────────────
+
+
+def _submit(complete, missing=(), reasoning="r", call_id="v"):
+    return ModelReply(text="", tool_calls=[ToolCall(
+        id=call_id, name="submit_verdict",
+        arguments={"complete": complete, "missing": list(missing), "reasoning": reasoning})],
+        input_tokens=20, output_tokens=5)
+
+
+class _Recording(_Scripted):
+    """Also counts the real model calls and keeps the last message list."""
+
+    def __init__(self, replies):
+        super().__init__(replies)
+        self.calls = 0
+        self.last_messages = None
+
+    def complete(self, system, messages, registry):
+        self.calls += 1
+        self.last_messages = list(messages)
+        return super().complete(system, messages, registry)
+
+
+def test_verdict_via_tool_ends_the_check(tmp_path):
+    missing = [{"action": "--to must include orders at 23:59:59 on that day",
+                "file": "ordertool/export.py"}]
+    client = _Recording([_submit(False, missing, "ran export --to 2024-01-31"),
+                         ModelReply(text="should never be asked for")])
+    with patch("scaffold.agent.usage_record.record_api_usage"):
+        v = GoalChecker(client=client).check("filters", str(tmp_path), [], "")
+    assert v.verified is True and v.complete is False and v.source == "tool"
+    assert v.missing == missing and "2024-01-31" in v.reasoning
+    # The call ended the review: no second paid model turn.
+    assert client.calls == 1
+    assert (v.input_tokens, v.output_tokens) == (20, 5)
+
+
+def test_tool_verdict_of_complete_with_work_listed_is_incomplete(tmp_path):
+    client = _Recording([_submit(True, [{"action": "fix cli", "file": "cli.py"}])])
+    with patch("scaffold.agent.usage_record.record_api_usage"):
+        v = GoalChecker(client=client).check("g", str(tmp_path), [], "")
+    assert v.complete is False and v.verified is True
+
+
+def test_tool_missing_is_capped_and_paths_made_relative(tmp_path):
+    seen = {}
+
+    def factory(ws):
+        seen["ws"] = ws
+        return None
+
+    class _Abs(_Recording):
+        def complete(self, system, messages, registry):
+            items = [{"action": f"fix {i}", "file": os.path.join(seen["ws"], f"m{i}.py")}
+                     for i in range(8)]
+            self._replies = [_submit(False, items)]
+            return super().complete(system, messages, registry)
+
+    with patch("scaffold.agent.usage_record.record_api_usage"):
+        v = GoalChecker(client=_Abs([]), sandbox_factory=factory).check(
+            "g", str(tmp_path), [], "")
+    assert len(v.missing) == MAX_MISSING
+    assert v.missing[0]["file"] == "m0.py"
+
+
+def test_invalid_tool_args_are_an_error_the_model_can_fix(tmp_path):
+    bad = ModelReply(text="", tool_calls=[ToolCall(id="b", name="submit_verdict",
+                                                   arguments={"reasoning": "forgot"})])
+    client = _Recording([bad, _submit(True, [], "all good")])
+    with patch("scaffold.agent.usage_record.record_api_usage"):
+        v = GoalChecker(client=client).check("g", str(tmp_path), [], "")
+    assert v.complete is True and v.verified is True and client.calls == 2
+
+
+def test_no_verdict_gets_one_nudge_then_the_tool_answers(tmp_path):
+    # The benchmark's failure: the loop ran out of turns while still looking.
+    looking = [ModelReply(text="", tool_calls=[ToolCall(id=f"t{i}", name="find_files",
+                                                        arguments={"pattern": f"*{i}.py"})])
+               for i in range(3)]
+    client = _Recording(looking + [_submit(False, [{"action": "add --status", "file": "cli.py"}])])
+    with patch("scaffold.agent.usage_record.record_api_usage") as record:
+        v = GoalChecker(client=client, max_turns=3).check("g", str(tmp_path), [], "")
+    assert client.calls == 4
+    assert v.verified is True and v.complete is False and v.source == "nudge_tool"
+    assert v.missing == [{"action": "add --status", "file": "cli.py"}]
+    # The nudge continues the same conversation and says what to do.
+    last = client.last_messages[-1]
+    text = last["content"] if isinstance(last["content"], str) else last["content"][-1]["text"]
+    assert text == "Call submit_verdict now."
+    assert len(client.last_messages) > 2
+    # Its tokens are billed with the rest.
+    assert record.call_args.kwargs["input_tokens"] == 20
+
+
+def test_empty_final_message_gets_the_nudge_too(tmp_path):
+    client = _Recording([ModelReply(text=""), ModelReply(text=INCOMPLETE)])
+    with patch("scaffold.agent.usage_record.record_api_usage"):
+        v = GoalChecker(client=client).check("g", str(tmp_path), [], "")
+    assert v.verified is True and v.complete is False and v.source == "nudge_text"
+
+
+def test_no_verdict_even_after_the_nudge_is_unverified(tmp_path):
+    client = _Recording([ModelReply(text="I think it is fine."), ModelReply(text="Yes.")])
+    with patch("scaffold.agent.usage_record.record_api_usage"):
+        v = GoalChecker(client=client).check("g", str(tmp_path), [], "")
+    assert client.calls == 2  # the loop's one turn and exactly one nudge
+    assert v.complete is True and v.verified is False and v.source == ""
+    assert "could not be parsed" in v.reasoning
+
+
+def test_cost_cap_is_not_nudged(tmp_path, monkeypatch):
+    client = _Recording([ModelReply(text="", tool_calls=[ToolCall(id="t", name="list_dir",
+                                                                  arguments={})],
+                                    input_tokens=10_000_000, output_tokens=10_000_000)])
+    client.model = "claude-haiku-4-5"
+    monkeypatch.setenv("AWOS_MAX_RUN_COST", "0.01")
+    with patch("scaffold.agent.usage_record.record_api_usage"):
+        v = GoalChecker(client=client).check("g", str(tmp_path), [], "")
+    assert client.calls == 1 and v.verified is False and "cost_cap" in v.reasoning
+
+
+# ── Behavioural verification on a copy ──────────────────────────────────────
+
+
+class _FakeSandbox:
+    """Runs commands with cwd = the workspace it was built over; no confinement."""
+
+    instances: list = []
+
+    def __init__(self, workspace):
+        self.workspace = workspace
+        self.closed = 0
+        _FakeSandbox.instances.append(self)
+
+    def run(self, command, timeout_sec=120):
+        from scaffold.agent.sandbox import SandboxResult
+        r = subprocess.run(command, shell=True, cwd=self.workspace, capture_output=True,
+                           text=True, timeout=timeout_sec)
+        return SandboxResult(exit_code=r.returncode, stdout=r.stdout, stderr=r.stderr,
+                             timed_out=False, duration_sec=0.0)
+
+    def close(self):
+        self.closed += 1
+
+
+@pytest.fixture
+def project(tmp_path):
+    root = tmp_path / "proj"
+    (root / "pkg").mkdir(parents=True)
+    (root / "pkg" / "app.py").write_text("print('hi')\n", encoding="utf-8")
+    for skipped in (".git", ".venv", "node_modules", "pkg/__pycache__"):
+        (root / skipped).mkdir(parents=True, exist_ok=True)
+        (root / skipped / "junk").write_text("x", encoding="utf-8")
+    (root / ".env").write_text("SECRET=1\n", encoding="utf-8")
+    _FakeSandbox.instances = []
+    return root
+
+
+def _run_cmd(command, call_id="c"):
+    return ModelReply(text="", tool_calls=[ToolCall(id=call_id, name="run_command",
+                                                    arguments={"command": command})])
+
+
+def test_checker_runs_commands_on_a_copy_never_the_real_root(project):
+    script = [
+        _run_cmd(f"ls -a; ls -a pkg; {sys.executable} pkg/app.py", "c1"),
+        _run_cmd("echo HACKED > pkg/app.py && touch created.txt && rm -rf pkg/__pycache__", "c2"),
+        _submit(True, [], "ran it"),
+    ]
+    client = _Recording(script)
+    with patch("scaffold.agent.usage_record.record_api_usage"):
+        v = GoalChecker(client=client, sandbox_factory=_FakeSandbox).check(
+            "g", str(project), [], "")
+    assert v.verified is True
+    sb = _FakeSandbox.instances[0]
+    assert os.path.realpath(sb.workspace) != os.path.realpath(project)
+    # The real tree is untouched by what the checker ran.
+    assert (project / "pkg" / "app.py").read_text(encoding="utf-8") == "print('hi')\n"
+    assert not (project / "created.txt").exists()
+    assert (project / "pkg" / "__pycache__" / "junk").exists()
+    # The copy left out VCS, envs, caches and secrets.
+    listing = client.last_messages[2]["content"][0]["content"]
+    names = set(listing.split("\n"))
+    assert "pkg" in names and "hi" in names
+    assert not names & {".git", ".venv", "node_modules", ".env", "__pycache__"}
+    # And it is gone afterwards, its sandbox closed once.
+    assert not os.path.exists(sb.workspace) and sb.closed == 1
+
+
+def test_sandbox_closed_and_copy_removed_when_the_review_crashes(project):
+    with patch("scaffold.agent.agent_loop.AgentLoop.run", side_effect=RuntimeError("boom")):
+        v = GoalChecker(client=_Scripted([]), sandbox_factory=_FakeSandbox).check(
+            "g", str(project), [], "")
+    assert "failed to run: boom" in v.reasoning and v.verified is False
+    sb = _FakeSandbox.instances[0]
+    assert sb.closed == 1
+    assert not os.path.exists(os.path.dirname(sb.workspace))
+
+
+def test_copy_removed_when_the_sandbox_cannot_start(project):
+    made = []
+
+    def factory(ws):
+        made.append(ws)
+        raise RuntimeError("docker gone")
+
+    with patch("scaffold.agent.usage_record.record_api_usage"):
+        v = GoalChecker(client=_Recording([_submit(True)]), sandbox_factory=factory).check(
+            "g", str(project), [], "")
+    assert v.verified is True and not os.path.exists(made[0])
+
+
+def test_no_sandbox_means_no_run_command_and_the_prompt_says_so(project):
+    seen = {}
+
+    class _Peek(_Recording):
+        def complete(self, system, messages, registry):
+            seen["tools"] = [t["name"] for t in registry.list_tools()]
+            seen["prompt"] = messages[0]["content"]
+            return super().complete(system, messages, registry)
+
+    with patch("scaffold.agent.usage_record.record_api_usage"):
+        GoalChecker(client=_Peek([_submit(True)]), sandbox_factory=lambda ws: None).check(
+            "g", str(project), [], "")
+    assert "run_command" not in seen["tools"] and "submit_verdict" in seen["tools"]
+    assert "edit_file" not in seen["tools"]
+    assert "run_command is not available" in seen["prompt"]
+
+
+def test_registry_over_a_sandbox_offers_run_command(tmp_path):
+    registry = build_readonly_registry(str(tmp_path), sandbox=_FakeSandbox(str(tmp_path)))
+    assert registry.get("run_command") is not None
+    assert registry.get("run_tests").sandbox is not None
+    assert registry.get("edit_file") is None
+
+
+@pytest.mark.skipif(sys.platform != "darwin" or not os.path.exists("/usr/bin/sandbox-exec"),
+                    reason="needs macOS Seatbelt")
+def test_real_seatbelt_sandbox_cannot_reach_the_real_root(project):
+    from scaffold.agent.sandbox import SeatbeltSandbox
+    boxes = []
+
+    def factory(ws):
+        boxes.append(SeatbeltSandbox(ws))
+        return boxes[-1]
+
+    target = project / "pkg" / "app.py"
+    script = [_run_cmd(f"echo HACKED > pkg/app.py; echo HACKED > '{target}'"), _submit(True)]
+    with patch("scaffold.agent.usage_record.record_api_usage"):
+        GoalChecker(client=_Recording(script), sandbox_factory=factory).check(
+            "g", str(project), [], "")
+    assert target.read_text(encoding="utf-8") == "print('hi')\n"
+    assert not boxes[0].tmpdir.exists()  # closed
+
+
+def test_prompt_tells_the_checker_to_try_the_behaviour():
+    from scaffold.agent.goal_check import INSTRUCTIONS, SYSTEM_PROMPT
+    text = SYSTEM_PROMPT + build_prompt("g", [], "")
+    for phrase in ("TRY the goal's behaviour", "error case", "boundary", "probe scripts",
+                   "traceback", "clean error message", "COPY", "submit_verdict"):
+        assert phrase in text, phrase
+    assert "concrete and verifiable" in INSTRUCTIONS and "23:59:59" in INSTRUCTIONS
+    assert f"At most {MAX_MISSING} items" in INSTRUCTIONS
+
+
+# ── Unusable verdicts, a copy that cannot be made, host reads ───────────────
+
+
+@pytest.mark.parametrize("missing", [[], [{"action": "", "file": "a.py"}], "not json"])
+def test_incomplete_with_no_usable_item_is_refused_and_asked_again(tmp_path, missing):
+    # It used to be recorded, and the goal failed with zero follow-up rounds.
+    bad = ModelReply(text="", tool_calls=[ToolCall(id="b", name="submit_verdict", arguments={
+        "complete": False, "missing": missing, "reasoning": "something is off"})])
+    fixed = _submit(False, [{"action": "--to must include 23:59", "file": "export.py"}])
+    client = _Recording([bad, fixed])
+    with patch("scaffold.agent.usage_record.record_api_usage"):
+        v = GoalChecker(client=client).check("g", str(tmp_path), [], "")
+    assert client.calls == 2
+    assert "needs at least one missing item" in str(client.last_messages[-1]["content"])
+    assert v.complete is False and v.missing == [{"action": "--to must include 23:59",
+                                                  "file": "export.py"}]
+
+
+def _peek_tools(project, **checker_kwargs):
+    seen = {}
+
+    class _Peek(_Recording):
+        def complete(self, system, messages, registry):
+            seen["tools"] = [t["name"] for t in registry.list_tools()]
+            seen["prompt"] = messages[0]["content"]
+            seen["registry"] = registry
+            return super().complete(system, messages, registry)
+
+    with patch("scaffold.agent.usage_record.record_api_usage"):
+        GoalChecker(client=_Peek([_submit(True)]), **checker_kwargs).check(
+            "g", str(project), [], "")
+    return seen
+
+
+def test_no_copy_means_no_code_runs_on_the_real_tree(project):
+    # A failed copy fell back to the real tree with run_tests still offered,
+    # unsandboxed: the model's conftest.py would run with the owner's rights.
+    with patch("scaffold.agent.goal_check._copy_workspace", side_effect=OSError("boom")):
+        seen = _peek_tools(project, sandbox_factory=_FakeSandbox)
+    assert "run_tests" not in seen["tools"] and "run_command" not in seen["tools"]
+    assert "read_file" in seen["tools"] and not _FakeSandbox.instances
+    assert "Nothing can be run in this review" in seen["prompt"]
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs FIFOs")
+def test_special_and_unreadable_files_do_not_break_the_copy(project):
+    os.mkfifo(project / "pkg" / "pipe")
+    locked = project / "pkg" / "locked.txt"
+    locked.write_text("x", encoding="utf-8")
+    locked.chmod(0)
+    locked_dir = project / "private"
+    locked_dir.mkdir()
+    locked_dir.chmod(0)
+    try:
+        seen = _peek_tools(project, sandbox_factory=_FakeSandbox)
+    finally:
+        locked.chmod(0o644)
+        locked_dir.chmod(0o755)
+    # The copy was made, so the review runs on it, in the sandbox.
+    assert "run_tests" in seen["tools"] and "run_command" in seen["tools"]
+    assert os.path.realpath(_FakeSandbox.instances[0].workspace) != os.path.realpath(project)
+
+
+def test_copy_leaves_out_runtime_state_and_stops_at_the_size_cap(project, monkeypatch):
+    from scaffold.agent.goal_check import _copy_workspace
+    (project / ".awos" / "goals").mkdir(parents=True)
+    (project / ".awos" / "goals" / "g.json").write_text("{}", encoding="utf-8")
+    (project / "dist").mkdir()
+    (project / "dist" / "big.whl").write_bytes(b"0" * 1024)
+    tmp, copy = _copy_workspace(str(project))
+    try:
+        assert os.path.exists(os.path.join(copy, "pkg", "app.py"))
+        assert not os.path.exists(os.path.join(copy, ".awos"))
+        assert not os.path.exists(os.path.join(copy, "dist"))
+    finally:
+        import shutil
+        shutil.rmtree(tmp)
+
+    (project / "pkg" / "data.bin").write_bytes(b"0" * (2 * 1024 * 1024))
+    monkeypatch.setenv("AWOS_GOAL_CHECK_MAX_COPY_MB", "1")
+    seen = _peek_tools(project, sandbox_factory=_FakeSandbox)
+    assert "run_tests" not in seen["tools"] and not _FakeSandbox.instances
+
+
+def test_host_read_tools_stay_inside_the_copy(project, tmp_path):
+    outside = tmp_path / "secret.txt"
+    outside.write_text("TOKEN=abc", encoding="utf-8")
+    (project / "pkg" / "link.txt").symlink_to(outside)
+    (project / "pkg" / ".env.local").write_text("KEY=1", encoding="utf-8")
+    registry = build_readonly_registry(str(project))
+    for path in (str(outside), "pkg/link.txt", "../secret.txt", ".env", "pkg/.env.local",
+                 os.path.expanduser("~/.zshrc")):
+        r = registry.execute("read_file", {"path": path})
+        assert not r.success and "Refused" in r.error, path
+    assert registry.execute("read_file", {"path": "pkg/app.py"}).success
+    grep = registry.execute("grep", {"pattern": "TOKEN|KEY|SECRET"})
+    assert grep.success and grep.data["hits"] == []
+    found = registry.execute("find_files", {"pattern": "../*.txt"})
+    assert found.data["matches"] == []
+    assert not registry.execute("list_dir", {"path": ".."}).success
 
 
 # ── Orchestrator wiring ──────────────────────────────────────────────────────
@@ -210,6 +579,8 @@ def _hermetic_env(monkeypatch):
     # conftest turns the check off for the rest of the suite; here it is
     # the subject (and its checker is always mocked).
     monkeypatch.setenv("AWOS_GOAL_CHECK", "1")
+    # No real sandbox (or docker container) unless a test injects one.
+    monkeypatch.setenv("AWOS_SANDBOX", "none")
 
 
 def _rounds(verdicts, monkeypatch, **env):

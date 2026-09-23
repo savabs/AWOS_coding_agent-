@@ -60,12 +60,103 @@ def _task_needs_edits(task: dict) -> bool:
     return not (_INSPECT_ONLY.search(action) and not _EDIT_WORDS.search(action))
 
 
+#: A verb of writing followed, within the same sentence, by "test(s)". Plain
+#: substrings matched "adds", "address" and "keep the tests passing", so an
+#: ordinary task whose tests stayed red passed as "fail as expected".
+_WRITES_TESTS = re.compile(
+    r"\b(?:add|write|create|reproduce)\b[^.;]*?\b(?:a |an |the |new |failing |regression |unit )*tests?\b",
+    re.IGNORECASE,
+)
+#: "Add X ... keep the tests passing" is about existing tests, not new ones.
+_EXISTING_TESTS = re.compile(r"\b(?:keep|existing|all|the)\s+(?:the\s+)?tests?\b", re.IGNORECASE)
+
+
 def _asks_for_tests(task: dict) -> bool:
     """The task's own purpose is writing tests (e.g. a reproduction test)."""
-    action = str(task.get("action", "")).lower()
-    return "test" in action and any(
-        verb in action for verb in ("add", "write", "create", "reproduc")
-    )
+    action = str(task.get("action", ""))
+    for m in _WRITES_TESTS.finditer(action):
+        if not _EXISTING_TESTS.search(m.group(0)):
+            return True
+    return False
+
+
+def _not_ignored(root: str, paths: list) -> list:
+    """
+    `paths` minus what the project's .gitignore excludes: a command also
+    writes .coverage, build output and caches, and those are no edit. Outside
+    a git repo nothing can be judged ignored, so everything is kept.
+    """
+    if not paths:
+        return []
+    try:
+        from .sandbox import HOST_GIT_OPTS
+    except ImportError:
+        from sandbox import HOST_GIT_OPTS
+    import subprocess
+
+    rels = [os.path.relpath(p, root) for p in paths]
+    try:
+        proc = subprocess.run(
+            ["git", *HOST_GIT_OPTS, "-C", root, "check-ignore", "--stdin", "-z"],
+            input="\0".join(rels), capture_output=True, text=True, timeout=30,
+        )
+    except Exception as exc:
+        logger.debug("git check-ignore failed: %s", exc)
+        return list(paths)
+    if proc.returncode not in (0, 1):  # 128: not a repo
+        return list(paths)
+    ignored = set(filter(None, proc.stdout.split("\0")))
+    return [p for p, rel in zip(paths, rels) if rel not in ignored]
+
+
+#: Each attempt can use a full turn budget; past a few, a stuck task is
+#: stuck, and AWOS_AGENT_RETRIES=50 would multiply the turns spent by 51.
+MAX_AGENT_RETRIES = 3
+
+
+def _agent_retries() -> int:
+    """Extra agent-loop attempts after a resumable stop (AWOS_AGENT_RETRIES, default 1)."""
+    try:
+        return min(MAX_AGENT_RETRIES, max(0, int(os.getenv("AWOS_AGENT_RETRIES", "1"))))
+    except ValueError:
+        return 1
+
+
+def _run_cost_cap() -> Optional[float]:
+    """AWOS_MAX_RUN_COST, read the way AgentLoop reads it; None when unset."""
+    raw = os.getenv("AWOS_MAX_RUN_COST", "").strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _agent_resume_reason(outcome, verdict: dict, model_errors: int) -> Optional[str]:
+    """
+    Why a failed agent-loop attempt is worth continuing, or None when it is not.
+    A cost or budget stop is final — resuming would spend past the cap — and a
+    model error gets one more chance only, since a dead provider stays dead.
+    The caller also stops once the task's cost cap is used up across attempts.
+    """
+    stop = outcome.stop_reason
+    if stop == "max_turns":
+        return "it ran out of turns (max_turns)"
+    if stop == "repeated_tool_call":
+        return "it repeated the same tool call without progress (repeated_tool_call)"
+    if stop == "model_error":
+        if model_errors > 1:
+            return None
+        return f"the model call failed ({outcome.final_message[:200]})"
+    if stop != "completed":
+        return None
+    if not verdict["success"]:
+        return "it finished without editing any file"
+    result = verdict["test_result"]
+    if result is not None and not getattr(result, "no_tests_found", True) and result.failed > 0:
+        return f"{result.failed} test(s) failed after its edits"
+    return None
 
 try:
     from .agent_state_manager import AgentStateManager
@@ -1320,21 +1411,24 @@ class Orchestrator:
             if not changed:  # not a git repo: fall back to what the run recorded
                 changed = sorted(getattr(self, "_run_files_changed", set()))
             verdict = checker.check(goal, root, changed, diff)
+            # Where the verdict came from (tool / text / nudge_*; "" = fallback)
+            # tells a run log whether the checker actually decided.
+            via = f" [via {getattr(verdict, 'source', '') or 'fallback'}]"
             if verdict.complete and (verdict.verified or round_no == 0):
                 # An unverified "complete" (checker crashed, ran out of
                 # turns, reply unparseable) is let through only on the first
                 # check, as advisory. It never supersedes failed follow-ups.
-                print(f"[GOAL CHECK] complete: {verdict.reasoning[:200]}")
+                print(f"[GOAL CHECK] complete{via}: {verdict.reasoning[:200]}")
                 if verdict.verified:
                     self._supersede_failed_follow_ups(extra)
                 return True, extra, verdict.reasoning
             if verdict.complete:
                 # The checker found gaps earlier and cannot now confirm the
                 # follow-ups closed them: the run is not verified done.
-                print(f"[GOAL CHECK] unverified after follow-ups: {verdict.reasoning[:200]}")
+                print(f"[GOAL CHECK] unverified after follow-ups{via}: {verdict.reasoning[:200]}")
                 break
 
-            print(f"[GOAL CHECK] incomplete ({len(verdict.missing)} item(s) missing): "
+            print(f"[GOAL CHECK] incomplete ({len(verdict.missing)} item(s) missing){via}: "
                   f"{verdict.reasoning[:200]}")
             for item in verdict.missing:
                 print(f"[GOAL CHECK]   - {item['file'] or '?'}: {item['action'][:160]}")
@@ -1565,25 +1659,120 @@ class Orchestrator:
                 )
 
         needs_edits = _task_needs_edits(task)
+        # AWOS_MAX_RUN_COST is the task's budget, not each attempt's: every
+        # AgentLoop used to read it afresh, so a max_turns stop at $0.99 of a
+        # $1 cap resumed with another $1.
+        cost_cap = _run_cost_cap()
         registry = build_coding_registry(codebase_root)
         # The same sandbox later runs the verification tests: code the model
         # wrote (a conftest.py, say) must never execute on the host.
         sandbox = getattr(registry, "sandbox", None)
+        retries_left = _agent_retries()
+        prompt = self._agent_loop_prompt(task, ctx)
+        files_changed: list = []
+        outcomes = []
         try:
-            outcome = AgentLoop(
-                registry=registry,
-                client=client,
-                on_event=_on_event,
-                # The loop pushes back if the model stops without editing on a
-                # task that needs edits (AWOS_AGENT_MAX_TURNS sets the budget).
-                require_edits=needs_edits,
-            ).run(self._agent_loop_prompt(task, ctx))
-        except BaseException:
+            while True:
+                spent = sum(o.cost_usd for o in outcomes)
+                outcome = AgentLoop(
+                    registry=registry,
+                    client=client,
+                    on_event=_on_event,
+                    # The loop pushes back if the model stops without editing on a
+                    # task that needs edits (AWOS_AGENT_MAX_TURNS sets the budget).
+                    # Not once an earlier attempt has edited: a resumed attempt
+                    # that finds the work done was nudged into edits it did not
+                    # need, and at a small turn budget ran out on the nudges.
+                    require_edits=needs_edits and not files_changed,
+                    max_cost_usd=None if cost_cap is None else cost_cap - spent,
+                ).run(prompt)
+                outcomes.append(outcome)
+                self._record_agent_loop_spend(model, outcome)
+                # Files a command wrote count too (a generator script, sed -i):
+                # otherwise a task done through run_command was judged "no
+                # edits", resumed, failed, and its writes never rolled back.
+                for path in [*outcome.files_touched,
+                             *_not_ignored(codebase_root, getattr(outcome, "files_written", []))]:
+                    rel = os.path.relpath(path, codebase_root)
+                    if rel not in files_changed:
+                        files_changed.append(rel)
+                verdict = self._judge_agent_attempt(
+                    task, outcome, files_changed, needs_edits, codebase_root, sandbox, task_id
+                )
+                model_errors = sum(o.stop_reason == "model_error" for o in outcomes)
+                reason = _agent_resume_reason(outcome, verdict, model_errors)
+                if reason is None or retries_left <= 0:
+                    break
+                if cost_cap is not None:
+                    spent = sum(o.cost_usd for o in outcomes)
+                    turns = sum(o.turns for o in outcomes) or 1
+                    if cost_cap - spent < spent / turns:
+                        # Not even one more turn fits under the task's cap.
+                        print(f"[TASK {task_id}] AgentLoop not resumed: ${spent:.4f} of "
+                              f"the ${cost_cap:.4f} cap spent")
+                        break
+                # One stop used to end the job. The edits so far stay in place
+                # (no rollback between attempts) and the next attempt resumes.
+                retries_left -= 1
+                print(f"[TASK {task_id}] AgentLoop resuming after: {reason}")
+                prompt = (
+                    self._agent_loop_prompt(task, ctx)
+                    + f"\n\nA previous attempt stopped: {reason}. "
+                    + f"It changed these files: {', '.join(files_changed) or 'none'}. "
+                    + f"Test status: {verdict['test_status']}. "
+                    + "Continue from the current state of the files; do not start over."
+                )
+        finally:
             registry.close()  # a docker sandbox holds a container until closed
-            raise
 
-        # Feed the spend to TokenTracker + BudgetLedger, as every other executor
-        # does per call; without this the budget hard-stop never saw it.
+        error = verdict["error"]
+        if error and len(outcomes) > 1:
+            error = f"{error} (after {len(outcomes)} attempts)"
+        result = {
+            "success": verdict["success"],
+            "summary": verdict["summary"],
+            "error": error,
+            "files_changed": files_changed,
+            "steps": [
+                SimpleNamespace(
+                    thought=turn.get("text", ""),
+                    action=",".join(c["name"] for c in turn.get("calls", [])),
+                    action_input={},
+                    observation="",
+                    success=all(c["ok"] for c in turn.get("calls", [])),
+                    latency_ms=0.0,
+                )
+                for o in outcomes
+                for turn in o.transcript
+            ],
+            "test_result": verdict["test_result"],
+            "input_tokens": sum(o.input_tokens for o in outcomes),
+            "output_tokens": sum(o.output_tokens for o in outcomes),
+            "cost_usd": sum(o.cost_usd for o in outcomes),
+            "model_used": model,
+        }
+        return self._record_tool_executor_result(
+            result,
+            task,
+            ctx,
+            tool_name="AgentLoop",
+            tag="AGENT",
+            marker="agent_loop",
+            failure_kind="agent_loop_fail",
+            task_id=task_id,
+            esc_decision=esc_decision,
+            _span=_span,
+            _strategy=_strategy,
+            _task_ts=_task_ts,
+            _live_t=_live_t,
+            _task_usage=_task_usage,
+        )
+
+    def _record_agent_loop_spend(self, model: str, outcome) -> None:
+        """
+        Feed one attempt's spend to TokenTracker + BudgetLedger, as every other
+        executor does per call; without this the budget hard-stop never saw it.
+        """
         try:
             from .agent_loop import _price_for
             from .usage_record import record_api_usage
@@ -1601,7 +1790,15 @@ class Orchestrator:
             tracker=getattr(self, "tracker", None),
         )
 
-        files_changed = [os.path.relpath(p, codebase_root) for p in outcome.files_touched]
+    def _judge_agent_attempt(
+        self, task: dict, outcome, files_changed: list, needs_edits: bool,
+        codebase_root: str, sandbox, task_id,
+    ) -> dict:
+        """
+        Verify an attempt with the project's own tests — the loop's success
+        only means the model stopped calling tools. `files_changed` spans every
+        attempt so far, since earlier attempts' edits are kept.
+        """
         writes_tests = (
             bool(files_changed)
             and all(_is_test_file(f) for f in files_changed)
@@ -1611,18 +1808,20 @@ class Orchestrator:
         # Verify independently of what the model claimed — including when it
         # edited nothing: an earlier task may already have done the work.
         test_result = None
-        try:
-            if files_changed or needs_edits:
-                try:
-                    test_result = TestRunner(project_root=codebase_root, sandbox=sandbox).run(
-                        changed_files=files_changed or task_files(task)
-                    )
-                except Exception as exc:
-                    logger.warning("[TASK %s] TestRunner error: %s", task_id, exc)
-        finally:
-            registry.close()
+        if files_changed or needs_edits:
+            try:
+                test_result = TestRunner(project_root=codebase_root, sandbox=sandbox).run(
+                    changed_files=files_changed or task_files(task)
+                )
+            except Exception as exc:
+                logger.warning("[TASK %s] TestRunner error: %s", task_id, exc)
 
         tests_ran = test_result is not None and not getattr(test_result, "no_tests_found", True)
+        test_status = (
+            f"{test_result.passed} passed, {test_result.failed} failed"
+            if tests_ran
+            else "no tests ran"
+        )
         # "Nothing left to do" is only credible when an earlier task in this run
         # changed files. On new work the old tests pass before anything is done —
         # that let a no-op "complete" 4 of 5 long tasks in the baseline.
@@ -1653,44 +1852,13 @@ class Orchestrator:
             summary = f"Added tests; {test_result.failed} fail as expected until the fix lands. {summary}"
             test_result = None
 
-        result = {
+        return {
             "success": success,
-            "summary": summary,
             "error": error,
-            "files_changed": files_changed,
-            "steps": [
-                SimpleNamespace(
-                    thought=turn.get("text", ""),
-                    action=",".join(c["name"] for c in turn.get("calls", [])),
-                    action_input={},
-                    observation="",
-                    success=all(c["ok"] for c in turn.get("calls", [])),
-                    latency_ms=0.0,
-                )
-                for turn in outcome.transcript
-            ],
+            "summary": summary,
             "test_result": test_result,
-            "input_tokens": outcome.input_tokens,
-            "output_tokens": outcome.output_tokens,
-            "cost_usd": outcome.cost_usd,
-            "model_used": model,
+            "test_status": test_status,
         }
-        return self._record_tool_executor_result(
-            result,
-            task,
-            ctx,
-            tool_name="AgentLoop",
-            tag="AGENT",
-            marker="agent_loop",
-            failure_kind="agent_loop_fail",
-            task_id=task_id,
-            esc_decision=esc_decision,
-            _span=_span,
-            _strategy=_strategy,
-            _task_ts=_task_ts,
-            _live_t=_live_t,
-            _task_usage=_task_usage,
-        )
 
     @staticmethod
     def _agent_loop_prompt(task: dict, ctx: dict) -> str:
@@ -1924,14 +2092,22 @@ class Orchestrator:
 
         # Resolve short filenames to full paths intelligently
         from .file_resolver import resolve_file
+        task = {**task, "file": str(task.get("file") or "").strip()}
         try:
-            resolved_file = resolve_file(task["file"], project_root=codebase_root)
-            task = {**task, "file": resolved_file}  # Update task with resolved path
-        except FileNotFoundError:
-            # If resolution fails, try original path (might be already full)
+            if task["file"]:
+                resolved_file = resolve_file(task["file"], project_root=codebase_root)
+                task = {**task, "file": resolved_file}  # Update task with resolved path
+        except (FileNotFoundError, ValueError):
+            # Not found, or ambiguous: try the original path (might be already full)
             pass
 
         file_path = os.path.join(codebase_root, task["file"])
+        # The agent loop finds its own files; "file" is only where to start. A
+        # follow-up with no file, or a placeholder like "multiple files", must
+        # still run — it used to crash the run (IsADirectoryError on the root)
+        # or fail as file_not_found without the agent ever looking.
+        _agent_executor = executor_choice() == "agent_loop"
+        _no_single_file = not task["file"] or os.path.isdir(file_path)
 
         _live_t = ctx.get("_live")           # LiveRenderer (optional)
         _total_t = ctx.get("_total_tasks", 1)
@@ -1957,7 +2133,10 @@ class Orchestrator:
         ])
 
         # Load or initialize file content
-        if is_create_task and not Path(file_path).exists():
+        if _agent_executor and (_no_single_file or not Path(file_path).is_file()):
+            file_content = ""
+            task = {**task, "_is_new_file": False}
+        elif is_create_task and not Path(file_path).exists():
             # Creating new file - use empty content and ensure parent dir exists
             print(f"[TASK {task_id}] Creating new file")
             Path(file_path).parent.mkdir(parents=True, exist_ok=True)
@@ -1972,7 +2151,7 @@ class Orchestrator:
                 with open(file_path, "r") as f:
                     file_content = f.read()
                 git.backup_file(file_path)
-            except FileNotFoundError:
+            except (FileNotFoundError, IsADirectoryError):
                 print(f"[TASK {task_id}] ERROR: File not found")
                 self.execution_log.append({
                     "task_id": task_id,

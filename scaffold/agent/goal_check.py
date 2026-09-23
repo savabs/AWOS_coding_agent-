@@ -6,17 +6,32 @@ edit verifies. That lets a run "succeed" on a partial change — a settings
 migration rewrote config.py and missed the seven other modules that read the
 ini file directly. Nothing looked at the goal as a whole.
 
-GoalChecker closes that gap. After the tasks finish it runs a short AgentLoop
-with read-only tools, hands it the original goal verbatim plus what changed,
-and asks it to search for every place the goal applies instead of trusting the
-diff's scope. What it finds missing comes back as follow-up tasks, one per
-file, that the orchestrator runs through its normal path.
+GoalChecker closes that gap. After the tasks finish it runs a short AgentLoop,
+hands it the original goal verbatim plus what changed, and asks it to search
+for every place the goal applies instead of trusting the diff's scope. What it
+finds missing comes back as follow-up tasks, one per file, that the
+orchestrator runs through its normal path.
+
+Reading code was not enough. On the long-task benchmark a checker read an
+export filter, declared it "complete", and missed that an invalid date raised
+a traceback and that `--to` excluded orders placed late on the last day. So
+the checker now TRIES the goal's behaviour: it works on a throwaway copy of
+the workspace with a sandboxed run_command, runs the program with the inputs,
+error cases and boundaries the goal states, and only then decides. The copy
+is what makes execution safe here: a checker that could write the real tree
+could finish the goal itself, unverified.
+
+Its verdict arrives through a submit_verdict tool call, not free text: two of
+three checks in that run ended with no parseable reply (out of turns, or an
+empty final message) and so said nothing. Text JSON is still accepted as a
+fallback, and a loop that ends without either gets one "call submit_verdict
+now" turn before it is given up on.
 
 The checker is advisory plumbing, not a gate that can wedge a run: no model,
-a crash, or a reply that will not parse all count as "complete", and say so.
-Such a verdict is marked unverified. The orchestrator never lets one excuse
-failed follow-up work: once the checker has found gaps, only a real
-"complete" answer can declare them closed.
+a crash, or no verdict at all count as "complete", and say so. Such a verdict
+is marked unverified. The orchestrator never lets one excuse failed follow-up
+work: once the checker has found gaps, only a real "complete" answer can
+declare them closed.
 """
 
 from __future__ import annotations
@@ -25,33 +40,90 @@ import json
 import logging
 import os
 import re
+import shutil
+import stat
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
 #: Follow-up tasks per round. More than this is a re-plan, not a gap.
 MAX_MISSING = 5
-DEFAULT_MAX_TURNS = 25
+#: Trying the behaviour (write a probe, run it, read the traceback) costs
+#: turns that reading alone did not; 25 ran out on the benchmark.
+DEFAULT_MAX_TURNS = 40
 #: The checker needs the shape of the change, not all of it.
 MAX_DIFF_CHARS = 12000
+VERDICT_TOOL = "submit_verdict"
+NUDGE_MESSAGE = f"Call {VERDICT_TOOL} now."
+#: Stop reasons after which one more turn can still produce a verdict. After a
+#: cost cap, a budget block or a provider error, another call is the problem.
+NUDGEABLE_STOPS = ("max_turns", "completed", "repeated_tool_call")
+#: Not copied into the checker's workspace: large, rebuilt on demand, runtime
+#: state (.awos holds thousands of ledgers), or secrets (.env) that neither the
+#: sandbox nor the confined host tools will read.
+COPY_IGNORE = (".git", ".venv", "venv", "node_modules", "__pycache__", ".env", ".env.*",
+               ".awos", "build", "dist", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+               ".tox")
+#: Past this many MB the copy is abandoned and the review runs without
+#: executing anything (AWOS_GOAL_CHECK_MAX_COPY_MB): a large repo copied up to
+#: three times per goal could fill $TMPDIR or stall the run.
+DEFAULT_MAX_COPY_MB = 500
 
-SYSTEM_PROMPT = """You review whether a coding goal has been FULLY carried out
-in a real repository. You can read and search the code and run the tests, but
-you cannot edit anything.
+SYSTEM_PROMPT = f"""You review whether a coding goal has been FULLY carried out
+in a real project. You work on a disposable COPY of the project: you can read
+and search the code, run the tests, and run shell commands in a sandbox
+(run_command). Nothing you do can change the real project, and fixing things
+is not your job: you judge.
+
+Reading the code is not enough; code that looks right is often wrong at the
+edges. TRY the goal's behaviour before you decide:
+- Run the program or CLI the goal names with the inputs it mentions: each new
+  flag or option alone and combined, and the plain path with none of them.
+- Exercise every error case and boundary the goal states: invalid or unknown
+  values, both ends of a range (is the end inclusive, as the goal says?),
+  writing to a file as well as to stdout.
+- Write small probe scripts or data files (in the project copy or $TMPDIR)
+  when the program needs input you do not have.
+- A traceback where the goal asked for a clean error message means the goal
+  is NOT done. So does any stated behaviour you could not see working.
 
 Be sceptical of the change's own scope: a partial change is the usual failure.
 Search for every place the goal applies before you decide.
+
+When you have decided, call {VERDICT_TOOL} exactly once. That call ends the
+review.
 """
 
 INSTRUCTIONS = (
     "Decide whether the goal is FULLY done. Search the codebase for every place "
     "the goal applies (e.g. every read of a setting, every caller, every "
-    "command) — do not trust the diff's scope. List concrete remaining work as "
-    "follow-up tasks, one per file, each an actionable instruction. Reply with "
-    'ONLY a JSON object {"complete": bool, "missing": [{"action": str, '
-    '"file": str}], "reasoning": str}.'
+    "command) — do not trust the diff's scope — and run the behaviour the goal "
+    "describes, including the error cases and boundaries it states. Then call "
+    f"{VERDICT_TOOL}. Each missing item must be concrete and verifiable: the "
+    "observable behaviour that is wrong, what you saw, and where to fix it, e.g. "
+    '{"action": "--to must include orders placed at 23:59:59 on that day; they '
+    'are currently excluded by the date comparison in filter_orders", "file": '
+    '"ordertool/export.py"}. At most '
+    f"{MAX_MISSING} items, one per file, paths relative to the project root. "
+    f"Only if you cannot call {VERDICT_TOOL}, reply with ONLY the same JSON "
+    'object {"complete": bool, "missing": [{"action": str, "file": str}], '
+    '"reasoning": str}.'
+)
+
+NO_SANDBOX_NOTE = (
+    "(run_command is not available: this machine has no sandbox, so judge from "
+    "the code and run_tests.)"
+)
+NO_EXEC_NOTE = (
+    "(Nothing can be run in this review: no copy of the project could be made, "
+    "so judge from reading the code alone.)"
+)
+INCOMPLETE_NEEDS_ITEMS = (
+    "complete=false needs at least one missing item with a non-empty action; "
+    "name what is wrong and where, or set complete=true."
 )
 
 
@@ -62,9 +134,12 @@ class GoalVerdict:
     reasoning: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
-    #: True only for a verdict the checker actually gave (parsed from its
-    #: reply). The fail-open "complete" fallbacks are unverified.
+    #: True only for a verdict the checker actually gave (the tool call, or
+    #: JSON in its reply). The fail-open "complete" fallbacks are unverified.
     verified: bool = False
+    #: How the verdict arrived: "tool", "text", "nudge_tool", "nudge_text", or
+    #: "" for a fallback. The first two are the healthy paths.
+    source: str = ""
 
 
 def _int_env(name: str, default: int) -> int:
@@ -74,32 +149,52 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
-def build_readonly_registry(project_root: str = ".") -> Any:
-    """The coding registry minus edit_file: a checker that can fix is a worker.
-
-    run_command is left out on purpose. The sandbox confines writes to the
-    workspace, which is exactly where the checker must not write: `sed -i` or
-    a script would let it finish the goal itself, unverified. run_tests stays;
-    it is the one execution the checker needs, and it only reads the tree.
-    """
+def _tool_classes() -> tuple:
     try:
-        from .tools.base import ToolRegistry
+        from .tools.base import Tool, ToolRegistry, ToolResult
         from .tools.filesystem import ReadFileTool, ListDirTool, FindFilesTool, GrepTool
         from .tools.code_edit import RunTestsTool
+        from .tools.run_command import RunCommandTool
     except ImportError:
-        from tools.base import ToolRegistry
+        from tools.base import Tool, ToolRegistry, ToolResult
         from tools.filesystem import ReadFileTool, ListDirTool, FindFilesTool, GrepTool
         from tools.code_edit import RunTestsTool
+        from tools.run_command import RunCommandTool
+    return (Tool, ToolRegistry, ToolResult, ReadFileTool, ListDirTool, FindFilesTool,
+            GrepTool, RunTestsTool, RunCommandTool)
+
+
+def build_readonly_registry(project_root: str = ".", sandbox: Any = None,
+                            run_tests: bool = True) -> Any:
+    """The coding registry minus edit_file: a checker that can fix is a worker.
+
+    run_command is offered only with a sandbox, and GoalChecker only passes
+    one built over a throwaway COPY of the workspace. The sandbox confines
+    writes to its workspace; were that the real tree, `sed -i` or a script
+    would let the checker finish the goal itself, unverified. run_tests runs
+    in the same sandbox, over the same copy. run_tests=False when there is no
+    copy: pytest imports the model's conftest.py, and on the real tree with
+    no sandbox that is the model's code running with the owner's rights.
+    """
+    (_, ToolRegistry, _, ReadFileTool, ListDirTool, FindFilesTool, GrepTool,
+     RunTestsTool, RunCommandTool) = _tool_classes()
 
     registry = ToolRegistry()
-    for tool in (
-        ReadFileTool(project_root=project_root),
-        ListDirTool(project_root=project_root),
-        FindFilesTool(project_root=project_root),
-        GrepTool(project_root=project_root),
-        RunTestsTool(project_root=project_root),
-    ):
+    registry.project_root = project_root
+    # The read tools run on the host, outside the sandbox: confined to the
+    # project so a symlink or an absolute path cannot read host secrets.
+    tools = [
+        ReadFileTool(project_root=project_root, confine=True),
+        ListDirTool(project_root=project_root, confine=True),
+        FindFilesTool(project_root=project_root, confine=True),
+        GrepTool(project_root=project_root, confine=True),
+    ]
+    if run_tests:
+        tools.append(RunTestsTool(project_root=project_root, sandbox=sandbox))
+    for tool in tools:
         registry.register(tool)
+    if sandbox is not None:
+        registry.register(RunCommandTool(sandbox))
     return registry
 
 
@@ -167,13 +262,16 @@ NO_DIFF_NOTE = (
 )
 
 
-def build_prompt(goal: str, changed_files: list[str], diff: str) -> str:
+def build_prompt(goal: str, changed_files: list[str], diff: str,
+                 can_run: bool = True, can_test: bool = True) -> str:
     files = "\n".join(f"- {f}" for f in changed_files) or "(none)"
+    note = "" if can_run else f"\n\n{NO_SANDBOX_NOTE if can_test else NO_EXEC_NOTE}"
     return (
         f"The user's goal, verbatim:\n{goal}\n\n"
         f"Files changed so far:\n{files}\n\n"
         f"Diff of the changes:\n{_truncate(diff) or NO_DIFF_NOTE}\n\n"
         f"{INSTRUCTIONS}"
+        + note
     )
 
 
@@ -210,6 +308,37 @@ def _as_bool(value: Any) -> bool:
     return bool(value)
 
 
+def verdict_from_data(data: Any) -> Optional[GoalVerdict]:
+    """A verdict from the tool's arguments or a parsed JSON reply, or None."""
+    if not isinstance(data, dict) or "complete" not in data:
+        return None
+    raw_missing = data.get("missing") or []
+    if isinstance(raw_missing, str):
+        # Some providers hand nested arrays over as a JSON string.
+        try:
+            raw_missing = json.loads(raw_missing)
+        except ValueError:
+            raw_missing = []
+    missing = []
+    for item in raw_missing if isinstance(raw_missing, list) else []:
+        if isinstance(item, dict) and str(item.get("action", "")).strip():
+            missing.append({"action": str(item["action"]).strip(),
+                            "file": str(item.get("file") or "").strip()})
+    complete = _as_bool(data["complete"])
+    if not complete and not missing:
+        # "Incomplete, nothing to do" ended the goal with zero follow-up
+        # rounds: a finished goal reported failed, or a gap never attempted.
+        # As no verdict, the tool refuses it and the text path nudges.
+        return None
+    return GoalVerdict(
+        # A verdict of "complete" that still lists work is not complete.
+        complete=complete and not missing,
+        missing=missing[:MAX_MISSING],
+        reasoning=str(data.get("reasoning", "")),
+        verified=True,
+    )
+
+
 def parse_verdict(text: str) -> Optional[GoalVerdict]:
     """The checker's reply as a verdict, or None when no usable JSON is in it."""
     for candidate in _json_candidates(text or ""):
@@ -217,41 +346,190 @@ def parse_verdict(text: str) -> Optional[GoalVerdict]:
             data = json.loads(candidate)
         except ValueError:
             continue
-        if not isinstance(data, dict) or "complete" not in data:
-            continue
-        missing = []
-        for item in data.get("missing") or []:
-            if isinstance(item, dict) and str(item.get("action", "")).strip():
-                missing.append({"action": str(item["action"]).strip(),
-                                "file": str(item.get("file") or "").strip()})
-        complete = _as_bool(data["complete"])
-        return GoalVerdict(
-            # A verdict of "complete" that still lists work is not complete.
-            complete=complete and not missing,
-            missing=missing[:MAX_MISSING],
-            reasoning=str(data.get("reasoning", "")),
-            verified=True,
-        )
+        verdict = verdict_from_data(data)
+        if verdict is not None:
+            return verdict
     return None
 
 
+def _submit_verdict_tool() -> Any:
+    Tool, _, ToolResult = _tool_classes()[:3]
+
+    class SubmitVerdictTool(Tool):
+        """The checker's answer. Recording it is the whole effect."""
+
+        def __init__(self) -> None:
+            self.verdict: Optional[GoalVerdict] = None
+
+        @property
+        def name(self) -> str:
+            return VERDICT_TOOL
+
+        @property
+        def description(self) -> str:
+            return (
+                "Submit your final verdict on whether the goal is fully done. "
+                "Call it once, after you have tried the goal's behaviour; it "
+                "ends the review."
+            )
+
+        @property
+        def parameters(self) -> dict[str, str]:
+            return {
+                "complete": "true only if every part of the goal works as stated",
+                "missing": "remaining work, one concrete verifiable item per file",
+                "reasoning": "what you ran and saw that decided the verdict",
+            }
+
+        @property
+        def input_schema(self) -> dict[str, Any]:
+            return {
+                "type": "object",
+                "properties": {
+                    "complete": {"type": "boolean",
+                                 "description": self.parameters["complete"]},
+                    "missing": {
+                        "type": "array",
+                        "maxItems": MAX_MISSING,
+                        "description": self.parameters["missing"],
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "action": {"type": "string", "description": (
+                                    "the wrong behaviour, what you observed, and "
+                                    "where to fix it")},
+                                "file": {"type": "string", "description": (
+                                    "path relative to the project root")},
+                            },
+                            "required": ["action", "file"],
+                        },
+                    },
+                    "reasoning": {"type": "string",
+                                  "description": self.parameters["reasoning"]},
+                },
+                "required": ["complete", "missing", "reasoning"],
+            }
+
+        def validate(self, args: dict[str, Any]) -> list[str]:
+            return [] if "complete" in args else ["Missing required parameter: 'complete'"]
+
+        def execute(self, args: dict[str, Any]) -> Any:
+            verdict = verdict_from_data(args)
+            if verdict is None and "complete" in args and not _as_bool(args["complete"]):
+                return ToolResult.fail(INCOMPLETE_NEEDS_ITEMS)
+            if verdict is None:
+                return ToolResult.fail("Could not read the verdict; pass complete, missing, reasoning.")
+            self.verdict = verdict
+            return ToolResult.ok("Verdict recorded. The review is over; reply with nothing more.")
+
+    return SubmitVerdictTool()
+
+
+class _EndOnVerdict:
+    """
+    Wraps the model client so the loop ends once submit_verdict is recorded:
+    the next turn is answered locally with an empty, tool-free reply, which
+    AgentLoop takes as "finished" without another paid call. It also keeps the
+    loop's message list, which the one nudge turn continues from.
+    """
+
+    def __init__(self, inner: Any, verdict_tool: Any) -> None:
+        self._inner = inner
+        self._tool = verdict_tool
+        self.messages: Optional[list] = None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    def complete(self, system: str, messages: list, registry: Any) -> Any:
+        try:
+            from .agent_loop import ModelReply
+        except ImportError:
+            from agent_loop import ModelReply
+        self.messages = messages
+        if self._tool.verdict is not None:
+            return ModelReply(text="")
+        return self._inner.complete(system, messages, registry)
+
+
+class CopyTooLarge(Exception):
+    """The workspace is over the copy cap. Not an OSError: copytree collects
+    those per file and carries on copying."""
+
+
+def _copy_workspace(root: str, max_bytes: Optional[int] = None) -> tuple[str, str]:
+    """(temp dir to remove, the copy inside it) of `root`."""
+    if max_bytes is None:
+        max_bytes = _int_env("AWOS_GOAL_CHECK_MAX_COPY_MB", DEFAULT_MAX_COPY_MB) * 1024 * 1024
+    copied = 0
+    base_ignore = shutil.ignore_patterns(*COPY_IGNORE)
+
+    def _ignore(directory: str, names: list[str]) -> set[str]:
+        skipped = set(base_ignore(directory, names))
+        for name in names:
+            path = os.path.join(directory, name)
+            # An unreadable directory would fail the whole copy.
+            if (name not in skipped and os.path.isdir(path) and not os.path.islink(path)
+                    and not os.access(path, os.R_OK | os.X_OK)):
+                skipped.add(name)
+        return skipped
+
+    def _copy_file(src: str, dst: str) -> None:
+        # A FIFO, a socket or a chmod-000 file the worker left behind made
+        # copytree raise, and the checker then fell back to the real tree.
+        # None of them is source the check needs, so they are skipped.
+        nonlocal copied
+        try:
+            st = os.lstat(src)
+        except OSError:
+            return
+        if not stat.S_ISREG(st.st_mode):
+            return
+        copied += st.st_size
+        if copied > max_bytes:
+            raise CopyTooLarge(f"workspace is over {max_bytes // (1024 * 1024)} MB")
+        try:
+            shutil.copy2(src, dst)
+        except PermissionError:
+            return
+
+    tmp = tempfile.mkdtemp(prefix="awos-goalcheck-")
+    try:
+        name = os.path.basename(os.path.abspath(root)) or "workspace"
+        copy = os.path.join(tmp, name)
+        # symlinks=True: a link is copied as a link, never followed out of
+        # the project; where it points is the sandbox's business.
+        shutil.copytree(root, copy, symlinks=True, ignore=_ignore,
+                        copy_function=_copy_file)
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    return tmp, copy
+
+
+def _default_sandbox(workspace: str) -> Any:
+    try:
+        from .sandbox import make_sandbox
+    except ImportError:
+        from sandbox import make_sandbox
+    return make_sandbox(workspace)
+
+
 class GoalChecker:
-    """Runs one read-only review of the whole goal against the codebase."""
+    """Runs one review of the whole goal, trying it out on a copy of the codebase."""
 
     def __init__(self, client: Any = None, model: Optional[str] = None,
-                 tracker: Any = None, max_turns: Optional[int] = None) -> None:
+                 tracker: Any = None, max_turns: Optional[int] = None,
+                 sandbox_factory: Optional[Callable[[str], Any]] = None) -> None:
         self.client = client
         self.model = model
         self.tracker = tracker
         self.max_turns = max_turns or _int_env("AWOS_GOAL_CHECK_MAX_TURNS", DEFAULT_MAX_TURNS)
+        #: workspace path -> Sandbox or None. Injectable for tests.
+        self.sandbox_factory = sandbox_factory or _default_sandbox
 
     def check(self, goal: str, codebase_root: str, changed_files: list[str],
               diff: str) -> GoalVerdict:
-        try:
-            from .agent_loop import AgentLoop
-        except ImportError:
-            from agent_loop import AgentLoop
-
         client, model = self.client, self.model or ""
         if client is None:
             try:
@@ -260,32 +538,122 @@ class GoalChecker:
                 logger.warning("[GOAL CHECK] no model client (%s); skipped", exc)
                 return GoalVerdict(True, reasoning=f"goal check skipped: no model client ({exc})")
 
+        tmp, sandbox, copied = None, None, True
         try:
-            outcome = AgentLoop(
-                registry=build_readonly_registry(codebase_root),
-                client=client,
-                max_turns=self.max_turns,
-                system_prompt=SYSTEM_PROMPT,
-            ).run(build_prompt(goal, changed_files, diff))
+            try:
+                tmp, workspace = _copy_workspace(codebase_root)
+            except Exception as exc:
+                # Without a copy there is nowhere safe to run code: review the
+                # real tree by reading only, with no run_command or run_tests.
+                logger.warning("[GOAL CHECK] could not copy the workspace (%s); "
+                               "reviewing read-only", exc)
+                workspace, copied = codebase_root, False
+            else:
+                try:
+                    sandbox = self.sandbox_factory(workspace)
+                except Exception as exc:
+                    logger.warning("[GOAL CHECK] no sandbox (%s); run_command not offered", exc)
+            return self._review(client, model, goal, workspace, sandbox,
+                                changed_files, diff, can_test=copied)
         except Exception as exc:
             logger.warning("[GOAL CHECK] checker crashed (%s); treated as complete", exc)
             return GoalVerdict(True, reasoning=f"goal check failed to run: {exc}")
+        finally:
+            if sandbox is not None:
+                try:
+                    sandbox.close()
+                except Exception as exc:
+                    logger.warning("[GOAL CHECK] sandbox close failed: %s", exc)
+            if tmp is not None:
+                shutil.rmtree(tmp, ignore_errors=True)
 
-        self._record_usage(model or getattr(client, "model", "") or "", outcome)
-        verdict = parse_verdict(outcome.final_message)
+    def _review(self, client: Any, model: str, goal: str, workspace: str,
+                sandbox: Any, changed_files: list[str], diff: str,
+                can_test: bool = True) -> GoalVerdict:
+        try:
+            from .agent_loop import AgentLoop
+        except ImportError:
+            from agent_loop import AgentLoop
+
+        verdict_tool = _submit_verdict_tool()
+        registry = build_readonly_registry(workspace, sandbox=sandbox, run_tests=can_test)
+        registry.register(verdict_tool)
+        gated = _EndOnVerdict(client, verdict_tool)
+        outcome = AgentLoop(
+            registry=registry,
+            client=gated,
+            max_turns=self.max_turns,
+            system_prompt=SYSTEM_PROMPT,
+        ).run(build_prompt(goal, changed_files, diff, can_run=sandbox is not None,
+                           can_test=can_test))
+        tokens_in, tokens_out = outcome.input_tokens, outcome.output_tokens
+
+        verdict, source = verdict_tool.verdict, "tool"
         if verdict is None:
-            logger.warning("[GOAL CHECK] unparseable reply (stop=%s): %.300s",
+            verdict, source = parse_verdict(outcome.final_message), "text"
+        if verdict is None and outcome.stop_reason in NUDGEABLE_STOPS:
+            verdict, source, n_in, n_out = self._nudge(
+                client, registry, verdict_tool, gated.messages, outcome)
+            tokens_in, tokens_out = tokens_in + n_in, tokens_out + n_out
+
+        self._record_usage(model or getattr(client, "model", "") or "", tokens_in, tokens_out)
+        if verdict is None:
+            logger.warning("[GOAL CHECK] no verdict (stop=%s): %.300s",
                            outcome.stop_reason, outcome.final_message)
             verdict = GoalVerdict(
                 True,
                 reasoning=(f"goal check reply could not be parsed "
-                           f"(stop={outcome.stop_reason}); treated as complete"),
+                           f"(stop={outcome.stop_reason}, no {VERDICT_TOOL} call "
+                           f"even after a nudge); treated as complete"),
             )
-        verdict.input_tokens = outcome.input_tokens
-        verdict.output_tokens = outcome.output_tokens
+        else:
+            verdict.source = source
+            for item in verdict.missing:
+                item["file"] = _relative_to(item["file"], workspace)
+        verdict.input_tokens = tokens_in
+        verdict.output_tokens = tokens_out
         return verdict
 
-    def _record_usage(self, model: str, outcome: Any) -> None:
+    def _nudge(self, client: Any, registry: Any, verdict_tool: Any,
+               messages: Optional[list], outcome: Any) -> tuple:
+        """One more turn asking for the verdict. (verdict, source, in, out)."""
+        try:
+            from .agent_loop import ModelReply
+        except ImportError:
+            from agent_loop import ModelReply
+
+        history = list(messages or [])
+        if not history:
+            return None, "", 0, 0
+        if history[-1].get("role") == "assistant":
+            # Tool calls the loop stopped before answering; the API rejects
+            # them unanswered, and the nudge does not need them.
+            history.pop()
+        if outcome.stop_reason == "completed" and outcome.final_message:
+            history.append(client.format_assistant_turn(ModelReply(text=outcome.final_message)))
+        last = history[-1] if history else None
+        if last and last.get("role") == "user" and isinstance(last.get("content"), list):
+            # Anthropic tool results: add the nudge to that user turn rather
+            # than sending two user turns in a row.
+            history[-1] = {**last, "content": [*last["content"],
+                                               {"type": "text", "text": NUDGE_MESSAGE}]}
+        else:
+            history.append({"role": "user", "content": NUDGE_MESSAGE})
+
+        try:
+            reply = client.complete(SYSTEM_PROMPT, history, registry)
+        except Exception as exc:
+            logger.warning("[GOAL CHECK] nudge turn failed: %s", exc)
+            return None, "", 0, 0
+        for call in reply.tool_calls:
+            if call.name == VERDICT_TOOL:
+                registry.execute(call.name, call.arguments)
+        if verdict_tool.verdict is not None:
+            return verdict_tool.verdict, "nudge_tool", reply.input_tokens, reply.output_tokens
+        verdict = parse_verdict(reply.text)
+        return verdict, "nudge_text" if verdict else "", reply.input_tokens, reply.output_tokens
+
+    def _record_usage(self, model: str, input_tokens: int, output_tokens: int) -> None:
         # Same book-keeping as the agent-loop executor, or the budget hard-stop
         # never sees what the check costs.
         try:
@@ -298,9 +666,20 @@ class GoalChecker:
         record_api_usage(
             request_type="goal_check",
             model=model,
-            input_tokens=outcome.input_tokens,
-            output_tokens=outcome.output_tokens,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
             input_price=price_in,
             output_price=price_out,
             tracker=self.tracker,
         )
+
+
+def _relative_to(path: str, workspace: str) -> str:
+    """A path the checker gave inside its copy, as the real project knows it."""
+    if not path:
+        return path
+    for base in (os.path.realpath(workspace), os.path.abspath(workspace), "/workspace"):
+        prefix = base.rstrip("/") + "/"
+        if path.startswith(prefix):
+            return path[len(prefix):]
+    return path

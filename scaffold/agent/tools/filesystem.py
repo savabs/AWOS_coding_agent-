@@ -15,9 +15,12 @@ import fnmatch
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from .base import Tool, ToolResult
+
+#: .env and .env.<anything>: the same names the sandbox denies.
+_DOTENV = re.compile(r"^\.env(\.[^/]*)?$")
 
 
 class _RootedTool(Tool):
@@ -29,16 +32,32 @@ class _RootedTool(Tool):
     and `edit_file` in the same registry would disagree about what "calc.py"
     means. Defaults to the process cwd, preserving prior behaviour for every
     existing caller.
+
+    confine=True keeps the tool inside project_root and away from .env files.
+    These tools run on the host, not in the sandbox, so the sandbox's deny
+    rules never applied to them: an absolute path or a symlink read the
+    owner's real ~/.zshrc or the project's .env into the model's context.
     """
 
-    def __init__(self, project_root: str = ".") -> None:
+    def __init__(self, project_root: str = ".", confine: bool = False) -> None:
         self.project_root = Path(project_root).expanduser().resolve()
+        self.confine = confine
 
     def _resolve(self, raw: str) -> Path:
         path = Path(str(raw).strip()).expanduser()
         if not path.is_absolute():
             path = self.project_root / path
         return path.resolve()
+
+    def _refusal(self, path: Path) -> Optional[str]:
+        """Why a confined tool may not use `path`, or None. Pass it resolved."""
+        if not self.confine:
+            return None
+        if not path.is_relative_to(self.project_root):
+            return f"Refused: {path} is outside the project ({self.project_root})"
+        if any(_DOTENV.match(part) for part in path.relative_to(self.project_root).parts):
+            return f"Refused: {path.name} holds secrets and is not readable"
+        return None
 
 
 class ReadFileTool(_RootedTool):
@@ -67,6 +86,9 @@ class ReadFileTool(_RootedTool):
 
     def execute(self, args: dict[str, Any]) -> ToolResult:
         path = self._resolve(args["path"])
+        refusal = self._refusal(path)
+        if refusal:
+            return ToolResult.fail(refusal)
         if not path.exists():
             return ToolResult.fail(f"File not found: {path}")
         if not path.is_file():
@@ -148,6 +170,9 @@ class ListDirTool(_RootedTool):
 
     def execute(self, args: dict[str, Any]) -> ToolResult:
         dir_path = self._resolve(args.get("path", "."))
+        refusal = self._refusal(dir_path)
+        if refusal:
+            return ToolResult.fail(refusal)
         recursive = str(args.get("recursive", "false")).lower() in ("true", "1", "yes")
 
         if not dir_path.exists():
@@ -208,10 +233,15 @@ class FindFilesTool(_RootedTool):
         root = self._resolve(args.get("root", "."))
         max_results = int(args.get("max_results", 50))
 
+        refusal = self._refusal(root)
+        if refusal:
+            return ToolResult.fail(refusal)
         if not root.exists():
             return ToolResult.fail(f"Root directory not found: {root}")
 
-        matches = sorted(root.glob(pattern))[:max_results]
+        # A pattern can climb out ("../*") and a match can be a symlink out.
+        matches = [m for m in sorted(root.glob(pattern)) if not self._refusal(m.resolve())]
+        matches = matches[:max_results]
         lines = [f"Find: {pattern!r} under {root}\n"]
         results = []
         for m in matches:
@@ -266,9 +296,13 @@ class GrepTool(_RootedTool):
         except re.error as e:
             return ToolResult.fail(f"Invalid regex: {e}")
 
+        refusal = self._refusal(root)
+        if refusal:
+            return ToolResult.fail(refusal)
+
         hits: list[dict] = []
         for filepath in sorted(root.rglob(file_glob)):
-            if not filepath.is_file():
+            if not filepath.is_file() or self._refusal(filepath.resolve()):
                 continue
             try:
                 text = filepath.read_text(encoding="utf-8", errors="replace")

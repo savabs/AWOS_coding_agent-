@@ -203,3 +203,45 @@ def test_executor_choice(monkeypatch, value, expected):
     else:
         monkeypatch.setenv("AWOS_EXECUTOR", value)
     assert executor_choice() == expected
+
+
+def _single_task(file_value, executor, monkeypatch):
+    """_execute_single_task up to the executor call, which is stubbed."""
+    monkeypatch.setenv("AWOS_EXECUTOR", executor)
+    root = Path(tempfile.mkdtemp())
+    (root / "calc.py").write_text("x = 1\n", encoding="utf-8")
+    orch = _orchestrator()
+    orch.tracker = None
+    orch.worker = SimpleNamespace(_dead_providers=set())
+    orch.context_pipeline = None
+    orch.vector_memory = None
+    orch.react_worker = None
+    orch._maybe_fit_gp = MagicMock()
+    orch.escalation.decide.return_value = SimpleNamespace(
+        spec=SimpleNamespace(name="m", level=SimpleNamespace(value=1), model_id="m",
+                             cost_per_req=0.0, provider="p"), reason="r")
+    orch.escalation.summary.return_value = ""
+    orch._execute_task_via_agent_loop = MagicMock(return_value={"task_id": "gc1_1", "success": True})
+    ledger = MagicMock()
+    ledger.check_budget.return_value = (True, "")
+    ctx = {"codebase_root": str(root), "codebase_context": {}, "sym_index": None,
+           "git": MagicMock(), "session": MagicMock()}
+    with patch("scaffold.agent.budget_ledger.get_ledger", return_value=ledger):
+        out = orch._execute_single_task(
+            {"task_id": "gc1_1", "action": "--to must include 23:59", "file": file_value}, ctx)
+    return out, orch
+
+
+@pytest.mark.parametrize("file_value", ["", "multiple files", "."])
+def test_follow_up_without_a_single_file_still_runs_the_agent_loop(file_value, monkeypatch):
+    # An empty "file" from the goal check resolved to the project root and
+    # open() raised IsADirectoryError out of the whole goal-check round.
+    out, orch = _single_task(file_value, "agent_loop", monkeypatch)
+    assert out["success"] is True
+    orch._execute_task_via_agent_loop.assert_called_once()
+
+
+def test_no_single_file_fails_cleanly_for_the_single_file_executors(monkeypatch):
+    out, orch = _single_task("", "worker", monkeypatch)
+    assert out["success"] is False and out["failure_kind"] == "file_not_found"
+    orch._execute_task_via_agent_loop.assert_not_called()
