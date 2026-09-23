@@ -115,13 +115,20 @@ model.
 
 ---
 
+**All 12 cases through the real orchestrator: 12/12**, $0.0126 total from the
+BudgetLedger, one task per case, tests verified by the orchestrator on every
+one (`scripts/prove_agent_loop_executor.py --all`). The first 12-case run
+exposed a fifth defect — agent-loop spend never reached the TokenTracker or
+BudgetLedger, so the budget hard-stop was blind to it — now fixed.
+
+---
+
 ## The single next action
 
-Run the full 12-case benchmark **through the orchestrator**, not just the
-executor in isolation — extend `prove_agent_loop_executor.py` to loop all
-cases. The two cases proved so far exercise the planner-less path
-(`pre_planned_tasks`); the next risk is the planner → task → executor chain on
-a real goal.
+Exercise the **planner** chain. Every orchestrator proof so far passed
+`pre_planned_tasks`; the untested path is goal → CheapPlanner (qwen3.7-plus) →
+tasks → agent loop. Add a `--plan` mode to `prove_agent_loop_executor.py` that
+passes only the goal, and run the 12 cases through it.
 
 ## Also open
 

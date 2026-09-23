@@ -1410,6 +1410,25 @@ class Orchestrator:
             on_event=_on_event,
         ).run(self._agent_loop_prompt(task, ctx))
 
+        # Feed the spend to TokenTracker + BudgetLedger, as every other executor
+        # does per call; without this the budget hard-stop never saw it.
+        try:
+            from .agent_loop import _price_for
+            from .usage_record import record_api_usage
+        except ImportError:
+            from agent_loop import _price_for
+            from usage_record import record_api_usage
+        price_in, price_out = _price_for(model) or (0.0, 0.0)
+        record_api_usage(
+            request_type="agent_loop",
+            model=model,
+            input_tokens=outcome.input_tokens,
+            output_tokens=outcome.output_tokens,
+            input_price=price_in,
+            output_price=price_out,
+            tracker=getattr(self, "tracker", None),
+        )
+
         files_changed = [os.path.relpath(p, codebase_root) for p in outcome.files_touched]
 
         # Verify independently of what the model claimed.

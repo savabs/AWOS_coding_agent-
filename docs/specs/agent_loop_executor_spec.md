@@ -79,6 +79,12 @@ fresh git repo, then checks the file it left with the case's own tests.
 
 Model: DeepSeek v4 Flash via OpenRouter, chosen by the escalation ladder.
 
+**All 12 cases** (`--all`, `.awos/orchestrator_proof_20260923T140143.json`):
+12/12 — orchestrator success and independent tests agree on every case; one
+task per case, none failed; orchestrator's own test run executed on all 12 at
+100%; $0.0126 total from the BudgetLedger (~$0.001/case); 75 requests, all to
+openrouter.ai.
+
 ### Defects found on the way, all fixed
 
 Each one blocked or falsified a real orchestrator run; none was visible to the
@@ -98,3 +104,7 @@ unit suite.
 4. **The stagnation breaker crashed** when runtime sessions are off
    (`None.pause_reason`), and without a session the run did not stop. Both
    fixed.
+5. **Agent-loop spend was invisible to the budget** — the first 12-case run
+   recorded nothing in TokenTracker or BudgetLedger, so the monthly hard-stop
+   could not see it. The executor now records each run via
+   `record_api_usage`.

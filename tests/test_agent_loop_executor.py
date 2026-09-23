@@ -86,6 +86,16 @@ def test_edit_that_passes_tests_succeeds_and_is_recorded():
     ctx["git"].rollback_file.assert_not_called()
 
 
+def test_spend_reaches_the_tracker_and_ledger():
+    # Unrecorded, agent-loop spend was invisible to the budget hard-stop.
+    with patch("scaffold.agent.usage_record.record_api_usage") as record:
+        _run(EDIT)
+    kwargs = record.call_args.kwargs
+    assert kwargs["request_type"] == "agent_loop"
+    assert kwargs["input_tokens"] == 300 and kwargs["output_tokens"] == 60
+    assert kwargs["input_price"] > 0
+
+
 def test_failing_tests_fail_the_task_and_roll_back():
     failing = TestResult(passed=0, failed=1, errors=0, pass_rate=0.0,
                          raw_output="", no_tests_found=False)
