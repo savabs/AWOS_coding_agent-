@@ -73,8 +73,13 @@ def _ledger_entries() -> list:
         return []
 
 
-def run_case(case) -> dict:
-    """One case: fresh git repo, fresh Orchestrator, independent verdict."""
+def run_case(case, plan: bool = False) -> dict:
+    """
+    One case: fresh git repo, fresh Orchestrator, independent verdict.
+
+    plan=False hands the orchestrator one pre-written task. plan=True hands it
+    only the goal, so CheapPlanner must decide the tasks and their files.
+    """
     hosts.clear()
     ledger_before = len(_ledger_entries())
     started = time.monotonic()
@@ -89,12 +94,13 @@ def run_case(case) -> dict:
         from scaffold.agent.orchestrator import Orchestrator
 
         task = {"task_id": 1, "file": case.target_file, "action": case.action, "complexity": "low"}
-        print(f"\n=== Orchestrator, AWOS_EXECUTOR=agent_loop, case {case.name} ===\n", flush=True)
+        mode = "planner" if plan else "pre-planned task"
+        print(f"\n=== Orchestrator, AWOS_EXECUTOR=agent_loop, {mode}, case {case.name} ===\n", flush=True)
         try:
             report = Orchestrator().execute_feature(
                 goal=case.action,
                 codebase_root=str(project),
-                pre_planned_tasks=[task],
+                pre_planned_tasks=None if plan else [task],
                 auto_approve_plan=True,
             )
         except Exception as exc:  # a crash is a result, not the end of the run
@@ -125,6 +131,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--case", default="b1_constant_mismatch")
     parser.add_argument("--all", action="store_true", help="Run every case in tests/bug_cases")
+    parser.add_argument("--plan", action="store_true",
+                        help="Give the orchestrator only the goal; its planner writes the tasks")
     args = parser.parse_args()
 
     cases_dir = REPO / "tests" / "bug_cases"
@@ -133,7 +141,7 @@ def main() -> int:
     results = []
     for index, name in enumerate(names, 1):
         print(f"\n########## [{index}/{len(names)}] {name} ##########", flush=True)
-        r = run_case(load_case(cases_dir / name))
+        r = run_case(load_case(cases_dir / name), plan=args.plan)
         results.append(r)
         ok = r["orchestrator_success"] and r["tests_pass"]
         print(f"\n[{index}/{len(names)}] {name}: "
@@ -166,7 +174,8 @@ def main() -> int:
         print(f"  orchestrator and tests DISAGREE on: {', '.join(disagree)}")
     print("=" * 78)
 
-    out = REPO / ".awos" / f"orchestrator_proof_{time.strftime('%Y%m%dT%H%M%S')}.json"
+    kind = "plan" if args.plan else "proof"
+    out = REPO / ".awos" / f"orchestrator_{kind}_{time.strftime('%Y%m%dT%H%M%S')}.json"
     out.write_text(json.dumps(results, indent=2), encoding="utf-8")
     print(f"  Saved {out.relative_to(REPO)}")
     ok = len(passed) == len(results) and set(all_hosts) <= {"openrouter.ai"}
