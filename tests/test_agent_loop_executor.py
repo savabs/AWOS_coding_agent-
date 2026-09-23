@@ -104,12 +104,58 @@ def test_failing_tests_fail_the_task_and_roll_back():
     ctx["git"].rollback_file.assert_called_once_with(str(root / "calc.py"))
 
 
-def test_finishing_without_an_edit_is_a_failure():
-    # The ReAct failure mode: claim done, change nothing.
-    out, ctx, _ = _run([ModelReply(text="All tests now pass.", input_tokens=10, output_tokens=5)])
+RED = TestResult(passed=0, failed=2, errors=0, pass_rate=0.0, raw_output="", no_tests_found=False)
+
+
+def test_claiming_done_without_an_edit_fails_when_tests_fail():
+    # The ReAct failure mode: claim done, change nothing — and the tests disagree.
+    out, ctx, _ = _run([ModelReply(text="All tests now pass.", input_tokens=10, output_tokens=5)],
+                       test_result=RED)
     assert out["success"] is False
     assert out["failure_kind"] == "agent_loop_fail"
     assert "without editing" in out["verify_error"]
+
+
+def test_no_edit_needed_is_success_when_tests_already_pass():
+    # An earlier task already did the work; the tests, not the model, say so.
+    out, ctx, _ = _run([ModelReply(text="Nothing to change.", input_tokens=10, output_tokens=5)])
+    assert out["success"] is True
+    ctx["git"].rollback_file.assert_not_called()
+
+
+def test_a_test_writing_task_is_not_failed_by_its_red_tests():
+    root_script = [
+        _call("edit_file", {"path": "test_calc.py", "old_string": "# tests",
+                            "new_string": "# tests\ndef test_add():\n    assert add(1, 2) == 3"}),
+        ModelReply(text="Added a reproduction test.", input_tokens=10, output_tokens=5),
+    ]
+    root = Path(tempfile.mkdtemp())
+    (root / "calc.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
+    (root / "test_calc.py").write_text("# tests\n", encoding="utf-8")
+    orch = _orchestrator()
+    ctx = {"codebase_root": str(root), "git": MagicMock(), "session": MagicMock(), "codebase_context": {}}
+    spec = SimpleNamespace(model_id="m", name="m", cost_per_req=0.0, level=SimpleNamespace(value=3))
+    runner = MagicMock()
+    runner.return_value.run.return_value = RED
+    with patch("scaffold.agent.agent_loop.build_client_from_env", return_value=_Scripted(root_script)), \
+         patch("scaffold.agent.orchestrator.TestRunner", runner):
+        out = orch._execute_task_via_agent_loop(
+            {"task_id": 1, "action": "Add a test that reproduces the add() bug", "file": "test_calc.py"},
+            ctx, task_id=1, esc_decision=SimpleNamespace(spec=spec), _span=MagicMock(),
+            _strategy=SimpleNamespace(name="d"), _task_ts=0.0, _live_t=None, _task_usage={},
+        )
+    assert out["success"] is True
+    ctx["git"].rollback_file.assert_not_called()
+
+
+def test_a_fix_task_that_only_edits_tests_is_still_judged_by_them():
+    # Editing tests is not a free pass: a fix task stays red if its tests fail.
+    script = [
+        _call("edit_file", {"path": "calc.py", "old_string": "a - b", "new_string": "a - b  # todo"}),
+        ModelReply(text="done", input_tokens=10, output_tokens=5),
+    ]
+    out, ctx, _ = _run(script, test_result=RED)
+    assert out["success"] is False
 
 
 def test_no_model_client_falls_back():

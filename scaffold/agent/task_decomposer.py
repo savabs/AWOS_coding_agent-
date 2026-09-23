@@ -37,7 +37,9 @@ class TaskDecomposer:
 
     def decompose(self, task: dict[str, Any]) -> list[dict[str, Any]]:
         """
-        Break *task* into 2-4 simpler sub-tasks.
+        Break *task* into 2-4 simpler sub-tasks, or [] when it has no genuine
+        split — the caller then leaves the task failed rather than retrying it
+        under a new name.
 
         Each sub-task inherits the original file unless the heuristic
         discovers a new file target. Complexity is lowered by 2-3 points.
@@ -105,17 +107,20 @@ Example:
         task_id = task.get("task_id", "sub")
         depth = task.get("decomposition_depth", 0)
 
-        # Split by conjunctions that indicate sequential steps
-        delimiters = r"\b(and then|then|and|followed by|after that)\b"
-        parts = [p.strip() for p in re.split(delimiters, action, flags=re.IGNORECASE) if p.strip()]
+        # Split by conjunctions that indicate sequential steps. The group must be
+        # non-capturing: re.split returns captured separators as parts, which
+        # once produced a sub-task whose whole action was "and".
+        delimiters = r"\b(?:and then|then|and|followed by|after that)\b"
+        parts = self._actionable(re.split(delimiters, action, flags=re.IGNORECASE))
 
         # If no clear split, split by file mentions or action verbs
         if len(parts) < 2:
-            parts = self._split_by_verbs(action)
+            parts = self._actionable(self._split_by_verbs(action))
 
-        # Ensure at least 2 sub-tasks, cap at 4
+        # No genuine split: a reworded copy ("Prepare X" / "Complete X") is not
+        # simpler, it just repeats the failure. Decline, and let the task fail.
         if len(parts) < 2:
-            parts = [f"Prepare {action}", f"Complete {action}"]
+            return []
 
         parts = parts[:4]
 
@@ -131,6 +136,13 @@ Example:
             })
 
         return sub_tasks
+
+    #: A fragment shorter than this is not a task ("Review", "the tests").
+    _MIN_WORDS = 3
+
+    @classmethod
+    def _actionable(cls, fragments: list[str]) -> list[str]:
+        return [f.strip() for f in fragments if len(f.split()) >= cls._MIN_WORDS]
 
     @staticmethod
     def _split_by_verbs(text: str) -> list[str]:

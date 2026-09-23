@@ -26,6 +26,26 @@ def executor_choice() -> str:
     """
     return os.getenv("AWOS_EXECUTOR", "agent_loop").strip().lower()
 
+
+def _is_test_file(path: str) -> bool:
+    name = os.path.basename(path)
+    parts = path.replace("\\", "/").split("/")
+    return (
+        name.startswith("test_")
+        or name.endswith("_test.py")
+        or name.endswith(".test.js")
+        or name.endswith(".test.ts")
+        or "tests" in parts[:-1]
+    )
+
+
+def _asks_for_tests(task: dict) -> bool:
+    """The task's own purpose is writing tests (e.g. a reproduction test)."""
+    action = str(task.get("action", "")).lower()
+    return "test" in action and any(
+        verb in action for verb in ("add", "write", "create", "reproduc")
+    )
+
 try:
     from .agent_state_manager import AgentStateManager
     from .cheap_planner import CheapPlanner
@@ -1430,27 +1450,54 @@ class Orchestrator:
         )
 
         files_changed = [os.path.relpath(p, codebase_root) for p in outcome.files_touched]
+        needs_edits = ReActWorker._task_needs_edits(task)
+        writes_tests = (
+            bool(files_changed)
+            and all(_is_test_file(f) for f in files_changed)
+            and _asks_for_tests(task)
+        )
 
-        # Verify independently of what the model claimed.
+        # Verify independently of what the model claimed — including when it
+        # edited nothing: an earlier task may already have done the work.
         test_result = None
-        if files_changed:
+        if files_changed or needs_edits:
             try:
-                test_result = TestRunner(project_root=codebase_root).run(changed_files=files_changed)
+                test_result = TestRunner(project_root=codebase_root).run(
+                    changed_files=files_changed or task_files(task)
+                )
             except Exception as exc:
                 logger.warning("[TASK %s] TestRunner error: %s", task_id, exc)
 
+        tests_ran = test_result is not None and not getattr(test_result, "no_tests_found", True)
+        already_satisfied = (
+            not files_changed
+            and needs_edits
+            and tests_ran
+            and test_result.failed == 0
+            and test_result.passed > 0
+        )
+
         completed = outcome.stop_reason == "completed"
-        edited_enough = bool(files_changed) or not ReActWorker._task_needs_edits(task)
+        summary = outcome.final_message[:500]
         if not completed:
-            error = f"AgentLoop stopped: {outcome.stop_reason}"
-        elif not edited_enough:
-            error = "AgentLoop finished without editing any file"
+            success, error = False, f"AgentLoop stopped: {outcome.stop_reason}"
+        elif files_changed or not needs_edits:
+            success, error = True, ""
+        elif already_satisfied:
+            success, error = True, ""
+            summary = f"Already satisfied — {test_result.passed} test(s) pass with no change needed."
         else:
-            error = ""
+            success, error = False, "AgentLoop finished without editing any file"
+
+        if writes_tests and tests_ran and test_result.failed > 0:
+            # A task that adds tests for unfixed behaviour is red by design;
+            # the goal's final state, not this step, is what gets judged.
+            summary = f"Added tests; {test_result.failed} fail as expected until the fix lands. {summary}"
+            test_result = None
 
         result = {
-            "success": completed and edited_enough,
-            "summary": outcome.final_message[:500],
+            "success": success,
+            "summary": summary,
             "error": error,
             "files_changed": files_changed,
             "steps": [

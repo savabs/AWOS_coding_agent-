@@ -64,7 +64,7 @@ class CheapPlanner:
         symbols = codebase_context.get("symbols", [])
         symbols_str = "\n".join(symbols[:20]) if symbols else "(none)"
 
-        prompt = f"""You are a code improvement expert. Break down this goal into 2-4 atomic micro-tasks.
+        prompt = f"""You are a code improvement expert. Break down this goal into 1-4 atomic micro-tasks.
 
 GOAL: {goal}
 
@@ -79,15 +79,22 @@ RULES:
 2. Tasks are simple enough for DeepSeek to handle
 3. Order tasks so dependencies are handled first
 4. Estimate complexity: low (minor change), medium (refactor), high (new feature)
+5. A fix in one place is ONE task. Do not split one fix into "prepare",
+   "update", "verify" or "review" steps — the executor reads, edits and runs
+   the tests itself.
+6. Never make "write a failing test" its own task: reproducing a bug and
+   fixing it belong in the same task.
+7. Existing tests are the contract. Never plan to change their assertions to
+   make them pass.
 
-RESPOND WITH ONLY JSON (no markdown, no text before/after):
+RESPOND WITH ONLY JSON (no markdown, no text before/after). One task per
+independent change; add more entries only for genuinely separate changes:
 {{
   "plan": [
-    {{"task_id": 1, "file": "path/file.py", "action": "specific action", "complexity": "low"}},
-    {{"task_id": 2, "file": "...", "action": "...", "complexity": "..."}}
+    {{"task_id": 1, "file": "path/file.py", "action": "specific action", "complexity": "low"}}
   ],
   "reasoning": "Brief explanation",
-  "total_tasks": 2
+  "total_tasks": 1
 }}"""
 
         try:

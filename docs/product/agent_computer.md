@@ -101,9 +101,15 @@ first*).
 
 ## Milestones (each ends with a live proof)
 
-- **M0 — Goal → result is dependable.** Fix the four planner-path defects
-  (no-edit-needed counted as failure; failing-test-first tasks punished; the
-  decomposer splitting on words; over-splitting). *Proof:* 12/12 via `--plan`.
+- **M0 — Goal → result is dependable. ✅ Done 2026-09-23.** Fixed the four
+  planner-path defects (no-edit-needed counted as failure; failing-test-first
+  tasks punished; the decomposer splitting on words; over-splitting).
+  *Proof:* 12/12 via `--plan`, $0.011, one task per goal, ~7 min total
+  (was 9/12, $0.080, ~53 min) — `.awos/orchestrator_plan_20260923T192147.json`.
+- **M0.5 — Realistic long-task suite.** User-shaped jobs on a multi-file
+  project, judged by hidden tests, with real budgets (~150 turns, $1, 30 min).
+  *Proof:* a baseline score. Expected to expose the 12-turn cap and the
+  ever-growing conversation, which then drive M2.
 - **M1 — Always-on host.** `awos serve` + job queue + restart safety.
   *Proof:* submit 3 jobs, kill the process mid-job, it resumes and finishes.
 - **M2 — Hours-long job.** Checkpoints and resume on a real repo, in an
