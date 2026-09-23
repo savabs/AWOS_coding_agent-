@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-AWOS — Learnable Operating System for Autonomous Work
-=====================================================
+AWOS — runtime for autonomous agents (see VISION.md)
+====================================================
 
 AWOS is a greedy meta-AI that optimizes quality × speed ÷ cost on every project.
 The coding agent is App #1 on the kernel. See VISION.md for full identity.
@@ -12,6 +12,12 @@ Usage (primary interface):
     awos worker resume [session_id]   Continue paused work
     awos worker diff [session_id]     Show sandbox changes
     awos worker cancel [session_id]   Stop active work
+
+Job host (always-on; jobs survive crashes and restarts):
+    awos submit "<goal>" [--root DIR] [--ability coding]   Queue a job, print its id
+    awos host [--once]                Run queued jobs one at a time
+    awos jobs [--all]                 List jobs
+    awos job <id>                     Show a job's record and report path
 
 Advanced commands:
     awos run <goal>              Execute via orchestrator directly (power users)
@@ -962,7 +968,10 @@ def cmd_agent(args):
         max_cost_usd=getattr(args, "max_cost", None),
         on_event=show if not getattr(args, "quiet", False) else None,
     )
-    outcome = loop.run(args.goal)
+    try:
+        outcome = loop.run(args.goal)
+    finally:
+        registry.close()  # release the sandbox (container / temp dir)
 
     print(f"\nResult:   {'✓' if outcome.success else '✗'} ({outcome.stop_reason})")
     print(f"Turns:    {outcome.turns}   Tool calls: {outcome.tool_calls} "
@@ -1047,6 +1056,75 @@ def cmd_goals(args):
         print(f"  {status_icon} [{g['status']:12}] {g['goal'][:55]}")
         print(f"     completed: {completed}  failed: {failed}  updated: {g['last_updated']}")
     print()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Job host commands (M1 — the always-on host; see scaffold/agent/job_host.py)
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _age(iso: str) -> str:
+    try:
+        secs = (datetime.now() - datetime.fromisoformat(iso)).total_seconds()
+    except (TypeError, ValueError):
+        return "-"
+    for unit, size in (("d", 86400), ("h", 3600), ("m", 60)):
+        if secs >= size:
+            return f"{secs / size:.0f}{unit}"
+    return f"{secs:.0f}s"
+
+
+def cmd_submit(args):
+    """Queue a job for the host; print its id."""
+    from scaffold.agent.job_host import JobStore
+
+    root = Path(args.root).resolve()
+    if not root.is_dir():
+        sys.exit(f"Not a directory: {root}")
+    try:
+        job = JobStore().submit(args.goal, root=root, ability=args.ability)
+    except ValueError as exc:
+        sys.exit(f"Error: {exc}")
+    print(job.id)
+
+
+def cmd_host(args):
+    """Run the job host: take queued jobs one at a time until stopped."""
+    from scaffold.agent.job_host import JobHost
+
+    try:
+        JobHost().serve(poll_sec=args.poll, once=args.once)
+    except RuntimeError as exc:
+        sys.exit(f"Error: {exc}")
+
+
+def cmd_jobs(args):
+    """List jobs (unfinished only, unless --all)."""
+    from scaffold.agent.job_host import FINAL_STATUSES, JobStore
+
+    jobs = JobStore().list()
+    if not args.all:
+        jobs = [j for j in jobs if j.status not in FINAL_STATUSES]
+    if not jobs:
+        print("No jobs." if args.all else "No unfinished jobs. (--all shows finished ones)")
+        return
+    print(f"  {'id':<16} {'status':<10} {'att':>3} {'age':>5}  goal")
+    for j in jobs:
+        goal = j.goal if len(j.goal) <= 60 else j.goal[:57] + "..."
+        print(f"  {j.id:<16} {j.status:<10} {j.attempts:>3} {_age(j.created_at):>5}  {goal}")
+
+
+def cmd_job(args):
+    """Show one job's record and where its report is."""
+    from dataclasses import asdict
+    from scaffold.agent.job_host import JobStore
+
+    store = JobStore()
+    job = store.get(args.job_id)
+    if job is None:
+        sys.exit(f"No such job: {args.job_id}")
+    print(json.dumps(asdict(job), indent=2))
+    report = store.report_path(job.id)
+    print(f"\nReport: {report}" if report.exists() else "\nReport: (written when the job finishes)")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1535,7 +1613,7 @@ def cmd_observe_follow(args):
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="awos",
-        description="AWOS — self-improving coding agent harness",
+        description="AWOS — runtime for autonomous agents (see VISION.md)",
     )
     sub = parser.add_subparsers(dest="command", help="Available commands")
 
@@ -1731,6 +1809,19 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Call the real model and save its replies to --cassette")
     agent.add_argument("--max-cost", type=float, default=None, dest="max_cost",
                        metavar="USD", help="Abort the run once it has cost this much")
+
+    # job host — queue work for the always-on host (`serve` is the web dashboard)
+    submit = sub.add_parser("submit", help="Queue a job for the job host; prints its id")
+    submit.add_argument("goal", help="What to get done (quote if multi-word)")
+    submit.add_argument("--root", default=".", help="Workspace directory the job works in (default: .)")
+    submit.add_argument("--ability", default="coding", help="Which ability runs the job (default: coding)")
+    host = sub.add_parser("host", help="Run the job host: take queued jobs until stopped")
+    host.add_argument("--once", action="store_true", help="Exit when the queue is empty")
+    host.add_argument("--poll", type=float, default=2.0, help="Seconds between queue checks (default: 2)")
+    jobs = sub.add_parser("jobs", help="List jobs (unfinished only)")
+    jobs.add_argument("--all", action="store_true", help="Include done, failed and cancelled jobs")
+    job = sub.add_parser("job", help="Show one job's record and report path")
+    job.add_argument("job_id", metavar="JOB_ID")
 
     # goals
     sub.add_parser("goals", help="List tracked goals and their status")

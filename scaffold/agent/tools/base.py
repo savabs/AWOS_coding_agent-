@@ -164,6 +164,16 @@ class ToolRegistry:
         result.latency_ms = (time.monotonic() - t0) * 1000
         return result
 
+    def close(self) -> None:
+        """Release what tools hold (a sandbox's container or temp dir).
+
+        Safe to call more than once; a tool without close() holds nothing.
+        """
+        for tool in self._tools.values():
+            close = getattr(tool, "close", None)
+            if callable(close):
+                close()
+
     def list_tools(self) -> list[dict[str, str]]:
         """Return tool catalog (for LLM tool-use prompts)."""
         return [

@@ -153,6 +153,9 @@ def run_one_in_process(task_dir: Path, project: Path) -> None:
         "AWOS_ENABLE_PLAN_REVIEW": "false",
         "AWOS_MAX_RUN_COST": str(load(task_dir).get("max_cost_usd", 1.0)),
         "AWOS_AGENT_MAX_TURNS": str(load(task_dir).get("max_turns", 150)),
+        # Data and performance jobs need to run code; run_command is offered
+        # only when a sandbox is available, and "auto" picks one.
+        "AWOS_SANDBOX": os.environ.get("AWOS_SANDBOX", "auto"),
     })
     from scaffold.agent.orchestrator import Orchestrator
 

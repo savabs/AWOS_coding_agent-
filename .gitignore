@@ -59,6 +59,9 @@ secrets/
 # and goals — not disposable scratch. Ignoring it would untrack that history.
 # Cassettes recorded for the benchmark live under .awos/cassettes/ and are also
 # meant to be committed, so a recorded comparison replays for free.
+# The exception is the job host's queue: per-job records, logs and reports
+# are operational state for one machine, not learning data.
+.awos/jobs/
 
 # Model artifacts (large files — store separately)
 *.pkl

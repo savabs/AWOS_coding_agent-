@@ -121,3 +121,21 @@ class TestPauseResumeMultiStep:
         assert completed.progress.completed_task_ids == [1, 2, 3]
         assert executed == [2, 3]
         assert second["success"] is True
+
+
+def test_orchestrator_tests_never_build_a_live_goal_checker(tmp_path, sessions_dir, monkeypatch):
+    # With a real key in the developer's shell, a GoalChecker here would make
+    # paid, non-deterministic model calls; conftest turns the check off.
+    monkeypatch.setenv("AWOS_EXECUTOR", "agent_loop")
+    repo = _make_repo(tmp_path)
+    orch = Orchestrator()
+
+    def ok(task, ctx):
+        return {"task_id": task["task_id"], "success": True, "task": task}
+
+    with patch.object(orch, "_execute_single_task", side_effect=ok), \
+         patch("scaffold.agent.goal_check.GoalChecker", side_effect=AssertionError("live checker")), \
+         patch("scaffold.agent.core.performance_tracker.ToolPerformanceTracker._load"):
+        result = orch.execute_feature(goal="g", codebase_root=str(repo),
+                                      pre_planned_tasks=_three_task_plan())
+    assert result["success"] is True

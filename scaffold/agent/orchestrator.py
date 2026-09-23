@@ -1057,8 +1057,18 @@ class Orchestrator:
             tasks_failed = cycle_failed
             break
 
+        # ── Goal check: every task passing is not the goal being done ──────
+        goal_complete, goal_check_reasoning = True, ""
+        if tasks_failed == 0 and not self._pause_requested:
+            goal_complete, extra, goal_check_reasoning = self._goal_check_rounds(
+                goal, _ctx, use_parallel,
+            )
+            tasks_completed += sum(1 for r in extra if r["success"])
+            tasks_failed += sum(1 for r in extra if not r["success"] and not r.get("superseded"))
+            total_tasks_all_cycles += len(extra)
+
         elapsed = time.time() - start_time
-        overall_success = tasks_failed == 0
+        overall_success = tasks_failed == 0 and goal_complete
 
         # ── Phase 1: Observability — print metrics summary after execution ──
         print()
@@ -1263,6 +1273,8 @@ class Orchestrator:
             "errors": [log["reason"] for log in self.execution_log if log["status"] == "failed"],
             "time_elapsed": elapsed,
             "integration_review": review,
+            "goal_complete": goal_complete,
+            "goal_check_reasoning": goal_check_reasoning,
             "runtime_session_id": (
                 self._runtime_session.session_id if self._runtime_session else None
             ),
@@ -1272,6 +1284,104 @@ class Orchestrator:
                 else None
             ),
         }
+
+    # ── Goal completeness check ───────────────────────────────────────────────
+
+    def _goal_check_rounds(self, goal: str, ctx: dict, use_parallel: bool) -> tuple:
+        """
+        Ask a read-only reviewer whether the whole goal is done, and run what
+        it says is missing as follow-up tasks. Each task is judged alone, so
+        without this a migration that fixed 1 of 8 read sites "succeeded".
+
+        Returns (complete, follow-up results, reasoning). Only the agent-loop
+        executor gets the check; AWOS_GOAL_CHECK=0 turns it off and
+        AWOS_GOAL_CHECK_ROUNDS (default 2) caps the follow-up rounds.
+        """
+        if executor_choice() != "agent_loop" or os.getenv("AWOS_GOAL_CHECK", "1") == "0":
+            return True, [], ""
+        try:
+            from .goal_check import GoalChecker, working_tree_changes
+        except ImportError:
+            from goal_check import GoalChecker, working_tree_changes
+
+        try:
+            max_rounds = int(os.getenv("AWOS_GOAL_CHECK_ROUNDS", "2"))
+        except ValueError:
+            max_rounds = 2
+        checker = GoalChecker(
+            model=os.getenv("AWOS_GOAL_CHECK_MODEL") or getattr(self, "_last_agent_model", None),
+            tracker=getattr(self, "tracker", None),
+        )
+        root = ctx["codebase_root"]
+        extra: list = []
+        round_no = 0
+        while True:
+            changed, diff = working_tree_changes(root)
+            if not changed:  # not a git repo: fall back to what the run recorded
+                changed = sorted(getattr(self, "_run_files_changed", set()))
+            verdict = checker.check(goal, root, changed, diff)
+            if verdict.complete and (verdict.verified or round_no == 0):
+                # An unverified "complete" (checker crashed, ran out of
+                # turns, reply unparseable) is let through only on the first
+                # check, as advisory. It never supersedes failed follow-ups.
+                print(f"[GOAL CHECK] complete: {verdict.reasoning[:200]}")
+                if verdict.verified:
+                    self._supersede_failed_follow_ups(extra)
+                return True, extra, verdict.reasoning
+            if verdict.complete:
+                # The checker found gaps earlier and cannot now confirm the
+                # follow-ups closed them: the run is not verified done.
+                print(f"[GOAL CHECK] unverified after follow-ups: {verdict.reasoning[:200]}")
+                break
+
+            print(f"[GOAL CHECK] incomplete ({len(verdict.missing)} item(s) missing): "
+                  f"{verdict.reasoning[:200]}")
+            for item in verdict.missing:
+                print(f"[GOAL CHECK]   - {item['file'] or '?'}: {item['action'][:160]}")
+            if round_no >= max_rounds or not verdict.missing:
+                break
+            self.execution_log.append({
+                "task_id": f"goal_check_{round_no + 1}",
+                "status": "goal_incomplete",
+                "reason": verdict.reasoning[:300],
+            })
+            round_no += 1
+            follow_ups = [
+                {"task_id": f"gc{round_no}_{i}", "action": item["action"],
+                 "file": item["file"], "complexity": "low"}
+                for i, item in enumerate(verdict.missing, 1)
+            ]
+            results = self._run_task_batch(follow_ups, ctx, use_parallel)
+            extra.extend(results)
+            if self._pause_requested:
+                break
+            # A failed follow-up does not end the rounds: the checker can be
+            # wrong (a finished fix sent back as work), and a follow-up with
+            # nothing to do then stops on repeated_tool_call. The next check
+            # is the arbiter; the round cap bounds the spend.
+
+        state = "not verified complete" if verdict.complete else "incomplete"
+        reason = f"Goal {state} after {round_no} follow-up round(s): {verdict.reasoning}"
+        self.execution_log.append({"task_id": "goal_check", "status": "failed", "reason": reason})
+        return False, extra, reason
+
+    def _supersede_failed_follow_ups(self, extra: list) -> None:
+        """
+        The goal was verified complete, so a follow-up that failed was work
+        the goal did not need. Mark it superseded — in the result and the
+        execution log — so it neither counts as a failed task nor lands in
+        the run's errors, while the record of it running stays.
+        """
+        failed = {r["task_id"] for r in extra if not r["success"]}
+        if not failed:
+            return
+        for r in extra:
+            if r["task_id"] in failed:
+                r["superseded"] = True
+        for entry in self.execution_log:
+            if entry.get("task_id") in failed and entry.get("status") == "failed":
+                entry["status"] = "superseded"
+        print(f"[GOAL CHECK] {len(failed)} failed follow-up(s) superseded: goal verified complete")
 
     # ── Batch / Parallel Execution ─────────────────────────────────────────────
 
@@ -1435,6 +1545,7 @@ class Orchestrator:
             logger.warning("[AgentLoop] no model client (%s); using the previous executor", exc)
             return None
 
+        self._last_agent_model = model  # the goal check reuses the model that did the work
         print(f"[TASK {task_id}] AgentLoop ({model})")
         if _live_t:
             _live_t.worker_start(1, esc_decision.spec.name)
@@ -1454,14 +1565,18 @@ class Orchestrator:
                 )
 
         needs_edits = _task_needs_edits(task)
-        outcome = AgentLoop(
-            registry=build_coding_registry(codebase_root),
-            client=client,
-            on_event=_on_event,
-            # The loop pushes back if the model stops without editing on a
-            # task that needs edits (AWOS_AGENT_MAX_TURNS sets the budget).
-            require_edits=needs_edits,
-        ).run(self._agent_loop_prompt(task, ctx))
+        registry = build_coding_registry(codebase_root)
+        try:
+            outcome = AgentLoop(
+                registry=registry,
+                client=client,
+                on_event=_on_event,
+                # The loop pushes back if the model stops without editing on a
+                # task that needs edits (AWOS_AGENT_MAX_TURNS sets the budget).
+                require_edits=needs_edits,
+            ).run(self._agent_loop_prompt(task, ctx))
+        finally:
+            registry.close()  # a docker sandbox holds a container until closed
 
         # Feed the spend to TokenTracker + BudgetLedger, as every other executor
         # does per call; without this the budget hard-stop never saw it.

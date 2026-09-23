@@ -748,14 +748,20 @@ def build_client_from_env(model: Optional[str] = None) -> ModelClient:
     )
 
 
-def build_coding_registry(project_root: str = ".", allow_shell: bool = False) -> Any:
+def build_coding_registry(
+    project_root: str = ".", allow_shell: bool = False, sandbox: Any = None
+) -> Any:
     """
-    The tool set a coding agent needs: look, search, edit, verify.
+    The tool set a coding agent needs: look, search, edit, verify, run.
 
     write_file is deliberately excluded — edit_file routes through Verifier and
     cannot leave a file syntactically broken, whereas write_file overwrites
     wholesale. shell is opt-in, and gated again by ShellTool's own ALLOW_SHELL
     check for anything destructive.
+
+    run_command is offered only when a sandbox exists (passed in, or found by
+    make_sandbox per AWOS_SANDBOX); code is never executed unsandboxed. It is
+    registered last so the order of the older tools stays stable.
     """
     try:
         from .tools.base import ToolRegistry
@@ -785,5 +791,22 @@ def build_coding_registry(project_root: str = ".", allow_shell: bool = False) ->
         except ImportError:
             from tools.shell import ShellTool
         registry.register(ShellTool())
+
+    if sandbox is None:
+        try:
+            try:
+                from .sandbox import make_sandbox
+            except ImportError:
+                from sandbox import make_sandbox
+            sandbox = make_sandbox(project_root)
+        except Exception as exc:
+            logger.debug("No sandbox for %s, run_command not offered: %s", project_root, exc)
+            sandbox = None
+    if sandbox is not None:
+        try:
+            from .tools.run_command import RunCommandTool
+        except ImportError:
+            from tools.run_command import RunCommandTool
+        registry.register(RunCommandTool(sandbox))
 
     return registry

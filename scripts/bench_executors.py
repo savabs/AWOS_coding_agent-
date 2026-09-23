@@ -154,13 +154,17 @@ def run_agent_loop(
             result.detail = f"client unavailable: {exc}"[:160]
             return result
 
+        registry = build_coding_registry(str(project))
         loop = AgentLoop(
-            registry=build_coding_registry(str(project)),
+            registry=registry,
             client=client,
             max_turns=max_turns,
             max_cost_usd=max_cost,
         )
-        outcome = loop.run(_prompt_for(case))
+        try:
+            outcome = loop.run(_prompt_for(case))
+        finally:
+            registry.close()
 
         result.latency_sec = round(time.monotonic() - started, 2)
         result.llm_calls = outcome.turns
