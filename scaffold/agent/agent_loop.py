@@ -772,26 +772,9 @@ def build_coding_registry(
         from tools.filesystem import ReadFileTool, ListDirTool, FindFilesTool, GrepTool
         from tools.code_edit import EditFileTool, RunTestsTool
 
-    # Every tool resolves relative paths against the same root, so "calc.py"
-    # means the same file to read_file and to edit_file.
-    registry = ToolRegistry()
-    for tool in (
-        ReadFileTool(project_root=project_root),
-        ListDirTool(project_root=project_root),
-        FindFilesTool(project_root=project_root),
-        GrepTool(project_root=project_root),
-        EditFileTool(project_root=project_root),
-        RunTestsTool(project_root=project_root),
-    ):
-        registry.register(tool)
-
-    if allow_shell:
-        try:
-            from .tools.shell import ShellTool
-        except ImportError:
-            from tools.shell import ShellTool
-        registry.register(ShellTool())
-
+    # Resolved first: run_tests executes code the model may have written (a
+    # conftest.py is imported by pytest), so it runs in the same sandbox as
+    # run_command whenever one exists.
     if sandbox is None:
         try:
             try:
@@ -802,6 +785,28 @@ def build_coding_registry(
         except Exception as exc:
             logger.debug("No sandbox for %s, run_command not offered: %s", project_root, exc)
             sandbox = None
+
+    # Every tool resolves relative paths against the same root, so "calc.py"
+    # means the same file to read_file and to edit_file.
+    registry = ToolRegistry()
+    registry.sandbox = sandbox  # shared with the caller's own verification
+    for tool in (
+        ReadFileTool(project_root=project_root),
+        ListDirTool(project_root=project_root),
+        FindFilesTool(project_root=project_root),
+        GrepTool(project_root=project_root),
+        EditFileTool(project_root=project_root),
+        RunTestsTool(project_root=project_root, sandbox=sandbox),
+    ):
+        registry.register(tool)
+
+    if allow_shell:
+        try:
+            from .tools.shell import ShellTool
+        except ImportError:
+            from tools.shell import ShellTool
+        registry.register(ShellTool())
+
     if sandbox is not None:
         try:
             from .tools.run_command import RunCommandTool

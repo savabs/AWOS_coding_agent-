@@ -1566,6 +1566,9 @@ class Orchestrator:
 
         needs_edits = _task_needs_edits(task)
         registry = build_coding_registry(codebase_root)
+        # The same sandbox later runs the verification tests: code the model
+        # wrote (a conftest.py, say) must never execute on the host.
+        sandbox = getattr(registry, "sandbox", None)
         try:
             outcome = AgentLoop(
                 registry=registry,
@@ -1575,8 +1578,9 @@ class Orchestrator:
                 # task that needs edits (AWOS_AGENT_MAX_TURNS sets the budget).
                 require_edits=needs_edits,
             ).run(self._agent_loop_prompt(task, ctx))
-        finally:
+        except BaseException:
             registry.close()  # a docker sandbox holds a container until closed
+            raise
 
         # Feed the spend to TokenTracker + BudgetLedger, as every other executor
         # does per call; without this the budget hard-stop never saw it.
@@ -1607,13 +1611,16 @@ class Orchestrator:
         # Verify independently of what the model claimed — including when it
         # edited nothing: an earlier task may already have done the work.
         test_result = None
-        if files_changed or needs_edits:
-            try:
-                test_result = TestRunner(project_root=codebase_root).run(
-                    changed_files=files_changed or task_files(task)
-                )
-            except Exception as exc:
-                logger.warning("[TASK %s] TestRunner error: %s", task_id, exc)
+        try:
+            if files_changed or needs_edits:
+                try:
+                    test_result = TestRunner(project_root=codebase_root, sandbox=sandbox).run(
+                        changed_files=files_changed or task_files(task)
+                    )
+                except Exception as exc:
+                    logger.warning("[TASK %s] TestRunner error: %s", task_id, exc)
+        finally:
+            registry.close()
 
         tests_ran = test_result is not None and not getattr(test_result, "no_tests_found", True)
         # "Nothing left to do" is only credible when an earlier task in this run

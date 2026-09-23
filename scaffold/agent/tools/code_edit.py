@@ -154,8 +154,11 @@ class RunTestsTool(Tool):
     #: introducing a second flag, so there is one switch for running tests.
     SAFETY_ENV_VAR = "AWOS_SAFE_TO_RUN_TESTS"
 
-    def __init__(self, project_root: str = ".") -> None:
+    def __init__(self, project_root: str = ".", sandbox: Any = None) -> None:
         self.project_root = Path(project_root)
+        # Tests import code the model may have written (conftest.py runs on
+        # collection), so they run in the sandbox whenever there is one.
+        self.sandbox = sandbox
 
     @property
     def name(self) -> str:
@@ -191,7 +194,9 @@ class RunTestsTool(Tool):
         changed = [p.strip() for p in raw.split(",") if p.strip()] or None
 
         TestRunner = _load_test_runner()
-        result = TestRunner(project_root=str(self.project_root)).run(changed_files=changed)
+        result = TestRunner(project_root=str(self.project_root), sandbox=self.sandbox).run(
+            changed_files=changed
+        )
 
         if getattr(result, "no_tests_found", False):
             return ToolResult.ok(

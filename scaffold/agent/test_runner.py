@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -64,9 +65,17 @@ class TestRunner:
     """Language-agnostic test executor with auto-detection."""
     __test__ = False  # suppress pytest collection warning
 
-    def __init__(self, project_root: str = ".", timeout_sec: int = _DEFAULT_TIMEOUT_SEC):
+    def __init__(
+        self,
+        project_root: str = ".",
+        timeout_sec: int = _DEFAULT_TIMEOUT_SEC,
+        sandbox=None,
+    ):
         self.project_root = Path(project_root)
         self.timeout_sec = timeout_sec
+        # When set, tests run inside it: pytest imports project code (and any
+        # conftest.py), which may have been written by the model.
+        self.sandbox = sandbox
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -184,6 +193,8 @@ class TestRunner:
     def _execute(self, cfg: TestConfig) -> TestResult:
         """Run the configured test command and parse output."""
         logger.info("[test_runner] Running: %s (timeout=%ds)", " ".join(cfg.command), cfg.timeout_sec)
+        if self.sandbox is not None:
+            return self._execute_in_sandbox(cfg)
         try:
             result = subprocess.run(
                 cfg.command,
@@ -208,10 +219,28 @@ class TestRunner:
                 no_tests_found=True,
             )
 
-        stdout = result.stdout or ""
-        stderr = result.stderr or ""
-        combined = f"{stdout}\n{stderr}".strip()
+        return self._parse(cfg, result.stdout or "", result.stderr or "")
 
+    def _execute_in_sandbox(self, cfg: TestConfig) -> TestResult:
+        """Run the test command inside the sandbox; same parsing as on the host."""
+        # The host interpreter's path means nothing in a container; "python" is
+        # first on the sandbox's PATH in both backends.
+        command = ["python" if part == sys.executable else part for part in cfg.command]
+        result = self.sandbox.run(shlex.join(command), timeout_sec=cfg.timeout_sec)
+        if result.timed_out:
+            return TestResult(
+                timed_out=True,
+                raw_output=f"Test execution timed out after {cfg.timeout_sec}s.",
+                test_command=command,
+            )
+        if "No module named pytest" in result.stderr:
+            # Nothing ran (e.g. a container image without pytest): no evidence.
+            return TestResult(
+                raw_output=result.stderr[-2000:], test_command=command, no_tests_found=True
+            )
+        return self._parse(cfg, result.stdout, result.stderr)
+
+    def _parse(self, cfg: TestConfig, stdout: str, stderr: str) -> TestResult:
         # Dispatch to parser
         if cfg.runner == "pytest":
             return self._parse_pytest(stdout, stderr, cfg.command)
