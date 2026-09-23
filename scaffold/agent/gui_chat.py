@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Literal, Optional
 
+from scaffold.agent.providers import chat_client, messages_client, openrouter_key
 from scaffold.agent.response_cache import ResponseCache
 from scaffold.agent.run_metrics import build_run_metrics
 
@@ -548,14 +549,12 @@ class GuiChatService:
         full_parts: list[str] = []
         first_token = True
         # OpenCode Go first — only provider with credits
+        # (served through OpenRouter when OPENROUTER_API_KEY is set)
         opencode_key = os.getenv("OPENCODE_GO_API_KEY")
-        if opencode_key:
+        if opencode_key or openrouter_key():
             opencode_base = os.getenv("OPENCODE_GO_BASE_URL", "https://opencode.ai/zen/go/v1")
             oc_model = "qwen3.7-plus"
-            from openai import OpenAI
-            # qwen3.7-plus uses Anthropic Messages endpoint, not chat/completions.
-            # OpenCode Go auto-routes but explicit endpoint is more reliable.
-            oc_client = OpenAI(api_key=opencode_key, base_url=opencode_base)
+            oc_client = chat_client(opencode_key, opencode_base)
             if model and model not in ("", "deepseek-chat"):
                 oc_model = model
             try:
@@ -609,7 +608,7 @@ class GuiChatService:
             if not self._last_completion_tokens:
                 self._last_completion_tokens = _estimate_tokens("".join(full_parts))
         else:
-            raise RuntimeError("Set OPENCODE_GO_API_KEY, DEEPSEEK_API_KEY, or ANTHROPIC_API_KEY in .env")
+            raise RuntimeError("Set OPENROUTER_API_KEY (or OPENCODE_GO_API_KEY / DEEPSEEK_API_KEY / ANTHROPIC_API_KEY) in .env")
 
         if cancel.is_set():
             text = "".join(full_parts)
@@ -928,13 +927,9 @@ class GuiChatService:
     def _stream_deepseek(
         self, system: str, user: str, session: ChatSession, max_tokens: int = 2048
     ) -> Iterator[str]:
-        from openai import OpenAI
-
-        api_key = os.getenv("DEEPSEEK_API_KEY")
-        if not api_key:
-            raise RuntimeError("DEEPSEEK_API_KEY not set in .env")
-
-        client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+        client = chat_client(os.getenv("DEEPSEEK_API_KEY"), "https://api.deepseek.com")
+        if client is None:
+            raise RuntimeError("Set OPENROUTER_API_KEY (or DEEPSEEK_API_KEY) in .env")
         stream = client.chat.completions.create(
             model="deepseek-chat",
             messages=self._llm_messages(system, user, session),
@@ -960,9 +955,7 @@ class GuiChatService:
     def _stream_anthropic(
         self, system: str, user: str, session: ChatSession, max_tokens: int = 2048
     ) -> Iterator[str]:
-        from anthropic import Anthropic
-
-        client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        client = messages_client(os.getenv("ANTHROPIC_API_KEY"))
         prior = self._conversation_messages(session)
         api_messages = list(prior) + [{"role": "user", "content": user}]
         with client.messages.stream(
@@ -1017,14 +1010,14 @@ class GuiChatService:
 
         t0 = time.perf_counter()
         self._reset_usage()
-        if os.getenv("DEEPSEEK_API_KEY") or is_cheap_only():
+        if openrouter_key() or os.getenv("DEEPSEEK_API_KEY") or is_cheap_only():
             text = self._call_deepseek(system, user, session=session)
             model = self._last_model
         elif os.getenv("ANTHROPIC_API_KEY"):
             text = "".join(self._stream_anthropic(system, user, session))
             model = "claude-haiku-4-5"
         else:
-            raise RuntimeError("Set DEEPSEEK_API_KEY or ANTHROPIC_API_KEY in .env")
+            raise RuntimeError("Set OPENROUTER_API_KEY (or DEEPSEEK_API_KEY / ANTHROPIC_API_KEY) in .env")
 
         if not self._last_prompt_tokens and not self._last_completion_tokens:
             msgs = self._llm_messages(system, user, session)
@@ -1056,12 +1049,9 @@ class GuiChatService:
             load_dotenv(Path(__file__).parent.parent.parent / ".env")
         except ImportError:
             pass
-        opencode_key = os.getenv("OPENCODE_GO_API_KEY")
-        if not opencode_key:
+        client = chat_client(os.getenv("OPENCODE_GO_API_KEY"), "https://opencode.ai/zen/go/v1")
+        if client is None:
             return "qa"  # safe fallback — answer directly
-
-        from openai import OpenAI
-        client = OpenAI(api_key=opencode_key, base_url="https://opencode.ai/zen/go/v1")
         prompt = (
             "Classify this prompt. Output ONLY one word: qa or task.\n\n"
             "TASK = code work: add, fix, change, create, modify, implement, "

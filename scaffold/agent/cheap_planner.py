@@ -12,7 +12,10 @@ import json
 import os
 from typing import Optional
 
-from openai import OpenAI
+try:
+    from .providers import chat_client
+except ImportError:
+    from providers import chat_client
 
 
 class CheapPlanner:
@@ -26,13 +29,12 @@ class CheapPlanner:
             model: Model to use (qwen3.7-plus for reasoning quality)
         """
         self.api_key = api_key or os.getenv("OPENCODE_GO_API_KEY")
-        if not self.api_key:
-            raise ValueError(
-                "No OpenCode Go key found. Set OPENCODE_GO_API_KEY in .env"
-            )
-
         opencode_base = os.getenv("OPENCODE_GO_BASE_URL", "https://opencode.ai/zen/go/v1")
-        self.client = OpenAI(api_key=self.api_key, base_url=opencode_base)
+        self.client = chat_client(self.api_key, opencode_base)
+        if self.client is None:
+            raise ValueError(
+                "No planner key found. Set OPENROUTER_API_KEY (or OPENCODE_GO_API_KEY) in .env"
+            )
         self.model_name = model
 
     def plan(self, goal: str, codebase_context: dict, tracker=None, existing_goal=None) -> dict:

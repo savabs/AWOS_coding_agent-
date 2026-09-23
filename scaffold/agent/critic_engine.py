@@ -152,22 +152,18 @@ OUTPUT: JSON only, no prose outside the JSON.
         self._init_clients()
 
     def _init_clients(self) -> None:
-        if self._deepseek_key:
-            try:
-                from openai import OpenAI
-                self._client = OpenAI(
-                    api_key=self._deepseek_key,
-                    base_url="https://api.deepseek.com",
-                )
-            except Exception as e:
-                logger.debug("[critic] DeepSeek client init failed: %s", e)
-
-        if self._anthropic_key:
-            try:
-                from anthropic import Anthropic
-                self._anthropic = Anthropic(api_key=self._anthropic_key)
-            except Exception as e:
-                logger.debug("[critic] Anthropic client init failed: %s", e)
+        try:
+            from .providers import chat_client, messages_client
+        except ImportError:
+            from providers import chat_client, messages_client
+        try:
+            self._client = chat_client(self._deepseek_key, "https://api.deepseek.com")
+        except Exception as e:
+            logger.debug("[critic] DeepSeek client init failed: %s", e)
+        try:
+            self._anthropic = messages_client(self._anthropic_key)
+        except Exception as e:
+            logger.debug("[critic] Anthropic client init failed: %s", e)
 
     # ── Public API ────────────────────────────────────────────────────────────
 

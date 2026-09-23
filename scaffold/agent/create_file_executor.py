@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from scaffold.agent.goal_acceptance import acceptance_for_create_goal, verify_deliverable
+from scaffold.agent.providers import chat_client, openrouter_key
 
 try:
     from scaffold.agent.tools.filesystem import WriteFileTool
@@ -155,8 +156,10 @@ Write the full contents for `{rel}` now."""
 
         usage = empty_usage()
         # Prefer Gemini Flash (cheap), then DeepSeek, then OpenAI mini
+        # google.genai has no OpenRouter route; with an OpenRouter key the
+        # DeepSeek branch below serves this through OpenRouter instead.
         gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-        if gemini_key:
+        if gemini_key and not openrouter_key():
             from google import genai
 
             client = genai.Client(api_key=gemini_key)
@@ -183,11 +186,8 @@ Write the full contents for `{rel}` now."""
             )
             return text, "gemini-2.5-flash", usage
 
-        deepseek_key = os.getenv("DEEPSEEK_API_KEY")
-        if deepseek_key:
-            from openai import OpenAI
-
-            client = OpenAI(api_key=deepseek_key, base_url="https://api.deepseek.com")
+        client = chat_client(os.getenv("DEEPSEEK_API_KEY"), "https://api.deepseek.com")
+        if client is not None:
             resp = client.chat.completions.create(
                 model="deepseek-chat",
                 messages=[
@@ -215,5 +215,5 @@ Write the full contents for `{rel}` now."""
             return text.strip(), "deepseek-chat", usage
 
         raise RuntimeError(
-            "No API key for create path. Set GEMINI_API_KEY or DEEPSEEK_API_KEY."
+            "No API key for create path. Set OPENROUTER_API_KEY (or GEMINI_API_KEY / DEEPSEEK_API_KEY)."
         )

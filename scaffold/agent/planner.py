@@ -7,13 +7,14 @@ Each planning call costs ~$0.03-0.05 and produces a reusable execution plan.
 
 import json
 import os
-from anthropic import Anthropic
 from typing import Optional, Any
 import logging
 
 try:
+    from .providers import messages_client
     from .task_schema import normalise_task, task_files
 except ImportError:
+    from providers import messages_client
     from task_schema import normalise_task, task_files
 
 logger = logging.getLogger(__name__)
@@ -45,9 +46,9 @@ class Planner:
         AWOS_MULTI_FILE_TASKS=1.
         """
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
-        if not self.api_key:
-            raise ValueError("ANTHROPIC_API_KEY not set")
-        self.client = Anthropic(api_key=self.api_key)
+        self.client = messages_client(self.api_key)
+        if self.client is None:
+            raise ValueError("Set OPENROUTER_API_KEY (or ANTHROPIC_API_KEY)")
         self.model = "claude-sonnet-4-6"
         self.allow_multi_file = (
             allow_multi_file

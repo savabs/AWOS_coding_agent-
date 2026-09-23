@@ -334,6 +334,24 @@ def cmd_models(args):
     print()
     print(f"MODELS_UNAVAILABLE: {sorted(MODELS_UNAVAILABLE)}")
     print()
+    from providers import OPENROUTER_BASE_URL, openrouter_key, openrouter_model_id
+
+    if openrouter_key():
+        # Every call routes through OpenRouter; check each ladder id exists there.
+        try:
+            from openai import OpenAI
+            c = OpenAI(api_key=openrouter_key(), base_url=OPENROUTER_BASE_URL)
+            available = {m.id for m in c.models.list()}
+        except Exception as exc:
+            available = None
+            print(f"OpenRouter catalog query failed: {exc}")
+        print("Routing: all calls via OpenRouter (OPENROUTER_API_KEY)")
+        for spec in LADDER:
+            routed = openrouter_model_id(spec.model_id)
+            found = "?" if available is None else ("OK" if routed in available else "NOT ON OPENROUTER")
+            print(f"  {spec.model_id:<28} → {routed:<36} {found}")
+        return
+
     # Live check: query OpenCode Go catalog for the working model
     opencode_key = os.getenv("OPENCODE_GO_API_KEY")
     if opencode_key:

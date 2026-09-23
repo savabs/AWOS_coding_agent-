@@ -10,58 +10,20 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from types import SimpleNamespace
 from typing import List, Optional
-
-from anthropic import Anthropic  # For Haiku/Sonnet/Opus
-from openai import OpenAI  # For DeepSeek API access
 
 try:
     from .budget_ledger import get_ledger
     from .escalation_engine import is_cheap_only
+    from .providers import chat_client, messages_client
     from .usage_record import empty_usage, merge_usage, record_api_usage
 except ImportError:
     from budget_ledger import get_ledger
     from escalation_engine import is_cheap_only
+    from providers import chat_client, messages_client
     from usage_record import empty_usage, merge_usage, record_api_usage
 
 _MONTHLY_BUDGET = float(os.getenv("AWOS_MONTHLY_BUDGET", "20.0"))
-
-_OPENAI_BASE_URL = "https://api.openai.com/v1"
-_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-
-
-class _OpenRouterOpenAI:
-    """
-    An OpenAI client pointed at OpenRouter, which namespaces model ids by
-    vendor ("openai/gpt-4o-mini"). Call sites keep passing bare OpenAI ids.
-    """
-
-    def __init__(self, inner: OpenAI) -> None:
-        self._inner = inner
-        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
-
-    def _create(self, *, model: str, **kwargs):
-        if "/" not in model:
-            model = f"openai/{model}"
-        return self._inner.chat.completions.create(model=model, **kwargs)
-
-    def __getattr__(self, name):
-        return getattr(self._inner, name)
-
-
-def _build_openai_client(api_key: str):
-    """
-    OpenAI client for OPENAI_API_KEY, sent where that key actually works.
-
-    Hard-coding api.openai.com sent an OpenRouter key (sk-or-…) there — a 401
-    on every call. OPENAI_BASE_URL, the SDK's own convention, wins when set.
-    """
-    base_url = os.getenv("OPENAI_BASE_URL") or (
-        _OPENROUTER_BASE_URL if api_key.startswith("sk-or-") else _OPENAI_BASE_URL
-    )
-    client = OpenAI(api_key=api_key, base_url=base_url)
-    return _OpenRouterOpenAI(client) if "openrouter.ai" in base_url else client
 
 
 @dataclass
@@ -88,30 +50,15 @@ class Worker:
         openai_key = os.getenv("OPENAI_API_KEY")
         opencode_key = os.getenv("OPENCODE_GO_API_KEY")
 
-        # OpenCode Go (primary — single provider for all models)
-        if opencode_key:
-            self.opencode_client = OpenAI(api_key=opencode_key, base_url="https://opencode.ai/zen/go/v1")
-        else:
-            self.opencode_client = None
-
-        # DeepSeek (direct API — legacy, keep for fallback)
-        if deepseek_key:
-            self.client = OpenAI(api_key=deepseek_key, base_url="https://api.deepseek.com")
-        else:
-            self.client = None
-
-        # Anthropic (Haiku / Sonnet)
-        if anthropic_key:
-            self.anthropic_client = Anthropic(api_key=anthropic_key)
-        else:
-            self.anthropic_client = None
-
-        # OpenAI (GPT-4o-mini etc.) — direct, or via OpenRouter when the key or
-        # OPENAI_BASE_URL says so
-        self.openai_client = _build_openai_client(openai_key) if openai_key else None
+        # With OPENROUTER_API_KEY set, every client below routes through
+        # OpenRouter and the direct keys are ignored — see providers.py.
+        self.opencode_client = chat_client(opencode_key, "https://opencode.ai/zen/go/v1")
+        self.client = chat_client(deepseek_key, "https://api.deepseek.com")
+        self.anthropic_client = messages_client(anthropic_key)
+        self.openai_client = chat_client(openai_key, "https://api.openai.com/v1")
 
         if not any([self.opencode_client, self.client, self.anthropic_client, self.openai_client]):
-            raise ValueError("Set at least one of: OPENCODE_GO_API_KEY, DEEPSEEK_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY")
+            raise ValueError("Set OPENROUTER_API_KEY (or one of: OPENCODE_GO_API_KEY, DEEPSEEK_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY)")
 
         self.model = model
         self.fallback_model = "claude-haiku-4-5"

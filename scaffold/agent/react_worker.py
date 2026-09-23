@@ -15,9 +15,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from anthropic import Anthropic
-from openai import OpenAI
-
 try:
     from google import genai
 except ImportError:
@@ -25,11 +22,13 @@ except ImportError:
 
 try:
     from .coding_tools import build_coding_tool_registry, format_tool_catalog
+    from .providers import chat_client, messages_client
     from .repo_map import enrich_with_repo_map
     from .test_runner import TestResult, TestRunner
     from .usage_record import empty_usage, merge_usage, record_api_usage
 except ImportError:
     from coding_tools import build_coding_tool_registry, format_tool_catalog
+    from providers import chat_client, messages_client
     from repo_map import enrich_with_repo_map
     from test_runner import TestResult, TestRunner
     from usage_record import empty_usage, merge_usage, record_api_usage
@@ -101,16 +100,17 @@ class ReActWorker:
         opencode_key = os.getenv("OPENCODE_GO_API_KEY")
         opencode_base = os.getenv("OPENCODE_GO_BASE_URL", "https://opencode.ai/zen/go/v1")
 
+        # With OPENROUTER_API_KEY set, every client routes through OpenRouter
+        # and direct keys are ignored — see providers.py.
         # DeepSeek via OpenCode Go (primary) with fallback to direct DeepSeek
-        self.client = OpenAI(api_key=opencode_key, base_url="https://opencode.ai/zen/go/v1") if opencode_key else (
-            OpenAI(api_key=deepseek_key, base_url="https://api.deepseek.com") if deepseek_key else None
-        )
-        self.anthropic_client = Anthropic(api_key=anthropic_key) if anthropic_key else None
-        self.openai_client = OpenAI(api_key=openai_key, base_url="https://api.openai.com/v1") if openai_key else None
-        self.openrouter_client = OpenAI(api_key=openrouter_key, base_url="https://openrouter.ai/api/v1") if openrouter_key else None
-        self.opencode_client = OpenAI(api_key=opencode_key, base_url="https://opencode.ai/zen/go/v1") if opencode_key else None
+        self.client = chat_client(opencode_key, opencode_base) or chat_client(deepseek_key, "https://api.deepseek.com")
+        self.anthropic_client = messages_client(anthropic_key)
+        self.openai_client = chat_client(openai_key, "https://api.openai.com/v1")
+        self.openrouter_client = chat_client()
+        self.opencode_client = chat_client(opencode_key, opencode_base)
         self.gemini_client = None
-        if self.gemini_key and genai is not None:
+        # google.genai has no OpenRouter route
+        if self.gemini_key and genai is not None and not openrouter_key:
             _shadow = os.environ.pop("GOOGLE_API_KEY", None)
             self.gemini_client = genai.Client(api_key=self.gemini_key)
             if _shadow is not None:
