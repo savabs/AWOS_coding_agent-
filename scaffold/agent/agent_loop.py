@@ -33,7 +33,20 @@ from typing import Any, Optional, Protocol
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MAX_TURNS = 12
+#: Real tasks need many steps: read, search, edit, test, fix, re-test.
+#: Overridable per process with AWOS_AGENT_MAX_TURNS.
+DEFAULT_MAX_TURNS = 60
+#: Assistant turns whose tool results stay verbatim; older results are stubbed
+#: so a long run's resent context stops growing. AWOS_AGENT_KEEP_TURNS.
+DEFAULT_KEEP_TURNS = 8
+#: How many times an empty finish is pushed back when edits are required.
+MAX_NUDGES = 2
+NUDGE_MESSAGE = (
+    "You have not changed any file yet, but this task requires changes. "
+    "Continue: read what you need, make the change with edit_file, then run "
+    "the tests to check it."
+)
+ELIDED_PREFIX = "[earlier tool output elided"
 DEFAULT_MAX_REPEATS = 3
 DEFAULT_TOOL_RESULT_CHARS = 8000
 
@@ -305,6 +318,8 @@ class LoopOutcome:
     files_touched: list[str] = field(default_factory=list)
     transcript: list[dict[str, Any]] = field(default_factory=list)
     elapsed_sec: float = 0.0
+    nudges: int = 0
+    elided_results: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -319,6 +334,8 @@ class LoopOutcome:
             "final_message": self.final_message,
             "files_touched": self.files_touched,
             "elapsed_sec": round(self.elapsed_sec, 2),
+            "nudges": self.nudges,
+            "elided_results": self.elided_results,
         }
 
 
@@ -329,7 +346,7 @@ class AgentLoop:
         self,
         registry: Any,
         client: ModelClient,
-        max_turns: int = DEFAULT_MAX_TURNS,
+        max_turns: Optional[int] = None,
         max_repeats: int = DEFAULT_MAX_REPEATS,
         system_prompt: str = SYSTEM_PROMPT,
         ledger: Any = None,
@@ -337,10 +354,17 @@ class AgentLoop:
         cost_per_turn_estimate: float = 0.01,
         max_cost_usd: Optional[float] = None,
         on_event: Any = None,
+        require_edits: bool = False,
     ) -> None:
         self.registry = registry
         self.client = client
-        self.max_turns = max_turns
+        self.max_turns = (
+            max_turns
+            if max_turns is not None
+            else _int_env("AWOS_AGENT_MAX_TURNS", DEFAULT_MAX_TURNS)
+        )
+        self.keep_turns = max(1, _int_env("AWOS_AGENT_KEEP_TURNS", DEFAULT_KEEP_TURNS))
+        self.require_edits = require_edits
         self.max_repeats = max_repeats
         self.system_prompt = system_prompt
         self.ledger = ledger
@@ -403,6 +427,8 @@ class AgentLoop:
                 self._emit("budget_blocked", reason=reason)
                 break
 
+            outcome.elided_results += _condense_history(messages, self.keep_turns)
+
             try:
                 reply = self.client.complete(self.system_prompt, messages, self.registry)
             except Exception as exc:
@@ -431,6 +457,19 @@ class AgentLoop:
 
             # No tool calls means the model considers the work finished.
             if not reply.tool_calls:
+                if self.require_edits and not touched and outcome.nudges < MAX_NUDGES:
+                    # An empty finish on a task that needs changes is almost
+                    # always the model giving up early, not a finished task.
+                    outcome.nudges += 1
+                    outcome.transcript.append(
+                        {"turn": turn, "text": reply.text, "calls": [], "nudged": True}
+                    )
+                    if reply.text:
+                        # Anthropic rejects an assistant turn with empty content.
+                        messages.append(self.client.format_assistant_turn(reply))
+                    messages.append({"role": "user", "content": NUDGE_MESSAGE})
+                    self._emit("nudge", turn=turn, nudges=outcome.nudges)
+                    continue
                 outcome.success = True
                 outcome.stop_reason = "completed"
                 outcome.final_message = reply.text
@@ -503,6 +542,74 @@ def _float_env(name: str, default: Optional[float]) -> Optional[float]:
     except ValueError:
         logger.warning("[agent_loop] %s=%r is not a number; ignoring", name, raw)
         return default
+
+
+def _int_env(name: str, default: int) -> int:
+    """Read an int from the environment, ignoring an unparseable value."""
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError:
+        logger.warning("[agent_loop] %s=%r is not an integer; ignoring", name, raw)
+        return default
+
+
+def _elided_stub(chars: int) -> str:
+    return f"{ELIDED_PREFIX} — {chars} chars; re-read the file if you need it]"
+
+
+def _should_stub(content: str) -> bool:
+    """Stub unless already a stub, or too short for a stub to save anything."""
+    return not content.startswith(ELIDED_PREFIX) and len(content) > len(
+        _elided_stub(len(content))
+    )
+
+
+def _condense_history(messages: list[dict[str, Any]], keep_turns: int) -> int:
+    """
+    Stub the text of tool results older than the last `keep_turns` assistant
+    turns, in place. Returns how many results were newly stubbed.
+
+    Only tool-result *content* shrinks: every message, block, tool_use_id and
+    tool_call_id stays, so Anthropic's tool_use/tool_result pairing and
+    OpenAI's tool_call_id linkage remain valid. A conversation with at most
+    `keep_turns` assistant turns is not touched at all, which keeps recorded
+    cassettes (fingerprinted on the payload) replaying exactly. Idempotent.
+    """
+    assistant_idx = [i for i, m in enumerate(messages) if m.get("role") == "assistant"]
+    if len(assistant_idx) <= keep_turns:
+        return 0
+    cutoff = assistant_idx[-keep_turns]  # messages from here on stay verbatim
+
+    stubbed = 0
+    for i in range(1, cutoff):  # index 0 is the task prompt
+        message = messages[i]
+        role = message.get("role")
+        if role == "tool":  # OpenAI dialect
+            content = message.get("content")
+            if isinstance(content, str) and _should_stub(content):
+                messages[i] = {**message, "content": _elided_stub(len(content))}
+                stubbed += 1
+        elif role == "user" and isinstance(message.get("content"), list):  # Anthropic
+            new_blocks, changed = [], False
+            for block in message["content"]:
+                content = block.get("content") if isinstance(block, dict) else None
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") == "tool_result"
+                    and isinstance(content, str)
+                    and _should_stub(content)
+                ):
+                    new_blocks.append({**block, "content": _elided_stub(len(content))})
+                    changed = True
+                    stubbed += 1
+                else:
+                    new_blocks.append(block)
+            if changed:
+                messages[i] = {**message, "content": new_blocks}
+    return stubbed
 
 
 def _synthetic_failure(message: str) -> Any:

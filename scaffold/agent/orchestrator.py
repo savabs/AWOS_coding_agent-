@@ -39,6 +39,27 @@ def _is_test_file(path: str) -> bool:
     )
 
 
+_INSPECT_ONLY = re.compile(
+    r"^\s*(review|explain|describe|analy[sz]e|investigate|inspect|check|verify|confirm|list|summari[sz]e)\b",
+    re.IGNORECASE,
+)
+_EDIT_WORDS = re.compile(
+    r"\b(fix|add|update|change|implement|create|write|make|move|refactor|migrate|remove|"
+    r"replace|rename|support|optimi[sz]e|speed|document|produce|generate|build|correct|edit)\w*",
+    re.IGNORECASE,
+)
+
+
+def _task_needs_edits(task: dict) -> bool:
+    """
+    Does this task require changing files? Default yes — a keyword whitelist
+    missed "Make it 5x faster" and let a no-op pass. Only a task that reads as
+    pure inspection, with no editing verb anywhere, needs no edits.
+    """
+    action = str(task.get("action", ""))
+    return not (_INSPECT_ONLY.search(action) and not _EDIT_WORDS.search(action))
+
+
 def _asks_for_tests(task: dict) -> bool:
     """The task's own purpose is writing tests (e.g. a reproduction test)."""
     action = str(task.get("action", "")).lower()
@@ -586,6 +607,7 @@ class Orchestrator:
 
         start_time = time.time()
         self.execution_log = []  # Reset log for each run
+        self._run_files_changed: set = set()  # files kept by successful tasks this run
 
         # ── ReAct Trace Session ────────────────────────────────────────────────
         session = ReasoningSession(
@@ -1009,7 +1031,14 @@ class Orchestrator:
                     continue
 
             # ── Retry with Simplification ────────────────────────────────────
-            if failed_tasks and decomposition_depth < max_decomposition:
+            # Not for the agent loop: it reads, edits and tests a whole task
+            # itself, and a fragment of the task's wording ("Create script to
+            # load, clean,") is not simpler, only less clear.
+            if (
+                failed_tasks
+                and decomposition_depth < max_decomposition
+                and executor_choice() != "agent_loop"
+            ):
                 new_tasks = []
                 for task in failed_tasks:
                     new_tasks.extend(self.decomposer.decompose(task))
@@ -1424,10 +1453,14 @@ class Orchestrator:
                     latency_ms=0.0,
                 )
 
+        needs_edits = _task_needs_edits(task)
         outcome = AgentLoop(
             registry=build_coding_registry(codebase_root),
             client=client,
             on_event=_on_event,
+            # The loop pushes back if the model stops without editing on a
+            # task that needs edits (AWOS_AGENT_MAX_TURNS sets the budget).
+            require_edits=needs_edits,
         ).run(self._agent_loop_prompt(task, ctx))
 
         # Feed the spend to TokenTracker + BudgetLedger, as every other executor
@@ -1450,7 +1483,6 @@ class Orchestrator:
         )
 
         files_changed = [os.path.relpath(p, codebase_root) for p in outcome.files_touched]
-        needs_edits = ReActWorker._task_needs_edits(task)
         writes_tests = (
             bool(files_changed)
             and all(_is_test_file(f) for f in files_changed)
@@ -1469,9 +1501,13 @@ class Orchestrator:
                 logger.warning("[TASK %s] TestRunner error: %s", task_id, exc)
 
         tests_ran = test_result is not None and not getattr(test_result, "no_tests_found", True)
+        # "Nothing left to do" is only credible when an earlier task in this run
+        # changed files. On new work the old tests pass before anything is done —
+        # that let a no-op "complete" 4 of 5 long tasks in the baseline.
         already_satisfied = (
             not files_changed
             and needs_edits
+            and bool(getattr(self, "_run_files_changed", set()))
             and tests_ran
             and test_result.failed == 0
             and test_result.passed > 0
@@ -1636,6 +1672,10 @@ class Orchestrator:
             for rel in files_changed:
                 abs_path = os.path.join(codebase_root, rel)
                 git.record_modified(abs_path)
+            # Kept edits this run — the evidence a later no-op task may cite.
+            if not hasattr(self, "_run_files_changed"):
+                self._run_files_changed = set()
+            self._run_files_changed.update(files_changed)
             self._update_task_node(task_id, "completed", session.session_id)
             self.execution_log.append({
                 "task_id": task_id,

@@ -55,10 +55,11 @@ def _orchestrator():
     return orch
 
 
-def _run(script, test_result=None):
+def _run(script, test_result=None, earlier_changes=None):
     root = Path(tempfile.mkdtemp())
     (root / "calc.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
     orch = _orchestrator()
+    orch._run_files_changed = set(earlier_changes or ())
     ctx = {"codebase_root": str(root), "git": MagicMock(), "session": MagicMock(),
            "codebase_context": {}}
     spec = SimpleNamespace(model_id="claude-haiku-4-5", name="Haiku", cost_per_req=0.01,
@@ -116,11 +117,32 @@ def test_claiming_done_without_an_edit_fails_when_tests_fail():
     assert "without editing" in out["verify_error"]
 
 
-def test_no_edit_needed_is_success_when_tests_already_pass():
-    # An earlier task already did the work; the tests, not the model, say so.
-    out, ctx, _ = _run([ModelReply(text="Nothing to change.", input_tokens=10, output_tokens=5)])
+def test_no_edit_needed_is_success_when_an_earlier_task_did_the_work():
+    # An earlier task in this run changed files; the tests confirm nothing is left.
+    out, ctx, _ = _run([ModelReply(text="Nothing to change.", input_tokens=10, output_tokens=5)],
+                       earlier_changes={"calc.py"})
     assert out["success"] is True
     ctx["git"].rollback_file.assert_not_called()
+
+
+def test_no_edit_on_new_work_fails_even_though_old_tests_pass():
+    # The baseline flaw: on new work the old tests pass before anything is done.
+    out, ctx, _ = _run([ModelReply(text="Nothing to change.", input_tokens=10, output_tokens=5)])
+    assert out["success"] is False
+    assert "without editing" in out["verify_error"]
+
+
+@pytest.mark.parametrize("action, needs", [
+    ("Make the monthly summary at least 5x faster", True),
+    ("Move settings to environment variables", True),
+    ("Fix the slice in paginate", True),
+    ("Review the export module", False),
+    ("Explain how day boundaries are computed", False),
+    ("Review and update the test assertions", True),
+])
+def test_task_needs_edits(action, needs):
+    from scaffold.agent.orchestrator import _task_needs_edits
+    assert _task_needs_edits({"action": action}) is needs
 
 
 def test_a_test_writing_task_is_not_failed_by_its_red_tests():

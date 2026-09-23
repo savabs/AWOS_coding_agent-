@@ -957,7 +957,7 @@ def cmd_agent(args):
     loop = AgentLoop(
         registry=registry,
         client=client,
-        max_turns=getattr(args, "max_turns", 12),
+        max_turns=getattr(args, "max_turns", None),
         ledger=get_ledger(),
         max_cost_usd=getattr(args, "max_cost", None),
         on_event=show if not getattr(args, "quiet", False) else None,
@@ -1717,8 +1717,8 @@ def build_parser() -> argparse.ArgumentParser:
     agent.add_argument("goal", help="What to do (quote if multi-word)")
     agent.add_argument("--root", default=".", help="Project root to work in")
     agent.add_argument("--model", default=None, help="Override the model id")
-    agent.add_argument("--max-turns", type=int, default=12, dest="max_turns",
-                       help="Stop after this many turns (default 12)")
+    agent.add_argument("--max-turns", type=int, default=None, dest="max_turns",
+                       help="Stop after this many turns (default: AWOS_AGENT_MAX_TURNS, else 60)")
     agent.add_argument("--allow-shell", action="store_true", dest="allow_shell",
                        help="Give the agent the shell tool (still gated by ALLOW_SHELL)")
     agent.add_argument("--rollback-on-failure", action="store_true",
