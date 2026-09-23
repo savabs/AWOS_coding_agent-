@@ -1,0 +1,16 @@
+[backup]
+source_dir = ~/documents
+backup_dir = /var/backups/backupd
+interval_minutes = 60
+retention_days = 7
+compress = true
+exclude = *.tmp, .git, node_modules
+
+[notify]
+notify_email = ops@example.com
+smtp_host = localhost
+smtp_port = 25
+
+[logging]
+log_level = INFO
+log_file =
