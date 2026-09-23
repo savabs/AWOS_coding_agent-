@@ -1,0 +1,8 @@
+{
+  "name": "monthly_summary_perf",
+  "kind": "performance",
+  "goal": "The monthly account summary takes forever for our big accounts (try `python -m ledger demo --size large`). Make it at least 5x faster on large accounts without changing any of the numbers it produces. Keep the existing functions, classes and CLI working the same way, and keep the tests passing.",
+  "max_turns": 150,
+  "max_cost_usd": 1.0,
+  "timeout_min": 30
+}
