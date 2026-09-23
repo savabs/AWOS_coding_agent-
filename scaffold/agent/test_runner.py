@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
@@ -51,6 +52,12 @@ class TestResult:
     timed_out: bool = False
     test_command: List[str] = field(default_factory=list)
     no_tests_found: bool = False
+
+
+#: Through the running interpreter, not a bare `pytest` on PATH: without an
+#: activated venv the bare command is "not found", and verification silently
+#: ran nothing.
+_PYTEST_CMD = [sys.executable, "-m", "pytest", "--tb=short", "-q"]
 
 
 class TestRunner:
@@ -105,19 +112,19 @@ class TestRunner:
         """Detect pytest via pytest.ini, pyproject.toml, or setup.cfg."""
         root = self.project_root
         if (root / "pytest.ini").exists():
-            return TestConfig("pytest", ["pytest", "--tb=short", "-q"])
+            return TestConfig("pytest", _PYTEST_CMD)
 
         pyproject = root / "pyproject.toml"
         if pyproject.exists():
             content = pyproject.read_text(encoding="utf-8")
             if "[tool.pytest" in content:
-                return TestConfig("pytest", ["pytest", "--tb=short", "-q"])
+                return TestConfig("pytest", _PYTEST_CMD)
 
         setup_cfg = root / "setup.cfg"
         if setup_cfg.exists():
             content = setup_cfg.read_text(encoding="utf-8")
             if "[tool:pytest]" in content:
-                return TestConfig("pytest", ["pytest", "--tb=short", "-q"])
+                return TestConfig("pytest", _PYTEST_CMD)
 
         return None
 
@@ -194,9 +201,11 @@ class TestRunner:
             )
         except FileNotFoundError as e:
             logger.error("[test_runner] Command not found: %s", e)
+            # Nothing ran: that is no evidence, not a run with zero results.
             return TestResult(
                 raw_output=f"Command not found: {e}",
                 test_command=cfg.command,
+                no_tests_found=True,
             )
 
         stdout = result.stdout or ""

@@ -21,10 +21,13 @@ Cheap-only mode (AWOS_CHEAP_ONLY=true):
   OpenRouter (L5) is always available — it is a cheap provider with diverse model access.
 """
 
+import logging
 import os
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 try:
     from .reward_store import ReplayGate
@@ -295,6 +298,14 @@ class EscalationEngine:
                 for spec in LADDER
             ]
             action_id = self._ml_router.select(features, budget_mask=budget_mask)
+            if not 0 <= action_id < len(LADDER):
+                # Weights learned on a longer, older ladder can name a rung that
+                # no longer exists; that crashed every task with IndexError.
+                logger.warning(
+                    "[escalation] LinUCB picked action %s but the ladder has %d rungs; "
+                    "using the first allowed rung", action_id, len(LADDER),
+                )
+                action_id = next((i for i, ok in enumerate(budget_mask) if ok), 0)
             ml_spec = LADDER[action_id]
             if ml_spec.model_id in MODELS_UNAVAILABLE or ml_spec.level.value > cap:
                 # The learned policy picked something dead or above cap.

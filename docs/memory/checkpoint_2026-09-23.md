@@ -77,12 +77,57 @@ failures as before; none in cassette, agent loop or benchmark code.
 
 ---
 
+## Later the same session
+
+**OpenRouter is the single provider key** — every model call routes through
+`OPENROUTER_API_KEY`; direct keys are ignored while it is set
+([[openrouter_only_spec]]). Live-proved: `scripts/check_openrouter_routing.py`.
+
+**The premise above was wrong about production.** `Orchestrator` never ran the
+single-shot Worker by default — it ran `ReActWorker` (`AWOS_REACT_WORKER`
+defaults to 1). Benchmarked as a third arm:
+
+| Executor | Haiku 4.5 | DeepSeek v4 Flash |
+|---|---|---|
+| Agent loop | 12/12 ($0.23) | 12/12 ($0.016) |
+| ReAct (then default) | 0/12 | 3/12 |
+| Single-shot | 4/12 | — |
+
+ReAct takes any reply not starting with JSON as `finish`
+(`react_worker.py:511`); models emitting XML/DSML tool calls end on turn 1
+having edited nothing.
+
+**The agent loop is now the orchestrator's executor** (`AWOS_EXECUTOR`,
+default `agent_loop`; `react` and `worker` stay selectable), verified by the
+project's tests rather than by the model's claim ([[agent_loop_executor_spec]]).
+Live-proved through the real `Orchestrator` on b1 and c1:
+`scripts/prove_agent_loop_executor.py`.
+
+Getting a real orchestrator run through exposed four defects, all fixed: every
+task crashed (stale LinUCB ladder index); test verification never ran (bare
+`pytest` not on PATH, reported as 0/0); edits that broke tests were kept
+(rollback decided before test failures); the stagnation breaker crashed without
+a runtime session.
+
+Suite: 36 failed / 1126 passed — one pre-existing failure fixed, none added.
+`tests/conftest.py` now strips provider keys so no unit test can reach a live
+model.
+
+---
+
 ## The single next action
 
-Wire the agent loop into `Orchestrator` as the executor for `bug_fix` tasks —
-the deferred item from the previous checkpoint, now justified by numbers.
-Keep the single-shot Worker as fallback. Use this benchmark (replayed, free)
-as the regression gate before and after.
+Run the full 12-case benchmark **through the orchestrator**, not just the
+executor in isolation — extend `prove_agent_loop_executor.py` to loop all
+cases. The two cases proved so far exercise the planner-less path
+(`pre_planned_tasks`); the next risk is the planner → task → executor chain on
+a real goal.
+
+## Also open
+
+- The LinUCB router's saved weights still describe the old 6-rung ladder; the
+  guard stops the crash, but the router should be retrained or reset.
+- `ReActWorker` is no longer the default but its parser bug stands.
 
 ---
 

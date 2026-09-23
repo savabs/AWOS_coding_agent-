@@ -41,7 +41,7 @@ class TestDetection:
         cfg = runner.detect()
         assert cfg is not None
         assert cfg.runner == "pytest"
-        assert cfg.command == ["pytest", "--tb=short", "-q"]
+        assert cfg.command == [sys.executable, "-m", "pytest", "--tb=short", "-q"]
 
     def test_detect_pyproject_pytest(self, tmp_project):
         Path(tmp_project, "pyproject.toml").write_text("[tool.pytest.ini_options]\n")

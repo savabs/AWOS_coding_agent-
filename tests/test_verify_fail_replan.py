@@ -38,6 +38,8 @@ def test_replan_task_adds_fidelity_hint():
 
 def test_orchestrator_replan_after_verify_fail(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key-for-test")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "fake-key-for-test")  # CheapPlanner needs a planner key
+    monkeypatch.setenv("AWOS_EXECUTOR", "worker")  # this test exercises the Worker path
     py = tmp_path / "worker.py"
     py.write_text(
         "class W:\n"

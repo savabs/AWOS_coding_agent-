@@ -41,9 +41,10 @@ def test_failure_signature_distinguishes_kind():
 def test_check_stagnation_trips_at_threshold(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
-    
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")  # CheapPlanner needs a planner key
+
     from scaffold.agent.orchestrator import Orchestrator
-    
+
     orch = Orchestrator()
     orch._stagnation_threshold = 3
     orch._failure_history = deque(maxlen=10)
@@ -67,9 +68,10 @@ def test_check_stagnation_trips_at_threshold(monkeypatch):
 def test_check_stagnation_ignores_success(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
-    
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")  # CheapPlanner needs a planner key
+
     from scaffold.agent.orchestrator import Orchestrator
-    
+
     orch = Orchestrator()
     result = {"success": True, "task": {}, "task_id": 1}
     

@@ -18,6 +18,14 @@ from typing import Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
+
+def executor_choice() -> str:
+    """
+    Which executor runs a task: agent_loop (default) | react | worker.
+    See docs/specs/agent_loop_executor_spec.md for the measurements behind it.
+    """
+    return os.getenv("AWOS_EXECUTOR", "agent_loop").strip().lower()
+
 try:
     from .agent_state_manager import AgentStateManager
     from .cheap_planner import CheapPlanner
@@ -927,21 +935,25 @@ class Orchestrator:
 
                     # ── Stagnation breaker ──────────────────────────────────
                     if self._check_stagnation(r):
-                        from .runtime_session import SessionStatus
-                        self._runtime_session.pause_reason = "STAGNATION"
                         print("\n[BREAKER] Stagnation detected: same error pattern repeating")
-                        print(f"[BREAKER] Task {r['task_id']} stuck — auto-pausing session")
-                        print(f"[BREAKER] Review: awos sessions show {self._runtime_session.session_id}")
-                        self._runtime_store.finalize(self._runtime_session, SessionStatus.PAUSED)
+                        print(f"[BREAKER] Task {r['task_id']} stuck — stopping")
+                        # Runtime sessions are optional; without one there is
+                        # nothing to pause, but the run must still stop.
+                        if self._runtime_session and self._runtime_store:
+                            from .runtime_session import SessionStatus
+                            self._runtime_session.pause_reason = "STAGNATION"
+                            print(f"[BREAKER] Review: awos sessions show {self._runtime_session.session_id}")
+                            self._runtime_store.finalize(self._runtime_session, SessionStatus.PAUSED)
                         self._pause_requested = True
                         tasks_completed = sum(1 for res in results if res["success"])
                         tasks_failed = sum(1 for res in results if not res["success"])
                         break
 
-            if self._pause_requested and self._runtime_session and self._runtime_store:
-                from .runtime_session import SessionStatus
-                print("[SESSION] Pause requested — stopping after last checkpoint")
-                self._runtime_store.finalize(self._runtime_session, SessionStatus.PAUSED)
+            if self._pause_requested:
+                if self._runtime_session and self._runtime_store:
+                    from .runtime_session import SessionStatus
+                    print("[SESSION] Pause requested — stopping after last checkpoint")
+                    self._runtime_store.finalize(self._runtime_session, SessionStatus.PAUSED)
                 tasks_completed = sum(1 for r in results if r["success"])
                 tasks_failed = sum(1 for r in results if not r["success"])
                 break
@@ -1319,13 +1331,198 @@ class Orchestrator:
             exploration_context=exploration,
             step_callback=_on_react_step,
         )
+        return self._record_tool_executor_result(
+            react_result,
+            task,
+            ctx,
+            tool_name="ReActWorker",
+            tag="REACT",
+            marker="react",
+            failure_kind="react_fail",
+            task_id=task_id,
+            esc_decision=esc_decision,
+            _span=_span,
+            _strategy=_strategy,
+            _task_ts=_task_ts,
+            _live_t=_live_t,
+            _task_usage=_task_usage,
+        )
+
+    def _execute_task_via_agent_loop(
+        self,
+        task: dict,
+        ctx: dict,
+        *,
+        task_id,
+        esc_decision,
+        _span,
+        _strategy,
+        _task_ts: float,
+        _live_t,
+        _task_usage: dict,
+    ) -> Optional[dict]:
+        """
+        Execute one task with AgentLoop (native tool calls), then verify it
+        with the project's own tests — the loop's success only means the model
+        stopped calling tools. Returns None when no model client can be built,
+        so the caller can fall back to the previous executor.
+        """
+        from types import SimpleNamespace
+
+        try:
+            from .agent_loop import AgentLoop, build_client_from_env, build_coding_registry
+            from .providers import openrouter_key, openrouter_model_id
+        except ImportError:
+            from agent_loop import AgentLoop, build_client_from_env, build_coding_registry
+            from providers import openrouter_key, openrouter_model_id
+
+        codebase_root = ctx["codebase_root"]
+        model = esc_decision.spec.model_id
+        if openrouter_key():
+            model = openrouter_model_id(model)
+        try:
+            client = build_client_from_env(model)
+        except Exception as exc:
+            logger.warning("[AgentLoop] no model client (%s); using the previous executor", exc)
+            return None
+
+        print(f"[TASK {task_id}] AgentLoop ({model})")
+        if _live_t:
+            _live_t.worker_start(1, esc_decision.spec.name)
+
+        def _on_event(kind: str, payload: dict) -> None:
+            if not self._gui_bus:
+                return
+            if kind == "turn" and payload.get("text"):
+                self._gui_bus.emit_agent_thinking(payload["text"], payload.get("turn", 0))
+            elif kind == "tool":
+                self._gui_bus.emit_agent_tool_call(
+                    action=payload.get("name", ""),
+                    action_input={},
+                    observation="",
+                    success=bool(payload.get("ok")),
+                    latency_ms=0.0,
+                )
+
+        outcome = AgentLoop(
+            registry=build_coding_registry(codebase_root),
+            client=client,
+            on_event=_on_event,
+        ).run(self._agent_loop_prompt(task, ctx))
+
+        files_changed = [os.path.relpath(p, codebase_root) for p in outcome.files_touched]
+
+        # Verify independently of what the model claimed.
+        test_result = None
+        if files_changed:
+            try:
+                test_result = TestRunner(project_root=codebase_root).run(changed_files=files_changed)
+            except Exception as exc:
+                logger.warning("[TASK %s] TestRunner error: %s", task_id, exc)
+
+        completed = outcome.stop_reason == "completed"
+        edited_enough = bool(files_changed) or not ReActWorker._task_needs_edits(task)
+        if not completed:
+            error = f"AgentLoop stopped: {outcome.stop_reason}"
+        elif not edited_enough:
+            error = "AgentLoop finished without editing any file"
+        else:
+            error = ""
+
+        result = {
+            "success": completed and edited_enough,
+            "summary": outcome.final_message[:500],
+            "error": error,
+            "files_changed": files_changed,
+            "steps": [
+                SimpleNamespace(
+                    thought=turn.get("text", ""),
+                    action=",".join(c["name"] for c in turn.get("calls", [])),
+                    action_input={},
+                    observation="",
+                    success=all(c["ok"] for c in turn.get("calls", [])),
+                    latency_ms=0.0,
+                )
+                for turn in outcome.transcript
+            ],
+            "test_result": test_result,
+            "input_tokens": outcome.input_tokens,
+            "output_tokens": outcome.output_tokens,
+            "cost_usd": outcome.cost_usd,
+            "model_used": model,
+        }
+        return self._record_tool_executor_result(
+            result,
+            task,
+            ctx,
+            tool_name="AgentLoop",
+            tag="AGENT",
+            marker="agent_loop",
+            failure_kind="agent_loop_fail",
+            task_id=task_id,
+            esc_decision=esc_decision,
+            _span=_span,
+            _strategy=_strategy,
+            _task_ts=_task_ts,
+            _live_t=_live_t,
+            _task_usage=_task_usage,
+        )
+
+    @staticmethod
+    def _agent_loop_prompt(task: dict, ctx: dict) -> str:
+        parts = [task.get("action", "")]
+        files = task_files(task)
+        if files:
+            parts.append("Files to change: " + ", ".join(files))
+        if task.get("prev_task_context"):
+            parts.append("The previous task changed:\n" + str(task["prev_task_context"])[:2000])
+        exploration = (ctx.get("exploration") or {}).get("exploration_summary", "")
+        if exploration:
+            parts.append("Exploration notes:\n" + str(exploration)[:3000])
+        parts.append(
+            "Read what you need, make the change with edit_file, and run the "
+            "tests to check your work."
+        )
+        return "\n\n".join(parts)
+
+    def _record_tool_executor_result(
+        self,
+        result: dict,
+        task: dict,
+        ctx: dict,
+        *,
+        tool_name: str,
+        tag: str,
+        marker: str,
+        failure_kind: str,
+        task_id,
+        esc_decision,
+        _span,
+        _strategy,
+        _task_ts: float,
+        _live_t,
+        _task_usage: dict,
+    ) -> dict:
+        """
+        Book-keeping shared by the tool-driving executors (ReAct, AgentLoop):
+        traces, git tracking or rollback, tests, reward, escalation, span, GUI.
+
+        `result` has ReActWorker's shape: success, summary, error,
+        files_changed (relative paths), steps, test_result, token/cost fields.
+        """
+        import time as _time
+
+        codebase_root = ctx["codebase_root"]
+        git = ctx["git"]
+        session = ctx["session"]
+
         try:
             from .usage_record import merge_result_usage
         except ImportError:
             from usage_record import merge_result_usage
-        merge_result_usage(_task_usage, react_result)
+        merge_result_usage(_task_usage, result)
 
-        steps = react_result.get("steps") or []
+        steps = result.get("steps") or []
         for step in steps:
             trace = ReasoningTrace(
                 thought=getattr(step, "thought", ""),
@@ -1334,13 +1531,26 @@ class Orchestrator:
                 observation=getattr(step, "observation", "")[:500],
                 success=getattr(step, "success", False),
                 latency_ms=getattr(step, "latency_ms", 0.0),
-                model=react_result.get("model_used", esc_decision.spec.name),
+                model=result.get("model_used", esc_decision.spec.name),
             )
             session.add_trace(trace)
 
-        success = bool(react_result.get("success"))
-        test_result = react_result.get("test_result")
-        files_changed = react_result.get("files_changed") or []
+        success = bool(result.get("success"))
+        test_result = result.get("test_result")
+        files_changed = result.get("files_changed") or []
+
+        # Failing tests must fail the task before keep-or-rollback is decided
+        # below; checked afterwards, the edits that broke them were kept.
+        if (
+            success
+            and test_result is not None
+            and not getattr(test_result, "no_tests_found", True)
+            and test_result.failed > 0
+        ):
+            success = False
+            result["error"] = result.get("error") or (
+                f"{test_result.failed} test(s) failed after the edit"
+            )
 
         # ── GuiEventBus: file_edit for each changed file ──────────────────
         if self._gui_bus:
@@ -1356,7 +1566,7 @@ class Orchestrator:
             _live_t.worker_done(success, n_edits=len(files_changed))
 
         if success:
-            print(f"[TASK {task_id}] REACT OK: {react_result.get('summary', 'done')[:200]}")
+            print(f"[TASK {task_id}] {tag} OK: {result.get('summary', 'done')[:200]}")
             for rel in files_changed:
                 abs_path = os.path.join(codebase_root, rel)
                 git.record_modified(abs_path)
@@ -1364,10 +1574,10 @@ class Orchestrator:
             self.execution_log.append({
                 "task_id": task_id,
                 "status": "completed",
-                "reason": f"ReAct: {react_result.get('summary', 'completed')[:120]}",
+                "reason": f"{tool_name}: {result.get('summary', 'completed')[:120]}",
             })
             self.performance.record(
-                tool="ReActWorker",
+                tool=tool_name,
                 model=esc_decision.spec.name,
                 task_type=self.performance._classify_task_type(task.get("action", "")),
                 success=True,
@@ -1375,8 +1585,8 @@ class Orchestrator:
                 cost=float(_task_usage.get("cost_usd", 0)) or esc_decision.spec.cost_per_req,
             )
         else:
-            err = react_result.get("error", "ReAct worker failed")
-            print(f"[TASK {task_id}] REACT FAILED: {err}")
+            err = result.get("error", f"{tool_name} failed")
+            print(f"[TASK {task_id}] {tag} FAILED: {err}")
             for rel in files_changed:
                 git.rollback_file(os.path.join(codebase_root, rel))
             self._update_task_node(task_id, "failed", session.session_id)
@@ -1387,13 +1597,13 @@ class Orchestrator:
             })
             self._persist_worker_failure_pattern(task, task_id, err)
             self.performance.record(
-                tool="ReActWorker",
+                tool=tool_name,
                 model=esc_decision.spec.name,
                 task_type=self.performance._classify_task_type(task.get("action", "")),
                 success=False,
                 latency_ms=(_time.time() - _task_ts) * 1000,
                 cost=float(_task_usage.get("cost_usd", 0)) or esc_decision.spec.cost_per_req,
-                error_type="react_fail",
+                error_type=failure_kind,
             )
 
         if test_result is not None and not getattr(test_result, "no_tests_found", True):
@@ -1456,13 +1666,13 @@ class Orchestrator:
                 success=_success,
                 cost_usd=_cost,
                 n_edits=len(files_changed),
-                error="" if _success else (react_result.get("error", "")),
+                error="" if _success else (result.get("error", "")),
             )
 
-        out = {"task_id": task_id, "success": _success, "task": task, "react": True}
+        out = {"task_id": task_id, "success": _success, "task": task, marker: True}
         if not _success:
-            out["failure_kind"] = "react_fail"
-            out["verify_error"] = react_result.get("error", "")
+            out["failure_kind"] = failure_kind
+            out["verify_error"] = result.get("error", "")
         return out
 
     def _execute_single_task(self, task: dict, ctx: dict) -> dict:
@@ -1656,8 +1866,25 @@ class Orchestrator:
         _span.worker_start_ts = _time.time()
         _span.strategy = _strategy.name
 
-        # ── ReAct worker path (default ON via AWOS_REACT_WORKER=1) ───────
-        if self.react_worker is not None and react_worker_enabled():
+        # ── Executor selection (AWOS_EXECUTOR) ────────────────────────────
+        _executor = executor_choice()
+        if _executor == "agent_loop":
+            _loop_result = self._execute_task_via_agent_loop(
+                task,
+                ctx,
+                task_id=task_id,
+                esc_decision=esc_decision,
+                _span=_span,
+                _strategy=_strategy,
+                _task_ts=_task_ts,
+                _live_t=_live_t,
+                _task_usage=_task_usage,
+            )
+            if _loop_result is not None:
+                return _loop_result
+            # No model client could be built: fall through to the previous path.
+
+        if _executor != "worker" and self.react_worker is not None and react_worker_enabled():
             return self._execute_task_via_react(
                 task,
                 ctx,
