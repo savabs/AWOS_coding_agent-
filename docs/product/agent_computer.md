@@ -27,6 +27,45 @@ Nvidia DGX Spark, a Linux box); later as a polished box of our own.
 The comma.ai lesson: be the brain for hardware that already exists, publish a
 short list of supported setups, and make each one excellent.
 
+## General computer, coding first
+
+It is only "the agent's own computer" if the agent can do on it what a person
+does on a computer — not just write code. Coding is **App #1** (per
+`VISION.md`: kernel = product, coding = App #1), chosen because it is the one
+ability proven today. Nothing in the host may assume a job is coding.
+
+Every job has the same shape:
+
+```
+job = goal + ability (app) + verifier
+```
+
+| Layer | General (kernel) | Coding (App #1) | Later apps |
+|---|---|---|---|
+| Workspace | a full sandboxed machine: files, shell, network, browser, accounts | a repo inside it | documents, downloads, profiles |
+| Tools | shell, files, browser, HTTP/APIs, email/calendar | edit_file, run_tests, git | browser actions, forms, app UIs |
+| Verifier | pluggable: "how do we know it's done?" | the project's tests | page reached, file produced, email sent, value matches |
+| Hand-off | report + artifacts + notification | branch / PR | document, spreadsheet, booked slot |
+
+Design rules, binding from M1 on:
+
+1. **The workspace is a whole machine, not a git checkout.** Git worktrees are
+   one feature inside it.
+2. **Verification is an interface, not pytest.** Each app brings its own
+   verifier; the host only asks "done and verified?"
+3. **Jobs, reports and budgets never mention code.** Coding details live in the
+   coding app.
+
+Abilities, in order (each added only when the previous one is dependable):
+
+1. **Coding** — proven (12/12).
+2. **Browser + research** — find, read, compare, fill forms; verifier = the
+   page state or the extracted facts.
+3. **Files and documents** — produce and edit docs, sheets, reports.
+4. **Ops on the machine itself** — install, configure, monitor, fix.
+5. **Communication** — email and calendar on the user's behalf, with approval.
+6. **Full computer use** — operate any desktop app through its screen.
+
 ## Why this is Stage 1, not a jump ahead
 
 `docs/MASTER_PLAN.md` Stage 1 = *one excellent worker — persistent,
@@ -44,7 +83,9 @@ proven today (12/12 benchmark cases through the orchestrator, ~$0.001 each,
 verified by tests). The promise: *leave it issues at night, get tested pull
 requests in the morning — on your own box, your code never leaves.*
 
-Browser and office work come after coding is dependable.
+They are the first *customers*, not the limit of the product: the same box
+gains browser, documents and ops abilities next (see *General computer, coding
+first*).
 
 ## MVP — what "done" means
 
@@ -77,7 +118,8 @@ Browser and office work come after coding is dependable.
 
 - Multiple agents per box (deferred — multi-agent).
 - Our own hardware (after the software is loved).
-- Pixel-level desktop control (after coding and browser work are dependable).
+- Pixel-level desktop control yet — it is ability 6, after coding, browser,
+  documents, ops and communication are dependable.
 - Consumer/home use.
 
 ## Open questions for the owner
