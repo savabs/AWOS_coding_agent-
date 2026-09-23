@@ -125,3 +125,15 @@ def test_cheap_planner_needs_only_openrouter(openrouter, monkeypatch):
     from scaffold.agent.cheap_planner import CheapPlanner
 
     assert "openrouter.ai" in str(CheapPlanner().client.base_url)
+
+
+def test_refine_goal_keeps_goal_when_reply_is_empty(openrouter):
+    # A reasoning model can spend its whole budget thinking and return "".
+    from scaffold.agent.cheap_planner import CheapPlanner
+
+    planner = CheapPlanner()
+    empty = MagicMock()
+    empty.choices = [MagicMock(message=MagicMock(content=""))]
+    planner.client = MagicMock()
+    planner.client.chat.completions.create.return_value = empty
+    assert planner.refine_goal("make it faster", {}) == "make it faster"

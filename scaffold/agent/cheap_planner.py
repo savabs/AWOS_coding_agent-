@@ -163,7 +163,9 @@ Respond with ONLY the refined goal, no explanation."""
             response = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=256,
+                # Reasoning models spend tokens thinking before answering;
+                # at 256 the answer could be cut off entirely.
+                max_tokens=1024,
                 temperature=0.3,
             )
             refined = response.choices[0].message.content or ""
@@ -174,7 +176,8 @@ Respond with ONLY the refined goal, no explanation."""
             if refined.startswith("- "):
                 refined = refined[2:]
 
-            return refined
+            # An empty reply must not erase the user's goal.
+            return refined.strip() or vague_goal
         except Exception:
             # Fallback: return original
             return vague_goal

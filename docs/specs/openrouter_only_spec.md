@@ -58,3 +58,21 @@ branch — DeepSeek, served through OpenRouter — handles the call.
   rewriting on both client shapes.
 - Live: with the key in `.env`, `scripts/check_backend.py` plus a single-shot
   benchmark case must show no DeepSeek/OpenAI/Anthropic-direct traffic.
+
+## Live proof — 2026-09-23
+
+`python3 scripts/check_openrouter_routing.py`, with DeepSeek, Anthropic,
+OpenAI, OpenCode and Gemini keys all still loaded from `.env`:
+
+| Call | Result | Request |
+|---|---|---|
+| Worker single-shot, case `a1_off_by_one_page` | solved | `POST openrouter.ai/api/v1/chat/completions` 200 |
+| `messages_client`, `claude-haiku-4-5` | "Ready" | `POST openrouter.ai/api/v1/messages` 200 |
+| `CheapPlanner`, `qwen3.7-plus` | "ready" | `POST openrouter.ai/api/v1/chat/completions` 200 |
+
+Hosts contacted: `openrouter.ai` only. Requests are recorded at the transport
+layer of both `httpx` (anthropic SDK) and `httpx2` (openai>=3 vendors its own).
+
+Found during proof: `CheapPlanner.refine_goal` capped output at 256 tokens;
+the reasoning model could spend it all thinking and return "", which erased the
+user's goal. Now 1024 tokens, and an empty reply falls back to the original goal.
