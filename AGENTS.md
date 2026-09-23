@@ -94,6 +94,19 @@ When proposing new work, map it to a **VISION stage (1–7)**. Reject work that 
 
 ---
 
+## 9. Parallel work (owner's standing rule)
+
+**Always work in parallel when the pieces don't collide.** Before starting multi-part work, split it into independent pieces and run them at the same time — parallel subagents, background runs, concurrent tool calls.
+
+- **Independent** = different files or directories, no shared mutable state, and no piece needs another's output. These run in parallel, always.
+- **Colliding** = same files, same state (e.g. `.awos/` ledgers, one git index), or an ordering dependency. These run in sequence.
+- Give each parallel agent its own files or directory, and say in its brief which paths it owns.
+- Merge and verify the results together at the end (tests, live proof).
+
+This rule is about **how AWOS is developed**. It does not relax §8: multi-agent swarms as an AWOS *product feature* stay deferred per `VISION.md`.
+
+---
+
 ## 6. Key paths
 
 | Path | Purpose |

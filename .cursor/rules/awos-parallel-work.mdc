@@ -1,0 +1,26 @@
+---
+description: Owner's standing rule — run non-colliding work in parallel with multiple agents
+alwaysApply: true
+---
+
+# Parallel Work (mandatory)
+
+Source of truth: `AGENTS.md` §9.
+
+## Rule
+
+Before starting multi-part work, split it into independent pieces and run them
+**at the same time** — parallel subagents, background runs, concurrent tool
+calls.
+
+- **Independent** (different files/directories, no shared mutable state, no
+  piece needs another's output) → parallel, always.
+- **Colliding** (same files, same state such as `.awos/` ledgers or one git
+  index, or an ordering dependency) → sequential.
+- Each parallel agent owns its own files or directory; name them in its brief.
+- Merge and verify together at the end (tests, live proof).
+
+## Scope
+
+This governs how AWOS is **developed**. Multi-agent swarms as an AWOS
+**product feature** remain deferred (`VISION.md`, `AGENTS.md` §8).
