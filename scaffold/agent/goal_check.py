@@ -60,8 +60,17 @@ logger = logging.getLogger(__name__)
 #: Follow-up tasks per round. More than this is a re-plan, not a gap.
 MAX_MISSING = 5
 #: Trying the behaviour (write a probe, run it, read the traceback) costs
-#: turns that reading alone did not; 25 ran out on the benchmark.
-DEFAULT_MAX_TURNS = 40
+#: turns that reading alone did not. 40 turns on Haiku cost $0.58 a check
+#: (~500k input tokens: 8 kept turns of 8k-char tool output, resent every turn)
+#: and still ended on max_turns; with the tighter context below, 24 is enough.
+DEFAULT_MAX_TURNS = 24
+#: History the checker keeps verbatim, and how much of each tool result it
+#: sees. It judges; it does not need a long transcript or whole files resent.
+CHECK_KEEP_TURNS = 3
+CHECK_TOOL_RESULT_CHARS = 3000
+#: Default cap on one check (AWOS_GOAL_CHECK_MAX_COST overrides; the goal's
+#: remaining budget still applies on top).
+DEFAULT_CHECK_MAX_COST = 0.20
 #: The checker needs the shape of the change, not all of it.
 MAX_DIFF_CHARS = 12000
 VERDICT_TOOL = "submit_verdict"
@@ -106,8 +115,13 @@ edges. TRY the goal's behaviour before you decide:
 Be sceptical of the change's own scope: a partial change is the usual failure.
 Search for every place the goal applies before you decide.
 
+Work economically — every turn resends the conversation, and older tool output
+is cut short. Aim for about 12 tool calls: search with grep and read targeted
+line ranges rather than whole files, and put several behaviour checks into one
+probe script instead of one command per check.
+
 When you have decided, call {VERDICT_TOOL} exactly once. That call ends the
-review.
+review — call it as soon as the evidence is clear.
 """
 
 INSTRUCTIONS = (
@@ -162,11 +176,11 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
-def _float_env(name: str) -> Optional[float]:
+def _float_env(name: str, default: Optional[float] = None) -> Optional[float]:
     try:
         return float(os.getenv(name, "").strip() or "x")
     except ValueError:
-        return None
+        return default
 
 
 def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
@@ -606,7 +620,7 @@ class GoalChecker:
         self.remaining_budget = remaining_budget
         #: A cap on one check alone: AWOS_GOAL_CHECK_MAX_COST, unset = none.
         self.max_cost_usd = (max_cost_usd if max_cost_usd is not None
-                             else _float_env("AWOS_GOAL_CHECK_MAX_COST"))
+                             else _float_env("AWOS_GOAL_CHECK_MAX_COST", DEFAULT_CHECK_MAX_COST))
 
     def _cost_cap(self) -> Optional[float]:
         """The tighter of the per-check cap and what the goal has left."""
@@ -723,6 +737,8 @@ class GoalChecker:
             system_prompt=SYSTEM_PROMPT,
             # None falls back to AWOS_MAX_RUN_COST, as for any loop.
             max_cost_usd=max_cost_usd,
+            keep_turns=CHECK_KEEP_TURNS,
+            tool_result_chars=CHECK_TOOL_RESULT_CHARS,
         ).run(build_prompt(goal, changed_files, diff, can_run=sandbox is not None,
                            can_test=can_test))
         tokens_in, tokens_out = outcome.input_tokens, outcome.output_tokens

@@ -168,7 +168,7 @@ def test_a_real_verdict_is_verified():
 
 
 def test_max_turns_from_env(monkeypatch):
-    assert GoalChecker(client=object()).max_turns == 40
+    assert GoalChecker(client=object()).max_turns == 24
     monkeypatch.setenv("AWOS_GOAL_CHECK_MAX_TURNS", "7")
     assert GoalChecker(client=object()).max_turns == 7
 
@@ -484,9 +484,39 @@ def test_affordable_retry_still_runs(tmp_path):
                                        _submit(True)])
     client.model = "claude-haiku-4-5"
     with patch("scaffold.agent.usage_record.record_api_usage"):
-        v = GoalChecker(client=client, max_turns=1,
+        # An explicit per-check cap: the default ($0.20) is below this check's cost.
+        v = GoalChecker(client=client, max_turns=1, max_cost_usd=1.0,
                         remaining_budget=lambda: 1.0).check("g", str(tmp_path), [], "")
     assert client.calls == 3 and v.verified is True and v.complete is True
+
+
+def test_default_per_check_cap(monkeypatch):
+    from scaffold.agent.goal_check import DEFAULT_CHECK_MAX_COST
+    monkeypatch.delenv("AWOS_GOAL_CHECK_MAX_COST", raising=False)
+    assert GoalChecker(client=object()).max_cost_usd == DEFAULT_CHECK_MAX_COST
+    monkeypatch.setenv("AWOS_GOAL_CHECK_MAX_COST", "0.5")
+    assert GoalChecker(client=object()).max_cost_usd == 0.5
+
+
+def test_checker_loop_uses_the_tight_context(monkeypatch, tmp_path):
+    # 3 kept turns and 3000-char tool results: the lever that took a check
+    # from ~500k input tokens down.
+    import scaffold.agent.agent_loop as al
+    from scaffold.agent import goal_check
+
+    seen = {}
+    orig_init = al.AgentLoop.__init__
+
+    def spy(self, *a, **kw):
+        seen.update(keep=kw.get("keep_turns"), chars=kw.get("tool_result_chars"))
+        orig_init(self, *a, **kw)
+
+    monkeypatch.setattr(al.AgentLoop, "__init__", spy)
+    client = _Recording([_submit(True)])
+    with patch("scaffold.agent.usage_record.record_api_usage"):
+        GoalChecker(client=client).check("g", str(tmp_path), [], "")
+    assert seen == {"keep": goal_check.CHECK_KEEP_TURNS,
+                    "chars": goal_check.CHECK_TOOL_RESULT_CHARS}
 
 
 # ── Behavioural verification on a copy ──────────────────────────────────────

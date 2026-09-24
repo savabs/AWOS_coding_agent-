@@ -337,6 +337,20 @@ class OpenAIToolClient:
         ]
 
 
+def _clip_result(result: Any, limit: int) -> Any:
+    """A copy of a ToolResult with its text and error cut to `limit` chars."""
+    import copy
+
+    clipped = copy.copy(result)
+    for attr in ("text", "error"):
+        value = getattr(clipped, attr, "") or ""
+        if len(value) > limit:
+            setattr(clipped, attr, value[:limit] + (
+                f"\n... [truncated {len(value) - limit} characters; narrow the query "
+                "or read a specific line range]"))
+    return clipped
+
+
 def _render_result(result: Any) -> str:
     """Turn a ToolResult into the text the model sees."""
     body = result.text if result.success else f"ERROR: {result.error}"
@@ -480,6 +494,8 @@ class AgentLoop:
         max_cost_usd: Optional[float] = None,
         on_event: Any = None,
         require_edits: bool = False,
+        keep_turns: Optional[int] = None,
+        tool_result_chars: Optional[int] = None,
     ) -> None:
         self.registry = registry
         self.client = client
@@ -488,7 +504,12 @@ class AgentLoop:
             if max_turns is not None
             else _int_env("AWOS_AGENT_MAX_TURNS", DEFAULT_MAX_TURNS)
         )
-        self.keep_turns = max(1, _int_env("AWOS_AGENT_KEEP_TURNS", DEFAULT_KEEP_TURNS))
+        self.keep_turns = max(1, keep_turns if keep_turns is not None
+                              else _int_env("AWOS_AGENT_KEEP_TURNS", DEFAULT_KEEP_TURNS))
+        # Every kept tool result is resent on every later turn, so a loop that
+        # only needs to judge (the goal checker) runs cheaper on a tighter cap.
+        # None keeps the adapters' default, byte-for-byte (cassettes rely on it).
+        self.tool_result_chars = tool_result_chars
         self.require_edits = require_edits
         self.max_repeats = max_repeats
         self.system_prompt = system_prompt
@@ -709,6 +730,8 @@ class AgentLoop:
             ):
                 break
 
+            if self.tool_result_chars is not None:
+                results = [_clip_result(r, self.tool_result_chars) for r in results]
             messages.extend(self.client.format_tool_results(reply.tool_calls, results))
 
         outcome.files_touched = touched
