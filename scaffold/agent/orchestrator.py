@@ -213,6 +213,8 @@ def _agent_resume_reason(outcome, verdict: dict, model_errors: int) -> Optional[
         return "it ran out of turns (max_turns)"
     if stop == "repeated_tool_call":
         return "it repeated the same tool call without progress (repeated_tool_call)"
+    if stop == "truncated":
+        return "its replies kept hitting the output limit (truncated); think briefly, then act"
     if stop == "model_error":
         if model_errors > 1:
             return None

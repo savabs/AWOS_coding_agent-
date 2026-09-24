@@ -43,6 +43,17 @@ DEFAULT_MAX_TURNS = 60
 DEFAULT_KEEP_TURNS = 8
 #: How many times an empty finish is pushed back when edits are required.
 MAX_NUDGES = 2
+#: Output budget per reply. Reasoning models spend it on hidden thinking
+#: before any text or tool call, so 4096 cut replies off. AWOS_AGENT_MAX_OUTPUT_TOKENS.
+DEFAULT_MAX_OUTPUT_TOKENS = 16384
+#: Finish reasons meaning "hit the output limit" (OpenAI / Anthropic).
+TRUNCATED_FINISH = frozenset({"length", "max_tokens"})
+#: Cut-off replies in a row the loop asks to continue before giving up.
+MAX_TRUNCATIONS = 3
+TRUNCATED_MESSAGE = (
+    "Your last reply was cut off by the output limit before any text or tool "
+    "call. Keep your reasoning short and take the next action now: call a tool."
+)
 NUDGE_MESSAGE = (
     "You have not changed any file yet, but this task requires changes. "
     "Continue: read what you need, make the change with edit_file, then run "
@@ -208,10 +219,10 @@ class ModelClient(Protocol):
 class AnthropicToolClient:
     """Adapter for the Anthropic Messages API (native tool use)."""
 
-    def __init__(self, client: Any, model: str, max_tokens: int = 4096) -> None:
+    def __init__(self, client: Any, model: str, max_tokens: Optional[int] = None) -> None:
         self._client = client
         self.model = model
-        self.max_tokens = max_tokens
+        self.max_tokens = max_tokens or _int_env("AWOS_AGENT_MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS)
 
     def complete(self, system, messages, registry) -> ModelReply:
         response = self._client.messages.create(
@@ -267,10 +278,10 @@ class AnthropicToolClient:
 class OpenAIToolClient:
     """Adapter for OpenAI-compatible function calling (DeepSeek, GPT, others)."""
 
-    def __init__(self, client: Any, model: str, max_tokens: int = 4096) -> None:
+    def __init__(self, client: Any, model: str, max_tokens: Optional[int] = None) -> None:
         self._client = client
         self.model = model
-        self.max_tokens = max_tokens
+        self.max_tokens = max_tokens or _int_env("AWOS_AGENT_MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS)
 
     def complete(self, system, messages, registry) -> ModelReply:
         response = self._client.chat.completions.create(
@@ -528,6 +539,7 @@ class AgentLoop:
         messages: list[dict[str, Any]] = [{"role": "user", "content": prompt}]
 
         outcome = LoopOutcome(success=False, stop_reason="max_turns")
+        truncations = 0  # consecutive replies cut off by the output limit
         # Keyed on (signature, state_version): the count resets whenever the
         # workspace may have changed, so only truly identical repeats add up.
         seen_calls: dict[tuple[str, int], int] = {}
@@ -586,6 +598,23 @@ class AgentLoop:
                 )
                 self._emit("cost_cap", cost_usd=outcome.cost_usd)
                 break
+
+            # A reply cut off by the output limit is not a finish, even with
+            # no tool calls: DeepSeek v4 Flash spent its whole budget on hidden
+            # reasoning after a profile, and the loop took the empty reply as
+            # "done" — twice, on a task a later attempt solved.
+            if not reply.tool_calls and _finish_reason(reply.raw) in TRUNCATED_FINISH:
+                truncations += 1
+                if truncations <= MAX_TRUNCATIONS:
+                    if reply.text:
+                        messages.append(self.client.format_assistant_turn(reply))
+                    messages.append({"role": "user", "content": TRUNCATED_MESSAGE})
+                    _trace(f"t{turn} cut off by the output limit ({truncations}/{MAX_TRUNCATIONS}); asking to continue")
+                    continue
+                outcome.stop_reason = "truncated"
+                outcome.final_message = reply.text or "Replies kept hitting the output limit."
+                break
+            truncations = 0
 
             # No tool calls means the model considers the work finished.
             if not reply.tool_calls:
