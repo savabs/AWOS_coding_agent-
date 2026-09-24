@@ -170,7 +170,27 @@ def run_one_in_process(task_dir: Path, project: Path) -> None:
     }), encoding="utf-8")
 
 
+def backend_ok() -> bool:
+    """
+    One tiny model call before any task. A dead key otherwise shows up as
+    every task "failing" at $0 — a run on 2026-09-24 spent 21 minutes scoring
+    0/5 against an expired OpenRouter key, which says nothing about the agent.
+    """
+    proc = subprocess.run(
+        [PY, str(REPO / "scripts" / "check_backend.py")],
+        capture_output=True, text=True, timeout=120,
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+    )
+    if proc.returncode != 0:
+        tail = "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-6:])
+        print(f"[long_tasks] backend check failed — not running any task:\n{tail}", flush=True)
+        return False
+    return True
+
+
 def run(names: list[str] | None) -> int:
+    if not backend_ok():
+        return 2
     results = []
     tasks = discover(names)
     for index, task_dir in enumerate(tasks, 1):
