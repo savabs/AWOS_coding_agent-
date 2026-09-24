@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1143,3 +1144,44 @@ def test_failed_task_on_an_untouched_file_still_restores_the_original(tmp_path):
     path.write_text("BROKEN\n", encoding="utf-8")
     git.rollback_file(str(path))
     assert path.read_text(encoding="utf-8") == "ORIGINAL\n"
+
+
+def test_nearly_out_of_budget_tells_the_checker_to_decide():
+    # With a $0.20 cap, checks were cut off mid-investigation with no verdict.
+    from scaffold.agent.goal_check import DECIDE_NOW, _EndOnVerdict
+
+    systems = []
+
+    class _Inner:
+        model = "claude-haiku-4-5"
+
+        def complete(self, system, messages, registry):
+            systems.append(system)
+            return ModelReply(text="looking", input_tokens=60_000, output_tokens=0)
+
+    tool = SimpleNamespace(verdict=None)
+    gated = _EndOnVerdict(_Inner(), tool, model="claude-haiku-4-5", cap=0.20, max_turns=24)
+    for _ in range(3):
+        gated.complete("SYS", [], None)
+    # $0.06 then $0.12 spent: below 75% of $0.20; after $0.18 the next call is told.
+    assert DECIDE_NOW not in systems[0] and DECIDE_NOW not in systems[1]
+    gated.complete("SYS", [], None)
+    assert systems[3].endswith(DECIDE_NOW)
+
+
+def test_near_the_turn_limit_tells_the_checker_to_decide():
+    from scaffold.agent.goal_check import DECIDE_NOW, _EndOnVerdict
+
+    systems = []
+
+    class _Inner:
+        model = "m"
+
+        def complete(self, system, messages, registry):
+            systems.append(system)
+            return ModelReply(text="", input_tokens=1, output_tokens=1)
+
+    gated = _EndOnVerdict(_Inner(), SimpleNamespace(verdict=None), model="m", max_turns=5)
+    for _ in range(5):
+        gated.complete("SYS", [], None)
+    assert [DECIDE_NOW in s for s in systems] == [False, False, False, True, True]

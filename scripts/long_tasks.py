@@ -195,6 +195,12 @@ def run(names: list[str] | None) -> int:
     tasks = discover(names)
     for index, task_dir in enumerate(tasks, 1):
         spec = load(task_dir)
+        # Again before every task: a key can die mid-run (a spend limit was
+        # reached during a run on 2026-09-25), and the tasks after it then
+        # "fail" at $0 — which measures the key, not the agent.
+        if index > 1 and not backend_ok():
+            print(f"[long_tasks] stopping: {len(tasks) - index + 1} task(s) not run", flush=True)
+            break
         print(f"\n########## [{index}/{len(tasks)}] {spec['name']} ({spec['kind']}) ##########", flush=True)
         print(f"GOAL: {spec['goal']}\n", flush=True)
         ledger_before = len(_ledger())

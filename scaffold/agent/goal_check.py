@@ -71,6 +71,15 @@ CHECK_TOOL_RESULT_CHARS = 3000
 #: Default cap on one check (AWOS_GOAL_CHECK_MAX_COST overrides; the goal's
 #: remaining budget still applies on top).
 DEFAULT_CHECK_MAX_COST = 0.20
+#: When a check is this close to its cost cap or turn limit, it is told to
+#: decide and submit its verdict instead of being cut off without one.
+DECIDE_AT_FRACTION = 0.75
+DECIDE_TURNS_LEFT = 2
+DECIDE_NOW = (
+    "\n\nBUDGET: this review is nearly out of budget. Do not investigate "
+    "further. Decide now on the evidence you have and call submit_verdict in "
+    "this reply; list anything you could not verify as missing work."
+)
 #: The checker needs the shape of the change, not all of it.
 MAX_DIFF_CHARS = 12000
 VERDICT_TOOL = "submit_verdict"
@@ -515,13 +524,27 @@ class _EndOnVerdict:
     loop's message list, which the one nudge turn continues from.
     """
 
-    def __init__(self, inner: Any, verdict_tool: Any) -> None:
+    def __init__(self, inner: Any, verdict_tool: Any, model: str = "",
+                 cap: Optional[float] = None, max_turns: Optional[int] = None) -> None:
         self._inner = inner
         self._tool = verdict_tool
         self.messages: Optional[list] = None
+        self._model, self._cap, self._max_turns = model, cap, max_turns
+        self._calls = self._tokens_in = self._tokens_out = 0
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._inner, name)
+
+    def _nearly_out(self) -> bool:
+        # With the $0.20 cap, checks were stopped mid-investigation with no
+        # verdict at all ("stop=cost_cap", UNVERIFIED). Deciding on what has
+        # been seen beats no decision.
+        if self._max_turns is not None and self._calls >= self._max_turns - DECIDE_TURNS_LEFT:
+            return True
+        if self._cap:
+            spent = _estimate_cost(self._model, self._tokens_in, self._tokens_out)
+            return spent >= DECIDE_AT_FRACTION * self._cap
+        return False
 
     def complete(self, system: str, messages: list, registry: Any) -> Any:
         try:
@@ -531,7 +554,15 @@ class _EndOnVerdict:
         self.messages = messages
         if self._tool.verdict is not None:
             return ModelReply(text="")
-        return self._inner.complete(system, messages, registry)
+        if self._nearly_out():
+            # In the system prompt, not a message: it must not break the
+            # conversation's tool-call pairing in either dialect.
+            system = system + DECIDE_NOW
+        reply = self._inner.complete(system, messages, registry)
+        self._calls += 1
+        self._tokens_in += getattr(reply, "input_tokens", 0) or 0
+        self._tokens_out += getattr(reply, "output_tokens", 0) or 0
+        return reply
 
 
 class CopyTooLarge(Exception):
@@ -729,7 +760,11 @@ class GoalChecker:
         verdict_tool = _submit_verdict_tool()
         registry = build_readonly_registry(workspace, sandbox=sandbox, run_tests=can_test)
         registry.register(verdict_tool)
-        gated = _EndOnVerdict(client, verdict_tool)
+        gated = _EndOnVerdict(
+            client, verdict_tool,
+            model=model or getattr(client, "model", "") or "",
+            cap=max_cost_usd, max_turns=self.max_turns,
+        )
         outcome = AgentLoop(
             registry=registry,
             client=gated,
