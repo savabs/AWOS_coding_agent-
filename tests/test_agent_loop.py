@@ -179,6 +179,29 @@ class TestToolSchemas(unittest.TestCase):
 
         self.assertTrue(ReadFileTool()(path="requirements.txt").success)
 
+    def test_read_file_tolerates_malformed_line_ranges(self):
+        """Ranges the goal-check model sent that used to raise ValueError."""
+        project = _temp_project()
+        (project / "lines.txt").write_text("".join(f"l{i}\n" for i in range(1, 101)))
+        registry = build_coding_registry(str(project))
+        cases = [
+            ({"start_line": "[20, 55]"}, "lines 20–55 of 100"),
+            ({"start_line": [20, 55]}, "lines 20–55 of 100"),
+            ({"start_line": "`60", "end_line": "70`"}, "lines 60–70 of 100"),
+            ({"start_line": "5", "end_line": 9}, "lines 5–9 of 100"),
+            ({"start_line": "abc"}, "lines 1–100 of 100"),
+            # A hyphen is a range, not a minus: "-55" sliced from the end.
+            ({"start_line": "20-55"}, "lines 20–55 of 100"),
+            ({"start_line": 10, "end_line": "-5"}, "lines 10–10 of 100"),
+            ({"end_line": -5}, "lines 1–5 of 100"),
+            ({"start_line": 3, "end_line": 0}, "lines 3–100 of 100"),
+            ({"start_line": "55-20"}, "lines 55–55 of 100"),
+        ]
+        for extra, expected in cases:
+            result = registry.execute("read_file", {"path": "lines.txt", **extra})
+            self.assertTrue(result.success, (extra, result))
+            self.assertIn(expected, result.text)
+
     def test_schema_derivation_survives_a_strict_validate(self):
         """A validate() that rejects empty input must not break schema building."""
 

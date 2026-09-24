@@ -23,6 +23,23 @@ from .base import Tool, ToolResult
 _DOTENV = re.compile(r"^\.env(\.[^/]*)?$")
 
 
+def _line_numbers(value: Any) -> list[int]:
+    """
+    The integers in a line-number argument. Models send "20", 20, "`160",
+    "[20, 55]", "20-55" or [20, 55]; int() raised on all but the first two and
+    cost the caller a turn. Unsigned: in "20-55" the hyphen is a range, and a
+    negative line number is not one (-55 sliced from the end and returned the
+    wrong lines as success).
+    """
+    if value is None or isinstance(value, bool):
+        return []
+    if isinstance(value, (int, float)):
+        return [abs(int(value))]
+    if isinstance(value, (list, tuple)):
+        return [n for v in value for n in _line_numbers(v)]
+    return [int(n) for n in re.findall(r"\d+", str(value))]
+
+
 class _RootedTool(Tool):
     """
     Mixin giving a filesystem tool a project root to resolve against.
@@ -102,10 +119,16 @@ class ReadFileTool(_RootedTool):
         lines = content.splitlines(keepends=True)
         total = len(lines)
 
-        start = int(args.get("start_line", 1)) - 1
-        end = int(args.get("end_line", total))
+        start_nums = _line_numbers(args.get("start_line"))
+        end_nums = _line_numbers(args.get("end_line"))
+        # A range packed into start_line ("[20, 55]") supplies the end too.
+        start = (start_nums[0] if start_nums else 1) - 1
+        end = end_nums[0] if end_nums else (start_nums[1] if len(start_nums) > 1 else total)
         start = max(0, start)
-        end = min(total, end)
+        if end < 1:
+            end = total  # end_line 0: no end given
+        # An end before the start ("55-20") still shows the start line.
+        end = min(total, max(end, start + 1))
         selected = lines[start:end]
         excerpt = "".join(selected)
 

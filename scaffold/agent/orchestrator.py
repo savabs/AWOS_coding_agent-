@@ -133,6 +133,74 @@ def _run_cost_cap() -> Optional[float]:
         return None
 
 
+#: AWOS_GOAL_BUDGET_USD default: what one goal may spend across all its tasks,
+#: retries, goal checks and follow-up rounds.
+DEFAULT_GOAL_BUDGET_USD = 2.00
+GOAL_BUDGET_REASON = "goal budget exhausted"
+#: Every planned task ran and passed, but the budget ran out before the goal
+#: check: nothing was left unstarted, the goal is only unverified.
+GOAL_CHECK_BUDGET_REASON = "goal check not run: goal budget exhausted"
+
+
+def _goal_budget() -> Optional[float]:
+    """AWOS_GOAL_BUDGET_USD (default $2.00); 0 or less turns the cap off."""
+    try:
+        budget = float(os.getenv("AWOS_GOAL_BUDGET_USD", "").strip() or DEFAULT_GOAL_BUDGET_USD)
+    except ValueError:
+        budget = DEFAULT_GOAL_BUDGET_USD
+    return budget if budget > 0 else None
+
+
+def _ledgers() -> list:
+    """
+    Every BudgetLedger in this process. The module is imported both as
+    `budget_ledger` (record_api_usage) and `scaffold.agent.budget_ledger`, and
+    each copy keeps its own singleton; spend lands in whichever one recorded it.
+    """
+    import sys
+    try:
+        from .budget_ledger import get_ledger
+    except ImportError:
+        from budget_ledger import get_ledger
+    found = {id(led): led for led in [get_ledger()]}
+    for name in ("budget_ledger", "scaffold.agent.budget_ledger"):
+        led = getattr(sys.modules.get(name), "_global_ledger", None)
+        if led is not None:
+            found[id(led)] = led
+    return list(found.values())
+
+
+def _ledger_spend_since(start: float) -> float:
+    """USD this process recorded to the budget ledger since `start` (epoch seconds)."""
+    from datetime import datetime
+
+    import json
+
+    since = datetime.fromtimestamp(start)
+    pid = os.getpid()
+    total, seen = 0.0, set()
+    for ledger in _ledgers():
+        for rec in getattr(ledger, "_records", []):
+            # A ledger loads .awos/budget.json when it is created, with what
+            # any concurrent run (a parallel long task) wrote since `start`:
+            # that spend is not this goal's.
+            if not isinstance(rec, dict) or rec.get("pid") != pid:
+                continue
+            # A ledger created after the other one wrote loads that record
+            # from .awos/budget.json too; counting it twice halved the cap.
+            # Timestamps carry microseconds, so equal records are one call.
+            key = json.dumps(rec, sort_keys=True, default=str)
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                if datetime.fromisoformat(rec["timestamp"]) >= since:
+                    total += float(rec.get("cost", 0) or 0)
+            except (KeyError, TypeError, ValueError):
+                continue
+    return total
+
+
 def _agent_resume_reason(outcome, verdict: dict, model_errors: int) -> Optional[str]:
     """
     Why a failed agent-loop attempt is worth continuing, or None when it is not.
@@ -698,6 +766,11 @@ class Orchestrator:
 
         start_time = time.time()
         self.execution_log = []  # Reset log for each run
+        # AWOS_GOAL_BUDGET_USD counts the ledger's spend from here on.
+        self._goal_started_at, self._goal_budget_hit = start_time, False
+        #: True once the budget kept a task, a retry or a follow-up from running.
+        self._goal_budget_skipped_work = False
+        self._last_goal_verdict = None
         self._run_files_changed: set = set()  # files kept by successful tasks this run
 
         # ── ReAct Trace Session ────────────────────────────────────────────────
@@ -1082,6 +1155,12 @@ class Orchestrator:
                         tasks_failed = sum(1 for res in results if not res["success"])
                         break
 
+            if self._goal_budget_exhausted():
+                # No replan or decomposition either: that is new work too.
+                tasks_completed = sum(1 for r in results if r["success"])
+                tasks_failed = sum(1 for r in results if not r["success"])
+                break
+
             if self._pause_requested:
                 if self._runtime_session and self._runtime_store:
                     from .runtime_session import SessionStatus
@@ -1150,13 +1229,24 @@ class Orchestrator:
 
         # ── Goal check: every task passing is not the goal being done ──────
         goal_complete, goal_check_reasoning = True, ""
-        if tasks_failed == 0 and not self._pause_requested:
+        if tasks_failed == 0 and not self._pause_requested and not self._goal_budget_exhausted():
             goal_complete, extra, goal_check_reasoning = self._goal_check_rounds(
                 goal, _ctx, use_parallel,
             )
             tasks_completed += sum(1 for r in extra if r["success"])
             tasks_failed += sum(1 for r in extra if not r["success"] and not r.get("superseded"))
             total_tasks_all_cycles += len(extra)
+        incomplete_reason = ""
+        if self._goal_budget_hit:
+            # Work left unstarted, or failed work not retried: not done. With
+            # every task run and passed, only the goal check was lost to the
+            # budget: the goal is unverified, not unfinished, and says so.
+            reason = (GOAL_BUDGET_REASON
+                      if self._goal_budget_skipped_work or tasks_failed
+                      else GOAL_CHECK_BUDGET_REASON)
+            goal_complete, incomplete_reason = False, reason
+            self.execution_log.append({"task_id": "goal_budget", "status": "failed",
+                                       "reason": reason})
 
         elapsed = time.time() - start_time
         overall_success = tasks_failed == 0 and goal_complete
@@ -1366,6 +1456,8 @@ class Orchestrator:
             "integration_review": review,
             "goal_complete": goal_complete,
             "goal_check_reasoning": goal_check_reasoning,
+            "goal_check": self._goal_check_summary(goal_complete, goal_check_reasoning),
+            "incomplete_reason": incomplete_reason,
             "runtime_session_id": (
                 self._runtime_session.session_id if self._runtime_session else None
             ),
@@ -1391,41 +1483,56 @@ class Orchestrator:
         if executor_choice() != "agent_loop" or os.getenv("AWOS_GOAL_CHECK", "1") == "0":
             return True, [], ""
         try:
-            from .goal_check import GoalChecker, working_tree_changes
+            from .goal_check import GoalChecker, goal_check_model, working_tree_changes
         except ImportError:
-            from goal_check import GoalChecker, working_tree_changes
+            from goal_check import GoalChecker, goal_check_model, working_tree_changes
 
         try:
             max_rounds = int(os.getenv("AWOS_GOAL_CHECK_ROUNDS", "2"))
         except ValueError:
             max_rounds = 2
+        worker_model = getattr(self, "_last_agent_model", None)
+        # Not the worker's model by default: a cheap worker judging its own
+        # goal said "All requirements satisfied" at 11 of 14 tests.
+        check_model = goal_check_model(worker_model)
+        print(f"[GOAL CHECK] checker model: {check_model or 'default'} "
+              f"(worker: {worker_model or '?'})")
         checker = GoalChecker(
-            model=os.getenv("AWOS_GOAL_CHECK_MODEL") or getattr(self, "_last_agent_model", None),
+            model=check_model,
             tracker=getattr(self, "tracker", None),
+            can_continue=lambda: not self._goal_budget_exhausted(),
+            # A check's spend reaches the ledger only when it ends, so each
+            # one is capped at what the goal has left.
+            remaining_budget=self._goal_budget_remaining,
         )
         root = ctx["codebase_root"]
         extra: list = []
         round_no = 0
         while True:
+            if self._goal_budget_exhausted():
+                return False, extra, GOAL_BUDGET_REASON
             changed, diff = working_tree_changes(root)
             if not changed:  # not a git repo: fall back to what the run recorded
                 changed = sorted(getattr(self, "_run_files_changed", set()))
             verdict = checker.check(goal, root, changed, diff)
+            self._last_goal_verdict = verdict
             # Where the verdict came from (tool / text / nudge_*; "" = fallback)
             # tells a run log whether the checker actually decided.
             via = f" [via {getattr(verdict, 'source', '') or 'fallback'}]"
             if verdict.complete and (verdict.verified or round_no == 0):
                 # An unverified "complete" (checker crashed, ran out of
                 # turns, reply unparseable) is let through only on the first
-                # check, as advisory. It never supersedes failed follow-ups.
-                print(f"[GOAL CHECK] complete{via}: {verdict.reasoning[:200]}")
+                # check, as advisory. It never supersedes failed follow-ups,
+                # and the log says UNVERIFIED so a run log cannot pass it off.
+                tag = "" if verdict.verified else "UNVERIFIED "
+                print(f"[GOAL CHECK] {tag}complete{via}: {verdict.reasoning[:200]}")
                 if verdict.verified:
                     self._supersede_failed_follow_ups(extra)
                 return True, extra, verdict.reasoning
             if verdict.complete:
                 # The checker found gaps earlier and cannot now confirm the
                 # follow-ups closed them: the run is not verified done.
-                print(f"[GOAL CHECK] unverified after follow-ups{via}: {verdict.reasoning[:200]}")
+                print(f"[GOAL CHECK] UNVERIFIED after follow-ups{via}: {verdict.reasoning[:200]}")
                 break
 
             print(f"[GOAL CHECK] incomplete ({len(verdict.missing)} item(s) missing){via}: "
@@ -1434,6 +1541,9 @@ class Orchestrator:
                 print(f"[GOAL CHECK]   - {item['file'] or '?'}: {item['action'][:160]}")
             if round_no >= max_rounds or not verdict.missing:
                 break
+            if self._goal_budget_exhausted():
+                self._goal_budget_skipped_work = True  # the follow-ups
+                return False, extra, GOAL_BUDGET_REASON
             self.execution_log.append({
                 "task_id": f"goal_check_{round_no + 1}",
                 "status": "goal_incomplete",
@@ -1458,6 +1568,47 @@ class Orchestrator:
         reason = f"Goal {state} after {round_no} follow-up round(s): {verdict.reasoning}"
         self.execution_log.append({"task_id": "goal_check", "status": "failed", "reason": reason})
         return False, extra, reason
+
+    def _goal_check_summary(self, goal_complete: bool, reasoning: str) -> dict:
+        """
+        What the last goal check actually established, for the run's result:
+        a fail-open "complete" (no verdict, a crash) shows verified=False.
+        """
+        verdict = getattr(self, "_last_goal_verdict", None)
+        if verdict is None:
+            return {"verified": False, "source": "not_run", "complete": goal_complete,
+                    "reasoning": reasoning}
+        return {"verified": bool(verdict.verified),
+                "source": getattr(verdict, "source", "") or "fallback",
+                "complete": bool(verdict.complete),
+                "reasoning": verdict.reasoning}
+
+    # ── Per-goal budget ───────────────────────────────────────────────────────
+
+    def _goal_budget_exhausted(self) -> bool:
+        """
+        True once this goal's spend (the budget ledger since execute_feature
+        started) reaches AWOS_GOAL_BUDGET_USD. Asked before each task, retry
+        attempt, goal check and follow-up round; says so once.
+        """
+        if getattr(self, "_goal_budget_hit", False):
+            return True
+        started, budget = getattr(self, "_goal_started_at", None), _goal_budget()
+        if started is None or budget is None:
+            return False
+        spent = _ledger_spend_since(started)
+        if spent < budget:
+            return False
+        self._goal_budget_hit = True
+        print(f"[BUDGET] goal budget ${budget:.2f} reached — stopping (spent ${spent:.4f})")
+        return True
+
+    def _goal_budget_remaining(self) -> Optional[float]:
+        """USD this goal may still spend; None when there is no goal budget."""
+        started, budget = getattr(self, "_goal_started_at", None), _goal_budget()
+        if started is None or budget is None:
+            return None
+        return max(0.0, budget - _ledger_spend_since(started))
 
     def _supersede_failed_follow_ups(self, extra: list) -> None:
         """
@@ -1497,6 +1648,11 @@ class Orchestrator:
             List of result dicts: {task_id, success, task}.
         """
         def run_one(task):
+            if self._goal_budget_exhausted():
+                # Not started, so neither passed nor failed; dropped below.
+                self._goal_budget_skipped_work = True
+                return {"task_id": task.get("task_id"), "success": False, "task": task,
+                        "budget_skipped": True}
             return self._execute_single_task(task, ctx)
 
         if use_parallel:
@@ -1505,7 +1661,7 @@ class Orchestrator:
                 f"[DAG] {len(tasks)} task(s) → {dag.wave_count} wave(s), "
                 f"parallelism_score={dag.parallelism_score:.2f}"
             )
-            return dag.execute(run_one)
+            return [r for r in dag.execute(run_one) if not r.get("budget_skipped")]
 
         # Sequential with context chaining (Ralph Loop pattern):
         # pass each task's applied change into the next task's context
@@ -1515,6 +1671,8 @@ class Orchestrator:
             if prev_task_context:
                 task = {**task, "prev_task_context": prev_task_context}
             r = run_one(task)
+            if r.get("budget_skipped"):
+                break
             results.append(r)
             if r.get("success") and r.get("_applied_context"):
                 prev_task_context = r["_applied_context"]
@@ -1711,6 +1869,10 @@ class Orchestrator:
                         print(f"[TASK {task_id}] AgentLoop not resumed: ${spent:.4f} of "
                               f"the ${cost_cap:.4f} cap spent")
                         break
+                if self._goal_budget_exhausted():
+                    self._goal_budget_skipped_work = True
+                    print(f"[TASK {task_id}] AgentLoop not resumed: {GOAL_BUDGET_REASON}")
+                    break
                 # One stop used to end the job. The edits so far stay in place
                 # (no rollback between attempts) and the next attempt resumes.
                 retries_left -= 1

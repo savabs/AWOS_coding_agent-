@@ -293,9 +293,119 @@ def test_no_verdict_even_after_the_nudge_is_unverified(tmp_path):
     client = _Recording([ModelReply(text="I think it is fine."), ModelReply(text="Yes.")])
     with patch("scaffold.agent.usage_record.record_api_usage"):
         v = GoalChecker(client=client).check("g", str(tmp_path), [], "")
-    assert client.calls == 2  # the loop's one turn and exactly one nudge
+    # Per check: the loop's one turn and exactly one nudge; two checks.
+    assert client.calls == 4
     assert v.complete is True and v.verified is False and v.source == ""
-    assert "could not be parsed" in v.reasoning
+    assert "could not be parsed" in v.reasoning and "2 check(s)" in v.reasoning
+
+
+def test_no_verdict_runs_one_fresh_check_before_the_fallback(tmp_path):
+    # The benchmark's migration: the checker ran out of turns, the nudge got
+    # no verdict, and the fallback let 18 of 22 hidden tests through.
+    looking = [ModelReply(text="", tool_calls=[ToolCall(id=f"t{i}", name="find_files",
+                                                        arguments={"pattern": f"*{i}.py"})],
+                          input_tokens=10, output_tokens=1)
+               for i in range(2)]
+    gap = [{"action": "server.py still reads app.ini", "file": "server.py"}]
+    client = _Recording(looking + [ModelReply(text="still looking", input_tokens=10,
+                                              output_tokens=1),
+                                   _submit(False, gap)])
+    workspaces = []
+
+    def factory(ws):
+        workspaces.append(ws)
+        return None
+
+    with patch("scaffold.agent.usage_record.record_api_usage") as record:
+        v = GoalChecker(client=client, max_turns=2, sandbox_factory=factory).check(
+            "g", str(tmp_path), [], "")
+    assert v.verified is True and v.complete is False and v.source == "tool"
+    assert v.missing == gap
+    # Fresh loop: the second check opened with just the goal prompt ...
+    assert len(client.last_messages) == 1
+    # ... on a fresh copy of the workspace.
+    assert len(workspaces) == 2 and workspaces[0] != workspaces[1]
+    # Both checks' tokens count, and each check was billed.
+    assert (v.input_tokens, v.output_tokens) == (50, 8)
+    assert record.call_count == 2
+
+
+def test_no_retry_when_the_goal_budget_is_spent(tmp_path):
+    client = _Recording([ModelReply(text="I think it is fine."), ModelReply(text="Yes.")])
+    with patch("scaffold.agent.usage_record.record_api_usage"):
+        v = GoalChecker(client=client, can_continue=lambda: False).check(
+            "g", str(tmp_path), [], "")
+    assert client.calls == 2 and v.verified is False and "1 check(s)" in v.reasoning
+
+
+# ── The checker's model ──────────────────────────────────────────────────────
+
+
+def test_checker_model_env_override_wins(monkeypatch):
+    from scaffold.agent.goal_check import goal_check_model
+    monkeypatch.setenv("AWOS_GOAL_CHECK_MODEL", "openai/gpt-4o-mini")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-fake")
+    assert goal_check_model("deepseek/deepseek-v4-flash") == "openai/gpt-4o-mini"
+
+
+def test_checker_model_defaults_to_haiku_via_openrouter(monkeypatch):
+    from scaffold.agent.agent_loop import _price_for
+    from scaffold.agent.goal_check import goal_check_model
+    monkeypatch.delenv("AWOS_GOAL_CHECK_MODEL", raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-fake")
+    model = goal_check_model("deepseek/deepseek-v4-flash")
+    assert model == "anthropic/claude-haiku-4.5"
+    assert _price_for(model) == (1.00, 5.00)  # priced, so the budget sees it
+
+
+@pytest.mark.parametrize("worker", ["claude-sonnet-4-6", "anthropic/claude-haiku-4.5",
+                                    "replay", "local"])
+def test_checker_model_keeps_a_free_or_stronger_worker(monkeypatch, worker):
+    # Haiku would turn a $0 run into ~$0.6 a check, or downgrade Sonnet.
+    from scaffold.agent.goal_check import goal_check_model
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-fake")
+    assert goal_check_model(worker) == worker
+
+
+@pytest.mark.parametrize("env", [{"AWOS_BASE_URL": "http://localhost:11434/v1"},
+                                 {"AWOS_PROVIDER": "anthropic"},
+                                 {"AWOS_PROVIDER": "deepseek"}])
+def test_checker_model_is_the_workers_off_openrouter(monkeypatch, env):
+    # The worker is not routed through OpenRouter although the key is set:
+    # Haiku's OpenRouter id would go to a server that does not serve it.
+    from scaffold.agent.goal_check import goal_check_model
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-fake")
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    assert goal_check_model("qwen2.5-coder") == "qwen2.5-coder"
+
+
+def test_checker_model_is_logged_and_capped_at_the_goals_remaining_budget(monkeypatch, capsys):
+    monkeypatch.setenv("AWOS_EXECUTOR", "agent_loop")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-fake")
+    monkeypatch.delenv("AWOS_GOAL_BUDGET_USD", raising=False)
+    orch = _orchestrator()
+    orch._last_agent_model = "deepseek/deepseek-v4-flash"
+    orch._goal_started_at, orch._goal_budget_hit = 0.0, False
+    checker = MagicMock()
+    checker.return_value.check.return_value = GoalVerdict(True, verified=True)
+    with patch("scaffold.agent.goal_check.GoalChecker", checker), \
+         patch("scaffold.agent.goal_check.working_tree_changes", return_value=([], "")), \
+         patch("scaffold.agent.orchestrator._ledger_spend_since", return_value=1.25):
+        orch._goal_check_rounds("g", {"codebase_root": "."}, False)
+    assert ("[GOAL CHECK] checker model: anthropic/claude-haiku-4.5 "
+            "(worker: deepseek/deepseek-v4-flash)") in capsys.readouterr().out
+    remaining = checker.call_args.kwargs["remaining_budget"]
+    with patch("scaffold.agent.orchestrator._ledger_spend_since", return_value=1.25):
+        assert remaining() == pytest.approx(0.75)  # of the default $2.00
+
+
+def test_checker_model_without_openrouter_is_the_workers(monkeypatch):
+    from scaffold.agent.goal_check import goal_check_model
+    monkeypatch.delenv("AWOS_GOAL_CHECK_MODEL", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    assert goal_check_model("claude-sonnet-4-6") == "claude-sonnet-4-6"
+    assert goal_check_model(None) is None
 
 
 def test_cost_cap_is_not_nudged(tmp_path, monkeypatch):
@@ -307,6 +417,76 @@ def test_cost_cap_is_not_nudged(tmp_path, monkeypatch):
     with patch("scaffold.agent.usage_record.record_api_usage"):
         v = GoalChecker(client=client).check("g", str(tmp_path), [], "")
     assert client.calls == 1 and v.verified is False and "cost_cap" in v.reasoning
+
+
+# ── What a check may spend ───────────────────────────────────────────────────
+
+
+def _looking(n, tokens_in=100_000):
+    """n turns that each search and decide nothing; Haiku prices 100k in at $0.10."""
+    return [ModelReply(text="", tool_calls=[ToolCall(id=f"t{i}", name="find_files",
+                                                     arguments={"pattern": f"*{i}.py"})],
+                       input_tokens=tokens_in, output_tokens=10)
+            for i in range(n)]
+
+
+def test_check_stops_at_what_the_goal_has_left(tmp_path):
+    # With no cap a check ran all 40 turns whatever the goal had left: one
+    # Haiku check measured $0.58 against a worker's $0.02.
+    client = _Recording(_looking(10))
+    client.model = "claude-haiku-4-5"
+    with patch("scaffold.agent.usage_record.record_api_usage") as record:
+        v = GoalChecker(client=client, max_turns=10,
+                        remaining_budget=lambda: 0.15).check("g", str(tmp_path), [], "")
+    # $0.10 after turn 1 is under $0.15; $0.20 after turn 2 is not. A cost cap
+    # is neither nudged nor retried.
+    assert client.calls == 2
+    assert v.verified is False and "cost_cap" in v.reasoning
+    assert record.call_args.kwargs["input_tokens"] == 200_000
+
+
+def test_per_check_cap_from_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("AWOS_GOAL_CHECK_MAX_COST", "0.05")
+    client = _Recording(_looking(10))
+    client.model = "claude-haiku-4-5"
+    with patch("scaffold.agent.usage_record.record_api_usage"):
+        v = GoalChecker(client=client, max_turns=10,
+                        remaining_budget=lambda: 5.0).check("g", str(tmp_path), [], "")
+    assert client.calls == 1 and "cost_cap" in v.reasoning
+
+
+def test_no_check_when_nothing_is_left(tmp_path):
+    client = _Recording(_looking(3))
+    with patch("scaffold.agent.usage_record.record_api_usage") as record:
+        v = GoalChecker(client=client, remaining_budget=lambda: 0.0).check(
+            "g", str(tmp_path), [], "")
+    assert client.calls == 0 and record.call_count == 0
+    assert v.verified is False and "cost_cap" in v.reasoning
+
+
+def test_no_retry_the_goal_cannot_afford(tmp_path):
+    # The first check ran out of turns ($0.10 + a $0.10 nudge); $0.15 left
+    # would stop the retry at the cap without a verdict, so it is not started.
+    left = iter([1.0, 0.15])
+    client = _Recording(_looking(1) + [ModelReply(text="still looking",
+                                                  input_tokens=100_000, output_tokens=10),
+                                       _submit(True)])
+    client.model = "claude-haiku-4-5"
+    with patch("scaffold.agent.usage_record.record_api_usage"):
+        v = GoalChecker(client=client, max_turns=1,
+                        remaining_budget=lambda: next(left)).check("g", str(tmp_path), [], "")
+    assert client.calls == 2 and v.verified is False and "1 check(s)" in v.reasoning
+
+
+def test_affordable_retry_still_runs(tmp_path):
+    client = _Recording(_looking(1) + [ModelReply(text="still looking",
+                                                  input_tokens=100_000, output_tokens=10),
+                                       _submit(True)])
+    client.model = "claude-haiku-4-5"
+    with patch("scaffold.agent.usage_record.record_api_usage"):
+        v = GoalChecker(client=client, max_turns=1,
+                        remaining_budget=lambda: 1.0).check("g", str(tmp_path), [], "")
+    assert client.calls == 3 and v.verified is True and v.complete is True
 
 
 # ── Behavioural verification on a copy ──────────────────────────────────────
@@ -574,7 +754,9 @@ MISSING = [{"action": "Read the port from settings", "file": "server.py"},
 
 @pytest.fixture(autouse=True)
 def _hermetic_env(monkeypatch):
-    for name in ("AWOS_GOAL_CHECK_ROUNDS", "AWOS_GOAL_CHECK_MODEL", "AWOS_GOAL_CHECK_MAX_TURNS"):
+    for name in ("AWOS_GOAL_CHECK_ROUNDS", "AWOS_GOAL_CHECK_MODEL", "AWOS_GOAL_CHECK_MAX_TURNS",
+                 "AWOS_GOAL_CHECK_MAX_COST", "AWOS_MAX_RUN_COST", "AWOS_BASE_URL",
+                 "AWOS_PROVIDER"):
         monkeypatch.delenv(name, raising=False)
     # conftest turns the check off for the rest of the suite; here it is
     # the subject (and its checker is always mocked).
@@ -758,6 +940,20 @@ def test_checker_model_from_env_then_last_agent_model(monkeypatch):
     assert checker.call_args.kwargs["model"] == "worker-model"
 
 
+def test_checker_model_is_haiku_not_the_worker_under_openrouter(monkeypatch):
+    done = GoalVerdict(True, verified=True)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-fake")
+    monkeypatch.setenv("AWOS_EXECUTOR", "agent_loop")
+    orch = _orchestrator()
+    orch._last_agent_model = "deepseek/deepseek-v4-flash"
+    checker = MagicMock()
+    checker.return_value.check.side_effect = [done]
+    with patch("scaffold.agent.goal_check.GoalChecker", checker), \
+         patch("scaffold.agent.goal_check.working_tree_changes", return_value=([], "")):
+        orch._goal_check_rounds("g", {"codebase_root": "."}, False)
+    assert checker.call_args.kwargs["model"] == "anthropic/claude-haiku-4.5"
+
+
 def test_failed_follow_ups_keep_going_to_the_round_cap(monkeypatch):
     verdicts = [GoalVerdict(False, missing=MISSING, reasoning="left")] * 3
     (ok, extra, _), orch, checker = _failing_follow_ups(verdicts, monkeypatch)
@@ -833,6 +1029,45 @@ def test_failed_follow_up_fails_the_feature(feature_env):
     extra = [{"task_id": "gc1_1", "success": False}]
     result = _run_feature(feature_env, (False, extra, "not verified complete"))
     assert result["success"] is False and result["tasks_failed"] == 1
+
+
+def _run_feature_with_checker(repo, verdicts, monkeypatch):
+    """execute_feature with the real _goal_check_rounds and a mocked checker."""
+    monkeypatch.setenv("AWOS_EXECUTOR", "agent_loop")
+    orch = Orchestrator()
+    plan = [{"task_id": 1, "task_type": "edit_file", "path": "config.py", "file": "config.py",
+             "action": "Read settings from env", "complexity": "low"}]
+    ok_task = lambda task, ctx: {"task_id": task["task_id"], "success": True, "task": task}  # noqa: E731
+    checker = MagicMock()
+    checker.return_value.check.side_effect = verdicts
+    with patch.object(orch, "_execute_single_task", side_effect=ok_task), \
+         patch("scaffold.agent.goal_check.GoalChecker", checker), \
+         patch("scaffold.agent.goal_check.working_tree_changes", return_value=(["config.py"], "d")), \
+         patch("scaffold.agent.core.performance_tracker.ToolPerformanceTracker._load"):
+        return orch.execute_feature(goal="migrate settings", codebase_root=str(repo),
+                                    pre_planned_tasks=plan)
+
+
+def test_fallback_complete_is_visible_as_unverified(feature_env, monkeypatch, capsys):
+    # No verdict even after the fresh second check: the run still passes
+    # (fail-open), but the result and the log both say it was not verified.
+    fallback = GoalVerdict(True, reasoning="goal check reply could not be parsed "
+                                           "(stop=max_turns, 2 check(s)); treated as complete")
+    result = _run_feature_with_checker(feature_env, [fallback], monkeypatch)
+    assert result["success"] is True
+    assert result["goal_check"] == {"verified": False, "source": "fallback", "complete": True,
+                                    "reasoning": fallback.reasoning}
+    assert "[GOAL CHECK] UNVERIFIED complete [via fallback]" in capsys.readouterr().out
+
+
+def test_real_verdict_is_reported_verified(feature_env, monkeypatch, capsys):
+    done = GoalVerdict(True, reasoning="ran export with both flags", verified=True, source="tool")
+    result = _run_feature_with_checker(feature_env, [done], monkeypatch)
+    assert result["success"] is True
+    assert result["goal_check"] == {"verified": True, "source": "tool", "complete": True,
+                                    "reasoning": "ran export with both flags"}
+    out = capsys.readouterr().out
+    assert "[GOAL CHECK] complete [via tool]" in out and "UNVERIFIED" not in out
 
 
 # ── Rollback keeps earlier tasks' work ───────────────────────────────────────

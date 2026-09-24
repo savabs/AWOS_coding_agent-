@@ -27,6 +27,14 @@ empty final message) and so said nothing. Text JSON is still accepted as a
 fallback, and a loop that ends without either gets one "call submit_verdict
 now" turn before it is given up on.
 
+A check that still ends without a verdict (out of turns, a repeated tool
+call, a final reply with no verdict even after the nudge) is run once more
+from scratch, on a fresh copy with a fresh loop: on the long-task benchmark
+the one no-verdict check let a migration through at 18 of 22 hidden tests.
+
+The checker runs on its own model, not the worker's (goal_check_model): the
+cheapest worker model said "All requirements satisfied" at 11 of 14.
+
 The checker is advisory plumbing, not a gate that can wedge a run: no model,
 a crash, or no verdict at all count as "complete", and say so. Such a verdict
 is marked unverified. The orchestrator never lets one excuse failed follow-up
@@ -57,6 +65,11 @@ DEFAULT_MAX_TURNS = 40
 #: The checker needs the shape of the change, not all of it.
 MAX_DIFF_CHARS = 12000
 VERDICT_TOOL = "submit_verdict"
+#: The checker's model when OpenRouter is configured and AWOS_GOAL_CHECK_MODEL
+#: is not set: stronger than the cheap worker models it judges.
+DEFAULT_OPENROUTER_CHECK_MODEL = "anthropic/claude-haiku-4.5"
+#: Checks per goal-check call: the first, and one fresh retry on no verdict.
+CHECK_ATTEMPTS = 2
 NUDGE_MESSAGE = f"Call {VERDICT_TOOL} now."
 #: Stop reasons after which one more turn can still produce a verdict. After a
 #: cost cap, a budget block or a provider error, another call is the problem.
@@ -149,6 +162,21 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
+def _float_env(name: str) -> Optional[float]:
+    try:
+        return float(os.getenv(name, "").strip() or "x")
+    except ValueError:
+        return None
+
+
+def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    try:
+        from .agent_loop import estimate_cost
+    except ImportError:
+        from agent_loop import estimate_cost
+    return estimate_cost(model, input_tokens, output_tokens)
+
+
 def _tool_classes() -> tuple:
     try:
         from .tools.base import Tool, ToolRegistry, ToolResult
@@ -196,6 +224,46 @@ def build_readonly_registry(project_root: str = ".", sandbox: Any = None,
     if sandbox is not None:
         registry.register(RunCommandTool(sandbox))
     return registry
+
+
+def goal_check_model(worker_model: Optional[str] = None) -> Optional[str]:
+    """
+    The checker's model: AWOS_GOAL_CHECK_MODEL, else Claude Haiku when the
+    worker runs through OpenRouter on a cheaper model than Haiku, else the
+    model the worker used. A local endpoint or a pinned provider is not
+    OpenRouter even with the key set (Haiku's id would go to a server that
+    does not serve it), a replayed or free worker keeps a $0 run at $0, and a
+    worker priced at Haiku or above is not downgraded.
+    """
+    try:
+        from .agent_loop import _price_for
+        from .providers import openrouter_key
+    except ImportError:
+        from agent_loop import _price_for
+        from providers import openrouter_key
+
+    explicit = os.getenv("AWOS_GOAL_CHECK_MODEL", "").strip()
+    if explicit:
+        return explicit
+    if not (openrouter_key() and _routes_via_openrouter()):
+        return worker_model
+    if worker_model is None:
+        return DEFAULT_OPENROUTER_CHECK_MODEL
+    worker_price = _price_for(worker_model)
+    if worker_price == (0.0, 0.0):
+        return worker_model
+    haiku_price = _price_for(DEFAULT_OPENROUTER_CHECK_MODEL) or (0.0, 0.0)
+    if worker_price is not None and worker_price[1] >= haiku_price[1]:
+        return worker_model
+    return DEFAULT_OPENROUTER_CHECK_MODEL
+
+
+def _routes_via_openrouter() -> bool:
+    """build_client_from_env's precedence: a local base URL wins, then OpenRouter."""
+    provider = os.getenv("AWOS_PROVIDER", "").strip().lower()
+    if os.getenv("AWOS_BASE_URL") and provider in ("", "local"):
+        return False
+    return provider in ("", "openrouter")
 
 
 def client_for_model(model: Optional[str]) -> tuple[Any, str]:
@@ -520,13 +588,33 @@ class GoalChecker:
 
     def __init__(self, client: Any = None, model: Optional[str] = None,
                  tracker: Any = None, max_turns: Optional[int] = None,
-                 sandbox_factory: Optional[Callable[[str], Any]] = None) -> None:
+                 sandbox_factory: Optional[Callable[[str], Any]] = None,
+                 can_continue: Optional[Callable[[], bool]] = None,
+                 remaining_budget: Optional[Callable[[], Optional[float]]] = None,
+                 max_cost_usd: Optional[float] = None) -> None:
         self.client = client
         self.model = model
         self.tracker = tracker
         self.max_turns = max_turns or _int_env("AWOS_GOAL_CHECK_MAX_TURNS", DEFAULT_MAX_TURNS)
         #: workspace path -> Sandbox or None. Injectable for tests.
         self.sandbox_factory = sandbox_factory or _default_sandbox
+        #: Asked before the retry check; False (the goal's budget is spent,
+        #: say) gives up on a verdict instead of paying for another check.
+        self.can_continue = can_continue
+        #: USD the goal has left (None: no goal budget). Each check is capped
+        #: at it, since a check's spend reaches the ledger only once it ends.
+        self.remaining_budget = remaining_budget
+        #: A cap on one check alone: AWOS_GOAL_CHECK_MAX_COST, unset = none.
+        self.max_cost_usd = (max_cost_usd if max_cost_usd is not None
+                             else _float_env("AWOS_GOAL_CHECK_MAX_COST"))
+
+    def _cost_cap(self) -> Optional[float]:
+        """The tighter of the per-check cap and what the goal has left."""
+        caps = [self.max_cost_usd]
+        if self.remaining_budget is not None:
+            caps.append(self.remaining_budget())
+        caps = [c for c in caps if c is not None]
+        return max(0.0, min(caps)) if caps else None
 
     def check(self, goal: str, codebase_root: str, changed_files: list[str],
               diff: str) -> GoalVerdict:
@@ -538,6 +626,56 @@ class GoalChecker:
                 logger.warning("[GOAL CHECK] no model client (%s); skipped", exc)
                 return GoalVerdict(True, reasoning=f"goal check skipped: no model client ({exc})")
 
+        verdict, stop, tokens_in, tokens_out = None, "", 0, 0
+        for attempt in range(1, CHECK_ATTEMPTS + 1):
+            cap = self._cost_cap()
+            if cap is not None and cap <= 0:
+                stop = "cost_cap"
+                break
+            try:
+                verdict, stop, final, n_in, n_out = self._check_once(
+                    client, model, goal, codebase_root, changed_files, diff,
+                    max_cost_usd=cap)
+            except Exception as exc:
+                # A crash is not retried: the same crash would come back.
+                logger.warning("[GOAL CHECK] checker crashed (%s); treated as complete", exc)
+                return GoalVerdict(True, reasoning=f"goal check failed to run: {exc}",
+                                   input_tokens=tokens_in, output_tokens=tokens_out)
+            tokens_in, tokens_out = tokens_in + n_in, tokens_out + n_out
+            if verdict is not None:
+                break
+            logger.warning("[GOAL CHECK] no verdict (stop=%s): %.300s", stop, final)
+            # After a cost cap, a budget block or a provider error another
+            # check is the problem, not the fix.
+            if (attempt == CHECK_ATTEMPTS or stop not in NUDGEABLE_STOPS
+                    or (self.can_continue is not None and not self.can_continue())):
+                break
+            # A retry costs about what the first check did; one the goal
+            # cannot afford would only stop at the cap without a verdict.
+            cost = _estimate_cost(model or getattr(client, "model", "") or "", n_in, n_out)
+            cap = self._cost_cap()
+            if cap is not None and cap < cost:
+                logger.warning("[GOAL CHECK] no retry: $%.4f left, the check cost $%.4f",
+                               cap, cost)
+                break
+            logger.warning("[GOAL CHECK] checking again from scratch (check %d of %d)",
+                           attempt + 1, CHECK_ATTEMPTS)
+
+        if verdict is None:
+            verdict = GoalVerdict(
+                True,
+                reasoning=(f"goal check reply could not be parsed "
+                           f"(stop={stop}, no {VERDICT_TOOL} call even after a nudge, "
+                           f"{attempt} check(s)); treated as complete"),
+            )
+        verdict.input_tokens = tokens_in
+        verdict.output_tokens = tokens_out
+        return verdict
+
+    def _check_once(self, client: Any, model: str, goal: str, codebase_root: str,
+                    changed_files: list[str], diff: str,
+                    max_cost_usd: Optional[float] = None) -> tuple:
+        """One review on a fresh copy. (verdict or None, stop, final message, in, out)."""
         tmp, sandbox, copied = None, None, True
         try:
             try:
@@ -554,10 +692,8 @@ class GoalChecker:
                 except Exception as exc:
                     logger.warning("[GOAL CHECK] no sandbox (%s); run_command not offered", exc)
             return self._review(client, model, goal, workspace, sandbox,
-                                changed_files, diff, can_test=copied)
-        except Exception as exc:
-            logger.warning("[GOAL CHECK] checker crashed (%s); treated as complete", exc)
-            return GoalVerdict(True, reasoning=f"goal check failed to run: {exc}")
+                                changed_files, diff, can_test=copied,
+                                max_cost_usd=max_cost_usd)
         finally:
             if sandbox is not None:
                 try:
@@ -569,7 +705,8 @@ class GoalChecker:
 
     def _review(self, client: Any, model: str, goal: str, workspace: str,
                 sandbox: Any, changed_files: list[str], diff: str,
-                can_test: bool = True) -> GoalVerdict:
+                can_test: bool = True, max_cost_usd: Optional[float] = None) -> tuple:
+        """(verdict or None, stop reason, final message, input tokens, output tokens)."""
         try:
             from .agent_loop import AgentLoop
         except ImportError:
@@ -584,6 +721,8 @@ class GoalChecker:
             client=gated,
             max_turns=self.max_turns,
             system_prompt=SYSTEM_PROMPT,
+            # None falls back to AWOS_MAX_RUN_COST, as for any loop.
+            max_cost_usd=max_cost_usd,
         ).run(build_prompt(goal, changed_files, diff, can_run=sandbox is not None,
                            can_test=can_test))
         tokens_in, tokens_out = outcome.input_tokens, outcome.output_tokens
@@ -597,22 +736,11 @@ class GoalChecker:
             tokens_in, tokens_out = tokens_in + n_in, tokens_out + n_out
 
         self._record_usage(model or getattr(client, "model", "") or "", tokens_in, tokens_out)
-        if verdict is None:
-            logger.warning("[GOAL CHECK] no verdict (stop=%s): %.300s",
-                           outcome.stop_reason, outcome.final_message)
-            verdict = GoalVerdict(
-                True,
-                reasoning=(f"goal check reply could not be parsed "
-                           f"(stop={outcome.stop_reason}, no {VERDICT_TOOL} call "
-                           f"even after a nudge); treated as complete"),
-            )
-        else:
+        if verdict is not None:
             verdict.source = source
             for item in verdict.missing:
                 item["file"] = _relative_to(item["file"], workspace)
-        verdict.input_tokens = tokens_in
-        verdict.output_tokens = tokens_out
-        return verdict
+        return verdict, outcome.stop_reason, outcome.final_message, tokens_in, tokens_out
 
     def _nudge(self, client: Any, registry: Any, verdict_tool: Any,
                messages: Optional[list], outcome: Any) -> tuple:

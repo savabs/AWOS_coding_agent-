@@ -73,6 +73,22 @@ FINGERPRINT_MAX_FILES = 20000
 #: before outputs are compared when the workspace cannot be watched.
 _TIMING = re.compile(r"\b\d+m\d+(?:\.\d+)?s\b|\b\d+(?:\.\d+)?\s*(?:ms|s|sec|secs|seconds)\b")
 DEFAULT_TOOL_RESULT_CHARS = 8000
+#: The action trace: one line per tool call on stdout, so a run log shows what
+#: the agent tried and not only how the task ended. AWOS_AGENT_TRACE=0 is off.
+TRACE_ARG_CHARS = 100
+TRACE_TEXT_CHARS = 160
+#: Arguments worth naming in a trace line, in the order they are shown. Edit
+#: strings and file contents are never among them.
+_TRACE_ARG_KEYS = ("command", "path", "pattern", "changed_files", "root", "file_glob")
+#: Secrets a model can write inline in a command, masked before it is traced
+#: (run logs are kept): NAME_KEY=value / TOKEN=value assignments, Bearer
+#: tokens, sk-... API keys.
+_TRACE_SECRETS = (
+    (re.compile(r"(?i)(\b[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|AUTH)[A-Z0-9_]*\s*=\s*)"
+                r"(?:\"[^\"]*\"|'[^']*'|[^\s;&|]+)"), r"\1***"),
+    (re.compile(r"(?i)(\bBearer\s+)[A-Za-z0-9._~+/=-]+"), r"\1***"),
+    (re.compile(r"\b(sk-[A-Za-z0-9]{0,4})[A-Za-z0-9_-]{8,}"), r"\1***"),
+)
 
 #: USD per million tokens, (input, output). A local runtime or a replayed
 #: cassette costs nothing, so both are priced at zero and a cost cap simply
@@ -551,6 +567,14 @@ class AgentLoop:
                 self.model_name, outcome.input_tokens, outcome.output_tokens
             )
             self._emit("turn", turn=turn, text=reply.text, calls=len(reply.tool_calls))
+            if reply.text and reply.text.strip():
+                _trace(f"t{turn} says: {_one_line(reply.text, TRACE_TEXT_CHARS)}")
+            elif not reply.tool_calls:
+                # Nothing to show and nothing to do: say why the reply was empty.
+                _trace(
+                    f"t{turn} empty reply ({reply.output_tokens} output tokens, "
+                    f"finish={_finish_reason(reply.raw)})"
+                )
 
             if self.max_cost_usd is not None and outcome.cost_usd >= self.max_cost_usd:
                 # Checked after the turn is accounted for, so the reported cost
@@ -578,6 +602,7 @@ class AgentLoop:
                         messages.append(self.client.format_assistant_turn(reply))
                     messages.append({"role": "user", "content": NUDGE_MESSAGE})
                     self._emit("nudge", turn=turn, nudges=outcome.nudges)
+                    _trace(f"t{turn} nudged ({outcome.nudges}/{MAX_NUDGES}): finished without an edit")
                     continue
                 outcome.success = True
                 outcome.stop_reason = "completed"
@@ -606,11 +631,14 @@ class AgentLoop:
                     )
                     outcome.failed_tool_calls += 1
                     outcome.stop_reason = "repeated_tool_call"
+                    _trace_call(turn, call, results[-1], None)
                     continue
 
                 is_command = call.name in COMMAND_TOOLS
                 before = watch.snapshot() if watch and is_command else None
+                call_started = time.monotonic()
                 result = self.registry.execute(call.name, call.arguments)
+                _trace_call(turn, call, result, time.monotonic() - call_started)
                 outcome.tool_calls += 1
                 if not result.success:
                     outcome.failed_tool_calls += 1
@@ -657,6 +685,13 @@ class AgentLoop:
         outcome.files_touched = touched
         outcome.files_written = written
         outcome.elapsed_sec = time.monotonic() - started
+        _trace(
+            f"stop: {outcome.stop_reason} after {outcome.turns} turns, "
+            f"{outcome.tool_calls} tool calls ({outcome.failed_tool_calls} failed), "
+            f"nudges {outcome.nudges}"
+            + (f" — {_one_line(outcome.final_message, TRACE_TEXT_CHARS)}"
+               if not outcome.success and outcome.final_message else "")
+        )
         self._emit("done", **outcome.to_dict())
         return outcome
 
@@ -683,6 +718,66 @@ def _int_env(name: str, default: int) -> int:
     except ValueError:
         logger.warning("[agent_loop] %s=%r is not an integer; ignoring", name, raw)
         return default
+
+
+def _trace_enabled() -> bool:
+    return os.getenv("AWOS_AGENT_TRACE", "1").strip() != "0"
+
+
+def _one_line(text: Any, limit: int) -> str:
+    """Whitespace collapsed to single spaces, cut to `limit` characters."""
+    flat = " ".join(str(text).split())
+    return flat if len(flat) <= limit else flat[: limit - 3] + "..."
+
+
+def _trace_args(call: ToolCall) -> str:
+    """The arguments that say what a call did: a command or a path, never content."""
+    args = call.arguments if isinstance(call.arguments, dict) else {}
+    parts = [
+        str(args[key]) for key in _TRACE_ARG_KEYS
+        if isinstance(args.get(key), (str, int, float)) and str(args[key]).strip()
+    ]
+    if call.name == "read_file" and (args.get("start_line") or args.get("end_line")):
+        parts.append(f"{args.get('start_line') or ''}-{args.get('end_line') or ''}")
+    return _one_line(_mask_secrets(", ".join(parts)), TRACE_ARG_CHARS)
+
+
+def _mask_secrets(text: str) -> str:
+    """`text` with inline credentials replaced by ***."""
+    for pattern, repl in _TRACE_SECRETS:
+        text = pattern.sub(repl, text)
+    return text
+
+
+def _trace(line: str) -> None:
+    """Print one trace line. Tracing must never break execution."""
+    if not _trace_enabled():
+        return
+    try:
+        print(f"[agent] {line}", flush=True)
+    except Exception:
+        logger.debug("trace print failed", exc_info=True)
+
+
+def _finish_reason(raw: Any) -> str:
+    """Why the provider ended the reply: OpenAI finish_reason, Anthropic stop_reason."""
+    try:
+        choices = getattr(raw, "choices", None)
+        if choices:
+            return str(getattr(choices[0], "finish_reason", None) or "?")
+        return str(getattr(raw, "stop_reason", None) or "?")
+    except Exception:
+        return "?"
+
+
+def _trace_call(turn: int, call: ToolCall, result: Any, elapsed: Optional[float]) -> None:
+    head = f"t{turn} {call.name}({_trace_args(call)})"
+    if getattr(result, "success", False):
+        _trace(f"{head} -> ok {elapsed:.1f}s" if elapsed is not None else f"{head} -> ok")
+        return
+    error = str(getattr(result, "error", "") or "").strip()
+    first = error.splitlines()[0] if error else "unknown error"
+    _trace(f"{head} -> FAILED: {_one_line(first, TRACE_TEXT_CHARS)}")
 
 
 def _elided_stub(chars: int) -> str:
