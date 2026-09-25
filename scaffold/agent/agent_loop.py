@@ -224,13 +224,15 @@ class AnthropicToolClient:
         self.model = model
         self.max_tokens = max_tokens or _int_env("AWOS_AGENT_MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS)
 
-    def complete(self, system, messages, registry) -> ModelReply:
+    def complete(self, system, messages, registry, tool_choice: Optional[str] = None) -> ModelReply:
+        extra = {"tool_choice": {"type": "tool", "name": tool_choice}} if tool_choice else {}
         response = self._client.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
             system=system,
             messages=messages,
             tools=registry.anthropic_schemas(),
+            **extra,
         )
         text_parts, calls = [], []
         for block in response.content:
@@ -283,12 +285,17 @@ class OpenAIToolClient:
         self.model = model
         self.max_tokens = max_tokens or _int_env("AWOS_AGENT_MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS)
 
-    def complete(self, system, messages, registry) -> ModelReply:
+    def complete(self, system, messages, registry, tool_choice: Optional[str] = None) -> ModelReply:
+        # tool_choice names a tool the reply MUST call — how a caller makes a
+        # decision structural rather than a request the model may ignore.
+        extra = ({"tool_choice": {"type": "function", "function": {"name": tool_choice}}}
+                 if tool_choice else {})
         response = self._client.chat.completions.create(
             model=self.model,
             max_tokens=self.max_tokens,
             messages=[{"role": "system", "content": system}, *messages],
             tools=registry.openai_schemas(),
+            **extra,
         )
         message = response.choices[0].message
         calls = []

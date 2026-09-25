@@ -556,13 +556,34 @@ class _EndOnVerdict:
             return ModelReply(text="")
         if self._nearly_out():
             # In the system prompt, not a message: it must not break the
-            # conversation's tool-call pairing in either dialect.
-            system = system + DECIDE_NOW
-        reply = self._inner.complete(system, messages, registry)
+            # conversation's tool-call pairing in either dialect. The prompt
+            # alone was ignored (3 of 4 checks ended UNVERIFIED), so the reply
+            # is also forced to be the verdict call where the client allows it.
+            reply = _complete_forcing(self._inner, system + DECIDE_NOW, messages,
+                                      registry, VERDICT_TOOL)
+        else:
+            reply = self._inner.complete(system, messages, registry)
         self._calls += 1
         self._tokens_in += getattr(reply, "input_tokens", 0) or 0
         self._tokens_out += getattr(reply, "output_tokens", 0) or 0
         return reply
+
+
+def _complete_forcing(client: Any, system: str, messages: list, registry: Any,
+                      tool: str) -> Any:
+    """
+    One model call whose reply must call `tool`, when the client supports a
+    forced tool choice; otherwise a plain call (replay cassettes, test doubles).
+    """
+    import inspect
+
+    try:
+        accepts = "tool_choice" in inspect.signature(client.complete).parameters
+    except (TypeError, ValueError):
+        accepts = False
+    if accepts:
+        return client.complete(system, messages, registry, tool_choice=tool)
+    return client.complete(system, messages, registry)
 
 
 class CopyTooLarge(Exception):
@@ -781,6 +802,8 @@ class GoalChecker:
         verdict, source = verdict_tool.verdict, "tool"
         if verdict is None:
             verdict, source = parse_verdict(outcome.final_message), "text"
+        # Not after a cost cap: the cap is a promise, even for one short call.
+        # The verdict is forced at DECIDE_AT_FRACTION of it instead, before it trips.
         if verdict is None and outcome.stop_reason in NUDGEABLE_STOPS:
             verdict, source, n_in, n_out = self._nudge(
                 client, registry, verdict_tool, gated.messages, outcome)
@@ -820,7 +843,8 @@ class GoalChecker:
             history.append({"role": "user", "content": NUDGE_MESSAGE})
 
         try:
-            reply = client.complete(SYSTEM_PROMPT, history, registry)
+            # The nudge exists to get the verdict, so its reply must be one.
+            reply = _complete_forcing(client, SYSTEM_PROMPT, history, registry, VERDICT_TOOL)
         except Exception as exc:
             logger.warning("[GOAL CHECK] nudge turn failed: %s", exc)
             return None, "", 0, 0
