@@ -165,6 +165,33 @@ def test_dry_run_end_to_end(tmp_path, capsys):
         assert "def sub" in job2_calc and "def mul" not in job2_calc
 
 
+def test_resume_keeps_earlier_jobs_and_state(tmp_path, capsys):
+    # A key dying mid-run must not throw away the arms' notebooks: resume the
+    # same run, rerun the selected jobs, keep the rest, pick up a fresh .env.
+    make_series(tmp_path, "mini")
+    out_root = tmp_path / "out"
+    env_file = tmp_path / "fake.env"
+    env_file.write_text("FAKE_KEY=old\n")
+    base = ["run", "--series", "mini", "--series-root", str(tmp_path), "--dry-run",
+            "--out-root", str(out_root), "--env-file", str(env_file)]
+    assert js.main(base) == 0
+    [result_file] = out_root.glob("job_series_*.json")
+    ts = json.loads(result_file.read_text())["timestamp"]
+    marker = out_root / "job_series" / ts / "on" / "state" / "kept.txt"
+    marker.write_text("notebook stand-in")
+
+    env_file.write_text("FAKE_KEY=new\n")
+    assert js.main(base + ["--resume", ts, "--jobs", "2"]) == 0
+    assert list(out_root.glob("job_series_*.json")) == [result_file]
+    data = json.loads(result_file.read_text())
+    assert [(r["arm"], r["job"]) for r in data["results"]] == [
+        ("off", 1), ("on", 1), ("off", 2), ("on", 2)]
+    assert data["resumed"] is True and data["jobs"] == [1, 2]
+    assert marker.read_text() == "notebook stand-in"
+    assert (out_root / "job_series" / ts / "off" / "state" / ".env").read_text() == "FAKE_KEY=new\n"
+    assert js.main(base + ["--resume", "19990101T000000"]) == 1
+
+
 def test_stream_child_times_out_and_logs(tmp_path, capsys):
     log = tmp_path / "x.log"
     timed_out = js.stream_child(

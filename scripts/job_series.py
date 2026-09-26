@@ -540,7 +540,7 @@ def print_report(results: list[dict], arms: list[str], summary: dict) -> None:
 
 def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
         root: Path | None = None, out_root: Path | None = None,
-        env_file: str | None = None) -> int:
+        env_file: str | None = None, resume: str | None = None) -> int:
     sdir = series_dir(series, root)
     jobs = discover_jobs(sdir)
     numbers = parse_jobs(job_spec, [n for n, _ in jobs])
@@ -549,8 +549,21 @@ def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
         return 1
     job_by_n = dict(jobs)
     out_root = out_root or (REPO / ".awos")
-    ts = time.strftime("%Y%m%dT%H%M%S")
+    ts = resume or time.strftime("%Y%m%dT%H%M%S")
     run_root = out_root / "job_series" / ts
+    # Resume: reuse each arm's state (its notebook) and project, keep the earlier
+    # results for jobs not selected now; selected jobs are rerun from scratch.
+    kept: list[dict] = []
+    if resume:
+        if not run_root.is_dir():
+            print(f"[job_series] nothing to resume at {run_root}")
+            return 1
+        try:
+            prev = json.loads((out_root / f"job_series_{ts}.json").read_text(encoding="utf-8"))
+            kept = [r for r in prev.get("results", []) if r["job"] not in numbers and r["arm"] in arms]
+        except (OSError, ValueError):
+            kept = []
+        print(f"[job_series] resuming {ts}: keeping {len(kept)} earlier result(s)")
 
     env_src = find_env_file(env_file)
     arm_dirs: dict[str, Path] = {}
@@ -572,7 +585,7 @@ def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
         print(f"[job_series] {arm} log:  tail -f {arm_dir / 'run.log'}")
     sys.stdout.flush()
 
-    results: list[dict] = []
+    results: list[dict] = list(kept)
     stopped = None
     for i, n in enumerate(numbers):
         for arm in arms:
@@ -592,7 +605,9 @@ def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
     print_report(results, arms, summary)
     out = out_root / f"job_series_{ts}.json"
     out.write_text(json.dumps({
-        "series": series, "timestamp": ts, "arms": arms, "jobs": numbers, "dry_run": dry_run,
+        "series": series, "timestamp": ts, "arms": arms,
+        "jobs": sorted({r["job"] for r in results} | set(numbers)), "dry_run": dry_run,
+        "resumed": bool(resume),
         "model_pin": {"model": PINNED_MODEL, "blocked_ladder_ids": list(BLOCKED_LADDER_IDS),
                       "env": PIN_ENV},
         "run_dir": str(run_root), "stopped": stopped,
@@ -619,6 +634,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--series-root", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--out-root", default=None, help="where results/state go (default .awos/)")
     parser.add_argument("--env-file", default=None, help=".env to copy into each arm (default: repo's)")
+    parser.add_argument("--resume", default=None, metavar="TS",
+                        help="continue run TS (e.g. 20260926T170601) with its notebooks; pair with --jobs")
     args = parser.parse_args(argv)
     root = Path(args.series_root) if args.series_root else None
     if args.command == "validate":
@@ -627,7 +644,7 @@ def main(argv: list[str] | None = None) -> int:
     if not arms or any(a not in ("off", "on") for a in arms):
         parser.error("--arms takes off and/or on")
     return run(args.series, arms, args.jobs, args.dry_run, root,
-               Path(args.out_root) if args.out_root else None, args.env_file)
+               Path(args.out_root) if args.out_root else None, args.env_file, args.resume)
 
 
 if __name__ == "__main__":

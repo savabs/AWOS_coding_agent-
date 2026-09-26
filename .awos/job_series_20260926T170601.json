@@ -1,0 +1,426 @@
+{
+  "series": "ordertool",
+  "timestamp": "20260926T170601",
+  "arms": [
+    "off",
+    "on"
+  ],
+  "jobs": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+  ],
+  "dry_run": false,
+  "model_pin": {
+    "model": "deepseek/deepseek-v4-flash",
+    "blocked_ladder_ids": [
+      "deepseek-v4-pro"
+    ],
+    "env": {
+      "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+      "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+      "AWOS_GOAL_CHECK": "0"
+    }
+  },
+  "run_dir": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20260926T170601",
+  "stopped": "backend check failed before on job 6",
+  "results": [
+    {
+      "arm": "off",
+      "job": 1,
+      "id": "01_list_date_filter",
+      "dir": "01_list_date_filter",
+      "solved": true,
+      "hidden_passed": 9,
+      "hidden_failed": 0,
+      "failing_tests": [],
+      "hidden_summary": "9 passed in 0.09s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "files_changed": 1,
+      "llm_calls": 1,
+      "input_tokens": 121985,
+      "output_tokens": 4015,
+      "cost_usd": 0.011567,
+      "notebook_cost_usd": 0,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 16,
+      "minutes": 1.39,
+      "timed_out": false,
+      "notebook_chars": 0
+    },
+    {
+      "arm": "on",
+      "job": 1,
+      "id": "01_list_date_filter",
+      "dir": "01_list_date_filter",
+      "solved": true,
+      "hidden_passed": 9,
+      "hidden_failed": 0,
+      "failing_tests": [],
+      "hidden_summary": "9 passed in 0.09s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "files_changed": 1,
+      "llm_calls": 2,
+      "input_tokens": 174054,
+      "output_tokens": 9137,
+      "cost_usd": 0.017108,
+      "notebook_cost_usd": 0.000209,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 22,
+      "minutes": 2.21,
+      "timed_out": false,
+      "notebook_chars": 1461
+    },
+    {
+      "arm": "off",
+      "job": 2,
+      "id": "02_customers_report",
+      "dir": "02_customers_report",
+      "solved": false,
+      "hidden_passed": 5,
+      "hidden_failed": 2,
+      "failing_tests": [
+        "tests/test_hidden_j02_customers.py::test_name_with_comma_is_quoted",
+        "tests/test_hidden_j02_customers.py::test_date_range_is_inclusive"
+      ],
+      "hidden_summary": "2 failed, 5 passed in 0.15s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "files_changed": 4,
+      "llm_calls": 4,
+      "input_tokens": 933469,
+      "output_tokens": 75171,
+      "cost_usd": 0.096384,
+      "notebook_cost_usd": 0,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 93,
+      "minutes": 13.11,
+      "timed_out": false,
+      "notebook_chars": 0
+    },
+    {
+      "arm": "on",
+      "job": 2,
+      "id": "02_customers_report",
+      "dir": "02_customers_report",
+      "solved": true,
+      "hidden_passed": 7,
+      "hidden_failed": 0,
+      "failing_tests": [],
+      "hidden_summary": "7 passed in 0.09s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": null,
+      "files_changed": 3,
+      "llm_calls": 3,
+      "input_tokens": 218571,
+      "output_tokens": 19224,
+      "cost_usd": 0.022855,
+      "notebook_cost_usd": 0,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 19,
+      "minutes": 15.0,
+      "timed_out": true,
+      "notebook_chars": 1461
+    },
+    {
+      "arm": "off",
+      "job": 3,
+      "id": "03_output_path_errors",
+      "dir": "03_output_path_errors",
+      "solved": false,
+      "hidden_passed": 2,
+      "hidden_failed": 7,
+      "failing_tests": [
+        "tests/test_hidden_j03_output_errors.py::test_missing_directory_is_clean_error[command0]",
+        "tests/test_hidden_j03_output_errors.py::test_missing_directory_is_clean_error[command1]",
+        "tests/test_hidden_j03_output_errors.py::test_missing_directory_is_clean_error[command2]",
+        "tests/test_hidden_j03_output_errors.py::test_directory_as_output_is_clean_error[export]",
+        "tests/test_hidden_j03_output_errors.py::test_directory_as_output_is_clean_error[customers]",
+        "tests/test_hidden_j03_output_errors.py::test_no_traceback_from_the_real_cli",
+        "tests/test_hidden_j03_output_errors.py::test_failure_mid_write_keeps_previous_file"
+      ],
+      "hidden_summary": "7 failed, 2 passed in 0.29s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "files_changed": 3,
+      "llm_calls": 2,
+      "input_tokens": 528344,
+      "output_tokens": 40267,
+      "cost_usd": 0.05415,
+      "notebook_cost_usd": 0,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 61,
+      "minutes": 7.31,
+      "timed_out": false,
+      "notebook_chars": 0
+    },
+    {
+      "arm": "on",
+      "job": 3,
+      "id": "03_output_path_errors",
+      "dir": "03_output_path_errors",
+      "solved": false,
+      "hidden_passed": 5,
+      "hidden_failed": 4,
+      "failing_tests": [
+        "tests/test_hidden_j03_output_errors.py::test_missing_directory_is_clean_error[command0]",
+        "tests/test_hidden_j03_output_errors.py::test_missing_directory_is_clean_error[command1]",
+        "tests/test_hidden_j03_output_errors.py::test_missing_directory_is_clean_error[command2]",
+        "tests/test_hidden_j03_output_errors.py::test_failure_mid_write_keeps_previous_file"
+      ],
+      "hidden_summary": "4 failed, 5 passed in 0.29s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "files_changed": 2,
+      "llm_calls": 3,
+      "input_tokens": 344310,
+      "output_tokens": 27451,
+      "cost_usd": 0.035502,
+      "notebook_cost_usd": 0.000467,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 45,
+      "minutes": 5.33,
+      "timed_out": false,
+      "notebook_chars": 2411
+    },
+    {
+      "arm": "off",
+      "job": 4,
+      "id": "04_order_discounts",
+      "dir": "04_order_discounts",
+      "solved": false,
+      "hidden_passed": 7,
+      "hidden_failed": 6,
+      "failing_tests": [
+        "tests/test_hidden_j04_discounts.py::test_discounted_total_rounds_half_up",
+        "tests/test_hidden_j04_discounts.py::test_decimal_percentage",
+        "tests/test_hidden_j04_discounts.py::test_discount_survives_reload_and_status_change",
+        "tests/test_hidden_j04_discounts.py::test_list_export_and_customers_use_discounted_total",
+        "tests/test_hidden_j04_discounts.py::test_full_discount_allowed",
+        "tests/test_hidden_j04_discounts.py::test_old_orders_file_still_loads"
+      ],
+      "hidden_summary": "6 failed, 7 passed in 0.18s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": null,
+      "files_changed": 4,
+      "llm_calls": 4,
+      "input_tokens": 401587,
+      "output_tokens": 44871,
+      "cost_usd": 0.043683,
+      "notebook_cost_usd": 0,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 50,
+      "minutes": 15.0,
+      "timed_out": true,
+      "notebook_chars": 0
+    },
+    {
+      "arm": "on",
+      "job": 4,
+      "id": "04_order_discounts",
+      "dir": "04_order_discounts",
+      "solved": false,
+      "hidden_passed": 8,
+      "hidden_failed": 5,
+      "failing_tests": [
+        "tests/test_hidden_j04_discounts.py::test_discounted_total_rounds_half_up",
+        "tests/test_hidden_j04_discounts.py::test_decimal_percentage",
+        "tests/test_hidden_j04_discounts.py::test_discount_survives_reload_and_status_change",
+        "tests/test_hidden_j04_discounts.py::test_invalid_discount_is_clean_error[ten]",
+        "tests/test_hidden_j04_discounts.py::test_old_orders_file_still_loads"
+      ],
+      "hidden_summary": "5 failed, 8 passed in 0.19s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "files_changed": 6,
+      "llm_calls": 4,
+      "input_tokens": 406691,
+      "output_tokens": 20056,
+      "cost_usd": 0.039745,
+      "notebook_cost_usd": 0.000443,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 47,
+      "minutes": 4.36,
+      "timed_out": false,
+      "notebook_chars": 2953
+    },
+    {
+      "arm": "off",
+      "job": 5,
+      "id": "05_csv_writer_refactor",
+      "dir": "05_csv_writer_refactor",
+      "solved": true,
+      "hidden_passed": 8,
+      "hidden_failed": 0,
+      "failing_tests": [],
+      "hidden_summary": "8 passed in 0.07s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "files_changed": 1,
+      "llm_calls": 1,
+      "input_tokens": 94417,
+      "output_tokens": 6069,
+      "cost_usd": 0.009477,
+      "notebook_cost_usd": 0,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 13,
+      "minutes": 1.67,
+      "timed_out": false,
+      "notebook_chars": 0
+    },
+    {
+      "arm": "on",
+      "job": 5,
+      "id": "05_csv_writer_refactor",
+      "dir": "05_csv_writer_refactor",
+      "solved": true,
+      "hidden_passed": 8,
+      "hidden_failed": 0,
+      "failing_tests": [],
+      "hidden_summary": "8 passed in 0.06s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "files_changed": 1,
+      "llm_calls": 2,
+      "input_tokens": 37568,
+      "output_tokens": 8891,
+      "cost_usd": 0.004917,
+      "notebook_cost_usd": 0.000492,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 5,
+      "minutes": 1.83,
+      "timed_out": false,
+      "notebook_chars": 2578
+    },
+    {
+      "arm": "off",
+      "job": 6,
+      "id": "06_monthly_report",
+      "dir": "06_monthly_report",
+      "solved": false,
+      "hidden_passed": 0,
+      "hidden_failed": 7,
+      "failing_tests": [
+        "tests/test_hidden_j06_monthly.py::test_full_report",
+        "tests/test_hidden_j06_monthly.py::test_inclusive_date_range",
+        "tests/test_hidden_j06_monthly.py::test_month_with_only_cancelled_orders_is_left_out",
+        "tests/test_hidden_j06_monthly.py::test_output_file",
+        "tests/test_hidden_j06_monthly.py::test_output_errors_are_clean",
+        "tests/test_hidden_j06_monthly.py::test_bad_date_is_clean_error",
+        "tests/test_hidden_j06_monthly.py::test_uses_the_shared_csv_writer"
+      ],
+      "hidden_summary": "7 failed in 1.62s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": false,
+      "files_changed": 1,
+      "llm_calls": 3,
+      "input_tokens": 116939,
+      "output_tokens": 5534,
+      "cost_usd": 0.011387,
+      "notebook_cost_usd": 0,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 15,
+      "minutes": 1.32,
+      "timed_out": false,
+      "notebook_chars": 0
+    }
+  ],
+  "summary": {
+    "off": {
+      "all": {
+        "jobs": 6,
+        "solved": 2,
+        "solve_rate": 0.3333,
+        "mean_cost_usd": 0.0378,
+        "mean_turns": 41.3333,
+        "mean_minutes": 6.6333
+      },
+      "jobs_1_6": {
+        "jobs": 6,
+        "solved": 2,
+        "solve_rate": 0.3333,
+        "mean_cost_usd": 0.0378,
+        "mean_turns": 41.3333,
+        "mean_minutes": 6.6333
+      },
+      "jobs_7_12": {
+        "jobs": 0,
+        "solved": 0,
+        "solve_rate": null,
+        "mean_cost_usd": null,
+        "mean_turns": null,
+        "mean_minutes": null
+      }
+    },
+    "on": {
+      "all": {
+        "jobs": 5,
+        "solved": 3,
+        "solve_rate": 0.6,
+        "mean_cost_usd": 0.024,
+        "mean_turns": 27.6,
+        "mean_minutes": 5.746
+      },
+      "jobs_1_6": {
+        "jobs": 5,
+        "solved": 3,
+        "solve_rate": 0.6,
+        "mean_cost_usd": 0.024,
+        "mean_turns": 27.6,
+        "mean_minutes": 5.746
+      },
+      "jobs_7_12": {
+        "jobs": 0,
+        "solved": 0,
+        "solve_rate": null,
+        "mean_cost_usd": null,
+        "mean_turns": null,
+        "mean_minutes": null
+      }
+    }
+  }
+}
