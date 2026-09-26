@@ -268,6 +268,101 @@ def test_orchestrator_reads_once_and_updates_from_the_goals_traces(capsys):
     prompt = client.calls[0]["messages"][1]["content"]
     assert "tests: 4 passed, 0 failed" in prompt and "TASK: add --json" in prompt
     assert "solved twice" in path.read_text(encoding="utf-8")
+    # No goal check ran: the job goes in as unverified, whatever the tests say.
+    assert f"verification: {nb.LEVEL_TESTS_ONLY}" in prompt
+    assert "success: True" not in prompt
+    assert f"[notebook] job recorded as: {nb.LEVEL_TESTS_ONLY}" in capsys.readouterr().out
+
+
+# ── Honest verification levels ───────────────────────────────────────────────
+# The notebook once recorded "success: 25 tests passed" for a job whose hidden
+# acceptance tests failed: it only ever saw the project's own tests.
+
+_VERIFIED_CHECK = {"verified": True, "source": "tool", "complete": True,
+                   "reasoning": "all 4 read sites migrated"}
+_NOT_RUN = {"verified": False, "source": "not_run", "complete": True, "reasoning": ""}
+
+
+def test_verified_only_when_the_goal_check_verified_complete():
+    outcome = {"success": True, "tests": "25 passed, 0 failed", "goal_check": _VERIFIED_CHECK}
+    assert nb.verification_level(outcome) == nb.LEVEL_VERIFIED
+
+
+def test_tests_passing_without_a_goal_check_is_not_verified():
+    for check in (None, _NOT_RUN):
+        outcome = {"success": True, "tests": "25 passed, 0 failed", "goal_check": check}
+        assert nb.verification_level(outcome) == nb.LEVEL_TESTS_ONLY
+
+
+def test_fail_open_goal_check_is_not_verified():
+    check = {"verified": False, "source": "fallback", "complete": True,
+             "reasoning": "checker ran out of turns"}
+    level = nb.verification_level(
+        {"success": True, "tests": "25 passed, 0 failed", "goal_check": check})
+    assert level.startswith(nb.LEVEL_TESTS_ONLY)
+    assert "checker ran out of turns" in level
+    assert nb.LEVEL_VERIFIED != level
+
+
+def test_success_without_passing_tests_or_check_is_not_verified():
+    for tests in (None, "no tests ran", "0 passed, 0 failed"):
+        level = nb.verification_level({"success": True, "tests": tests})
+        assert level == nb.LEVEL_UNCHECKED
+
+
+def test_incomplete_carries_the_goal_checks_reason():
+    check = {"verified": True, "source": "tool", "complete": False,
+             "reasoning": "--to still excludes the last day"}
+    level = nb.verification_level(
+        {"success": False, "tasks_failed": 0, "tests": "25 passed, 0 failed",
+         "goal_check": check})
+    assert level == "incomplete: --to still excludes the last day"
+
+
+def test_failed_carries_a_reason():
+    assert nb.verification_level({"success": False, "tasks_failed": 2}) == \
+        "failed: 2 task(s) failed"
+    level = nb.verification_level({"success": False, "tasks_failed": 1,
+                                   "incomplete_reason": "goal budget used up"})
+    assert level == "failed: goal budget used up"
+
+
+def test_update_prompt_states_the_level_not_success():
+    outcome = {"success": True, "tests": "25 passed, 0 failed", "goal_check": _NOT_RUN}
+    prompt = nb.build_update_prompt("", "add a flag", outcome, "TASK: x")
+    assert f"verification: {nb.LEVEL_TESTS_ONLY}" in prompt
+    assert "not proof the goal is met" in prompt
+    assert "goal check: not run" in prompt
+    assert "success" not in prompt.split("ACTION TRACE")[0]
+
+
+def test_system_prompt_forbids_unchecked_claims_and_marks_pitfalls_provisional():
+    text = " ".join(nb.SYSTEM_PROMPT.split())
+    assert "Never write that something works" in text
+    assert "unless the trace or outcome shows it was checked" in text
+    assert "provisional" in text and "(unverified)" in text
+    assert nb.LEVEL_TESTS_ONLY in text
+    assert 'never as "success" or "solved"' in text
+
+
+def test_orchestrator_passes_the_goal_checks_verdict_to_the_notebook():
+    orch = Orchestrator.__new__(Orchestrator)
+    orch.tracker = None
+    orch._last_goal_verdict = SimpleNamespace(
+        verified=True, complete=False, source="tool", reasoning="export ignores --to")
+    orch._notebook_traces = [nb.task_trace(
+        {"action": "add --to"}, [_outcome(1, detail="ok")],
+        {"success": True, "error": "", "test_status": "25 passed, 0 failed"})]
+    client = _FakeClient(GOOD)
+    with patch.object(nb, "_default_client", return_value=client), \
+         patch("scaffold.agent.usage_record.record_api_usage"):
+        orch._update_project_notebook("add --to", "proj", {
+            "success": False, "tasks_completed": 1, "tasks_failed": 0,
+            "goal_check": orch._goal_check_summary(False, "export ignores --to"),
+            "incomplete_reason": "",
+        })
+    prompt = client.calls[0]["messages"][1]["content"]
+    assert "verification: incomplete: export ignores --to" in prompt
 
 
 def test_agent_loop_task_leaves_a_trace():

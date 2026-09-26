@@ -1619,16 +1619,23 @@ class Orchestrator:
         and outcome. Advisory: a failure keeps the old notebook, never the goal.
         """
         try:
-            from .project_notebook import compact_trace, enabled, update_notebook
+            from .project_notebook import (compact_trace, enabled, update_notebook,
+                                           verification_level)
         except ImportError:
-            from project_notebook import compact_trace, enabled, update_notebook
+            from project_notebook import (compact_trace, enabled, update_notebook,
+                                          verification_level)
         if not enabled():
             return
         traces = getattr(self, "_notebook_traces", None) or []
-        # The tests' state at the end: the last task's judged line.
+        # The tests' state at the end: the last task's judged line. These are
+        # the project's own visible tests only, never proof the goal was met.
         last = traces[-1].splitlines()[-1] if traces else ""
         if "tests: " in last:
             outcome = {**outcome, "tests": last.split("tests: ", 1)[1]}
+        # How far the job was checked, so the notebook cannot record an
+        # unverified job as a success.
+        outcome = {**outcome, "verification": verification_level(outcome)}
+        print(f"[notebook] job recorded as: {outcome['verification'][:160]}")
         try:
             update_notebook(codebase_root, goal, outcome, compact_trace(traces),
                             tracker=getattr(self, "tracker", None))
