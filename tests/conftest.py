@@ -6,6 +6,10 @@ set a fake one themselves (monkeypatch / patch.dict), after this runs.
 The goal check is off by default for the same reason: every execute_feature
 test would otherwise build a real GoalChecker and a real model client. Its own
 tests (test_goal_check.py) turn it back on with the checker mocked.
+
+The project notebook is off too: an execute_feature test must neither read a
+notebook left in ./.awos by a real run nor write one. test_project_notebook.py
+turns it back on inside a temporary working directory.
 """
 import pytest
 
@@ -28,3 +32,4 @@ def _no_live_provider_keys(monkeypatch):
     for name in _PROVIDER_ENV:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("AWOS_GOAL_CHECK", "0")
+    monkeypatch.setenv("AWOS_NOTEBOOK", "0")

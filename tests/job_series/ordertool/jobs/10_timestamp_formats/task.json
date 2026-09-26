@@ -1,0 +1,7 @@
+{
+  "id": "10_timestamp_formats",
+  "goal": "People keep getting 'invalid timestamp' when they type times the natural way, e.g. `add ... --created-at \"2024-03-10 14:05\"` or `2024-03-10T14:05`, and the web shop's import files have started using the same style. Anywhere ordertool reads an order timestamp from a user or a file, accept a space instead of the T and a time without seconds, in addition to what works today. Nothing about how timestamps are stored or shown may change, and real garbage (like hour 25) must still be rejected with the usual error.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

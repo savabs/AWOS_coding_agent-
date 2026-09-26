@@ -100,6 +100,28 @@ LADDER: list[ModelSpec] = [
 
 LEVEL_MAP: dict[EscalationLevel, ModelSpec] = {m.level: m for m in LADDER}
 
+
+# ── LinUCB arm ids ────────────────────────────────────────────────────────────
+# The learned router's arm id for a rung is its INDEX in LADDER — decide()
+# selects LADDER[arm] and record_outcome() trains the same arm. It is never
+# EscalationLevel.value (sparse: Flash=1, Pro=6), which reward_store keeps
+# as the episode's action_id; arm_for_level_value() translates those.
+
+def arm_for_level(level: EscalationLevel) -> Optional[int]:
+    """Ladder index (LinUCB arm id) of ``level``, or None if not on the ladder."""
+    for i, spec in enumerate(LADDER):
+        if spec.level == level:
+            return i
+    return None
+
+
+def arm_for_level_value(value: int) -> Optional[int]:
+    """Arm id for a stored EscalationLevel.value, or None if not on the ladder."""
+    try:
+        return arm_for_level(EscalationLevel(int(value)))
+    except (ValueError, TypeError):
+        return None
+
 CHEAP_ONLY_MAX_LEVEL = EscalationLevel.OPENCODE
 _CHEAP_ROTATION = [
     EscalationLevel.DEEPSEEK,
@@ -427,10 +449,13 @@ class EscalationEngine:
         self._task_history[task_id].append({"level": level.value, "success": success})
 
         # ── Update LinUCB with this outcome (gated by ReplayGate) ─────────
+        # Train the arm decide() selects for this rung: its LADDER index.
+        arm = arm_for_level(level)
         if (
             self._ml_router is not None
             and self._feature_extractor is not None
             and task is not None
+            and arm is not None
         ):
             failure_count = self.failure_count(task_id)
             features = self._feature_extractor.extract(task, failure_count)
@@ -447,11 +472,11 @@ class EscalationEngine:
             ep = _Ep()
             ep.reward = _reward
             ep.features = list(features)
-            ep.action_id = level.value
+            ep.action_id = arm
             ep.episode_id = task_id
 
             if _gate.admit(ep):
-                self._ml_router.update(features, level.value, _reward)
+                self._ml_router.update(features, arm, _reward)
 
     def failure_count(self, task_id: str) -> int:
         """Count consecutive failures for a task."""

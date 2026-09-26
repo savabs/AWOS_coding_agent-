@@ -358,6 +358,23 @@ def _clip_result(result: Any, limit: int) -> Any:
     return clipped
 
 
+#: Tools whose output is worth a line in LoopOutcome.transcript even when
+#: they succeed: the tail of a test run is its pass/fail summary.
+_TRANSCRIPT_OUTPUT_TOOLS = frozenset({"run_tests", "run_command", "shell"})
+TRANSCRIPT_DETAIL_CHARS = 200
+
+
+def _transcript_detail(name: str, result: Any) -> str:
+    """The error of a failed call; the tail of a command's output; else ""."""
+    if not getattr(result, "success", False):
+        text = getattr(result, "error", "") or getattr(result, "text", "") or ""
+        return _one_line(_mask_secrets(str(text)), TRANSCRIPT_DETAIL_CHARS)
+    if name in _TRANSCRIPT_OUTPUT_TOOLS:
+        text = " ".join(_mask_secrets(str(getattr(result, "text", "") or "")).split())
+        return text[-TRANSCRIPT_DETAIL_CHARS:]
+    return ""
+
+
 def _render_result(result: Any) -> str:
     """Turn a ToolResult into the text the model sees."""
     body = result.text if result.success else f"ERROR: {result.error}"
@@ -726,8 +743,12 @@ class AgentLoop:
                 {
                     "turn": turn,
                     "text": reply.text,
+                    # Short args and a result snippet: the project notebook
+                    # learns from this trace (commands that worked, errors).
                     "calls": [
-                        {"name": c.name, "ok": r.success} for c, r in zip(reply.tool_calls, results)
+                        {"name": c.name, "ok": r.success, "args": _trace_args(c),
+                         "detail": _transcript_detail(c.name, r)}
+                        for c, r in zip(reply.tool_calls, results)
                     ],
                 }
             )

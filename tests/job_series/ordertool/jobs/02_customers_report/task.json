@@ -1,0 +1,7 @@
+{
+  "id": "02_customers_report",
+  "goal": "Accounting wants a customer list. Please add a `customers` command that outputs a CSV with one row per customer and the columns customer, email, orders, total_spent, produced the same way `export` produces its CSV (stdout by default, or a file with --output, with the same confirmation message). Cancelled orders don't count toward the order count or the total, and a customer whose orders are all cancelled is left out. Emails identify a customer case-insensitively (show them in lowercase); use the name from the customer's most recent order. Sort by total spent, highest first, ties by email. It should also accept --from/--to exactly like export does.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

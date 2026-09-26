@@ -1,0 +1,7 @@
+{
+  "id": "09_import_orders",
+  "goal": "Our web shop hands me a CSV of new orders every day and I retype them with `add`. Please add an `import FILE` command that adds them to the orders file. The file has a header row with the columns customer, email, created_at, items, and optionally discount; items are written the same SKU:QTY:PRICE (separated by |) way the orders file stores them, created_at is like --created-at, and discount is a percentage like add's --discount. Every row must pass the same checks as adding an order by hand. Imported orders get the next free order ids, in file order, and start as pending. It's all or nothing: if any row is bad, import nothing and report the problem with its line number (the header is line 1). On success print `imported N orders`. Note the shop's files sometimes pass through Excel before they reach me.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

@@ -774,6 +774,8 @@ class Orchestrator:
         self._goal_budget_skipped_work = False
         self._last_goal_verdict = None
         self._run_files_changed: set = set()  # files kept by successful tasks this run
+        #: One compact action trace per agent-loop task: the notebook update's input.
+        self._notebook_traces: list = []
 
         # ── ReAct Trace Session ────────────────────────────────────────────────
         session = ReasoningSession(
@@ -1117,6 +1119,8 @@ class Orchestrator:
             _live=_live,
             _total_tasks=len(tasks),
             exploration=_exploration_data,
+            # Read once per goal; every agent-loop prompt of the goal carries it.
+            notebook=self._read_project_notebook(codebase_root),
         )
 
         while True:
@@ -1252,6 +1256,15 @@ class Orchestrator:
 
         elapsed = time.time() - start_time
         overall_success = tasks_failed == 0 and goal_complete
+
+        # ── Project notebook: learn from this goal, after its goal check ──
+        self._update_project_notebook(goal, codebase_root, {
+            "success": overall_success,
+            "tasks_completed": tasks_completed,
+            "tasks_failed": tasks_failed,
+            "goal_check": self._goal_check_summary(goal_complete, goal_check_reasoning),
+            "incomplete_reason": incomplete_reason,
+        })
 
         # ── Phase 1: Observability — print metrics summary after execution ──
         print()
@@ -1585,6 +1598,43 @@ class Orchestrator:
                 "complete": bool(verdict.complete),
                 "reasoning": verdict.reasoning}
 
+    # ── Project notebook ──────────────────────────────────────────────────────
+
+    @staticmethod
+    def _read_project_notebook(codebase_root: str) -> str:
+        """This project's notebook for the goal's prompts; "" when off or none."""
+        try:
+            from .project_notebook import read_notebook
+        except ImportError:
+            from project_notebook import read_notebook
+        try:
+            return read_notebook(codebase_root)
+        except Exception as exc:
+            logger.warning("[notebook] read failed: %s", exc)
+            return ""
+
+    def _update_project_notebook(self, goal: str, codebase_root: str, outcome: dict) -> None:
+        """
+        One cheap call rewrites the project's notebook from this goal's traces
+        and outcome. Advisory: a failure keeps the old notebook, never the goal.
+        """
+        try:
+            from .project_notebook import compact_trace, enabled, update_notebook
+        except ImportError:
+            from project_notebook import compact_trace, enabled, update_notebook
+        if not enabled():
+            return
+        traces = getattr(self, "_notebook_traces", None) or []
+        # The tests' state at the end: the last task's judged line.
+        last = traces[-1].splitlines()[-1] if traces else ""
+        if "tests: " in last:
+            outcome = {**outcome, "tests": last.split("tests: ", 1)[1]}
+        try:
+            update_notebook(codebase_root, goal, outcome, compact_trace(traces),
+                            tracker=getattr(self, "tracker", None))
+        except Exception as exc:
+            logger.warning("[notebook] update failed: %s", exc)
+
     # ── Per-goal budget ───────────────────────────────────────────────────────
 
     def _goal_budget_exhausted(self) -> bool:
@@ -1889,6 +1939,14 @@ class Orchestrator:
         finally:
             registry.close()  # a docker sandbox holds a container until closed
 
+        traces = getattr(self, "_notebook_traces", None)
+        if traces is not None and outcomes:
+            try:
+                from .project_notebook import task_trace
+            except ImportError:
+                from project_notebook import task_trace
+            traces.append(task_trace(task, outcomes, verdict))
+
         error = verdict["error"]
         if error and len(outcomes) > 1:
             error = f"{error} (after {len(outcomes)} attempts)"
@@ -2035,6 +2093,12 @@ class Orchestrator:
         exploration = (ctx.get("exploration") or {}).get("exploration_summary", "")
         if exploration:
             parts.append("Exploration notes:\n" + str(exploration)[:3000])
+        if ctx.get("notebook"):
+            try:
+                from .project_notebook import prompt_section
+            except ImportError:
+                from project_notebook import prompt_section
+            parts.append(prompt_section(ctx["notebook"]))
         parts.append(
             "Read what you need, make the change with edit_file, and run the "
             "tests to check your work."

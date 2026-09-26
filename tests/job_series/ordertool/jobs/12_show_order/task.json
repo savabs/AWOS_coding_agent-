@@ -1,0 +1,7 @@
+{
+  "id": "12_show_order",
+  "goal": "Support keeps asking me for the details of a single order. Add a `show ORDER_ID` command that prints exactly this layout (example for an order with a 10% discount):\n\nORD-0002  Grace Hopper <grace@example.com>\nstatus: pending\ncreated: 2024-03-05T17:40:00\nGADGET x1 @ 25.00 = 25.00\nCABLE x3 @ 4.50 = 13.50\nsubtotal: 38.50\ndiscount: 10% -3.85\ntotal: 34.65\n\nOne line per order line, in order. The discount line only appears when the order has a discount, and its amount is chosen so that subtotal minus discount is exactly the total. Amounts, timestamps and errors (e.g. an unknown order id) should look like they do everywhere else in the tool.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}
