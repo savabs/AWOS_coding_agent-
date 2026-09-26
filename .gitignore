@@ -62,6 +62,9 @@ secrets/
 # The exception is the job host's queue: per-job records, logs and reports
 # are operational state for one machine, not learning data.
 .awos/jobs/
+# Job-series runs: per-arm scratch state and project checkouts (with their own
+# .git and a copy of .env). The results file .awos/job_series_<ts>.json is kept.
+.awos/job_series/
 
 # Model artifacts (large files — store separately)
 *.pkl
