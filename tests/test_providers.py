@@ -137,3 +137,92 @@ def test_refine_goal_keeps_goal_when_reply_is_empty(openrouter):
     planner.client = MagicMock()
     planner.client.chat.completions.create.return_value = empty
     assert planner.refine_goal("make it faster", {}) == "make it faster"
+
+
+# ── request timeout ──────────────────────────────────────────────────────────
+# The SDK default (600 s, 2 retries) let one hung agent-loop call stall a job
+# for 12+ minutes. Every client AWOS builds carries AWOS_MODEL_TIMEOUT_S.
+
+@pytest.fixture
+def no_timeout_env(monkeypatch):
+    monkeypatch.delenv("AWOS_MODEL_TIMEOUT_S", raising=False)
+    monkeypatch.delenv("AWOS_MODEL_MAX_RETRIES", raising=False)
+
+
+def _inner(client):
+    return getattr(client, "_inner", client)
+
+
+def test_client_options_defaults(no_timeout_env):
+    assert providers.client_options() == {"timeout": 120.0, "max_retries": 2}
+
+
+def test_client_options_from_env(monkeypatch):
+    monkeypatch.setenv("AWOS_MODEL_TIMEOUT_S", "30")
+    monkeypatch.setenv("AWOS_MODEL_MAX_RETRIES", "0")
+    assert providers.client_options() == {"timeout": 30.0, "max_retries": 0}
+
+
+@pytest.mark.parametrize("timeout, retries", [("abc", "x"), ("0", "-1"), ("-5", "")])
+def test_client_options_bad_env_falls_back(monkeypatch, timeout, retries):
+    monkeypatch.setenv("AWOS_MODEL_TIMEOUT_S", timeout)
+    monkeypatch.setenv("AWOS_MODEL_MAX_RETRIES", retries)
+    assert providers.client_options() == {"timeout": 120.0, "max_retries": 2}
+
+
+@pytest.mark.parametrize("routed", [True, False])
+def test_every_providers_client_gets_the_timeout(monkeypatch, routed):
+    monkeypatch.setenv("AWOS_MODEL_TIMEOUT_S", "45")
+    monkeypatch.setenv("AWOS_MODEL_MAX_RETRIES", "1")
+    if routed:
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-test")
+    else:
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    for client in (_inner(chat_client("k", "https://api.deepseek.com")),
+                   _inner(messages_client("k"))):
+        assert client.timeout == 45.0
+        assert client.max_retries == 1
+
+
+@pytest.mark.parametrize("env", [
+    {"AWOS_BASE_URL": "http://localhost:11434/v1"},
+    {"OPENROUTER_API_KEY": "sk-or-v1-test", "AWOS_AGENT_MODEL": "deepseek/deepseek-chat"},
+    {"ANTHROPIC_API_KEY": "k"},
+    {"DEEPSEEK_API_KEY": "k"},
+    {"OPENAI_API_KEY": "k"},
+])
+def test_agent_loop_clients_get_the_timeout(monkeypatch, env):
+    from scaffold.agent.agent_loop import build_client_from_env
+
+    for name in ("AWOS_BASE_URL", "AWOS_PROVIDER", "OPENROUTER_API_KEY",
+                 "AWOS_AGENT_MODEL", *DIRECT_KEYS):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("AWOS_MODEL_TIMEOUT_S", "33")
+    monkeypatch.setenv("AWOS_MODEL_MAX_RETRIES", "1")
+    sdk = build_client_from_env()._client
+    assert sdk.timeout == 33.0
+    assert sdk.max_retries == 1
+
+
+def test_timed_out_model_call_is_a_clean_model_error_stop():
+    import httpx
+    from openai import APITimeoutError
+
+    from scaffold.agent.agent_loop import AgentLoop, build_coding_registry
+
+    class HangingClient:
+        def complete(self, system, messages, registry, tool_choice=None):
+            raise APITimeoutError(request=httpx.Request("POST", "https://x/v1"))
+
+        def format_assistant_turn(self, reply):
+            return {}
+
+        def format_tool_results(self, calls, results):
+            return []
+
+    outcome = AgentLoop(build_coding_registry("."), HangingClient()).run("task")
+    assert outcome.success is False
+    assert outcome.stop_reason == "model_error"
+    assert "APITimeoutError" in outcome.final_message
