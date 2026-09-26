@@ -928,6 +928,15 @@ def _synthetic_failure(message: str) -> Any:
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
+def _client_options() -> dict:
+    """Request timeout and retries shared with providers.py (AWOS_MODEL_TIMEOUT_S)."""
+    try:
+        from .providers import client_options
+    except ImportError:
+        from providers import client_options
+    return client_options()
+
+
 def _build_openrouter(api_key: str, model: Optional[str]) -> ModelClient:
     """
     OpenRouter: one key, many vendors, OpenAI-compatible wire format.
@@ -962,6 +971,7 @@ def _build_openrouter(api_key: str, model: Optional[str]) -> ModelClient:
             api_key=api_key,
             base_url=OPENROUTER_BASE_URL,
             default_headers=headers or None,
+            **_client_options(),
         ),
         chosen,
     )
@@ -1001,7 +1011,11 @@ def build_client_from_env(model: Optional[str] = None) -> ModelClient:
 
         return OpenAIToolClient(
             # Local servers ignore the key but the SDK insists on one.
-            OpenAI(api_key=os.getenv("AWOS_BASE_URL_KEY", "not-needed"), base_url=base_url),
+            OpenAI(
+                api_key=os.getenv("AWOS_BASE_URL_KEY", "not-needed"),
+                base_url=base_url,
+                **_client_options(),
+            ),
             model or os.getenv("AWOS_AGENT_MODEL", "qwen2.5-coder"),
         )
 
@@ -1014,7 +1028,7 @@ def build_client_from_env(model: Optional[str] = None) -> ModelClient:
         from anthropic import Anthropic
 
         return AnthropicToolClient(
-            Anthropic(api_key=anthropic_key),
+            Anthropic(api_key=anthropic_key, **_client_options()),
             model or os.getenv("AWOS_AGENT_MODEL", "claude-sonnet-4-6"),
         )
 
@@ -1023,7 +1037,9 @@ def build_client_from_env(model: Optional[str] = None) -> ModelClient:
         from openai import OpenAI
 
         return OpenAIToolClient(
-            OpenAI(api_key=deepseek_key, base_url="https://api.deepseek.com"),
+            OpenAI(
+                api_key=deepseek_key, base_url="https://api.deepseek.com", **_client_options()
+            ),
             model or os.getenv("AWOS_AGENT_MODEL", "deepseek-chat"),
         )
 
@@ -1032,7 +1048,7 @@ def build_client_from_env(model: Optional[str] = None) -> ModelClient:
         from openai import OpenAI
 
         return OpenAIToolClient(
-            OpenAI(api_key=openai_key),
+            OpenAI(api_key=openai_key, **_client_options()),
             model or os.getenv("AWOS_AGENT_MODEL", "gpt-4o-mini"),
         )
 

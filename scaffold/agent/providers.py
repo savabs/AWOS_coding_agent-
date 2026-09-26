@@ -37,6 +37,37 @@ _VENDORS = (
 )
 
 
+#: Per-request model timeout and SDK retries. The SDK defaults (600 s, 2
+#: retries) let one hung call stall a job for half an hour; a live run had an
+#: agent-loop call hang 12+ minutes. A timed-out call raises, which AgentLoop
+#: turns into a clean `model_error` stop.
+DEFAULT_MODEL_TIMEOUT_S = 120.0
+DEFAULT_MODEL_MAX_RETRIES = 2
+
+
+def model_timeout_s() -> float:
+    """AWOS_MODEL_TIMEOUT_S, default 120; a bad or non-positive value falls back."""
+    try:
+        value = float(os.getenv("AWOS_MODEL_TIMEOUT_S", DEFAULT_MODEL_TIMEOUT_S))
+    except ValueError:
+        return DEFAULT_MODEL_TIMEOUT_S
+    return value if value > 0 else DEFAULT_MODEL_TIMEOUT_S
+
+
+def model_max_retries() -> int:
+    """AWOS_MODEL_MAX_RETRIES, default 2; a bad or negative value falls back."""
+    try:
+        value = int(os.getenv("AWOS_MODEL_MAX_RETRIES", DEFAULT_MODEL_MAX_RETRIES))
+    except ValueError:
+        return DEFAULT_MODEL_MAX_RETRIES
+    return value if value >= 0 else DEFAULT_MODEL_MAX_RETRIES
+
+
+def client_options() -> dict:
+    """Keyword arguments every OpenAI/Anthropic client AWOS builds should get."""
+    return {"timeout": model_timeout_s(), "max_retries": model_max_retries()}
+
+
 def openrouter_key() -> Optional[str]:
     return os.getenv("OPENROUTER_API_KEY") or None
 
@@ -101,10 +132,11 @@ def chat_client(
     key = openrouter_key()
     if key:
         return _Routed(
-            OpenAI(api_key=key, base_url=OPENROUTER_BASE_URL), ("chat", "completions")
+            OpenAI(api_key=key, base_url=OPENROUTER_BASE_URL, **client_options()),
+            ("chat", "completions"),
         )
     if direct_key:
-        return OpenAI(api_key=direct_key, base_url=direct_base_url)
+        return OpenAI(api_key=direct_key, base_url=direct_base_url, **client_options())
     return None
 
 
@@ -113,9 +145,12 @@ def messages_client(direct_key: Optional[str] = None) -> Any:
     key = openrouter_key()
     if key:
         return _Routed(
-            Anthropic(base_url=OPENROUTER_ANTHROPIC_BASE_URL, auth_token=key, api_key=None),
+            Anthropic(
+                base_url=OPENROUTER_ANTHROPIC_BASE_URL, auth_token=key, api_key=None,
+                **client_options(),
+            ),
             ("messages",),
         )
     if direct_key:
-        return Anthropic(api_key=direct_key)
+        return Anthropic(api_key=direct_key, **client_options())
     return None
