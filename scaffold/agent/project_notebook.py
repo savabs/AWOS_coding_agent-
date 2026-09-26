@@ -22,7 +22,12 @@ AWOS_NOTEBOOK=0 turns off both. AWOS_NOTEBOOK_MODEL picks the update's model
 (default: the cheap worker model through OpenRouter). AWOS_PROJECT_ID names
 the project; else it is derived from the codebase root's path.
 
-Stdout markers (live proof): `[notebook] read <n> chars from <path>` and
+Each past job is recorded with an honest verification level (see
+verification_level): "verified" only when a goal-check verdict said complete
+and was verified; the project's own tests passing is not enough.
+
+Stdout markers (live proof): `[notebook] read <n> chars from <path>`,
+`[notebook] job recorded as: <level>` and
 `[notebook] updated <path> (<n> chars, $<cost>)`.
 """
 
@@ -63,6 +68,13 @@ HEADER = (
     "check before relying on it):"
 )
 
+#: How far a past job's result was checked. Only a goal-check verdict that
+#: said complete (verified=True) is "verified"; the notebook once recorded
+#: "success: 25 tests passed" for a job whose hidden acceptance tests failed.
+LEVEL_VERIFIED = "verified"
+LEVEL_TESTS_ONLY = "tests pass, not independently verified"
+LEVEL_UNCHECKED = "finished, not independently verified (no passing tests seen)"
+
 SYSTEM_PROMPT = f"""You keep a coding agent's notebook about ONE software
 project. After each job you rewrite the notebook so the next job on this
 project goes faster: the commands that work, where things live, the project's
@@ -71,6 +83,16 @@ own rules, and what went wrong before and what fixed it.
 Rules:
 - Use only facts observed in the job's trace and outcome, or already in the
   notebook. No guesses, no generic advice.
+- Never write that something works, or that a job succeeded, unless the trace
+  or outcome shows it was checked. The project's own tests passing is not
+  proof the goal was met: only a job whose verification is "{LEVEL_VERIFIED}"
+  was independently checked.
+- Record each job with its verification exactly as the OUTCOME gives it
+  ("{LEVEL_VERIFIED}", "{LEVEL_TESTS_ONLY}", "failed: <reason>",
+  "incomplete: <reason>", ...), never as "success" or "solved".
+- What was learned from a job that is not "{LEVEL_VERIFIED}" is provisional:
+  mark such Pitfalls and conventions "(unverified)" until a verified job
+  confirms them.
 - Keep what is still true; correct what the trace shows is wrong; drop what
   no longer matters.
 - Return the WHOLE new notebook, at most {MAX_NOTEBOOK_CHARS} characters, in
@@ -83,7 +105,8 @@ Rules:
 {SECTIONS[2]}
 (what went wrong on a past job and what fixed it)
 {SECTIONS[3]}
-(one line per job, oldest first: goal -> outcome; keep the last {MAX_PAST_JOBS})
+(one line per job, oldest first: goal -> verification (and reason);
+keep the last {MAX_PAST_JOBS})
 
 Short bullet points. No preamble, no closing remarks, no code fences.
 """
@@ -219,15 +242,53 @@ def build_update_prompt(old: str, goal: str, outcome: dict, trace: str) -> str:
     return "\n\n".join(parts)
 
 
+def _tests_pass(tests: Any) -> bool:
+    """True for a test status like "25 passed, 0 failed"."""
+    match = re.search(r"(\d+) passed, (\d+) failed", str(tests or ""))
+    return bool(match) and int(match.group(1)) > 0 and int(match.group(2)) == 0
+
+
+def verification_level(outcome: dict) -> str:
+    """
+    How far this job's result was checked, for its "Past jobs" line:
+    LEVEL_VERIFIED only when a goal-check verdict said complete and was
+    verified; LEVEL_TESTS_ONLY when only the project's own tests passed (no
+    goal check, or one that could not confirm); "failed: ..." or
+    "incomplete: ..." otherwise, with the goal check's reason when present.
+    """
+    check = outcome.get("goal_check") or {}
+    check_ran = bool(check) and check.get("source") != "not_run"
+    check_reason = " ".join(str(check.get("reasoning") or "").split()) if check_ran else ""
+    if outcome.get("success"):
+        if check_ran and check.get("verified") and check.get("complete"):
+            return LEVEL_VERIFIED
+        level = LEVEL_TESTS_ONLY if _tests_pass(outcome.get("tests")) else LEVEL_UNCHECKED
+        if check_ran:
+            level += f" (goal check could not confirm: {check_reason[:200] or 'no verdict'})"
+        return level
+    label = "failed" if outcome.get("tasks_failed") else "incomplete"
+    reason = " ".join(str(outcome.get("incomplete_reason") or "").split()) or check_reason
+    if not reason and outcome.get("tasks_failed"):
+        reason = f"{outcome['tasks_failed']} task(s) failed"
+    return f"{label}: {reason[:300]}" if reason else label
+
+
 def _describe_outcome(outcome: dict) -> str:
-    lines = [f"success: {bool(outcome.get('success'))}"]
-    for key in ("tasks_completed", "tasks_failed", "tests"):
+    level = outcome.get("verification") or verification_level(outcome)
+    lines = [f"verification: {level}"]
+    for key in ("tasks_completed", "tasks_failed"):
         if outcome.get(key) not in (None, ""):
             lines.append(f"{key}: {outcome[key]}")
+    if outcome.get("tests") not in (None, ""):
+        lines.append(f"project's own tests (not proof the goal is met): {outcome['tests']}")
     check = outcome.get("goal_check") or {}
     if check and check.get("source") != "not_run":
-        lines.append(f"goal check: {'complete' if check.get('complete') else 'incomplete'}"
-                     f" — {str(check.get('reasoning', ''))[:500]}")
+        state = "complete" if check.get("complete") else "incomplete"
+        if check.get("complete") and not check.get("verified"):
+            state = "complete, UNVERIFIED (fail-open)"
+        lines.append(f"goal check: {state} — {str(check.get('reasoning', ''))[:500]}")
+    else:
+        lines.append("goal check: not run")
     if outcome.get("incomplete_reason"):
         lines.append(f"incomplete: {str(outcome['incomplete_reason'])[:300]}")
     return "\n".join(lines)
