@@ -1,3 +1,9 @@
+---
+title: "DAG-Based Parallel Executor — Research"
+tags:
+  - doc/research
+---
+
 # DAG-Based Parallel Executor — Research
 
 ## Problem
@@ -41,3 +47,8 @@ Speed-up: 2 waves instead of 4 serial steps = up to 3× faster
 - `concurrent.futures.ThreadPoolExecutor` — stdlib, no new deps
 - Tasks are I/O-bound (LLM API calls) → threading > multiprocessing
 - Opt-in via `use_parallel=True` on `execute_feature()` — sequential default unchanged
+
+## Related
+
+- _(add links to related documents here)_
+

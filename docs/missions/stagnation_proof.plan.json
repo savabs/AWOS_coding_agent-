@@ -1,0 +1,10 @@
+[
+  {
+    "task_id": 1,
+    "task_type": "edit_file",
+    "path": "tests/fixtures/stagnation_target.py",
+    "file": "tests/fixtures/stagnation_target.py",
+    "action": "Fix the intentionally broken syntax: the function is missing a colon after the def line. Add the colon to make it valid Python.",
+    "complexity": "low"
+  }
+]

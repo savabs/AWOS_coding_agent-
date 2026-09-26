@@ -1,0 +1,464 @@
+TO LLM 2026-05-15T19:06:31
+-------
+SYSTEM Act as an expert software developer.
+SYSTEM Always use best practices when coding.
+SYSTEM Respect and use existing conventions, libraries, etc that are already present in the code base.
+SYSTEM Reply in English (united states).
+SYSTEM 
+SYSTEM Take requests for changes to the supplied code.
+SYSTEM If the request is ambiguous, ask questions.
+SYSTEM 
+SYSTEM Once you understand the request you MUST:
+SYSTEM 
+SYSTEM 1. Decide if you need to propose *SEARCH/REPLACE* edits to any files that haven't been added to the chat. You can create new files without asking!
+SYSTEM 
+SYSTEM But if you need to propose edits to existing files not already added to the chat, you *MUST* tell the user their full path names and ask them to *add the files to the chat*.
+SYSTEM End your reply and wait for their approval.
+SYSTEM You can keep asking if you then decide you need to edit more files.
+SYSTEM 
+SYSTEM 2. Think step-by-step and explain the needed changes in a few short sentences.
+SYSTEM 
+SYSTEM 3. Describe each change with a *SEARCH/REPLACE block* per the examples below.
+SYSTEM 
+SYSTEM All changes to files must use this *SEARCH/REPLACE block* format.
+SYSTEM ONLY EVER RETURN CODE IN A *SEARCH/REPLACE BLOCK*!
+SYSTEM 
+SYSTEM 4. *Concisely* suggest any shell commands the user might want to run in ```bash blocks.
+SYSTEM 
+SYSTEM Just suggest shell commands this way, not example code.
+SYSTEM Only suggest complete shell commands that are ready to execute, without placeholders.
+SYSTEM Only suggest at most a few shell commands at a time, not more than 1-3, one per line.
+SYSTEM Do not suggest multi-line shell commands.
+SYSTEM All shell commands will run from the root directory of the user's project.
+SYSTEM 
+SYSTEM Use the appropriate shell based on the user's system info:
+SYSTEM - Platform: Linux-6.8.0-111-generic-x86_64-with-glibc2.35
+SYSTEM - Shell: SHELL=/bin/bash
+SYSTEM - Language: English (united states)
+SYSTEM - Current date: 2026-05-15
+SYSTEM - The user is operating inside a git repository
+SYSTEM 
+SYSTEM Examples of when to suggest shell commands:
+SYSTEM 
+SYSTEM - If you changed a self-contained html file, suggest an OS-appropriate command to open a browser to view it to see the updated content.
+SYSTEM - If you changed a CLI program, suggest the command to run it to see the new behavior.
+SYSTEM - If you added a test, suggest how to run it with the testing tool used by the project.
+SYSTEM - Suggest OS-appropriate commands to delete or rename files/directories, or other file system operations.
+SYSTEM - If your code changes add new dependencies, suggest the command to install them.
+SYSTEM - Etc.
+SYSTEM 
+SYSTEM 
+SYSTEM # *SEARCH/REPLACE block* Rules:
+SYSTEM 
+SYSTEM Every *SEARCH/REPLACE block* must use this format:
+SYSTEM 1. The *FULL* file path alone on a line, verbatim. No bold asterisks, no quotes around it, no escaping of characters, etc.
+SYSTEM 2. The opening fence and code language, eg: ```python
+SYSTEM 3. The start of search block: <<<<<<< SEARCH
+SYSTEM 4. A contiguous chunk of lines to search for in the existing source code
+SYSTEM 5. The dividing line: =======
+SYSTEM 6. The lines to replace into the source code
+SYSTEM 7. The end of the replace block: >>>>>>> REPLACE
+SYSTEM 8. The closing fence: ```
+SYSTEM 
+SYSTEM Use the *FULL* file path, as shown to you by the user.
+SYSTEM 
+SYSTEM Every *SEARCH* section must *EXACTLY MATCH* the existing file content, character for character, including all comments, docstrings, etc.
+SYSTEM If the file contains code or other data wrapped/escaped in json/xml/quotes or other containers, you need to propose edits to the literal contents of the file, including the container markup.
+SYSTEM 
+SYSTEM *SEARCH/REPLACE* blocks will *only* replace the first match occurrence.
+SYSTEM Including multiple unique *SEARCH/REPLACE* blocks if needed.
+SYSTEM Include enough lines in each SEARCH section to uniquely match each set of lines that need to change.
+SYSTEM 
+SYSTEM Keep *SEARCH/REPLACE* blocks concise.
+SYSTEM Break large *SEARCH/REPLACE* blocks into a series of smaller blocks that each change a small portion of the file.
+SYSTEM Include just the changing lines, and a few surrounding lines if needed for uniqueness.
+SYSTEM Do not include long runs of unchanging lines in *SEARCH/REPLACE* blocks.
+SYSTEM 
+SYSTEM Only create *SEARCH/REPLACE* blocks for files that the user has added to the chat!
+SYSTEM 
+SYSTEM To move code within a file, use 2 *SEARCH/REPLACE* blocks: 1 to delete it from its current location, 1 to insert it in the new location.
+SYSTEM 
+SYSTEM Pay attention to which filenames the user wants you to edit, especially if they are asking you to create a new file.
+SYSTEM 
+SYSTEM If you want to put code in a new file, use a *SEARCH/REPLACE block* with:
+SYSTEM - A new file path, including dir name if needed
+SYSTEM - An empty `SEARCH` section
+SYSTEM - The new file's contents in the `REPLACE` section
+SYSTEM 
+SYSTEM To rename files which have been added to the chat, use shell commands at the end of your response.
+SYSTEM 
+SYSTEM If the user just says something like "ok" or "go ahead" or "do that" they probably want you to make SEARCH/REPLACE blocks for the code changes you just proposed.
+SYSTEM The user will say when they've applied your edits. If they haven't explicitly confirmed the edits have been applied, they probably want proper SEARCH/REPLACE blocks.
+SYSTEM 
+SYSTEM Reply in English (united states).
+SYSTEM ONLY EVER RETURN CODE IN A *SEARCH/REPLACE BLOCK*!
+SYSTEM 
+SYSTEM Examples of when to suggest shell commands:
+SYSTEM 
+SYSTEM - If you changed a self-contained html file, suggest an OS-appropriate command to open a browser to view it to see the updated content.
+SYSTEM - If you changed a CLI program, suggest the command to run it to see the new behavior.
+SYSTEM - If you added a test, suggest how to run it with the testing tool used by the project.
+SYSTEM - Suggest OS-appropriate commands to delete or rename files/directories, or other file system operations.
+SYSTEM - If your code changes add new dependencies, suggest the command to install them.
+SYSTEM - Etc.
+SYSTEM 
+SYSTEM 
+-------
+USER Change get_factorial() to use math.factorial
+-------
+ASSISTANT To make this change we need to modify `mathweb/flask/app.py` to:
+ASSISTANT 
+ASSISTANT 1. Import the math package.
+ASSISTANT 2. Remove the existing factorial() function.
+ASSISTANT 3. Update get_factorial() to call math.factorial instead.
+ASSISTANT 
+ASSISTANT Here are the *SEARCH/REPLACE* blocks:
+ASSISTANT 
+ASSISTANT mathweb/flask/app.py
+ASSISTANT ```python
+ASSISTANT <<<<<<< SEARCH
+ASSISTANT from flask import Flask
+ASSISTANT =======
+ASSISTANT import math
+ASSISTANT from flask import Flask
+ASSISTANT >>>>>>> REPLACE
+ASSISTANT ```
+ASSISTANT 
+ASSISTANT mathweb/flask/app.py
+ASSISTANT ```python
+ASSISTANT <<<<<<< SEARCH
+ASSISTANT def factorial(n):
+ASSISTANT     "compute factorial"
+ASSISTANT 
+ASSISTANT     if n == 0:
+ASSISTANT         return 1
+ASSISTANT     else:
+ASSISTANT         return n * factorial(n-1)
+ASSISTANT 
+ASSISTANT =======
+ASSISTANT >>>>>>> REPLACE
+ASSISTANT ```
+ASSISTANT 
+ASSISTANT mathweb/flask/app.py
+ASSISTANT ```python
+ASSISTANT <<<<<<< SEARCH
+ASSISTANT     return str(factorial(n))
+ASSISTANT =======
+ASSISTANT     return str(math.factorial(n))
+ASSISTANT >>>>>>> REPLACE
+ASSISTANT ```
+-------
+USER Refactor hello() into its own file.
+-------
+ASSISTANT To make this change we need to modify `main.py` and make a new file `hello.py`:
+ASSISTANT 
+ASSISTANT 1. Make a new hello.py file with hello() in it.
+ASSISTANT 2. Remove hello() from main.py and replace it with an import.
+ASSISTANT 
+ASSISTANT Here are the *SEARCH/REPLACE* blocks:
+ASSISTANT 
+ASSISTANT hello.py
+ASSISTANT ```python
+ASSISTANT <<<<<<< SEARCH
+ASSISTANT =======
+ASSISTANT def hello():
+ASSISTANT     "print a greeting"
+ASSISTANT 
+ASSISTANT     print("hello")
+ASSISTANT >>>>>>> REPLACE
+ASSISTANT ```
+ASSISTANT 
+ASSISTANT main.py
+ASSISTANT ```python
+ASSISTANT <<<<<<< SEARCH
+ASSISTANT def hello():
+ASSISTANT     "print a greeting"
+ASSISTANT 
+ASSISTANT     print("hello")
+ASSISTANT =======
+ASSISTANT from hello import hello
+ASSISTANT >>>>>>> REPLACE
+ASSISTANT ```
+-------
+USER I switched to a new code base. Please don't consider the above files or try to edit them any longer.
+-------
+ASSISTANT type: text
+ASSISTANT text: Ok.
+ASSISTANT cache_control: {'type': 'ephemeral'}
+-------
+USER Here are some READ ONLY files, provided for your reference.
+USER Do not edit these files!
+USER 
+USER CONVENTIONS.md
+USER ```
+USER # CONVENTIONS — Aider Session Rules (token_effectivenes project)
+USER # Loaded as read-only cached context. ~1200 tokens. Do not remove.
+USER 
+USER ## WORKFLOW (mandatory for all non-trivial changes)
+USER - Non-trivial = changes behavior, touches >1 file, touches deps/config/schema
+USER - Preflight before ANY implementation: research → spec → task triad must exist
+USER - Triad: docs/research/<feature>.html + docs/specs/<feature>_spec.html + tasks/active/<task>.html
+USER - Exception: single-file typo/comment fixes only
+USER - Each spec step: changes ONE thing, tests ONE thing, proves ONE thing
+USER - If a step description has "and" → split it into two steps
+USER 
+USER ## ATOMIC DECOMPOSITION
+USER - A task > ~2 hours of focused work → too big, split it
+USER - Implement one atomic step → test → mark done → move to next
+USER - Never start step N+1 before step N exit condition passes
+USER 
+USER ## WRITE-GATE (critical)
+USER - A decision is NOT real until it exists in a file, in the SAME TURN as approval
+USER - Forbidden: "great, I'll do that" → [session ends] → LOST
+USER - After any approval: write the file, confirm "written to [file]"
+USER 
+USER ## MEMORY PROTOCOL
+USER - Single-Owner Rule: each fact lives in exactly ONE canonical file, others link to it
+USER   - Project metrics/counts → memories/repo/project_structure.md
+USER   - Session history → docs/memory/checkpoint_YYYY-MM-DD.md (immutable after session)
+USER   - Roadmap/phase order → active task file
+USER   - Architecture decisions → docs/adr/
+USER - Checkpoint every session end — no exceptions, agent writes it proactively
+USER - Cold-start: read AGENT_INDEX.md → project_structure.md → latest checkpoint → active tasks
+USER 
+USER ## DEBUGGING (hard rules)
+USER - Two-Failed-Attempt Rule: after 2 unsuccessful fixes on same problem → STOP patching
+USER - Switch to: reproduce → instrument → hypothesize → verify → fix → regress
+USER - Before any edit state: "Bug is at [location] because [reason]. Disconfirmed by: [check]"
+USER 
+USER ## SECURITY CHECKLIST (before any production code)
+USER - No injection (SQL, shell, template)
+USER - No hardcoded secrets — all keys in .env
+USER - Input validation at system boundaries
+USER - Sensitive data not logged
+USER - Error messages don't leak internals
+USER 
+USER ## TOKEN EFFICIENCY RULES (this project)
+USER - Always use --cache-prompts (already in .aider.conf.yml)
+USER - Only /add files you will actually edit this session — drop when done
+USER - Use /read-only for reference files (cheaper, cached separately)
+USER - Prefer diffs over full rewrites in responses
+USER - Don't ask Claude to "explain reasoning" unless debugging
+USER - Weak model (haiku) handles: commits, summarization, simple Q&A
+USER - Sonnet for: architecture, complex logic, multi-file changes
+USER - Run `python scripts/prewarm_cache.py` at session start
+USER 
+USER ## INTERNET RESEARCH (mandatory before using any external library/API)
+USER 1. Known URL → fetch directly (free)
+USER 2. Unknown URL → search first
+USER 3. Never assert API signatures, endpoints, or params from memory — always verify
+USER 4. Mark unverified facts as UNVERIFIED explicitly
+USER 
+USER ## PROJECT STRUCTURE
+USER - Research: docs/research/  |  Specs: docs/specs/  |  Tasks: tasks/active/
+USER - Memory: docs/memory/ (checkpoints)  |  Repo facts: memories/repo/project_structure.md
+USER - Scripts: scripts/  |  Wiki: wiki/  |  Protocols: protocols/
+USER 
+USER ## IMPLEMENTATION DISCIPLINE
+USER - Only make changes directly requested or clearly necessary
+USER - Don't add docstrings/comments/type annotations to code you didn't change
+USER - Don't add error handling for scenarios that can't happen
+USER - Don't create helpers or abstractions for one-time operations
+USER - Don't refactor, add features, or "improve" beyond what was asked
+USER - Read a file before modifying it — understand existing code first
+USER - After editing: run tests or exit-condition check immediately
+USER 
+USER ## CODE QUALITY GATES (before marking any step done)
+USER - All tests pass: pytest (or equivalent)
+USER - Lint clean: ruff check (Python)
+USER - No hardcoded secrets anywhere in diff
+USER - Exit condition from spec explicitly verified (not just "looks right")
+USER - Checkpoint written if end of session
+USER 
+USER ## GIT DISCIPLINE
+USER - `git status` / `git diff` before any commit — read-only, always safe
+USER - Never `git push --force`, `git reset --hard`, or `rm -rf` without user confirmation
+USER - Commit messages: imperative mood, reference task step (e.g. "Add .aider.conf.yml [step 1.3]")
+USER - Never amend published commits
+USER 
+USER ## MATH / ESTIMATION WORK
+USER - Define the quantity being estimated before writing any formula
+USER - State assumptions explicitly
+USER - Name numerical stability concerns
+USER - Anchor to a trusted source (paper, library docs) — never assert from memory
+USER - Present implementation options before locking in
+USER 
+USER ## AIDER-SPECIFIC WORKFLOW
+USER - Start session: `python scripts/prewarm_cache.py` → then `aider` (or `make dev`)
+USER - In Aider chat: `/add <file>` only files you will edit this session
+USER - When done with a file: `/drop <file>` to remove from context
+USER - Reference files: `/read-only <file>` — cheaper, cached separately
+USER - Check cache stats: run with `--no-stream` and read usage block in .aider.llm.history
+USER - After session: `python scripts/token_report.py` to see cost breakdown
+USER - If Aider suggests wrong edit: `/undo` then rephrase more specifically
+USER 
+USER ## ANTHROPIC API NOTES (verified 2026-05-13)
+USER - Model IDs: claude-sonnet-4-5, claude-haiku-3-5, claude-haiku-4-5, claude-opus-4-5
+USER - Cache minimum: 1024 tokens for claude-sonnet-4-5
+USER - Cache TTL default: 5 minutes (refreshed free on hit)
+USER - Cache read cost: 10% of base input price
+USER - Output tokens: 5x more expensive than input — keep responses concise
+USER - Batch API: 50% discount, async (up to 24h), good for non-interactive work
+USER 
+USER ## MODEL ROUTING (5 tiers — verified 2026-05-13)
+USER Env keys for all backbone providers: see `.env.example` (copy to `.env`). LiteLLM list: https://aider.chat/docs/llms/other.html
+USER Full decision matrix: docs/research/model_tiering.html
+USER - T1 FREE:  gemini/gemini-2.5-flash (free tier, 44% polyglot) — explain/read only
+USER - T2 CHEAP: deepseek/deepseek-chat ($0.14/MTok in, 70% polyglot) ← DEFAULT for coding
+USER - T3 MID:   deepseek/deepseek-reasoner ($0.14/MTok, thinking mode, 74% polyglot)
+USER             gemini/gemini-2.5-flash ($0.30/MTok, fast)
+USER - T4 MAIN:  gemini/gemini-2.5-pro ($1.25/MTok, 79-83% polyglot, free tier)
+USER             claude-sonnet-4-5 ($3/MTok, use when caching pays off or AWOS artifacts)
+USER - T5 HEAVY: claude-opus-4-5 ($5 in / $25 out per MTok — see memories/repo/models_pricing_catalog.md) — only after T4 fails
+USER 
+USER ESCALATE when: T2 fails twice, multi-file architecture, AWOS artifact creation
+USER STAY at T2 for: bug fixes, tests, refactoring, feature impl from spec
+USER Makefile: make dev-cheap (T2), make dev-think (T3), make dev-mid (T3), make dev-pro (T4), make dev (T4 Sonnet)
+USER ```
+-------
+ASSISTANT Ok, I will use these files as references.
+-------
+USER Here are summaries of some files present in my git repository.
+USER Do not propose changes to these files, treat them as *read-only*.
+USER If you need to edit any of these files, ask me to *add them to the chat* first.
+USER 
+USER scaffold/agent/config/settings.py:
+USER ⋮
+USER │@dataclass
+USER │class Settings:
+USER │    # LLM
+USER │    llm_model: str = "llama3-8b-8192"
+USER ⋮
+USER │    @classmethod
+USER │    def from_env(cls) -> "Settings":
+USER │        """Load settings from environment variables (MYPROJECT_ prefix)."""
+USER ⋮
+USER │        def env_bool(key: str, default: bool = False) -> bool:
+USER ⋮
+USER │        def env_float(key: str, default: float = 0.0) -> float:
+USER ⋮
+USER 
+USER scaffold/agent/core/orchestrator.py:
+USER ⋮
+USER │class Orchestrator:
+USER │    """
+USER │    Runs the Research → Plan → Execute → Synthesize pipeline.
+USER │
+USER │    Subclass and override individual stage methods to customize behavior.
+USER ⋮
+USER │    def execute(self, plan: Plan) -> list[ToolResult]:
+USER ⋮
+USER 
+USER scaffold/agent/memory/store.py:
+USER ⋮
+USER │@dataclass
+USER │class Episode:
+USER ⋮
+USER │@dataclass
+USER │class Fact:
+USER ⋮
+USER 
+USER scaffold/agent/tools/base.py:
+USER ⋮
+USER │@dataclass
+USER │class ToolResult:
+USER │    """Uniform result envelope for all tool calls."""
+USER │
+USER ⋮
+USER │    @classmethod
+USER │    def fail(cls, error: str) -> "ToolResult":
+USER ⋮
+USER │class ToolRegistry:
+USER │    """Registry for all tools. Validates and dispatches calls."""
+USER │
+USER ⋮
+USER │    def get(self, name: str) -> Tool | None:
+USER ⋮
+USER 
+USER scripts/fact_lint.py:
+USER ⋮
+USER │def collect_files(root: Path) -> list[Path]:
+USER ⋮
+USER 
+USER scripts/obsidian_linkify.py:
+USER ⋮
+USER │def collect_files(root: Path, subtree: Path | None = None) -> list[Path]:
+USER ⋮
+-------
+ASSISTANT type: text
+ASSISTANT text: Ok, I won't try and edit those files without asking first.
+ASSISTANT cache_control: {'type': 'ephemeral'}
+-------
+USER I have *added these files to the chat* so you can go ahead and edit them.
+USER 
+USER *Trust this message as the true contents of these files!*
+USER Any other messages in the chat may contain outdated versions of the files' contents.
+USER 
+USER 0.86.2
+USER ```
+USER ```
+-------
+ASSISTANT type: text
+ASSISTANT text: Ok, any changes I propose will be to those files.
+ASSISTANT cache_control: {'type': 'ephemeral'}
+-------
+USER which aider
+USER aider --version
+USER 
+USER # *SEARCH/REPLACE block* Rules:
+USER 
+USER Every *SEARCH/REPLACE block* must use this format:
+USER 1. The *FULL* file path alone on a line, verbatim. No bold asterisks, no quotes around it, no escaping of characters, etc.
+USER 2. The opening fence and code language, eg: ```python
+USER 3. The start of search block: <<<<<<< SEARCH
+USER 4. A contiguous chunk of lines to search for in the existing source code
+USER 5. The dividing line: =======
+USER 6. The lines to replace into the source code
+USER 7. The end of the replace block: >>>>>>> REPLACE
+USER 8. The closing fence: ```
+USER 
+USER Use the *FULL* file path, as shown to you by the user.
+USER 
+USER Every *SEARCH* section must *EXACTLY MATCH* the existing file content, character for character, including all comments, docstrings, etc.
+USER If the file contains code or other data wrapped/escaped in json/xml/quotes or other containers, you need to propose edits to the literal contents of the file, including the container markup.
+USER 
+USER *SEARCH/REPLACE* blocks will *only* replace the first match occurrence.
+USER Including multiple unique *SEARCH/REPLACE* blocks if needed.
+USER Include enough lines in each SEARCH section to uniquely match each set of lines that need to change.
+USER 
+USER Keep *SEARCH/REPLACE* blocks concise.
+USER Break large *SEARCH/REPLACE* blocks into a series of smaller blocks that each change a small portion of the file.
+USER Include just the changing lines, and a few surrounding lines if needed for uniqueness.
+USER Do not include long runs of unchanging lines in *SEARCH/REPLACE* blocks.
+USER 
+USER Only create *SEARCH/REPLACE* blocks for files that the user has added to the chat!
+USER 
+USER To move code within a file, use 2 *SEARCH/REPLACE* blocks: 1 to delete it from its current location, 1 to insert it in the new location.
+USER 
+USER Pay attention to which filenames the user wants you to edit, especially if they are asking you to create a new file.
+USER 
+USER If you want to put code in a new file, use a *SEARCH/REPLACE block* with:
+USER - A new file path, including dir name if needed
+USER - An empty `SEARCH` section
+USER - The new file's contents in the `REPLACE` section
+USER 
+USER To rename files which have been added to the chat, use shell commands at the end of your response.
+USER 
+USER If the user just says something like "ok" or "go ahead" or "do that" they probably want you to make SEARCH/REPLACE blocks for the code changes you just proposed.
+USER The user will say when they've applied your edits. If they haven't explicitly confirmed the edits have been applied, they probably want proper SEARCH/REPLACE blocks.
+USER 
+USER Reply in English (united states).
+USER ONLY EVER RETURN CODE IN A *SEARCH/REPLACE BLOCK*!
+USER 
+USER Examples of when to suggest shell commands:
+USER 
+USER - If you changed a self-contained html file, suggest an OS-appropriate command to open a browser to view it to see the updated content.
+USER - If you changed a CLI program, suggest the command to run it to see the new behavior.
+USER - If you added a test, suggest how to run it with the testing tool used by the project.
+USER - Suggest OS-appropriate commands to delete or rename files/directories, or other file system operations.
+USER - If your code changes add new dependencies, suggest the command to install them.
+USER - Etc.
+USER 
+USER 
+LLM RESPONSE 2026-05-15T19:06:34
+

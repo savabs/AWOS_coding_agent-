@@ -1,0 +1,28 @@
+{
+  "goal": "Add a health_check() method to the Orchestrator class in scaffold/agent/orchestrator.py that returns a dict with the readiness state of each component: LinUCB (is_ready, total_updates), GP (is_fitted), PRM (trained or dormant), VectorMemory (available), CriticEngine (enabled), and PostMortemEngine (patterns stored count)",
+  "goal_hash": "f19596d28d",
+  "started_at": "2026-05-24T15:12:06",
+  "last_updated": "2026-05-24T17:45:06",
+  "completed_task_ids": [
+    2,
+    "1_2",
+    "1_4",
+    "1_3_1",
+    "1_3",
+    3,
+    "1_1_1",
+    "1_3_2"
+  ],
+  "failed_task_ids": [
+    1,
+    "1_1",
+    "1_1_2",
+    "1_3"
+  ],
+  "session_ids": [
+    "orch_a4101add",
+    "orch_a38f20fa",
+    "orch_50769b75"
+  ],
+  "status": "failed"
+}

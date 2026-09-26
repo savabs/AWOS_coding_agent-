@@ -1,0 +1,6 @@
+{
+  "action": "collect() leaks state between calls. Fix it.",
+  "file": "buggy.py",
+  "task_id": 1,
+  "complexity": "medium"
+}

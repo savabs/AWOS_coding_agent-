@@ -21,6 +21,8 @@ from typing import Any
 from .base import Tool, ToolResult
 
 # Commands / patterns that are always read-only safe
+# The complete command must match; prefix-only matching would allow a safe
+# command followed by a destructive shell expression.
 _SAFE_PATTERNS = re.compile(
     r"^\s*("
     r"git\s+(status|log|diff|show|branch|remote|fetch|ls-files|ls-tree|describe|rev-parse|shortlog|tag|stash list)|"
@@ -31,9 +33,13 @@ _SAFE_PATTERNS = re.compile(
     r"pip\s+(list|show|freeze)|"
     r"which(\s|$)|type(\s|$)|env(\s|$)|printenv(\s|$)|"
     r"curl\s+-s|wget\s+--quiet"
-    r")",
+    r")[^;&|<>`\n\r]*$",
     re.IGNORECASE,
 )
+
+# These operators change the command graph or redirect data. Keep them behind
+# the explicit ALLOW_SHELL/allow_destructive escape hatch.
+_UNSAFE_SYNTAX = re.compile(r"[;&|<>`\n\r]|\$\(|\$\{", re.IGNORECASE)
 
 
 class ShellTool(Tool):
@@ -113,4 +119,6 @@ class ShellTool(Tool):
 
     @staticmethod
     def _is_safe(command: str) -> bool:
-        return bool(_SAFE_PATTERNS.match(command))
+        if _UNSAFE_SYNTAX.search(command):
+            return False
+        return bool(_SAFE_PATTERNS.fullmatch(command))

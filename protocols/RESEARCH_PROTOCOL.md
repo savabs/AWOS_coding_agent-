@@ -1,3 +1,9 @@
+---
+title: "Research Protocol"
+tags:
+  - doc/wiki
+---
+
 # Research Protocol
 
 > **Goal: understand, not plan.**

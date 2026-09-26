@@ -1,0 +1,49 @@
+{
+  "root_id": "g_bf3f4cc6f89a",
+  "nodes": {
+    "g_bf3f4cc6f89a": {
+      "goal_id": "g_bf3f4cc6f89a",
+      "description": "In scaffold/agent/usage_record.py add a short # comment above merge_result_usage explaining it merges worker API usage into a task accumulator",
+      "parent_ids": [],
+      "child_ids": [
+        "g_3af7d7b57597"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-16T08:17:59Z",
+      "updated_at": "2026-06-16T08:18:08Z",
+      "completed_at": "2026-06-16T08:18:08Z",
+      "session_ids": [
+        "orch_7606bd92"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_3af7d7b57597": {
+      "goal_id": "g_3af7d7b57597",
+      "description": "Add a comment above `merge_result_usage` explaining its purpose: merging worker API usage into a task accumulator.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "scaffold/agent/usage_record.py",
+          "action": "Add a comment above `merge_result_usage` explaining its purpose: merging worker API usage into a task accumulator.",
+          "function_signature": "merge_result_usage",
+          "complexity": "low",
+          "file": "scaffold/agent/usage_record.py"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-16T08:18:05Z",
+      "updated_at": "2026-06-16T08:18:08Z",
+      "completed_at": "2026-06-16T08:18:08Z",
+      "session_ids": [
+        "orch_7606bd92"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

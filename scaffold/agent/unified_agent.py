@@ -23,8 +23,7 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-from anthropic import Anthropic
-from openai import OpenAI
+from providers import chat_client, messages_client
 
 from chat_orchestrator import ChatOrchestrator, IntentParser
 from session_memory import SessionMemory, ChatSessionManager, MemoryStrategy
@@ -108,11 +107,11 @@ class RequestRouter:
         """Initialize semantic router"""
         # Try to initialize Anthropic client
         api_key = os.getenv("ANTHROPIC_API_KEY")
-        self.client = Anthropic(api_key=api_key) if api_key else None
+        self.client = messages_client(api_key)
         self.routing_cache = {}
         
         if not self.client:
-            print("⚠️  ANTHROPIC_API_KEY not set - using fallback regex routing")
+            print("⚠️  OPENROUTER_API_KEY / ANTHROPIC_API_KEY not set - using fallback regex routing")
             self.use_semantic = False
         else:
             self.use_semantic = True
@@ -354,11 +353,10 @@ class UnifiedAgent:
             if reason_bl:
                 logger.warning(reason_bl)
 
-        api_key = os.getenv("DEEPSEEK_API_KEY")
-        if not api_key:
+        client = chat_client(os.getenv("DEEPSEEK_API_KEY"), "https://api.deepseek.com")
+        if client is None:
             return self._call_anthropic(system_prompt, user_prompt, max_tokens)  # Fall back to Haiku
         try:
-            client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
             response = client.chat.completions.create(
                 model="deepseek-chat",
                 messages=[

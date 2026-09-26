@@ -39,11 +39,27 @@ class ErrorClass(Enum):
     SYNTAX_ERROR     = auto()
     FORMAT_MALFORMED = auto()
     EMPTY_OUTPUT     = auto()
+    FILE_NOT_FOUND   = auto()
+    VERIFY_FAIL      = auto()
+    WORKER_FAIL      = auto()
     UNKNOWN          = auto()
 
 
 # Ordered list of (trigger_signals, ErrorClass)
 _CLASSIFIERS: list[tuple[list[str], ErrorClass]] = [
+    (
+        ["file not found", "no such file", "does not exist", "cannot find file"],
+        ErrorClass.FILE_NOT_FOUND,
+    ),
+    (
+        ["verification failed", "verify failed", "verifier rejected", "apply failed",
+         "verification error", "failed verification"],
+        ErrorClass.VERIFY_FAIL,
+    ),
+    (
+        ["worker failed", "worker error", "forced worker", "gauntlet g3"],
+        ErrorClass.WORKER_FAIL,
+    ),
     (
         ["not found", "no match", "search text not", "couldn't find",
          "could not find", "exact text", "search string"],
@@ -114,6 +130,30 @@ _RECIPES: dict[ErrorClass, _Recipe] = {
             "If unsure where to change, search for the relevant function name first."
         ),
         focus_hint="Target a single function body or class method — do not change the entire file.",
+    ),
+    ErrorClass.FILE_NOT_FOUND: _Recipe(
+        approach_name="path_check",
+        hint=(
+            "The target file path does not exist. Confirm the file path from the task "
+            "and project layout before editing; create the file only if the task requires it."
+        ),
+        focus_hint="Use an existing file path from the codebase context.",
+    ),
+    ErrorClass.VERIFY_FAIL: _Recipe(
+        approach_name="verify_repair",
+        hint=(
+            "The patch failed verification. Ensure SEARCH text matches the file exactly "
+            "and the REPLACE block is valid Python with correct indentation."
+        ),
+        focus_hint="Re-read the file snippet and produce a minimal fix that applies cleanly.",
+    ),
+    ErrorClass.WORKER_FAIL: _Recipe(
+        approach_name="worker_retry",
+        hint=(
+            "The worker could not produce a valid patch. Try a smaller SEARCH block "
+            "anchored on a unique function or class definition."
+        ),
+        focus_hint="Target one function body; avoid editing unrelated parts of the file.",
     ),
     ErrorClass.UNKNOWN: _Recipe(
         approach_name="fresh_approach",

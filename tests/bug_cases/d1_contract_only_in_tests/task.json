@@ -1,0 +1,7 @@
+{
+  "action": "format_duration() returns the wrong shape. Make it match what the tests require.",
+  "file": "buggy.py",
+  "task_id": 1,
+  "complexity": "medium",
+  "notes": "The exact output format is specified only by the tests."
+}

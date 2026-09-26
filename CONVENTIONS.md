@@ -1,3 +1,9 @@
+---
+title: "CONVENTIONS — Aider Session Rules (token_effectivenes project)"
+tags:
+  - doc/wiki
+---
+
 # CONVENTIONS — Aider Session Rules (token_effectivenes project)
 # Loaded as read-only cached context. ~1200 tokens. Do not remove.
 
@@ -21,7 +27,7 @@
 
 ## MEMORY PROTOCOL
 - Single-Owner Rule: each fact lives in exactly ONE canonical file, others link to it
-  - Project metrics/counts → memories/repo/project_structure.md
+  - Project metrics/counts → [[project_structure]]
   - Session history → docs/memory/checkpoint_YYYY-MM-DD.md (immutable after session)
   - Roadmap/phase order → active task file
   - Architecture decisions → docs/adr/
@@ -58,7 +64,7 @@
 
 ## PROJECT STRUCTURE
 - Research: docs/research/  |  Specs: docs/specs/  |  Tasks: tasks/active/
-- Memory: docs/memory/ (checkpoints)  |  Repo facts: memories/repo/project_structure.md
+- Memory: docs/memory/ (checkpoints)  |  Repo facts: [[project_structure]]
 - Scripts: scripts/  |  Wiki: wiki/  |  Protocols: protocols/
 
 ## IMPLEMENTATION DISCIPLINE
@@ -139,7 +145,7 @@ Full decision matrix: docs/research/model_tiering.html
             gemini/gemini-2.5-flash ($0.30/MTok, fast)
 - T4 MAIN:  gemini/gemini-2.5-pro ($1.25/MTok, 79-83% polyglot, free tier)
             claude-sonnet-4-5 ($3/MTok, use when caching pays off or AWOS artifacts)
-- T5 HEAVY: claude-opus-4-5 ($5 in / $25 out per MTok — see memories/repo/models_pricing_catalog.md) — only after T4 fails
+- T5 HEAVY: claude-opus-4-5 ($5 in / $25 out per MTok — see [[models_pricing_catalog]]) — only after T4 fails
 
 ESCALATE when: T2 fails twice, multi-file architecture, AWOS artifact creation
 STAY at T2 for: bug fixes, tests, refactoring, feature impl from spec

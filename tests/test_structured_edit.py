@@ -21,8 +21,8 @@ def make_worker():
     import scaffold.agent.worker as worker_mod
     # Patch the API clients so __init__ doesn't fail without real keys
     with mock.patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test", "ANTHROPIC_API_KEY": "test"}):
-        with mock.patch("scaffold.agent.worker.OpenAI"), \
-             mock.patch("scaffold.agent.worker.Anthropic"), \
+        with mock.patch("scaffold.agent.providers.OpenAI"), \
+             mock.patch("scaffold.agent.providers.Anthropic"), \
              mock.patch("scaffold.agent.worker.get_ledger"):
             return worker_mod.Worker(api_key="test")
 

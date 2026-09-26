@@ -1,0 +1,51 @@
+{
+  "root_id": "g_cd654d97e71b",
+  "nodes": {
+    "g_cd654d97e71b": {
+      "goal_id": "g_cd654d97e71b",
+      "description": "create docs/example_uncensored_agent_guide.md about building uncensored local LLM agents with Ollama and open weights",
+      "parent_ids": [],
+      "child_ids": [
+        "g_d4967d758664"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-14T12:19:12Z",
+      "updated_at": "2026-06-14T14:55:46Z",
+      "completed_at": "2026-06-14T14:55:46Z",
+      "session_ids": [
+        "orch_d3c31d61",
+        "orch_220479a2"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_d4967d758664": {
+      "goal_id": "g_d4967d758664",
+      "description": "Create a guide on building uncensored local LLM agents using Ollama and open-weights models.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "create_file",
+          "path": "docs/example_uncensored_agent_guide.md",
+          "action": "Create a guide on building uncensored local LLM agents using Ollama and open-weights models.",
+          "content_hint": "Introduction to uncensored local LLM agents; setting up Ollama with open-weights models; configuring an agent (e.g., using the AWOS framework) to interact with Ollama-served models; providing example agent prompts/configurations; discussion of use cases and ethical considerations.",
+          "complexity": "medium",
+          "file": "docs/example_uncensored_agent_guide.md"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-14T12:19:25Z",
+      "updated_at": "2026-06-14T14:55:46Z",
+      "completed_at": "2026-06-14T14:55:46Z",
+      "session_ids": [
+        "orch_d3c31d61",
+        "orch_220479a2"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

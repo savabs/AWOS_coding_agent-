@@ -1,3 +1,9 @@
+---
+title: "Math Protocol"
+tags:
+  - doc/wiki
+---
+
 # Math Protocol
 
 > **Math is the product. LLM is the scaffold.**

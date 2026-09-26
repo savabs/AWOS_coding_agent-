@@ -1,0 +1,7 @@
+{
+  "id": "05_csv_writer_refactor",
+  "goal": "Small refactor before we add more reports: every CSV the tool writes (export, export --line-items, customers) sets up its own csv writer and repeats the same header/row-count code. Pull that into one shared function, `write_csv(header, rows, stream)` in ordertool/export.py, that writes the header row and then the data rows (any iterable of lists) and returns the number of data rows written, and make all of those commands go through it. The output of every command must stay byte-for-byte identical.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

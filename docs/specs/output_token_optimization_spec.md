@@ -442,3 +442,8 @@ print(f"Reduction: {(1 - response.usage.output_tokens/original_tokens)*100:.0f}%
 ---
 
 **Status:** ✅ Ready for implementation
+
+## Related
+
+- _(add links to related documents here)_
+

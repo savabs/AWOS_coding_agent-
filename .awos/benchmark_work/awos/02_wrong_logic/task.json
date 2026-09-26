@@ -1,0 +1,8 @@
+{
+  "task_id": 1,
+  "task_type": "edit_file",
+  "file": "buggy.py",
+  "path": "buggy.py",
+  "action": "Fix Cache.set to evict oldest key (use iter(self._store) not reversed). Fix is_palindrome to compare cleaned to cleaned[::-1].",
+  "complexity": "medium"
+}

@@ -1,0 +1,3921 @@
+[
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "function",
+      "hello"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 63,
+    "success_count": 21,
+    "total_count": 21,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "fn_b"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-18"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "fn_a"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-18"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "function",
+      "hello"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 75,
+    "success_count": 25,
+    "total_count": 25,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "function",
+      "computes",
+      "prepare",
+      "median",
+      "list"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 102,
+    "success_count": 34,
+    "total_count": 34,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "complete",
+      "function",
+      "computes",
+      "median",
+      "list"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 156,
+    "success_count": 52,
+    "total_count": 52,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "factorial",
+      "function",
+      "prepare",
+      "correct",
+      "ensure"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 114,
+    "success_count": 38,
+    "total_count": 38,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "factorial",
+      "complete",
+      "function",
+      "prepare",
+      "correct"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 63,
+    "success_count": 21,
+    "total_count": 21,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "variance",
+      "function",
+      "prepare"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-19"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "docstring",
+      "detailed",
+      "function",
+      "prepare",
+      "divide"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 33,
+    "success_count": 11,
+    "total_count": 11,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "docstring",
+      "complete",
+      "detailed",
+      "function",
+      "prepare"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 129,
+    "success_count": 43,
+    "total_count": 43,
+    "last_seen": "2026-06-25"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "zerodivisionerror",
+      "explicit",
+      "function",
+      "prepare",
+      "divide"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 45,
+    "success_count": 15,
+    "total_count": 15,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "instead",
+      "divide",
+      "return",
+      "string",
+      "float"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 54,
+    "success_count": 18,
+    "total_count": 18,
+    "last_seen": "2026-06-18"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "validation",
+      "prepare",
+      "input"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-19"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "validation",
+      "complete",
+      "prepare",
+      "input"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 18,
+    "success_count": 6,
+    "total_count": 6,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "normalize",
+      "function",
+      "prepare",
+      "scales",
+      "values"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 21,
+    "success_count": 7,
+    "total_count": 7,
+    "last_seen": "2026-05-25"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "complete",
+      "function",
+      "computes",
+      "median",
+      "list"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 96,
+    "success_count": 32,
+    "total_count": 32,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "factorial",
+      "function",
+      "prepare",
+      "correct",
+      "ensure"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 90,
+    "success_count": 30,
+    "total_count": 30,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "docstring",
+      "complete",
+      "detailed",
+      "function",
+      "prepare"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 42,
+    "success_count": 14,
+    "total_count": 14,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "complete",
+      "function",
+      "mode"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 78,
+    "success_count": 26,
+    "total_count": 26,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "instead",
+      "divide",
+      "return",
+      "string",
+      "float"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 54,
+    "success_count": 18,
+    "total_count": 18,
+    "last_seen": "2026-06-14"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "variance",
+      "function",
+      "prepare"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-05-25"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "docstring",
+      "complete",
+      "detailed",
+      "function",
+      "prepare"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 24,
+    "success_count": 8,
+    "total_count": 8,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "zerodivisionerror",
+      "complete",
+      "explicit",
+      "function",
+      "prepare"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 42,
+    "success_count": 14,
+    "total_count": 14,
+    "last_seen": "2026-05-25"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "instead",
+      "divide",
+      "return",
+      "string",
+      "float"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 60,
+    "success_count": 20,
+    "total_count": 20,
+    "last_seen": "2026-05-27"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "validation",
+      "prepare",
+      "input"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 15,
+    "success_count": 5,
+    "total_count": 5,
+    "last_seen": "2026-05-25"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "validation",
+      "complete",
+      "prepare",
+      "input"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-05-25"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "normalize",
+      "function",
+      "prepare",
+      "scales",
+      "values"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 24,
+    "success_count": 8,
+    "total_count": 8,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "variance",
+      "function",
+      "prepare"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-20"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "zerodivisionerror",
+      "explicit",
+      "function",
+      "prepare",
+      "divide"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 33,
+    "success_count": 11,
+    "total_count": 11,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "instead",
+      "divide",
+      "return",
+      "string",
+      "float"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 57,
+    "success_count": 19,
+    "total_count": 19,
+    "last_seen": "2026-05-27"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "normalize",
+      "function",
+      "prepare",
+      "scales",
+      "values"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 18,
+    "success_count": 6,
+    "total_count": 6,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "function",
+      "computes",
+      "prepare",
+      "median",
+      "list"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "step_by_step",
+    "attempts": 30,
+    "success_count": 10,
+    "total_count": 10,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "complete",
+      "function",
+      "computes",
+      "median",
+      "list"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "step_by_step",
+    "attempts": 51,
+    "success_count": 17,
+    "total_count": 17,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "variance",
+      "function",
+      "prepare"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "rubber_duck",
+    "attempts": 69,
+    "success_count": 23,
+    "total_count": 23,
+    "last_seen": "2026-05-25"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "complete",
+      "variance",
+      "function"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "rubber_duck",
+    "attempts": 48,
+    "success_count": 16,
+    "total_count": 16,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "zerodivisionerror",
+      "explicit",
+      "function",
+      "prepare",
+      "divide"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 27,
+    "success_count": 9,
+    "total_count": 9,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "validation",
+      "prepare",
+      "input"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "direct",
+    "attempts": 21,
+    "success_count": 7,
+    "total_count": 7,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "validation",
+      "complete",
+      "prepare",
+      "input"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "cot",
+    "attempts": 69,
+    "success_count": 23,
+    "total_count": 23,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "normalize",
+      "function",
+      "prepare",
+      "scales",
+      "values"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "direct",
+    "attempts": 51,
+    "success_count": 17,
+    "total_count": 17,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "function",
+      "computes",
+      "prepare",
+      "median",
+      "list"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "cot",
+    "attempts": 36,
+    "success_count": 12,
+    "total_count": 12,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "factorial",
+      "function",
+      "prepare",
+      "correct",
+      "ensure"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 108,
+    "success_count": 36,
+    "total_count": 36,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "validation",
+      "prepare",
+      "input"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "step_by_step",
+    "attempts": 30,
+    "success_count": 10,
+    "total_count": 10,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "normalize",
+      "function",
+      "prepare",
+      "scales",
+      "values"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "step_by_step",
+    "attempts": 12,
+    "success_count": 4,
+    "total_count": 4,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "complete",
+      "function",
+      "computes",
+      "median",
+      "list"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "direct",
+    "attempts": 27,
+    "success_count": 9,
+    "total_count": 9,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "validation",
+      "complete",
+      "prepare",
+      "input"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "rubber_duck",
+    "attempts": 39,
+    "success_count": 13,
+    "total_count": 13,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "normalize",
+      "function",
+      "prepare",
+      "scales",
+      "values"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "rubber_duck",
+    "attempts": 39,
+    "success_count": 13,
+    "total_count": 13,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "parameters",
+      "function",
+      "hints",
+      "greet",
+      "type"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "rubber_duck",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-20"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "errorpattern",
+      "dataclass",
+      "__repr__",
+      "returns",
+      "method"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "cot",
+    "attempts": 39,
+    "success_count": 13,
+    "total_count": 13,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "field"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "field"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "attempt",
+      "logging",
+      "retry"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "rubber_duck",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "refactor",
+    "keywords": [
+      "_build_prompt",
+      "execute_task",
+      "assembles",
+      "building",
+      "extract"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "direct",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "architecture",
+    "keywords": [
+      "execute_task",
+      "arguments",
+      "complete",
+      "returns",
+      "system"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "then"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "field"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "respectively",
+      "_cheap_call",
+      "exponential",
+      "exception",
+      "existing"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 36,
+    "success_count": 12,
+    "total_count": 12,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "statements",
+      "preserve",
+      "existing",
+      "logging",
+      "return"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "refactor",
+    "keywords": [
+      "_build_prompt",
+      "execute_task",
+      "assembles",
+      "building",
+      "extract"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "_build_prompt",
+      "execute_task",
+      "arguments",
+      "provided",
+      "returns"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "field"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 18,
+    "success_count": 6,
+    "total_count": 6,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "existing",
+      "logging",
+      "return",
+      "string",
+      "intact"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "refactor",
+    "keywords": [
+      "_build_prompt",
+      "concatenation",
+      "execute_task",
+      "constructs",
+      "building"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "step_by_step",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "_cheap_call",
+      "exponential",
+      "exception",
+      "exhausted",
+      "preserve"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "rubber_duck",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "_cheap_call",
+      "exponential",
+      "exception",
+      "exhausted",
+      "complete"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "rubber_duck",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "refactor",
+    "keywords": [
+      "_build_prompt",
+      "execute_task",
+      "assembles",
+      "building",
+      "extract"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "rubber_duck",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "architecture",
+    "keywords": [
+      "execute_task",
+      "arguments",
+      "provided",
+      "returns",
+      "system"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "then"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "architecture",
+    "keywords": [
+      "load_config",
+      "import",
+      "config",
+      "module"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "function",
+      "variable",
+      "settings",
+      "app_name",
+      "storing"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "statements",
+      "preserve",
+      "existing",
+      "logging",
+      "return"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "execute_task",
+      "complete",
+      "returns",
+      "prompt",
+      "string"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 12,
+    "success_count": 4,
+    "total_count": 4,
+    "last_seen": "2026-05-27"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "then"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "architecture",
+    "keywords": [
+      "execute_task",
+      "arguments",
+      "provided",
+      "return",
+      "system"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "_cheap_call",
+      "exponential",
+      "statements",
+      "exception",
+      "exhausted"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "execute_task",
+      "completed",
+      "returns",
+      "prompt",
+      "string"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "prepare"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "complete"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "preserve",
+      "existing",
+      "logging",
+      "return",
+      "string"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "toolperformancetracker",
+      "snapshot",
+      "computes",
+      "method",
+      "class"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "rubber_duck",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "internal",
+      "tracking",
+      "returns",
+      "summary",
+      "dict"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "performance_tracker",
+      "execution",
+      "statement",
+      "snapshot",
+      "summary"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "rubber_duck",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "formats",
+      "tracker",
+      "success",
+      "output",
+      "avg_ms"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-21"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "variance",
+      "function",
+      "prepare"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "step_by_step",
+    "attempts": 21,
+    "success_count": 7,
+    "total_count": 7,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "normalize",
+      "function",
+      "prepare",
+      "scales",
+      "values"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "cot",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-22"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "variance",
+      "function",
+      "prepare"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "direct",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-23"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "variance",
+      "function",
+      "prepare"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "cot",
+    "attempts": 12,
+    "success_count": 4,
+    "total_count": 4,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "skill_library",
+      "skilllibrary",
+      "duplicate",
+      "statement",
+      "identical"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "factorial",
+      "function",
+      "prepare",
+      "correct",
+      "ensure"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "cot",
+    "attempts": 63,
+    "success_count": 21,
+    "total_count": 21,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "complete",
+      "variance",
+      "function"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "step_by_step",
+    "attempts": 33,
+    "success_count": 11,
+    "total_count": 11,
+    "last_seen": "2026-05-25"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "docstring",
+      "detailed",
+      "function",
+      "prepare",
+      "divide"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "rubber_duck",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-05-25"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "docstring",
+      "complete",
+      "detailed",
+      "function",
+      "prepare"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "cot",
+    "attempts": 30,
+    "success_count": 10,
+    "total_count": 10,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "zerodivisionerror",
+      "explicit",
+      "function",
+      "prepare",
+      "divide"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "cot",
+    "attempts": 15,
+    "success_count": 5,
+    "total_count": 5,
+    "last_seen": "2026-05-25"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "zerodivisionerror",
+      "complete",
+      "explicit",
+      "function",
+      "prepare"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "rubber_duck",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "validation",
+      "prepare",
+      "input"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "step_by_step",
+    "attempts": 15,
+    "success_count": 5,
+    "total_count": 5,
+    "last_seen": "2026-05-25"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "function",
+      "prepare",
+      "clamp"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "rubber_duck",
+    "attempts": 36,
+    "success_count": 12,
+    "total_count": 12,
+    "last_seen": "2026-05-25"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "complete",
+      "function",
+      "clamp"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "rubber_duck",
+    "attempts": 51,
+    "success_count": 17,
+    "total_count": 17,
+    "last_seen": "2026-05-25"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "normalize",
+      "complete",
+      "function",
+      "scales",
+      "values"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 27,
+    "success_count": 9,
+    "total_count": 9,
+    "last_seen": "2026-05-25"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "factorial",
+      "function",
+      "prepare",
+      "correct",
+      "ensure"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "step_by_step",
+    "attempts": 33,
+    "success_count": 11,
+    "total_count": 11,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "variance",
+      "function",
+      "prepare"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "rubber_duck",
+    "attempts": 15,
+    "success_count": 5,
+    "total_count": 5,
+    "last_seen": "2026-05-25"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "docstring",
+      "detailed",
+      "function",
+      "prepare",
+      "divide"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "step_by_step",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "docstring",
+      "complete",
+      "detailed",
+      "function",
+      "prepare"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "direct",
+    "attempts": 42,
+    "success_count": 14,
+    "total_count": 14,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "zerodivisionerror",
+      "explicit",
+      "function",
+      "prepare",
+      "divide"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "step_by_step",
+    "attempts": 12,
+    "success_count": 4,
+    "total_count": 4,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "validation",
+      "prepare",
+      "input"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "cot",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "normalize",
+      "function",
+      "prepare",
+      "scales",
+      "values"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "rubber_duck",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "factorial",
+      "function",
+      "prepare",
+      "correct",
+      "ensure"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "direct",
+    "attempts": 27,
+    "success_count": 9,
+    "total_count": 9,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "variance",
+      "function",
+      "prepare"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "direct",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "docstring",
+      "detailed",
+      "function",
+      "prepare",
+      "divide"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "cot",
+    "attempts": 18,
+    "success_count": 6,
+    "total_count": 6,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "docstring",
+      "complete",
+      "detailed",
+      "function",
+      "prepare"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "rubber_duck",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "zerodivisionerror",
+      "complete",
+      "explicit",
+      "function",
+      "prepare"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "direct",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "instead",
+      "divide",
+      "return",
+      "string",
+      "float"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "rubber_duck",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "validation",
+      "complete",
+      "prepare",
+      "input"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "direct",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-25"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "docstring",
+      "complete",
+      "detailed",
+      "function",
+      "prepare"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "step_by_step",
+    "attempts": 12,
+    "success_count": 4,
+    "total_count": 4,
+    "last_seen": "2026-05-25"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "factorial",
+      "function",
+      "prepare",
+      "correct",
+      "ensure"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "cot",
+    "attempts": 12,
+    "success_count": 4,
+    "total_count": 4,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "zerodivisionerror",
+      "explicit",
+      "function",
+      "prepare",
+      "divide"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "zerodivisionerror",
+      "complete",
+      "explicit",
+      "function",
+      "prepare"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "rubber_duck",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "instead",
+      "divide",
+      "return",
+      "string",
+      "float"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "step_by_step",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "normalize",
+      "complete",
+      "function",
+      "scales",
+      "values"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "direct",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "refactor",
+    "keywords": [
+      "skilllibrary",
+      "duplicate",
+      "statement",
+      "remove",
+      "skills"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "_maybe_train_prm",
+      "complete",
+      "methods"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "zerodivisionerror",
+      "explicit",
+      "function",
+      "prepare",
+      "divide"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "refactor",
+    "keywords": [
+      "skilllibrary",
+      "duplicate",
+      "statement",
+      "remove",
+      "skills"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "functionality",
+      "orchestrator",
+      "health_check",
+      "instantiate",
+      "potentially"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "linucb_component",
+      "orchestrator",
+      "dictionary",
+      "containing",
+      "components"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "_parse_search_replace",
+      "characters",
+      "truncated",
+      "alongside",
+      "complete"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "placeholder",
+      "generated",
+      "prepare",
+      "content",
+      "skipped"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "factorial",
+      "complete",
+      "function",
+      "prepare",
+      "correct"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "rubber_duck",
+    "attempts": 15,
+    "success_count": 5,
+    "total_count": 5,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "instead",
+      "divide",
+      "return",
+      "string",
+      "float"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "cot",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "validation",
+      "prepare",
+      "input"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "rubber_duck",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "factorial",
+      "complete",
+      "function",
+      "prepare",
+      "correct"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "step_by_step",
+    "attempts": 18,
+    "success_count": 6,
+    "total_count": 6,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "instead",
+      "divide",
+      "return",
+      "string",
+      "float"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "rubber_duck",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "_cheap_call",
+      "exponential",
+      "explaining",
+      "docstring",
+      "transient"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "postmortemengine",
+      "uninitialized",
+      "health_check",
+      "vectormemory",
+      "criticengine"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "orchestrator",
+      "structure",
+      "return",
+      "basic",
+      "class"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "characters",
+      "response",
+      "first"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "_parse_search_replace",
+      "function",
+      "response",
+      "specific",
+      "prepare"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "complete"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-18"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "characters",
+      "response",
+      "prepare",
+      "first"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "characters",
+      "complete",
+      "response",
+      "first"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "prepare"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-18"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "indicate",
+      "default",
+      "return",
+      "actual",
+      "empty"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "execute_feature",
+      "orchestrator",
+      "parameter",
+      "signature",
+      "dry_run"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 15,
+    "success_count": 5,
+    "total_count": 5,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "indicating",
+      "generated",
+      "template",
+      "prepare",
+      "message"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "health_check",
+      "orchestrator",
+      "vectormemory",
+      "integration",
+      "components"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "total_updates",
+      "health_check",
+      "orchestrator",
+      "including",
+      "readiness"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "components",
+      "robustness",
+      "is_fitted",
+      "prepare",
+      "getattr"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "components",
+      "robustness",
+      "is_fitted",
+      "complete",
+      "getattr"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "normalize",
+      "complete",
+      "function",
+      "scales",
+      "values"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "cot",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-25"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "variance",
+      "function",
+      "prepare"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-25"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "docstring",
+      "complete",
+      "detailed",
+      "function",
+      "prepare"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "direct",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "factorial",
+      "function",
+      "prepare",
+      "correct",
+      "ensure"
+    ],
+    "model_used": "Claude Haiku 4.5",
+    "strategy_used": "rubber_duck",
+    "attempts": 33,
+    "success_count": 11,
+    "total_count": 11,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "variance",
+      "function",
+      "prepare"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "cot",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "instead",
+      "divide",
+      "return",
+      "string",
+      "float"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "cot",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "factorial",
+      "function",
+      "prepare",
+      "correct",
+      "ensure"
+    ],
+    "model_used": "Claude Sonnet 4.6",
+    "strategy_used": "direct",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "stabilitygate",
+      "should_check",
+      "explaining",
+      "docstring",
+      "completed"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 12,
+    "success_count": 4,
+    "total_count": 4,
+    "last_seen": "2026-06-17"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "should_evolve",
+      "promptevolver",
+      "placeholder",
+      "docstring",
+      "signature"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "promptevolver",
+      "should_evolve",
+      "placeholder",
+      "explanation",
+      "docstring"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "promptevolver",
+      "should_evolve",
+      "placeholder",
+      "explanation",
+      "docstring"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-26"
+  },
+  {
+    "task_type": "refactor",
+    "keywords": [
+      "_extract_context",
+      "explaining",
+      "extracting",
+      "docstring",
+      "relevant"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-27"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "_check_syntax",
+      "describing",
+      "docstring",
+      "arguments",
+      "purpose"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-06-19"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "_check_contract_compliance",
+      "describing",
+      "docstring",
+      "arguments",
+      "purpose"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-27"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "descriptive",
+      "explaining",
+      "docstring",
+      "run_tests",
+      "arguments"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-27"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "parameters",
+      "prepare",
+      "hints",
+      "type"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-27"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "nonexistent_helper",
+      "function",
+      "prepare",
+      "return",
+      "value"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-27"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "nonexistent_helper",
+      "complete",
+      "function",
+      "return",
+      "value"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-05-27"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "interaction",
+      "explaining",
+      "docstring",
+      "recording",
+      "concise"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-12"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "get_status",
+      "definition",
+      "function",
+      "comment",
+      "returns"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 12,
+    "success_count": 4,
+    "total_count": 4,
+    "last_seen": "2026-06-18"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "_try_cheap_fallback",
+      "explaining",
+      "alternate",
+      "providers",
+      "function"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 27,
+    "success_count": 9,
+    "total_count": 9,
+    "last_seen": "2026-06-21"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "_try_cheap_fallback",
+      "definition",
+      "alternate",
+      "providers",
+      "expensive"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-12"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "_try_cheap_fallback",
+      "placeholder",
+      "explanation",
+      "alternate",
+      "providers"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-12"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "responsibilities",
+      "comprehensive",
+      "architectural",
+      "explaining",
+      "evaluation"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-06-12"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "get_uncensored_agent_guide_content",
+      "containing",
+      "uncensored",
+      "function",
+      "markdown"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-06-14"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "get_uncensored_agent_guide_content",
+      "uncensored_agent_guide",
+      "make_demo_file",
+      "appropriate",
+      "retrieved"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-12"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "_save_content_to_file",
+      "operations",
+      "specified",
+      "function",
+      "filepath"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-12"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "_save_content_to_file",
+      "output_filepath",
+      "run_awos_demo",
+      "interaction",
+      "introduce"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-12"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "weights",
+      "models",
+      "open"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-14"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "is_cheap_only",
+      "explaining",
+      "docstring",
+      "function",
+      "returns"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-16"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "print_visual_diff",
+      "explaining",
+      "function",
+      "comment",
+      "purpose"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-16"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "_check_edit_fidelity",
+      "docstring",
+      "function",
+      "line"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 15,
+    "success_count": 5,
+    "total_count": 5,
+    "last_seen": "2026-06-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "merge_result_usage",
+      "accumulator",
+      "explaining",
+      "comment",
+      "purpose"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-16"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "taskdiagnostic",
+      "docstring",
+      "record",
+      "method",
+      "line"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-16"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "_normalize_plan_paths",
+      "explaining",
+      "filenames",
+      "scaffold",
+      "comment"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-16"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "awos_cheap_only",
+      "_is_cheap_only",
+      "environment",
+      "explaining",
+      "docstring"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-16"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "_cheap_call",
+      "explaining",
+      "docstring",
+      "function",
+      "purpose"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-16"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "should_evolve",
+      "docstring",
+      "function",
+      "line"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-06-17"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "max_allowed_level",
+      "explaining",
+      "comment",
+      "ladder",
+      "above"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-06-17"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "runtimesessionstore",
+      "list_sessions",
+      "docstring",
+      "method",
+      "line"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 12,
+    "success_count": 4,
+    "total_count": 4,
+    "last_seen": "2026-06-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "apply_kernel_defaults",
+      "docstring",
+      "function",
+      "line"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-18"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "mcts_enabled",
+      "explaining",
+      "docstring",
+      "function",
+      "controls"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 12,
+    "success_count": 4,
+    "total_count": 4,
+    "last_seen": "2026-06-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "register_worktree",
+      "docstring",
+      "function",
+      "line"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-18"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "check_guard",
+      "docstring",
+      "function",
+      "line"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-18"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "worktree_enabled",
+      "docstring",
+      "complete",
+      "function",
+      "property"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-18"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "_sandbox_summary",
+      "function",
+      "awos"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-18"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "broken_add",
+      "correctly",
+      "function",
+      "modify",
+      "return"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-20"
+  },
+  {
+    "task_type": "architecture",
+    "keywords": [
+      "docstring",
+      "describe",
+      "expand",
+      "module",
+      "search"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-19"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "verification",
+      "installed",
+      "display",
+      "version",
+      "script"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-06-19"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "testmctstracestore",
+      "initialized",
+      "correctly",
+      "reports",
+      "within"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-06-19"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "cmd_sessions_show",
+      "function",
+      "worktree",
+      "sandbox",
+      "feature"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-19"
+  },
+  {
+    "task_type": "architecture",
+    "keywords": [
+      "docstring",
+      "describe",
+      "expand",
+      "module",
+      "search"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "rubber_duck",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-19"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "installation",
+      "installed",
+      "version",
+      "script",
+      "shows"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-19"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "cmd_sessions_show",
+      "function",
+      "worktree",
+      "sandbox",
+      "enabled"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-19"
+  },
+  {
+    "task_type": "architecture",
+    "keywords": [
+      "conditions",
+      "docstring",
+      "algorithm",
+      "describe",
+      "expand"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-19"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "cmd_sessions_show",
+      "conditional",
+      "identified",
+      "statement",
+      "operating"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-19"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "awos_worktree_auto_merge",
+      "auto_merge_enabled",
+      "immediately",
+      "docstring",
+      "following"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-19"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "surrounding",
+      "formatting",
+      "guidelines",
+      "formatter",
+      "docstring"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-19"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "awos_worktree_auto_merge",
+      "auto_merge_enabled",
+      "environment",
+      "definition",
+      "assignment"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-20"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "gauntlet",
+      "comment",
+      "example",
+      "sigint",
+      "marker"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-20"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "_replan_attempted",
+      "returns",
+      "already",
+      "verify",
+      "replan"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-21"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "existing",
+      "mission",
+      "start",
+      "guide",
+      "print"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-21"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "register_worktree",
+      "docstring",
+      "complete",
+      "prepare",
+      "clarify"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "direct",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-21"
+  },
+  {
+    "task_type": "other",
+    "keywords": [
+      "register_worktree",
+      "docstring",
+      "complete",
+      "clarify",
+      "session"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-21"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "replan_task_after_verify_fail",
+      "explaining",
+      "docstring",
+      "rejection",
+      "verifier"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "symbolindex",
+      "gauntlet",
+      "worktree",
+      "comment",
+      "module"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-24"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "mentioning",
+      "paragraph",
+      "mission",
+      "short",
+      "start"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "functionalities",
+      "specifically",
+      "explaining",
+      "docstring",
+      "telemetry"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "interactions",
+      "explaining",
+      "mechanisms",
+      "telemetry",
+      "framework"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-24"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "typescript",
+      "docstring",
+      "coverage",
+      "archived",
+      "snapshot"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-25"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "orchestrates",
+      "compaction",
+      "docstring",
+      "sessions",
+      "module"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-25"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "summarizes",
+      "docstring",
+      "modules",
+      "module",
+      "python"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-25"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "costtracker",
+      "accumulates",
+      "describing",
+      "docstring",
+      "labeled"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-25"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "port_sessions",
+      "docstring",
+      "persists",
+      "sessions",
+      "module"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-25"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "definitions",
+      "docstring",
+      "surface",
+      "module",
+      "ported"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-25"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "datamodels",
+      "docstring",
+      "harness",
+      "module",
+      "shared"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-25"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "historylog",
+      "docstring",
+      "appends",
+      "session",
+      "noting"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-25"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "transcriptstore",
+      "explaining",
+      "docstring",
+      "compact",
+      "entries"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-25"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "development",
+      "paragraph",
+      "section",
+      "python3",
+      "pytest"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "step_by_step",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-06-25"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "verify_password",
+      "hash_password",
+      "compare",
+      "hashed",
+      "plain"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "token_fingerprint",
+      "characters",
+      "return",
+      "first",
+      "only"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "is_session_valid",
+      "expires_at",
+      "session",
+      "valid"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "role_can_checkout",
+      "allow",
+      "staff",
+      "role"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "line_total",
+      "unit_price",
+      "multiply",
+      "quantity"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "apply_coupon",
+      "discount",
+      "percent",
+      "single"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "invoice_total",
+      "round_money",
+      "tax_rate",
+      "include"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "round_half_up",
+      "round_money",
+      "decimal"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "currency_split",
+      "remainder",
+      "absorbs",
+      "equals",
+      "total"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "sku_normalize",
+      "whitespace",
+      "uppercase",
+      "strip"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "stock_available",
+      "reserved",
+      "on_hand",
+      "without",
+      "minus"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "reserve_stock",
+      "increment",
+      "reserved"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "release_stock",
+      "decrement",
+      "reserved",
+      "on_hand",
+      "only"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "reorder_point",
+      "available",
+      "needed",
+      "true"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "shipping_cost",
+      "weight",
+      "above",
+      "tier"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "qualifies_free_shipping",
+      "delivery_days",
+      "threshold",
+      "express",
+      "base"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "can_ship_international",
+      "blocked",
+      "country",
+      "reject",
+      "codes"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "min_order_for_promo",
+      "bundle_discount",
+      "loyalty_points",
+      "stackable",
+      "compound"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 9,
+    "success_count": 3,
+    "total_count": 3,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "build_port_manifest",
+      "total_python_files",
+      "hardcoded",
+      "files"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "render_summary",
+      "workspace",
+      "porting",
+      "summary",
+      "python"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "load_command_snapshot",
+      "ported_commands",
+      "sliced",
+      "full"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "load_tool_snapshot",
+      "ported_tools",
+      "sliced",
+      "full"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "module_count",
+      "assistant",
+      "_snapshot"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 18,
+    "success_count": 6,
+    "total_count": 6,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "run_deferred_init",
+      "plugin_init",
+      "enabled",
+      "trusted",
+      "true"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "deferred",
+      "heading",
+      "startup",
+      "report",
+      "setup"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "run_remote_mode",
+      "return",
+      "remote",
+      "broken",
+      "mode"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "run_direct_connect",
+      "connect",
+      "return",
+      "direct",
+      "broken"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "bug_fix",
+    "keywords": [
+      "submit_message",
+      "summary",
+      "output",
+      "prompt",
+      "first"
+    ],
+    "model_used": "DeepSeek V4 Flash",
+    "strategy_used": "cot",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-06-26"
+  }
+]

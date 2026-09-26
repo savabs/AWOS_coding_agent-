@@ -6,8 +6,14 @@ Strategy:
   - No git    → snapshot files to memory, rollback = restore from snapshot
 
 This prevents dirty state when tasks fail mid-execution.
+
+A failed task rolls a file back to the state the last successful task left it
+in, not to before the run: several tasks (and the goal check's follow-ups,
+which target exactly the files the run already changed) can edit one file,
+and one failure must not erase the earlier tasks' kept work.
 """
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -25,6 +31,8 @@ class GitManager:
         self.original_branch: Optional[str] = None
         self.file_backups: Dict[str, str] = {}   # path → original content
         self.modified_files: list = []            # files touched this run
+        # abs path → content a successful task kept (None: it deleted the file)
+        self.kept: Dict[str, Optional[bytes]] = {}
 
     # ── Git helpers ───────────────────────────────────────────────────────────
 
@@ -86,12 +94,24 @@ class GitManager:
             self.file_backups[file_path] = p.read_text(errors="ignore")
 
     def record_modified(self, file_path: str):
-        """Track which files were actually written during this run."""
+        """Track a file a successful task changed, and snapshot it as kept:
+        a later task that fails on this file rolls back to this content."""
         if file_path not in self.modified_files:
             self.modified_files.append(file_path)
+        p = Path(file_path)
+        self.kept[os.path.abspath(file_path)] = p.read_bytes() if p.exists() else None
 
     def rollback_file(self, file_path: str):
-        """Restore a single file to pre-execution state."""
+        """Undo a failed task's change to one file: back to what the last
+        successful task kept, or to the pre-execution state if none did."""
+        key = os.path.abspath(file_path)
+        if key in self.kept:
+            content = self.kept[key]
+            if content is None:
+                Path(file_path).unlink(missing_ok=True)
+            else:
+                Path(file_path).write_bytes(content)
+            return
         if self.is_git_repo and self.branch_name:
             # On the feature branch — reset this file to what the original branch had
             ok, _ = self._git("checkout", self.original_branch, "--", file_path)

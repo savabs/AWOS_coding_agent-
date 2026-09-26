@@ -1,0 +1,53 @@
+{
+  "id": "wedge_v1_test_rescue_corpus",
+  "updated": "2026-06-25",
+  "wedge": "ci_rescue_sprint",
+  "primary_demo": "ci_rescue_sprint",
+  "cases": [
+    {
+      "case_id": "01_off_by_one",
+      "path": "tests/fixtures/benchmark/01_off_by_one",
+      "red_count": 1,
+      "must_pass": ["test_case.py::test_find_max_last_element_is_largest"],
+      "must_still_pass": "python3 -m pytest test_case.py -q --tb=no",
+      "forbidden_paths": ["test_case.py"]
+    },
+    {
+      "case_id": "02_wrong_logic",
+      "path": "tests/fixtures/benchmark/02_wrong_logic",
+      "red_count": 2,
+      "must_pass": [
+        "test_case.py::test_cache_evicts_oldest_not_newest",
+        "test_case.py::test_palindrome_simple"
+      ],
+      "must_still_pass": "python3 -m pytest test_case.py -q --tb=no",
+      "forbidden_paths": ["test_case.py"]
+    },
+    {
+      "case_id": "03_simple_add",
+      "path": "tests/fixtures/benchmark/03_simple_add",
+      "red_count": 1,
+      "must_pass": ["test_case.py::test_add_positive"],
+      "must_still_pass": "python3 -m pytest test_case.py -q --tb=no",
+      "forbidden_paths": ["test_case.py"]
+    },
+    {
+      "case_id": "ci_rescue_sprint",
+      "path": "tests/fixtures/wedge_v1/ci_rescue_sprint",
+      "red_count": 28,
+      "green_count": 7,
+      "total_tests": 35,
+      "source_modules": 5,
+      "mission_tasks": 18,
+      "goal_file": "wedge_goal.json",
+      "notes": "Cursor-class product corpus — primary wedge"
+    },
+    {
+      "case_id": "payment_utils",
+      "path": "tests/fixtures/wedge_v1/payment_utils",
+      "red_count": 3,
+      "goal_file": "wedge_goal.json",
+      "notes": "Assertion lab fixture only — below Cursor bar"
+    }
+  ]
+}

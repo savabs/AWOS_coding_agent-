@@ -36,6 +36,26 @@ except Exception:
     pass
 
 
+_SKIP_INDEX_PARTS = frozenset({"__pycache__", "venv", "site-packages"})
+
+
+def should_index_py_file(py_path: Path, root: Path) -> bool:
+    """Return True if py_path should be indexed under codebase root.
+
+    Uses path parts relative to root so worktrees under `.awos/worktrees/` are
+    not excluded by the `.awos` segment in the absolute path.
+    """
+    try:
+        rel = py_path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    if not rel.parts or rel.suffix != ".py":
+        return False
+    return not any(
+        part.startswith(".") or part in _SKIP_INDEX_PARTS for part in rel.parts
+    )
+
+
 @dataclass
 class FileSymbols:
     """All symbols extracted from one file."""
@@ -69,12 +89,9 @@ class SymbolIndex:
     def build(self, max_files: int = 80):
         """Scan the codebase and populate the index. Caps at max_files for speed."""
         py_files = sorted(self.root.rglob("*.py"))
-        # Exclude venv, __pycache__, .git directories
-        py_files = [
-            p for p in py_files
-            if not any(part.startswith((".","__pycache__","venv","site-packages"))
-                       for part in p.parts)
-        ][:max_files]
+        py_files = [p for p in py_files if should_index_py_file(p, self.root)][
+            :max_files
+        ]
 
         for path in py_files:
             self._parse_file(str(path))

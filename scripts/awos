@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# AWOS CLI wrapper — install: bash scripts/install-awos-cli.sh
+set -euo pipefail
+SCRIPT="$(readlink -f "${BASH_SOURCE[0]}")"
+ROOT="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
+exec python3 "$ROOT/awos.py" "$@"

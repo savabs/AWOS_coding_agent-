@@ -1,3 +1,10 @@
+---
+title: "Task: ProjectPlanner — Persistent Goal DAG (Phase 5C)"
+tags:
+  - doc/task
+  - status/active
+---
+
 # Task: ProjectPlanner — Persistent Goal DAG (Phase 5C)
 
 > Canonical HTML: tasks/active/project_planner_task.html
@@ -32,3 +39,8 @@ Give AWOS persistent, cross-session project memory via a Goal DAG at .awos/goals
 - 2026-05-19: Jaccard keyword overlap for goal matching, not LLM embeddings (zero extra cost)
 - 2026-05-19: One JSON file per goal (crash isolation); atomic write via .tmp + os.replace()
 - 2026-05-19: ProjectPlanner is an orchestration wrapper above Planner.plan(), does not replace it
+
+## Related
+
+- _(add links to related documents here)_
+

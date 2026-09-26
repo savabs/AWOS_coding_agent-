@@ -1,3 +1,9 @@
+---
+title: "Debug Protocol"
+tags:
+  - doc/wiki
+---
+
 # Debug Protocol
 
 > **Hard rule: after 2 failed fix attempts on the same bug, mandatory switch to this protocol.**

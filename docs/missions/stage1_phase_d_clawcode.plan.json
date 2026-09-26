@@ -1,0 +1,114 @@
+[
+  {
+    "task_id": 1,
+    "task_type": "edit_file",
+    "path": "src/parity_audit.py",
+    "file": "src/parity_audit.py",
+    "action": "Add a one-line module docstring at the top: audits Python port coverage against the archived TypeScript snapshot",
+    "complexity": "low"
+  },
+  {
+    "task_id": 2,
+    "task_type": "edit_file",
+    "path": "src/query_engine.py",
+    "file": "src/query_engine.py",
+    "action": "Add a one-line module docstring at the top: orchestrates multi-turn query sessions with budget and compaction",
+    "complexity": "low"
+  },
+  {
+    "task_id": 3,
+    "task_type": "edit_file",
+    "path": "src/port_manifest.py",
+    "file": "src/port_manifest.py",
+    "action": "Add a one-line module docstring at the top: summarizes Python port layout and top-level modules",
+    "complexity": "low"
+  },
+  {
+    "task_id": 4,
+    "task_type": "edit_file",
+    "path": "src/cost_tracker.py",
+    "file": "src/cost_tracker.py",
+    "action": "Add a one-line docstring to CostTracker.record() describing it accumulates labeled cost units",
+    "complexity": "low"
+  },
+  {
+    "task_id": 5,
+    "task_type": "edit_file",
+    "path": "src/session_store.py",
+    "file": "src/session_store.py",
+    "action": "Add a one-line module docstring at the top: persists query sessions to JSON files under .port_sessions",
+    "complexity": "low"
+  },
+  {
+    "task_id": 6,
+    "task_type": "edit_file",
+    "path": "src/runtime.py",
+    "file": "src/runtime.py",
+    "action": "Add a one-line module docstring at the top: runtime helpers for the Python porting workspace",
+    "complexity": "low"
+  },
+  {
+    "task_id": 7,
+    "task_type": "edit_file",
+    "path": "src/context.py",
+    "file": "src/context.py",
+    "action": "Add a one-line module docstring at the top: request and workspace context for harness commands",
+    "complexity": "low"
+  },
+  {
+    "task_id": 8,
+    "task_type": "edit_file",
+    "path": "src/tools.py",
+    "file": "src/tools.py",
+    "action": "Add a one-line module docstring at the top: tool surface definitions ported from Claude Code",
+    "complexity": "low"
+  },
+  {
+    "task_id": 9,
+    "task_type": "edit_file",
+    "path": "src/commands.py",
+    "file": "src/commands.py",
+    "action": "Add a one-line module docstring at the top: command backlog and registry for the porting workspace",
+    "complexity": "low"
+  },
+  {
+    "task_id": 10,
+    "task_type": "edit_file",
+    "path": "src/models.py",
+    "file": "src/models.py",
+    "action": "Add a one-line module docstring at the top: shared datamodels for the Python harness port",
+    "complexity": "low"
+  },
+  {
+    "task_id": 11,
+    "task_type": "edit_file",
+    "path": "src/history.py",
+    "file": "src/history.py",
+    "action": "Add a one-line docstring to HistoryLog.add() noting it appends a titled event to the session log",
+    "complexity": "low"
+  },
+  {
+    "task_id": 12,
+    "task_type": "edit_file",
+    "path": "src/transcript.py",
+    "file": "src/transcript.py",
+    "action": "Add a one-line docstring to TranscriptStore.compact() explaining it keeps only the last N entries",
+    "complexity": "low"
+  },
+  {
+    "task_id": 13,
+    "task_type": "edit_file",
+    "path": "src/tool_pool.py",
+    "file": "src/tool_pool.py",
+    "action": "Add a one-line module docstring at the top: pooled tool execution helpers for the harness",
+    "complexity": "low"
+  },
+  {
+    "task_id": 14,
+    "task_type": "edit_file",
+    "path": "README.md",
+    "file": "README.md",
+    "action": "Add a short Development section with one paragraph: run tests with python3 -m pytest tests/ -q",
+    "complexity": "low"
+  }
+]

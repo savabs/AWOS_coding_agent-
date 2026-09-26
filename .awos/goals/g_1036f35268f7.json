@@ -1,0 +1,48 @@
+{
+  "root_id": "g_1036f35268f7",
+  "nodes": {
+    "g_1036f35268f7": {
+      "goal_id": "g_1036f35268f7",
+      "description": "Add a one-line docstring to is_cheap_only() in escalation_engine.py explaining it returns True when premium models are halted",
+      "parent_ids": [],
+      "child_ids": [
+        "g_1e522e82464d"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-12T07:43:00Z",
+      "updated_at": "2026-06-16T08:16:43Z",
+      "completed_at": "2026-06-16T08:16:43Z",
+      "session_ids": [
+        "orch_7a8664ef",
+        "orch_eb99e4f5"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_1e522e82464d": {
+      "goal_id": "g_1e522e82464d",
+      "description": "Add a one-line docstring to the `is_cheap_only()` function: \"\"\"Returns True when premium models are halted.\"\"\"",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "escalation_engine.py",
+          "action": "Add a one-line docstring to the `is_cheap_only()` function: \"\"\"Returns True when premium models are halted.\"\"\"",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-12T07:43:04Z",
+      "updated_at": "2026-06-16T08:16:43Z",
+      "completed_at": "2026-06-16T08:16:43Z",
+      "session_ids": [
+        "orch_7a8664ef",
+        "orch_eb99e4f5"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

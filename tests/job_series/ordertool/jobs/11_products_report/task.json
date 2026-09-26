@@ -1,0 +1,7 @@
+{
+  "id": "11_products_report",
+  "goal": "Purchasing asked which products actually sell. Add a `products` command that outputs a CSV with the columns sku, units, orders, revenue: one row per SKU over all orders that aren't cancelled. units is the total quantity sold, orders is how many different orders contained the SKU, and revenue is what the SKU really brought in: each order line's amount after that order's discount, rounded to the cent like every other amount, then added up. Sort by revenue (highest first), ties by sku. Like our other CSV commands it should print to stdout or write --output FILE and accept --from/--to.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

@@ -1,0 +1,19 @@
+{
+  "goal": "Add a comment above the Orchestrator class in scaffold/agent/orchestrator.py saying AWOS v2",
+  "goal_hash": "789bfbdf06",
+  "started_at": "2026-05-24T17:37:16",
+  "last_updated": "2026-05-24T17:38:06",
+  "completed_task_ids": [
+    "1_2"
+  ],
+  "failed_task_ids": [
+    1,
+    "1_1",
+    "1_1_1",
+    "1_1_2"
+  ],
+  "session_ids": [
+    "orch_ec70cce9"
+  ],
+  "status": "failed"
+}

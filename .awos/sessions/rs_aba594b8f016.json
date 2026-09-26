@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "session_id": "rs_aba594b8f016",
+  "goal": "Risky Stage 1 gauntlet — three tasks, one file each: (1) In awos.py add function _sandbox_summary(session) returning a one-line string with feature_id, worktree_path, branch, and whether the worktree directory exists when session.sandbox.enabled else empty string. (2) In cmd_sessions_show call _sandbox_summary and print Sandbox line when non-empty. (3) Add tests/test_awos_sessions_sandbox.py with two pytest tests for enabled and disabled sandbox on a mock RuntimeSession.",
+  "goal_hash": "f017696201",
+  "status": "completed",
+  "created_at": "2026-06-18T07:39:48Z",
+  "updated_at": "2026-06-18T07:41:48Z",
+  "paused_at": null,
+  "codebase_root": "/home/becmachlean/2024/projects/AWOS_coding_agent/.awos/worktrees/aba594b8f016",
+  "reasoning_session_id": "orch_9686b703",
+  "goal_graph_id": "g_14e700a93d00",
+  "progress": {
+    "completed_task_ids": [
+      1,
+      3,
+      "2_1",
+      "2_2",
+      "2_3_1",
+      "2_3_2"
+    ],
+    "failed_task_ids": [
+      2,
+      "2_3"
+    ],
+    "current_task_id": null,
+    "total_tasks": 3,
+    "decomposition_depth": 0
+  },
+  "budget": {
+    "spent_usd": 0.00951463
+  },
+  "sandbox": {
+    "enabled": true,
+    "feature_id": "aba594b8f016",
+    "worktree_path": "/home/becmachlean/2024/projects/AWOS_coding_agent/.awos/worktrees/aba594b8f016",
+    "branch": "awos/feature/aba594b8f016"
+  },
+  "parent_session_id": null,
+  "cancel_requested": false
+}

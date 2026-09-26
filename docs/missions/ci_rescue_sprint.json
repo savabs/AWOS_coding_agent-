@@ -1,0 +1,30 @@
+{
+  "id": "ci_rescue_sprint_v1",
+  "title": "CI Rescue Sprint — shopkit fixture (28 reds → green)",
+  "updated": "2026-06-25",
+  "codebase_root": "tests/fixtures/wedge_v1/ci_rescue_sprint",
+  "ensure_git": true,
+  "goal_assertions_file": "tests/fixtures/wedge_v1/ci_rescue_sprint/wedge_goal.json",
+  "env": {
+    "AWOS_USE_WORKTREE": "true",
+    "AWOS_RUNTIME_SESSION": "true",
+    "AWOS_CHEAP_ONLY": "true",
+    "AWOS_PREMIUM_BUDGET": "0",
+    "AWOS_MONTHLY_BUDGET": "20",
+    "AWOS_LEARNING_DISABLE": "true"
+  },
+  "plan_file": "ci_rescue_sprint.plan.json",
+  "goal": "CI Rescue Sprint: fix auth.py, billing.py, inventory.py, shipping.py, and promo.py so all 35 pytest tests pass. Do not edit tests/, conftest.py, or golden/. Keep 7 regression tests green.",
+  "goal_assertions": {
+    "must_still_pass": "python3 -m pytest tests/ -q --tb=no",
+    "forbidden_paths": ["tests/", "conftest.py", "golden/"],
+    "max_wall_minutes": 120
+  },
+  "success_criteria": [
+    "28 failing tests → 0 failing; 35/35 pass",
+    "5 source modules edited; tests/ unchanged",
+    "wedge_v1_assert.py prints WEDGE_ASSERT: SEMANTIC_PASS",
+    "Wall time 30–120 min on live API run (lab golden demo exempt)",
+    "Passes Cursor substitution test at ₹2,000/mo class"
+  ]
+}

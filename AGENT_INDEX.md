@@ -1,3 +1,9 @@
+---
+title: "AWOS Agent Index — Cold-Start Reference"
+tags:
+  - doc/wiki
+---
+
 # AWOS Agent Index — Cold-Start Reference
 
 > **This file is for the agent, not the human.**
@@ -22,6 +28,14 @@ Do NOT re-read the full codebase. The above files are all you need.
 ---
 
 ## File Map — Every Canonical Location
+
+### Validation & stress
+
+| File | What it contains |
+|---|---|
+| `docs/stage1_risk_gauntlet_booklet.md` | **Permanent extreme-limit stress catalog** (G1–G6) |
+| `docs/gauntlet_scenarios.json` | Machine-readable gauntlet scenarios |
+| `scripts/stage1_gauntlet_runner.py` | Gauntlet executor (`list`, `run <ID>`, `run-all`) |
 
 ### Identity (read first)
 

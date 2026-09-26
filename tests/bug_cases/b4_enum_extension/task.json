@@ -1,0 +1,7 @@
+{
+  "action": "describe() has no branch for every status the project defines. Cover them all.",
+  "file": "buggy.py",
+  "task_id": 1,
+  "complexity": "medium",
+  "notes": "status.py lists the full set; the labels for the missing ones are asserted in the test."
+}

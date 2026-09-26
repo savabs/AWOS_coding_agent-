@@ -1,0 +1,39 @@
+{
+  "goal": "add a hello function",
+  "goal_hash": "1c34a75e2e",
+  "started_at": "2026-05-17T02:25:26",
+  "last_updated": "2026-05-20T20:48:01",
+  "completed_task_ids": [
+    1,
+    2
+  ],
+  "failed_task_ids": [
+    3,
+    "3_1",
+    "3_2",
+    "3_1_1",
+    "3_1_2",
+    "3_2_1",
+    "3_2_2"
+  ],
+  "session_ids": [
+    "orch_53688887",
+    "orch_7b1e6306",
+    "orch_bd7b15f7",
+    "orch_9a40625d",
+    "orch_01682e57",
+    "orch_f25e7ef0",
+    "orch_ad4a8ce6",
+    "orch_9786a808",
+    "orch_ea46dc24",
+    "orch_cd7102ee",
+    "orch_a03b8922",
+    "orch_9762c86a",
+    "orch_3a0ca6fe",
+    "orch_51d2af85",
+    "orch_680d5cc8",
+    "orch_1ecedc6f",
+    "orch_791524a6"
+  ],
+  "status": "failed"
+}

@@ -1,3 +1,10 @@
+---
+title: "Task: ML Meta-Controller"
+tags:
+  - doc/task
+  - status/active
+---
+
 # Task: ML Meta-Controller
 
 ## Step 1 — RewardStore (new file, ~120 lines)
@@ -18,3 +25,8 @@ Test: EscalationEngine(ml_router=None) behaves identically to current
 
 ## Step 6 — Integration test
 Test: 25 episodes → LinUCB takes over from heuristic → record_outcome updates weights
+
+## Related
+
+- _(add links to related documents here)_
+

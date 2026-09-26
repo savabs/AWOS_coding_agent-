@@ -1,0 +1,49 @@
+{
+  "root_id": "g_e52af3145134",
+  "nodes": {
+    "g_e52af3145134": {
+      "goal_id": "g_e52af3145134",
+      "description": "create a .md file reagrding how to code a advance self learning agent",
+      "parent_ids": [],
+      "child_ids": [
+        "g_3458d953b21d"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-14T12:22:31Z",
+      "updated_at": "2026-06-14T12:23:07Z",
+      "completed_at": "2026-06-14T12:23:07Z",
+      "session_ids": [
+        "orch_37cc932b"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_3458d953b21d": {
+      "goal_id": "g_3458d953b21d",
+      "description": "Create a comprehensive guide on coding advanced self-learning agents using the AWOS framework.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "create_file",
+          "path": "HOW_TO_CODE_SELF_LEARNING_AGENT.md",
+          "action": "Create a comprehensive guide on coding advanced self-learning agents using the AWOS framework.",
+          "content_hint": "Introduction to self-learning agents; How AWOS's planner/worker/verifier pattern supports self-learning; Key components for implementation (e.g., feedback loops, knowledge updating, evaluation mechanisms); Step-by-step guide for integration with AWOS; Examples or conceptual pseudo-code; Discussion of challenges and best practices for creating adaptive agents within AWOS.",
+          "complexity": "high",
+          "file": "HOW_TO_CODE_SELF_LEARNING_AGENT.md"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-14T12:22:39Z",
+      "updated_at": "2026-06-14T12:23:07Z",
+      "completed_at": "2026-06-14T12:23:07Z",
+      "session_ids": [
+        "orch_37cc932b"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

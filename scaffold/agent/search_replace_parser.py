@@ -132,8 +132,17 @@ class SearchReplaceParser:
         Returns:
             True if successful, False otherwise
         """
+        # Handle new file creation (empty SEARCH = create new file with REPLACE content)
         if not file_path.exists():
-            return False
+            if not block.search_text or block.search_text.strip() == "":
+                # Creating new file
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                file_path.write_text(block.replace_text)
+                print(f"✅ Created new file {file_path}")
+                return True
+            else:
+                # File doesn't exist but SEARCH is not empty - error
+                return False
         
         # Validate first
         is_valid, error = SearchReplaceParser.validate_block(block, file_path)

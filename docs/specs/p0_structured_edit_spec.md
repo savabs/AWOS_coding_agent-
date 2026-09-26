@@ -1,3 +1,9 @@
+---
+title: "P0 Spec — Structured Edit Format & Edit Reliability"
+tags:
+  - doc/spec
+---
+
 # P0 Spec — Structured Edit Format & Edit Reliability
 
 **Full spec**: [docs/specs/p0_structured_edit_spec.html](p0_structured_edit_spec.html)  
@@ -21,3 +27,8 @@ Switch from SEARCH/REPLACE text block parsing to JSON structured edits. Enforce 
 - scaffold/agent/orchestrator.py — read file before call
 - scaffold/agent/models.py — new dataclasses
 - tests/test_structured_edit.py — new test file
+
+## Related
+
+- _(add links to related documents here)_
+

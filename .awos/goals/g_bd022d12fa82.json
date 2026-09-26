@@ -1,0 +1,157 @@
+{
+  "root_id": "g_bd022d12fa82",
+  "nodes": {
+    "g_bd022d12fa82": {
+      "goal_id": "g_bd022d12fa82",
+      "description": "Stage 1 real workload mission (worktree, multi-step): (1) scaffold/agent/mcts_policy.py — expand module docstring with when MCTS runs (2) scripts/install-awos-cli.sh — add echo line showing awos version path (3) tests/test_mcts_trace_store.py — add test that empty store count is 0 (already exists, ensure green) (4) awos.py cmd_sessions_show — print Sandbox line when worktree enabled (5) docs/missions/README.md — one paragraph mission playbook",
+      "parent_ids": [],
+      "child_ids": [
+        "g_e235b65312e9",
+        "g_c9f6677623c6",
+        "g_30fa44363e44",
+        "g_8947868a4e7c",
+        "g_0d576ee18ae5"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-19T09:11:48Z",
+      "updated_at": "2026-06-19T09:19:33Z",
+      "completed_at": "2026-06-19T09:19:33Z",
+      "session_ids": [
+        "orch_876c7751",
+        "orch_db126c12"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_e235b65312e9": {
+      "goal_id": "g_e235b65312e9",
+      "description": "Expand the module docstring to describe when Monte Carlo Tree Search (MCTS) runs.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "scaffold/agent/mcts_policy.py",
+          "action": "Expand the module docstring to describe when Monte Carlo Tree Search (MCTS) runs.",
+          "complexity": "low",
+          "test_result": {
+            "passed": 0,
+            "failed": 0,
+            "errors": 0,
+            "pass_rate": 0.0,
+            "raw_output": "Tests skipped — set AWOS_SAFE_TO_RUN_TESTS=1 to enable.",
+            "timed_out": false,
+            "test_command": [],
+            "no_tests_found": true
+          }
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-19T09:12:11Z",
+      "updated_at": "2026-06-19T09:16:13Z",
+      "completed_at": "2026-06-19T09:16:13Z",
+      "session_ids": [
+        "orch_876c7751",
+        "orch_5d2f840d"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_c9f6677623c6": {
+      "goal_id": "g_c9f6677623c6",
+      "description": "Add an 'echo' line to the script that shows the installed AWOS CLI version path after installation.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "file": "scripts/install-awos-cli.sh",
+          "action": "Add an 'echo' line to the script that shows the installed AWOS CLI version path after installation.",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-19T09:12:11Z",
+      "updated_at": "2026-06-19T09:16:16Z",
+      "completed_at": "2026-06-19T09:16:16Z",
+      "session_ids": [
+        "orch_876c7751",
+        "orch_5d2f840d"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_30fa44363e44": {
+      "goal_id": "g_30fa44363e44",
+      "description": "Modify the 'cmd_sessions_show' function to print a 'Sandbox' line when a worktree is enabled for a session.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 3,
+          "file": "awos.py",
+          "action": "Modify the 'cmd_sessions_show' function to print a 'Sandbox' line when a worktree is enabled for a session.",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-19T09:12:11Z",
+      "updated_at": "2026-06-19T09:16:19Z",
+      "completed_at": "2026-06-19T09:16:19Z",
+      "session_ids": [
+        "orch_876c7751",
+        "orch_5d2f840d"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_8947868a4e7c": {
+      "goal_id": "g_8947868a4e7c",
+      "description": "Add a one-paragraph 'mission playbook' to the document.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 4,
+          "file": "docs/missions/README.md",
+          "action": "Add a one-paragraph 'mission playbook' to the document.",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-19T09:12:11Z",
+      "updated_at": "2026-06-19T09:19:30Z",
+      "completed_at": "2026-06-19T09:19:30Z",
+      "session_ids": [
+        "orch_876c7751",
+        "orch_db126c12"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_0d576ee18ae5": {
+      "goal_id": "g_0d576ee18ae5",
+      "description": "Add a new one-paragraph section titled 'Mission Playbook' to the README, describing the overall structure, purpose, or common steps involved in AWOS missions.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 5,
+          "file": "docs/missions/README.md",
+          "action": "Add a new one-paragraph section titled 'Mission Playbook' to the README, describing the overall structure, purpose, or common steps involved in AWOS missions.",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-19T09:19:21Z",
+      "updated_at": "2026-06-19T09:19:33Z",
+      "completed_at": "2026-06-19T09:19:33Z",
+      "session_ids": [
+        "orch_db126c12"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

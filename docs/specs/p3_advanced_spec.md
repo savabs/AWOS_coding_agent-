@@ -1,3 +1,9 @@
+---
+title: "P3 Spec — LSP Feedback, Auto Skills, Enhanced Repo Map"
+tags:
+  - doc/spec
+---
+
 # P3 Spec — LSP Feedback, Auto Skills, Enhanced Repo Map
 
 **Full spec**: [docs/specs/p3_advanced_spec.html](p3_advanced_spec.html)  
@@ -23,3 +29,8 @@ Ruff/pyright linting as post-edit feedback (instant diagnostic loop). Auto skill
 - scaffold/agent/orchestrator.py — wire all
 - scaffold/agent/worker.py — skill injection
 - tests/test_p3_improvements.py — new test file
+
+## Related
+
+- _(add links to related documents here)_
+

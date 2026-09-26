@@ -1,0 +1,58 @@
+{
+  "name": "awos",
+  "version": "1.0.0",
+  "description": "AWOS — Self-Improving Coding Agent",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "node dev-runner.js",
+    "test": "node --test dev-runner.test.js",
+    "build": "electron-builder",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux",
+    "build:win": "electron-builder --win"
+  },
+  "build": {
+    "appId": "com.awos.runtime",
+    "productName": "AWOS",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json",
+      "icons/**/*",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../gui",
+        "to": "gui"
+      },
+      {
+        "from": "../scaffold",
+        "to": "scaffold"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "icons/icon.png",
+      "target": ["dmg", "zip"],
+      "hardenedRuntime": false
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "category": "Development",
+      "icon": "icons/icon.png"
+    },
+    "win": {
+      "target": ["nsis"],
+      "icon": "icons/icon.png"
+    }
+  },
+  "devDependencies": {
+    "electron": "^34.0.0",
+    "electron-builder": "^25.0.0"
+  }
+}

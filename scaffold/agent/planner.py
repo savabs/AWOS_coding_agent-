@@ -7,9 +7,15 @@ Each planning call costs ~$0.03-0.05 and produces a reusable execution plan.
 
 import json
 import os
-from anthropic import Anthropic
 from typing import Optional, Any
 import logging
+
+try:
+    from .providers import messages_client
+    from .task_schema import normalise_task, task_files
+except ImportError:
+    from providers import messages_client
+    from task_schema import normalise_task, task_files
 
 logger = logging.getLogger(__name__)
 
@@ -28,14 +34,50 @@ _MAX_SIMPLE_GOAL_WORDS = 10
 class Planner:
     """Uses Claude Sonnet to break down user goals into atomic micro-tasks."""
     
-    def __init__(self, api_key: Optional[str] = None):
-        """Initialize Planner with Anthropic API client."""
+    def __init__(self, api_key: Optional[str] = None, allow_multi_file: Optional[bool] = None):
+        """
+        Initialize Planner with Anthropic API client.
+
+        allow_multi_file lets a single task span several files. It is off by
+        default because the single-shot Worker is handed the text of exactly
+        one file and returns one SEARCH/REPLACE block for it — a multi-file
+        task is unexecutable there. Turn it on when the executor can open and
+        edit files itself (AgentLoop), via this argument or
+        AWOS_MULTI_FILE_TASKS=1.
+        """
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
-        if not self.api_key:
-            raise ValueError("ANTHROPIC_API_KEY not set")
-        self.client = Anthropic(api_key=self.api_key)
+        self.client = messages_client(self.api_key)
+        if self.client is None:
+            raise ValueError("Set OPENROUTER_API_KEY (or ANTHROPIC_API_KEY)")
         self.model = "claude-sonnet-4-6"
-    
+        self.allow_multi_file = (
+            allow_multi_file
+            if allow_multi_file is not None
+            else os.getenv("AWOS_MULTI_FILE_TASKS", "").lower() in ("1", "true", "yes")
+        )
+
+    # ── Prompt fragments ──────────────────────────────────────────────────────
+
+    _SINGLE_FILE_RULE = """1. Each task must change ONLY ONE file"""
+
+    _MULTI_FILE_RULE = """1. A task may change more than one file, but only when the changes belong
+   to the same unit of work and would break the codebase if applied apart —
+   a renamed function and its callers, a new parameter and the call sites
+   that pass it, a behaviour change and the test that covers it. List every
+   file in "files", most important first. Split anything separable into its
+   own task; do not bundle unrelated edits to save tasks."""
+
+    def _constraints_block(self) -> str:
+        return self._MULTI_FILE_RULE if self.allow_multi_file else self._SINGLE_FILE_RULE
+
+    def _schema_file_fields(self) -> str:
+        if self.allow_multi_file:
+            return (
+                '      "file": "path/to/primary_file.py",\n'
+                '      "files": ["path/to/primary_file.py", "path/to/other.py"],'
+            )
+        return '      "file": "path/to/file.py",'
+
     def plan(self, goal: str, codebase_context: dict, tracker=None, existing_goal: Any = None) -> dict:
         """
         Break down a user goal into atomic micro-tasks.
@@ -69,11 +111,14 @@ class Planner:
         symbols = codebase_context.get("symbols", [])
         symbols_str = "\n".join(symbols[:30]) if symbols else "(none extracted)"
         
-        # Stable system instructions — cached after first call (90% savings on repeat planning)
+        # Stable system instructions — cached after first call (90% savings on
+        # repeat planning). Still cacheable with multi-file support: the block
+        # varies per Planner instance, not per call, so the prefix is constant
+        # for the life of a session.
         system_instructions = """You are an expert software architect. Break down user goals into atomic micro-tasks that can each be executed independently by a junior AI model in 1-5 minutes.
 
 CONSTRAINTS:
-1. Each task must change ONLY ONE file
+__FILE_SCOPE_RULE__
 2. Each task must be simple enough for a junior model to handle with 50 lines of context
 3. Tasks should be ordered so dependencies are handled first
 4. Each task needs: file path, specific action, complexity level (low/medium/high)
@@ -92,7 +137,7 @@ OUTPUT FORMAT - REQUIRED JSON (no markdown, no extra text):
   "plan": [
     {
       "task_id": 1,
-      "file": "path/to/file.py",
+__FILE_SCHEMA_FIELDS__
       "action": "specific action description",
       "complexity": "low|medium|high",
       "function_signature": "exact signature (optional)",
@@ -107,6 +152,10 @@ OUTPUT FORMAT - REQUIRED JSON (no markdown, no extra text):
 }
 
 Output ONLY valid JSON. No markdown, no explanation before or after."""
+
+        system_instructions = system_instructions.replace(
+            "__FILE_SCOPE_RULE__", self._constraints_block()
+        ).replace("__FILE_SCHEMA_FIELDS__", self._schema_file_fields())
 
         # Variable user content — NOT cached (changes each request)
         user_prompt = f"""GOAL: {goal}
@@ -136,6 +185,19 @@ Key symbols (file::class/def):
             ]
         )
         
+        # Cache telemetry
+        try:
+            from .cache_telemetry import CacheTelemetryStore, extract_cache_stats_anthropic
+            cache_store = CacheTelemetryStore()
+            cache_event = extract_cache_stats_anthropic(
+                response=response.model_dump(),
+                component="planner",
+                model=self.model,
+            )
+            cache_store.record(cache_event)
+        except Exception:
+            pass  # Don't fail planning if telemetry breaks
+        
         # Extract response
         response_text = response.content[0].text.strip()
         
@@ -155,10 +217,31 @@ Key symbols (file::class/def):
         if "plan" not in result or not isinstance(result["plan"], list):
             raise ValueError(f"Invalid plan structure: {result}")
 
-        for task in result["plan"]:
+        for index, task in enumerate(result["plan"]):
             required = ["task_id", "file", "action", "complexity"]
             if not all(k in task for k in required):
                 raise ValueError(f"Task missing required fields: {task}")
+
+            if "files" in task:
+                if not isinstance(task["files"], list) or not all(
+                    isinstance(p, str) for p in task["files"]
+                ):
+                    raise ValueError(f"Task 'files' must be a list of strings: {task}")
+                if not self.allow_multi_file and len(task_files(task)) > 1:
+                    # The executor cannot carry out what the model proposed, so
+                    # say that rather than silently dropping files and producing
+                    # a half-applied change.
+                    raise ValueError(
+                        f"Task {task.get('task_id')} spans {len(task_files(task))} files "
+                        "but multi-file tasks are disabled. Enable them with "
+                        "Planner(allow_multi_file=True) or AWOS_MULTI_FILE_TASKS=1, "
+                        "and use an executor that can edit more than one file."
+                    )
+
+            # Keep `file` and `files` agreeing, once, here — every downstream
+            # reader of task["file"] then stays correct without knowing about
+            # multi-file tasks at all.
+            result["plan"][index] = normalise_task(task)
 
             # Validate optional contract fields if present
             if "constraints" in task and not isinstance(task["constraints"], list):
@@ -173,6 +256,10 @@ Key symbols (file::class/def):
         if existing_goal is not None:
             result["plan"] = self._filter_completed_tasks(result["plan"], existing_goal)
             result["total_tasks"] = len(result["plan"])
+
+        # ── Phase 5D: decompose complex refactoring tasks into atomic sub-tasks ──
+        result["plan"] = self._decompose_refactoring_tasks(result["plan"])
+        result["total_tasks"] = len(result["plan"])
 
         # Record cost if tracker provided
         if tracker:
@@ -215,6 +302,53 @@ Key symbols (file::class/def):
         if word_set & _COMPLEX_SIGNALS:
             return False
         return True
+
+    @staticmethod
+    def _decompose_refactoring_tasks(tasks: list) -> list:
+        """
+        Decompose complex refactoring tasks into atomic sub-tasks.
+        
+        Uses RefactoringDecomposer to intelligently break down:
+          - "Add import + use" → [add import, use]
+          - "Replace all X" → [replace first, replace rest]
+        
+        Returns expanded task list with atomic sub-tasks.
+        """
+        from .refactoring_decomposer import RefactoringDecomposer
+        
+        decomposer = RefactoringDecomposer()
+        expanded_tasks = []
+        task_id_counter = 1
+        
+        for task in tasks:
+            if decomposer.should_decompose(task):
+                # Decompose into atomic sub-tasks
+                atomic_tasks = decomposer.decompose(task)
+                
+                for atomic in atomic_tasks:
+                    # Convert AtomicTask to dict format
+                    sub_task = {
+                        "task_id": task_id_counter,
+                        "action": atomic.action,
+                        "file": atomic.file,
+                        "complexity": atomic.complexity,
+                    }
+                    
+                    # Add optional fields
+                    if hasattr(task, 'constraints') and task.get('constraints'):
+                        sub_task["constraints"] = task["constraints"]
+                    if hasattr(task, 'must_not') and task.get('must_not'):
+                        sub_task["must_not"] = task["must_not"]
+                    
+                    expanded_tasks.append(sub_task)
+                    task_id_counter += 1
+            else:
+                # Keep original task
+                task["task_id"] = task_id_counter
+                expanded_tasks.append(task)
+                task_id_counter += 1
+        
+        return expanded_tasks
 
     @staticmethod
     def _filter_completed_tasks(tasks: list, existing_goal: Any) -> list:

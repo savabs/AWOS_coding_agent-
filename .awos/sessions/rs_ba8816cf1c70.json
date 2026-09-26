@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "session_id": "rs_ba8816cf1c70",
+  "goal": "Stage 1 real workload mission (worktree, multi-step): (1) scaffold/agent/mcts_policy.py — expand module docstring with when MCTS runs (2) scripts/install-awos-cli.sh — add echo line showing awos version path (3) tests/test_mcts_trace_store.py — add test that empty store count is 0 (already exists, ensure green) (4) awos.py cmd_sessions_show — print Sandbox line when worktree enabled (5) docs/missions/README.md — one paragraph mission playbook",
+  "goal_hash": "c33e36d875",
+  "status": "failed",
+  "created_at": "2026-06-19T09:11:48Z",
+  "updated_at": "2026-06-19T09:12:59Z",
+  "paused_at": null,
+  "codebase_root": "/home/becmachlean/2024/projects/AWOS_coding_agent/.awos/worktrees/ba8816cf1c70",
+  "reasoning_session_id": null,
+  "goal_graph_id": null,
+  "progress": {
+    "completed_task_ids": [
+      1,
+      2,
+      3
+    ],
+    "failed_task_ids": [
+      4,
+      "4_1",
+      "4_2",
+      "4_1_1",
+      "4_1_2",
+      "4_2_1",
+      "4_2_2"
+    ],
+    "current_task_id": null,
+    "total_tasks": 4,
+    "decomposition_depth": 0
+  },
+  "budget": {
+    "spent_usd": 0.0
+  },
+  "sandbox": {
+    "enabled": true,
+    "feature_id": "ba8816cf1c70",
+    "worktree_path": "/home/becmachlean/2024/projects/AWOS_coding_agent/.awos/worktrees/ba8816cf1c70",
+    "branch": "awos/feature/ba8816cf1c70"
+  },
+  "parent_session_id": null,
+  "cancel_requested": false
+}

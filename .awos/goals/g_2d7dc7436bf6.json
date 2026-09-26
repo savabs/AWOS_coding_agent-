@@ -1,0 +1,70 @@
+{
+  "root_id": "g_2d7dc7436bf6",
+  "nodes": {
+    "g_2d7dc7436bf6": {
+      "goal_id": "g_2d7dc7436bf6",
+      "description": "add module functions",
+      "parent_ids": [],
+      "child_ids": [
+        "g_698502fcbb08",
+        "g_a9b4812415d3"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-09-22T20:14:19Z",
+      "updated_at": "2026-09-22T20:14:19Z",
+      "completed_at": "2026-09-22T20:14:19Z",
+      "session_ids": [
+        "orch_7cdf05d3"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_698502fcbb08": {
+      "goal_id": "g_698502fcbb08",
+      "description": "add fn_a",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "module_a.py",
+          "action": "add fn_a",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-09-22T20:14:19Z",
+      "updated_at": "2026-09-22T20:14:19Z",
+      "completed_at": "2026-09-22T20:14:19Z",
+      "session_ids": [
+        "orch_7cdf05d3"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_a9b4812415d3": {
+      "goal_id": "g_a9b4812415d3",
+      "description": "add fn_b",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "file": "module_b.py",
+          "action": "add fn_b",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-09-22T20:14:19Z",
+      "updated_at": "2026-09-22T20:14:19Z",
+      "completed_at": "2026-09-22T20:14:19Z",
+      "session_ids": [
+        "orch_7cdf05d3"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

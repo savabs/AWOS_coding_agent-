@@ -1,0 +1,6 @@
+{
+  "action": "average() raises ZeroDivisionError on an empty sequence. It should return 0.0.",
+  "file": "buggy.py",
+  "task_id": 1,
+  "complexity": "medium"
+}

@@ -1,3 +1,9 @@
+---
+title: "Research: Vector Memory — AWOS Phase 6"
+tags:
+  - doc/research
+---
+
 # Research: Vector Memory — AWOS Phase 6
 
 > Canonical HTML: docs/research/vector_memory.html
@@ -18,3 +24,8 @@ Dense vector retrieval (ChromaDB + all-MiniLM-L6-v2) to replace keyword matching
 ## Links
 - Spec: [[vector_memory_spec]]
 - Related: [[project_planner_research]] (Jaccard matching to be upgraded)
+
+## Related
+
+- _(add links to related documents here)_
+

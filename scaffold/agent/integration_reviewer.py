@@ -14,7 +14,10 @@ import os
 import subprocess
 from typing import Any
 
-from anthropic import Anthropic
+try:
+    from .providers import messages_client
+except ImportError:
+    from providers import messages_client
 
 
 class IntegrationReviewer:
@@ -22,7 +25,7 @@ class IntegrationReviewer:
 
     def __init__(self, api_key: str | None = None) -> None:
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
-        self.client = Anthropic(api_key=self.api_key) if self.api_key else None
+        self.client = messages_client(self.api_key)
         self.model = "claude-sonnet-4-6"
 
     # ── Public API ─────────────────────────────────────────────────────────

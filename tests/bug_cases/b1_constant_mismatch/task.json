@@ -1,0 +1,7 @@
+{
+  "action": "retry_budget() must use the retry limit the project defines, not its own number.",
+  "file": "buggy.py",
+  "task_id": 1,
+  "complexity": "medium",
+  "notes": "The correct value lives in limits.py, not in buggy.py."
+}

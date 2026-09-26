@@ -1,0 +1,88 @@
+{
+  "root_id": "g_123112247ec3",
+  "nodes": {
+    "g_123112247ec3": {
+      "goal_id": "g_123112247ec3",
+      "description": "Fix the bug in tests/fixtures/gauntlet_broken_module.py: broken_add must return a+b not a-b. Ensure tests/fixtures/test_gauntlet_broken_module.py passes.",
+      "parent_ids": [],
+      "child_ids": [
+        "g_eaaa6d96ccc2",
+        "g_2fd7a3d72c1d"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-18T08:31:27Z",
+      "updated_at": "2026-06-18T08:32:15Z",
+      "completed_at": "2026-06-18T08:32:15Z",
+      "session_ids": [
+        "orch_4c685436"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_eaaa6d96ccc2": {
+      "goal_id": "g_eaaa6d96ccc2",
+      "description": "Create a task file to document and track the fix for the `broken_add` function.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "create_file",
+          "path": "tasks/active/fix_gauntlet_broken_module_bug.html",
+          "action": "Create a task file to document and track the fix for the `broken_add` function.",
+          "content_hint": "Describe the bug in `broken_add` (returning a-b instead of a+b) located in `tests/fixtures/gauntlet_broken_module.py`. Outline the step to modify the function and the verification step using `tests/fixtures/test_gauntlet_broken_module.py`.",
+          "complexity": "low",
+          "file": "tasks/active/fix_gauntlet_broken_module_bug.html",
+          "_placement_validation": {
+            "ok": true,
+            "path": "tasks/active/fix_gauntlet_broken_module_bug.html",
+            "artifact_kind": "task",
+            "expected_folder": "tasks/active",
+            "issues": [],
+            "score": 1.0
+          },
+          "artifact_kind": "task",
+          "placement_ok": true
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-18T08:31:49Z",
+      "updated_at": "2026-06-18T08:32:07Z",
+      "completed_at": "2026-06-18T08:32:07Z",
+      "session_ids": [
+        "orch_4c685436"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_2fd7a3d72c1d": {
+      "goal_id": "g_2fd7a3d72c1d",
+      "description": "Modify the `broken_add` function to correctly return the sum `a + b`.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "task_type": "edit_file",
+          "path": "tests/fixtures/gauntlet_broken_module.py",
+          "action": "Modify the `broken_add` function to correctly return the sum `a + b`.",
+          "function_signature": "def broken_add(a, b):",
+          "constraints": "The function must perform addition.",
+          "must_not": "The function must not perform subtraction.",
+          "complexity": "low",
+          "file": "tests/fixtures/gauntlet_broken_module.py"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-18T08:31:49Z",
+      "updated_at": "2026-06-18T08:32:15Z",
+      "completed_at": "2026-06-18T08:32:15Z",
+      "session_ids": [
+        "orch_4c685436"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

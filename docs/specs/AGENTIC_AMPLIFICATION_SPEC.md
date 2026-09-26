@@ -500,3 +500,8 @@ cohere>=4.0.0            # For Cohere embeddings + rerank
 **Author:** Cascade  
 **Date:** 2026-05-16  
 **Status:** Draft — awaiting review
+
+## Related
+
+- _(add links to related documents here)_
+
