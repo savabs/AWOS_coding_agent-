@@ -51,6 +51,25 @@ about half the turns and cost with the notebook. Jobs 7–12 are the real test.
 If the background run finished, its full results are in
 `.awos/job_series_20260926T123741.json` (not yet committed).
 
+## Update 2026-09-27 — both runs complete
+
+- Run 1 (`.awos/job_series_20260926T123741.json`): jobs 7–12 on 5/6 vs off
+  4/6, −20% turns, −17% cost → **meets** the spec's criteria.
+- Run 2 (`.awos/job_series_20260926T170601.json`, with the request timeout and
+  the honest notebook; resumed at job 6 after a key expired): jobs 7–12 on
+  **6/6 vs off 3/6**, but turns equal (39.3 vs 39.2) and cost +9% → meets (a),
+  **misses (b)**. The notebook arm spent its turns finishing jobs 9, 11, 12
+  that the off arm gave up on.
+- Combined (24 paired jobs): solved on 18/24 vs off 13/24; discordant pairs
+  5–0 for the notebook (one-sided sign test p ≈ 0.03); turns/job −19%;
+  cost/job −17%; cost per solved job $0.039 vs $0.065 (−40%).
+- Verdict: the notebook **helps, consistently in direction** (more solved,
+  cheaper per solved job), but the pre-registered bar "(b) ≥20% cheaper on
+  jobs 7–12 in two runs" was met by run 1 only. Cost per solved job is the
+  better metric but was chosen after seeing the data — state that when citing.
+- Honest notebook works: run 2 recorded 10 jobs "tests pass, not
+  independently verified" and 1 "failed"; none as plain success.
+
 ## Findings to act on
 
 1. **The notebook records false success.** It only sees the visible tests, so
