@@ -70,6 +70,23 @@ If the background run finished, its full results are in
 - Honest notebook works: run 2 recorded 10 jobs "tests pass, not
   independently verified" and 1 "failed"; none as plain success.
 
+## Update 2026-09-27 — run 3 and verdict
+
+- Run 3 (`.awos/job_series_20260927T214648.json`, same code as run 2): jobs
+  7–12 on 5/6 vs off 5/6, turns 19.0 vs 33.3 (−43%), cost $0.019 vs $0.033
+  (−45%) → **meets** the criteria. Jobs 1–6 were worse with the notebook
+  (3/6 vs 4/6; job 2 hit the 15-minute limit).
+- Three runs, jobs 7–12: on 16/18 vs off 12/18 solved; turns 27.7 vs 34.6
+  (−20%); cost $0.027 vs $0.033 (−17%).
+- Three runs, all 36 paired jobs: on 26/36 vs off 22/36; turns/job −18%;
+  cost/job −17%; cost per solved job $0.038 vs $0.055 (−30%); discordant
+  pairs 5–1 for the notebook (sign test p ≈ 0.11 — not significant alone).
+- **Verdict: compounding shown by the spec's rule** (runs 1 and 3 meet both
+  criteria; run 2 meets (a) only). Honest summary: once the notebook has a few
+  jobs in it, the same cheap model does the same or more work with about a
+  fifth fewer turns; the solve-rate gain is in the right direction but not yet
+  statistically firm. One project, one model — generality not yet shown.
+
 ## Findings to act on
 
 1. **The notebook records false success.** It only sees the visible tests, so
