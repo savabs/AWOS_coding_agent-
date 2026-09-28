@@ -1,0 +1,7 @@
+{
+  "id": "02_set_timezone",
+  "goal": "When a merchant moves (or we registered them with the wrong timezone) I currently have to edit the database by hand. Add a `set-timezone CUSTOMER TIMEZONE` command. It should accept a timezone exactly the way `add-customer` does (including the old abbreviations some merchants still give us, like PST or IST), keep the customer's name and currency, and confirm with a line in the same style as add-customer's, e.g. `updated acme (America/Los_Angeles)`. Reports afterwards must use the new timezone. An unknown customer or an invalid timezone should be reported like the tool's other errors.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

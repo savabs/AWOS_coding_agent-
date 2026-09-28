@@ -1,0 +1,7 @@
+{
+  "id": "10_report_json",
+  "goal": "Our dashboard team wants to consume the daily report from a script. Add a --json option to `report` that prints the same report as a JSON object with the keys customer_id, customer (the name), day (YYYY-MM-DD), timezone, currency, orders, total_cents, refunded_cents, average_cents and order_ids (the ids of the orders counted). Money goes out as integer cents, the same way our CSV outputs do it. It has to work with --day and --yesterday and give exactly the same numbers as the text report. Errors stay the tool's normal error line (the dashboard checks the exit status).",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}
