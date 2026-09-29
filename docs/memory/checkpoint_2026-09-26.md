@@ -87,6 +87,28 @@ If the background run finished, its full results are in
   fifth fewer turns; the solve-rate gain is in the right direction but not yet
   statistically firm. One project, one model — generality not yet shown.
 
+## Update 2026-09-29 — second codebase (salesdesk), and a reality check
+
+- New series: `tests/job_series/salesdesk` and `tests/job_series/backupd`
+  (12/12 valid each). backupd not run yet.
+- Salesdesk run (`.awos/job_series_20260928T100230.json`, resumed twice after
+  network drops). **Invalid, excluded:** on j07 (network died at 13 min) and
+  on j08 (primary planner — Gemini, not covered by the model pin — returned
+  bad JSON, then the job died silently on the CheapPlanner fallback; 0 turns).
+  Could not rerun them: the notebook had already learned jobs 9–12.
+  Valid: jobs 1–6 both 6/6, equal turns (easy, nothing to gain); jobs 9–12
+  off 1/4 vs on 3/4 solved, turns −10%, cost −7%. Same shape as ordertool
+  run 2: more solved, not ≥20% cheaper. Small, noisy sample.
+- Reality check (owner discussion): these series are a lab test we wrote
+  ourselves, with conventions planted to reward memory, on toy-size projects,
+  each job starting from a perfect previous state. They show the mechanism,
+  and probably overstate it. Project memory itself is not unique in the market
+  (CLAUDE.md, AGENTS.md, Cursor rules, Devin knowledge). The claim worth
+  testing: a cheap model + accumulated repo knowledge ≈ a frontier harness on
+  solved jobs, at a fraction of the cost. Next evidence should be head-to-head
+  against a market harness, on a real repo's history (replay real merged
+  changes; their real tests as hidden tests).
+
 ## Findings to act on
 
 1. **The notebook records false success.** It only sees the visible tests, so
@@ -96,6 +118,13 @@ If the background run finished, its full results are in
 2. **Mac sleep stalls runs.** On battery with the lid closed, macOS sleeps
    despite `caffeinate` (smoke jobs took ~32 min wall, ~2 min of work). Long
    runs need AC power + lid open, or an always-on box.
+4. **Planner fallback kills a job silently** (salesdesk on j08): primary
+   planner failure → CheapPlanner → the process ends with no output and no
+   agent turns. Also the primary planner is Gemini, outside the model pin.
+5. **The runner accepts infrastructure failures as "not solved".** Jobs whose
+   log shows APIConnectionError/AuthenticationError, or 0 turns, should be
+   marked invalid and retried before the next job (the notebook must not
+   advance past them).
 3. Pinning uses `escalation_engine.MODELS_UNAVAILABLE` in the runner's child;
    there is no first-class "pin the worker model" setting.
 
