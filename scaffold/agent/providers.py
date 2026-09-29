@@ -68,6 +68,16 @@ def client_options() -> dict:
     return {"timeout": model_timeout_s(), "max_retries": model_max_retries()}
 
 
+#: Pins the model of every planner LLM call (CheapPlanner primary and
+#: fallback, and the Sonnet Planner). Unset, each planner keeps its own default.
+PLANNER_MODEL_ENV = "AWOS_PLANNER_MODEL"
+
+
+def planner_model(default: str) -> str:
+    """AWOS_PLANNER_MODEL when set (non-blank), else the planner's `default`."""
+    return os.getenv(PLANNER_MODEL_ENV, "").strip() or default
+
+
 def openrouter_key() -> Optional[str]:
     return os.getenv("OPENROUTER_API_KEY") or None
 

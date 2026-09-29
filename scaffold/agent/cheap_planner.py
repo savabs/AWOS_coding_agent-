@@ -13,20 +13,24 @@ import os
 from typing import Optional
 
 try:
-    from .providers import chat_client
+    from .providers import chat_client, planner_model
 except ImportError:
-    from providers import chat_client
+    from providers import chat_client, planner_model
+
+#: CheapPlanner's model when AWOS_PLANNER_MODEL is unset. Reached through
+#: OpenRouter when OPENROUTER_API_KEY is set (docs/specs/openrouter_only_spec.md).
+DEFAULT_CHEAP_PLANNER_MODEL = "qwen3.7-plus"
 
 
 class CheapPlanner:
     """Uses OpenCode Go (DeepSeek V4 Flash) for budget-conscious planning."""
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "qwen3.7-plus"):
-        """Initialize with OpenCode Go API.
-        
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+        """Initialize the planner client (OpenRouter when its key is set).
+
         Args:
             api_key: OpenCode Go API key. Reads OPENCODE_GO_API_KEY.
-            model: Model to use (qwen3.7-plus for reasoning quality)
+            model: Model to use. Default: AWOS_PLANNER_MODEL, else qwen3.7-plus.
         """
         self.api_key = api_key or os.getenv("OPENCODE_GO_API_KEY")
         opencode_base = os.getenv("OPENCODE_GO_BASE_URL", "https://opencode.ai/zen/go/v1")
@@ -35,7 +39,7 @@ class CheapPlanner:
             raise ValueError(
                 "No planner key found. Set OPENROUTER_API_KEY (or OPENCODE_GO_API_KEY) in .env"
             )
-        self.model_name = model
+        self.model_name = model or planner_model(DEFAULT_CHEAP_PLANNER_MODEL)
 
     def plan(self, goal: str, codebase_context: dict, tracker=None, existing_goal=None) -> dict:
         """
@@ -166,7 +170,7 @@ independent change; add more entries only for genuinely separate changes:
                 )
                 tracker.record(
                     request_type="planning",
-                    model="DeepSeek V4 Flash (cheap planning)",
+                    model=f"{self.model_name} (planning)",
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
                     cost=cost
@@ -175,9 +179,12 @@ independent change; add more entries only for genuinely separate changes:
             return result
 
         except json.JSONDecodeError as e:
-            raise ValueError(f"Gemini returned invalid JSON: {response_text[:300]}... Error: {e}")
+            raise ValueError(
+                f"planner model {self.model_name} returned invalid JSON: "
+                f"{response_text[:300]!r}... Error: {e}"
+            )
         except Exception as e:
-            raise RuntimeError(f"Gemini planning failed: {str(e)}")
+            raise RuntimeError(f"planner model {self.model_name} failed: {e}")
 
     def refine_goal(self, vague_goal: str, codebase_context: dict) -> str:
         """Convert vague goal into specific, actionable goal.
@@ -185,7 +192,7 @@ independent change; add more entries only for genuinely separate changes:
         User: "make the agent better"
         → Agent: "improve error handling in orchestrator and add retry logic to worker"
         
-        This runs quickly and cheaply on Gemini Flash.
+        This runs quickly and cheaply on the planner model.
         """
 
         prompt = f"""The user said: "{vague_goal}"

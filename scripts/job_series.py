@@ -23,6 +23,12 @@ store starts empty and is private to that arm) and one persistent git project
 (off j1, on j1, off j2, ...), so a key dying mid-run leaves a paired prefix.
 The only difference between arms is AWOS_NOTEBOOK=0|1; the model is pinned to
 DeepSeek V4 Flash in both (see _pin_model).
+
+Infrastructure failures (INVALID_MARKERS in the job's log, or 0 agent turns)
+are not the agent's result: the arm's notebook is restored to its pre-job
+snapshot, the backend is awaited, and the job retried (AWOS_SERIES_RETRIES,
+default 2). A job still invalid is recorded with "invalid": true and dropped
+from the comparison in every arm (paired exclusion).
 """
 from __future__ import annotations
 
@@ -53,8 +59,34 @@ BLOCKED_LADDER_IDS = ("deepseek-v4-pro",)
 PIN_ENV = {
     "AWOS_AGENT_MODEL": PINNED_MODEL,       # fallback id for build_client_from_env / check_backend
     "AWOS_NOTEBOOK_MODEL": PINNED_MODEL,    # the notebook's update call
+    "AWOS_PLANNER_MODEL": PINNED_MODEL,     # every planner call (primary and fallback)
     "AWOS_GOAL_CHECK": "0",                 # hidden tests judge; saves ~$0.13/job
 }
+
+# One entry per arm: the child command and the env it adds. In "cmd", the
+# placeholders {runner}, {job_dir} and {project} are filled per job; the child
+# runs with cwd = the arm's state dir. --arms accepts any key here. Under
+# --dry-run every arm runs the no-op `_dry_child` instead (with the arm's env).
+# A child may write report.json in its cwd; see USAGE_KEYS for the usage contract.
+ARM_CHILDREN: dict[str, dict] = {
+    "off": {"cmd": [PY, "{runner}", "_child", "{job_dir}", "{project}"],
+            "env": {"AWOS_NOTEBOOK": "0", **PIN_ENV}},
+    "on": {"cmd": [PY, "{runner}", "_child", "{job_dir}", "{project}"],
+           "env": {"AWOS_NOTEBOOK": "1", **PIN_ENV}},
+}
+
+# report.json may carry {"usage": {...}} with these keys; it then replaces the
+# ledger/spans metrics for that job (for harnesses that don't write .awos/).
+USAGE_KEYS = ("cost_usd", "turns", "input_tokens", "output_tokens", "models")
+
+# Text in a job's log section that means the infrastructure broke, not the agent.
+INVALID_MARKERS = (
+    "APIConnectionError",       # network drop (openai/litellm client)
+    "Connection error",         # the same error's message text
+    "AuthenticationError",      # key rejected
+    "API key expired",
+    "Error code: 401",
+)
 
 
 # ── Series discovery and staging ──────────────────────────────────────────────
@@ -291,16 +323,40 @@ def run_child(job_dir: Path, project: Path) -> None:
         auto_approve_plan=True,
     )
     (Path.cwd() / "report.json").write_text(json.dumps({
-        k: report.get(k) for k in ("success", "tasks_completed", "tasks_failed")
+        k: report.get(k) for k in ("success", "tasks_completed", "tasks_failed",
+                                   "plan_source", "planner_errors", "errors")
     }), encoding="utf-8")
 
 
 def run_dry_child(job_dir: Path, project: Path) -> None:
-    """--dry-run stand-in for the orchestrator: touches nothing, calls nothing."""
+    """--dry-run stand-in for the orchestrator: touches nothing, calls nothing.
+
+    Test hooks (env): AWOS_SERIES_DRY_FAIL="<arm>:<job>:<times>" makes the first
+    <times> attempts of that arm's job scribble on the notebook and die with a
+    connection error; AWOS_SERIES_DRY_USAGE=<json> is written as report.json's usage.
+    """
     print(f"[job_series] dry-run child cwd={Path.cwd()} project={project} "
           f"notebook={os.environ.get('AWOS_NOTEBOOK')} goal_check={os.environ.get('AWOS_GOAL_CHECK')} "
           f"model={os.environ.get('AWOS_AGENT_MODEL')}", flush=True)
-    (Path.cwd() / "report.json").write_text(json.dumps({"success": None}), encoding="utf-8")
+    fail = os.environ.get("AWOS_SERIES_DRY_FAIL", "")
+    if fail:
+        arm, job, times = fail.split(":")
+        m = re.match(r"(\d+)", job_dir.name)
+        if arm == os.environ.get("AWOS_SERIES_ARM") and m and int(m.group(1)) == int(job):
+            counter = Path.cwd() / f".dry_fail_{job}"
+            done = int(counter.read_text()) if counter.is_file() else 0
+            if done < int(times):
+                counter.write_text(str(done + 1))
+                nb = Path.cwd() / ".awos" / "projects" / "dry" / "notebook.md"
+                nb.parent.mkdir(parents=True, exist_ok=True)
+                with open(nb, "a", encoding="utf-8") as fh:
+                    fh.write("half-written by a broken job\n")
+                print("openai.APIConnectionError: Connection error.", flush=True)
+                return
+    report: dict = {"success": None}
+    if os.environ.get("AWOS_SERIES_DRY_USAGE"):
+        report["usage"] = json.loads(os.environ["AWOS_SERIES_DRY_USAGE"])
+    (Path.cwd() / "report.json").write_text(json.dumps(report), encoding="utf-8")
 
 
 # ── run ───────────────────────────────────────────────────────────────────────
@@ -375,6 +431,69 @@ def backend_ok() -> bool:
     return True
 
 
+def wait_for_backend(max_wait_s: float | None = None, check=None, sleep=time.sleep) -> bool:
+    """Poll backend_ok with backoff (15s doubling, capped at 3 min) for up to max_wait_s.
+
+    Default wait: AWOS_SERIES_BACKEND_WAIT_S or 15 minutes. False if still down.
+    """
+    check = check or backend_ok
+    if max_wait_s is None:
+        max_wait_s = float(os.environ.get("AWOS_SERIES_BACKEND_WAIT_S", 900))
+    waited, delay = 0.0, 15.0
+    while True:
+        if check():
+            return True
+        if waited >= max_wait_s:
+            print(f"[job_series] backend ({PINNED_MODEL}) still down after {waited:.0f}s; giving up",
+                  flush=True)
+            return False
+        step = min(delay, max_wait_s - waited)
+        print(f"[job_series] waiting {step:.0f}s for the backend ({PINNED_MODEL} via "
+              f"scripts/check_backend.py; {waited:.0f}/{max_wait_s:.0f}s so far)", flush=True)
+        sleep(step)
+        waited += step
+        delay = min(delay * 2, 180.0)
+
+
+def detect_invalid(log_text: str, turns: int, dry_run: bool) -> str | None:
+    """Why this job's result says nothing about the agent, or None if it is a fair result.
+
+    Infrastructure markers in the job's log section (network drop, dead key), or a
+    real run that recorded 0 agent turns (the planner/child crashed before acting).
+    A timeout is only invalid when its log shows one of the markers.
+    """
+    for marker in INVALID_MARKERS:
+        if marker in log_text:
+            return f"log shows {marker!r}"
+    if not dry_run and turns == 0:
+        return "0 agent turns (child crashed before the agent acted)"
+    return None
+
+
+def snapshot_notebook(state: Path) -> Path | None:
+    """Copy state/.awos/projects (the notebook) aside; None if it doesn't exist yet."""
+    src = state / ".awos" / "projects"
+    if not src.is_dir():
+        return None
+    dest = Path(tempfile.mkdtemp(prefix="job_series_nb_")) / "projects"
+    shutil.copytree(src, dest)
+    return dest
+
+
+def restore_notebook(state: Path, snap: Path | None) -> None:
+    """Put state/.awos/projects back exactly as snapshot_notebook saw it."""
+    target = state / ".awos" / "projects"
+    if target.exists():
+        shutil.rmtree(target)
+    if snap is not None:
+        shutil.copytree(snap, target)
+
+
+def drop_snapshot(snap: Path | None) -> None:
+    if snap is not None:
+        shutil.rmtree(snap.parent, ignore_errors=True)
+
+
 def git(project: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", "-C", str(project), "-c", "user.email=bench@awos", "-c", "user.name=bench", *args],
@@ -425,6 +544,42 @@ def stream_child(cmd: list[str], cwd: Path, env: dict, log_path: Path, prefix: s
     return timed_out
 
 
+def key_usage(state: Path) -> float | None:
+    """The OpenRouter key's lifetime spend, read with the arm's own key.
+
+    Jobs run one at a time, so the change across a job is everything that job
+    billed, whichever harness ran it and whether or not it wrote the ledger.
+    """
+    import urllib.request
+    try:
+        key = next((ln.split("=", 1)[1].strip().strip('"').strip("'")
+                    for ln in (state / ".env").read_text(encoding="utf-8").splitlines()
+                    if ln.startswith("OPENROUTER_API_KEY=")), "")
+        if not key:
+            return None
+        req = urllib.request.Request("https://openrouter.ai/api/v1/key",
+                                     headers={"Authorization": f"Bearer {key}"})
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return float(json.loads(resp.read().decode())["data"]["usage"])
+    except Exception:  # noqa: BLE001 - a missing figure must not break a run
+        return None
+
+
+def billed_since(state: Path, before: float | None, settle_s: float = 60.0) -> float | None:
+    """Spend since `before`, polling until OpenRouter's usage figure settles."""
+    if before is None:
+        return None
+    last, deadline = None, time.monotonic() + settle_s
+    while True:
+        now = key_usage(state)
+        if now is not None and last is not None and abs(now - last) < 1e-9 and now > before:
+            return round(now - before, 6)
+        if time.monotonic() > deadline:
+            return None if now is None else round(now - before, 6)
+        last = now
+        time.sleep(5)
+
+
 def run_job(arm: str, number: int, job_dir: Path, sdir: Path, jobs: list, arm_dir: Path,
             dry_run: bool) -> dict:
     spec = load(job_dir)
@@ -438,26 +593,53 @@ def run_job(arm: str, number: int, job_dir: Path, sdir: Path, jobs: list, arm_di
 
     ledger_before = len(read_ledger(state))
     spans_before = len(read_spans(state))
-    env = {**os.environ, "PYTHONUNBUFFERED": "1", "AWOS_NOTEBOOK": "1" if arm == "on" else "0",
-           **PIN_ENV}
+    billed_before = None if dry_run else key_usage(state)
+    child = ARM_CHILDREN[arm]
+    env = {**os.environ, "PYTHONUNBUFFERED": "1", **child["env"], "AWOS_SERIES_ARM": arm}
+    fill = {"{runner}": str(Path(__file__).resolve()), "{job_dir}": str(job_dir),
+            "{project}": str(project)}
+    cmd = ([PY, "{runner}", "_dry_child", "{job_dir}", "{project}"] if dry_run
+           else list(child["cmd"]))
+    for key, val in fill.items():
+        cmd = [part.replace(key, val) for part in cmd]
+    log_path = arm_dir / "run.log"
+    log_start = log_path.stat().st_size if log_path.exists() else 0
     started = time.monotonic()
     timed_out = stream_child(
-        [PY, str(Path(__file__).resolve()), "_dry_child" if dry_run else "_child",
-         str(job_dir), str(project)],
-        cwd=state, env=env, log_path=arm_dir / "run.log", prefix=prefix,
+        cmd, cwd=state, env=env, log_path=log_path, prefix=prefix,
         timeout_s=float(spec.get("timeout_min", 30)) * 60,
     )
     minutes = round((time.monotonic() - started) / 60, 2)
+    with open(log_path, "rb") as fh:
+        fh.seek(log_start)
+        log_text = fh.read().decode("utf-8", errors="replace")
     try:
         report = json.loads(report_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         report = {}
     changed = git(project, "status", "--porcelain", check=False).stdout
     hidden, visible = judge(job_dir, project)
-    usage = ledger_metrics(read_ledger(state)[ledger_before:])
-    # The ledger holds one entry per agent-loop task, not per model call.
-    usage["turns"] = sum(int(s.get("attempt_count", 0) or 0)
-                         for s in read_spans(state)[spans_before:])
+    reported = report.get("usage") if isinstance(report, dict) else None
+    if isinstance(reported, dict) and all(k in reported for k in USAGE_KEYS):
+        # The harness counted its own usage (it doesn't write the .awos ledger).
+        usage = {
+            "llm_calls": int(reported.get("llm_calls", 0) or 0),
+            "input_tokens": int(reported["input_tokens"] or 0),
+            "output_tokens": int(reported["output_tokens"] or 0),
+            "cost_usd": round(float(reported["cost_usd"] or 0), 6),
+            "notebook_cost_usd": round(float(reported.get("notebook_cost_usd", 0) or 0), 6),
+            "models": sorted(str(m) for m in (reported["models"] or [])),
+            "turns": int(reported["turns"] or 0),
+            "usage_source": "report",
+        }
+    else:
+        usage = ledger_metrics(read_ledger(state)[ledger_before:])
+        # The ledger holds one entry per agent-loop task, not per model call.
+        usage["turns"] = sum(int(s.get("attempt_count", 0) or 0)
+                             for s in read_spans(state)[spans_before:])
+        usage["usage_source"] = "ledger"
+    usage["billed_usd"] = billed_since(state, billed_before)
+    invalid_reason = detect_invalid(log_text, usage["turns"], dry_run)
     result = {
         "arm": arm, "job": number, "id": spec.get("id", job_dir.name), "dir": job_dir.name,
         "solved": bool(hidden["ok"] and visible["ok"]),
@@ -465,17 +647,71 @@ def run_job(arm: str, number: int, job_dir: Path, sdir: Path, jobs: list, arm_di
         "failing_tests": hidden["failing"], "hidden_summary": hidden["summary"],
         "visible_tests_ok": visible["ok"], "visible_failing": visible["failing"],
         "orchestrator_success": report.get("success"),
+        "plan_source": report.get("plan_source"),
         "files_changed": len([ln for ln in changed.splitlines() if ln.strip()]),
         **usage,
         "minutes": minutes, "timed_out": timed_out,
         "notebook_chars": notebook_chars(state),
+        "invalid": invalid_reason is not None, "invalid_reason": invalid_reason, "attempts": 1,
     }
-    print(f"{prefix} {'SOLVED' if result['solved'] else 'not solved'} — hidden "
+    verdict = ("INVALID (" + invalid_reason + ")" if invalid_reason
+               else "SOLVED" if result["solved"] else "not solved")
+    print(f"{prefix} {verdict} — hidden "
           f"{hidden['passed']}/{hidden['passed'] + result['hidden_failed']} · own tests "
           f"{'ok' if visible['ok'] else 'BROKEN'} · {usage['turns']} turns · "
-          f"${usage['cost_usd']:.4f} · {minutes} min · notebook {result['notebook_chars']} chars",
+          f"${usage['cost_usd']:.4f} (billed "
+          f"{'?' if usage['billed_usd'] is None else '$%.4f' % usage['billed_usd']}) · "
+          f"{minutes} min · notebook {result['notebook_chars']} chars",
           flush=True)
     return result
+
+
+def run_job_with_retries(arm: str, number: int, job_dir: Path, sdir: Path, jobs: list,
+                         arm_dir: Path, dry_run: bool, retries: int) -> tuple[dict, str | None]:
+    """run_job, but an infrastructure failure doesn't count as the agent's result.
+
+    Before each attempt the arm's notebook (state/.awos/projects) is snapshotted;
+    an invalid attempt restores it (so a broken job can't advance the notebook),
+    waits for the backend, and retries up to `retries` times. Returns (result,
+    stop_reason); stop_reason is set when the backend stayed down past the wait.
+    Every attempt's metrics are measured from that attempt's own ledger/spans start.
+    """
+    state = arm_dir / "state"
+    failed: list[dict] = []
+    while True:
+        snap = snapshot_notebook(state)
+        try:
+            result = run_job(arm, number, job_dir, sdir, jobs, arm_dir, dry_run)
+            if result["invalid"]:
+                restore_notebook(state, snap)
+                result["notebook_chars"] = notebook_chars(state)
+        finally:
+            drop_snapshot(snap)
+        result["attempts"] = len(failed) + 1
+        if failed:
+            result["failed_attempts"] = failed
+        if not result["invalid"]:
+            return result, None
+        failed = failed + [{"reason": result["invalid_reason"], "cost_usd": result["cost_usd"],
+                            "minutes": result["minutes"]}]
+        if len(failed) > retries:
+            print(f"[{arm} j{number:02d}] still invalid after {len(failed)} attempt(s); "
+                  f"recording it as invalid and moving on", flush=True)
+            return result, None
+        print(f"[{arm} j{number:02d}] notebook restored; retry {len(failed)}/{retries} "
+              f"once the backend answers", flush=True)
+        if not dry_run and not wait_for_backend():
+            return result, f"backend down after invalid {arm} job {number} ({result['invalid_reason']})"
+
+
+def dropped_jobs(results: list[dict], arms: list[str]) -> dict[int, str]:
+    """{job: why} for every job where any arm's row is invalid (paired exclusion)."""
+    out: dict[int, str] = {}
+    for r in results:
+        if r["arm"] in arms and r.get("invalid"):
+            why = f"{r['arm']}: {r.get('invalid_reason')}"
+            out[r["job"]] = f"{out[r['job']]}; {why}" if r["job"] in out else why
+    return dict(sorted(out.items()))
 
 
 def _mean(xs: list[float]) -> float | None:
@@ -489,18 +725,23 @@ def summarize(results: list[dict], arms: list[str]) -> dict:
             "solved": sum(r["solved"] for r in rows),
             "solve_rate": _mean([float(r["solved"]) for r in rows]),
             "mean_cost_usd": _mean([r["cost_usd"] for r in rows]),
+            "mean_billed_usd": _mean([r["billed_usd"] for r in rows
+                                      if r.get("billed_usd") is not None]),
             "mean_turns": _mean([float(r.get("turns", 0)) for r in rows]),
             "mean_minutes": _mean([r["minutes"] for r in rows]),
         }
 
+    # Paired exclusion: a job invalid in either arm leaves the comparison entirely.
+    dropped = dropped_jobs(results, arms)
     out: dict = {}
     for arm in arms:
-        rows = [r for r in results if r["arm"] == arm]
+        rows = [r for r in results if r["arm"] == arm and r["job"] not in dropped]
         out[arm] = {
             "all": block(rows),
             "jobs_1_6": block([r for r in rows if r["job"] <= 6]),
             "jobs_7_12": block([r for r in rows if 7 <= r["job"] <= 12]),
         }
+    out["dropped_jobs"] = {str(n): why for n, why in dropped.items()}
     return out
 
 
@@ -512,7 +753,8 @@ def _fmt(v, money=False) -> str:
 
 def print_report(results: list[dict], arms: list[str], summary: dict) -> None:
     by = {(r["arm"], r["job"]): r for r in results}
-    numbers = sorted({r["job"] for r in results})
+    dropped = dropped_jobs(results, arms)
+    numbers = sorted({r["job"] for r in results} - set(dropped))
     width = 10 + 34 * len(arms)
     print("\n" + "=" * width)
     print("  job     " + "".join(f"{arm + ': verdict  turns  cost  min':<34}" for arm in arms))
@@ -534,7 +776,10 @@ def print_report(results: list[dict], arms: list[str], summary: dict) -> None:
                 continue
             print(f"  {arm:<4} {label:<10} solved {b['solved']}/{b['jobs']} "
                   f"(rate {_fmt(b['solve_rate'])})  mean cost {_fmt(b['mean_cost_usd'], True)}  "
-                  f"mean turns {_fmt(b['mean_turns'])}")
+                  f"mean turns {_fmt(b['mean_turns'])}  "
+                  f"mean billed {_fmt(b.get('mean_billed_usd'), True)}")
+    for n, why in dropped.items():
+        print(f"  dropped job {n} from both arms (invalid run — {why})")
     print("=" * width)
 
 
@@ -565,6 +810,7 @@ def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
             kept = []
         print(f"[job_series] resuming {ts}: keeping {len(kept)} earlier result(s)")
 
+    retries = int(os.environ.get("AWOS_SERIES_RETRIES", 2))
     env_src = find_env_file(env_file)
     arm_dirs: dict[str, Path] = {}
     for arm in arms:
@@ -577,7 +823,8 @@ def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
         (arm_dir / "run.log").touch()
         arm_dirs[arm] = arm_dir
 
-    print(f"[job_series] series={series} jobs={numbers} arms={arms} dry_run={dry_run}")
+    print(f"[job_series] series={series} jobs={numbers} arms={arms} dry_run={dry_run} "
+          f"retries={retries}")
     print(f"[job_series] model pinned: {PINNED_MODEL} (ladder blocks {list(BLOCKED_LADDER_IDS)}; "
           f"env {sorted(PIN_ENV)})")
     print(f"[job_series] .env copied from: {env_src if env_src else 'none found'}")
@@ -590,13 +837,17 @@ def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
     for i, n in enumerate(numbers):
         for arm in arms:
             # Before every job: a key dying mid-run otherwise reads as the agent failing.
-            if not dry_run and not backend_ok():
+            if not dry_run and not wait_for_backend():
                 stopped = f"backend check failed before {arm} job {n}"
                 break
             spec = load(job_by_n[n])
             print(f"\n########## [{arm}] job {n} ({i + 1}/{len(numbers)}): {spec.get('id')} ##########")
             print(f"GOAL: {spec['goal']}\n", flush=True)
-            results.append(run_job(arm, n, job_by_n[n], sdir, jobs, arm_dirs[arm], dry_run))
+            result, stopped = run_job_with_retries(arm, n, job_by_n[n], sdir, jobs, arm_dirs[arm],
+                                                   dry_run, retries)
+            results.append(result)
+            if stopped:
+                break
         if stopped:
             print(f"[job_series] stopping: {stopped}", flush=True)
             break
@@ -628,7 +879,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("command", choices=["validate", "run"])
     parser.add_argument("--series", default="ordertool")
-    parser.add_argument("--arms", default="off,on", help="comma list of off|on (default off,on)")
+    parser.add_argument("--arms", default="off,on",
+                        help=f"comma list of {'|'.join(ARM_CHILDREN)} (default off,on)")
     parser.add_argument("--jobs", default=None, help="e.g. 1-12 or 1-3,7 (default all)")
     parser.add_argument("--dry-run", action="store_true", help="no-op child instead of the orchestrator")
     parser.add_argument("--series-root", default=None, help=argparse.SUPPRESS)
@@ -641,8 +893,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "validate":
         return validate(args.series, root)
     arms = [a.strip() for a in args.arms.split(",") if a.strip()]
-    if not arms or any(a not in ("off", "on") for a in arms):
-        parser.error("--arms takes off and/or on")
+    if not arms or any(a not in ARM_CHILDREN for a in arms):
+        parser.error(f"--arms takes any of {', '.join(ARM_CHILDREN)}")
     return run(args.series, arms, args.jobs, args.dry_run, root,
                Path(args.out_root) if args.out_root else None, args.env_file, args.resume)
 

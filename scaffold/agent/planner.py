@@ -11,10 +11,10 @@ from typing import Optional, Any
 import logging
 
 try:
-    from .providers import messages_client
+    from .providers import messages_client, planner_model
     from .task_schema import normalise_task, task_files
 except ImportError:
-    from providers import messages_client
+    from providers import messages_client, planner_model
     from task_schema import normalise_task, task_files
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ class Planner:
         self.client = messages_client(self.api_key)
         if self.client is None:
             raise ValueError("Set OPENROUTER_API_KEY (or ANTHROPIC_API_KEY)")
-        self.model = "claude-sonnet-4-6"
+        self.model = planner_model("claude-sonnet-4-6")
         self.allow_multi_file = (
             allow_multi_file
             if allow_multi_file is not None

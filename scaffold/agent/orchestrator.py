@@ -6,6 +6,7 @@ expensive planning (Sonnet) and cheap execution (DeepSeek) with verification.
 """
 
 import ast
+import contextlib
 import hashlib
 import logging
 import os
@@ -937,6 +938,7 @@ class Orchestrator:
             print(f"[EXPLORE] {n_hits} grep hit(s) across {n_files} file(s)")
 
         # Phase 1: Planning — skip if caller already built a cheap plan
+        _plan_source, _planner_errors = "pre_planned", []
         if pre_planned_tasks is not None:
             tasks = pre_planned_tasks
             print(f"\n[PLANNER] Using pre-built plan: {len(tasks)} tasks")
@@ -944,39 +946,7 @@ class Orchestrator:
                 print(f"  Task {task['task_id']}: {task['action']} (complexity: {task['complexity']})")
         else:
             print(f"\n[PLANNER] Breaking down goal: {goal}")
-            try:
-                with _live.spinner("Planning…"):
-                    if is_cheap_only():
-                        plan = CheapPlanner().plan(
-                            goal, codebase_context, tracker=self.tracker,
-                        )
-                        print("[PLANNER] Cheap-only mode — using OpenCode Go (DeepSeek V4 Flash)")
-                    else:
-                        plan = self.planner.plan(
-                            goal, codebase_context,
-                            tracker=self.tracker,
-                            existing_goal=self._active_goal_graph,
-                        )
-            except Exception as _primary_err:
-                logger.warning("[planner] primary planner failed (%s) — trying CheapPlanner", _primary_err)
-                try:
-                    with _live.spinner("Planning (fallback)…"):
-                        plan = CheapPlanner().plan(
-                            goal, codebase_context, tracker=self.tracker,
-                        )
-                    print("[PLANNER] Fell back to CheapPlanner (OpenCode Go / DeepSeek V4 Flash)")
-                except Exception as e:
-                    return {
-                        "success": False,
-                        "goal": goal,
-                        "tasks_completed": 0,
-                        "tasks_failed": 0,
-                        "total_tasks": 0,
-                        "total_cost": 0,
-                        "execution_log": self.execution_log,
-                        "errors": [f"Planning failed (primary: {_primary_err}; fallback: {str(e)})"],
-                        "time_elapsed": time.time() - start_time
-                    }
+            plan, _plan_source, _planner_errors = self._plan_goal(goal, codebase_context, _live)
             tasks = plan.get("plan", [])
             print(f"[PLANNER] Generated {len(tasks)} tasks:")
             for task in tasks:
@@ -1466,8 +1436,13 @@ class Orchestrator:
             "tasks_failed": tasks_failed,
             "total_tasks": len(tasks),
             "execution_log": self.execution_log,
-            "errors": [log["reason"] for log in self.execution_log if log["status"] == "failed"],
+            "errors": _planner_errors + [
+                log["reason"] for log in self.execution_log if log["status"] == "failed"
+            ],
             "time_elapsed": elapsed,
+            # "planner" | "planner_fallback" | "goal_as_task" | "pre_planned"
+            "plan_source": _plan_source,
+            "planner_errors": _planner_errors,
             "integration_review": review,
             "goal_complete": goal_complete,
             "goal_check_reasoning": goal_check_reasoning,
@@ -1481,6 +1456,75 @@ class Orchestrator:
                 if self._runtime_session and self._runtime_session.sandbox.enabled
                 else None
             ),
+        }
+
+    # ── Planning ─────────────────────────────────────────────────────────────
+
+    def _plan_goal(self, goal: str, codebase_context: dict, live=None) -> tuple:
+        """
+        Plan `goal`: primary planner, then CheapPlanner, then the goal itself.
+
+        Returns (plan, source, errors). source is "planner", "planner_fallback"
+        or "goal_as_task"; errors holds one line per planner that failed.
+
+        A run once ended here with no output and no work: both planners
+        failed, the failure only went into the returned dict, and the job
+        recorded 0 turns. Now each failure is printed, and when no planner
+        produces a plan the goal runs as one task — the agent loop reads the
+        code and can carry a whole goal.
+        """
+        def _spinner(label):
+            return live.spinner(label) if live is not None else contextlib.nullcontext()
+
+        errors: list = []
+        try:
+            with _spinner("Planning…"):
+                if is_cheap_only():
+                    plan = CheapPlanner().plan(goal, codebase_context, tracker=self.tracker)
+                    print("[PLANNER] Cheap-only mode — CheapPlanner")
+                else:
+                    plan = self.planner.plan(
+                        goal, codebase_context,
+                        tracker=self.tracker,
+                        existing_goal=getattr(self, "_active_goal_graph", None),
+                    )
+            self._check_plan(plan)
+            return plan, "planner", errors
+        except Exception as primary_err:
+            errors.append(f"primary planner failed: {primary_err}")
+            logger.warning("[planner] primary planner failed (%s) — trying CheapPlanner", primary_err)
+            print(f"[PLANNER] ✗ primary planner failed: {primary_err}", flush=True)
+            print("[PLANNER] trying CheapPlanner fallback…", flush=True)
+        try:
+            with _spinner("Planning (fallback)…"):
+                plan = CheapPlanner().plan(goal, codebase_context, tracker=self.tracker)
+            self._check_plan(plan)
+            print("[PLANNER] Fell back to CheapPlanner", flush=True)
+            return plan, "planner_fallback", errors
+        except Exception as fallback_err:
+            errors.append(f"fallback planner failed: {fallback_err}")
+            logger.error("[planner] fallback CheapPlanner failed (%s)", fallback_err)
+            print(f"[PLANNER] ✗ fallback CheapPlanner failed: {fallback_err}", flush=True)
+        print(
+            "[PLANNER] ✗ every planner failed — running the whole goal as one task",
+            flush=True,
+        )
+        return self._goal_as_single_task_plan(goal), "goal_as_task", errors
+
+    @staticmethod
+    def _check_plan(plan) -> None:
+        """A plan with no tasks is a planner failure, not a finished goal."""
+        tasks = plan.get("plan") if isinstance(plan, dict) else None
+        if not isinstance(tasks, list) or not tasks:
+            raise ValueError(f"planner returned no tasks: {str(plan)[:200]}")
+
+    @staticmethod
+    def _goal_as_single_task_plan(goal: str) -> dict:
+        """One task whose action is the goal; no start file (the agent finds it)."""
+        return {
+            "plan": [{"task_id": 1, "file": "", "action": goal, "complexity": "high"}],
+            "reasoning": "every planner failed; the goal runs as a single task",
+            "total_tasks": 1,
         }
 
     # ── Goal completeness check ───────────────────────────────────────────────

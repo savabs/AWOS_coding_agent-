@@ -21,6 +21,20 @@ js = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(js)
 
 
+@pytest.fixture(autouse=True)
+def _no_billing_lookup(monkeypatch):
+    # key_usage asks OpenRouter for the key's spend; tests stay off the network.
+    monkeypatch.setattr(js, "key_usage", lambda state: None)
+
+
+def test_billed_since_measures_the_settled_change(monkeypatch):
+    readings = iter([1.00, 1.05, 1.05])
+    monkeypatch.setattr(js, "key_usage", lambda state: next(readings))
+    monkeypatch.setattr(js.time, "sleep", lambda s: None)
+    assert js.billed_since(Path("."), 0.98) == pytest.approx(0.07)
+    assert js.billed_since(Path("."), None) is None
+
+
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(textwrap.dedent(text), encoding="utf-8")
@@ -219,3 +233,190 @@ def test_pin_model_leaves_only_flash(tmp_path):
     assert proc.returncode == 0, proc.stderr[-2000:]
     assert "ALLOWED ['deepseek-v4-flash']" in proc.stdout
     assert "CHOSEN deepseek-v4-flash" in proc.stdout
+
+
+# ── invalid jobs (infrastructure failures) ────────────────────────────────────
+
+
+@pytest.mark.parametrize("line", [
+    "openai.APIConnectionError: Connection error.",
+    "litellm.AuthenticationError: invalid key",
+    "Error: API key expired",
+    "stop=model_error (Connection error.)",
+    "Error code: 401 - {'error': 'unauthorized'}",
+])
+def test_detect_invalid_markers(line):
+    assert js.detect_invalid(f"+00:03 {line}\n", turns=7, dry_run=False)
+
+
+def test_detect_invalid_zero_turns_and_clean_runs():
+    assert "0 agent turns" in js.detect_invalid("ran fine\n", turns=0, dry_run=False)
+    assert js.detect_invalid("ran fine\n", turns=0, dry_run=True) is None
+    assert js.detect_invalid("tests failed: AssertionError\n", turns=12, dry_run=False) is None
+    assert set(js.INVALID_MARKERS) >= {"APIConnectionError", "AuthenticationError",
+                                       "API key expired", "Connection error"}
+
+
+def _dry_run(tmp_path, *extra):
+    make_series(tmp_path, "mini")
+    out_root = tmp_path / "out"
+    rc = js.main(["run", "--series", "mini", "--series-root", str(tmp_path), "--dry-run",
+                  "--out-root", str(out_root), *extra])
+    [result_file] = out_root.glob("job_series_*.json")
+    return rc, json.loads(result_file.read_text())
+
+
+def test_invalid_job_restores_notebook_and_retries(tmp_path, monkeypatch, capsys):
+    # on j2 dies with a connection error once, after scribbling on the notebook.
+    monkeypatch.setenv("AWOS_SERIES_DRY_FAIL", "on:2:1")
+    rc, data = _dry_run(tmp_path)
+    assert rc == 0
+    rows = {(r["arm"], r["job"]): r for r in data["results"]}
+    assert len(data["results"]) == 4
+    r = rows[("on", 2)]
+    assert r["invalid"] is False and r["invalid_reason"] is None and r["attempts"] == 2
+    assert "APIConnectionError" in r["failed_attempts"][0]["reason"]
+    assert r["notebook_chars"] == 0                      # the broken job's notebook edit is gone
+    state = Path(data["run_dir"]) / "on" / "state"
+    assert not (state / ".awos" / "projects").exists()
+    assert all(rows[k]["attempts"] == 1 and not rows[k]["invalid"]
+               for k in rows if k != ("on", 2))
+    assert data["summary"]["dropped_jobs"] == {}
+    assert data["summary"]["on"]["all"]["jobs"] == 2
+    assert "notebook restored; retry 1/2" in capsys.readouterr().out
+
+
+def test_notebook_restored_to_prior_content(tmp_path):
+    state = tmp_path / "state"
+    nb = state / ".awos" / "projects" / "p1" / "notebook.md"
+    nb.parent.mkdir(parents=True)
+    nb.write_text("learned in job 1\n")
+    snap = js.snapshot_notebook(state)
+    nb.write_text("learned in job 1\nhalf-written by a broken job\n")
+    (state / ".awos" / "projects" / "p2").mkdir()
+    js.restore_notebook(state, snap)
+    js.drop_snapshot(snap)
+    assert nb.read_text() == "learned in job 1\n"
+    assert not (state / ".awos" / "projects" / "p2").exists()
+    assert not snap.parent.exists()
+
+
+def test_still_invalid_is_recorded_and_dropped_pairwise(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("AWOS_SERIES_DRY_FAIL", "off:1:99")
+    monkeypatch.setenv("AWOS_SERIES_RETRIES", "1")
+    rc, data = _dry_run(tmp_path)
+    assert rc == 0                                        # the run keeps going
+    rows = {(r["arm"], r["job"]): r for r in data["results"]}
+    assert rows[("off", 1)]["invalid"] is True and rows[("off", 1)]["attempts"] == 2
+    assert "APIConnectionError" in rows[("off", 1)]["invalid_reason"]
+    assert rows[("on", 1)]["invalid"] is False
+    # Job 1 leaves the comparison in both arms, job 2 stays.
+    assert list(data["summary"]["dropped_jobs"]) == ["1"]
+    assert data["summary"]["off"]["all"]["jobs"] == 1
+    assert data["summary"]["on"]["all"]["jobs"] == 1
+    out = capsys.readouterr().out
+    assert "dropped job 1 from both arms" in out and "off: log shows" in out
+
+
+def test_summarize_pairwise_exclusion():
+    rows = [{"arm": a, "job": n, "solved": True, "cost_usd": 1.0, "turns": 3, "minutes": 1.0,
+             "invalid": (a == "on" and n == 2), "invalid_reason": "log shows 'Connection error'"}
+            for a in ("off", "on") for n in (1, 2, 3)]
+    s = js.summarize(rows, ["off", "on"])
+    assert s["off"]["all"]["jobs"] == 2 and s["on"]["all"]["jobs"] == 2
+    assert s["dropped_jobs"] == {"2": "on: log shows 'Connection error'"}
+    # Rows from before this field existed (resume of an old file) count as valid.
+    old = [{k: v for k, v in r.items() if k not in ("invalid", "invalid_reason")} for r in rows]
+    assert js.summarize(old, ["off", "on"])["off"]["all"]["jobs"] == 3
+
+
+def test_report_usage_overrides_ledger(tmp_path, monkeypatch):
+    usage = {"cost_usd": 0.25, "turns": 9, "input_tokens": 1000, "output_tokens": 200,
+             "models": ["openrouter/some-model"]}
+    monkeypatch.setenv("AWOS_SERIES_DRY_USAGE", json.dumps(usage))
+    rc, data = _dry_run(tmp_path, "--arms", "on", "--jobs", "1")
+    [r] = data["results"]
+    assert r["usage_source"] == "report"
+    assert r["cost_usd"] == 0.25 and r["turns"] == 9
+    assert r["input_tokens"] == 1000 and r["output_tokens"] == 200
+    assert r["models"] == ["openrouter/some-model"]
+    # Incomplete usage dicts are ignored in favour of the ledger.
+    monkeypatch.setenv("AWOS_SERIES_DRY_USAGE", json.dumps({"cost_usd": 1.0}))
+    rc, data = _dry_run(tmp_path / "b", "--arms", "on", "--jobs", "1")
+    assert data["results"][0]["usage_source"] == "ledger" and data["results"][0]["cost_usd"] == 0
+
+
+def test_arms_mapping_drives_cli_and_child(tmp_path, monkeypatch):
+    assert set(js.ARM_CHILDREN) == {"off", "on"}
+    for arm, child in js.ARM_CHILDREN.items():
+        assert "{job_dir}" in child["cmd"] and "{project}" in child["cmd"]
+        assert child["env"]["AWOS_NOTEBOOK"] == ("1" if arm == "on" else "0")
+        assert child["env"]["AWOS_AGENT_MODEL"] == js.PINNED_MODEL
+    with pytest.raises(SystemExit):
+        js.main(["run", "--arms", "nope", "--dry-run"])
+    # A new arm is just a new key: --arms accepts it and its env reaches the child.
+    monkeypatch.setitem(js.ARM_CHILDREN, "extra", {
+        "cmd": [sys.executable, "-c", "print('unused under dry-run')"],
+        "env": {"AWOS_NOTEBOOK": "extra-arm"}})
+    rc, data = _dry_run(tmp_path, "--arms", "extra", "--jobs", "1")
+    assert rc == 0 and [r["arm"] for r in data["results"]] == ["extra"]
+    assert "notebook=extra-arm" in (Path(data["run_dir"]) / "extra" / "run.log").read_text()
+
+
+def test_real_child_command_is_filled_from_mapping(tmp_path, monkeypatch):
+    # Non-dry path: the arm's cmd template runs with placeholders filled; a child
+    # that writes report.json usage gives a valid, non-zero-turn result.
+    script = tmp_path / "fake_harness.py"
+    script.write_text(textwrap.dedent("""
+        import json, sys, pathlib
+        job_dir, project = sys.argv[1], sys.argv[2]
+        print("fake harness", pathlib.Path(job_dir).name, pathlib.Path(project).name, flush=True)
+        pathlib.Path("report.json").write_text(json.dumps({"success": True, "usage": {
+            "cost_usd": 0.01, "turns": 3, "input_tokens": 10, "output_tokens": 2,
+            "models": ["m"]}}))
+    """))
+    monkeypatch.setitem(js.ARM_CHILDREN, "fake", {
+        "cmd": [sys.executable, str(script), "{job_dir}", "{project}"], "env": {}})
+    monkeypatch.setattr(js, "backend_ok", lambda: True)
+    make_series(tmp_path, "mini")
+    out_root = tmp_path / "out"
+    assert js.main(["run", "--series", "mini", "--series-root", str(tmp_path),
+                    "--out-root", str(out_root), "--arms", "fake", "--jobs", "1"]) == 0
+    [f] = out_root.glob("job_series_*.json")
+    data = json.loads(f.read_text())
+    [r] = data["results"]
+    assert r["invalid"] is False and r["turns"] == 3 and r["orchestrator_success"] is True
+    log = Path(data["run_dir"]) / "fake" / "run.log"
+    assert "fake harness 01_sub project" in log.read_text()
+
+
+def test_wait_for_backend_backs_off_then_gives_up(capsys):
+    naps: list[float] = []
+    answers = iter([False, False, True])
+    assert js.wait_for_backend(max_wait_s=900, check=lambda: next(answers), sleep=naps.append)
+    assert naps == [15.0, 30.0]
+    naps.clear()
+    assert not js.wait_for_backend(max_wait_s=100, check=lambda: False, sleep=naps.append)
+    assert sum(naps) == 100 and naps[:3] == [15.0, 30.0, 55.0]
+    assert "waiting 15s for the backend" in capsys.readouterr().out
+
+
+def test_backend_down_after_invalid_job_stops_cleanly(tmp_path, monkeypatch):
+    # Real (non-dry) path with a child that always shows a dead key: after the
+    # invalid attempt the backend never comes back, so the run stops, resumable.
+    script = tmp_path / "dead_key.py"
+    script.write_text("print('litellm.AuthenticationError: API key expired', flush=True)\n")
+    monkeypatch.setitem(js.ARM_CHILDREN, "dead", {
+        "cmd": [sys.executable, str(script)], "env": {}})
+    checks = iter([True])
+    monkeypatch.setattr(js, "backend_ok", lambda: next(checks, False))
+    monkeypatch.setenv("AWOS_SERIES_BACKEND_WAIT_S", "0")
+    make_series(tmp_path, "mini")
+    out_root = tmp_path / "out"
+    assert js.main(["run", "--series", "mini", "--series-root", str(tmp_path),
+                    "--out-root", str(out_root), "--arms", "dead"]) == 0
+    [f] = out_root.glob("job_series_*.json")
+    data = json.loads(f.read_text())
+    assert "backend down after invalid dead job 1" in data["stopped"]
+    [r] = data["results"]
+    assert r["invalid"] is True and r["attempts"] == 1 and r["job"] == 1
