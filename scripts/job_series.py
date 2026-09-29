@@ -50,6 +50,7 @@ SERIES_ROOT = REPO / "tests" / "job_series"
 PY = sys.executable
 
 PINNED_MODEL = "deepseek/deepseek-v4-flash"
+FRONTIER_MODEL = "anthropic/claude-sonnet-5.5"   # the aider-frontier arm only
 # Escalation ladder ids hidden from the router inside the child, so every
 # decision (heuristic, retry escalation, LinUCB, performance veto) lands on
 # Flash. MODELS_UNAVAILABLE is the ladder's own "never pick this" filter.
@@ -73,6 +74,16 @@ ARM_CHILDREN: dict[str, dict] = {
             "env": {"AWOS_NOTEBOOK": "0", **PIN_ENV}},
     "on": {"cmd": [PY, "{runner}", "_child", "{job_dir}", "{project}"],
            "env": {"AWOS_NOTEBOOK": "1", **PIN_ENV}},
+    # Head-to-head: a market harness (Aider) with no project memory. Stock Aider
+    # stops after 3 follow-up rounds per message; 10 is generous to it, so a
+    # win for AWOS is not a win against a handicapped competitor.
+    "aider": {"cmd": [PY, str(REPO / "scripts" / "harness_aider.py"), "{job_dir}", "{project}",
+                      "--model", PINNED_MODEL, "--max-reflections", "10"],
+              "env": {}},
+    "aider-frontier": {"cmd": [PY, str(REPO / "scripts" / "harness_aider.py"), "{job_dir}",
+                               "{project}", "--model", FRONTIER_MODEL,
+                               "--max-reflections", "10"],
+                       "env": {}},
 }
 
 # report.json may carry {"usage": {...}} with these keys; it then replaces the
