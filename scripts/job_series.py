@@ -576,19 +576,31 @@ def key_usage(state: Path) -> float | None:
         return None
 
 
-def billed_since(state: Path, before: float | None, settle_s: float = 60.0) -> float | None:
-    """Spend since `before`, polling until OpenRouter's usage figure settles."""
+def billed_since(state: Path, before: float | None, settle_s: float = 150.0,
+                 min_wait_s: float = 30.0, stable_reads: int = 3,
+                 every_s: float = 10.0) -> float | None:
+    """Spend since `before`, once OpenRouter's usage figure has settled.
+
+    The figure lags by tens of seconds; a charge counted late would land on the
+    next job (often another arm's). So wait at least min_wait_s, then require
+    `stable_reads` equal readings `every_s` apart.
+    """
     if before is None:
         return None
-    last, deadline = None, time.monotonic() + settle_s
+    started = time.monotonic()
+    readings: list[float] = []
     while True:
         now = key_usage(state)
-        if now is not None and last is not None and abs(now - last) < 1e-9 and now > before:
-            return round(now - before, 6)
-        if time.monotonic() > deadline:
-            return None if now is None else round(now - before, 6)
-        last = now
-        time.sleep(5)
+        if now is not None:
+            readings.append(now)
+        waited = time.monotonic() - started
+        tail = readings[-stable_reads:]
+        if (waited >= min_wait_s and len(tail) == stable_reads
+                and max(tail) - min(tail) < 1e-9):
+            return round(tail[-1] - before, 6)
+        if waited > settle_s:
+            return round(readings[-1] - before, 6) if readings else None
+        time.sleep(every_s)
 
 
 def run_job(arm: str, number: int, job_dir: Path, sdir: Path, jobs: list, arm_dir: Path,

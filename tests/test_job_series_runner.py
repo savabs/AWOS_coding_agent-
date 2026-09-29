@@ -27,11 +27,14 @@ def _no_billing_lookup(monkeypatch):
     monkeypatch.setattr(js, "key_usage", lambda state: None)
 
 
-def test_billed_since_measures_the_settled_change(monkeypatch):
-    readings = iter([1.00, 1.05, 1.05])
+def test_billed_since_waits_for_a_settled_figure(monkeypatch):
+    # The figure lags: a late charge (1.05 -> 1.08) must not be missed.
+    readings = iter([1.00, 1.05, 1.05, 1.08, 1.08, 1.08])
+    clock = iter(range(0, 1000, 10))
     monkeypatch.setattr(js, "key_usage", lambda state: next(readings))
+    monkeypatch.setattr(js.time, "monotonic", lambda: next(clock))
     monkeypatch.setattr(js.time, "sleep", lambda s: None)
-    assert js.billed_since(Path("."), 0.98) == pytest.approx(0.07)
+    assert js.billed_since(Path("."), 0.98) == pytest.approx(0.10)
     assert js.billed_since(Path("."), None) is None
 
 
