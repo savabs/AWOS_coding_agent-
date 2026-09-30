@@ -13,13 +13,21 @@ import os
 from typing import Optional
 
 try:
-    from .providers import chat_client, planner_model
+    from .providers import (
+        REASONING_OFF, chat_client, openrouter_key, planner_model, planner_reasoning,
+    )
 except ImportError:
-    from providers import chat_client, planner_model
+    from providers import (
+        REASONING_OFF, chat_client, openrouter_key, planner_model, planner_reasoning,
+    )
 
 #: CheapPlanner's model when AWOS_PLANNER_MODEL is unset. Reached through
 #: OpenRouter when OPENROUTER_API_KEY is set (docs/specs/openrouter_only_spec.md).
 DEFAULT_CHEAP_PLANNER_MODEL = "qwen3.7-plus"
+
+#: Output budget for a plan call. The JSON itself is ~200–600 tokens; the rest
+#: is headroom for a reasoning model's hidden thinking. Only used tokens bill.
+PLAN_MAX_TOKENS = 8192
 
 
 class CheapPlanner:
@@ -40,6 +48,67 @@ class CheapPlanner:
                 "No planner key found. Set OPENROUTER_API_KEY (or OPENCODE_GO_API_KEY) in .env"
             )
         self.model_name = model or planner_model(DEFAULT_CHEAP_PLANNER_MODEL)
+        # The `reasoning` field is OpenRouter's; a direct provider may reject it.
+        self._via_openrouter = bool(openrouter_key())
+
+    def _plan_request(self, prompt: str, reasoning: Optional[dict]) -> dict:
+        kwargs = dict(
+            model=self.model_name,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=PLAN_MAX_TOKENS,
+            temperature=0.3,
+        )
+        if getattr(self, "_via_openrouter", False) and reasoning is not None:
+            kwargs["extra_body"] = {"reasoning": reasoning}
+        return kwargs
+
+    def _record(self, tracker, response, prompt: str, response_text: str) -> None:
+        if not tracker or not getattr(response, "usage", None):
+            return
+        input_tokens = response.usage.prompt_tokens or len(prompt) // 4
+        output_tokens = response.usage.completion_tokens or len(response_text) // 4
+        # DeepSeek V4 Flash pricing via OpenCode Go: $0.14 input, $0.28 output per 1M
+        cost = (
+            (input_tokens  / 1_000_000) * 0.14 +
+            (output_tokens / 1_000_000) * 0.28
+        )
+        tracker.record(
+            request_type="planning",
+            model=f"{self.model_name} (planning)",
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost=cost
+        )
+
+    def _complete_plan(self, prompt: str, tracker=None) -> str:
+        """The model's plan text; retries once without reasoning if cut short.
+
+        A reasoning model can spend its output budget thinking and return ""
+        or a lone space (finish_reason "length"). Such a reply never parses,
+        and the orchestrator's fallback used to repeat the identical call.
+        Instead, ask once more with reasoning off (measured ~6 s, ~200
+        tokens). Still empty → a clear ValueError naming the cause.
+        """
+        attempts = [planner_reasoning()]
+        if getattr(self, "_via_openrouter", False) and attempts[0] != REASONING_OFF:
+            attempts.append(dict(REASONING_OFF))
+        text, finish = "", None
+        for reasoning in attempts:
+            response = self.client.chat.completions.create(
+                **self._plan_request(prompt, reasoning)
+            )
+            choice = response.choices[0]
+            text = choice.message.content or ""
+            finish = getattr(choice, "finish_reason", None)
+            self._record(tracker, response, prompt, text)
+            if text.strip() and finish != "length":
+                return text
+        if text.strip():
+            return text  # truncated but non-empty: the JSON parser reports it
+        raise ValueError(
+            f"planner model {self.model_name} returned an empty reply "
+            f"(finish_reason={finish!r}) after {len(attempts)} attempt(s)"
+        )
 
     def plan(self, goal: str, codebase_context: dict, tracker=None, existing_goal=None) -> dict:
         """
@@ -133,14 +202,10 @@ independent change; add more entries only for genuinely separate changes:
   "total_tasks": 1
 }}"""
 
+        response_text = ""
         try:
-            response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=4096,  # Enough for both reasoning and the JSON response
-                temperature=0.3,
-            )
-            response_text = response.choices[0].message.content or ""
+            # Every call (a retry too) is billed to the tracker as it happens.
+            response_text = self._complete_plan(prompt, tracker)
 
             # Remove markdown if present
             if "```" in response_text:
@@ -159,23 +224,6 @@ independent change; add more entries only for genuinely separate changes:
                 required = ["task_id", "file", "action", "complexity"]
                 if not all(k in task for k in required):
                     raise ValueError(f"Task missing fields: {task}")
-
-            # Record token usage if tracker provided
-            if tracker and response.usage:
-                input_tokens = response.usage.prompt_tokens or len(prompt) // 4
-                output_tokens = response.usage.completion_tokens or len(response_text) // 4
-                # DeepSeek V4 Flash pricing via OpenCode Go: $0.14 input, $0.28 output per 1M
-                cost = (
-                    (input_tokens  / 1_000_000) * 0.14 +
-                    (output_tokens / 1_000_000) * 0.28
-                )
-                tracker.record(
-                    request_type="planning",
-                    model=f"{self.model_name} (planning)",
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    cost=cost
-                )
 
             return result
 

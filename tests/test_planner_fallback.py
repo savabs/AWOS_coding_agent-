@@ -35,6 +35,16 @@ class _BadJsonPlanner:
         )
 
 
+class _BadJsonPrimary:
+    """A primary planner of another kind (not a CheapPlanner), failing the same way."""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def plan(self, *args, **kwargs):
+        return _BadJsonPlanner().plan(*args, **kwargs)
+
+
 class _GoodPlanner:
     def __init__(self, *args, **kwargs):
         pass
@@ -66,7 +76,7 @@ def env(tmp_path, monkeypatch):
 
 def test_every_planner_fails_goal_runs_as_one_task(env, capsys):
     orch = Orchestrator()
-    orch.planner = _BadJsonPlanner()
+    orch.planner = _BadJsonPrimary()
     plan, source, errors = None, None, None
     with patch.object(orch_mod, "CheapPlanner", _BadJsonPlanner):
         plan, source, errors = orch._plan_goal(GOAL, {})
@@ -79,6 +89,21 @@ def test_every_planner_fails_goal_runs_as_one_task(env, capsys):
     assert errors[1].startswith("fallback planner failed") and "invalid JSON" in errors[1]
     out = capsys.readouterr().out
     assert "fallback CheapPlanner failed" in out and "invalid JSON" in out
+    assert "running the whole goal as one task" in out
+
+
+def test_cheap_primary_failure_skips_the_identical_fallback(env, capsys):
+    # The primary is a CheapPlanner, which retries an empty reply itself; a
+    # CheapPlanner fallback would only repeat the same failing call.
+    orch = Orchestrator()
+    orch.planner = _BadJsonPlanner()
+    with patch.object(orch_mod, "CheapPlanner", _BadJsonPlanner):
+        plan, source, errors = orch._plan_goal(GOAL, {})
+    assert source == "goal_as_task"
+    assert _BadJsonPlanner.calls == 1
+    assert len(errors) == 1 and errors[0].startswith("primary planner failed")
+    out = capsys.readouterr().out
+    assert "trying CheapPlanner fallback" not in out
     assert "running the whole goal as one task" in out
 
 
@@ -106,7 +131,7 @@ def test_empty_plan_is_a_failure_not_a_finished_goal(env):
 def test_execute_feature_runs_goal_when_planners_fail(env):
     """End to end: both planners fail, the goal still reaches the executor."""
     orch = Orchestrator()
-    orch.planner = _BadJsonPlanner()
+    orch.planner = _BadJsonPrimary()
     executed: list = []
 
     def mock_execute(task, ctx):

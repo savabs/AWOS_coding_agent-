@@ -1526,7 +1526,14 @@ class Orchestrator:
             errors.append(f"primary planner failed: {primary_err}")
             logger.warning("[planner] primary planner failed (%s) — trying CheapPlanner", primary_err)
             print(f"[PLANNER] ✗ primary planner failed: {primary_err}", flush=True)
-            print("[PLANNER] trying CheapPlanner fallback…", flush=True)
+        # The primary is often a CheapPlanner itself, which already retries an
+        # empty reply; the fallback then only repeated the same failing call.
+        if is_cheap_only() or (isinstance(CheapPlanner, type)
+                               and isinstance(self.planner, CheapPlanner)):
+            print("[PLANNER] ✗ no other planner to try — running the whole goal as one task",
+                  flush=True)
+            return self._goal_as_single_task_plan(goal), "goal_as_task", errors
+        print("[PLANNER] trying CheapPlanner fallback…", flush=True)
         try:
             with _spinner("Planning (fallback)…"):
                 plan = CheapPlanner().plan(goal, codebase_context, tracker=self.tracker)
@@ -1565,6 +1572,10 @@ class Orchestrator:
         The plan as one task when its tasks touch at most `max_files` distinct
         files; None to keep it as planned (one task, max_files <= 0, or too
         many files). The planner's tasks become an ordered checklist.
+
+        The checklist is marked as a suggestion: the planner sees names, not
+        code, and its guessed designs (a new helper printing its own message)
+        once overrode the codebase's existing pattern and failed the goal.
         """
         if max_files <= 0 or len(tasks) <= 1:
             return None
@@ -1588,7 +1599,15 @@ class Orchestrator:
         task = {
             "task_id": 1,
             "file": files[0] if files else "",
-            "action": f"{goal}\n\nSteps (one session — do them all here, in this order):\n{steps}",
+            "action": (
+                f"{goal}\n\n"
+                "Suggested steps (one session — do them all here). The goal above "
+                "is the requirement; these steps are a planner's guess made without "
+                "reading the code. Where the codebase already has a pattern for "
+                "something (a similar command, its messages, its output handling), "
+                "follow that pattern instead of a step's wording.\n"
+                f"{steps}"
+            ),
             "complexity": complexity,
         }
         if len(files) > 1:

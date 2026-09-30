@@ -1,7 +1,8 @@
 """
 Tests for the post-green stop rule in scaffold/agent/agent_loop.py.
 
-Once run_tests passes after an edit, the loop tells the model to finish, and
+Once run_tests passes after an edit, the loop tells the model to check once
+each requirement the tests don't cover and then finish, and
 if the model keeps going without changing anything it stops the run itself
 after AWOS_AGENT_POST_GREEN_TURNS turns, as completed. The model and the tools
 are stubbed, so nothing runs and no key is needed.
@@ -15,7 +16,14 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scaffold"))
 
-from scaffold.agent.agent_loop import GREEN_MESSAGE, AgentLoop, ModelReply, ToolCall
+from scaffold.agent.agent_loop import (
+    DEFAULT_POST_GREEN_TURNS,
+    GREEN_MESSAGE,
+    SYSTEM_PROMPT,
+    AgentLoop,
+    ModelReply,
+    ToolCall,
+)
 from scaffold.agent.tools.base import ToolResult
 
 
@@ -189,3 +197,50 @@ def test_passing_tests_without_edit_do_not_reset_count():
     outcome, _ = _run(replies, post_green_turns=3)
     assert outcome.post_green_stop is True
     assert outcome.turns == 6
+
+
+# ── (f) the wording: one check of untested requirements, then finish ────────
+
+
+def _flat(text):
+    return " ".join(text.split())
+
+
+def test_green_message_asks_for_one_check_of_untested_requirements():
+    msg = _flat(GREEN_MESSAGE)
+    assert msg.startswith("All tests pass.")
+    assert "Before finishing, check once each requirement" in msg
+    assert "the tests do not cover" in msg
+    assert "failure paths" in msg and "messages" in msg and "formats" in msg
+    assert "short summary and no tool calls" in msg
+    assert "finish now" not in msg
+
+
+def test_system_prompt_step3_checks_untested_requirements_once():
+    prompt = _flat(SYSTEM_PROMPT)
+    assert "Verify with run_tests" in prompt
+    assert "For each requirement the tests do not exercise" in prompt
+    assert "check it once" in prompt
+    assert "fix it if it is wrong" in prompt
+    assert "do not re-run the same smoke command" in prompt
+    assert "Do not repeat checks already done" in prompt
+    # The old blanket ban is gone.
+    assert "at most one quick manual check" not in prompt
+    assert "Do not write ad-hoc scripts" not in prompt
+
+
+def test_default_cap_leaves_room_for_a_check_pass():
+    # A typical check pass (2-4 idle turns of reads/commands) must not be cut.
+    assert DEFAULT_POST_GREEN_TURNS >= 5
+    replies = [edit(), run_tests(), read(0), read(1), read(2), read(3),
+               ModelReply(text="checked; finished")]
+    outcome, _ = _run(replies)
+    assert outcome.post_green_stop is False
+    assert outcome.final_message == "checked; finished"
+
+
+def test_default_cap_still_stops_repeated_smoke_checks():
+    replies = [edit(), run_tests()] + [read(i) for i in range(20)]
+    outcome, _ = _run(replies)
+    assert outcome.post_green_stop is True
+    assert outcome.turns == 2 + DEFAULT_POST_GREEN_TURNS + 1

@@ -65,7 +65,10 @@ def test_small_plan_collapses_into_one_task():
     assert task["complexity"] == "high"
     action = task["action"]
     assert action.startswith(GOAL)
-    assert "Steps (one session — do them all here, in this order):" in action
+    assert "Suggested steps (one session — do them all here)" in action
+    # The goal is the requirement; the planner's steps yield to existing patterns.
+    assert "The goal above is the requirement" in action
+    assert "follow that pattern instead" in action
     for n, t in enumerate(LAYERS, 1):
         assert f"{n}. {t['action']}" in action
     # Checklist order is the planner's order.

@@ -61,13 +61,20 @@ NUDGE_MESSAGE = (
 )
 #: Appended to a passing run_tests result that follows an edit. A quarter of
 #: a 24-job benchmark's turns came after the tests were already green, mostly
-#: hand-written smoke checks of behaviour the tests covered.
+#: hand-written smoke checks of behaviour the tests covered. "Finish now" cut
+#: that, but then some jobs stopped at the first green and missed a
+#: requirement the visible tests don't exercise (a failure path, an exact
+#: message) - so the message asks for one check of each such requirement.
 GREEN_MESSAGE = (
-    "All tests pass. If every requirement of the task is met, finish now: "
+    "All tests pass. Before finishing, check once each requirement of the "
+    "task the tests do not cover (failure paths, messages, formats); then "
     "reply with a short summary and no tool calls."
 )
 #: Turns allowed after a green run_tests in which nothing changed before the
 #: loop stops the run as completed. AWOS_AGENT_POST_GREEN_TURNS; 0 disables.
+#: The one-pass requirement check is typically 2-4 turns of reads/commands and
+#: any fix resets the count, so 6 leaves headroom for it while still cutting
+#: repeated smoke checks.
 DEFAULT_POST_GREEN_TURNS = 6
 ELIDED_PREFIX = "[earlier tool output elided"
 DEFAULT_MAX_REPEATS = 3
@@ -175,11 +182,12 @@ Work in this order:
 2. Make the smallest edit that accomplishes the task, matching the surrounding
    code's style and idiom.
 3. Verify with run_tests and read the output. If your change broke something,
-   fix it. Once the tests pass and every requirement of the task is met, you
-   are done: reply with a short summary and no tool calls. Do not write ad-hoc
-   scripts or manual command-line checks for behaviour the tests already
-   cover; at most one quick manual check, and only when no test covers the
-   change.
+   fix it. Once the tests pass, go through the task's requirements. For each
+   requirement the tests do not exercise (failure paths, error messages, exact
+   output formats, edge cases the task names), check it once - by reading the
+   code path or with one targeted command - and fix it if it is wrong. Then
+   reply with a short summary and no tool calls. Do not repeat checks already
+   done, and do not re-run the same smoke command.
 
 Rules:
 - edit_file rejects an edit that would break the file's syntax and tells you

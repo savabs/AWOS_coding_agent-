@@ -78,6 +78,31 @@ def planner_model(default: str) -> str:
     return os.getenv(PLANNER_MODEL_ENV, "").strip() or default
 
 
+#: How hard a reasoning model may think during a planner call (OpenRouter's
+#: `reasoning` request field). DeepSeek V4 Flash left unbounded spent its
+#: whole 4096-token budget on hidden reasoning and returned "" after 2–3
+#: minutes on half the ordertool jobs; at "low" the same plan took ~730
+#: reasoning tokens. Values: minimal | low (default) | medium | high |
+#: off (no reasoning) | default (send nothing; the model's own setting).
+PLANNER_REASONING_ENV = "AWOS_PLANNER_REASONING"
+DEFAULT_PLANNER_REASONING = "low"
+_REASONING_EFFORTS = ("minimal", "low", "medium", "high")
+#: Reasoning switched off — the planner's retry after an empty reply.
+REASONING_OFF: dict = {"enabled": False}
+
+
+def planner_reasoning() -> Optional[dict]:
+    """The `reasoning` field for planner calls, or None to send none."""
+    value = os.getenv(PLANNER_REASONING_ENV, "").strip().lower() or DEFAULT_PLANNER_REASONING
+    if value in ("default", "model"):
+        return None
+    if value in ("off", "none", "0", "false", "disabled"):
+        return dict(REASONING_OFF)
+    if value not in _REASONING_EFFORTS:
+        value = DEFAULT_PLANNER_REASONING
+    return {"effort": value}
+
+
 def openrouter_key() -> Optional[str]:
     return os.getenv("OPENROUTER_API_KEY") or None
 
