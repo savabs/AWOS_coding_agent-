@@ -59,6 +59,16 @@ NUDGE_MESSAGE = (
     "Continue: read what you need, make the change with edit_file, then run "
     "the tests to check it."
 )
+#: Appended to a passing run_tests result that follows an edit. A quarter of
+#: a 24-job benchmark's turns came after the tests were already green, mostly
+#: hand-written smoke checks of behaviour the tests covered.
+GREEN_MESSAGE = (
+    "All tests pass. If every requirement of the task is met, finish now: "
+    "reply with a short summary and no tool calls."
+)
+#: Turns allowed after a green run_tests in which nothing changed before the
+#: loop stops the run as completed. AWOS_AGENT_POST_GREEN_TURNS; 0 disables.
+DEFAULT_POST_GREEN_TURNS = 6
 ELIDED_PREFIX = "[earlier tool output elided"
 DEFAULT_MAX_REPEATS = 3
 
@@ -164,8 +174,12 @@ Work in this order:
    at an API, a signature or a file's contents — open it.
 2. Make the smallest edit that accomplishes the task, matching the surrounding
    code's style and idiom.
-3. Verify. Run the tests and read the output. If your change broke something,
-   fix it.
+3. Verify with run_tests and read the output. If your change broke something,
+   fix it. Once the tests pass and every requirement of the task is met, you
+   are done: reply with a short summary and no tool calls. Do not write ad-hoc
+   scripts or manual command-line checks for behaviour the tests already
+   cover; at most one quick manual check, and only when no test covers the
+   change.
 
 Rules:
 - edit_file rejects an edit that would break the file's syntax and tells you
@@ -482,6 +496,8 @@ class LoopOutcome:
     elapsed_sec: float = 0.0
     nudges: int = 0
     elided_results: int = 0
+    #: True when the run was ended by the post-green cap, not by the model.
+    post_green_stop: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -499,6 +515,7 @@ class LoopOutcome:
             "elapsed_sec": round(self.elapsed_sec, 2),
             "nudges": self.nudges,
             "elided_results": self.elided_results,
+            "post_green_stop": self.post_green_stop,
         }
 
 
@@ -520,6 +537,7 @@ class AgentLoop:
         require_edits: bool = False,
         keep_turns: Optional[int] = None,
         tool_result_chars: Optional[int] = None,
+        post_green_turns: Optional[int] = None,
     ) -> None:
         self.registry = registry
         self.client = client
@@ -535,6 +553,12 @@ class AgentLoop:
         # None keeps the adapters' default, byte-for-byte (cassettes rely on it).
         self.tool_result_chars = tool_result_chars
         self.require_edits = require_edits
+        # Idle turns tolerated once the tests are green; 0 or less never stops.
+        self.post_green_turns = (
+            post_green_turns
+            if post_green_turns is not None
+            else _int_env("AWOS_AGENT_POST_GREEN_TURNS", DEFAULT_POST_GREEN_TURNS)
+        )
         self.max_repeats = max_repeats
         self.system_prompt = system_prompt
         self.ledger = ledger
@@ -597,6 +621,12 @@ class AgentLoop:
         last_output: dict[str, str] = {}
         touched: list[str] = []
         written: list[str] = []
+        # Post-green tracking. `edited` is an edit since the last green
+        # run_tests; `green` is a passing run_tests after an edit with nothing
+        # changed since; `idle` counts whole turns spent green.
+        edited = False
+        green = False
+        idle = 0
 
         for turn in range(1, self.max_turns + 1):
             outcome.turns = turn
@@ -687,6 +717,8 @@ class AgentLoop:
             messages.append(self.client.format_assistant_turn(reply))
 
             results = []
+            notes: dict[int, str] = {}  # result index -> text shown after it
+            fresh_green = False  # green (re-)established by this turn
             for call in reply.tool_calls:
                 signature = f"{call.name}:{json.dumps(call.arguments, sort_keys=True, default=str)}"
                 key = (signature, state_version)
@@ -709,6 +741,8 @@ class AgentLoop:
                     continue
 
                 is_command = call.name in COMMAND_TOOLS
+                version_before = state_version
+                changed = None
                 before = watch.snapshot() if watch and is_command else None
                 call_started = time.monotonic()
                 result = self.registry.execute(call.name, call.arguments)
@@ -736,6 +770,22 @@ class AgentLoop:
                     path = result.data.get("path")
                     if path and path not in touched:
                         touched.append(path)
+                # Any state change ends green: it must be re-earned by a new
+                # passing run_tests. Only a real edit arms the reminder.
+                if state_version != version_before:
+                    green = False
+                if result.success and (call.name in ("edit_file", "write_file")
+                                       or (is_command and changed)):
+                    edited = True
+                if call.name == "run_tests":
+                    data = getattr(result, "data", None) or {}
+                    if (result.success and data.get("failed") == 0
+                            and (data.get("passed") or 0) > 0):
+                        if edited:
+                            notes[len(results)] = GREEN_MESSAGE
+                            edited, green, idle, fresh_green = False, True, 0, True
+                    else:
+                        green = False
                 results.append(result)
                 self._emit("tool", name=call.name, ok=result.success)
 
@@ -758,8 +808,30 @@ class AgentLoop:
             ):
                 break
 
+            if green and not fresh_green:
+                idle += 1
+                if 0 < self.post_green_turns < idle:
+                    # The tests passed and nothing has changed since: whatever
+                    # the model is still checking, the orchestrator re-runs the
+                    # tests itself, so this is a finish, not a failure.
+                    outcome.success = True
+                    outcome.stop_reason = "completed"
+                    outcome.post_green_stop = True
+                    outcome.final_message = (
+                        f"Stopped: tests passed {idle} turns ago and nothing "
+                        "changed since."
+                    )
+                    self._emit("post_green_stop", turn=turn, idle_turns=idle)
+                    _trace(f"t{turn} stopped after green: {idle} turns without a change")
+                    break
+
             if self.tool_result_chars is not None:
                 results = [_clip_result(r, self.tool_result_chars) for r in results]
+            if notes:
+                # Copies, so the traced results and the transcript keep the
+                # tool's own text.
+                results = [_with_note(r, notes[i]) if i in notes else r
+                           for i, r in enumerate(results)]
             messages.extend(self.client.format_tool_results(reply.tool_calls, results))
 
         outcome.files_touched = touched
@@ -914,6 +986,15 @@ def _condense_history(messages: list[dict[str, Any]], keep_turns: int) -> int:
             if changed:
                 messages[i] = {**message, "content": new_blocks}
     return stubbed
+
+
+def _with_note(result: Any, note: str) -> Any:
+    """A copy of a ToolResult with `note` appended to its text."""
+    import copy
+
+    noted = copy.copy(result)
+    noted.text = f"{getattr(result, 'text', '') or ''}\n\n{note}".lstrip()
+    return noted
 
 
 def _synthetic_failure(message: str) -> Any:

@@ -123,6 +123,17 @@ def _agent_retries() -> int:
         return 1
 
 
+def _single_task_max_files() -> int:
+    """
+    AWOS_SINGLE_TASK_MAX_FILES (default 4): a plan whose tasks touch at most
+    this many files runs as one task; 0 or less keeps the planner's split.
+    """
+    try:
+        return int(os.getenv("AWOS_SINGLE_TASK_MAX_FILES", "4"))
+    except ValueError:
+        return 4
+
+
 def _run_cost_cap() -> Optional[float]:
     """AWOS_MAX_RUN_COST, read the way AgentLoop reads it; None when unset."""
     raw = os.getenv("AWOS_MAX_RUN_COST", "").strip()
@@ -210,6 +221,10 @@ def _agent_resume_reason(outcome, verdict: dict, model_errors: int) -> Optional[
     The caller also stops once the task's cost cap is used up across attempts.
     """
     stop = outcome.stop_reason
+    if verdict.get("green_stop"):
+        # Stopped after its edits turned the tests green: a resume only
+        # re-reads finished work (one ran 22 more turns to change nothing).
+        return None
     if stop == "max_turns":
         return "it ran out of turns (max_turns)"
     if stop == "repeated_tool_call":
@@ -939,6 +954,7 @@ class Orchestrator:
 
         # Phase 1: Planning — skip if caller already built a cheap plan
         _plan_source, _planner_errors = "pre_planned", []
+        _plan_collapsed = False
         if pre_planned_tasks is not None:
             tasks = pre_planned_tasks
             print(f"\n[PLANNER] Using pre-built plan: {len(tasks)} tasks")
@@ -948,6 +964,21 @@ class Orchestrator:
             print(f"\n[PLANNER] Breaking down goal: {goal}")
             plan, _plan_source, _planner_errors = self._plan_goal(goal, codebase_context, _live)
             tasks = plan.get("plan", [])
+            # A layer-by-layer split (model → service → CLI) of a small
+            # feature cost turns: task 1 did the whole goal, and each later
+            # task started cold, re-read it all and ran out of turns on the
+            # nudges. The agent loop can carry a small plan in one session;
+            # the Worker edits one file per task, so it keeps the split.
+            _max_files = _single_task_max_files()
+            if executor_choice() == "agent_loop":
+                collapsed = self._collapse_small_plan(goal, tasks, _max_files)
+                if collapsed is not None:
+                    print(
+                        f"[PLANNER] {len(tasks)} tasks touch {len(task_files(collapsed[0]))} "
+                        f"file(s) → running as one task (AWOS_SINGLE_TASK_MAX_FILES={_max_files})"
+                    )
+                    tasks = collapsed
+                    _plan_collapsed = True
             print(f"[PLANNER] Generated {len(tasks)} tasks:")
             for task in tasks:
                 print(f"  Task {task['task_id']}: {task['action']} (complexity: {task['complexity']})")
@@ -1442,6 +1473,7 @@ class Orchestrator:
             "time_elapsed": elapsed,
             # "planner" | "planner_fallback" | "goal_as_task" | "pre_planned"
             "plan_source": _plan_source,
+            "plan_collapsed": _plan_collapsed,
             "planner_errors": _planner_errors,
             "integration_review": review,
             "goal_complete": goal_complete,
@@ -1526,6 +1558,42 @@ class Orchestrator:
             "reasoning": "every planner failed; the goal runs as a single task",
             "total_tasks": 1,
         }
+
+    @staticmethod
+    def _collapse_small_plan(goal: str, tasks: list, max_files: int) -> Optional[list]:
+        """
+        The plan as one task when its tasks touch at most `max_files` distinct
+        files; None to keep it as planned (one task, max_files <= 0, or too
+        many files). The planner's tasks become an ordered checklist.
+        """
+        if max_files <= 0 or len(tasks) <= 1:
+            return None
+        files: list = []
+        for task in tasks:
+            for path in task_files(task):
+                if path not in files:
+                    files.append(path)
+        if len(files) > max_files:
+            return None
+        rank = {"low": 0, "medium": 1, "high": 2}
+        complexity = max(
+            (t.get("complexity", "low") for t in tasks),
+            key=lambda c: rank.get(str(c).lower(), 1),
+        )
+        steps = "\n".join(
+            f"{n}. {t.get('action', '')}"
+            + (f" ({', '.join(task_files(t))})" if task_files(t) else "")
+            for n, t in enumerate(tasks, 1)
+        )
+        task = {
+            "task_id": 1,
+            "file": files[0] if files else "",
+            "action": f"{goal}\n\nSteps (one session — do them all here, in this order):\n{steps}",
+            "complexity": complexity,
+        }
+        if len(files) > 1:
+            task["files"] = files
+        return [task]
 
     # ── Goal completeness check ───────────────────────────────────────────────
 
@@ -1944,7 +2012,13 @@ class Orchestrator:
                     # Not once an earlier attempt has edited: a resumed attempt
                     # that finds the work done was nudged into edits it did not
                     # need, and at a small turn budget ran out on the nudges.
-                    require_edits=needs_edits and not files_changed,
+                    # Nor once an earlier task in this goal kept edits: a
+                    # later layer task that finds the work done must be free
+                    # to confirm it with the tests and stop.
+                    require_edits=(
+                        needs_edits and not files_changed
+                        and not getattr(self, "_run_files_changed", set())
+                    ),
                     max_cost_usd=None if cost_cap is None else cost_cap - spent,
                 ).run(prompt)
                 outcomes.append(outcome)
@@ -2023,6 +2097,8 @@ class Orchestrator:
             "output_tokens": sum(o.output_tokens for o in outcomes),
             "cost_usd": sum(o.cost_usd for o in outcomes),
             "model_used": model,
+            # The next task's prompt starts from this, not cold.
+            "_applied_context": self._agent_applied_context(task, files_changed, verdict),
         }
         return self._record_tool_executor_result(
             result,
@@ -2107,9 +2183,25 @@ class Orchestrator:
             and test_result.passed > 0
         )
 
+        # A turn-budget or repeat stop after its edits turned the tests green
+        # is finished work; resuming it spent 20+ turns re-reading it.
+        green_stop = (
+            outcome.stop_reason in ("max_turns", "repeated_tool_call")
+            and bool(files_changed)
+            and tests_ran
+            and test_result.failed == 0
+            and test_result.passed > 0
+        )
+
         completed = outcome.stop_reason == "completed"
         summary = outcome.final_message[:500]
-        if not completed:
+        if green_stop:
+            success, error = True, ""
+            summary = (
+                f"Stopped on {outcome.stop_reason} after its tests passed "
+                f"({test_result.passed} passed). {summary}"
+            )
+        elif not completed:
             success, error = False, f"AgentLoop stopped: {outcome.stop_reason}"
         elif files_changed or not needs_edits:
             success, error = True, ""
@@ -2131,7 +2223,20 @@ class Orchestrator:
             "summary": summary,
             "test_result": test_result,
             "test_status": test_status,
+            "green_stop": green_stop,
         }
+
+    @staticmethod
+    def _agent_applied_context(task: dict, files_changed: list, verdict: dict) -> str:
+        """What a finished agent-loop task did, for the next task's prompt."""
+        if not verdict.get("success"):
+            return ""
+        return (
+            f"PREVIOUS TASK COMPLETED: {str(task.get('action', ''))[:300]}\n"
+            f"  Files changed: {', '.join(files_changed) or 'none'}\n"
+            f"  Tests: {verdict.get('test_status', 'no tests ran')}\n"
+            f"  Summary: {str(verdict.get('summary', ''))[:400]}"
+        )
 
     @staticmethod
     def _agent_loop_prompt(task: dict, ctx: dict) -> str:
@@ -2140,7 +2245,11 @@ class Orchestrator:
         if files:
             parts.append("Files to change: " + ", ".join(files))
         if task.get("prev_task_context"):
-            parts.append("The previous task changed:\n" + str(task["prev_task_context"])[:2000])
+            parts.append(
+                "The previous task changed:\n" + str(task["prev_task_context"])[:2000]
+                + "\n\nIf earlier tasks already did what this task asks, confirm it "
+                "with run_tests and finish without editing."
+            )
         exploration = (ctx.get("exploration") or {}).get("exploration_summary", "")
         if exploration:
             parts.append("Exploration notes:\n" + str(exploration)[:3000])
@@ -2345,6 +2454,8 @@ class Orchestrator:
             )
 
         out = {"task_id": task_id, "success": _success, "task": task, marker: True}
+        if _success and result.get("_applied_context"):
+            out["_applied_context"] = result["_applied_context"]  # chained by _run_task_batch
         if not _success:
             out["failure_kind"] = failure_kind
             out["verify_error"] = result.get("error", "")

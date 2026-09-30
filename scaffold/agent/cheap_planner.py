@@ -103,8 +103,9 @@ RULES:
 7. Existing tests are the contract. Never plan to change their assertions to
    make them pass.
 8. State OUTCOMES and acceptance, not mechanisms: each "action" says what must
-   be true when the task is done and how to check it (a command to run, a test,
-   an observable behaviour). Never name a library, function, framework or
+   be true when the task is done and how the tests or an observable behaviour
+   will show it (the executor runs the test suite itself; do not prescribe
+   manual commands). Never name a library, function, framework or
    technique that is not shown in the CODEBASE section above — the executor
    reads the code and chooses how.
 9. Performance goals ("faster", "slow", "takes forever", "Nx"): plan exactly ONE

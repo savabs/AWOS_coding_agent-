@@ -153,12 +153,13 @@ def test_model_error_is_resumed_only_once(monkeypatch):
 
 
 def test_resumed_attempt_is_not_nudged_to_edit_after_earlier_edits(monkeypatch):
-    # Attempt 1 fixes calc.py and runs out of turns; the tests are green.
-    # Attempt 2 finds the work done. It used to be told "you have not changed
-    # any file" twice, run out of turns on the nudges, and roll the fix back.
+    # Attempt 1 fixes calc.py and runs out of turns with a test still red, so
+    # it resumes (a green stop is accepted without a resume). Attempt 2 finds
+    # the work done. It used to be told "you have not changed any file"
+    # twice, run out of turns on the nudges, and roll the fix back.
     monkeypatch.setenv("AWOS_AGENT_MAX_TURNS", "2")
     done = ModelReply(text="Already done.", input_tokens=10, output_tokens=5)
-    run = _run([FIX, READ, done, done, done], [GREEN, GREEN])
+    run = _run([FIX, READ, done, done, done], [RED, GREEN])
     assert len(run.prompts) == 2
     assert run.out["success"] is True
     assert "return a + b" in (run.root / "calc.py").read_text()
