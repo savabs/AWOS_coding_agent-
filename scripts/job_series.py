@@ -16,6 +16,8 @@ Job N starts from base + the references of jobs 1..N-1 (cumulative).
     python3 scripts/job_series.py validate [--series ordertool]
     python3 scripts/job_series.py run [--series ordertool] [--arms off,on] [--jobs 1-12]
     python3 scripts/job_series.py run --dry-run      # everything but the model calls
+    python3 scripts/job_series.py run --arms off,aider --jobs 3,8 --repeat 5   # noise
+    python3 scripts/job_series.py revalidate 20260929T131340 [--data-root DIR]
 
 `run` gives every arm its own empty state dir (the child's cwd, so every .awos
 store starts empty and is private to that arm) and one persistent git project
@@ -466,11 +468,63 @@ def wait_for_backend(max_wait_s: float | None = None, check=None, sleep=time.sle
         delay = min(delay * 2, 180.0)
 
 
+_HARNESS_AIDER = None
+
+
+def _ha():
+    """scripts/harness_aider.py as a module (it owns the no-edit rules)."""
+    global _HARNESS_AIDER
+    if _HARNESS_AIDER is None:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "harness_aider_for_job_series", Path(__file__).resolve().parent / "harness_aider.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _HARNESS_AIDER = mod
+    return _HARNESS_AIDER
+
+
+_TS_PREFIX = re.compile(r"^\+\d+:\d\d ", re.M)
+_NO_EDIT_LINE = re.compile(r"\[harness_aider\] aider_no_edit reason=(\w+)")
+_FINAL_LINE = re.compile(r"\[aider-final\] (\{.*\})")
+_APPLIED_LINE = re.compile(r"^Applied edit to (\S+)", re.M)
+# The harness banner: "add_files=none(0) " (old) / "add_files=auto:src+tests(12 edit, ...".
+_PRELOADED = re.compile(r"\[harness_aider\] aider .*? add_files=\S*?\((\d+)")
+
+
+def aider_no_edit(log_text: str) -> str | None:
+    """For an Aider job's log section: why it made no edit, or None.
+
+    None also when the section is not an Aider run. Uses the harness's own
+    `aider_no_edit reason=` line when present; for logs from before that line
+    existed, re-derives it from `[aider-final]`, "Applied edit to" lines and the
+    model's "please add ... to the chat" requests.
+    """
+    if "[harness_aider]" not in log_text:
+        return None
+    text = _TS_PREFIX.sub("", log_text)
+    m = _NO_EDIT_LINE.search(text)
+    if m:
+        return m.group(1)
+    final: dict = {}
+    for fm in _FINAL_LINE.finditer(text):
+        try:
+            final = json.loads(fm.group(1))
+        except ValueError:
+            pass
+    pre = _PRELOADED.search(text)
+    ha = _ha()
+    return ha.no_edit_reason(final, _APPLIED_LINE.findall(text), ha.asked_to_add_files(text),
+                             preloaded=bool(pre and int(pre.group(1)) > 0))
+
+
 def detect_invalid(log_text: str, turns: int, dry_run: bool) -> str | None:
     """Why this job's result says nothing about the agent, or None if it is a fair result.
 
     Infrastructure markers in the job's log section (network drop, dead key), or a
-    real run that recorded 0 agent turns (the planner/child crashed before acting).
+    real run that recorded 0 agent turns (the planner/child crashed before acting),
+    or an Aider run that never edited because it had no files in its chat / only
+    asked for files to be added (the harness's setup, not the model's work).
     A timeout is only invalid when its log shows one of the markers.
     """
     for marker in INVALID_MARKERS:
@@ -478,6 +532,9 @@ def detect_invalid(log_text: str, turns: int, dry_run: bool) -> str | None:
             return f"log shows {marker!r}"
     if not dry_run and turns == 0:
         return "0 agent turns (child crashed before the agent acted)"
+    no_edit = aider_no_edit(log_text)
+    if no_edit in _ha().NO_EDIT_SETUP_REASONS:
+        return f"aider_no_edit ({no_edit}: Aider never had the code to edit)"
     return None
 
 
@@ -677,6 +734,12 @@ def run_job(arm: str, number: int, job_dir: Path, sdir: Path, jobs: list, arm_di
         "notebook_chars": notebook_chars(state),
         "invalid": invalid_reason is not None, "invalid_reason": invalid_reason, "attempts": 1,
     }
+    no_edit = aider_no_edit(log_text)
+    if no_edit or "[harness_aider]" in log_text:
+        result["aider_no_edit"] = no_edit
+        if no_edit:
+            print(f"{prefix} aider_no_edit: {no_edit} (files in chat: "
+                  f"{len(report.get('files_in_chat') or [])})", flush=True)
     verdict = ("INVALID (" + invalid_reason + ")" if invalid_reason
                else "SOLVED" if result["solved"] else "not solved")
     print(f"{prefix} {verdict} — hidden "
@@ -727,44 +790,108 @@ def run_job_with_retries(arm: str, number: int, job_dir: Path, sdir: Path, jobs:
             return result, f"backend down after invalid {arm} job {number} ({result['invalid_reason']})"
 
 
-def dropped_jobs(results: list[dict], arms: list[str]) -> dict[int, str]:
-    """{job: why} for every job where any arm's row is invalid (paired exclusion)."""
-    out: dict[int, str] = {}
+def _rep(r: dict) -> int:
+    """A row's repeat number (rows from before --repeat existed are repeat 1)."""
+    return int(r.get("repeat", 1) or 1)
+
+
+def dropped_jobs(results: list[dict], arms: list[str]) -> dict[tuple[int, int], str]:
+    """{(repeat, job): why} for every job where any arm's row is invalid in that
+    repeat (paired exclusion: the job leaves the comparison in every arm)."""
+    out: dict[tuple[int, int], str] = {}
     for r in results:
         if r["arm"] in arms and r.get("invalid"):
+            key = (_rep(r), r["job"])
             why = f"{r['arm']}: {r.get('invalid_reason')}"
-            out[r["job"]] = f"{out[r['job']]}; {why}" if r["job"] in out else why
+            out[key] = f"{out[key]}; {why}" if key in out else why
     return dict(sorted(out.items()))
+
+
+def _multi(results: list[dict]) -> bool:
+    return any(_rep(r) > 1 for r in results)
+
+
+def _drop_label(key: tuple[int, int], multi: bool) -> str:
+    rep, job = key
+    return f"r{rep}:{job}" if multi else str(job)
 
 
 def _mean(xs: list[float]) -> float | None:
     return round(sum(xs) / len(xs), 4) if xs else None
 
 
-def summarize(results: list[dict], arms: list[str]) -> dict:
-    def block(rows: list[dict]) -> dict:
-        return {
-            "jobs": len(rows),
-            "solved": sum(r["solved"] for r in rows),
-            "solve_rate": _mean([float(r["solved"]) for r in rows]),
-            "mean_cost_usd": _mean([r["cost_usd"] for r in rows]),
-            "mean_billed_usd": _mean([r["billed_usd"] for r in rows
-                                      if r.get("billed_usd") is not None]),
-            "mean_turns": _mean([float(r.get("turns", 0)) for r in rows]),
-            "mean_minutes": _mean([r["minutes"] for r in rows]),
-        }
+def _spread(xs: list[float]) -> dict:
+    """mean, sample sd, min, max of per-repeat values (None values skipped)."""
+    xs = [float(x) for x in xs if x is not None]
+    if not xs:
+        return {"n": 0, "mean": None, "sd": None, "min": None, "max": None}
+    m = sum(xs) / len(xs)
+    sd = (sum((x - m) ** 2 for x in xs) / (len(xs) - 1)) ** 0.5 if len(xs) > 1 else 0.0
+    return {"n": len(xs), "mean": round(m, 4), "sd": round(sd, 4),
+            "min": round(min(xs), 4), "max": round(max(xs), 4)}
 
-    # Paired exclusion: a job invalid in either arm leaves the comparison entirely.
+
+def _block(rows: list[dict]) -> dict:
+    return {
+        "jobs": len(rows),
+        "solved": sum(r["solved"] for r in rows),
+        "solve_rate": _mean([float(r["solved"]) for r in rows]),
+        "mean_cost_usd": _mean([r["cost_usd"] for r in rows]),
+        "mean_billed_usd": _mean([r["billed_usd"] for r in rows
+                                  if r.get("billed_usd") is not None]),
+        "mean_turns": _mean([float(r.get("turns", 0)) for r in rows]),
+        "mean_minutes": _mean([r["minutes"] for r in rows]),
+    }
+
+
+def repeat_summary(results: list[dict], arms: list[str],
+                   dropped: dict[tuple[int, int], str]) -> dict:
+    """Noise across repeats: per job and arm, solves out of the valid runs; per
+    arm, mean +- sd (and min/max) over repeats of solve rate, turns and cost."""
+    reps = sorted({_rep(r) for r in results})
+    per_job: dict = {}
+    per_repeat: dict = {}
+    overall: dict = {}
+    for arm in arms:
+        rows = [r for r in results if r["arm"] == arm]
+        jobs: dict = {}
+        for r in rows:
+            j = jobs.setdefault(str(r["job"]), {"solved": 0, "runs": 0, "invalid": 0})
+            if (_rep(r), r["job"]) in dropped:
+                j["invalid"] += 1
+                continue
+            j["runs"] += 1
+            j["solved"] += int(bool(r["solved"]))
+        per_job[arm] = dict(sorted(jobs.items(), key=lambda kv: int(kv[0])))
+        blocks = [{"repeat": rep, **_block([r for r in rows if _rep(r) == rep
+                                           and (rep, r["job"]) not in dropped])}
+                  for rep in reps]
+        per_repeat[arm] = blocks
+        overall[arm] = {
+            "solve_rate": _spread([b["solve_rate"] for b in blocks]),
+            "mean_turns": _spread([b["mean_turns"] for b in blocks]),
+            "mean_billed_usd": _spread([b["mean_billed_usd"] for b in blocks]),
+            "mean_cost_usd": _spread([b["mean_cost_usd"] for b in blocks]),
+        }
+    return {"repeats": reps, "per_job": per_job, "per_repeat": per_repeat, "overall": overall}
+
+
+def summarize(results: list[dict], arms: list[str]) -> dict:
+    # Paired exclusion: a job invalid in any arm leaves the comparison entirely
+    # (per repeat, when there are repeats).
     dropped = dropped_jobs(results, arms)
     out: dict = {}
     for arm in arms:
-        rows = [r for r in results if r["arm"] == arm and r["job"] not in dropped]
+        rows = [r for r in results if r["arm"] == arm and (_rep(r), r["job"]) not in dropped]
         out[arm] = {
-            "all": block(rows),
-            "jobs_1_6": block([r for r in rows if r["job"] <= 6]),
-            "jobs_7_12": block([r for r in rows if 7 <= r["job"] <= 12]),
+            "all": _block(rows),
+            "jobs_1_6": _block([r for r in rows if r["job"] <= 6]),
+            "jobs_7_12": _block([r for r in rows if 7 <= r["job"] <= 12]),
         }
-    out["dropped_jobs"] = {str(n): why for n, why in dropped.items()}
+    multi = _multi(results)
+    out["dropped_jobs"] = {_drop_label(k, multi): why for k, why in dropped.items()}
+    if multi:
+        out["repeats"] = repeat_summary(results, arms, dropped)
     return out
 
 
@@ -774,18 +901,27 @@ def _fmt(v, money=False) -> str:
     return f"${v:.4f}" if money else (f"{v:.2f}" if isinstance(v, float) else str(v))
 
 
+def _fmt_spread(s: dict, money: bool = False) -> str:
+    if not s or s.get("mean") is None:
+        return "-"
+    f = (lambda v: f"${v:.4f}") if money else (lambda v: f"{v:.2f}")
+    return f"{f(s['mean'])} ± {f(s['sd'])} [{f(s['min'])}..{f(s['max'])}]"
+
+
 def print_report(results: list[dict], arms: list[str], summary: dict) -> None:
-    by = {(r["arm"], r["job"]): r for r in results}
+    by = {(r["arm"], _rep(r), r["job"]): r for r in results}
     dropped = dropped_jobs(results, arms)
-    numbers = sorted({r["job"] for r in results} - set(dropped))
+    multi = _multi(results)
+    keys = sorted({(_rep(r), r["job"]) for r in results} - set(dropped))
     width = 10 + 34 * len(arms)
     print("\n" + "=" * width)
     print("  job     " + "".join(f"{arm + ': verdict  turns  cost  min':<34}" for arm in arms))
     print("  " + "-" * (width - 2))
-    for n in numbers:
-        line = f"  {n:>3}     "
+    for rep, n in keys:
+        label = f"r{rep}:{n}" if multi else str(n)
+        line = f"  {label:>5}   "
         for arm in arms:
-            r = by.get((arm, n))
+            r = by.get((arm, rep, n))
             cell = ("-" if r is None else
                     f"{'SOLVED' if r['solved'] else 'no':<8} {r.get('turns', 0):>5}  "
                     f"${r['cost_usd']:.3f} {r['minutes']:>5}")
@@ -801,19 +937,54 @@ def print_report(results: list[dict], arms: list[str], summary: dict) -> None:
                   f"(rate {_fmt(b['solve_rate'])})  mean cost {_fmt(b['mean_cost_usd'], True)}  "
                   f"mean turns {_fmt(b['mean_turns'])}  "
                   f"mean billed {_fmt(b.get('mean_billed_usd'), True)}")
-    for n, why in dropped.items():
-        print(f"  dropped job {n} from both arms (invalid run — {why})")
+    rs = summary.get("repeats")
+    if rs:
+        print("  " + "-" * (width - 2))
+        print(f"  across {len(rs['repeats'])} repeats (mean ± sd [min..max] of per-repeat values):")
+        for arm in arms:
+            o = rs["overall"][arm]
+            print(f"  {arm:<4} solve rate {_fmt_spread(o['solve_rate'])}  "
+                  f"turns {_fmt_spread(o['mean_turns'])}  "
+                  f"billed {_fmt_spread(o['mean_billed_usd'], True)}")
+            print(f"       per job solved/runs: " + "  ".join(
+                f"j{j}:{v['solved']}/{v['runs']}" for j, v in rs["per_job"][arm].items()))
+    for (rep, n), why in dropped.items():
+        where = f"job {n} (repeat {rep})" if multi else f"job {n}"
+        print(f"  dropped {where} from {'both' if len(arms) == 2 else 'all'} arms (invalid run — {why})")
     print("=" * width)
+
+
+def _setup_arm_dirs(run_root: Path, arms: list[str], env_src: Path | None) -> dict[str, Path]:
+    arm_dirs: dict[str, Path] = {}
+    for arm in arms:
+        arm_dir = run_root / arm
+        (arm_dir / "state").mkdir(parents=True, exist_ok=True)
+        (arm_dir / "project").mkdir(parents=True, exist_ok=True)
+        if env_src:
+            shutil.copy2(env_src, arm_dir / "state" / ".env")
+        git(arm_dir / "project", "init", "-q")
+        (arm_dir / "run.log").touch()
+        arm_dirs[arm] = arm_dir
+    return arm_dirs
 
 
 def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
         root: Path | None = None, out_root: Path | None = None,
-        env_file: str | None = None, resume: str | None = None) -> int:
+        env_file: str | None = None, resume: str | None = None, repeat: int = 1) -> int:
+    """Run the selected jobs `repeat` times. With repeat > 1 each repeat gets its
+    own fresh arm dirs (run_root/r<k>/<arm>), so no state carries across repeats;
+    every row carries its `repeat` number."""
     sdir = series_dir(series, root)
     jobs = discover_jobs(sdir)
     numbers = parse_jobs(job_spec, [n for n, _ in jobs])
     if not numbers:
         print(f"[job_series] no jobs selected in {sdir}")
+        return 1
+    if repeat < 1:
+        print("[job_series] --repeat must be >= 1")
+        return 1
+    if resume and repeat > 1:
+        print("[job_series] --resume and --repeat > 1 can't be combined")
         return 1
     job_by_n = dict(jobs)
     out_root = out_root or (REPO / ".awos")
@@ -835,40 +1006,40 @@ def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
 
     retries = int(os.environ.get("AWOS_SERIES_RETRIES", 2))
     env_src = find_env_file(env_file)
-    arm_dirs: dict[str, Path] = {}
-    for arm in arms:
-        arm_dir = run_root / arm
-        (arm_dir / "state").mkdir(parents=True, exist_ok=True)
-        (arm_dir / "project").mkdir(parents=True, exist_ok=True)
-        if env_src:
-            shutil.copy2(env_src, arm_dir / "state" / ".env")
-        git(arm_dir / "project", "init", "-q")
-        (arm_dir / "run.log").touch()
-        arm_dirs[arm] = arm_dir
 
     print(f"[job_series] series={series} jobs={numbers} arms={arms} dry_run={dry_run} "
-          f"retries={retries}")
+          f"retries={retries} repeat={repeat}")
     print(f"[job_series] model pinned: {PINNED_MODEL} (ladder blocks {list(BLOCKED_LADDER_IDS)}; "
           f"env {sorted(PIN_ENV)})")
     print(f"[job_series] .env copied from: {env_src if env_src else 'none found'}")
-    for arm, arm_dir in arm_dirs.items():
-        print(f"[job_series] {arm} log:  tail -f {arm_dir / 'run.log'}")
     sys.stdout.flush()
 
     results: list[dict] = list(kept)
     stopped = None
-    for i, n in enumerate(numbers):
-        for arm in arms:
-            # Before every job: a key dying mid-run otherwise reads as the agent failing.
-            if not dry_run and not wait_for_backend():
-                stopped = f"backend check failed before {arm} job {n}"
-                break
-            spec = load(job_by_n[n])
-            print(f"\n########## [{arm}] job {n} ({i + 1}/{len(numbers)}): {spec.get('id')} ##########")
-            print(f"GOAL: {spec['goal']}\n", flush=True)
-            result, stopped = run_job_with_retries(arm, n, job_by_n[n], sdir, jobs, arm_dirs[arm],
-                                                   dry_run, retries)
-            results.append(result)
+    for rep in range(1, repeat + 1):
+        rep_root = run_root if repeat == 1 else run_root / f"r{rep}"
+        arm_dirs = _setup_arm_dirs(rep_root, arms, env_src)
+        for arm, arm_dir in arm_dirs.items():
+            print(f"[job_series] {arm} log{'' if repeat == 1 else f' (repeat {rep})'}:  "
+                  f"tail -f {arm_dir / 'run.log'}")
+        sys.stdout.flush()
+        for i, n in enumerate(numbers):
+            for arm in arms:
+                # Before every job: a key dying mid-run otherwise reads as the agent failing.
+                if not dry_run and not wait_for_backend():
+                    stopped = f"backend check failed before {arm} job {n}"
+                    break
+                spec = load(job_by_n[n])
+                rep_note = "" if repeat == 1 else f" repeat {rep}/{repeat}"
+                print(f"\n########## [{arm}] job {n} ({i + 1}/{len(numbers)}){rep_note}: "
+                      f"{spec.get('id')} ##########")
+                print(f"GOAL: {spec['goal']}\n", flush=True)
+                result, stopped = run_job_with_retries(arm, n, job_by_n[n], sdir, jobs,
+                                                       arm_dirs[arm], dry_run, retries)
+                result["repeat"] = rep
+                results.append(result)
+                if stopped:
+                    break
             if stopped:
                 break
         if stopped:
@@ -881,7 +1052,7 @@ def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
     out.write_text(json.dumps({
         "series": series, "timestamp": ts, "arms": arms,
         "jobs": sorted({r["job"] for r in results} | set(numbers)), "dry_run": dry_run,
-        "resumed": bool(resume),
+        "resumed": bool(resume), "repeat": repeat,
         "model_pin": {"model": PINNED_MODEL, "blocked_ladder_ids": list(BLOCKED_LADDER_IDS),
                       "env": PIN_ENV},
         "run_dir": str(run_root), "stopped": stopped,
@@ -889,6 +1060,111 @@ def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
     }, indent=2), encoding="utf-8")
     print(f"  Saved {out}")
     return 2 if stopped and not results else 0
+
+
+# ── revalidate ────────────────────────────────────────────────────────────────
+
+_SECTION = re.compile(r"^===== \[(\S+) j(\d+)\] [^\n]*=====$", re.M)
+
+
+def log_sections(log_text: str) -> dict[tuple[str, int], list[str]]:
+    """{(arm, job): [attempt log text, ...]} in log order, from one arm's run.log."""
+    out: dict[tuple[str, int], list[str]] = {}
+    heads = list(_SECTION.finditer(log_text))
+    for i, h in enumerate(heads):
+        end = heads[i + 1].start() if i + 1 < len(heads) else len(log_text)
+        out.setdefault((h.group(1), int(h.group(2))), []).append(log_text[h.start():end])
+    return out
+
+
+def revalidate(ts: str, data_root: Path | None = None, out_root: Path | None = None) -> int:
+    """Re-judge an existing run's validity from its per-arm logs.
+
+    Reads <data_root>/job_series_<ts>.json and each row's run.log section (the
+    last attempt of that arm's job: the one the row records), applies today's
+    detect_invalid (INVALID_MARKERS, 0 turns, Aider with no files / only asking
+    for files and no edits), and writes <out_root>/job_series_<ts>_revalidated.json
+    with the invalid flags and the paired-exclusion summary. The run itself is
+    only read.
+    """
+    data_root = data_root or (REPO / ".awos")
+    out_root = out_root or (REPO / ".awos")
+    src = data_root / f"job_series_{ts}.json"
+    try:
+        data = json.loads(src.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"[job_series] can't read {src}: {exc}")
+        return 1
+    arms = list(data.get("arms") or sorted({r["arm"] for r in data.get("results", [])}))
+    run_dir = Path(data.get("run_dir") or "")
+    if not run_dir.is_dir():
+        run_dir = data_root / "job_series" / ts
+    multi = _multi(data.get("results", []))
+    sections: dict[tuple[int, str], dict] = {}
+
+    def section(rep: int, arm: str, job: int) -> str | None:
+        if (rep, arm) not in sections:
+            log = (run_dir / f"r{rep}" / arm if multi else run_dir / arm) / "run.log"
+            try:
+                text = log.read_text(encoding="utf-8", errors="replace")
+                sections[(rep, arm)] = log_sections(text)
+            except OSError:
+                sections[(rep, arm)] = {}
+        attempts = sections[(rep, arm)].get((arm, job))
+        return attempts[-1] if attempts else None
+
+    results = []
+    changed = []
+    for row in data.get("results", []):
+        r = dict(row)
+        text = section(_rep(r), r["arm"], r["job"])
+        before = bool(r.get("invalid"))
+        r["invalid_before"] = before
+        r["invalid_reason_before"] = r.get("invalid_reason")
+        if text is None:
+            r["revalidation"] = "no log section found; kept as recorded"
+            results.append(r)
+            continue
+        reason = detect_invalid(text, int(r.get("turns", 0) or 0), bool(data.get("dry_run")))
+        if "[harness_aider]" in text:
+            r["aider_no_edit"] = aider_no_edit(text)
+        # Rows already invalid stay invalid (their retries were judged live).
+        final = reason or (r.get("invalid_reason") if before else None)
+        r["invalid"] = final is not None
+        r["invalid_reason"] = final
+        r["revalidation"] = reason or "valid"
+        if r["invalid"] != before:
+            changed.append(f"{r['arm']} j{r['job']:02d}"
+                           + (f" r{_rep(r)}" if multi else "") + f": {final}")
+        results.append(r)
+
+    summary = summarize(results, arms)
+    print(f"[job_series] revalidated {src}")
+    for c in changed:
+        print(f"  newly invalid: {c}")
+    if not changed:
+        print("  no row changed validity")
+    print_report(results, arms, summary)
+    before_summary = data.get("summary") or {}
+    for arm in arms:
+        a = before_summary.get(arm, {}).get("all", {})
+        b = summary[arm]["all"]
+        print(f"  {arm:<6} before: solved {a.get('solved', '?')}/{a.get('jobs', '?')}  "
+              f"after: solved {b['solved']}/{b['jobs']} (paired exclusion)")
+    out_root.mkdir(parents=True, exist_ok=True)
+    out = out_root / f"job_series_{ts}_revalidated.json"
+    out.write_text(json.dumps({
+        **{k: v for k, v in data.items() if k not in ("results", "summary")},
+        "revalidated_from": str(src), "revalidated_at": time.strftime("%Y%m%dT%H%M%S"),
+        "revalidation_rules": {"invalid_markers": list(INVALID_MARKERS),
+                               "aider_no_edit_invalid": list(_ha().NO_EDIT_SETUP_REASONS),
+                               "zero_turns": True},
+        "newly_invalid": changed,
+        "summary_before": before_summary,
+        "results": results, "summary": summary,
+    }, indent=2), encoding="utf-8")
+    print(f"  Saved {out}")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -900,26 +1176,37 @@ def main(argv: list[str] | None = None) -> int:
         run_dry_child(Path(argv[1]), Path(argv[2]))
         return 0
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["validate", "run"])
+    parser.add_argument("command", choices=["validate", "run", "revalidate"])
+    parser.add_argument("ts", nargs="?", default=None,
+                        help="revalidate: the run's timestamp, e.g. 20260929T131340")
     parser.add_argument("--series", default="ordertool")
     parser.add_argument("--arms", default="off,on",
                         help=f"comma list of {'|'.join(ARM_CHILDREN)} (default off,on)")
     parser.add_argument("--jobs", default=None, help="e.g. 1-12 or 1-3,7 (default all)")
+    parser.add_argument("--repeat", type=int, default=1,
+                        help="run the selected jobs N times, each repeat with fresh state (default 1)")
     parser.add_argument("--dry-run", action="store_true", help="no-op child instead of the orchestrator")
     parser.add_argument("--series-root", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--out-root", default=None, help="where results/state go (default .awos/)")
+    parser.add_argument("--data-root", default=None,
+                        help="revalidate: where the run's results/logs are (default --out-root)")
     parser.add_argument("--env-file", default=None, help=".env to copy into each arm (default: repo's)")
     parser.add_argument("--resume", default=None, metavar="TS",
                         help="continue run TS (e.g. 20260926T170601) with its notebooks; pair with --jobs")
     args = parser.parse_args(argv)
     root = Path(args.series_root) if args.series_root else None
+    out_root = Path(args.out_root) if args.out_root else None
     if args.command == "validate":
         return validate(args.series, root)
+    if args.command == "revalidate":
+        if not args.ts:
+            parser.error("revalidate needs the run's timestamp")
+        return revalidate(args.ts, Path(args.data_root) if args.data_root else out_root, out_root)
     arms = [a.strip() for a in args.arms.split(",") if a.strip()]
     if not arms or any(a not in ARM_CHILDREN for a in arms):
         parser.error(f"--arms takes any of {', '.join(ARM_CHILDREN)}")
-    return run(args.series, arms, args.jobs, args.dry_run, root,
-               Path(args.out_root) if args.out_root else None, args.env_file, args.resume)
+    return run(args.series, arms, args.jobs, args.dry_run, root, out_root, args.env_file,
+               args.resume, args.repeat)
 
 
 if __name__ == "__main__":

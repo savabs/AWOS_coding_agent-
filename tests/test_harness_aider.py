@@ -205,8 +205,11 @@ for i in range(int(os.environ.get("FAKE_TURNS", "3"))):
         time.sleep(30)
     else:
         time.sleep(0.05)
+if os.environ.get("FAKE_SAY"):
+    print(os.environ["FAKE_SAY"], flush=True)
+edited = [f for f in os.environ.get("FAKE_EDITED", "a.py").split(",") if f]
 print("[aider-final] " + json.dumps({"test_outcome": True, "reflections": 1, "edit_format": "diff",
-                                     "edited": ["a.py"], "in_chat": ["a.py"]}), flush=True)
+                                     "edited": edited, "in_chat": ["a.py"]}), flush=True)
 sys.exit(int(os.environ.get("FAKE_EXIT", "0")))
 '''
 
@@ -324,3 +327,130 @@ def test_main_nonzero_exit_is_failure(fake_aider, tmp_path, monkeypatch):
     ha.main([str(job), str(project), "--model", "m/x", "--no-price-lookup"])
     report = json.loads((state / "report.json").read_text())
     assert report["success"] is False and report["exit_code"] == 1 and report["killed"] is None
+
+
+# ── files in the chat and no-edit detection ───────────────────────────────────
+
+
+def _git_project(tmp_path, files: dict[str, str]) -> Path:
+    import subprocess
+    project = tmp_path / "proj"
+    for rel, text in files.items():
+        (project / rel).parent.mkdir(parents=True, exist_ok=True)
+        (project / rel).write_text(text)
+    subprocess.run(["git", "init", "-q", str(project)], check=True)
+    subprocess.run(["git", "-C", str(project), "add", "-A"], check=True)
+    return project
+
+
+PROJECT_FILES = {
+    "pkg/__init__.py": "",
+    "pkg/core.py": "x = 1\n" * 40,             # 240 bytes -> 60 tokens
+    "pkg/utils/dates.py": "y = 2\n" * 20,
+    "tests/test_core.py": "def test_x():\n    pass\n" * 20,
+    "tests/conftest.py": "",
+    "README.md": "readme\n",
+}
+
+
+def test_select_files_auto_adds_sources_and_tests_read_only(tmp_path):
+    project = _git_project(tmp_path, PROJECT_FILES)
+    edit, read, how = ha.select_files(project)
+    assert how == "src+tests"
+    assert edit == ["pkg/__init__.py", "pkg/core.py", "pkg/utils/dates.py"]
+    assert read == ["tests/conftest.py", "tests/test_core.py"]
+    # Over budget with the tests: sources only; over budget without: repo map only.
+    src_tokens = ha.estimate_tokens(project, edit)
+    assert ha.select_files(project, "auto", src_tokens)[2] == "src"
+    assert ha.select_files(project, "auto", src_tokens - 1) == ([], [], "repo_map")
+    assert ha.select_files(project, "none") == ([], [], "none")
+    assert ha.select_files(project, "src", 0) == (edit, [], "src")
+
+
+def test_select_files_without_git_walks_the_tree(tmp_path):
+    project = tmp_path / "plain"
+    (project / "pkg").mkdir(parents=True)
+    (project / "pkg" / "a.py").write_text("a = 1\n")
+    (project / "test_a.py").write_text("")
+    (project / ".venv" / "lib").mkdir(parents=True)
+    (project / ".venv" / "lib" / "x.py").write_text("")
+    assert ha.select_files(project)[:2] == (["pkg/a.py"], ["test_a.py"])
+
+
+def test_build_command_adds_read_only_files(tmp_path):
+    cmd = ha.build_command(["aider"], "m/x", "goal", tmp_path, "t", files=["pkg/a.py"],
+                           read_files=["tests/test_a.py", "tests/conftest.py"])
+    assert cmd[-1] == "pkg/a.py"
+    reads = [cmd[i + 1] for i, part in enumerate(cmd) if part == "--read"]
+    assert reads == ["tests/test_a.py", "tests/conftest.py"]
+
+
+@pytest.mark.parametrize("text", [
+    "Please add `ordertool/storage.py` to the chat so I can propose changes.",
+    "If you need to edit any of these files, ask me to *add them to the chat* first.",
+    "I need to see the files. Please add them to the\nchat.",
+    "Please add the files you want me to edit to the chat.",
+])
+def test_asked_to_add_files(text):
+    assert ha.asked_to_add_files(text)
+
+
+def test_not_asked_to_add_files():
+    assert not ha.asked_to_add_files("Added ordertool/cli.py to the chat.")
+    assert not ha.asked_to_add_files("I will add a --from flag. The chat is fine.")
+
+
+def test_no_edit_reason():
+    edited = {"edited": ["a.py"], "in_chat": ["a.py"]}
+    assert ha.no_edit_reason(edited, [], asked=True) is None
+    assert ha.no_edit_reason({}, ["a.py"], asked=True) is None          # killed, but edited
+    assert ha.no_edit_reason({"edited": [], "in_chat": []}, [], asked=True) == "no_files_in_chat"
+    had = {"edited": [], "in_chat": ["a.py"]}
+    assert ha.no_edit_reason(had, [], asked=True) == "asked_to_add_files"
+    assert ha.no_edit_reason(had, [], asked=True, preloaded=True) == "asked_for_files_it_had"
+    assert ha.no_edit_reason(had, [], asked=False) == "no_edits"
+    assert ha.no_edit_reason({}, [], asked=True) == "asked_to_add_files"  # killed, no final
+    assert "asked_for_files_it_had" not in ha.NO_EDIT_SETUP_REASONS
+
+
+def test_tracker_sees_wrapped_asks_and_applied_edits():
+    t = ha.UsageTracker()
+    for ln in ["I need these. Please add those files to the", "chat when you're ready."]:
+        t.feed(ln)
+    assert t.asked_to_add
+    t.feed("Applied edit to pkg/a.py")
+    t.feed("Applied edit to pkg/a.py")
+    assert t.applied == ["pkg/a.py"]
+
+
+def test_main_preloads_files_and_reports_no_edit(fake_aider, tmp_path, monkeypatch, capsys):
+    job, _, state = _job(tmp_path)
+    project = _git_project(tmp_path, PROJECT_FILES)
+    log = tmp_path / "argv.json"
+    monkeypatch.chdir(state)
+    monkeypatch.setenv("FAKE_ARGV_LOG", str(log))
+    monkeypatch.setenv("FAKE_TURNS", "1")
+    monkeypatch.setenv("FAKE_EDITED", "")
+    monkeypatch.setenv("FAKE_SAY", "Please add pkg/core.py to the chat.")
+    ha.main([str(job), str(project), "--model", "m/x", "--no-price-lookup"])
+    argv = json.loads(log.read_text())["argv"]
+    assert argv[-3:] == ["pkg/__init__.py", "pkg/core.py", "pkg/utils/dates.py"]
+    assert [argv[i + 1] for i, a in enumerate(argv) if a == "--read"] == \
+        ["tests/conftest.py", "tests/test_core.py"]
+    report = json.loads((state / "report.json").read_text())
+    assert report["files_selection"] == "src+tests"
+    assert report["aider_no_edit"] == "asked_for_files_it_had"
+    assert report["asked_to_add_files"] is True
+    out = capsys.readouterr().out
+    assert "[harness_aider] aider_no_edit reason=asked_for_files_it_had preloaded=3" in out
+    assert "add_files=auto:src+tests(3 edit, 2 read-only" in out
+
+
+def test_main_edits_mean_no_no_edit_flag(fake_aider, tmp_path, monkeypatch, capsys):
+    job, project, state = _job(tmp_path)
+    monkeypatch.chdir(state)
+    monkeypatch.setenv("FAKE_TURNS", "1")
+    ha.main([str(job), str(project), "--model", "m/x", "--no-price-lookup", "--add-files", "none"])
+    report = json.loads((state / "report.json").read_text())
+    assert report["aider_no_edit"] is None and report["files_edited"] == ["a.py"]
+    assert "aider_no_edit" not in capsys.readouterr().out

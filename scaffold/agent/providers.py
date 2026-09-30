@@ -84,23 +84,45 @@ def planner_model(default: str) -> str:
 #: minutes on half the ordertool jobs; at "low" the same plan took ~730
 #: reasoning tokens. Values: minimal | low (default) | medium | high |
 #: off (no reasoning) | default (send nothing; the model's own setting).
+#: AWOS_PLANNER_REASONING is the planner's older name for
+#: AWOS_REASONING_PLANNER; the new name wins when both are set.
 PLANNER_REASONING_ENV = "AWOS_PLANNER_REASONING"
 DEFAULT_PLANNER_REASONING = "low"
+#: Per-role reasoning effort: AWOS_REASONING_<ROLE> (e.g. AWOS_REASONING_NOTEBOOK).
+REASONING_ENV_PREFIX = "AWOS_REASONING_"
+DEFAULT_REASONING = "low"
 _REASONING_EFFORTS = ("minimal", "low", "medium", "high")
 #: Reasoning switched off — the planner's retry after an empty reply.
 REASONING_OFF: dict = {"enabled": False}
 
 
-def planner_reasoning() -> Optional[dict]:
-    """The `reasoning` field for planner calls, or None to send none."""
-    value = os.getenv(PLANNER_REASONING_ENV, "").strip().lower() or DEFAULT_PLANNER_REASONING
+def _reasoning_value(value: str) -> Optional[dict]:
+    value = value.strip().lower() or DEFAULT_REASONING
     if value in ("default", "model"):
         return None
     if value in ("off", "none", "0", "false", "disabled"):
         return dict(REASONING_OFF)
     if value not in _REASONING_EFFORTS:
-        value = DEFAULT_PLANNER_REASONING
+        value = DEFAULT_REASONING
     return {"effort": value}
+
+
+def reasoning_for(role: str) -> Optional[dict]:
+    """
+    The `reasoning` field for a call made in `role` ("planner", "notebook",
+    "review", "critique", ...), or None to send none. AWOS_REASONING_<ROLE>,
+    default "low"; the planner also honours AWOS_PLANNER_REASONING.
+    """
+    key = re.sub(r"[^A-Z0-9]", "_", (role or "").upper())
+    value = os.getenv(REASONING_ENV_PREFIX + key, "").strip()
+    if not value and key == "PLANNER":
+        value = os.getenv(PLANNER_REASONING_ENV, "").strip()
+    return _reasoning_value(value)
+
+
+def planner_reasoning() -> Optional[dict]:
+    """The `reasoning` field for planner calls, or None to send none."""
+    return reasoning_for("planner")
 
 
 def openrouter_key() -> Optional[str]:
@@ -161,17 +183,27 @@ class _Routed:
 
 
 def chat_client(
-    direct_key: Optional[str] = None, direct_base_url: Optional[str] = None
+    direct_key: Optional[str] = None,
+    direct_base_url: Optional[str] = None,
+    *,
+    max_retries: Optional[int] = None,
 ) -> Any:
-    """OpenAI-shaped client: OpenRouter when its key is set, else the direct provider."""
+    """
+    OpenAI-shaped client: OpenRouter when its key is set, else the direct
+    provider. `max_retries` overrides the SDK retries (0 turns them off, for a
+    caller that retries on its own terms).
+    """
+    options = client_options()
+    if max_retries is not None:
+        options["max_retries"] = max(0, int(max_retries))
     key = openrouter_key()
     if key:
         return _Routed(
-            OpenAI(api_key=key, base_url=OPENROUTER_BASE_URL, **client_options()),
+            OpenAI(api_key=key, base_url=OPENROUTER_BASE_URL, **options),
             ("chat", "completions"),
         )
     if direct_key:
-        return OpenAI(api_key=direct_key, base_url=direct_base_url, **client_options())
+        return OpenAI(api_key=direct_key, base_url=direct_base_url, **options)
     return None
 
 
@@ -189,3 +221,160 @@ def messages_client(direct_key: Optional[str] = None) -> Any:
     if direct_key:
         return Anthropic(api_key=direct_key, **client_options())
     return None
+
+
+# ── Utility calls: bounded, checked, paid for ────────────────────────────────
+#
+# A utility call (notebook rewrite, integration review, critique) used to take
+# whatever came back: a reasoning model that spent its output budget thinking
+# returned "" or a reply cut off mid-sentence (finish_reason "length"), and a
+# cut-off notebook rewrite overwrote a 2732-char notebook with 364 chars. Its
+# spend went unrecorded too, so it never counted toward a goal's budget.
+# utility_chat is opt-in: the agent loop and planner keep their own paths.
+
+#: A utility call's output-token floor: room for low-effort reasoning plus
+#: the answer. A cap, not a cost: unused tokens are not billed.
+UTILITY_MIN_MAX_TOKENS = 4096
+
+
+class ModelReplyError(RuntimeError):
+    """A model reply that must not be used: empty or cut off."""
+
+    def __init__(self, message: str, *, model: str = "", role: str = "",
+                 finish_reason: Any = None, text: str = "", cost_usd: float = 0.0):
+        super().__init__(message)
+        self.model = model
+        self.role = role
+        self.finish_reason = finish_reason
+        self.text = text
+        self.cost_usd = cost_usd
+
+
+class EmptyReplyError(ModelReplyError):
+    """The model returned no content."""
+
+
+class TruncatedReplyError(ModelReplyError):
+    """The reply hit its token cap (finish_reason "length")."""
+
+
+def _is_routed(client: Any) -> bool:
+    return isinstance(client, _Routed)
+
+
+def without_sdk_retries(client: Any) -> Any:
+    """`client` with SDK retries off when it supports that; else `client` as is."""
+    if _is_routed(client):
+        inner = client.__dict__.get("_inner")
+        if hasattr(inner, "with_options"):
+            try:
+                return _Routed(inner.with_options(max_retries=0), ("chat", "completions"))
+            except Exception:
+                return client
+        return client
+    if getattr(type(client), "with_options", None) is not None:
+        try:
+            return client.with_options(max_retries=0)
+        except Exception:
+            return client
+    return client
+
+
+def _record_utility_spend(request_type: str, model: str, response: Any, tracker: Any) -> float:
+    """One call's tokens into TokenTracker + BudgetLedger; returns its USD cost."""
+    try:
+        from . import usage_record
+    except ImportError:
+        import usage_record
+    try:
+        from .agent_loop import _price_for
+    except ImportError:
+        from agent_loop import _price_for
+    usage = getattr(response, "usage", None)
+    input_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+    output_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+    price_in, price_out = _price_for(model) or (0.0, 0.0)
+    try:
+        usage_record.record_api_usage(
+            request_type=request_type,
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            input_price=price_in,
+            output_price=price_out,
+            tracker=tracker,
+        )
+    except Exception:
+        pass
+    return usage_record.cost_from_tokens(input_tokens, output_tokens, price_in, price_out)
+
+
+def utility_chat(
+    client: Any,
+    role: str,
+    model: str,
+    messages: list,
+    *,
+    max_tokens: Optional[int] = None,
+    tracker: Any = None,
+    request_type: Optional[str] = None,
+    temperature: Optional[float] = 0,
+    send_reasoning: Optional[bool] = None,
+    sdk_retries: Optional[int] = None,
+    **extra: Any,
+) -> tuple[str, dict]:
+    """
+    One checked utility call through an OpenAI-shaped client.
+
+    - reasoning effort from reasoning_for(role), sent when the client routes
+      through OpenRouter (or when `send_reasoning=True`);
+    - max_tokens at least UTILITY_MIN_MAX_TOKENS;
+    - an empty reply or finish_reason "length" is retried once with reasoning
+      off, then raises EmptyReplyError / TruncatedReplyError;
+    - every call's spend is recorded under `request_type` (default `role`),
+      the wasted one included, so it counts toward the goal budget;
+    - `sdk_retries=0` turns the SDK's own retries off.
+
+    Returns (text, info), info = {"cost_usd", "calls", "finish_reason",
+    "model"}. Transport errors propagate unchanged.
+    """
+    request_type = request_type or role
+    if sdk_retries == 0:
+        client = without_sdk_retries(client)
+    if send_reasoning is None:
+        send_reasoning = _is_routed(client)
+    tokens = max(int(max_tokens or 0), UTILITY_MIN_MAX_TOKENS)
+    # The retry switches reasoning off where it can; elsewhere it asks again.
+    attempts = [reasoning_for(role), dict(REASONING_OFF)] if send_reasoning else [None, None]
+
+    info: dict = {"cost_usd": 0.0, "calls": 0, "finish_reason": None, "model": model}
+    text, finish = "", None
+    for reasoning in attempts:
+        kwargs: dict = dict(model=model, messages=messages, max_tokens=tokens, **extra)
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        if reasoning is not None:
+            body = dict(kwargs.pop("extra_body", None) or {})
+            body["reasoning"] = reasoning
+            kwargs["extra_body"] = body
+        response = client.chat.completions.create(**kwargs)
+        info["calls"] += 1
+        info["cost_usd"] += _record_utility_spend(request_type, model, response, tracker)
+        try:
+            choice = response.choices[0]
+            text = choice.message.content or ""
+        except (AttributeError, IndexError, TypeError):
+            choice, text = None, ""
+        finish = getattr(choice, "finish_reason", None)
+        info["finish_reason"] = finish
+        if text.strip() and finish != "length":
+            return text, info
+    common = dict(model=model, role=role, finish_reason=finish, text=text,
+                  cost_usd=info["cost_usd"])
+    if finish == "length":
+        raise TruncatedReplyError(
+            f"{role} reply from {model} cut off at {tokens} tokens "
+            f"(finish_reason='length') after {info['calls']} attempt(s)", **common)
+    raise EmptyReplyError(
+        f"{role} reply from {model} was empty (finish_reason={finish!r}) "
+        f"after {info['calls']} attempt(s)", **common)

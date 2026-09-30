@@ -1,53 +1,126 @@
-"""IntegrationReviewer: Post-execution coherence check by a strong model.
+"""IntegrationReviewer: an advisory post-execution coherence check.
 
-After the Planner-Worker-Verifier pipeline completes all tasks, the
-IntegrationReviewer reads the total diff and asks a T4 model (Sonnet)
-to validate cross-task coherence, interface consistency, and missing
-edge cases.
+After all tasks of a goal complete, the reviewer reads the total diff and asks
+a model to check cross-task coherence: interface consistency, broken call
+chains, missing imports, stubs left behind. Its verdict is advisory: it is
+printed and returned in the run result, never used to fail a goal.
 
-This implements the "Integration Model" step from the Correct AI
-Development Hierarchy: cheap models execute isolated tasks; a strong
-model reviews/merges/refactors the integrated result.
+Model: AWOS_REVIEW_MODEL, else the run's agent model (the one that did the
+work, passed in by the orchestrator, or AWOS_AGENT_MODEL). No model known →
+skipped; there is no premium default (it used to be a hardcoded Sonnet whose
+spend was never recorded). The call goes through providers.utility_chat
+(role "review": bounded reasoning, empty/cut-off replies refused, spend
+recorded as request_type "integration_review", so it counts toward the goal
+budget). AWOS_INTEGRATION_REVIEW=0 turns it off.
+
+A skipped review returns {"passed": True, "skipped": True, "skip_reason": ...}.
 """
 
+from __future__ import annotations
+
 import os
+import re
 import subprocess
-from typing import Any
+from typing import Any, Optional
 
 try:
-    from .providers import messages_client
+    from .providers import ModelReplyError, chat_client, utility_chat
 except ImportError:
-    from providers import messages_client
+    from providers import ModelReplyError, chat_client, utility_chat
+
+REVIEW_MODEL_ENV = "AWOS_REVIEW_MODEL"
+REVIEW_SWITCH_ENV = "AWOS_INTEGRATION_REVIEW"
+REQUEST_TYPE = "integration_review"
+MAX_OUTPUT_TOKENS = 4096
+
+#: Bullet text that says "nothing here" rather than naming an issue.
+_NOISE = re.compile(
+    r"(none|nil|nothing|n/?a|not applicable|"
+    r"none (found|identified|detected|noted)|"
+    r"no (issues?|problems?|suggestions?|concerns?)( (found|identified|detected|noted))?)",
+    re.I,
+)
+
+
+def enabled() -> bool:
+    return os.getenv(REVIEW_SWITCH_ENV, "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def review_model(agent_model: Optional[str] = None) -> Optional[str]:
+    """AWOS_REVIEW_MODEL, else the run's agent model, else AWOS_AGENT_MODEL."""
+    for value in (os.getenv(REVIEW_MODEL_ENV), agent_model, os.getenv("AWOS_AGENT_MODEL")):
+        if value and value.strip():
+            return value.strip()
+    return None
+
+
+def _is_cheap_only() -> bool:
+    try:
+        from .escalation_engine import is_cheap_only
+    except ImportError:
+        try:
+            from escalation_engine import is_cheap_only
+        except ImportError:
+            return False
+    return is_cheap_only()
+
+
+def _skipped(reason: str) -> dict[str, Any]:
+    return {"passed": True, "issues": [], "suggestions": [], "raw_response": "",
+            "skipped": True, "skip_reason": reason}
 
 
 class IntegrationReviewer:
-    """Reviews total diff for coherence using Claude Sonnet (T4)."""
+    """Reviews the total diff for cross-task coherence (advisory)."""
 
-    def __init__(self, api_key: str | None = None) -> None:
-        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
-        self.client = messages_client(self.api_key)
-        self.model = "claude-sonnet-4-6"
+    def __init__(self, api_key: str | None = None, *, client: Any = None,
+                 model: Optional[str] = None, tracker: Any = None) -> None:
+        # api_key is kept for callers of the old signature; the reviewer now
+        # goes through the OpenRouter chat client.
+        self.api_key = api_key
+        self.client = client
+        self.model = model
+        self.tracker = tracker
 
     # ── Public API ─────────────────────────────────────────────────────────
 
-    def review(self, codebase_root: str, execution_log: list[dict]) -> dict[str, Any]:
+    def review(self, codebase_root: str, execution_log: list[dict], *,
+               agent_model: Optional[str] = None, tracker: Any = None) -> dict[str, Any]:
         """Review the total diff after task execution.
 
-        Returns:
-            {
-                "passed": bool,
-                "issues": [str],
-                "suggestions": [str],
-                "raw_response": str,
-            }
+        Returns {"passed", "issues", "suggestions", "raw_response",
+        "model_used"} or, when not run, {"passed": True, "skipped": True,
+        "skip_reason": str, ...}.
         """
+        if not enabled():
+            return _skipped(f"{REVIEW_SWITCH_ENV}=0")
         diff = self._get_diff(codebase_root)
-        if not diff or not self.client:
-            return {"passed": True, "issues": [], "suggestions": [], "raw_response": ""}
+        if not diff:
+            return _skipped("no diff to review")
+        model = self.model or review_model(agent_model)
+        if not model:
+            reason = f"no review model ({REVIEW_MODEL_ENV} and AWOS_AGENT_MODEL unset)"
+            if _is_cheap_only():
+                reason = "cheap-only: no premium default reviewer; " + reason
+            return _skipped(reason)
+        client = self.client if self.client is not None else chat_client()
+        if client is None:
+            return _skipped("no model client (OPENROUTER_API_KEY not set)")
 
         prompt = self._build_prompt(diff, execution_log)
-        response = self._call_model(prompt)
-        return self._parse_response(response)
+        try:
+            text, _info = utility_chat(
+                client, "review", model,
+                [{"role": "user", "content": prompt}],
+                max_tokens=MAX_OUTPUT_TOKENS,
+                tracker=tracker if tracker is not None else self.tracker,
+                request_type=REQUEST_TYPE,
+            )
+        except ModelReplyError as exc:
+            return _skipped(f"unusable review reply: {exc}")
+        except Exception as exc:
+            return _skipped(f"review call failed: {type(exc).__name__}: {exc}"[:300])
+        return self._parse_response(text, model_used=model)
 
     # ── Internal ─────────────────────────────────────────────────────────────
 
@@ -67,7 +140,7 @@ class IntegrationReviewer:
 
     def _build_prompt(self, diff: str, execution_log: list[dict]) -> str:
         tasks_summary = "\n".join(
-            f"- Task {log['task_id']}: {log['status']} — {log['reason']}"
+            f"- Task {log.get('task_id')}: {log.get('status')} — {log.get('reason', '')}"
             for log in execution_log
         )
         return f"""You are a senior staff engineer reviewing a pull request that was generated by an AI agent executing multiple isolated tasks.
@@ -88,56 +161,50 @@ GIT DIFF:
 {diff[:8000]}
 ```
 
-If the diff is empty, say "No changes to review."
-
-Respond in this exact format:
+Respond in this exact format (leave a list empty when there is nothing):
 VERDICT: PASS | NEEDS_FIX
 ISSUES:
 - <issue 1>
-- <issue 2>
 SUGGESTIONS:
 - <suggestion 1>
 """
 
-    def _call_model(self, prompt: str) -> str:
-        if not self.client:
-            return "VERDICT: PASS\nISSUES:\nSUGGESTIONS:\n"
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=1024,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return response.content[0].text
+    @staticmethod
+    def _is_noise(item: str) -> bool:
+        return bool(_NOISE.fullmatch(item.strip().strip(".!:;-*` ").strip()))
 
-    def _parse_response(self, text: str) -> dict[str, Any]:
-        passed = "PASS" in text and "NEEDS_FIX" not in text
-        issues = []
-        suggestions = []
-
-        in_issues = False
-        in_suggestions = False
-        for line in text.splitlines():
+    def _parse_response(self, text: str, model_used: str = "") -> dict[str, Any]:
+        verdict = None
+        issues: list[str] = []
+        suggestions: list[str] = []
+        section = None
+        for line in (text or "").splitlines():
             stripped = line.strip()
-            if stripped.startswith("ISSUES:"):
-                in_issues = True
-                in_suggestions = False
+            upper = stripped.replace("*", "").strip().upper()  # "**VERDICT:**" too
+            if upper.startswith("VERDICT:"):
+                value = upper.split(":", 1)[1]
+                verdict = "NEEDS_FIX" if "NEEDS_FIX" in value else ("PASS" if "PASS" in value else verdict)
+                section = None
                 continue
-            if stripped.startswith("SUGGESTIONS:"):
-                in_issues = False
-                in_suggestions = True
+            if upper.startswith("ISSUES:"):
+                section = issues
                 continue
-            if stripped.startswith("VERDICT:"):
-                in_issues = False
-                in_suggestions = False
+            if upper.startswith("SUGGESTIONS:"):
+                section = suggestions
                 continue
-            if in_issues and stripped.startswith("-"):
-                issues.append(stripped[1:].strip())
-            if in_suggestions and stripped.startswith("-"):
-                suggestions.append(stripped[1:].strip())
+            if section is not None and stripped.startswith(("-", "*")):
+                item = stripped[1:].strip()
+                if item and not self._is_noise(item):
+                    section.append(item)
 
+        if verdict is None:
+            passed = "PASS" in (text or "") and "NEEDS_FIX" not in (text or "")
+        else:
+            passed = verdict == "PASS"
         return {
             "passed": passed,
             "issues": issues,
             "suggestions": suggestions,
             "raw_response": text,
+            "model_used": model_used,
         }
