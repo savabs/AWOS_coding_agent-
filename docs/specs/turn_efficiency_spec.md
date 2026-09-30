@@ -70,6 +70,30 @@ If criteria 1 and 2 hold and criterion 3 holds, the fixes stay. If criterion 3
 fails, find which cap cut real work, using the `post_green_stop` and collapse
 markers in the logs.
 
+## Result: run 20260930T125415 (ordertool, off and on arms, DeepSeek V4 Flash)
+
+| Criterion | Off | On |
+|---|---|---|
+| 1. Turns per job fall ≥40% | 33.7 → 18.4 (−45%) ✅ | 34.1 → 16.2 (−53%) ✅ |
+| 2. Billed cost per job falls ≥30% | $0.032 → $0.024 (−26%) ❌ | $0.038 → $0.022 (−41%) ✅ |
+| 3. Solved falls by at most 1 | 6 → 8/12 ✅ | 7 → 8/12 ✅ |
+
+Five of the six checks pass. The miss is not in the agent's own spend.
+
+- **Where the off arm's cost went.** Agent spend (ledger) fell 46%, from $0.0315 to $0.0171 per job. The primary planner, DeepSeek V4 Flash, returned empty JSON on 6 of 12 jobs, against 3 of 12 before. Each empty reply costs a call and 2–3 minutes before the fallback runs.
+- **Planner overhead.** The planner cost is now a large share of the bill. It is the next fix: skip the primary planner for small goals, or put a cheaper, non-reasoning planner first.
+
+The stop rule costs some real work.
+
+- **Where it lost jobs.** Two lost jobs (on j03, both arms' j07) ended right after the first green test run with one hidden edge case missing.
+- **Adjustment.** When the tests are green, have the agent run each untested clause of the goal once (failure paths, exact messages) before it finishes.
+- **Plan collapse.** In on j02 the collapsed checklist carried the planner's guessed design into the task. Label the steps as suggestions and treat the goal as the requirement.
+
+Against Aider in the 2026-09-29 run:
+
+- **Solved per $1 billed.** AWOS is now at about 28 (off) and about 30 (on), up from about 15–16. Aider was at about 38, solving 5 of 12.
+- **Solved jobs.** AWOS solves more jobs, 8 of 12 against Aider's 5.
+
 ## Live proof
 
 - `[PLANNER] N tasks touch F file(s) → running as one task` appears in the run
