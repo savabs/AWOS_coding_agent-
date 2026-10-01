@@ -15,8 +15,12 @@ local only, never uploaded):
 - Write: once per goal, after the goal (and its goal check) finishes, one
   cheap LLM call rewrites it from the old notebook, the goal, the outcome and
   a compact action trace of the goal's agent-loop tasks. The model returns the
-  whole notebook in four fixed sections; anything else is dropped, and a
-  failed or unparseable reply keeps the old notebook.
+  whole notebook in four fixed sections; anything else is dropped. The call
+  goes through providers.utility_chat (bounded reasoning, empty/cut-off
+  replies retried once then refused, spend recorded). A failed, cut-off or
+  lossy reply (a section missing or emptied, under 60% of the old length,
+  fewer past jobs) keeps the old notebook; an accepted one first copies the
+  old notebook to notebook.md.bak.
 
 AWOS_NOTEBOOK=0 turns off both. AWOS_NOTEBOOK_MODEL picks the update's model
 (default: the cheap worker model through OpenRouter). AWOS_PROJECT_ID names
@@ -28,7 +32,8 @@ and was verified; the project's own tests passing is not enough.
 
 Stdout markers (live proof): `[notebook] read <n> chars from <path>`,
 `[notebook] job recorded as: <level>` and
-`[notebook] updated <path> (<n> chars, $<cost>)`.
+`[notebook] updated <path> (<n> chars, $<cost>)` and
+`[notebook] update rejected (<reason>, $<cost>); kept <path>`.
 """
 
 from __future__ import annotations
@@ -53,8 +58,9 @@ MAX_TRACE_CHARS = 6000
 MAX_PAST_JOBS = 15
 #: The update's model when AWOS_NOTEBOOK_MODEL is not set: the cheap worker.
 DEFAULT_NOTEBOOK_MODEL = "deepseek/deepseek-v4-flash"
-#: Room for a 3500-char notebook plus a little reasoning chatter.
-MAX_OUTPUT_TOKENS = 2000
+#: Room for a 3500-char notebook plus low-effort reasoning (the utility-call
+#: floor; 2000 let a reasoning model cut the notebook off mid-rewrite).
+MAX_OUTPUT_TOKENS = 4096
 
 SECTIONS = (
     "## How to work here",
@@ -300,24 +306,7 @@ def parse_notebook(reply: str) -> Optional[str]:
     MAX_PAST_JOBS past jobs and MAX_NOTEBOOK_CHARS chars. None when it has
     none of the sections (a refusal, an apology, garbage).
     """
-    text = (reply or "").strip()
-    # A reasoning model may think out loud first, or fence the answer.
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
-    text = re.sub(r"^```[a-zA-Z]*\n|\n```\s*$", "", text).strip()
-
-    bodies: dict[str, list[str]] = {}
-    current: Optional[str] = None
-    for line in text.splitlines():
-        heading = _section_of(line)
-        if heading is not None:
-            current = heading
-            bodies.setdefault(current, [])
-            continue
-        if line.startswith("#"):
-            current = None  # a section the notebook does not have: dropped
-            continue
-        if current is not None:
-            bodies[current].append(line.rstrip())
+    bodies = _split_sections(_clean_reply(reply))
     if not bodies:
         return None
 
@@ -338,6 +327,31 @@ def parse_notebook(reply: str) -> Optional[str]:
             sections[name].pop()
         notebook = _render(sections)
     return notebook
+
+
+def _clean_reply(reply: str) -> str:
+    text = (reply or "").strip()
+    # A reasoning model may think out loud first, or fence the answer.
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
+    return re.sub(r"^```[a-zA-Z]*\n|\n```\s*$", "", text).strip()
+
+
+def _split_sections(text: str) -> dict[str, list[str]]:
+    """Each of the four sections present in `text` → its lines."""
+    bodies: dict[str, list[str]] = {}
+    current: Optional[str] = None
+    for line in text.splitlines():
+        heading = _section_of(line)
+        if heading is not None:
+            current = heading
+            bodies.setdefault(current, [])
+            continue
+        if line.startswith("#"):
+            current = None  # a section the notebook does not have: dropped
+            continue
+        if current is not None:
+            bodies[current].append(line.rstrip())
+    return bodies
 
 
 def _section_of(line: str) -> Optional[str]:
@@ -403,31 +417,41 @@ def update_notebook(
     except OSError:
         old = ""
     try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
+        from .providers import ModelReplyError, TruncatedReplyError, utility_chat
+    except ImportError:
+        from providers import ModelReplyError, TruncatedReplyError, utility_chat
+    try:
+        # Spend (the wasted call included) is recorded inside utility_chat,
+        # as request_type "notebook", so it counts toward the goal budget.
+        reply, info = utility_chat(
+            client, "notebook", model,
+            [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": build_update_prompt(old, goal, outcome, trace)},
             ],
             max_tokens=MAX_OUTPUT_TOKENS,
-            temperature=0,
+            tracker=tracker,
+            request_type="notebook",
         )
+    except ModelReplyError as exc:
+        what = "reply cut off" if isinstance(exc, TruncatedReplyError) else "empty reply"
+        print(f"[notebook] update rejected ({what}, ${exc.cost_usd:.4f}); kept {path}")
+        return None
     except Exception as exc:
         print(f"[notebook] update failed ({type(exc).__name__}); kept {path}")
         logger.warning("[notebook] update call failed: %s", exc)
         return None
 
-    cost = _record_spend(model, response, tracker)
-    try:
-        reply = response.choices[0].message.content or ""
-    except (AttributeError, IndexError, TypeError):
-        reply = ""
+    cost = info["cost_usd"]
     notebook = parse_notebook(reply)
-    if notebook is None:
-        print(f"[notebook] update unusable (no notebook sections, ${cost:.4f}); kept {path}")
+    reason = "no notebook sections" if notebook is None else rewrite_rejection(old, reply, notebook)
+    if reason:
+        print(f"[notebook] update rejected ({reason}, ${cost:.4f}); kept {path}")
         return None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+        if old.strip():
+            path.with_suffix(".md.bak").write_text(old, encoding="utf-8")
         tmp = path.with_suffix(".md.tmp")
         tmp.write_text(notebook, encoding="utf-8")
         os.replace(tmp, path)
@@ -438,28 +462,35 @@ def update_notebook(
     return notebook
 
 
-def _record_spend(model: str, response: Any, tracker: Any) -> float:
-    """The update's spend into TokenTracker + BudgetLedger (request_type="notebook")."""
-    try:
-        from .agent_loop import _price_for
-        from . import usage_record
-    except ImportError:
-        from agent_loop import _price_for
-        import usage_record
-    usage = getattr(response, "usage", None)
-    input_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
-    output_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
-    price_in, price_out = _price_for(model) or (0.0, 0.0)
-    try:
-        usage_record.record_api_usage(
-            request_type="notebook",
-            model=model,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            input_price=price_in,
-            output_price=price_out,
-            tracker=tracker,
-        )
-    except Exception as exc:
-        logger.warning("[notebook] spend not recorded: %s", exc)
-    return usage_record.cost_from_tokens(input_tokens, output_tokens, price_in, price_out)
+#: A rewrite shorter than this share of the old notebook is taken as a
+#: cut-off or careless reply, not a deliberate cleanup.
+MIN_KEEP_RATIO = 0.6
+
+
+def rewrite_rejection(old: str, reply: str, notebook: str) -> Optional[str]:
+    """
+    Why a parsed rewrite must not replace `old`, or None when it may. A
+    truncated reply once replaced a 2732-char notebook with 364 chars;
+    parse_notebook alone accepts a reply with any one heading.
+    """
+    found = _split_sections(_clean_reply(reply))
+    missing = [name for name in SECTIONS if name not in found]
+    if missing:
+        return "missing " + ", ".join(repr(name.lstrip("# ")) for name in missing)
+    old = (old or "").strip()
+    if not old:
+        return None
+    if len(notebook.strip()) < MIN_KEEP_RATIO * len(old):
+        return f"{len(notebook.strip())} chars would replace {len(old)}"
+    before = {n: _trim_blank(lines) for n, lines in _split_sections(old).items()}
+    after = _split_sections(notebook)
+    for name in SECTIONS:
+        had = any(line.strip() for line in before.get(name, []))
+        has = any(line.strip() for line in after.get(name, []))
+        if had and not has:
+            return f"section {name.lstrip('# ')!r} emptied"
+    jobs_before = sum(1 for line in before.get(SECTIONS[3], []) if line.strip())
+    jobs_after = sum(1 for line in after.get(SECTIONS[3], []) if line.strip())
+    if jobs_after < jobs_before and jobs_before < MAX_PAST_JOBS:
+        return f"past jobs {jobs_before} -> {jobs_after}"
+    return None

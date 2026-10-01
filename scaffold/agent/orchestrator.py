@@ -436,70 +436,93 @@ class Orchestrator:
     def _runtime_session_enabled(self) -> bool:
         return os.getenv("AWOS_RUNTIME_SESSION", "").lower() in ("1", "true", "yes")
 
-    def _cheap_call(self, prompt: str) -> str:
+    def _cheap_route(self, chat_client) -> Optional[tuple]:
         """
-        Fire a cheap LLM call for critique generation (Phase 5B ReflexionMemory).
-        Uses the worker's existing model client infrastructure with max_tokens=120.
-        Retries up to 3 times with exponential backoff (0.5s, 1s, 2s).
-        Returns empty string on any error — never raises.
+        (client, model, extra kwargs) for a _cheap_call, or None when no
+        client is configured. The run's pinned model (the agent loop's model,
+        or AWOS_AGENT_MODEL) through OpenRouter when AWOS_AGENT_MODEL is set;
+        else the worker's clients in their old order. The client "anthropic"
+        marks the Messages-API fallback.
         """
-        delays = [0.5, 1.0, 2.0]
+        pinned = os.getenv("AWOS_AGENT_MODEL", "").strip()
+        if pinned:
+            client = chat_client(max_retries=0)
+            if client is not None:
+                return client, getattr(self, "_last_agent_model", None) or pinned, {}
+        worker = getattr(self, "worker", None)
+        if getattr(worker, "opencode_client", None) is not None:
+            return worker.opencode_client, "qwen3.7-plus", {}
+        if getattr(worker, "client", None) is not None:
+            return worker.client, "deepseek-chat", {}
+        if getattr(worker, "openrouter_client", None) is not None:
+            return worker.openrouter_client, "openrouter/auto", {"extra_headers": {
+                "HTTP-Referer": "https://github.com/999-sbpatel/AWOS_coding_agent",
+                "X-OpenRouter-Title": "AWOS",
+            }}
+        if getattr(worker, "openai_client", None) is not None:
+            return worker.openai_client, "gpt-4o-mini", {}
+        if not is_cheap_only() and getattr(worker, "anthropic_client", None) is not None:
+            return "anthropic", "claude-haiku-4-5", {}
+        return None
+
+    def _cheap_call(self, prompt: str, role: str = "critique", *,
+                    raise_bad_reply: bool = False) -> str:
+        """
+        A cheap auxiliary LLM call (critique, post-mortem, prompt evolution,
+        tool synthesis, scaffold evolution). Also handed to those engines as
+        their `prompt -> str` caller, so `role` and `raise_bad_reply` are
+        optional.
+
+        Through providers.utility_chat: bounded reasoning, spend recorded
+        (request_type "cheap_<role>"), an empty or cut-off reply retried once
+        with reasoning off and then refused. One attempt plus one retry on a
+        transport error, with SDK retries off (it used to be 3 × 3 calls).
+
+        Returns "" on any failure; with raise_bad_reply=True an empty or
+        cut-off reply raises providers.ModelReplyError instead, so a caller
+        can tell "no answer" from an answer.
+        """
+        try:
+            from .providers import ModelReplyError, chat_client, utility_chat
+        except ImportError:
+            from providers import ModelReplyError, chat_client, utility_chat
+
+        messages = [{"role": "user", "content": prompt}]
         last_exc = None
-        for attempt in range(3):
+        for attempt in range(2):
             try:
-                worker = self.worker
-                # Try OpenCode Go FIRST (has quota, cheapest)
-                if hasattr(worker, "opencode_client") and worker.opencode_client is not None:
-                    response = worker.opencode_client.chat.completions.create(
-                        model="qwen3.7-plus",  # Qwen for reasoning quality on aux calls
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=4096,  # Enough for reasoning + content
-                        temperature=0.3,
-                    )
-                    return response.choices[0].message.content or ""
-                # Try DeepSeek / OpenAI-compatible
-                if hasattr(worker, "client") and worker.client is not None:
-                    response = worker.client.chat.completions.create(
-                        model="deepseek-chat",
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=120,
-                        temperature=0.3,
-                    )
-                    return response.choices[0].message.content or ""
-                # Fallback: OpenRouter (cheap, diverse models)
-                if hasattr(worker, "openrouter_client") and worker.openrouter_client is not None:
-                    response = worker.openrouter_client.chat.completions.create(
-                        model="openrouter/auto",
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=120,
-                        temperature=0.3,
-                        extra_headers={
-                            "HTTP-Referer": "https://github.com/999-sbpatel/AWOS_coding_agent",
-                            "X-OpenRouter-Title": "AWOS",
-                        },
-                    )
-                    return response.choices[0].message.content or ""
-                # Fallback: OpenAI mini (cheap-only — no Haiku)
-                if hasattr(worker, "openai_client") and worker.openai_client is not None:
-                    response = worker.openai_client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=120,
-                        temperature=0.3,
-                    )
-                    return response.choices[0].message.content or ""
-                if not is_cheap_only() and hasattr(worker, "anthropic_client") and worker.anthropic_client is not None:
-                    response = worker.anthropic_client.messages.create(
-                        model="claude-haiku-4-5",
-                        max_tokens=120,
-                        messages=[{"role": "user", "content": prompt}],
+                route = self._cheap_route(chat_client)
+                if route is None:
+                    logger.debug("[Orchestrator] _cheap_call: no model client configured")
+                    return ""
+                client, model, extra = route
+                if client == "anthropic":
+                    response = self.worker.anthropic_client.messages.create(
+                        model=model,
+                        max_tokens=1024,
+                        messages=messages,
                     )
                     return response.content[0].text or ""
+                text, _info = utility_chat(
+                    client, role, model, messages,
+                    max_tokens=4096,
+                    tracker=getattr(self, "tracker", None),
+                    request_type=f"cheap_{role}",
+                    temperature=0.3,
+                    sdk_retries=0,
+                    **extra,
+                )
+                return text
+            except ModelReplyError as exc:
+                logger.warning("[Orchestrator] _cheap_call (%s) unusable reply: %s", role, exc)
+                if raise_bad_reply:
+                    raise
+                return ""
             except Exception as exc:
                 last_exc = exc
-                if attempt < 2:
-                    time.sleep(delays[attempt])
-        logger.error("[Orchestrator] _cheap_call failed after 3 retries: %s", last_exc)
+                if attempt == 0:
+                    time.sleep(0.5)
+        logger.error("[Orchestrator] _cheap_call failed after a retry: %s", last_exc)
         return ""
 
     def _update_task_node(self, task_id: Any, status: str, session_id: str) -> None:
@@ -558,15 +581,34 @@ class Orchestrator:
 
     def _persist_worker_failure_pattern(self, task: dict, task_id: Any, error: str) -> None:
         try:
+            from .providers import ModelReplyError
+        except ImportError:
+            from providers import ModelReplyError
+        try:
             err_cls = self.self_correction.classify(error or "")
             if err_cls == ErrorClass.UNKNOWN:
                 err_cls = ErrorClass.WORKER_FAIL
+            bad_reply: list = []
+
+            def _caller(prompt: str) -> str:
+                try:
+                    return self._cheap_call(prompt, role="critique", raise_bad_reply=True)
+                except ModelReplyError as exc:
+                    bad_reply.append(exc)
+                    raise
+
             critique = self.self_correction.generate_critique(
                 task=task,
                 error=error or "worker failed",
                 error_class=err_cls,
-                model_caller=self._cheap_call,
-            ) or f"Worker failed: {error or 'unknown'}"
+                model_caller=_caller,
+            )
+            if bad_reply:
+                # An empty or cut-off critique must not become a stored
+                # lesson that later prompts repeat.
+                logger.warning("[TASK %s] Failure pattern not saved: %s", task_id, bad_reply[0])
+                return
+            critique = critique or f"Worker failed: {error or 'unknown'}"
             pattern = make_error_pattern(
                 task_id=str(task_id),
                 file_path=task.get("file", "unknown"),
@@ -1368,12 +1410,20 @@ class Orchestrator:
 
         print(f"{'='*60}\n")
 
-        # ── Integration Review (T4 model checks cross-task coherence) ────
+        # ── Integration Review (advisory cross-task coherence check) ────
+        # The run's agent model (or AWOS_REVIEW_MODEL); its spend is recorded
+        # to the ledger, so it counts toward the goal budget.
         review = {"passed": True, "issues": [], "suggestions": []}
         if overall_success:
             try:
-                review = self.integration_reviewer.review(codebase_root, self.execution_log)
-                if review.get("issues"):
+                review = self.integration_reviewer.review(
+                    codebase_root, self.execution_log,
+                    agent_model=getattr(self, "_last_agent_model", None),
+                    tracker=getattr(self, "tracker", None),
+                )
+                if review.get("skipped"):
+                    print(f"[INTEGRATION] Review skipped: {review.get('skip_reason', '')}")
+                elif review.get("issues"):
                     print(f"[INTEGRATION] {len(review['issues'])} issue(s) found")
                     for issue in review["issues"][:3]:
                         print(f"  - {issue}")

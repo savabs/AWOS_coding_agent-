@@ -22,6 +22,9 @@ def test_parse_filters_noise_issues():
 def test_cheap_only_skips_without_deepseek(monkeypatch):
     monkeypatch.setenv("AWOS_CHEAP_ONLY", "true")
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    # No model pinned for the run: there is no premium default to fall back to.
+    for name in ("AWOS_REVIEW_MODEL", "AWOS_AGENT_MODEL", "AWOS_INTEGRATION_REVIEW"):
+        monkeypatch.delenv(name, raising=False)
     ir = IntegrationReviewer(api_key=None)
     ir._get_diff = lambda _root: "+# sample diff\n"
     result = ir.review(".", [{"task_id": 1, "status": "completed", "reason": "ok"}])

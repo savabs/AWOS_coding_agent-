@@ -428,3 +428,164 @@ def test_backend_down_after_invalid_job_stops_cleanly(tmp_path, monkeypatch):
     assert "backend down after invalid dead job 1" in data["stopped"]
     [r] = data["results"]
     assert r["invalid"] is True and r["attempts"] == 1 and r["job"] == 1
+
+
+# ── Aider no-edit detection, revalidate, --repeat ─────────────────────────────
+
+OLD_BANNER = ("+00:01 [harness_aider] aider 0.86.2 model=openrouter/x key=set price=known "
+              "max_reflections=10 add_files=none(0) cost_cap=$0.3 timeout=870s project=/p\n")
+NEW_BANNER = ("+00:01 [harness_aider] aider 0.86.2 model=openrouter/x key=set price=known "
+              "max_reflections=10 add_files=auto:src+tests(12 edit, 5 read-only, ~10283 tokens) "
+              "cost_cap=$0.3 timeout=870s project=/p\n")
+
+
+def _final(edited, in_chat):
+    return "+00:07 [aider-final] " + json.dumps({"edited": edited, "in_chat": in_chat}) + "\n"
+
+
+def test_aider_no_edit_from_old_logs():
+    ask = "+00:07 Please add `ordertool/storage.py` to the\n+00:07 chat so I can edit it.\n"
+    # j11 of 20260929T131340: nothing in the chat at the end.
+    assert js.aider_no_edit(OLD_BANNER + "+00:07 Please add the files to the chat.\n"
+                            + _final([], [])) == "no_files_in_chat"
+    # j08/j12: files added after the ask, still no edit.
+    assert js.aider_no_edit(OLD_BANNER + ask + _final([], ["a.py"])) == "asked_to_add_files"
+    # j03 of 20260930T170402: killed by the timeout, no final line.
+    assert js.aider_no_edit(OLD_BANNER + ask + "+14:31 [harness_aider] hit the 870s limit\n") \
+        == "asked_to_add_files"
+    # Asked first, then edited: a fair run.
+    assert js.aider_no_edit(OLD_BANNER + ask + _final(["a.py"], ["a.py"])) is None
+    assert js.aider_no_edit(OLD_BANNER + ask + "+00:40 Applied edit to a.py\n") is None
+    # Not an Aider log.
+    assert js.aider_no_edit("+00:01 [job_series] child cwd=/x\n") is None
+
+
+def test_detect_invalid_aider_setup_vs_model_failures():
+    ask = "+00:07 Please add a.py to the chat.\n"
+    reason = js.detect_invalid(OLD_BANNER + ask + _final([], ["a.py"]), turns=1, dry_run=False)
+    assert reason and reason.startswith("aider_no_edit (asked_to_add_files")
+    # With the code pre-added, asking for it again is the model's own failure: valid.
+    text = NEW_BANNER + ask + _final([], ["a.py"])
+    assert js.aider_no_edit(text) == "asked_for_files_it_had"
+    assert js.detect_invalid(text, turns=1, dry_run=False) is None
+    # The harness's own line wins over re-derivation.
+    line = "+01:35 [harness_aider] aider_no_edit reason=no_edits preloaded=12 in_chat=13\n"
+    assert js.aider_no_edit(NEW_BANNER + ask + _final([], ["a.py"]) + line) == "no_edits"
+    assert js.detect_invalid(NEW_BANNER + line, turns=1, dry_run=False) is None
+
+
+def test_log_sections_keep_every_attempt():
+    text = ("\n===== [off j01] 2026-09-28 10:02:34 =====\nfirst\n"
+            "\n===== [off j02] 2026-09-28 10:06:54 =====\nbroken APIConnectionError\n"
+            "\n===== [off j02] 2026-09-29 09:37:00 =====\nretry ok\n")
+    s = js.log_sections(text)
+    assert list(s) == [("off", 1), ("off", 2)]
+    assert len(s[("off", 2)]) == 2 and "retry ok" in s[("off", 2)][-1]
+    assert "APIConnectionError" not in s[("off", 2)][-1]
+
+
+def _row(arm, job, solved=True, turns=5, **kw):
+    return {"arm": arm, "job": job, "solved": solved, "cost_usd": 0.01, "turns": turns,
+            "minutes": 1.0, "billed_usd": 0.02, **kw}
+
+
+def test_revalidate_reads_logs_and_writes_elsewhere(tmp_path, capsys):
+    data_root, out_root = tmp_path / "bench" / ".awos", tmp_path / "mine" / ".awos"
+    run_dir = data_root / "job_series" / "TS1"
+    logs = {
+        "off": ("\n===== [off j01] x =====\n+00:01 ok\n"
+                "\n===== [off j02] x =====\n+00:01 openai.APIConnectionError: Connection error.\n"
+                "\n===== [off j03] x =====\n+00:01 ok\n"),
+        "aider": ("\n===== [aider j01] x =====\n" + OLD_BANNER + "+00:05 Applied edit to a.py\n"
+                  + _final(["a.py"], ["a.py"])
+                  + "\n===== [aider j02] x =====\n" + OLD_BANNER + _final(["a.py"], ["a.py"])
+                  + "\n===== [aider j03] x =====\n" + OLD_BANNER
+                  + "+00:07 Please add the files you want me to edit to the chat.\n" + _final([], [])),
+    }
+    for arm, text in logs.items():
+        (run_dir / arm).mkdir(parents=True)
+        (run_dir / arm / "run.log").write_text(text)
+    rows = [_row(a, n, solved=(a == "off" or n == 1)) for n in (1, 2, 3) for a in ("off", "aider")]
+    src = data_root / "job_series_TS1.json"
+    original = json.dumps({"series": "mini", "timestamp": "TS1", "arms": ["off", "aider"],
+                           "dry_run": False, "run_dir": str(run_dir), "results": rows,
+                           "summary": js.summarize(rows, ["off", "aider"])})
+    src.write_text(original)
+
+    assert js.main(["revalidate", "TS1", "--data-root", str(data_root),
+                    "--out-root", str(out_root)]) == 0
+    assert src.read_text() == original                     # the run is only read
+    data = json.loads((out_root / "job_series_TS1_revalidated.json").read_text())
+    by = {(r["arm"], r["job"]): r for r in data["results"]}
+    assert by[("off", 2)]["invalid"] and "APIConnectionError" in by[("off", 2)]["invalid_reason"]
+    assert by[("aider", 3)]["invalid"] and "no_files_in_chat" in by[("aider", 3)]["invalid_reason"]
+    assert by[("aider", 3)]["aider_no_edit"] == "no_files_in_chat"
+    assert by[("aider", 1)]["invalid"] is False and by[("aider", 1)]["aider_no_edit"] is None
+    assert by[("off", 1)]["invalid_before"] is False
+    # Paired exclusion, same code as `run`: jobs 2 and 3 leave every arm.
+    assert set(data["summary"]["dropped_jobs"]) == {"2", "3"}
+    assert data["summary"]["off"]["all"] == js.summarize(data["results"], ["off", "aider"])["off"]["all"]
+    assert data["summary"]["off"]["all"]["jobs"] == 1 and data["summary"]["aider"]["all"]["solved"] == 1
+    assert data["summary_before"]["off"]["all"]["jobs"] == 3
+    assert len(data["newly_invalid"]) == 2
+    out = capsys.readouterr().out
+    assert "newly invalid: aider j03" in out and "after: solved 1/1" in out
+
+
+def test_revalidate_missing_run(tmp_path, capsys):
+    assert js.main(["revalidate", "NOPE", "--out-root", str(tmp_path)]) == 1
+
+
+def test_repeat_dry_run_fresh_state_and_noise_summary(tmp_path, capsys):
+    rc, data = _dry_run(tmp_path, "--repeat", "3", "--arms", "off,aider")
+    assert rc == 0 and data["repeat"] == 3
+    assert [(r["repeat"], r["arm"], r["job"]) for r in data["results"]][:5] == [
+        (1, "off", 1), (1, "aider", 1), (1, "off", 2), (1, "aider", 2), (2, "off", 1)]
+    assert len(data["results"]) == 12
+    run_dir = Path(data["run_dir"])
+    for rep in (1, 2, 3):
+        for arm in ("off", "aider"):
+            state = run_dir / f"r{rep}" / arm / "state"
+            assert state.is_dir()
+            assert f"cwd={state}" in (run_dir / f"r{rep}" / arm / "run.log").read_text() or \
+                f"cwd={state.resolve()}" in (run_dir / f"r{rep}" / arm / "run.log").read_text()
+    rs = data["summary"]["repeats"]
+    assert rs["repeats"] == [1, 2, 3]
+    assert rs["per_job"]["off"] == {"1": {"solved": 0, "runs": 3, "invalid": 0},
+                                    "2": {"solved": 0, "runs": 3, "invalid": 0}}
+    assert rs["overall"]["aider"]["solve_rate"] == {"n": 3, "mean": 0.0, "sd": 0.0,
+                                                    "min": 0.0, "max": 0.0}
+    assert data["summary"]["off"]["all"]["jobs"] == 6
+    out = capsys.readouterr().out
+    assert "across 3 repeats" in out and "j1:0/3" in out
+
+
+def test_repeat_one_keeps_the_old_layout(tmp_path):
+    rc, data = _dry_run(tmp_path, "--jobs", "1")
+    assert data["repeat"] == 1 and data["results"][0]["repeat"] == 1
+    assert (Path(data["run_dir"]) / "off" / "state").is_dir()
+    assert "repeats" not in data["summary"]
+
+
+def test_repeat_summary_spread_and_per_repeat_exclusion():
+    rows = []
+    for rep, solved in ((1, (True, True)), (2, (True, False)), (3, (False, False))):
+        for n, s in zip((1, 2), solved):
+            rows.append(_row("off", n, solved=s, turns=10 * rep, repeat=rep))
+            rows.append(_row("on", n, solved=True, turns=4, repeat=rep,
+                             invalid=(rep == 3 and n == 2), invalid_reason="x"))
+    s = js.summarize(rows, ["off", "on"])
+    assert s["dropped_jobs"] == {"r3:2": "on: x"}           # only that repeat's job 2
+    assert s["off"]["all"]["jobs"] == 5
+    rs = s["repeats"]
+    assert rs["per_job"]["off"]["2"] == {"solved": 1, "runs": 2, "invalid": 1}
+    sr = rs["overall"]["off"]["solve_rate"]
+    assert sr["mean"] == 0.5 and sr["min"] == 0.0 and sr["max"] == 1.0 and sr["sd"] == 0.5
+    assert rs["overall"]["off"]["mean_turns"]["mean"] == 20.0
+    assert rs["overall"]["on"]["mean_billed_usd"]["mean"] == 0.02
+
+
+def test_repeat_rejects_resume(tmp_path, capsys):
+    make_series(tmp_path, "mini")
+    assert js.main(["run", "--series", "mini", "--series-root", str(tmp_path), "--dry-run",
+                    "--out-root", str(tmp_path / "o"), "--repeat", "2", "--resume", "X"]) == 1

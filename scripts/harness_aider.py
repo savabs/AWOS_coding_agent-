@@ -18,7 +18,16 @@ Reads <job_dir>/task.json, runs Aider once, non-interactively (`--message`), in
      "cost_source": ..., "aider_test_outcome": bool | null, ...}
 
 `turns` = model responses. Aider gets no conventions file, no chat history and
-no memory of earlier jobs: it is the no-memory baseline. Its history files go to
+no memory of earlier jobs: it is the no-memory baseline.
+
+Files in the chat (--add-files, default auto): Aider only edits files that are
+"in the chat"; started with none, it answers the goal with "please add these
+files to the chat" and, run non-interactively, often never edits at all (run
+20260929T131340 j08/j11/j12, 20260930T170402 j03/j04/j06). AWOS's agent can read
+any file, so for a fair start `auto` adds every non-test source file (editable)
+and the visible tests (--read, read-only) while they fit a token budget, else
+only the sources, else none (repo map + Aider's own requests). A run that ends
+with no edits is reported as `aider_no_edit` (see no_edit_reason). Its history files go to
 the state dir; its repo-map cache is removed from the project after the run.
 
 Model setup: Aider 0.86 ships no settings for DeepSeek V4 / Claude Sonnet 5.x
@@ -93,6 +102,7 @@ def run(self, *a, **k):
             "reflections": self.num_reflections, "edit_format": self.edit_format,
             "edited": sorted(self.aider_edited_files or []),
             "in_chat": sorted(self.get_inchat_relative_files()),
+            "read_only": sorted(self.get_rel_fname(f) for f in (self.abs_read_only_fnames or [])),
         }), flush=True)
 C.run = run
 from aider.main import main
@@ -111,6 +121,46 @@ _COST = re.compile(r"Cost:\s*\$(?P<msg>[\d.,]+)\s*message,\s*\$(?P<sess>[\d.,]+)
 def _num(text: str, unit: str = "") -> int:
     value = float(text.replace(",", ""))
     return int(round(value * {"k": 1e3, "m": 1e6}.get(unit.lower(), 1)))
+
+
+# The model asking the (absent) user to put files in the chat: "Please add
+# `a.py` to the chat", "ask me to *add them to the chat*".
+# Within one sentence: a "." only ends it when followed by a space (not in a.py).
+_ASK_TO_ADD = re.compile(r"\badd\b(?:[^.?!]|[.?!](?=\S)){0,160}?\bto\s+(?:the|this)\s+chat\b", re.I)
+_APPLIED = re.compile(r"^Applied edit to (\S+)")
+NO_EDIT_TAG = "aider_no_edit"
+# Reasons that say the harness left Aider without the code, not that the
+# model failed: job_series treats these as an invalid run.
+NO_EDIT_SETUP_REASONS = ("no_files_in_chat", "asked_to_add_files")
+
+
+def asked_to_add_files(text: str) -> bool:
+    """True if the text asks for files to be added to the chat (line wraps ok)."""
+    return bool(_ASK_TO_ADD.search(" ".join(text.split())))
+
+
+def no_edit_reason(final: dict | None, applied: list[str], asked: bool,
+                   preloaded: bool = False) -> str | None:
+    """Why Aider ended without editing anything, or None if it edited.
+
+    no_files_in_chat    - Aider's final state had no file in the chat
+    asked_to_add_files  - Aider started without the code (nothing pre-added) and
+                          the model's answer was a request to add files
+    asked_for_files_it_had - the harness pre-added the code, yet the model asked
+                          for files instead of editing: the model's failure
+    no_edits            - the model had the files and did not edit
+
+    The first two are the harness's doing (NO_EDIT_SETUP_REASONS); the last two
+    are fair results for the model.
+    """
+    final = final or {}
+    if final.get("edited") or applied:
+        return None
+    if final and not final.get("in_chat"):
+        return "no_files_in_chat"
+    if asked:
+        return "asked_for_files_it_had" if preloaded else "asked_to_add_files"
+    return "no_edits"
 
 
 class UsageTracker:
@@ -132,10 +182,19 @@ class UsageTracker:
         self.text_session_cost: float | None = None
         self.final: dict = {}
         self.api_error: str | None = None   # first provider error Aider printed
+        self.applied: list[str] = []         # "Applied edit to <file>" lines
+        self.asked_to_add = False            # model asked for files to be added
+        self._prev = ""                      # previous line, for wrapped asks
 
     def feed(self, line: str) -> bool:
         """Parse one output line; True if it carried usage."""
         line = _ANSI.sub("", line).strip()
+        if not self.asked_to_add and asked_to_add_files(f"{self._prev} {line}"):
+            self.asked_to_add = True
+        self._prev = line
+        a = _APPLIED.match(line)
+        if a and a.group(1) not in self.applied:
+            self.applied.append(a.group(1))
         if line.startswith(USAGE_TAG):
             try:
                 self.exact.append(json.loads(line[len(USAGE_TAG):]))
@@ -366,7 +425,8 @@ def aider_version(prefix: list[str]) -> str:
 def build_command(prefix: list[str], model: str, goal: str, state: Path, test_cmd: str,
                   settings_file: Path | None = None, metadata_file: Path | None = None,
                   edit_format: str | None = None, map_tokens: int | None = None,
-                  files: list[str] | None = None, request_timeout: float | None = None) -> list[str]:
+                  files: list[str] | None = None, request_timeout: float | None = None,
+                  read_files: list[str] | None = None) -> list[str]:
     """Aider argv. The API key is never in it (it goes through the environment)."""
     cmd = [
         *prefix,
@@ -407,18 +467,76 @@ def build_command(prefix: list[str], model: str, goal: str, state: Path, test_cm
         cmd += ["--timeout", f"{request_timeout:g}"]
     if map_tokens is not None:
         cmd += ["--map-tokens", str(map_tokens)]
+    for f in read_files or []:
+        cmd += ["--read", f]
     return cmd + list(files or [])
+
+
+def _py_files(project: Path) -> list[str]:
+    """Tracked .py files (git), else every .py file outside hidden/cache dirs."""
+    try:
+        proc = subprocess.run(["git", "-C", str(project), "ls-files", "*.py"],
+                              capture_output=True, text=True, timeout=30)
+        if proc.returncode == 0 and proc.stdout.strip():
+            return sorted(f for f in proc.stdout.splitlines() if f)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return sorted(str(p.relative_to(project)) for p in project.rglob("*.py")
+                  if not any(part.startswith(".") or part == "__pycache__"
+                             for part in p.relative_to(project).parts))
+
+
+def is_test_file(rel: str) -> bool:
+    p = Path(rel)
+    return ("tests" in p.parts[:-1] or "test" in p.parts[:-1] or p.name.startswith("test_")
+            or p.name.endswith("_test.py") or p.name == "conftest.py")
 
 
 def source_files(project: Path) -> list[str]:
     """Tracked non-test .py files: what a user would /add for a small project."""
-    try:
-        out = subprocess.run(["git", "-C", str(project), "ls-files", "*.py"],
-                             capture_output=True, text=True, timeout=30).stdout
-    except (OSError, subprocess.SubprocessError):
-        return []
-    return [f for f in out.splitlines()
-            if f and not f.startswith("tests/") and not Path(f).name.startswith("test_")]
+    return [f for f in _py_files(project) if not is_test_file(f)]
+
+
+def test_files(project: Path) -> list[str]:
+    """Tracked test .py files (the project's visible tests)."""
+    return [f for f in _py_files(project) if is_test_file(f)]
+
+
+# Chat budget for --add-files auto, in estimated tokens (bytes / 4). The job
+# series' projects are ~10k tokens with their tests; Flash has a 1M context.
+DEFAULT_FILE_BUDGET_TOKENS = 40000
+
+
+def estimate_tokens(project: Path, files: list[str]) -> int:
+    total = 0
+    for f in files:
+        try:
+            total += (project / f).stat().st_size
+        except OSError:
+            pass
+    return total // 4
+
+
+def select_files(project: Path, mode: str = "auto",
+                 budget_tokens: int = DEFAULT_FILE_BUDGET_TOKENS) -> tuple[list[str], list[str], str]:
+    """(editable files, read-only files, how) Aider starts with in its chat.
+
+    auto: sources + tests (read-only) if both fit the budget; else sources only
+    if they fit; else nothing (Aider works from its repo map and asks for files).
+    src: every source file, no budget. none: nothing.
+    """
+    if mode == "none":
+        return [], [], "none"
+    src = source_files(project)
+    if mode == "src":
+        return src, [], "src"
+    tests = test_files(project)
+    src_tokens = estimate_tokens(project, src)
+    if src and src_tokens + estimate_tokens(project, tests) <= budget_tokens:
+        return src, tests, "src+tests"
+    if src and src_tokens <= budget_tokens:
+        return src, [], "src"
+    return [], [], "repo_map"
 
 
 # ── run ───────────────────────────────────────────────────────────────────────
@@ -477,9 +595,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--model", required=True, help="OpenRouter model id, e.g. deepseek/deepseek-v4-flash")
     ap.add_argument("--max-reflections", type=int, default=3,
                     help="automatic follow-up rounds per message (stock Aider: 3)")
-    ap.add_argument("--add-files", choices=["none", "src"], default="none",
-                    help="none (default): Aider picks files from its repo map and adds them "
-                         "itself; src: pre-add every tracked non-test .py file")
+    ap.add_argument("--add-files", choices=["auto", "src", "none"], default="auto",
+                    help="auto (default): every non-test source file plus the visible tests "
+                         "read-only, under --file-budget-tokens (else sources only, else none); "
+                         "src: every non-test .py file, no budget; none: Aider picks files from "
+                         "its repo map and asks for them")
+    ap.add_argument("--file-budget-tokens", type=int, default=DEFAULT_FILE_BUDGET_TOKENS,
+                    help="estimated-token budget for --add-files auto")
     ap.add_argument("--edit-format", default=None, help="override the edit format (default diff)")
     ap.add_argument("--map-tokens", type=int, default=None, help="repo map budget (Aider default: by context size)")
     ap.add_argument("--request-timeout", type=float, default=None,
@@ -509,14 +631,16 @@ def main(argv: list[str] | None = None) -> int:
         metadata_file = state / "aider.model.metadata.json"
         metadata_file.write_text(json.dumps(meta, indent=2), encoding="utf-8")
     test_cmd = args.test_cmd or f"{shlex.quote(sys.executable)} -m pytest -q -p no:cacheprovider"
-    files = source_files(project) if args.add_files == "src" else []
+    files, read_files, files_how = select_files(project, args.add_files, args.file_budget_tokens)
     request_timeout = args.request_timeout or model_timeout_s()
     cmd = build_command(prefix, args.model, goal, state, test_cmd, settings_file, metadata_file,
-                        args.edit_format, args.map_tokens, files, request_timeout)
+                        args.edit_format, args.map_tokens, files, request_timeout, read_files)
 
     print(f"[harness_aider] aider {version} model=openrouter/{args.model} "
           f"key={'set' if env.get(KEY_ENV) else 'MISSING'} price={'known' if meta else 'unknown'} "
-          f"max_reflections={args.max_reflections} add_files={args.add_files}({len(files)}) "
+          f"max_reflections={args.max_reflections} add_files={args.add_files}:{files_how}"
+          f"({len(files)} edit, {len(read_files)} read-only, "
+          f"~{estimate_tokens(project, files + read_files)} tokens) "
           f"cost_cap=${max_cost} timeout={timeout_s:.0f}s project={project}", flush=True)
     tracker = UsageTracker()
     started = time.monotonic()
@@ -530,6 +654,13 @@ def main(argv: list[str] | None = None) -> int:
         shutil.rmtree(project / ".aider.tags.cache.v4", ignore_errors=True)
     minutes = round((time.monotonic() - started) / 60, 2)
     cost, cost_source = tracker.cost()
+    no_edit = no_edit_reason(tracker.final, tracker.applied, tracker.asked_to_add,
+                             preloaded=bool(files))
+    if no_edit:
+        # Loud and greppable: a run with no edits must never pass as a quiet failure.
+        print(f"[harness_aider] {NO_EDIT_TAG} reason={no_edit} preloaded={len(files)} "
+              f"in_chat={len(tracker.final.get('in_chat') or [])} "
+              f"asked_to_add_files={tracker.asked_to_add} killed={killed}", flush=True)
 
     report = {
         # Aider exits 0 even when every model call failed; no response = no run.
@@ -550,9 +681,16 @@ def main(argv: list[str] | None = None) -> int:
         "edit_format": tracker.final.get("edit_format"),
         "files_edited": tracker.final.get("edited"),
         "files_in_chat": tracker.final.get("in_chat"),
+        "files_read_only": tracker.final.get("read_only"),
+        "files_applied": tracker.applied,
+        NO_EDIT_TAG: no_edit,
+        "asked_to_add_files": tracker.asked_to_add,
         "max_reflections": args.max_reflections,
         "request_timeout_s": request_timeout,
         "add_files": args.add_files,
+        "files_selection": files_how,
+        "files_added": files,
+        "files_read": read_files,
         "minutes": minutes,
     }
     (state / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
