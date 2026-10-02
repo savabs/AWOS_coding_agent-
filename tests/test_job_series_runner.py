@@ -260,6 +260,18 @@ def test_detect_invalid_zero_turns_and_clean_runs():
                                        "API key expired", "Connection error"}
 
 
+def test_aider_answer_without_edit_is_a_fair_failure_not_a_crash():
+    # Aider counts 0 turns when it answers without an edit; with the code in its
+    # chat that is the model failing (backupd j02: 5.8 min of analysis, no edit),
+    # and dropping it from every arm would favour Aider.
+    log = ("[harness_aider] aider_no_edit reason=no_edits preloaded=15 in_chat=15 "
+           "asked_to_add_files=False killed=None\n")
+    assert js.detect_invalid(log, turns=0, dry_run=False) is None
+    setup = ("[harness_aider] aider_no_edit reason=asked_to_add_files preloaded=0 in_chat=0 "
+             "asked_to_add_files=True killed=None\n")
+    assert "aider_no_edit" in js.detect_invalid(setup, turns=0, dry_run=False)
+
+
 def _dry_run(tmp_path, *extra):
     make_series(tmp_path, "mini")
     out_root = tmp_path / "out"

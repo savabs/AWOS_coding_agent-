@@ -800,11 +800,16 @@ def detect_invalid(log_text: str, turns: int, dry_run: bool) -> str | None:
     for marker in INVALID_MARKERS:
         if marker in log_text:
             return f"log shows {marker!r}"
-    if not dry_run and turns == 0:
-        return "0 agent turns (child crashed before the agent acted)"
     no_edit = aider_no_edit(log_text)
     if no_edit in _ha().NO_EDIT_SETUP_REASONS:
         return f"aider_no_edit ({no_edit}: Aider never had the code to edit)"
+    if no_edit is not None:
+        # Aider had the code and answered without an edit (it counts 0 turns
+        # then): the model's failure, not a crash. Excluding it once dropped a
+        # job from every arm and quietly favoured Aider.
+        return None
+    if not dry_run and turns == 0:
+        return "0 agent turns (child crashed before the agent acted)"
     return None
 
 
