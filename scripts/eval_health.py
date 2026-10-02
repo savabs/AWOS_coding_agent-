@@ -247,6 +247,11 @@ def check_run(run_root: Path, results_path: Path,
                  f"{len(invalid)}/{len(arm_rows)} jobs invalid ({st['invalid_share']:.0%}) "
                  f"— measurement drops them")
         for r in arm_rows:
+            # Aider counts 0 turns when it answers without an edit; with its files
+            # in chat (aider_no_edit set, row not invalid) that is the model's fair
+            # failure, the same call the runner makes — not silent zero work.
+            if r.get("aider_no_edit") and not r.get("invalid"):
+                continue
             if not dry_run and not r.get("invalid") and not (r.get("turns") or 0) > 0:
                 flag("fatal", "zero_work", arm, r.get("job"), rep,
                      f"turns={r.get('turns')!r} and not marked invalid: silent zero-work job")

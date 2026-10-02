@@ -204,6 +204,14 @@ def test_silent_zero_work_is_fatal(tmp_path):
     assert _checks(health, "fatal") == ["zero_work", "zero_work"]
 
 
+def test_aider_answer_without_edit_is_not_zero_work(tmp_path):
+    # backupd j09: Aider had its 15 files, answered without an edit, 0 turns —
+    # a fair failure (the runner keeps it), not silent zero work.
+    root, results = _build(tmp_path, [_row("aider", 9, turns=0, aider_no_edit="no_edits")])
+    health = eh.check_run(root, results)
+    assert "zero_work" not in _checks(health, "fatal")
+
+
 def test_repeat_dirs(tmp_path):
     rows = [_row("on", 1, repeat=1), _row("on", 1, repeat=2)]
     root, results = _build(tmp_path, [])
