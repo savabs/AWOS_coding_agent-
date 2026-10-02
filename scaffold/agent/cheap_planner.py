@@ -20,6 +20,10 @@ except ImportError:
     from providers import (
         REASONING_OFF, chat_client, openrouter_key, planner_model, planner_reasoning,
     )
+try:  # one log line per model call, for scripts/eval_health.py
+    from .llm_call_log import record_error, record_response
+except ImportError:
+    from llm_call_log import record_error, record_response
 
 #: CheapPlanner's model when AWOS_PLANNER_MODEL is unset. Reached through
 #: OpenRouter when OPENROUTER_API_KEY is set (docs/specs/openrouter_only_spec.md).
@@ -93,14 +97,21 @@ class CheapPlanner:
         if getattr(self, "_via_openrouter", False) and attempts[0] != REASONING_OFF:
             attempts.append(dict(REASONING_OFF))
         text, finish = "", None
-        for reasoning in attempts:
-            response = self.client.chat.completions.create(
-                **self._plan_request(prompt, reasoning)
-            )
+        for attempt, reasoning in enumerate(attempts, 1):
+            try:
+                response = self.client.chat.completions.create(
+                    **self._plan_request(prompt, reasoning)
+                )
+            except Exception as exc:
+                record_error("planner", self.model_name, exc, attempt=attempt, final=True)
+                raise
             choice = response.choices[0]
             text = choice.message.content or ""
             finish = getattr(choice, "finish_reason", None)
             self._record(tracker, response, prompt, text)
+            record_response(
+                "planner", self.model_name, response, visible_chars=len(text), attempt=attempt,
+                final=(bool(text.strip()) and finish != "length") or attempt == len(attempts))
             if text.strip() and finish != "length":
                 return text
         if text.strip():

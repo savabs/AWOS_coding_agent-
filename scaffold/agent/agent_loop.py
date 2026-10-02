@@ -33,6 +33,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol
 
+try:  # one log line per model call, for scripts/eval_health.py
+    from .llm_call_log import record_error, record_response
+except ImportError:
+    from llm_call_log import record_error, record_response
+
 logger = logging.getLogger(__name__)
 
 #: Real tasks need many steps: read, search, edit, test, fix, re-test.
@@ -651,11 +656,18 @@ class AgentLoop:
             try:
                 reply = self.client.complete(self.system_prompt, messages, self.registry)
             except Exception as exc:
+                record_error("agent", self.model_name, exc, turn=turn)
                 outcome.stop_reason = "model_error"
                 outcome.final_message = f"{type(exc).__name__}: {exc}"
                 logger.warning("[agent_loop] model call failed on turn %d: %s", turn, exc)
                 break
 
+            record_response(
+                "agent", self.model_name, reply.raw, visible_chars=len(reply.text or ""),
+                input_tokens=reply.input_tokens, output_tokens=reply.output_tokens,
+                cost_usd=estimate_cost(self.model_name, reply.input_tokens, reply.output_tokens),
+                finish_reason=_finish_reason(reply.raw).strip("?") or None,
+                tool_calls=len(reply.tool_calls), turn=turn)
             outcome.input_tokens += reply.input_tokens
             outcome.output_tokens += reply.output_tokens
             outcome.cost_usd = estimate_cost(

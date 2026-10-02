@@ -17,6 +17,11 @@ from typing import Any, Optional
 from anthropic import Anthropic
 from openai import OpenAI
 
+try:  # one log line per model call, for scripts/eval_health.py
+    from .llm_call_log import record_error, record_response
+except ImportError:
+    from llm_call_log import record_error, record_response
+
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 #: The Anthropic SDK appends /v1/messages itself.
 OPENROUTER_ANTHROPIC_BASE_URL = "https://openrouter.ai/api"
@@ -349,7 +354,7 @@ def utility_chat(
 
     info: dict = {"cost_usd": 0.0, "calls": 0, "finish_reason": None, "model": model}
     text, finish = "", None
-    for reasoning in attempts:
+    for attempt, reasoning in enumerate(attempts, 1):
         kwargs: dict = dict(model=model, messages=messages, max_tokens=tokens, **extra)
         if temperature is not None:
             kwargs["temperature"] = temperature
@@ -357,9 +362,14 @@ def utility_chat(
             body = dict(kwargs.pop("extra_body", None) or {})
             body["reasoning"] = reasoning
             kwargs["extra_body"] = body
-        response = client.chat.completions.create(**kwargs)
+        try:
+            response = client.chat.completions.create(**kwargs)
+        except Exception as exc:
+            record_error(role, model, exc, attempt=attempt, final=True)
+            raise
         info["calls"] += 1
-        info["cost_usd"] += _record_utility_spend(request_type, model, response, tracker)
+        call_cost = _record_utility_spend(request_type, model, response, tracker)
+        info["cost_usd"] += call_cost
         try:
             choice = response.choices[0]
             text = choice.message.content or ""
@@ -367,7 +377,10 @@ def utility_chat(
             choice, text = None, ""
         finish = getattr(choice, "finish_reason", None)
         info["finish_reason"] = finish
-        if text.strip() and finish != "length":
+        good = bool(text.strip()) and finish != "length"
+        record_response(role, model, response, cost_usd=call_cost, visible_chars=len(text),
+                        attempt=attempt, final=good or attempt == len(attempts))
+        if good:
             return text, info
     common = dict(model=model, role=role, finish_reason=finish, text=text,
                   cost_usd=info["cost_usd"])

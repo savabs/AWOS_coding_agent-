@@ -19,6 +19,15 @@ Job N starts from base + the references of jobs 1..N-1 (cumulative).
     python3 scripts/job_series.py run --arms off,aider --jobs 3,8 --repeat 5   # noise
     python3 scripts/job_series.py revalidate 20260929T131340 [--data-root DIR]
 
+Evaluation instrument (docs/research/evaluation_first_principles_2026-10.md,
+rules 1, 2, 8): `run` validates the selected jobs first (preflight; an INVALID
+job aborts before any model spend; --skip-preflight is recorded), records each
+arm's inputs per job (project tree + task hashes, masked command, pinned env,
+Aider's chat files) and fails the run if arms of one job got different inputs,
+stamps provenance (git sha/dirty, config hash, timestamps), then calls
+scripts/eval_health.check_run (-> <run_dir>/health.json, results["valid"]) and
+scripts/eval_report.write_report. `revalidate` calls the same two hooks.
+
 `run` gives every arm its own empty state dir (the child's cwd, so every .awos
 store starts empty and is private to that arm) and one persistent git project
 (so the project id is stable across jobs). Arms interleave job by job
@@ -244,46 +253,307 @@ def validate(series: str, root: Path | None = None) -> int:
         print(f"  jobs are not numbered 1..{len(jobs)}: {numbers}")
         bad += 1
     for n, job_dir in jobs:
-        problems = []
-        missing = [p for p in ("hidden_tests", "reference") if not (job_dir / p).is_dir()]
-        if missing:
-            problems.append(f"missing {missing}")
-        try:
-            spec = load(job_dir)
-            absent = [k for k in TASK_KEYS if k not in spec]
-            if absent:
-                problems.append(f"task.json lacks {absent}")
-        except ValueError as exc:
-            problems.append(f"task.json unreadable: {exc}")
-        if missing:
-            bad += 1
-            invalid += 1
-            print(f"  {n:>2} {job_dir.name:<30} INVALID")
-            for p in problems:
-                print(f"      - {p}")
-            continue
-        with tempfile.TemporaryDirectory() as tmp:
-            start = materialize(sdir, jobs, n, Path(tmp) / "start")
-            h_start, v_start = judge(job_dir, start)
-            solved = materialize(sdir, jobs, n, Path(tmp) / "solved", with_own_reference=True)
-            h_solved, v_solved = judge(job_dir, solved)
-        if h_start["ok"]:
-            problems.append("hidden tests PASS on the start state (measures nothing)")
-        if not v_start["ok"]:
-            problems.append(f"visible tests fail on the start state ({v_start['summary']})")
-        if not h_solved["ok"]:
-            problems.append(f"hidden tests fail with the reference ({h_solved['summary']}; "
-                            f"failing {h_solved['failing'][:5]})")
-        if not v_solved["ok"]:
-            problems.append(f"reference breaks the visible tests ({v_solved['summary']})")
-        bad += bool(problems)
-        invalid += bool(problems)
-        print(f"  {n:>2} {job_dir.name:<30} {'ok' if not problems else 'INVALID':<8} "
-              f"start: {h_start['summary']} | reference: {h_solved['summary']}", flush=True)
-        for p in problems:
-            print(f"      - {p}")
+        c = check_job(sdir, jobs, n, job_dir)
+        _print_check(c)
+        bad += not c["ok"]
+        invalid += not c["ok"]
     print(f"[job_series] {len(jobs) - invalid}/{len(jobs)} jobs valid")
     return 1 if bad else 0
+
+
+def check_job(sdir: Path, jobs: list[tuple[int, Path]], n: int, job_dir: Path) -> dict:
+    """One job's harness checks (protocol rule 1): hidden tests fail on the start
+    state (an empty patch scores nothing) and pass with the reference, and neither
+    state breaks the visible tests. {"job","dir","ok","problems","start","reference"}."""
+    problems: list[str] = []
+    missing = [p for p in ("hidden_tests", "reference") if not (job_dir / p).is_dir()]
+    if missing:
+        problems.append(f"missing {missing}")
+    try:
+        spec = load(job_dir)
+        absent = [k for k in TASK_KEYS if k not in spec]
+        if absent:
+            problems.append(f"task.json lacks {absent}")
+    except (OSError, ValueError) as exc:
+        problems.append(f"task.json unreadable: {exc}")
+    out = {"job": n, "dir": job_dir.name, "start": None, "reference": None}
+    if missing:
+        return {**out, "ok": False, "problems": problems}
+    with tempfile.TemporaryDirectory() as tmp:
+        start = materialize(sdir, jobs, n, Path(tmp) / "start")
+        h_start, v_start = judge(job_dir, start)
+        solved = materialize(sdir, jobs, n, Path(tmp) / "solved", with_own_reference=True)
+        h_solved, v_solved = judge(job_dir, solved)
+    if h_start["ok"]:
+        problems.append("hidden tests PASS on the start state (measures nothing)")
+    if not v_start["ok"]:
+        problems.append(f"visible tests fail on the start state ({v_start['summary']})")
+    if not h_solved["ok"]:
+        problems.append(f"hidden tests fail with the reference ({h_solved['summary']}; "
+                        f"failing {h_solved['failing'][:5]})")
+    if not v_solved["ok"]:
+        problems.append(f"reference breaks the visible tests ({v_solved['summary']})")
+    return {**out, "ok": not problems, "problems": problems,
+            "start": h_start["summary"], "reference": h_solved["summary"]}
+
+
+def _print_check(c: dict) -> None:
+    line = f"  {c['job']:>2} {c['dir']:<30} {'ok' if c['ok'] else 'INVALID':<8}"
+    if c["start"] is not None:
+        line += f" start: {c['start']} | reference: {c['reference']}"
+    print(line, flush=True)
+    for p in c["problems"]:
+        print(f"      - {p}")
+
+
+def preflight(sdir: Path, jobs: list[tuple[int, Path]], numbers: list[int]) -> dict:
+    """`validate` for the selected jobs, before any arm starts (no model calls).
+
+    {"status": "ok"|"failed", "jobs": {"<n>": [problems]}, "invalid_jobs": [n], "seconds"}.
+    """
+    started = time.monotonic()
+    by_n = dict(jobs)
+    print(f"[job_series] preflight: validating jobs {numbers} "
+          f"(hidden tests fail on the start state, pass with the reference)", flush=True)
+    checks = [check_job(sdir, jobs, n, by_n[n]) for n in numbers]
+    for c in checks:
+        _print_check(c)
+    bad = [c["job"] for c in checks if not c["ok"]]
+    return {"status": "failed" if bad else "ok",
+            "jobs": {str(c["job"]): c["problems"] for c in checks},
+            "invalid_jobs": bad, "seconds": round(time.monotonic() - started, 1)}
+
+
+# ── provenance, input manifests, end-of-run hooks ─────────────────────────────
+
+# Not part of what an arm "received": VCS data, AWOS runtime state, bytecode.
+_TREE_SKIP = {".git", ".awos", "__pycache__", ".pytest_cache", ".aider.tags.cache.v4"}
+_SECRET_NAME = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)", re.I)
+_SECRET_VALUE = re.compile(r"\b(sk-[A-Za-z0-9_\-]{8,}|sk_[A-Za-z0-9_\-]{8,}|Bearer\s+\S+)")
+_UTC = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def _now() -> str:
+    return time.strftime(_UTC, time.gmtime())
+
+
+def sha256_file(path: Path) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 16), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def tree_hash(root: Path) -> tuple[str, int]:
+    """(sha256 over sorted 'relpath\\0filehash\\n' lines, file count); skips _TREE_SKIP."""
+    import hashlib
+    lines = []
+    for f in root.rglob("*"):
+        rel = f.relative_to(root)
+        if any(part in _TREE_SKIP for part in rel.parts) or not f.is_file():
+            continue
+        lines.append(f"{rel.as_posix()}\0{sha256_file(f)}\n")
+    lines.sort()
+    return hashlib.sha256("".join(lines).encode()).hexdigest(), len(lines)
+
+
+def mask_secret(name: str, value: str | None) -> str | None:
+    if value is None:
+        return None
+    if _SECRET_NAME.search(name):
+        return "***" if value else ""
+    return _SECRET_VALUE.sub("***", value)
+
+
+def mask_cmd(cmd: list[str]) -> list[str]:
+    """The child command with secret-looking values masked (--api-key X, K=V, sk-...)."""
+    out: list[str] = []
+    hide_next = False
+    for part in cmd:
+        if hide_next:
+            out.append("***")
+            hide_next = False
+            continue
+        if part.startswith("-") and _SECRET_NAME.search(part):
+            if "=" in part:
+                out.append(part.split("=", 1)[0] + "=***")
+            else:
+                out.append(part)
+                hide_next = True
+            continue
+        if "=" in part and _SECRET_NAME.search(part.split("=", 1)[0]):
+            out.append(part.split("=", 1)[0] + "=***")
+            continue
+        out.append(_SECRET_VALUE.sub("***", part))
+    return out
+
+
+def input_manifest(arm: str, job_dir: Path, project: Path, cmd: list[str], env: dict) -> dict:
+    """What an arm receives for a job, recorded before its child starts (rule 1)."""
+    proj_sha, n_files = tree_hash(project)
+    keys = sorted(set(PIN_ENV) | set(ARM_CHILDREN[arm]["env"]) | {"AWOS_SERIES_ARM"})
+    return {
+        "project_sha256": proj_sha, "project_files": n_files,
+        "task_sha256": sha256_file(job_dir / "task.json"),
+        "cmd": mask_cmd(cmd),
+        "env": {k: mask_secret(k, env.get(k)) for k in keys},
+        "recorded_at": _now(),
+    }
+
+
+_ADD_FILES_BANNER = re.compile(
+    r"\[harness_aider\] aider .*? add_files=(\S*?)\((\d+)(?: edit, (\d+) read-only)?")
+
+
+def aider_files(report: dict, log_text: str) -> dict | None:
+    """The files the Aider harness put in the chat, from report.json (else its banner)."""
+    if isinstance(report, dict) and report.get("harness") == "aider":
+        return {"source": "report",
+                "selection": report.get("files_selection") or report.get("add_files"),
+                "added": list(report.get("files_added") or []),
+                "read_only": list(report.get("files_read") or []),
+                "in_chat_final": report.get("files_in_chat")}
+    m = _ADD_FILES_BANNER.search(_TS_PREFIX.sub("", log_text or ""))
+    if m:
+        return {"source": "log", "selection": m.group(1),
+                "added_count": int(m.group(2)), "read_only_count": int(m.group(3) or 0)}
+    return None
+
+
+def manifest_violations(results: list[dict]) -> list[dict]:
+    """Fatal when arms of one (repeat, job) received different project trees or
+    task files, or when the Aider harness started with no file in the chat."""
+    out: list[dict] = []
+    groups: dict[tuple[int, int], list[dict]] = {}
+    for r in results:
+        if isinstance(r.get("inputs"), dict):
+            groups.setdefault((_rep(r), r["job"]), []).append(r)
+    for (rep, job), rows in sorted(groups.items()):
+        for field, what in (("project_sha256", "project tree"), ("task_sha256", "task.json")):
+            seen = {r["arm"]: r["inputs"].get(field) for r in rows}
+            if len(set(seen.values())) > 1:
+                out.append({"severity": "fatal", "check": "input_mismatch", "arm": None,
+                            "job": job, "repeat": rep,
+                            "detail": f"arms received different {what}: "
+                                      + ", ".join(f"{a}={(h or '?')[:12]}"
+                                                  for a, h in sorted(seen.items()))})
+        for r in rows:
+            af = r["inputs"].get("aider_files")
+            if not af:
+                continue
+            n = (len(af.get("added", [])) + len(af.get("read_only", []))
+                 if af.get("source") == "report"
+                 else af.get("added_count", 0) + af.get("read_only_count", 0))
+            if n == 0:
+                out.append({"severity": "fatal", "check": "aider_no_files", "arm": r["arm"],
+                            "job": job, "repeat": rep,
+                            "detail": f"the harness put no file in Aider's chat "
+                                      f"(selection={af.get('selection')})"})
+    return out
+
+
+def git_provenance(repo: Path = REPO) -> dict:
+    """HEAD sha, branch, and whether code (anything outside .awos/) is modified."""
+    def g(*args: str) -> str:
+        try:
+            return subprocess.run(["git", "-C", str(repo), *args], capture_output=True,
+                                  text=True, timeout=20).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return ""
+    status = [ln for ln in g("status", "--porcelain", "--untracked-files=no").splitlines()
+              if ln.strip() and not ln[3:].startswith(".awos/")]
+    return {"sha": g("rev-parse", "HEAD") or None,
+            "branch": g("rev-parse", "--abbrev-ref", "HEAD") or None,
+            "dirty": bool(status), "dirty_paths": [ln[3:] for ln in status][:20]}
+
+
+def config_hash(series: str, sdir: Path, arms: list[str], numbers: list[int],
+                repeat: int) -> dict:
+    """A stable hash of everything that defines the run (rule 8: one change per run)."""
+    import hashlib
+    series_sha, _ = tree_hash(sdir) if sdir.is_dir() else (None, 0)
+    config = {
+        "series": series, "series_sha256": series_sha, "jobs": numbers, "repeat": repeat,
+        "arms": {a: {"cmd": [c.replace(str(REPO), "<repo>").replace(PY, "<python>")
+                             for c in ARM_CHILDREN[a]["cmd"]],
+                     "env": ARM_CHILDREN[a]["env"]} for a in arms},
+        "pin": {"model": PINNED_MODEL, "blocked_ladder_ids": list(BLOCKED_LADDER_IDS),
+                "env": PIN_ENV},
+    }
+    blob = json.dumps(config, sort_keys=True).encode()
+    return {"sha256": hashlib.sha256(blob).hexdigest(), "series_sha256": series_sha}
+
+
+def _scripts_on_path() -> None:
+    here = str(Path(__file__).resolve().parent)
+    if here not in sys.path:
+        sys.path.insert(0, here)
+
+
+def _hook(module: str, attr: str):
+    """module.attr from scripts/, or None (with a warning) while it doesn't exist yet."""
+    import importlib
+    _scripts_on_path()
+    try:
+        return getattr(importlib.import_module(module), attr)
+    except (ImportError, AttributeError) as exc:
+        print(f"[job_series] WARNING: {module}.{attr} unavailable ({exc}); skipping", flush=True)
+        return None
+
+
+def finish(data: dict, results_path: Path, run_root: Path, out_dir: Path,
+           own: list[dict]) -> dict:
+    """Health check + report hooks (rule 2). Writes <out_dir>/health.json, sets
+    data["valid"], rewrites results_path, then writes the report."""
+    violations = list(own)
+    check_run = _hook("eval_health", "check_run")
+    health_ok: bool | None = None
+    if check_run is None:
+        violations.append({"severity": "warn", "check": "health_check_unavailable", "arm": None,
+                           "job": None, "repeat": None,
+                           "detail": "scripts/eval_health.py not found; only runner checks ran"})
+    else:
+        try:
+            h = check_run(run_root, results_path) or {}
+            health_ok = bool(h.get("ok"))
+            violations.extend(h.get("violations") or [])
+        except Exception as exc:  # noqa: BLE001 - a broken checker voids, not crashes, the run
+            violations.append({"severity": "fatal", "check": "health_check_crashed", "arm": None,
+                               "job": None, "repeat": None, "detail": repr(exc)[:300]})
+    fatal = [v for v in violations if v.get("severity") == "fatal"]
+    ok = (health_ok is not False) and not fatal
+    out_dir.mkdir(parents=True, exist_ok=True)
+    health_path = out_dir / "health.json"
+    health_path.write_text(json.dumps({"ok": ok, "checked_at": _now(),
+                                       "health_check": None if check_run is None else health_ok,
+                                       "violations": violations}, indent=2), encoding="utf-8")
+    data["valid"] = ok
+    data["violations"] = violations
+    data["health"] = {"path": str(health_path), "fatal": len(fatal),
+                      "warn": len(violations) - len(fatal)}
+    if not ok:
+        bar = "!" * 78
+        print(f"\n{bar}\n  INVALID RUN — {len(fatal)} fatal violation(s); do not draw conclusions "
+              f"from it.", flush=True)
+        for v in fatal[:20]:
+            where = " ".join(f"{k}={v[k]}" for k in ("arm", "job", "repeat") if v.get(k) is not None)
+            print(f"  - {v.get('check')} {where}: {v.get('detail')}")
+        print(f"  details: {health_path}\n{bar}", flush=True)
+    else:
+        print(f"[job_series] health: ok ({len(violations)} warning(s)) — {health_path}")
+    results_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    write_report = _hook("eval_report", "write_report")
+    if write_report is not None:
+        try:
+            report_path = write_report(results_path, out_dir)
+            data["report"] = str(report_path)
+            results_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            print(f"[job_series] report: {report_path}", flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[job_series] WARNING: write_report failed: {exc!r}", flush=True)
+    return data
 
 
 # ── the child (runs with cwd = the arm's state dir) ───────────────────────────
@@ -676,12 +946,17 @@ def run_job(arm: str, number: int, job_dir: Path, sdir: Path, jobs: list, arm_di
     billed_before = None if dry_run else key_usage(state)
     child = ARM_CHILDREN[arm]
     env = {**os.environ, "PYTHONUNBUFFERED": "1", **child["env"], "AWOS_SERIES_ARM": arm}
+    # Tags every line of the child's .awos/llm_calls.jsonl with what it served.
+    rep = arm_dir.parent.name
+    env.update({"AWOS_EVAL_ARM": arm, "AWOS_EVAL_JOB": str(number),
+                "AWOS_EVAL_REPEAT": rep[1:] if rep[:1] == "r" and rep[1:].isdigit() else "1"})
     fill = {"{runner}": str(Path(__file__).resolve()), "{job_dir}": str(job_dir),
             "{project}": str(project)}
     cmd = ([PY, "{runner}", "_dry_child", "{job_dir}", "{project}"] if dry_run
            else list(child["cmd"]))
     for key, val in fill.items():
         cmd = [part.replace(key, val) for part in cmd]
+    inputs = input_manifest(arm, job_dir, project, cmd, env)
     log_path = arm_dir / "run.log"
     log_start = log_path.stat().st_size if log_path.exists() else 0
     started = time.monotonic()
@@ -733,7 +1008,11 @@ def run_job(arm: str, number: int, job_dir: Path, sdir: Path, jobs: list, arm_di
         "minutes": minutes, "timed_out": timed_out,
         "notebook_chars": notebook_chars(state),
         "invalid": invalid_reason is not None, "invalid_reason": invalid_reason, "attempts": 1,
+        "inputs": inputs,
     }
+    af = aider_files(report, log_text)
+    if af:
+        inputs["aider_files"] = af
     no_edit = aider_no_edit(log_text)
     if no_edit or "[harness_aider]" in log_text:
         result["aider_no_edit"] = no_edit
@@ -970,10 +1249,17 @@ def _setup_arm_dirs(run_root: Path, arms: list[str], env_src: Path | None) -> di
 
 def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
         root: Path | None = None, out_root: Path | None = None,
-        env_file: str | None = None, resume: str | None = None, repeat: int = 1) -> int:
+        env_file: str | None = None, resume: str | None = None, repeat: int = 1,
+        skip_preflight: bool = False) -> int:
     """Run the selected jobs `repeat` times. With repeat > 1 each repeat gets its
     own fresh arm dirs (run_root/r<k>/<arm>), so no state carries across repeats;
-    every row carries its `repeat` number."""
+    every row carries its `repeat` number.
+
+    Before any arm starts, the selected jobs are validated (preflight; skipped
+    under --dry-run or --skip-preflight, and recorded as skipped). An INVALID job
+    aborts the run before any model spend (exit 3). After the run, the health
+    check and report hooks run (see finish)."""
+    started_at = _now()
     sdir = series_dir(series, root)
     jobs = discover_jobs(sdir)
     numbers = parse_jobs(job_spec, [n for n, _ in jobs])
@@ -1006,6 +1292,35 @@ def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
 
     retries = int(os.environ.get("AWOS_SERIES_RETRIES", 2))
     env_src = find_env_file(env_file)
+    provenance = {"git": git_provenance(), "config": config_hash(series, sdir, arms, numbers, repeat),
+                  "started_at": started_at}
+    out_root.mkdir(parents=True, exist_ok=True)
+    out = out_root / f"job_series_{ts}.json"
+
+    if dry_run or skip_preflight:
+        pre = {"status": "skipped", "reason": "dry-run" if dry_run else "--skip-preflight"}
+        print(f"[job_series] preflight SKIPPED ({pre['reason']})", flush=True)
+    else:
+        pre = preflight(sdir, jobs, numbers)
+    if pre["status"] == "failed":
+        bar = "!" * 78
+        print(f"\n{bar}\n  PREFLIGHT FAILED — job(s) {pre['invalid_jobs']} are INVALID (the harness "
+              f"can't score them).\n  Aborting before any arm starts; no model calls were made.\n"
+              f"  Fix the series, or check with: python scripts/job_series.py validate "
+              f"--series {series}\n{bar}", flush=True)
+        if resume:
+            return 3   # keep the earlier results file as it was
+        out.write_text(json.dumps({
+            "series": series, "timestamp": ts, "arms": arms, "jobs": numbers, "dry_run": dry_run,
+            "repeat": repeat, "provenance": {**provenance, "finished_at": _now()},
+            "preflight": pre, "valid": False, "aborted": "preflight failed",
+            "violations": [{"severity": "fatal", "check": "preflight", "arm": None, "job": n,
+                            "repeat": None, "detail": "; ".join(pre["jobs"][str(n)])}
+                           for n in pre["invalid_jobs"]],
+            "results": [],
+        }, indent=2), encoding="utf-8")
+        print(f"  Saved {out}")
+        return 3
 
     print(f"[job_series] series={series} jobs={numbers} arms={arms} dry_run={dry_run} "
           f"retries={retries} repeat={repeat}")
@@ -1048,17 +1363,24 @@ def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
 
     summary = summarize(results, arms)
     print_report(results, arms, summary)
-    out = out_root / f"job_series_{ts}.json"
-    out.write_text(json.dumps({
+    own = manifest_violations(results)
+    if pre["status"] == "skipped" and not dry_run:
+        own.append({"severity": "warn", "check": "preflight_skipped", "arm": None, "job": None,
+                    "repeat": None, "detail": "run started with --skip-preflight"})
+    data = {
         "series": series, "timestamp": ts, "arms": arms,
         "jobs": sorted({r["job"] for r in results} | set(numbers)), "dry_run": dry_run,
         "resumed": bool(resume), "repeat": repeat,
         "model_pin": {"model": PINNED_MODEL, "blocked_ladder_ids": list(BLOCKED_LADDER_IDS),
                       "env": PIN_ENV},
+        "provenance": {**provenance, "finished_at": _now()},
+        "preflight": pre, "valid": None, "violations": own,
         "run_dir": str(run_root), "stopped": stopped,
         "results": results, "summary": summary,
-    }, indent=2), encoding="utf-8")
+    }
+    out.write_text(json.dumps(data, indent=2), encoding="utf-8")
     print(f"  Saved {out}")
+    finish(data, out, run_root, run_root, own)
     return 2 if stopped and not results else 0
 
 
@@ -1153,17 +1475,24 @@ def revalidate(ts: str, data_root: Path | None = None, out_root: Path | None = N
               f"after: solved {b['solved']}/{b['jobs']} (paired exclusion)")
     out_root.mkdir(parents=True, exist_ok=True)
     out = out_root / f"job_series_{ts}_revalidated.json"
-    out.write_text(json.dumps({
-        **{k: v for k, v in data.items() if k not in ("results", "summary")},
+    own = manifest_violations(results)
+    revalidated = {
+        **{k: v for k, v in data.items()
+           if k not in ("results", "summary", "valid", "violations", "health", "report")},
+        "valid_before": data.get("valid"),
         "revalidated_from": str(src), "revalidated_at": time.strftime("%Y%m%dT%H%M%S"),
         "revalidation_rules": {"invalid_markers": list(INVALID_MARKERS),
                                "aider_no_edit_invalid": list(_ha().NO_EDIT_SETUP_REASONS),
                                "zero_turns": True},
         "newly_invalid": changed,
         "summary_before": before_summary,
+        "valid": None, "violations": own,
         "results": results, "summary": summary,
-    }, indent=2), encoding="utf-8")
+    }
+    out.write_text(json.dumps(revalidated, indent=2), encoding="utf-8")
     print(f"  Saved {out}")
+    # The run's own dir is only read; health.json and the report go next to the output.
+    finish(revalidated, out, run_dir, out_root / "job_series" / f"{ts}_revalidated", own)
     return 0
 
 
@@ -1186,6 +1515,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repeat", type=int, default=1,
                         help="run the selected jobs N times, each repeat with fresh state (default 1)")
     parser.add_argument("--dry-run", action="store_true", help="no-op child instead of the orchestrator")
+    parser.add_argument("--skip-preflight", action="store_true",
+                        help="don't validate the selected jobs before the run (recorded as skipped)")
     parser.add_argument("--series-root", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--out-root", default=None, help="where results/state go (default .awos/)")
     parser.add_argument("--data-root", default=None,
@@ -1206,7 +1537,7 @@ def main(argv: list[str] | None = None) -> int:
     if not arms or any(a not in ARM_CHILDREN for a in arms):
         parser.error(f"--arms takes any of {', '.join(ARM_CHILDREN)}")
     return run(args.series, arms, args.jobs, args.dry_run, root, out_root, args.env_file,
-               args.resume, args.repeat)
+               args.resume, args.repeat, args.skip_preflight)
 
 
 if __name__ == "__main__":

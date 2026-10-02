@@ -36,8 +36,9 @@
   },
   "run_dir": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20260930T170402",
   "stopped": null,
+  "valid_before": null,
   "revalidated_from": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20260930T170402.json",
-  "revalidated_at": "20261001T105250",
+  "revalidated_at": "20261002T210437",
   "revalidation_rules": {
     "invalid_markers": [
       "APIConnectionError",
@@ -149,6 +150,89 @@
     },
     "dropped_jobs": {}
   },
+  "valid": false,
+  "violations": [
+    {
+      "severity": "warn",
+      "check": "no_call_log",
+      "arm": "off",
+      "job": null,
+      "repeat": null,
+      "detail": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20260930T170402/off/state/.awos/llm_calls.jsonl missing (run predates llm_call_log): per-call checks skipped"
+    },
+    {
+      "severity": "fatal",
+      "check": "notebook_drop",
+      "arm": "on",
+      "job": 4,
+      "repeat": null,
+      "detail": "notebook 2732 -> 364 chars (-87%) between job 3 and job 4"
+    },
+    {
+      "severity": "warn",
+      "check": "no_call_log",
+      "arm": "on",
+      "job": null,
+      "repeat": null,
+      "detail": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20260930T170402/on/state/.awos/llm_calls.jsonl missing (run predates llm_call_log): per-call checks skipped"
+    },
+    {
+      "severity": "warn",
+      "check": "invalid_share",
+      "arm": "aider",
+      "job": null,
+      "repeat": null,
+      "detail": "5/12 jobs invalid (42%) \u2014 measurement drops them"
+    },
+    {
+      "severity": "fatal",
+      "check": "aider_no_files",
+      "arm": "aider",
+      "job": 3,
+      "repeat": null,
+      "detail": "Aider had no files in chat (asked_to_add_files; preloaded=0, edits applied=0, marked invalid=True)"
+    },
+    {
+      "severity": "fatal",
+      "check": "aider_no_files",
+      "arm": "aider",
+      "job": 4,
+      "repeat": null,
+      "detail": "Aider had no files in chat (asked_to_add_files; preloaded=0, edits applied=0, marked invalid=True)"
+    },
+    {
+      "severity": "fatal",
+      "check": "aider_no_files",
+      "arm": "aider",
+      "job": 5,
+      "repeat": null,
+      "detail": "Aider had no files in chat (asked_to_add_files; preloaded=0, edits applied=0, marked invalid=True)"
+    },
+    {
+      "severity": "fatal",
+      "check": "aider_no_files",
+      "arm": "aider",
+      "job": 6,
+      "repeat": null,
+      "detail": "Aider had no files in chat (asked_to_add_files; preloaded=0, edits applied=0, marked invalid=True)"
+    },
+    {
+      "severity": "fatal",
+      "check": "aider_no_files",
+      "arm": "aider",
+      "job": 12,
+      "repeat": null,
+      "detail": "Aider had no files in chat (asked_to_add_files; preloaded=0, edits applied=0, marked invalid=True)"
+    },
+    {
+      "severity": "warn",
+      "check": "invalid_share",
+      "arm": null,
+      "job": null,
+      "repeat": null,
+      "detail": "5/12 jobs invalid in some arm (42%) \u2014 head-to-head drops them from every arm"
+    }
+  ],
   "results": [
     {
       "arm": "off",
@@ -1628,5 +1712,11 @@
       "6": "aider: aider_no_edit (asked_to_add_files: Aider never had the code to edit)",
       "12": "aider: aider_no_edit (asked_to_add_files: Aider never had the code to edit)"
     }
-  }
+  },
+  "health": {
+    "path": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20260930T170402_revalidated/health.json",
+    "fatal": 6,
+    "warn": 4
+  },
+  "report": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20260930T170402_revalidated/report.md"
 }
