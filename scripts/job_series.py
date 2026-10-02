@@ -1252,6 +1252,19 @@ def _setup_arm_dirs(run_root: Path, arms: list[str], env_src: Path | None) -> di
     return arm_dirs
 
 
+def save_partial(out: Path, series: str, ts: str, arms: list[str], numbers: list[int],
+                 repeat: int, provenance: dict, pre: dict, results: list[dict]) -> None:
+    """The results so far, marked partial; the end of the run overwrites them."""
+    try:
+        out.write_text(json.dumps({
+            "series": series, "timestamp": ts, "arms": arms, "jobs": numbers,
+            "repeat": repeat, "partial": True, "provenance": provenance,
+            "preflight": pre, "results": results,
+        }, indent=2, default=str), encoding="utf-8")
+    except OSError as exc:
+        print(f"[job_series] could not save partial results: {exc}", flush=True)
+
+
 def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
         root: Path | None = None, out_root: Path | None = None,
         env_file: str | None = None, resume: str | None = None, repeat: int = 1,
@@ -1358,6 +1371,9 @@ def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
                                                        arm_dirs[arm], dry_run, retries)
                 result["repeat"] = rep
                 results.append(result)
+                # Saved after every job: a killed runner kept nothing, and
+                # --resume then had no earlier results to keep.
+                save_partial(out, series, ts, arms, numbers, repeat, provenance, pre, results)
                 if stopped:
                     break
             if stopped:

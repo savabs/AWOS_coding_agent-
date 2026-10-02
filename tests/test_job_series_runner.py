@@ -272,6 +272,27 @@ def test_aider_answer_without_edit_is_a_fair_failure_not_a_crash():
     assert "aider_no_edit" in js.detect_invalid(setup, turns=0, dry_run=False)
 
 
+def test_results_are_saved_after_every_job_and_resume_keeps_them(tmp_path, monkeypatch):
+    # A runner killed mid-run used to leave no results file, so --resume kept nothing.
+    saved: list[int] = []
+    real = js.save_partial
+
+    def spy(out, *args):
+        real(out, *args)
+        saved.append(len(json.loads(out.read_text())["results"]))
+
+    monkeypatch.setattr(js, "save_partial", spy)
+    rc, data = _dry_run(tmp_path)
+    assert saved == list(range(1, len(data["results"]) + 1))
+    assert "partial" not in data  # the end of the run overwrites the partial file
+
+    out_root = tmp_path / "out"
+    rc = js.main(["run", "--series", "mini", "--series-root", str(tmp_path), "--dry-run",
+                  "--out-root", str(out_root), "--resume", data["timestamp"], "--jobs", "2"])
+    resumed = json.loads((out_root / f"job_series_{data['timestamp']}.json").read_text())
+    assert {r["job"] for r in resumed["results"]} == {r["job"] for r in data["results"]}
+
+
 def _dry_run(tmp_path, *extra):
     make_series(tmp_path, "mini")
     out_root = tmp_path / "out"
