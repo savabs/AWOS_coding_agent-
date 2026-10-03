@@ -38,6 +38,27 @@ The first attempt with no fallbacks (run 20261003T113221) was stopped after
 
 The metrics and decision rule below are unchanged.
 
+### Amendment 2 (2026-10-03, before any scored data)
+
+Allowing open fallbacks failed too (run 20261003T114031, stopped after 1 job).
+
+- **What happened.** DeepInfra was still overloaded. The sticky session put
+  24 of 25 calls on **Relace (fp4)**. A quantized model confounds quality,
+  and Relace charges about 7× DeepInfra's output price.
+- **Final setting.** An ordered list of fp8 caching providers with
+  fallbacks off. OpenRouter tries only these, in order:
+
+  ```
+  AWOS_OPENROUTER_PROVIDER=deepinfra,gmicloud,novita,siliconflow
+  AWOS_OPENROUTER_ALLOW_FALLBACKS=0
+  ```
+
+  Overload moves a call down the list, never to fp4.
+- **Health check.** Any provider outside the list is fatal
+  (`provider_mismatch`).
+- **Smoke test.** Both calls were served by DeepInfra. On the second call,
+  3840 of 4098 prompt tokens were cached.
+
 ## Hypothesis
 
 Unpinned routing spreads calls across about 15 endpoints, so the prompt cache
