@@ -108,6 +108,20 @@ def test_manifest_hashes_equal_across_arms(tmp_path):
     assert not any(v["check"] == "input_mismatch" for v in data["violations"])
 
 
+def test_routing_pin_and_session_are_recorded(tmp_path, monkeypatch):
+    # A provider-pin ablation must say how it was routed, in every row and the run.
+    monkeypatch.setenv("AWOS_OPENROUTER_PROVIDER", "deepinfra")
+    make_series(tmp_path, "mini")
+    rc, data, _ = _run(tmp_path, "mini", "--dry-run")
+    assert rc == 0
+    assert data["model_pin"]["routing"] == {"AWOS_OPENROUTER_PROVIDER": "deepinfra"}
+    sessions = set()
+    for r in data["results"]:
+        assert r["inputs"]["env"]["AWOS_OPENROUTER_PROVIDER"] == "deepinfra"
+        sessions.add(r["inputs"]["env"]["AWOS_SESSION_ID"])
+    assert len(sessions) == len(data["results"])  # one session per (arm, job)
+
+
 def test_manifest_mismatch_is_fatal(tmp_path, monkeypatch, capsys):
     make_series(tmp_path, "mini")
     real = js.materialize

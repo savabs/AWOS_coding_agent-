@@ -61,19 +61,40 @@ def _int(value: Any) -> Optional[int]:
         return None
 
 
+def _provider(response: Any) -> Optional[str]:
+    """The serving provider OpenRouter names in its response (`provider`).
+
+    The OpenAI SDK keeps unknown fields in `model_extra` (pydantic extras);
+    a dict or plain object carries it as a key / attribute."""
+    value = _get(response, "provider")
+    if value is None and not isinstance(response, dict):
+        extra = getattr(response, "model_extra", None)
+        if isinstance(extra, dict):
+            value = extra.get("provider")
+    return value if isinstance(value, str) and value else None
+
+
+def requested_provider() -> Optional[str]:
+    """AWOS_OPENROUTER_PROVIDER as the run asked for it, or None (no pin)."""
+    value = os.environ.get("AWOS_OPENROUTER_PROVIDER", "").strip()
+    return value or None
+
+
 def fields_from_response(response: Any) -> dict:
     """The loggable fields of an OpenAI- or Anthropic-shaped response.
 
     Keys: response_model, finish_reason, input_tokens, output_tokens,
     reasoning_tokens, cached_tokens, cost_usd (usage.cost when the provider
-    reports it, e.g. OpenRouter), visible_chars. Missing values are None.
+    reports it, e.g. OpenRouter), visible_chars, provider (OpenRouter's serving
+    provider). Missing values are None.
     Never raises.
     """
     out: dict = dict(response_model=None, finish_reason=None, input_tokens=None,
                      output_tokens=None, reasoning_tokens=None, cached_tokens=None,
-                     cost_usd=None, visible_chars=None)
+                     cost_usd=None, visible_chars=None, provider=None)
     try:
         out["response_model"] = _get(response, "model")
+        out["provider"] = _provider(response)
         usage = _get(response, "usage")
         choices = _get(response, "choices")
         if choices:
@@ -136,6 +157,8 @@ def record_call(component: str, requested_model: Optional[str], response_model: 
         for key, env in _TAG_ENV.items():
             if os.environ.get(env):
                 line[key] = os.environ[env]
+        line["provider"] = None
+        line["requested_provider"] = requested_provider()
         line.update(extra)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "a", encoding="utf-8") as fh:

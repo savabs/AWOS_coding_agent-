@@ -307,16 +307,26 @@ class AnthropicToolClient:
 class OpenAIToolClient:
     """Adapter for OpenAI-compatible function calling (DeepSeek, GPT, others)."""
 
-    def __init__(self, client: Any, model: str, max_tokens: Optional[int] = None) -> None:
+    def __init__(self, client: Any, model: str, max_tokens: Optional[int] = None,
+                 *, openrouter: bool = False) -> None:
         self._client = client
         self.model = model
         self.max_tokens = max_tokens or _int_env("AWOS_AGENT_MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS)
+        # Talking to OpenRouter: requests carry the provider pin / session id
+        # (providers.openrouter_routing; nothing is added when its env is unset).
+        self.openrouter = openrouter
 
     def complete(self, system, messages, registry, tool_choice: Optional[str] = None) -> ModelReply:
         # tool_choice names a tool the reply MUST call — how a caller makes a
         # decision structural rather than a request the model may ignore.
         extra = ({"tool_choice": {"type": "function", "function": {"name": tool_choice}}}
                  if tool_choice else {})
+        if self.openrouter:
+            try:
+                from .providers import with_openrouter_routing
+            except ImportError:
+                from providers import with_openrouter_routing
+            extra = with_openrouter_routing(extra)
         response = self._client.chat.completions.create(
             model=self.model,
             max_tokens=self.max_tokens,
@@ -1075,6 +1085,7 @@ def _build_openrouter(api_key: str, model: Optional[str]) -> ModelClient:
             **_client_options(),
         ),
         chosen,
+        openrouter=True,
     )
 
 
@@ -1118,6 +1129,7 @@ def build_client_from_env(model: Optional[str] = None) -> ModelClient:
                 **_client_options(),
             ),
             model or os.getenv("AWOS_AGENT_MODEL", "qwen2.5-coder"),
+            openrouter="openrouter.ai" in base_url,
         )
 
     openrouter_key = os.getenv("OPENROUTER_API_KEY")

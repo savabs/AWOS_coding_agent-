@@ -75,6 +75,14 @@ PIN_ENV = {
     "AWOS_GOAL_CHECK": "0",                 # hidden tests judge; saves ~$0.13/job
 }
 
+# Routing knobs taken from the launching shell (an ablation sets them): recorded
+# in every input manifest and the results, so a run says how it was routed.
+ROUTING_ENV = ("AWOS_OPENROUTER_PROVIDER", "AWOS_OPENROUTER_ALLOW_FALLBACKS")
+
+
+def routing_env() -> dict:
+    return {k: os.environ[k] for k in ROUTING_ENV if os.environ.get(k)}
+
 # One entry per arm: the child command and the env it adds. In "cmd", the
 # placeholders {runner}, {job_dir} and {project} are filled per job; the child
 # runs with cwd = the arm's state dir. --arms accepts any key here. Under
@@ -393,7 +401,8 @@ def mask_cmd(cmd: list[str]) -> list[str]:
 def input_manifest(arm: str, job_dir: Path, project: Path, cmd: list[str], env: dict) -> dict:
     """What an arm receives for a job, recorded before its child starts (rule 1)."""
     proj_sha, n_files = tree_hash(project)
-    keys = sorted(set(PIN_ENV) | set(ARM_CHILDREN[arm]["env"]) | {"AWOS_SERIES_ARM"})
+    keys = sorted(set(PIN_ENV) | set(ARM_CHILDREN[arm]["env"]) | {"AWOS_SERIES_ARM"}
+                  | set(ROUTING_ENV) | {"AWOS_SESSION_ID"})
     return {
         "project_sha256": proj_sha, "project_files": n_files,
         "task_sha256": sha256_file(job_dir / "task.json"),
@@ -480,7 +489,7 @@ def config_hash(series: str, sdir: Path, arms: list[str], numbers: list[int],
                              for c in ARM_CHILDREN[a]["cmd"]],
                      "env": ARM_CHILDREN[a]["env"]} for a in arms},
         "pin": {"model": PINNED_MODEL, "blocked_ladder_ids": list(BLOCKED_LADDER_IDS),
-                "env": PIN_ENV},
+                "env": PIN_ENV, "routing": routing_env()},
     }
     blob = json.dumps(config, sort_keys=True).encode()
     return {"sha256": hashlib.sha256(blob).hexdigest(), "series_sha256": series_sha}
@@ -955,6 +964,10 @@ def run_job(arm: str, number: int, job_dir: Path, sdir: Path, jobs: list, arm_di
     rep = arm_dir.parent.name
     env.update({"AWOS_EVAL_ARM": arm, "AWOS_EVAL_JOB": str(number),
                 "AWOS_EVAL_REPEAT": rep[1:] if rep[:1] == "r" and rep[1:].isdigit() else "1"})
+    # One OpenRouter session per job: sticky routing keeps a job's calls on the
+    # provider that holds its prompt cache, and jobs never share a cache.
+    import hashlib
+    env["AWOS_SESSION_ID"] = hashlib.sha256(f"{arm_dir}:{number}".encode()).hexdigest()[:24]
     fill = {"{runner}": str(Path(__file__).resolve()), "{job_dir}": str(job_dir),
             "{project}": str(project)}
     cmd = ([PY, "{runner}", "_dry_child", "{job_dir}", "{project}"] if dry_run
@@ -1393,7 +1406,7 @@ def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
         "jobs": sorted({r["job"] for r in results} | set(numbers)), "dry_run": dry_run,
         "resumed": bool(resume), "repeat": repeat,
         "model_pin": {"model": PINNED_MODEL, "blocked_ladder_ids": list(BLOCKED_LADDER_IDS),
-                      "env": PIN_ENV},
+                      "env": PIN_ENV, "routing": routing_env()},
         "provenance": {**provenance, "finished_at": _now()},
         "preflight": pre, "valid": None, "violations": own,
         "run_dir": str(run_root), "stopped": stopped,

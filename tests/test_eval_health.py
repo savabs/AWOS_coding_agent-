@@ -232,3 +232,53 @@ def test_cli_writes_health_json(tmp_path, capsys):
     assert eh.main([str(root), str(results)]) == 0
     assert "RUN HEALTH: OK" in capsys.readouterr().out
     assert json.loads((results.parent / "health.json").read_text())["ok"] is True
+
+
+# ── provider pin + prompt cache ──────────────────────────────────────────────
+
+def _provider_checks(health):
+    """Violations other than billing (these fixtures' call costs are arbitrary)."""
+    return [c for c in _checks(health) if c != "billing_mismatch"]
+
+
+def _pinned(at_job, turn, provider="DeepInfra", cached=0, inp=1000, **kw):
+    return _call(at_job, requested_provider="deepinfra", provider=provider, turn=turn,
+                 input_tokens=inp, cached_tokens=cached, **kw)
+
+
+def test_pinned_run_served_by_pinned_provider_is_ok(tmp_path):
+    rows = [_row("on", 1), _row("on", 2)]
+    calls = {"on": [_pinned(1, 1), _pinned(1, 2, cached=900), _pinned(2, 1),
+                    _pinned(2, 2, cached=800), _pinned(2, 3, provider="deepinfra", cached=900)]}
+    health = eh.check_run(*_build(tmp_path, rows, calls))
+    assert health["ok"] and _provider_checks(health) == []
+    st = health["stats"]["arms"]["on"]
+    assert st["requested_provider"] == "deepinfra"
+    assert st["agent_cache_share"] == round(2600 / 5000, 4)
+    assert st["agent_later_turns"] == 3 and st["agent_later_turns_cached_share"] == 1.0
+
+
+def test_provider_mismatch_is_fatal(tmp_path):
+    rows = [_row("on", 1)]
+    calls = {"on": [_pinned(1, 1), _pinned(1, 2, provider="Chutes", cached=900)]}
+    health = eh.check_run(*_build(tmp_path, rows, calls))
+    assert not health["ok"] and "provider_mismatch" in _checks(health, "fatal")
+
+
+def test_pinned_run_with_low_cache_share_warns(tmp_path):
+    rows = [_row("on", 1)]
+    calls = {"on": [_pinned(1, 1), _pinned(1, 2, cached=10), _pinned(1, 3)]}
+    health = eh.check_run(*_build(tmp_path, rows, calls))
+    assert health["ok"] and _provider_checks(health) == ["low_cache_share"]
+    assert health["stats"]["arms"]["on"]["agent_later_turns_cached_share"] == 0.5
+
+
+def test_unpinned_run_skips_provider_checks_but_reports_cache(tmp_path):
+    rows = [_row("on", 1)]
+    calls = {"on": [_call(1, provider="Chutes", turn=1, input_tokens=100, cached_tokens=0),
+                    _call(1, provider="DeepInfra", turn=2, input_tokens=100, cached_tokens=0)]}
+    health = eh.check_run(*_build(tmp_path, rows, calls))
+    assert health["ok"] and _provider_checks(health) == []
+    st = health["stats"]["arms"]["on"]
+    assert st["requested_provider"] is None and st["agent_cache_share"] == 0.0
+    assert "cache=" in eh.format_report(health)

@@ -114,7 +114,8 @@ def test_fields_from_openai_response():
     f = lcl.fields_from_response(_response("hello", "length", reasoning=900, cached=64, cost=0.002))
     assert f == {"response_model": "deepseek/deepseek-v4-flash", "finish_reason": "length",
                  "input_tokens": 100, "output_tokens": 20, "reasoning_tokens": 900,
-                 "cached_tokens": 64, "cost_usd": 0.002, "visible_chars": 5}
+                 "cached_tokens": 64, "cost_usd": 0.002, "visible_chars": 5,
+                 "provider": None}
 
 
 def test_fields_from_dict_and_anthropic_and_garbage():
@@ -216,3 +217,41 @@ def test_planner_logs_transport_error(log):
         _planner(error=RuntimeError("boom"))._complete_plan("goal")
     [line] = log()
     assert line["component"] == "planner" and "boom" in line["error"]
+
+
+# ── provider (OpenRouter provider pin) ───────────────────────────────────────
+
+def test_provider_from_attribute_dict_and_model_extra():
+    r = _response()
+    r.provider = "DeepInfra"
+    assert lcl.fields_from_response(r)["provider"] == "DeepInfra"
+    assert lcl.fields_from_response({"provider": "Chutes", "choices": []})["provider"] == "Chutes"
+
+    from openai.types.chat import ChatCompletion
+    sdk = ChatCompletion.model_validate({
+        "id": "x", "object": "chat.completion", "created": 1, "model": "m",
+        "provider": "DeepInfra",
+        "choices": [{"index": 0, "finish_reason": "stop",
+                     "message": {"role": "assistant", "content": "hi"}}],
+        "usage": {"prompt_tokens": 3000, "completion_tokens": 5, "total_tokens": 3005,
+                  "prompt_tokens_details": {"cached_tokens": 2944}}})
+    f = lcl.fields_from_response(sdk)
+    assert f["provider"] == "DeepInfra" and f["cached_tokens"] == 2944
+
+
+def test_line_records_provider_and_requested_provider(log, monkeypatch):
+    monkeypatch.setenv("AWOS_OPENROUTER_PROVIDER", "deepinfra")
+    r = _response(cached=50)
+    r.provider = "DeepInfra"
+    lcl.record_response("agent", "m", r)
+    lcl.record_error("agent", "m", RuntimeError("x"))
+    ok, err = log()
+    assert ok["provider"] == "DeepInfra" and ok["requested_provider"] == "deepinfra"
+    assert ok["cached_tokens"] == 50
+    assert err["provider"] is None and err["requested_provider"] == "deepinfra"
+
+
+def test_requested_provider_none_without_pin(log, monkeypatch):
+    monkeypatch.delenv("AWOS_OPENROUTER_PROVIDER", raising=False)
+    lcl.record_call("agent", "m", "m", "stop", 1, 1)
+    assert log()[0]["requested_provider"] is None

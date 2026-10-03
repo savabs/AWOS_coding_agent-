@@ -43,6 +43,9 @@ AGENT_TRUNCATION_WARN = 0.05
 NOTEBOOK_MAX_DROP = 0.40
 BILLING_MAX_GAP = 0.50
 INVALID_MAX_SHARE = 0.25
+#: A provider-pinned run exists to let the prompt cache hit; below this share
+#: of agent input tokens read from cache, the pin is not doing its job.
+PINNED_MIN_CACHE_SHARE = 0.20
 #: aider_no_edit reasons that mean the harness left Aider without the code.
 AIDER_SETUP_REASONS = ("no_files_in_chat", "asked_to_add_files")
 
@@ -390,6 +393,8 @@ def _check_calls(arm, rep, arm_rows, sections, st, allowed, flag, log_path: Path
         flag("fatal", "unpinned_model", arm, None, rep,
              f"{comp} {field} {m!r} x{n} not in allowed {sorted(allowed)}")
 
+    _check_provider(arm, rep, calls, agent, st, flag)
+
     # Billing vs logged cost.
     logged = sum(c["cost_usd"] for c in calls if isinstance(c.get("cost_usd"), (int, float)))
     st["logged_cost_usd"] = round(logged, 6)
@@ -398,6 +403,46 @@ def _check_calls(arm, rep, arm_rows, sections, st, allowed, flag, log_path: Path
         flag("warn", "billing_mismatch", arm, None, rep,
              f"billed ${billed:.4f} vs logged ${logged:.4f} "
              f"({abs(billed - logged) / billed:.0%} apart)")
+
+
+def _provider_key(name: Any) -> str:
+    """"DeepInfra" / "deepinfra" / "deepinfra/fp8" -> "deepinfra"."""
+    return re.sub(r"[^a-z0-9]", "", str(name).strip().lower().split("/")[0])
+
+
+def _check_provider(arm, rep, calls: list[dict], agent: list[dict], st: dict, flag) -> None:
+    """Provider pin (AWOS_OPENROUTER_PROVIDER) honoured, and prompt-cache use."""
+    # Cache stats for every arm: Σcached / Σinput over agent calls, and the
+    # share of agent turns ≥2 (prefix already sent once) that hit the cache.
+    total_in = sum(c.get("input_tokens") or 0 for c in agent)
+    total_cached = sum(c.get("cached_tokens") or 0 for c in agent)
+    share = total_cached / total_in if total_in else 0.0
+    later = [c for c in agent if isinstance(c.get("turn"), int) and c["turn"] >= 2]
+    hits = sum(1 for c in later if (c.get("cached_tokens") or 0) > 0)
+    st["agent_cache_share"] = round(share, 4)
+    st["agent_later_turns"] = len(later)
+    st["agent_later_turns_cached_share"] = round(hits / len(later), 4) if later else 0.0
+    st["providers_seen"] = dict(Counter(c.get("provider") for c in calls
+                                        if c.get("provider") and not c.get("error")))
+
+    requested = next((c.get("requested_provider") for c in calls
+                      if c.get("requested_provider")), None)
+    st["requested_provider"] = requested
+    if not requested:
+        return
+    allowed = {_provider_key(p) for p in str(requested).split(",") if p.strip()}
+    wrong: Counter = Counter()
+    for c in calls:
+        served = c.get("provider")
+        if served and not c.get("error") and _provider_key(served) not in allowed:
+            wrong[(served, c.get("component"))] += 1
+    for (served, comp), n in sorted(wrong.items(), key=str):
+        flag("fatal", "provider_mismatch", arm, None, rep,
+             f"{comp} served by {served!r} x{n}; run pinned provider {requested!r}")
+    if agent and share < PINNED_MIN_CACHE_SHARE:
+        flag("warn", "low_cache_share", arm, None, rep,
+             f"provider pinned to {requested!r} but agent cache share {share:.1%} "
+             f"< {PINNED_MIN_CACHE_SHARE:.0%} ({total_cached}/{total_in} input tokens cached)")
 
 
 def _job_of(call: dict, per_job: dict[int, list[dict]]) -> Optional[int]:
@@ -430,7 +475,11 @@ def format_report(health: dict) -> str:
                 f"billed=${a.get('billed_usd', 0):.4f}"]
         if "calls" in a:
             bits += [f"calls={a['calls']}", f"logged=${a['logged_cost_usd']:.4f}",
-                     f"agent_trunc={a['agent_truncation_rate']:.1%}"]
+                     f"agent_trunc={a['agent_truncation_rate']:.1%}",
+                     f"cache={a.get('agent_cache_share', 0):.1%}"]
+            if a.get("requested_provider"):
+                bits.append(f"provider_pin={a['requested_provider']} "
+                            f"seen={a.get('providers_seen')}")
         elif not _is_aider(arm.split("/")[-1]):
             bits.append("calls=n/a (no call log)")
         if "aider_no_edit" in a:

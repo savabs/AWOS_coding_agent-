@@ -15,10 +15,12 @@ from typing import Optional
 try:
     from .providers import (
         REASONING_OFF, chat_client, openrouter_key, planner_model, planner_reasoning,
+        with_openrouter_routing,
     )
 except ImportError:
     from providers import (
         REASONING_OFF, chat_client, openrouter_key, planner_model, planner_reasoning,
+        with_openrouter_routing,
     )
 try:  # one log line per model call, for scripts/eval_health.py
     from .llm_call_log import record_error, record_response
@@ -64,6 +66,10 @@ class CheapPlanner:
         )
         if getattr(self, "_via_openrouter", False) and reasoning is not None:
             kwargs["extra_body"] = {"reasoning": reasoning}
+        if getattr(self, "_via_openrouter", False):
+            # Provider pin / session id (AWOS_OPENROUTER_PROVIDER, AWOS_SESSION_ID);
+            # a no-op when unset. Merged with `reasoning`, never replacing it.
+            kwargs = with_openrouter_routing(kwargs)
         return kwargs
 
     def _record(self, tracker, response, prompt: str, response_text: str) -> None:

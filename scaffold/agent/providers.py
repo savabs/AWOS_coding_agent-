@@ -130,6 +130,52 @@ def planner_reasoning() -> Optional[dict]:
     return reasoning_for("planner")
 
 
+#: OpenRouter provider pin (cost ablation). OpenRouter load-balances one model
+#: across many third-party endpoints, so a prompt prefix lands on a different
+#: cache each turn and prompt caching never hits. Pinning one provider (and a
+#: sticky session) lets the agent loop's re-sent prefix be read from cache.
+#:   AWOS_OPENROUTER_PROVIDER=deepinfra[,other]  -> provider.order
+#:   AWOS_OPENROUTER_ALLOW_FALLBACKS=0|1         -> provider.allow_fallbacks (default 0)
+#:   AWOS_SESSION_ID=<id>                        -> session_id (sticky routing)
+#: All unset -> {} and requests are byte-for-byte what they were.
+OPENROUTER_PROVIDER_ENV = "AWOS_OPENROUTER_PROVIDER"
+OPENROUTER_FALLBACKS_ENV = "AWOS_OPENROUTER_ALLOW_FALLBACKS"
+SESSION_ID_ENV = "AWOS_SESSION_ID"
+_TRUE = ("1", "true", "yes", "on")
+
+
+def requested_openrouter_providers() -> list[str]:
+    """The provider order from AWOS_OPENROUTER_PROVIDER ([] when unset)."""
+    raw = os.getenv(OPENROUTER_PROVIDER_ENV, "")
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
+
+def openrouter_routing() -> dict:
+    """OpenRouter routing fields for a request's extra_body; {} when unset."""
+    body: dict = {}
+    order = requested_openrouter_providers()
+    if order:
+        fallbacks = os.getenv(OPENROUTER_FALLBACKS_ENV, "0").strip().lower() in _TRUE
+        body["provider"] = {"order": order, "allow_fallbacks": fallbacks}
+    session = os.getenv(SESSION_ID_ENV, "").strip()
+    if session:
+        body["session_id"] = session
+    return body
+
+
+def with_openrouter_routing(kwargs: dict) -> dict:
+    """`kwargs` with openrouter_routing() merged into its extra_body.
+
+    Keys the caller already put in extra_body (e.g. `reasoning`) are kept and
+    win on a clash. Env unset -> `kwargs` returned unchanged, no extra_body."""
+    routing = openrouter_routing()
+    if not routing:
+        return kwargs
+    body = dict(routing)
+    body.update(kwargs.get("extra_body") or {})
+    return {**kwargs, "extra_body": body}
+
+
 def openrouter_key() -> Optional[str]:
     return os.getenv("OPENROUTER_API_KEY") or None
 
@@ -154,8 +200,10 @@ def openrouter_model_id(model_id: str) -> str:
 class _RewriteModel:
     """Every method call on `target` gets its `model=` mapped to an OpenRouter id."""
 
-    def __init__(self, target: Any) -> None:
+    def __init__(self, target: Any, chat: bool = False) -> None:
         self._target = target
+        # Chat-completions calls also get the provider pin / session id.
+        self._chat = chat
 
     def __getattr__(self, name):
         attr = getattr(self._target, name)
@@ -165,6 +213,8 @@ class _RewriteModel:
         def call(*args, **kwargs):
             if "model" in kwargs:
                 kwargs["model"] = openrouter_model_id(kwargs["model"])
+            if self._chat:
+                kwargs = with_openrouter_routing(kwargs)
             return attr(*args, **kwargs)
 
         return call
@@ -178,7 +228,7 @@ class _Routed:
         target = inner
         for part in path:
             target = getattr(target, part)
-        namespace: Any = _RewriteModel(target)
+        namespace: Any = _RewriteModel(target, chat=tuple(path) == ("chat", "completions"))
         for part in reversed(path[1:]):
             namespace = SimpleNamespace(**{part: namespace})
         setattr(self, path[0], namespace)
