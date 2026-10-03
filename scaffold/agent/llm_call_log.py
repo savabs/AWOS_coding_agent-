@@ -159,6 +159,10 @@ def record_call(component: str, requested_model: Optional[str], response_model: 
                 line[key] = os.environ[env]
         line["provider"] = None
         line["requested_provider"] = requested_provider()
+        if line["requested_provider"]:
+            # A fallback call is a miss of the preference, not a broken pin.
+            line["fallbacks_allowed"] = os.environ.get(
+                "AWOS_OPENROUTER_ALLOW_FALLBACKS", "0").strip().lower() in ("1", "true", "yes")
         line.update(extra)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "a", encoding="utf-8") as fh:

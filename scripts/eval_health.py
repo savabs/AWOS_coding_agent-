@@ -436,9 +436,17 @@ def _check_provider(arm, rep, calls: list[dict], agent: list[dict], st: dict, fl
         served = c.get("provider")
         if served and not c.get("error") and _provider_key(served) not in allowed:
             wrong[(served, c.get("component"))] += 1
+    # With fallbacks allowed the pin is a preference: another provider serving a
+    # call (the preferred one overloaded) is a cache miss to report, not a fault.
+    fallbacks = any(c.get("fallbacks_allowed") for c in calls)
+    served_ok = [c for c in calls if c.get("provider") and not c.get("error")]
+    st["preferred_provider_share"] = (
+        round(1 - sum(wrong.values()) / len(served_ok), 4) if served_ok else None)
     for (served, comp), n in sorted(wrong.items(), key=str):
-        flag("fatal", "provider_mismatch", arm, None, rep,
-             f"{comp} served by {served!r} x{n}; run pinned provider {requested!r}")
+        flag("warn" if fallbacks else "fatal",
+             "provider_fallback" if fallbacks else "provider_mismatch", arm, None, rep,
+             f"{comp} served by {served!r} x{n}; run "
+             f"{'preferred' if fallbacks else 'pinned'} provider {requested!r}")
     if agent and share < PINNED_MIN_CACHE_SHARE:
         flag("warn", "low_cache_share", arm, None, rep,
              f"provider pinned to {requested!r} but agent cache share {share:.1%} "

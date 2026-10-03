@@ -247,6 +247,7 @@ def test_pin_model_leaves_only_flash(tmp_path):
     "Error: API key expired",
     "stop=model_error (Connection error.)",
     "Error code: 401 - {'error': 'unauthorized'}",
+    "model call failed on turn 1: Error code: 429 - {'error': {'message': 'Provider returned error'}}",
 ])
 def test_detect_invalid_markers(line):
     assert js.detect_invalid(f"+00:03 {line}\n", turns=7, dry_run=False)

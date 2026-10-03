@@ -265,6 +265,19 @@ def test_provider_mismatch_is_fatal(tmp_path):
     assert not health["ok"] and "provider_mismatch" in _checks(health, "fatal")
 
 
+def test_fallback_call_is_a_warning_when_fallbacks_allowed(tmp_path):
+    # Preferred provider overloaded (429) -> OpenRouter falls back: a cache miss
+    # to report, not a broken pin.
+    rows = [_row("on", 1)]
+    calls = {"on": [_pinned(1, 1, fallbacks_allowed=True),
+                    _pinned(1, 2, provider="Novita", cached=0, fallbacks_allowed=True),
+                    _pinned(1, 3, cached=900, fallbacks_allowed=True)]}
+    health = eh.check_run(*_build(tmp_path, rows, calls))
+    assert "provider_mismatch" not in _checks(health, "fatal")
+    assert "provider_fallback" in _checks(health, "warn")
+    assert health["stats"]["arms"]["on"]["preferred_provider_share"] == round(2 / 3, 4)
+
+
 def test_pinned_run_with_low_cache_share_warns(tmp_path):
     rows = [_row("on", 1)]
     calls = {"on": [_pinned(1, 1), _pinned(1, 2, cached=10), _pinned(1, 3)]}

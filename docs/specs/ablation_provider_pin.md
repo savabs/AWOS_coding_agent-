@@ -16,6 +16,28 @@ AWOS_OPENROUTER_ALLOW_FALLBACKS=0
 Everything else is unchanged from baseline run `20261002T223614`, including
 history condensing. The stable-prefix change is the next ablation.
 
+### Amendment (2026-10-03, before any scored data)
+
+The first attempt with no fallbacks (run 20261003T113221) was stopped after
+1.5 jobs, about $0.02 spent.
+
+- **What happened.** DeepInfra's shared pool returned HTTP 429 ("engine
+  overloaded") on every call in on j01: agent, critique and notebook. With no
+  fallback, provider capacity became an AWOS failure.
+- **New setting.** `AWOS_OPENROUTER_PROVIDER=deepinfra`,
+  `AWOS_OPENROUTER_ALLOW_FALLBACKS=1`. DeepInfra is preferred, and the
+  per-job sticky session keeps calls there and cached while it is healthy.
+  OpenRouter falls back only when DeepInfra fails.
+- **Health check changes.** A fallback call is now a warning
+  (`provider_fallback`), and the report gives the preferred-provider share.
+  `provider_mismatch` stays fatal only for no-fallback runs. HTTP 429 is now
+  an infrastructure marker (`INVALID_MARKERS`), so the job is retried
+  rather than scored as an agent failure.
+- **What the aborted attempt already showed.** On off j01, 14/14 calls went to
+  DeepInfra with an agent cache share of 64%.
+
+The metrics and decision rule below are unchanged.
+
 ## Hypothesis
 
 Unpinned routing spreads calls across about 15 endpoints, so the prompt cache

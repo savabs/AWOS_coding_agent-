@@ -116,6 +116,7 @@ INVALID_MARKERS = (
     "AuthenticationError",      # key rejected
     "API key expired",
     "Error code: 401",
+    "Error code: 429",          # provider overloaded / rate-limited upstream: capacity, not the agent
 )
 
 
