@@ -5,9 +5,10 @@ quality_gate.py — Pre-completion quality gate for a task.
 Checks:
   1. All task steps are marked done [x] (no pending [ ] or in-progress [~])
   2. Test suite passes (runs pytest or equivalent)
-  3. Obsidian lint is clean (no FM01, FM02, LK01 errors)
-  4. No Python errors in modified files (optional — requires pyright/mypy)
-  5. Checkpoint file exists for today
+  3. Live proof step present and marked done when required (§2.6 AWOS.md)
+  4. Obsidian lint is clean (no FM01, FM02, LK01 errors)
+  5. No Python errors in modified files (optional — requires pyright/mypy)
+  6. Checkpoint file exists for today
 
 Usage:
     python scripts/quality_gate.py --task tasks/active/my_feature.md
@@ -60,6 +61,45 @@ def check_task_steps(task_path: Path) -> tuple[bool, str]:
         return False, "No task steps found. Is this the right task file?"
 
     return True, f"Task steps: {len(done)}/{total} complete"
+
+
+def check_live_proof(task_path: Path) -> tuple[bool, str]:
+    """
+    Verify live proof discipline (AWOS.md §2.6).
+
+    - If task mentions live proof: pending live-proof steps → FAIL
+    - If task touches kernel paths but omits live proof → WARN
+    """
+    content = task_path.read_text(encoding="utf-8")
+    lower = content.lower()
+
+    live_proof_lines = [
+        line for line in content.splitlines()
+        if "live proof" in line.lower() and re.match(r"^\s*-\s*\[[ x~!]\]", line)
+    ]
+
+    if live_proof_lines:
+        pending = [ln for ln in live_proof_lines if re.match(r"^\s*-\s*\[ \]", ln)]
+        if pending:
+            return False, (
+                "Live proof step not marked done. Run the demo, observe markers, then mark [x].\n"
+                + "\n".join(f"  {s.strip()}" for s in pending)
+            )
+        return True, f"Live proof: {len(live_proof_lines)} step(s) marked done"
+
+    # Advisory: kernel/CLI tasks should document live proof
+    kernel_hints = (
+        "orchestrator", "session", "awos.py", "verifier", "breaker",
+        "mission", "cli", "stagnation", "circuit",
+    )
+    if any(h in lower for h in kernel_hints):
+        return False, (
+            "No live proof step in task file. Add:\n"
+            "  - [ ] Live proof: run `<demo>` — watch for `<marker>`\n"
+            "See protocols/LIVE_PROOF_PROTOCOL.md"
+        )
+
+    return True, "Live proof not required for this task (no kernel/CLI keywords)"
 
 
 def run_tests(test_cmd: str, root: Path) -> tuple[bool, str]:
@@ -176,15 +216,19 @@ def main():
     else:
         results.append(("SKIP", "Tests", "skipped with --skip-tests"))
 
-    # Check 3: Obsidian lint
+    # Check 3: Live proof
+    ok, msg = check_live_proof(task_path)
+    results.append(("PASS" if ok else "FAIL", "Live proof", msg))
+
+    # Check 4: Obsidian lint
     ok, msg = run_obsidian_lint(root)
     results.append(("PASS" if ok else "FAIL", "Obsidian lint", msg))
 
-    # Check 4: Checkpoint
+    # Check 5: Checkpoint
     ok, msg = check_checkpoint_exists(root)
     results.append(("PASS" if ok else "WARN", "Checkpoint", msg))
 
-    # Check 5: Structure file (advisory)
+    # Check 6: Structure file (advisory)
     ok, msg = check_structure_updated(root)
     results.append(("PASS" if ok else "WARN", "Structure file", msg))
 

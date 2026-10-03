@@ -1,3 +1,9 @@
+---
+title: "📊 Inference Engine Monitoring System — Complete Delivery Summary"
+tags:
+  - doc/wiki
+---
+
 # 📊 Inference Engine Monitoring System — Complete Delivery Summary
 
 ## What You Asked For

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Research: Live Event Streaming for Agent UX — AWOS</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#21262d;--border:#30363d;--text:#c9d1d9;--muted:#8b949e;--accent:#58a6ff;--accent-green:#3fb950;--accent-red:#f85149;--accent-yellow:#d29922;--code-bg:#0d1117;--header:#161b22}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);border-bottom:1px solid var(--border);padding:20px 32px}
+header h1{font-size:20px;font-weight:600;margin-bottom:8px;color:var(--accent)}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:12px;color:var(--muted)}
+.tag{background:var(--surface2);color:var(--accent);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace;border:1px solid var(--border)}
+main{max-width:800px;margin:0 auto;padding:32px}
+h2{font-size:17px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border);color:var(--accent)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent-green)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+pre{background:var(--surface);color:var(--text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0;border:1px solid var(--border)}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px}
+p code,li code{background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:12px;color:var(--accent)}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border);color:var(--muted)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.callout{background:var(--surface2);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+.diagram{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;margin:12px 0;font-family:monospace;font-size:13px;line-height:1.8;white-space:pre}
+.diagram .arrow{color:var(--accent)}.diagram .file{color:var(--accent-green)}.diagram .event{color:var(--accent-yellow)}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Research: Live Event Streaming for Agent UX</h1>
+  <div class="meta">
+    <span class="tag">doc/research</span>
+    <span class="tag">phase/4</span>
+    <span class="tag">topic/live-streaming</span>
+    <span class="tag">topic/agent-ux</span>
+    <time>2026-07-05</time>
+  </div>
+</header>
+
+<main>
+
+<h2>Problem</h2>
+<p>
+The AWOS web UI (<code>agent.html</code>) currently shows a static dashboard with session history. It has an SSE endpoint but it only polls <code>RuntimeSessionStore</code> every 500ms for basic stats (is_running, progress %, cost). Users cannot see <strong>live agent output</strong> — they cannot watch tasks being executed, files being edited, or model routing decisions being made in real-time.
+</p>
+<p>
+This is the #1 UX gap vs Cursor/Claude Code/OpenHands. Those products show you the agent working <em>as it works</em>. Our product is a <strong>glass box</strong> (VISION.md) — we must show every decision transparently.
+</p>
+
+<h2>Current State</h2>
+
+<h3>What exists</h3>
+<ul>
+  <li><code>GuiEventBus</code> in <code>gui_events.py</code> — a dataclass + event bus with <code>emit()</code> and <code>subscribe()</code>. Writes events to <code>.awos/gui/&lt;id&gt;/events.jsonl</code>. <strong>But nothing calls it.</strong> It's dead code.</li>
+  <li><code>gui/server.py</code> has an SSE endpoint <code>/api/agent/stream</code> that polls <code>RuntimeSessionStore</code> every 500ms. Only returns basic stats, not structured events.</li>
+  <li><code>gui/static/agent.html</code> has a terminal panel, progress bar, stats sidebar, session history, diff viewer, and chat view — all static. SSE only updates progress bar + cost numbers.</li>
+</ul>
+
+<h3>Architecture constraint</h3>
+<p>
+The orchestrator runs in a <strong>separate process</strong> from the web server. They cannot share an in-memory queue. Any IPC mechanism must be cross-process.
+</p>
+
+<h2>Architecture Decision: File-Polling via GuiEventBus</h2>
+
+<div class="diagram">
+<span class="file">orchestrator.py</span>          <span class="file">gui/server.py</span>               <span class="file">agent.html</span>
+<span class="file">GuiEventBus</span>                    SSE endpoint                    Browser
+    │                                │                               │
+    ├─ emit("session_start")         │                               │
+    ├─ emit("plan_generated")        │                               │
+    ├─ emit("model_routed")          │                               │
+    ├─ emit("task_start")     ──────→│  .5s poll events.jsonl        │
+    ├─ emit("file_edit")             │  for this session             │
+    ├─ emit("test_result")           │  send new lines as SSE    ───→│  render event
+    ├─ emit("task_complete")         │  "data: {event}\n\n"          │  by type
+    └─ emit("session_done")          │                               │
+         │                           │                               │
+         ▼                           │                               │
+  .awos/gui/&lt;id&gt;/              │                               │
+  events.jsonl                       │                               │
+</div>
+
+<p><strong>Why file-polling wins:</strong></p>
+<ol>
+  <li><strong>Cross-process by nature</strong> — orchestrator writes, SSE reads. No shared memory needed.</li>
+  <li><strong>Persistence</strong> — every event lives forever in <code>.awos/gui/</code>. Free session replay.</li>
+  <li><strong>Simple</strong> — <code>GuiEventBus</code> already has <code>emit()</code>, just need to call it.</li>
+  <li><strong>Fast enough</strong> — local file, OS cache, 500ms poll → effectively real-time.</li>
+</ol>
+
+<h3>Alternative considered: HTTP callback</h3>
+<p>
+Orchestrator POSTs events to <code>http://localhost:8765/api/ingest</code>. Rejected because:
+<br>— Requires server to be running first (ordering dependency)
+<br>— Extra HTTP overhead for each event
+<br>— Server crash = lost events
+</p>
+
+<h2>Event Schema</h2>
+
+<table>
+<tr><th>Event type</th><th>When emitted</th><th>Key payload fields</th></tr>
+<tr>
+  <td><code>session_start</code></td>
+  <td>Start of <code>execute_feature()</code></td>
+  <td><code>goal, session_id, codebase_root</code></td>
+</tr>
+<tr>
+  <td><code>codebase_indexed</code></td>
+  <td>After vector memory index</td>
+  <td><code>n_chunks, elapsed</code></td>
+</tr>
+<tr>
+  <td><code>plan_generated</code></td>
+  <td>After planner returns tasks</td>
+  <td><code>n_tasks, tasks: [{id, action, complexity, file}]</code></td>
+</tr>
+<tr>
+  <td><code>model_routed</code></td>
+  <td>After EscalationEngine decides model</td>
+  <td><code>model_name, tier, reason, cost_estimate, provider</code></td>
+</tr>
+<tr>
+  <td><code>task_start</code></td>
+  <td>Before each task execution</td>
+  <td><code>task_id, action, file, model_name, model_reason</code></td>
+</tr>
+<tr>
+  <td><code>file_edit</code></td>
+  <td>After file modification</td>
+  <td><code>path, status, lines_added, lines_removed, diff</code></td>
+</tr>
+<tr>
+  <td><code>test_result</code></td>
+  <td>After test run</td>
+  <td><code>test_name, passed, duration, output</code></td>
+</tr>
+<tr>
+  <td><code>task_complete</code></td>
+  <td>After task finishes</td>
+  <td><code>task_id, success, cost_usd, n_edits, error</code></td>
+</tr>
+<tr>
+  <td><code>session_done</code></td>
+  <td>End of <code>execute_feature()</code></td>
+  <td><code>completed, failed, total_cost, elapsed</code></td>
+</tr>
+</table>
+
+<h3>SSE wire format</h3>
+<pre>data: {"type":"session_start","session_id":"rs_abc123","timestamp":"2026-07-05T10:00:00Z","payload":{"goal":"Fix 28 tests"}}
+
+data: {"type":"model_routed","session_id":"rs_abc123","timestamp":"2026-07-05T10:00:01Z","payload":{"model_name":"DeepSeek V4 Flash","tier":"T2","reason":"94% success on this repo for CI tasks","cost_estimate":0.001,"provider":"deepseek"}}
+
+data: {"type":"task_start","session_id":"rs_abc123","timestamp":"2026-07-05T10:00:02Z","payload":{"task_id":1,"action":"Fix test_auth_login_empty_credentials","file":"auth.py","model_name":"DeepSeek V4 Flash","model_reason":"Standard bug fix. DeepSeek: 94% success."}}
+
+data: {"type":"file_edit","session_id":"rs_abc123","timestamp":"2026-07-05T10:00:05Z","payload":{"path":"auth.py","status":"modified","lines_added":3,"lines_removed":0,"diff":"@@ -42,6 +42,9 @@\n+if not credentials:\n+    return False\n"}}
+
+data: {"type":"task_complete","session_id":"rs_abc123","timestamp":"2026-07-05T10:00:10Z","payload":{"task_id":1,"success":true,"cost_usd":0.0012,"n_edits":1}}
+</pre>
+
+<h2>Files to Modify</h2>
+
+<table>
+<tr><th>File</th><th>Change</th></tr>
+<tr><td><code>scaffold/agent/gui_events.py</code></td><td>Add new event type constants, add helper methods for common events</td></tr>
+<tr><td><code>scaffold/agent/orchestrator.py</code></td><td>Create <code>GuiEventBus</code> at session start, emit events at each phase, pass through to <code>_execute_single_task</code></td></tr>
+<tr><td><code>gui/server.py</code></td><td>Replace polling SSE with event-file-reading SSE that sends structured events</td></tr>
+<tr><td><code>gui/static/agent.html</code></td><td>Parse event types, render each type differently: model card, log entry, diff, test result</td></tr>
+</table>
+
+<h2>Risk Assessment</h2>
+
+<table>
+<tr><th>Risk</th><th>Mitigation</th></tr>
+<tr><td>File polling too slow for real-time feel</td><td>500ms poll on local file is effectively instant (OS cache). We can drop to 200ms if needed.</td></tr>
+<tr><td>events.jsonl grows unbounded</td><td>Rotate at 10K lines. Or keep forever — sessions are bounded per run.</td></tr>
+<tr><td>Orchestrator crashes mid-run, events lost</td><td>Each event is written to disk immediately via <code>GuiEventBus.emit()</code>. Only the last ~500ms of unflushed data is lost.</td></tr>
+<tr><td>Web server not running when orchestrator starts</td><td>Events accumulate in events.jsonl. SSE picks them up when server starts. No ordering dependency.</td></tr>
+<tr><td>Multiple sessions writing to same events.jsonl</td><td>Each <code>GuiEventBus</code> instance uses <code>session_id</code> as subdirectory: <code>.awos/gui/&lt;id&gt;/events.jsonl</code></td></tr>
+</table>
+
+</main>
+</body>
+</html>

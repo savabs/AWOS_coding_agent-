@@ -1,0 +1,2 @@
+<?xml version='1.0' encoding='utf-8'?>
+<rules><budget>15.00</budget><monthly_limit>15.00</monthly_limit><request_timeout_sec>30</request_timeout_sec><max_context_tokens>10000</max_context_tokens><constraints><no_blind_workspace_scans>Explicit hydrate_file() calls only</no_blind_workspace_scans><no_full_file_rewrites>Use SEARCH/REPLACE blocks only</no_full_file_rewrites><no_repeated_system_prompt>Context pin with cache_control ephemeral</no_repeated_system_prompt></constraints></rules>

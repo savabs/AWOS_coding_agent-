@@ -1,0 +1,69 @@
+{
+  "session_id": "demo_chat",
+  "strategy": "hybrid",
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is the project structure?",
+      "tokens": 50,
+      "timestamp": "2026-05-16T00:53:03.543210"
+    },
+    {
+      "role": "assistant",
+      "content": "The project has 3 layers: Core, Tools, Config",
+      "tokens": 80,
+      "timestamp": "2026-05-16T00:53:03.543269"
+    },
+    {
+      "role": "user",
+      "content": "How much does this cost?",
+      "tokens": 40,
+      "timestamp": "2026-05-16T00:53:03.543279"
+    },
+    {
+      "role": "assistant",
+      "content": "Monthly budget: $15. Spend: $0.04",
+      "tokens": 70,
+      "timestamp": "2026-05-16T00:53:03.543304"
+    },
+    {
+      "role": "user",
+      "content": "Can we reduce coding costs?",
+      "tokens": 45,
+      "timestamp": "2026-05-16T00:53:03.543314"
+    },
+    {
+      "role": "assistant",
+      "content": "Yes! 3 ways: 1. Use DeepSeek 2. Cache STRUCT 3. Batch requests",
+      "tokens": 95,
+      "timestamp": "2026-05-16T00:53:03.543342"
+    },
+    {
+      "role": "user",
+      "content": "Implement option 2",
+      "tokens": 35,
+      "timestamp": "2026-05-16T00:53:03.543353"
+    },
+    {
+      "role": "assistant",
+      "content": "I will cache STRUCT.xml now. This prevents re-indexing on each request.",
+      "tokens": 100,
+      "timestamp": "2026-05-16T00:53:03.543373"
+    },
+    {
+      "role": "user",
+      "content": "What was the summary?",
+      "tokens": 40,
+      "timestamp": "2026-05-16T00:53:03.543383"
+    },
+    {
+      "role": "assistant",
+      "content": "Setup complete. Implemented cost reduction. STRUCT cached.",
+      "tokens": 90,
+      "timestamp": "2026-05-16T00:53:03.543412"
+    }
+  ],
+  "summary": null,
+  "total_tokens": 645,
+  "message_count": 10
+}

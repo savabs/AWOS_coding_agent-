@@ -1,0 +1,7 @@
+{
+  "id": "08_monthly_report",
+  "goal": "Merchants want a year at a glance. Add a `monthly CUSTOMER YEAR` command with one row per month of that year (all 12, empty months included): the month as YYYY-MM, the number of orders, the total and the average order value, plus a TOTAL line at the end - a text table in the style of `breakdown`'s. With --csv it should print CSV instead, with the columns month,order_count,total_cents,refunded_cents,average_cents. Orders, totals and refunds count exactly as they do in the daily report, months are the merchant's calendar months, and averages must be rounded the same way the daily report rounds its average.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

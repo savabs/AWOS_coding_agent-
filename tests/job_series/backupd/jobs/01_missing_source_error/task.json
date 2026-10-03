@@ -1,0 +1,7 @@
+{
+  "id": "01_missing_source_error",
+  "goal": "Last night the external drive with our data wasn't mounted, and `backupd run` from cron blew up with a Python traceback in the mail instead of a proper message. If the source directory doesn't exist (or is a file rather than a folder), backupd should fail the way it fails for other problems: a one-line error that mentions the path, exit status 1. Nothing may be written or pruned in that case, and the last-run time must not be updated.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

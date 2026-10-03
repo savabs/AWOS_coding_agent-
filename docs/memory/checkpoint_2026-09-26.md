@@ -1,0 +1,138 @@
+---
+title: "Checkpoint 2026-09-26 — compounding proof, run 1 (partial); project on hiatus"
+tags:
+  - doc/checkpoint
+  - status/paused
+---
+
+# Checkpoint 2026-09-26 — compounding proof (paused)
+
+Branch `claude/bench-run` (worktree `.claude/worktrees/bench-run`), draft PR #1.
+Owner put the project on **hiatus** on 2026-09-26 during run 1 of the series.
+
+## Direction decided this session
+
+- Stepped back from tuning 5 practice long tasks (benchmark-chasing).
+- Moat, chosen by the owner: **(2) private, on your box** as the wedge +
+  **(4) it gets better at your work** as the lock. Everything else (loop,
+  sandbox, checker, queue) is copyable plumbing.
+- Research found nothing learned reached the agent on the default path, and
+  LinUCB routing trained/selected on mismatched arm ids.
+- Spec: [`docs/specs/compounding_proof_spec.md`](../specs/compounding_proof_spec.md).
+
+## Built (commit 4647572, pushed)
+
+- Project notebook `scaffold/agent/project_notebook.py` (read into the
+  agent-loop prompt once per goal; rewritten once per goal by one cheap call;
+  `.awos/projects/<id>/notebook.md`; `AWOS_NOTEBOOK=0` disables).
+- Routing fix (ladder-index arms, `ml_router.py` / `escalation_engine.py`).
+- 12-job series `tests/job_series/ordertool` (12/12 validate).
+- Runner `scripts/job_series.py` (off vs on, pinned Flash, private state per
+  arm, interleaved, turns from spans, elapsed time per log line).
+- Suite: no new failures vs baseline.
+
+## Run 1 — partial (started 12:37 IST; jobs 1–6 both arms, job 7 off)
+
+Raw lines: [`runs/job_series_20260926T123741_partial.txt`](runs/job_series_20260926T123741_partial.txt);
+the learned notebook: [`runs/job_series_20260926T123741_notebook_on.md`](runs/job_series_20260926T123741_notebook_on.md).
+
+| Job | off | on |
+|---|---|---|
+| 1 | ✅ 17 turns $0.014 | ✅ 13 turns $0.012 |
+| 2 | ✅ 34 turns $0.028 | ✅ 32 turns $0.034 |
+| 3 | ❌ 2/9, 49 turns $0.037 | ❌ 8/9, 40 turns $0.028 |
+| 4 | ❌ 8/13, 56 turns $0.053 | ❌ 9/13, 78 turns $0.068 |
+| 5 | ✅ 19 turns $0.014 | ✅ 7 turns $0.006 |
+| 6 | ✅ 58 turns $0.062 | ✅ 32 turns $0.028 |
+| 1–6 | 4/6, 233 turns, $0.207 | 4/6, 202 turns (−13%), $0.176 (−15%) |
+
+**Suggestive, not shown** (one run; job 4 went the other way). Jobs 5–6 used
+about half the turns and cost with the notebook. Jobs 7–12 are the real test.
+If the background run finished, its full results are in
+`.awos/job_series_20260926T123741.json` (not yet committed).
+
+## Update 2026-09-27 — both runs complete
+
+- Run 1 (`.awos/job_series_20260926T123741.json`): jobs 7–12 on 5/6 vs off
+  4/6, −20% turns, −17% cost → **meets** the spec's criteria.
+- Run 2 (`.awos/job_series_20260926T170601.json`, with the request timeout and
+  the honest notebook; resumed at job 6 after a key expired): jobs 7–12 on
+  **6/6 vs off 3/6**, but turns equal (39.3 vs 39.2) and cost +9% → meets (a),
+  **misses (b)**. The notebook arm spent its turns finishing jobs 9, 11, 12
+  that the off arm gave up on.
+- Combined (24 paired jobs): solved on 18/24 vs off 13/24; discordant pairs
+  5–0 for the notebook (one-sided sign test p ≈ 0.03); turns/job −19%;
+  cost/job −17%; cost per solved job $0.039 vs $0.065 (−40%).
+- Verdict: the notebook **helps, consistently in direction** (more solved,
+  cheaper per solved job), but the pre-registered bar "(b) ≥20% cheaper on
+  jobs 7–12 in two runs" was met by run 1 only. Cost per solved job is the
+  better metric but was chosen after seeing the data — state that when citing.
+- Honest notebook works: run 2 recorded 10 jobs "tests pass, not
+  independently verified" and 1 "failed"; none as plain success.
+
+## Update 2026-09-27 — run 3 and verdict
+
+- Run 3 (`.awos/job_series_20260927T214648.json`, same code as run 2): jobs
+  7–12 on 5/6 vs off 5/6, turns 19.0 vs 33.3 (−43%), cost $0.019 vs $0.033
+  (−45%) → **meets** the criteria. Jobs 1–6 were worse with the notebook
+  (3/6 vs 4/6; job 2 hit the 15-minute limit).
+- Three runs, jobs 7–12: on 16/18 vs off 12/18 solved; turns 27.7 vs 34.6
+  (−20%); cost $0.027 vs $0.033 (−17%).
+- Three runs, all 36 paired jobs: on 26/36 vs off 22/36; turns/job −18%;
+  cost/job −17%; cost per solved job $0.038 vs $0.055 (−30%); discordant
+  pairs 5–1 for the notebook (sign test p ≈ 0.11 — not significant alone).
+- **Verdict: compounding shown by the spec's rule** (runs 1 and 3 meet both
+  criteria; run 2 meets (a) only). Honest summary: once the notebook has a few
+  jobs in it, the same cheap model does the same or more work with about a
+  fifth fewer turns; the solve-rate gain is in the right direction but not yet
+  statistically firm. One project, one model — generality not yet shown.
+
+## Update 2026-09-29 — second codebase (salesdesk), and a reality check
+
+- New series: `tests/job_series/salesdesk` and `tests/job_series/backupd`
+  (12/12 valid each). backupd not run yet.
+- Salesdesk run (`.awos/job_series_20260928T100230.json`, resumed twice after
+  network drops). **Invalid, excluded:** on j07 (network died at 13 min) and
+  on j08 (primary planner — Gemini, not covered by the model pin — returned
+  bad JSON, then the job died silently on the CheapPlanner fallback; 0 turns).
+  Could not rerun them: the notebook had already learned jobs 9–12.
+  Valid: jobs 1–6 both 6/6, equal turns (easy, nothing to gain); jobs 9–12
+  off 1/4 vs on 3/4 solved, turns −10%, cost −7%. Same shape as ordertool
+  run 2: more solved, not ≥20% cheaper. Small, noisy sample.
+- Reality check (owner discussion): these series are a lab test we wrote
+  ourselves, with conventions planted to reward memory, on toy-size projects,
+  each job starting from a perfect previous state. They show the mechanism,
+  and probably overstate it. Project memory itself is not unique in the market
+  (CLAUDE.md, AGENTS.md, Cursor rules, Devin knowledge). The claim worth
+  testing: a cheap model + accumulated repo knowledge ≈ a frontier harness on
+  solved jobs, at a fraction of the cost. Next evidence should be head-to-head
+  against a market harness, on a real repo's history (replay real merged
+  changes; their real tests as hidden tests).
+
+## Findings to act on
+
+1. **The notebook records false success.** It only sees the visible tests, so
+   job 3 ("success: 25 tests passed") went in as a win while hidden tests
+   failed. Wrong beliefs can compound too. Fix: the notebook should record
+   the goal-check verdict when there is one, or say "unverified".
+2. **Mac sleep stalls runs.** On battery with the lid closed, macOS sleeps
+   despite `caffeinate` (smoke jobs took ~32 min wall, ~2 min of work). Long
+   runs need AC power + lid open, or an always-on box.
+4. **Planner fallback kills a job silently** (salesdesk on j08): primary
+   planner failure → CheapPlanner → the process ends with no output and no
+   agent turns. Also the primary planner is Gemini, outside the model pin.
+5. **The runner accepts infrastructure failures as "not solved".** Jobs whose
+   log shows APIConnectionError/AuthenticationError, or 0 turns, should be
+   marked invalid and retried before the next job (the notebook must not
+   advance past them).
+3. Pinning uses `escalation_engine.MODELS_UNAVAILABLE` in the runner's child;
+   there is no first-class "pin the worker model" setting.
+
+## Next single action (on return)
+
+Finish run 1 (or rerun: `PYTHONUNBUFFERED=1 caffeinate -i -s .venv/bin/python
+scripts/job_series.py run`, ~1.5 h, ~$0.5, on AC), then a second run, and judge
+against the spec's criteria (jobs 7–12: on ≥ off solve rate and ≥20% lower
+cost/turns, two runs agreeing). Then fix finding 1.
+
+Key: OpenRouter, $5 limit, about $3.3 left at pause.

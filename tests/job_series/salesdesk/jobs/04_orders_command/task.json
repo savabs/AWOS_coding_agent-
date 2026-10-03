@@ -1,0 +1,7 @@
+{
+  "id": "04_orders_command",
+  "goal": "Support needs to see the individual orders behind a daily report. Add an `orders CUSTOMER` command that lists one day's orders, oldest first, one per line: order id, time, amount and status separated by two spaces, e.g. `o2  2026-03-10 09:01  €25.00  paid`. Every status is listed (refunded and cancelled too). It takes --day and --yesterday just like `report` and shows today by default, and it must pick the same orders the report counts for that day. Times and amounts should look the way the merchant expects to see them. If there are no orders print `no orders`. Errors (unknown customer, bad date) like the other commands.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

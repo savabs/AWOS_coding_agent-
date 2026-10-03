@@ -69,7 +69,7 @@ Growth: Now can 3.1x without hitting budget
 ## What's Ready Now
 
 ### 1. **Research Document** ✅
-📄 [docs/research/output_token_optimization.md](../docs/research/output_token_optimization.md)
+📄 [[output_token_optimization]]
 
 Complete reference with:
 - All 7 techniques explained
@@ -91,7 +91,7 @@ Ready-to-use class with:
 - **Tested and working** (see terminal output above)
 
 ### 3. **Integration Spec** ✅
-📋 [docs/specs/output_token_optimization_spec.md](../docs/specs/output_token_optimization_spec.md)
+📋 [[output_token_optimization_spec]]
 
 Step-by-step guide:
 - How to integrate into HydrationEngine
@@ -335,9 +335,9 @@ Week 3: ? → target 120k-150k
 
 ## Files Created This Session
 
-1. **docs/research/output_token_optimization.md** — Complete research
+1. **[[output_token_optimization]]** — Complete research
 2. **scaffold/agent/output_token_optimizer.py** — Implementation module
-3. **docs/specs/output_token_optimization_spec.md** — Integration guide
+3. **[[output_token_optimization_spec]]** — Integration guide
 4. **scaffold/agent/sonnet_optimizer_integration_example.py** — Examples & analysis
 
 All files are:
@@ -386,3 +386,8 @@ Plan custom implementation.
 ---
 
 **Status:** ✅ Complete and ready to implement
+
+## Related
+
+- _(add links to related documents here)_
+

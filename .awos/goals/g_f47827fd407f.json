@@ -1,0 +1,80 @@
+{
+  "root_id": "g_f47827fd407f",
+  "nodes": {
+    "g_f47827fd407f": {
+      "goal_id": "g_f47827fd407f",
+      "description": "you can create e .md file regarding making a uncensored agent",
+      "parent_ids": [],
+      "child_ids": [
+        "g_28179a4ea976",
+        "g_90d0b17c1b93"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-12T10:44:40Z",
+      "updated_at": "2026-06-12T10:45:22Z",
+      "completed_at": "2026-06-12T10:45:22Z",
+      "session_ids": [
+        "orch_13fefe2d"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_28179a4ea976": {
+      "goal_id": "g_28179a4ea976",
+      "description": "Define a new function `get_uncensored_agent_guide_content()` that returns a multi-line string containing the initial Markdown content for a guide on making an uncensored agent.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "run_awos_demo.py",
+          "action": "Define a new function `get_uncensored_agent_guide_content()` that returns a multi-line string containing the initial Markdown content for a guide on making an uncensored agent.",
+          "complexity": "low",
+          "test_result": {
+            "passed": 0,
+            "failed": 0,
+            "errors": 0,
+            "pass_rate": 0.0,
+            "raw_output": "Tests skipped — set AWOS_SAFE_TO_RUN_TESTS=1 to enable.",
+            "timed_out": false,
+            "test_command": [],
+            "no_tests_found": true
+          }
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-12T10:44:59Z",
+      "updated_at": "2026-06-12T10:45:20Z",
+      "completed_at": "2026-06-12T10:45:20Z",
+      "session_ids": [
+        "orch_13fefe2d"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_90d0b17c1b93": {
+      "goal_id": "g_90d0b17c1b93",
+      "description": "Modify the `main` function (or an appropriate helper function called by `main`) to call `make_demo_file()` with 'uncensored_agent_guide.md' as the filename and the content retrieved from `get_uncensored_agent_guide_content()`.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "file": "run_awos_demo.py",
+          "action": "Modify the `main` function (or an appropriate helper function called by `main`) to call `make_demo_file()` with 'uncensored_agent_guide.md' as the filename and the content retrieved from `get_uncensored_agent_guide_content()`.",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-12T10:44:59Z",
+      "updated_at": "2026-06-12T10:45:22Z",
+      "completed_at": "2026-06-12T10:45:22Z",
+      "session_ids": [
+        "orch_13fefe2d"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

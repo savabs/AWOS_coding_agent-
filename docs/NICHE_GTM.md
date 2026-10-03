@@ -1,3 +1,9 @@
+---
+title: "AWOS — Fast Earnable Track (Niche GTM)"
+tags:
+  - doc/wiki
+---
+
 # AWOS — Fast Earnable Track (Niche GTM)
 
 > **Canonical owner for go-to-market strategy.**

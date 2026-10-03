@@ -1,0 +1,98 @@
+[
+  {
+    "task_id": 1,
+    "task_type": "edit_file",
+    "path": "src/port_manifest.py",
+    "file": "src/port_manifest.py",
+    "action": "Fix build_port_manifest: set total_python_files=len(files), not the hardcoded 5",
+    "complexity": "low"
+  },
+  {
+    "task_id": 2,
+    "task_type": "edit_file",
+    "path": "src/query_engine.py",
+    "file": "src/query_engine.py",
+    "action": "Fix render_summary title: use '# Python Porting Workspace Summary' not 'Broken'",
+    "complexity": "low"
+  },
+  {
+    "task_id": 3,
+    "task_type": "edit_file",
+    "path": "src/commands.py",
+    "file": "src/commands.py",
+    "action": "Fix PORTED_COMMANDS: use full load_command_snapshot(), not sliced [:20]",
+    "complexity": "medium"
+  },
+  {
+    "task_id": 4,
+    "task_type": "edit_file",
+    "path": "src/tools.py",
+    "file": "src/tools.py",
+    "action": "Fix PORTED_TOOLS: use full load_tool_snapshot(), not sliced [:20]",
+    "complexity": "medium"
+  },
+  {
+    "task_id": 5,
+    "task_type": "edit_file",
+    "path": "src/assistant/__init__.py",
+    "file": "src/assistant/__init__.py",
+    "action": "Fix assistant MODULE_COUNT: use _SNAPSHOT['module_count'], not 0",
+    "complexity": "low"
+  },
+  {
+    "task_id": 6,
+    "task_type": "edit_file",
+    "path": "src/bridge/__init__.py",
+    "file": "src/bridge/__init__.py",
+    "action": "Fix bridge MODULE_COUNT: use _SNAPSHOT['module_count'], not 0",
+    "complexity": "low"
+  },
+  {
+    "task_id": 7,
+    "task_type": "edit_file",
+    "path": "src/utils/__init__.py",
+    "file": "src/utils/__init__.py",
+    "action": "Fix utils MODULE_COUNT: restore real snapshot module_count (must be >100)",
+    "complexity": "low"
+  },
+  {
+    "task_id": 8,
+    "task_type": "edit_file",
+    "path": "src/deferred_init.py",
+    "file": "src/deferred_init.py",
+    "action": "Fix run_deferred_init: plugin_init should be enabled when trusted=True",
+    "complexity": "low"
+  },
+  {
+    "task_id": 9,
+    "task_type": "edit_file",
+    "path": "src/setup.py",
+    "file": "src/setup.py",
+    "action": "Fix setup report: heading must be 'Deferred init:' not 'Deferred startup:'",
+    "complexity": "low"
+  },
+  {
+    "task_id": 10,
+    "task_type": "edit_file",
+    "path": "src/remote_runtime.py",
+    "file": "src/remote_runtime.py",
+    "action": "Fix run_remote_mode: return mode 'remote' not 'broken'",
+    "complexity": "low"
+  },
+  {
+    "task_id": 11,
+    "task_type": "edit_file",
+    "path": "src/direct_modes.py",
+    "file": "src/direct_modes.py",
+    "action": "Fix run_direct_connect: return mode 'direct-connect' not 'broken-direct'",
+    "complexity": "low"
+  },
+  {
+    "task_id": 12,
+    "task_type": "edit_file",
+    "path": "src/query_engine.py",
+    "file": "src/query_engine.py",
+    "action": "Fix submit_message output: first summary line must start with 'Prompt:'",
+    "complexity": "low"
+  }
+]

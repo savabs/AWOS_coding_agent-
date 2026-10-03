@@ -1,0 +1,7 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Task: AWOS Development Supervisor</title><style>body{font:15px/1.6 system-ui;max-width:940px;margin:32px auto;padding:0 20px;color:#111}h1,h2{color:#0b3b63}code{background:#f8fafc;padding:2px 6px;border-radius:4px}</style></head>
+<body><header><p>AWOS / tasks / active</p><h1>Task: Remove Repeated Manual Electron Restarts</h1><p><strong>Status:</strong> active · <strong>Governing spec:</strong> <code>docs/specs/dev_hot_reload_spec.html</code></p></header>
+<ol><li>☑ Implement dependency-free development supervisor.</li><li>☑ Add <code>npm run dev</code>.</li><li>☑ Add focused tests.</li><li>☑ Perform live edit/restart/health proof. Electron changed PID from <code>164185<</code>/code> to <code>164939</code> after a watched-fi</code>le change, and <code>awos control status</code> succeeded afterwa<p><strong>Validation note:</strong> Unit lifecycle proof and live edit/restart/health proof pass. The supervisor now escalates a tray-hiding Electron child from <code>SIGTERM</code> to bounded <code>SIGKILL</code> when necessary.</p>.</p></strong>
+<h2>Safety</h2><p>This applies only to explicit development mode. It must not silently restart production builds or claim that an interrupted agent task completed.</p>
+<h2>Related</h2><ul><li><a href="../../docs/research/dev_hot_reload.html">Research</a></li><li><a href="../../docs/specs/dev_hot_reload_spec.html">Spec</a></li></ul
+</body></html>

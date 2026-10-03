@@ -1,3 +1,9 @@
+---
+title: "Multi-Session Agent — Spec"
+tags:
+  - doc/spec
+---
+
 # Multi-Session Agent — Spec
 
 ## New file: `scaffold/agent/agent_state_manager.py`
@@ -218,3 +224,8 @@ with tempfile.TemporaryDirectory() as tmp:
     goals = mgr.list_goals()
     assert len(goals) == 2
 ```
+
+## Related
+
+- _(add links to related documents here)_
+

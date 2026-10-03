@@ -1,0 +1,55 @@
+{
+  "ok": true,
+  "passed": 7,
+  "failed": 0,
+  "workspace": "/tmp/awos_deliverable_e2e_jsghc7yq",
+  "port": 36899,
+  "artifacts": [
+    "docs/e2e_uncensored_agent_guide.md",
+    "docs/e2e_via_http_guide.md"
+  ],
+  "checks": [
+    {
+      "name": "router_coarse_create",
+      "passed": true,
+      "detail": "",
+      "duration_ms": 1.0686559999157907
+    },
+    {
+      "name": "plan_create_file_schema",
+      "passed": true,
+      "detail": "",
+      "duration_ms": 0.006332000339170918
+    },
+    {
+      "name": "orchestrator_create_file",
+      "passed": true,
+      "detail": "",
+      "duration_ms": 1692.7438370003074
+    },
+    {
+      "name": "http_api_modes",
+      "passed": true,
+      "detail": "",
+      "duration_ms": 1.9022769993171096
+    },
+    {
+      "name": "http_agent_create_sse",
+      "passed": true,
+      "detail": "",
+      "duration_ms": 745.4473310008325
+    },
+    {
+      "name": "regression_no_decoy_patch",
+      "passed": true,
+      "detail": "",
+      "duration_ms": 0.12681000043812674
+    },
+    {
+      "name": "router_mutate_not_create",
+      "passed": true,
+      "detail": "",
+      "duration_ms": 0.03617799848143477
+    }
+  ]
+}

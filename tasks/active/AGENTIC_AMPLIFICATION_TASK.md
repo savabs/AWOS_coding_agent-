@@ -303,3 +303,8 @@ All features are **additive** — can be disabled independently.
 **Deferred:** Tool Macros — revisit after 100+ tool usage logs
 
 **Next:** Whatever you want — the entire v3 roadmap is complete.
+
+## Related
+
+- _(add links to related documents here)_
+

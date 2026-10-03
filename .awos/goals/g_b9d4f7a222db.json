@@ -1,0 +1,47 @@
+{
+  "root_id": "g_b9d4f7a222db",
+  "nodes": {
+    "g_b9d4f7a222db": {
+      "goal_id": "g_b9d4f7a222db",
+      "description": "g3",
+      "parent_ids": [],
+      "child_ids": [
+        "g_663463d185f3"
+      ],
+      "tasks": [],
+      "status": "in_progress",
+      "created_at": "2026-06-18T08:44:48Z",
+      "updated_at": "2026-06-18T08:44:51Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_e128dae6"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_663463d185f3": {
+      "goal_id": "g_663463d185f3",
+      "description": "Fix",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "file": "tests/fixtures/gauntlet_broken_module.py",
+          "action": "Fix",
+          "complexity": "medium"
+        }
+      ],
+      "status": "failed",
+      "created_at": "2026-06-18T08:44:51Z",
+      "updated_at": "2026-06-18T08:44:51Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_e128dae6"
+      ],
+      "failure_count": 1,
+      "critique_ids": []
+    }
+  }
+}

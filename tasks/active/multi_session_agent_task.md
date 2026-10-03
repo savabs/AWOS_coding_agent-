@@ -1,3 +1,10 @@
+---
+title: "Multi-Session Agent Task"
+tags:
+  - doc/task
+  - status/active
+---
+
 # Multi-Session Agent Task
 
 ## Status: PENDING
@@ -30,3 +37,8 @@
 
 ## Estimated effort
 4–6 hours
+
+## Related
+
+- _(add links to related documents here)_
+

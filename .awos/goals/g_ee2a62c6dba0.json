@@ -1,0 +1,60 @@
+{
+  "root_id": "g_ee2a62c6dba0",
+  "nodes": {
+    "g_ee2a62c6dba0": {
+      "goal_id": "g_ee2a62c6dba0",
+      "description": "add type hints to the greet function in demo.py",
+      "parent_ids": [],
+      "child_ids": [
+        "g_0db9f13f42c7"
+      ],
+      "tasks": [],
+      "status": "in_progress",
+      "created_at": "2026-05-20T15:22:46Z",
+      "updated_at": "2026-05-20T15:22:52Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_36ee618e"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_0db9f13f42c7": {
+      "goal_id": "g_0db9f13f42c7",
+      "description": "Add type hints to the greet function parameters and return value",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "demo.py",
+          "action": "Add type hints to the greet function parameters and return value",
+          "complexity": "low",
+          "function_signature": "def greet(name: str) -> str:",
+          "interface_contract": "Called with a string name argument, returns a greeting string",
+          "constraints": [
+            "Must add type hint 'str' to the name parameter",
+            "Must add return type hint '-> str' to the function signature",
+            "Must preserve existing function body and logic unchanged",
+            "Must not import any additional modules"
+          ],
+          "must_not": [
+            "Must not change the function name",
+            "Must not alter the logic or return value of the function body",
+            "Must not add or remove parameters"
+          ],
+          "example_call": "result = greet('Alice')  # returns 'Hello, Alice!' or equivalent"
+        }
+      ],
+      "status": "failed",
+      "created_at": "2026-05-20T15:22:52Z",
+      "updated_at": "2026-05-20T15:23:10Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_36ee618e"
+      ],
+      "failure_count": 1,
+      "critique_ids": []
+    }
+  }
+}

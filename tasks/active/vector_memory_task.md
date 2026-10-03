@@ -1,3 +1,10 @@
+---
+title: "Task: Vector Memory (Phase 6)"
+tags:
+  - doc/task
+  - status/active
+---
+
 # Task: Vector Memory (Phase 6)
 
 > Canonical HTML: tasks/active/vector_memory_task.html
@@ -24,3 +31,8 @@ Add ChromaDB + all-MiniLM-L6-v2 semantic retrieval to AWOS.
 ## Links
 - Spec: [[vector_memory_spec]]
 - Research: [[vector_memory_research]]
+
+## Related
+
+- _(add links to related documents here)_
+

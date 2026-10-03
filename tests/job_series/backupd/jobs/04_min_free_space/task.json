@@ -1,0 +1,7 @@
+{
+  "id": "04_min_free_space",
+  "goal": "Our backup disk filled up last month and backupd kept writing broken archives. Add a setting `min_free_space` (in the [backup] section, or APP_MIN_FREE_SPACE like every other setting) that takes a size like 500M or 2G, in the same units backupd uses when it prints sizes; the default is 0, meaning no check. Before writing an archive, if the disk holding the backup folder has less free space than that, the run must stop with a one-line error saying how much is free and how much is required (in the usual size format) and naming the backup folder, exit status 1, with nothing written and the last-run time untouched. An invalid value is a configuration error like any other bad setting. show-config should list it too (as a number of bytes), and please add it to the settings table in the README.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

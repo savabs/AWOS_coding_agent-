@@ -1,0 +1,65 @@
+{
+  "session_id": "orch_ed1c7c6b",
+  "goal": "Stage 1 LONG workload mission (worktree, one file per step, do NOT skip steps): (1) scaffold/agent/worktree.py \u2014 expand register_worktree docstring with when session resume uses it (2) scaffold/agent/runtime_session.py \u2014 add one-line docstring to RuntimeSessionStore.checkpoint explaining pause/resume (3) scaffold/agent/virtual_execution_runtime.py \u2014 add one-line docstring to finalize() for pause vs completed (4) scaffold/agent/plan_actions.py \u2014 add one-line docstring to replan_task_after_verify_fail (5) scaffold/agent/self_correction.py \u2014 module docstring mention WORKER_FAIL and VERIFY_FAIL classes (6) scaffold/agent/verifier.py \u2014 one-line comment above _check_edit_fidelity explaining fidelity gate (7) tests/test_verify_fail_replan.py \u2014 add test that replan returns empty when _replan_attempted set (8) tests/test_symbol_index_worktree.py \u2014 add one-line comment at top describing G1 worktree indexing (9) tests/test_pause_resume_orchestrator.py \u2014 add module docstring line about G2 gauntlet (10) scripts/stage1_gauntlet_runner.py \u2014 add G7 to the module docstring usage block (11) awos.py \u2014 add 'awos mission start --long' to mission guide print block (12) docs/missions/README.md \u2014 add 'Long mission' paragraph with awos mission start --long",
+  "start_time": "2026-06-21T12:22:22.954915",
+  "total_cost": 0.0,
+  "final_success": false,
+  "traces": [
+    {
+      "thought": "Task 2: Add a new test case to verify that `replan` returns an empty list when the `_replan_attempted` flag is already set. on tests/test_verify_fail_replan.py",
+      "action": "Worker.execute_task",
+      "action_input": {
+        "file": "tests/test_verify_fail_replan.py",
+        "complexity": "low"
+      },
+      "observation": "Verified and applied",
+      "success": true,
+      "timestamp": "2026-06-21T12:28:38.698817",
+      "latency_ms": 0.0,
+      "model": "DeepSeek V4 Flash",
+      "cost": 0.0
+    },
+    {
+      "thought": "Task 3: Add 'awos mission start --long' to the existing mission guide print block. on awos.py",
+      "action": "Worker.execute_task",
+      "action_input": {
+        "file": "awos.py",
+        "complexity": "low"
+      },
+      "observation": "Verified and applied",
+      "success": true,
+      "timestamp": "2026-06-21T12:28:47.321494",
+      "latency_ms": 0.0,
+      "model": "DeepSeek V4 Flash",
+      "cost": 0.0
+    },
+    {
+      "thought": "Task 1_2_1: Prepare Complete Expand the docstring for `register_worktree` to clarify its usage during session resume. on scaffold/agent/worktree.py",
+      "action": "Worker.execute_task",
+      "action_input": {
+        "file": "scaffold/agent/worktree.py",
+        "complexity": "low"
+      },
+      "observation": "Verified and applied",
+      "success": true,
+      "timestamp": "2026-06-21T12:31:10.461030",
+      "latency_ms": 0.0,
+      "model": "DeepSeek V4 Flash",
+      "cost": 0.0
+    },
+    {
+      "thought": "Task 1_2_2: Complete Complete Expand the docstring for `register_worktree` to clarify its usage during session resume. on scaffold/agent/worktree.py",
+      "action": "Worker.execute_task",
+      "action_input": {
+        "file": "scaffold/agent/worktree.py",
+        "complexity": "low"
+      },
+      "observation": "Verified and applied",
+      "success": true,
+      "timestamp": "2026-06-21T12:31:18.882304",
+      "latency_ms": 0.0,
+      "model": "DeepSeek V4 Flash",
+      "cost": 0.0
+    }
+  ]
+}

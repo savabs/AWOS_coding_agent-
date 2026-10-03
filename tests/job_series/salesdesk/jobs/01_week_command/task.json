@@ -1,0 +1,7 @@
+{
+  "id": "01_week_command",
+  "goal": "Merchants keep asking for a quick \"how is this week going\" view. Please add a `week CUSTOMER` command that shows the current week so far, Monday through today, exactly the way `breakdown` shows a range of days (same table, and the same --csv option). \"This week\" and \"today\" mean the merchant's, not ours, and like `report` it has to respect --now so we can check past weeks. An unknown customer should be reported the same way the other commands report it.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

@@ -1,0 +1,55 @@
+{
+  "root_id": "g_4be8e3c458c7",
+  "nodes": {
+    "g_4be8e3c458c7": {
+      "goal_id": "g_4be8e3c458c7",
+      "description": "add input validation to math_utils",
+      "parent_ids": [],
+      "child_ids": [
+        "g_b4a5cfc0f6f1"
+      ],
+      "tasks": [],
+      "status": "in_progress",
+      "created_at": "2026-09-22T19:57:27Z",
+      "updated_at": "2026-09-22T19:57:27Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_f53ae76c"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_b4a5cfc0f6f1": {
+      "goal_id": "g_b4a5cfc0f6f1",
+      "description": "Add input validation",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "src/math_utils.py",
+          "action": "Add input validation",
+          "complexity": "medium",
+          "must_not": [
+            "break existing tests",
+            "change return types"
+          ]
+        }
+      ],
+      "status": "failed",
+      "created_at": "2026-09-22T19:57:27Z",
+      "updated_at": "2026-09-22T20:01:28Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_f53ae76c",
+        "orch_b5c2fb2b",
+        "orch_ea487eef",
+        "orch_6ee87bbf",
+        "orch_b3b4cc31",
+        "orch_472869df"
+      ],
+      "failure_count": 6,
+      "critique_ids": []
+    }
+  }
+}

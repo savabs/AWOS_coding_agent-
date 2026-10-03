@@ -1,0 +1,7 @@
+{
+  "id": "07_verify_command",
+  "goal": "We never check that our backups can actually be read until the day we need one. Please add a `verify` command: `backupd verify` checks the latest backup, `backupd verify backup-20260310-120000.zip` checks that one. It should read every file in the archive back (zip or tar) and print `ok: <archive name> (<N> files)`. If the archive is damaged or truncated, if the named backup doesn't exist, or if there are no backups at all, it should fail like backupd's other errors (one line naming the archive or the backup folder, exit status 1). Like `status` and `list`, it only needs the backup folder to be configured. Also record each successful verification in backupd's log, the same way `run` logs what it did, so it shows up in our log file.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

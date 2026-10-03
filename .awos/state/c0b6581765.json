@@ -1,0 +1,15 @@
+{
+  "goal": "explain this repo to me",
+  "goal_hash": "c0b6581765",
+  "started_at": "2026-06-12T14:31:06",
+  "last_updated": "2026-06-12T14:31:26",
+  "completed_task_ids": [
+    1,
+    2
+  ],
+  "failed_task_ids": [],
+  "session_ids": [
+    "orch_09d154cb"
+  ],
+  "status": "complete"
+}

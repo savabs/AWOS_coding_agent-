@@ -1,0 +1,26 @@
+[
+  {
+    "task_id": 1,
+    "task_type": "edit_file",
+    "path": "payment.py",
+    "file": "payment.py",
+    "action": "Fix apply_discount: remove extra /100 so 10% off 100 yields 90.0 not 99.9",
+    "complexity": "low"
+  },
+  {
+    "task_id": 2,
+    "task_type": "edit_file",
+    "path": "payment.py",
+    "file": "payment.py",
+    "action": "Fix apply_tax to quantize with Decimal ROUND_HALF_UP to 2 decimals (test_tax_rounds_half_up)",
+    "complexity": "medium"
+  },
+  {
+    "task_id": 3,
+    "task_type": "edit_file",
+    "path": "payment.py",
+    "file": "payment.py",
+    "action": "Fix is_refundable: return False when opened=True; True only when unopened and within 30 days",
+    "complexity": "low"
+  }
+]

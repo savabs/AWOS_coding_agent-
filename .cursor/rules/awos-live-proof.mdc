@@ -1,0 +1,41 @@
+---
+description: Require observable live proof for non-trivial features — not unit tests alone
+alwaysApply: true
+---
+
+# Live Proof (mandatory)
+
+Process detail: `protocols/LIVE_PROOF_PROTOCOL.md` · `AWOS.md` §2.6
+
+## Rule
+
+For non-trivial work (orchestrator, sessions, CLI, safety, verification loops):
+
+1. **Unit tests** — prove code paths
+2. **Live proof** — runnable demo + proof guide so a human can *see* it work
+
+Do **not** mark a task complete with only `pytest` green. Someone must be able to run one command and read the output.
+
+## Required artifacts
+
+| Artifact | Path |
+|----------|------|
+| Runnable demo | `scripts/demo_<feature>.sh` or documented `awos` / `python` one-liner |
+| Proof guide | `docs/<feature>_proof.md` — markers to watch, success criteria |
+| Task checklist | `- [ ] Live proof: run \`<cmd>\` — watch for \`<marker>\`` |
+
+## Spec / task
+
+- Spec must include **Live proof** section (scenario, command, success markers)
+- Task file step marked `[x]` only after actually running and observing markers
+- Checkpoint must cite command run + 2–5 lines of observed output
+
+## Exempt
+
+Trivial single-file edits (typos, comments), pure internal helpers with no user-visible behavior.
+
+When in doubt: **require live proof.**
+
+## Reference
+
+`scripts/demo_stagnation_breaker.sh` + `docs/stagnation_breaker_proof.md`

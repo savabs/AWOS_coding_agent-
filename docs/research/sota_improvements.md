@@ -1,3 +1,9 @@
+---
+title: "SOTA Coding Agent Improvements — Research"
+tags:
+  - doc/research
+---
+
 # SOTA Coding Agent Improvements — Research
 
 **Full doc**: [docs/research/sota_improvements.html](sota_improvements.html)  
@@ -20,3 +26,8 @@ Research into SOTA coding agents (Claude Code src/, Aider, OpenHands, SWE-Agent,
 - P1 (9h): Test execution, architect+editor split, context compaction → [spec](../specs/p1_verifier_architect_spec.html)
 - P2 (11h): Prompt cache, parallel sampling, worktree isolation → [spec](../specs/p2_performance_spec.html)
 - P3 (12h): LSP/ruff, auto skills, enhanced repo map → [spec](../specs/p3_advanced_spec.html)
+
+## Related
+
+- _(add links to related documents here)_
+

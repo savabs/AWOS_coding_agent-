@@ -1,3 +1,9 @@
+---
+title: "Budget Hard Stop — Spec"
+tags:
+  - doc/spec
+---
+
 # Budget Hard Stop — Spec
 
 ## What to build
@@ -107,3 +113,8 @@ allowed, reason = ledger.check_budget(0.01, monthly_budget=20.0)
 assert allowed
 assert reason == ""
 ```
+
+## Related
+
+- _(add links to related documents here)_
+

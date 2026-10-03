@@ -1,0 +1,87 @@
+{
+  "timestamp": "2026-06-27T05:28:33.463709+00:00",
+  "raw": {
+    "arm": "raw",
+    "commits": [
+      {
+        "commit": "commit_1_tiers",
+        "tests_pass": 15,
+        "tests_fail": 0,
+        "regression_count": 0,
+        "cost_usd": 0.0,
+        "wall_sec": 0.0
+      },
+      {
+        "commit": "commit_2_refactor",
+        "tests_pass": 17,
+        "tests_fail": 0,
+        "regression_count": 0,
+        "cost_usd": 0.0,
+        "wall_sec": 0.0
+      },
+      {
+        "commit": "commit_3_bulk",
+        "tests_pass": 20,
+        "tests_fail": 0,
+        "regression_count": 0,
+        "cost_usd": 0.0,
+        "wall_sec": 0.0
+      },
+      {
+        "commit": "commit_4_integration",
+        "tests_pass": 22,
+        "tests_fail": 1,
+        "regression_count": 0,
+        "cost_usd": 0.0,
+        "wall_sec": 0.0
+      }
+    ],
+    "zero_regression": true,
+    "final_pass": false,
+    "total_cost": 0.0,
+    "total_time": 0.0,
+    "evoscore": 0.9796
+  },
+  "awos": {
+    "arm": "awos",
+    "commits": [
+      {
+        "commit": "commit_1_tiers",
+        "tests_pass": 15,
+        "tests_fail": 0,
+        "regression_count": 0,
+        "cost_usd": 0.0,
+        "wall_sec": 0.01
+      },
+      {
+        "commit": "commit_2_refactor",
+        "tests_pass": 17,
+        "tests_fail": 0,
+        "regression_count": 0,
+        "cost_usd": 0.0,
+        "wall_sec": 0.01
+      },
+      {
+        "commit": "commit_3_bulk",
+        "tests_pass": 20,
+        "tests_fail": 0,
+        "regression_count": 0,
+        "cost_usd": 0.0,
+        "wall_sec": 0.01
+      },
+      {
+        "commit": "commit_4_integration",
+        "tests_pass": 22,
+        "tests_fail": 1,
+        "regression_count": 0,
+        "cost_usd": 0.0,
+        "wall_sec": 0.01
+      }
+    ],
+    "zero_regression": true,
+    "final_pass": false,
+    "total_cost": 0.0,
+    "total_time": 0.03,
+    "evoscore": 0.9796
+  }
+}

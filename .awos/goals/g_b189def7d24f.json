@@ -1,0 +1,76 @@
+{
+  "root_id": "g_b189def7d24f",
+  "nodes": {
+    "g_b189def7d24f": {
+      "goal_id": "g_b189def7d24f",
+      "description": "In scaffold/agent/virtual_execution_runtime.py add a one-line docstring to worktree_enabled explaining it returns True when AWOS_USE_WORKTREE is enabled",
+      "parent_ids": [],
+      "child_ids": [
+        "g_60bc50c17aed",
+        "g_1c411f918cf9"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-18T04:18:58Z",
+      "updated_at": "2026-06-19T13:16:37Z",
+      "completed_at": "2026-06-19T13:16:37Z",
+      "session_ids": [
+        "orch_e51cf4ba",
+        "orch_f2f6474e"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_60bc50c17aed": {
+      "goal_id": "g_60bc50c17aed",
+      "description": "Add a one-line docstring to the `worktree_enabled` function/property.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "scaffold/agent/virtual_execution_runtime.py",
+          "action": "Add a one-line docstring to the `worktree_enabled` function/property.",
+          "function_signature": "worktree_enabled",
+          "constraints": "Add the docstring: 'Returns True when AWOS_USE_WORKTREE is enabled.'",
+          "complexity": "low",
+          "file": "scaffold/agent/virtual_execution_runtime.py"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-18T04:19:04Z",
+      "updated_at": "2026-06-19T13:16:34Z",
+      "completed_at": "2026-06-19T13:16:34Z",
+      "session_ids": [
+        "orch_e51cf4ba",
+        "orch_f2f6474e"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_1c411f918cf9": {
+      "goal_id": "g_1c411f918cf9",
+      "description": "Apply code formatting (e.g., Black or project-specific formatter) to ensure the newly added docstring and surrounding code conform to style guidelines.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "file": "scaffold/agent/virtual_execution_runtime.py",
+          "action": "Apply code formatting (e.g., Black or project-specific formatter) to ensure the newly added docstring and surrounding code conform to style guidelines.",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-19T13:16:30Z",
+      "updated_at": "2026-06-19T13:16:37Z",
+      "completed_at": "2026-06-19T13:16:37Z",
+      "session_ids": [
+        "orch_f2f6474e"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

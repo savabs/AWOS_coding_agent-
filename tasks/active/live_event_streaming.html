@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task: Live Event Streaming — AWOS</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#21262d;--border:#30363d;--text:#c9d1d9;--muted:#8b949e;--accent:#58a6ff;--accent-green:#3fb950;--accent-red:#f85149;--accent-yellow:#d29922}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:20px 32px}
+header h1{font-size:20px;font-weight:600;margin-bottom:8px;color:var(--accent)}
+header .meta{font-size:12px;color:var(--muted)}
+.tag{background:var(--surface2);color:var(--accent);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace;border:1px solid var(--border)}
+.status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status.active{background:var(--accent-yellow);color:#000}
+main{max-width:800px;margin:0 auto;padding:32px}
+h2{font-size:17px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border);color:var(--accent)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent-green)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+pre{background:var(--surface);border:1px solid var(--border);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px}
+p code,li code{background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:12px;color:var(--accent)}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border);color:var(--muted)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.task-item{padding:8px 12px;margin:4px 0;border-radius:4px;border-left:3px solid var(--border);background:var(--surface)}
+.task-item.done{border-left-color:var(--accent-green);opacity:.6}
+.task-item .label{font-size:12px;color:var(--muted)}
+.task-item .step-title{font-weight:600}
+.progress-bar{height:6px;background:var(--surface2);border-radius:3px;overflow:hidden;margin:12px 0}
+.progress-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent-green));transition:width .3s;width:0%}
+.callout{background:var(--surface2);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb">AWOS / tasks / active</div>
+  <h1>Task: Live Event Streaming</h1>
+  <div class="meta">
+    <span class="tag">doc/task</span>
+    <span class="tag">phase/4</span>
+    <span class="tag">topic/live-streaming</span>
+    <span class="status active">active</span>
+    <time>2026-07-05</time>
+  </div>
+</header>
+
+<main>
+
+<h2>Summary</h2>
+<p>Wire the orchestrator to emit structured events through GuiEventBus. Replace polling SSE with event-file-tail SSE. Update agent.html to render live events. Result: users see the agent working in real-time when running <code>awos fix-ci</code> + <code>awos serve</code>.</p>
+
+<p><strong>Spec:</strong> <a href="../../docs/specs/live_event_streaming_spec.html">live_event_streaming_spec.html</a></p>
+
+<div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width: 85%"></div></div>
+
+<h2>Steps</h2>
+
+<div class="task-item done" id="step1">
+  <div class="label">Step 1 — gui_events.py ✅</div>
+  <div class="step-title">Extend GuiEventBus with event type constants + emit helpers</div>
+  <p class="exit">Exit: pytest tests/test_gui_events.py -q passes with tests for EventType constants + emit helpers</p>
+  <p>Files: <code>scaffold/agent/gui_events.py</code>, <code>tests/test_gui_events.py</code></p>
+</div>
+
+<div class="task-item done" id="step2">
+  <div class="label">Step 2 — orchestrator.py ✅</div>
+  <div class="step-title">Wire orchestrator to emit session_start, codebase_indexed, plan_generated</div>
+  <p class="exit">Exit: .awos/gui/&lt;id&gt;/events.jsonl contains session_start + plan_generated after dry run</p>
+  <p>Files: <code>scaffold/agent/orchestrator.py</code></p>
+</div>
+
+<div class="task-item done" id="step3">
+  <div class="label">Step 3 — orchestrator.py ✅</div>
+  <div class="step-title">Emit model_routed and task_start events from task execution</div>
+  <p class="exit">Exit: events.jsonl contains model_routed + task_start per task with correct payload</p>
+  <p>Files: <code>scaffold/agent/orchestrator.py</code></p>
+</div>
+
+<div class="task-item" id="step4">
+  <div class="label">Step 4 — orchestrator.py</div>
+  <div class="step-title">Emit file_edit, test_result, task_complete, session_done events</div>
+  <p class="exit">Exit: events.jsonl contains all 9 event types with correct payloads after full fix-ci run</p>
+  <p>Files: <code>scaffold/agent/orchestrator.py</code></p>
+</div>
+
+<div class="task-item done" id="step5">
+  <div class="label">Step 5 — server.py ✅</div>
+  <div class="step-title">Add /api/agent/events SSE endpoint that tails events.jsonl</div>
+  <p class="exit">Exit: curl http://localhost:8765/api/agent/events shows SSE data lines during fix-ci run</p>
+  <p>Files: <code>gui/server.py</code>, <code>tests/test_sse_streaming.py</code></p>
+</div>
+
+<div class="task-item done" id="step6">
+  <div class="label">Step 6 — agent.html ✅</div>
+  <div class="step-title">Render each event type as live terminal entries (model card, task log, diff, test result)</div>
+  <p class="exit">Exit: Open http://localhost:8765/agent during fix-ci run — see live log entries in terminal</p>
+  <p>Files: <code>gui/static/agent.html</code></p>
+</div>
+
+<div class="task-item" id="step7">
+  <div class="label">Step 7 — Live proof</div>
+  <div class="step-title">Run end-to-end demo and verify observable markers</div>
+  <p class="exit">Exit: demo_agent_streaming.sh completes with all markers observed</p>
+  <p>Files: <code>scripts/demo_agent_streaming.sh</code>, <code>docs/agent_streaming_proof.md</code></p>
+</div>
+
+<h2>Blockers</h2>
+<p>None.</p>
+
+<h2>Related</h2>
+<ul>
+  <li><a href="../../docs/research/live_event_streaming.html">[[live_event_streaming]]</a> — research</li>
+  <li><a href="../../docs/specs/live_event_streaming_spec.html">[[live_event_streaming_spec]]</a> — spec</li>
+</ul>
+
+</main>
+</body>
+</html>

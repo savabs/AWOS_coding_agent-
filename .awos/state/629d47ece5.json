@@ -1,0 +1,23 @@
+{
+  "goal": "Stage 1 LONG workload mission (worktree, one file per step, do NOT skip steps): (1) scaffold/agent/worktree.py \u2014 expand register_worktree docstring with when session resume uses it (2) scaffold/agent/runtime_session.py \u2014 add one-line docstring to RuntimeSessionStore.checkpoint explaining pause/resume (3) scaffold/agent/virtual_execution_runtime.py \u2014 add one-line docstring to finalize() for pause vs completed (4) scaffold/agent/plan_actions.py \u2014 add one-line docstring to replan_task_after_verify_fail (5) scaffold/agent/self_correction.py \u2014 module docstring mention WORKER_FAIL and VERIFY_FAIL classes (6) scaffold/agent/verifier.py \u2014 one-line comment above _check_edit_fidelity explaining fidelity gate (7) tests/test_verify_fail_replan.py \u2014 add test that replan returns empty when _replan_attempted set (8) tests/test_symbol_index_worktree.py \u2014 add one-line comment at top describing G1 worktree indexing (9) tests/test_pause_resume_orchestrator.py \u2014 add module docstring line about G2 gauntlet (10) scripts/stage1_gauntlet_runner.py \u2014 add G7 to the module docstring usage block (11) awos.py \u2014 add 'awos mission start --long' to mission guide print block (12) docs/missions/README.md \u2014 add 'Long mission' paragraph with awos mission start --long",
+  "goal_hash": "629d47ece5",
+  "started_at": "2026-06-21T12:28:04",
+  "last_updated": "2026-06-21T12:31:18",
+  "completed_task_ids": [
+    2,
+    3,
+    "1_2_1",
+    "1_2_2"
+  ],
+  "failed_task_ids": [
+    1,
+    "1_1",
+    "1_2",
+    "1_1_1",
+    "1_1_2"
+  ],
+  "session_ids": [
+    "orch_ed1c7c6b"
+  ],
+  "status": "failed"
+}

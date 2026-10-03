@@ -1,0 +1,6 @@
+{
+  "action": "paginate() drops the last item on every page. Fix the slice.",
+  "file": "buggy.py",
+  "task_id": 1,
+  "complexity": "medium"
+}

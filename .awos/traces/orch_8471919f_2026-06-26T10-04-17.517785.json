@@ -1,0 +1,261 @@
+{
+  "session_id": "orch_8471919f",
+  "goal": "CI Rescue Sprint: fix auth.py, billing.py, inventory.py, shipping.py, and promo.py so all 35 pytest tests pass. Do not edit tests/, conftest.py, or golden/. Keep 7 regression tests green.",
+  "start_time": "2026-06-26T10:04:17.517785",
+  "total_cost": 0.0,
+  "final_success": true,
+  "traces": [
+    {
+      "thought": "Task 1: Fix verify_password to compare hash_password(plain) with hashed, not plain on auth.py",
+      "action": "Worker.execute_task",
+      "action_input": {
+        "file": "auth.py",
+        "complexity": "low"
+      },
+      "observation": "Verified and applied",
+      "success": true,
+      "timestamp": "2026-06-26T10:04:22.024739",
+      "latency_ms": 0.0,
+      "model": "DeepSeek V4 Flash",
+      "cost": 0.0
+    },
+    {
+      "thought": "Task 2: Fix token_fingerprint to return first 8 characters only on auth.py",
+      "action": "Worker.execute_task",
+      "action_input": {
+        "file": "auth.py",
+        "complexity": "low"
+      },
+      "observation": "Verified and applied",
+      "success": true,
+      "timestamp": "2026-06-26T10:04:24.742529",
+      "latency_ms": 0.0,
+      "model": "DeepSeek V4 Flash",
+      "cost": 0.0
+    },
+    {
+      "thought": "Task 3: Fix is_session_valid: session valid when now < expires_at on auth.py",
+      "action": "Worker.execute_task",
+      "action_input": {
+        "file": "auth.py",
+        "complexity": "low"
+      },
+      "observation": "Verified and applied",
+      "success": true,
+      "timestamp": "2026-06-26T10:04:27.572656",
+      "latency_ms": 0.0,
+      "model": "DeepSeek V4 Flash",
+      "cost": 0.0
+    },
+    {
+      "thought": "Task 4: Fix role_can_checkout to allow staff role on auth.py",
+      "action": "Worker.execute_task",
+      "action_input": {
+        "file": "auth.py",
+        "complexity": "low"
+      },
+      "observation": "Verified and applied",
+      "success": true,
+      "timestamp": "2026-06-26T10:04:30.056755",
+      "latency_ms": 0.0,
+      "model": "DeepSeek V4 Flash",
+      "cost": 0.0
+    },
+    {
+      "thought": "Task 5: Fix line_total to multiply unit_price by quantity on billing.py",
+      "action": "Worker.execute_task",
+      "action_input": {
+        "file": "billing.py",
+        "complexity": "low"
+      },
+      "observation": "Verified and applied",
+      "success": true,
+      "timestamp": "2026-06-26T10:04:32.289522",
+      "latency_ms": 0.0,
+      "model": "DeepSeek V4 Flash",
+      "cost": 0.0
+    },
+    {
+      "thought": "Task 6: Fix apply_coupon: single /100 for percent discount on billing.py",
+      "action": "Worker.execute_task",
+      "action_input": {
+        "file": "billing.py",
+        "complexity": "low"
+      },
+      "observation": "Verified and applied",
+      "success": true,
+      "timestamp": "2026-06-26T10:04:34.430029",
+      "latency_ms": 0.0,
+      "model": "DeepSeek V4 Flash",
+      "cost": 0.0
+    },
+    {
+      "thought": "Task 7: Fix invoice_total to include tax_rate via round_money on billing.py",
+      "action": "Worker.execute_task",
+      "action_input": {
+        "file": "billing.py",
+        "complexity": "medium"
+      },
+      "observation": "Verified and applied",
+      "success": true,
+      "timestamp": "2026-06-26T10:04:36.901379",
+      "latency_ms": 0.0,
+      "model": "DeepSeek V4 Flash",
+      "cost": 0.0
+    },
+    {
+      "thought": "Task 8: Fix round_money to use Decimal ROUND_HALF_UP on billing.py",
+      "action": "Worker.execute_task",
+      "action_input": {
+        "file": "billing.py",
+        "complexity": "medium"
+      },
+      "observation": "Verified and applied",
+      "success": true,
+      "timestamp": "2026-06-26T10:04:39.830164",
+      "latency_ms": 0.0,
+      "model": "DeepSeek V4 Flash",
+      "cost": 0.0
+    },
+    {
+      "thought": "Task 9: Fix currency_split so last part absorbs remainder and sum equals total on billing.py",
+      "action": "Worker.execute_task",
+      "action_input": {
+        "file": "billing.py",
+        "complexity": "medium"
+      },
+      "observation": "Verified and applied",
+      "success": true,
+      "timestamp": "2026-06-26T10:04:42.706757",
+      "latency_ms": 0.0,
+      "model": "DeepSeek V4 Flash",
+      "cost": 0.0
+    },
+    {
+      "thought": "Task 10: Fix sku_normalize: strip whitespace and uppercase on inventory.py",
+      "action": "Worker.execute_task",
+      "action_input": {
+        "file": "inventory.py",
+        "complexity": "low"
+      },
+      "observation": "Verified and applied",
+      "success": true,
+      "timestamp": "2026-06-26T10:04:45.106877",
+      "latency_ms": 0.0,
+      "model": "DeepSeek V4 Flash",
+      "cost": 0.0
+    },
+    {
+      "thought": "Task 11: Fix stock_available: on_hand minus reserved without off-by-one on inventory.py",
+      "action": "Worker.execute_task",
+      "action_input": {
+        "file": "inventory.py",
+        "complexity": "low"
+      },
+      "observation": "Verified and applied",
+      "success": true,
+      "timestamp": "2026-06-26T10:04:46.929412",
+      "latency_ms": 0.0,
+      "model": "DeepSeek V4 Flash",
+      "cost": 0.0
+    },
+    {
+      "thought": "Task 12: Fix reserve_stock to increment reserved by qty on inventory.py",
+      "action": "Worker.execute_task",
+      "action_input": {
+        "file": "inventory.py",
+        "complexity": "medium"
+      },
+      "observation": "Verified and applied",
+      "success": true,
+      "timestamp": "2026-06-26T10:04:48.654099",
+      "latency_ms": 0.0,
+      "model": "DeepSeek V4 Flash",
+      "cost": 0.0
+    },
+    {
+      "thought": "Task 13: Fix release_stock: decrement reserved only, do not add to on_hand on inventory.py",
+      "action": "Worker.execute_task",
+      "action_input": {
+        "file": "inventory.py",
+        "complexity": "medium"
+      },
+      "observation": "Verified and applied",
+      "success": true,
+      "timestamp": "2026-06-26T10:04:51.778228",
+      "latency_ms": 0.0,
+      "model": "DeepSeek V4 Flash",
+      "cost": 0.0
+    },
+    {
+      "thought": "Task 14: Fix reorder_point: True when available <= needed on inventory.py",
+      "action": "Worker.execute_task",
+      "action_input": {
+        "file": "inventory.py",
+        "complexity": "low"
+      },
+      "observation": "Verified and applied",
+      "success": true,
+      "timestamp": "2026-06-26T10:04:55.224176",
+      "latency_ms": 0.0,
+      "model": "DeepSeek V4 Flash",
+      "cost": 0.0
+    },
+    {
+      "thought": "Task 15: Fix shipping_cost top tier to 25.0 for weight above 5kg on shipping.py",
+      "action": "Worker.execute_task",
+      "action_input": {
+        "file": "shipping.py",
+        "complexity": "low"
+      },
+      "observation": "Verified and applied",
+      "success": true,
+      "timestamp": "2026-06-26T10:04:57.451391",
+      "latency_ms": 0.0,
+      "model": "DeepSeek V4 Flash",
+      "cost": 0.0
+    },
+    {
+      "thought": "Task 16: Fix qualifies_free_shipping to use >= threshold; delivery_days express max(1, base-1) on shipping.py",
+      "action": "Worker.execute_task",
+      "action_input": {
+        "file": "shipping.py",
+        "complexity": "medium"
+      },
+      "observation": "Verified and applied",
+      "success": true,
+      "timestamp": "2026-06-26T10:05:01.709318",
+      "latency_ms": 0.0,
+      "model": "DeepSeek V4 Flash",
+      "cost": 0.0
+    },
+    {
+      "thought": "Task 17: Fix can_ship_international to reject blocked country codes on shipping.py",
+      "action": "Worker.execute_task",
+      "action_input": {
+        "file": "shipping.py",
+        "complexity": "low"
+      },
+      "observation": "Verified and applied",
+      "success": true,
+      "timestamp": "2026-06-26T10:05:04.716943",
+      "latency_ms": 0.0,
+      "model": "DeepSeek V4 Flash",
+      "cost": 0.0
+    },
+    {
+      "thought": "Task 18: Fix stackable compound discount, min_order_for_promo >=, loyalty_points round, bundle_discount 0 for single item on promo.py",
+      "action": "Worker.execute_task",
+      "action_input": {
+        "file": "promo.py",
+        "complexity": "high"
+      },
+      "observation": "Verified and applied",
+      "success": true,
+      "timestamp": "2026-06-26T10:05:11.146506",
+      "latency_ms": 0.0,
+      "model": "DeepSeek V4 Flash",
+      "cost": 0.0
+    }
+  ]
+}

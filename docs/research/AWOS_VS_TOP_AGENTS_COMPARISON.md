@@ -1,3 +1,9 @@
+---
+title: "AWOS vs Top Coding Agents — Competitive Analysis"
+tags:
+  - doc/research
+---
+
 # AWOS vs Top Coding Agents — Competitive Analysis
 
 > **⚠️ SUPERSEDED for positioning purposes (2026-06-08).**
@@ -622,3 +628,8 @@ AIAgent (run_agent.py)
 **End of Analysis**
 
 *This comparison is based on research conducted on 2026-05-16. Market conditions and agent capabilities evolve rapidly; re-evaluate quarterly.*
+
+## Related
+
+- _(add links to related documents here)_
+

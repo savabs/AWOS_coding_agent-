@@ -1,3 +1,9 @@
+---
+title: "RL / LLM Training Protocol"
+tags:
+  - doc/wiki
+---
+
 # RL / LLM Training Protocol
 
 > **Context:** Patterns for fine-tuning LLMs with reinforcement learning (GRPO, PPO, DPO).

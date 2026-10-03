@@ -13,7 +13,7 @@ tags:
 - 1.2 Expand PRICING dict in token_report.py
 - 1.3 Add Makefile tier targets (dev-cheap, dev-think, dev-mid, dev-pro)
 - 1.4 Add MODEL ROUTING section to CONVENTIONS.md
-- 1.5 Update memories/repo/project_structure.md
+- 1.5 Update [[project_structure]]
 
 ## Related
 - [[model_tiering]] — research

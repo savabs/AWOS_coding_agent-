@@ -1,3 +1,9 @@
+---
+title: "P1 Spec — Test Execution, Architect+Editor Split, Context Compaction"
+tags:
+  - doc/spec
+---
+
 # P1 Spec — Test Execution, Architect+Editor Split, Context Compaction
 
 **Full spec**: [docs/specs/p1_verifier_architect_spec.html](p1_verifier_architect_spec.html)  
@@ -22,3 +28,8 @@ Add pytest execution as objective verifier. Split worker into architect (reasoni
 - scaffold/agent/orchestrator.py — test wiring, SessionState
 - scaffold/agent/session_state.py (new) — dataclasses
 - tests/test_p1_improvements.py — new test file
+
+## Related
+
+- _(add links to related documents here)_
+

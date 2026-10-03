@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "session_id": "rs_c08eb76a04d6",
+  "goal": "create docs/e2e_uncensored_agent_guide.md about uncensored local agents",
+  "goal_hash": "d9e2e3419d",
+  "status": "failed",
+  "created_at": "2026-06-21T07:01:50Z",
+  "updated_at": "2026-06-21T07:01:50Z",
+  "paused_at": null,
+  "codebase_root": "/tmp/pytest-of-becmachlean/pytest-11/test_deliverable_e2e_suite0",
+  "reasoning_session_id": null,
+  "goal_graph_id": null,
+  "progress": {
+    "completed_task_ids": [],
+    "failed_task_ids": [
+      1,
+      "1_1",
+      "1_2",
+      "1_1_1",
+      "1_1_2",
+      "1_2_1",
+      "1_2_2"
+    ],
+    "current_task_id": null,
+    "total_tasks": 1,
+    "decomposition_depth": 0
+  },
+  "budget": {
+    "spent_usd": 0.0
+  },
+  "sandbox": {
+    "enabled": false,
+    "feature_id": null,
+    "worktree_path": null,
+    "branch": null
+  },
+  "parent_session_id": null,
+  "cancel_requested": false
+}

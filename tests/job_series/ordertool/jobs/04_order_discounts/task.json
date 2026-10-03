@@ -1,0 +1,7 @@
+{
+  "id": "04_order_discounts",
+  "goal": "We've started giving some customers a percentage discount on a whole order. Let me set it when adding an order, e.g. `add ... --discount 12.5` for 12.5% off (default: no discount). From then on the order's total everywhere (the add confirmation, list, export, report, customers) should be the discounted total, rounded to the cent the same way the tool rounds every other amount. The discount must be between 0 and 100 (decimals allowed); anything else is invalid input and should be reported like other bad input. It needs to be saved in the orders file, and orders files created before this change must keep loading (as orders without a discount).",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

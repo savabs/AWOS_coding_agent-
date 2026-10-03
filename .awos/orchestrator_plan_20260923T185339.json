@@ -1,0 +1,194 @@
+[
+  {
+    "case": "a1_off_by_one_page",
+    "tier": "A",
+    "multi_file": false,
+    "orchestrator_success": true,
+    "tasks_completed": 4,
+    "tasks_failed": 0,
+    "cost_usd": 0.021483,
+    "tests_pass": true,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 59
+    },
+    "diff": "diff --git a/buggy.py b/buggy.py\nindex d16e31b..4840a2e 100644\n--- a/buggy.py\n+++ b/buggy.py\n@@ -1,5 +1,5 @@\n def paginate(items, page, per_page):\n     \"\"\"Return the items on a 1-indexed page.\"\"\"\n     start = (page - 1) * per_page\n-    end = start + per_page - 1\n+    end = start + per_page\n     return items[start:end]\ndiff --git a/test_case.py b/test_case.py\nindex af4c55e..e0fe19c 100644\n--- a/test_case.py\n+++ b/test_case.py\n@@ -1,13 +1,27 @@\n from buggy import paginate\n \n def test_first_page_is_full():\n-    assert paginate(list(range(10)), 1, 3) == [0, 1, 2]\n+    result = paginate(list(range(10)), 1, 3)\n+    assert len(result) == 3\n+    assert result == [0, 1, 2]\n \n def test_second_page_is_full():\n-    assert paginate(list(range(10)), 2, 3) == [3, 4, 5]\n+    result = paginate(list(range(10)), 2, 3)\n+    assert len(result) == 3\n+    assert result == [3, 4, 5]\n \n def test_last_partial_page():\n     assert paginate(list(range(10)), 4, 3) == [9]\n \n def test_page_beyond_end_is_empty():\n     assert paginate(list(range(10)), 9, 3) == []\n+\n+\n+def test_no_items_dropped_across_all_pages():\n+    items = list(range(10))\n+    per_page = 3\n+    all_results = []\n+    for page in range(1, 5):\n+        page_items = paginate(items, page, per_page)\n+        all_results.extend(page_items)\n+    assert all_results == items, f\"Expected {items}, got {all_results}\"\n",
+    "seconds": 1215.8
+  },
+  {
+    "case": "a2_mutable_default",
+    "tier": "A",
+    "multi_file": false,
+    "orchestrator_success": true,
+    "tasks_completed": 2,
+    "tasks_failed": 0,
+    "cost_usd": 0.003683,
+    "tests_pass": true,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 13
+    },
+    "diff": "diff --git a/buggy.py b/buggy.py\nindex 1ee48e3..3fb949b 100644\n--- a/buggy.py\n+++ b/buggy.py\n@@ -1,4 +1,6 @@\n-def collect(value, into=[]):\n+def collect(value, into=None):\n     \"\"\"Append value to a list and return it.\"\"\"\n+    if into is None:\n+        into = []\n     into.append(value)\n     return into\ndiff --git a/test_case.py b/test_case.py\nindex bfb4b00..666e60e 100644\n--- a/test_case.py\n+++ b/test_case.py\n@@ -9,6 +9,9 @@ def test_calls_do_not_share_state():\n \n def test_explicit_list_still_accumulates():\n     acc = []\n-    collect(1, acc)\n-    collect(2, acc)\n+    result1 = collect(1, acc)\n+    assert result1 == [1]\n+    assert acc == [1]\n+    result2 = collect(2, acc)\n+    assert result2 == [1, 2]\n     assert acc == [1, 2]\n",
+    "seconds": 137.3
+  },
+  {
+    "case": "a3_integer_midpoint",
+    "tier": "A",
+    "multi_file": false,
+    "orchestrator_success": true,
+    "tasks_completed": 2,
+    "tasks_failed": 0,
+    "cost_usd": 0.001515,
+    "tests_pass": true,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 10
+    },
+    "diff": "diff --git a/buggy.py b/buggy.py\nindex a71f1e6..468780a 100644\n--- a/buggy.py\n+++ b/buggy.py\n@@ -1,3 +1,3 @@\n-def midpoint(low, high):\n+def midpoint(low, high) -> int:\n     \"\"\"Return the integer index halfway between low and high.\"\"\"\n-    return (low + high) / 2\n+    return (low + high) // 2\n",
+    "seconds": 54.9
+  },
+  {
+    "case": "a4_empty_input_crash",
+    "tier": "A",
+    "multi_file": false,
+    "orchestrator_success": true,
+    "tasks_completed": 2,
+    "tasks_failed": 0,
+    "cost_usd": 0.001608,
+    "tests_pass": true,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 10
+    },
+    "diff": "diff --git a/buggy.py b/buggy.py\nindex 52d2005..141e078 100644\n--- a/buggy.py\n+++ b/buggy.py\n@@ -1,3 +1,5 @@\n def average(numbers):\n     \"\"\"Mean of a sequence; 0.0 when there is nothing to average.\"\"\"\n+    if not numbers:\n+        return 0.0\n     return sum(numbers) / len(numbers)\ndiff --git a/test_case.py b/test_case.py\nindex c2fd406..9506464 100644\n--- a/test_case.py\n+++ b/test_case.py\n@@ -5,7 +5,9 @@ def test_normal_case():\n     assert average([1, 2, 3]) == 2.0\n \n def test_empty_returns_zero():\n-    assert average([]) == 0.0\n+    result = average([])\n+    assert result == 0.0\n+    assert isinstance(result, float)\n \n def test_empty_does_not_raise():\n     try:\n",
+    "seconds": 46.3
+  },
+  {
+    "case": "b1_constant_mismatch",
+    "tier": "B",
+    "multi_file": true,
+    "orchestrator_success": true,
+    "tasks_completed": 3,
+    "tasks_failed": 0,
+    "cost_usd": 0.009235,
+    "tests_pass": true,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 30
+    },
+    "diff": "diff --git a/buggy.py b/buggy.py\nindex bb5694b..369d3a5 100644\n--- a/buggy.py\n+++ b/buggy.py\n@@ -1,3 +1,5 @@\n+from limits import MAX_RETRIES\n+\n def retry_budget(attempt):\n     \"\"\"Remaining retries for a given attempt number.\"\"\"\n-    return 3 - attempt\n+    return MAX_RETRIES - attempt\ndiff --git a/limits.py b/limits.py\nindex e492128..fc8efc7 100644\n--- a/limits.py\n+++ b/limits.py\n@@ -1,4 +1,4 @@\n-\"\"\"Project-wide limits. Single owner for these numbers.\"\"\"\n+\"\"\"Project-wide limits. Exported for use by other modules. Single owner for these numbers.\"\"\"\n \n MAX_RETRIES = 7\n REQUEST_TIMEOUT_SEC = 30\n",
+    "seconds": 241.9
+  },
+  {
+    "case": "b2_schema_drift",
+    "tier": "B",
+    "multi_file": true,
+    "orchestrator_success": true,
+    "tasks_completed": 2,
+    "tasks_failed": 0,
+    "cost_usd": 0.004222,
+    "tests_pass": true,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 14
+    },
+    "diff": "diff --git a/buggy.py b/buggy.py\nindex 3ef31ec..1970750 100644\n--- a/buggy.py\n+++ b/buggy.py\n@@ -1,3 +1,3 @@\n def serialize(user):\n     \"\"\"Render a User as a dict for the API.\"\"\"\n-    return {\"id\": user.id, \"name\": user.username}\n+    return {\"id\": user.id, \"name\": user.display_name}\ndiff --git a/test_case.py b/test_case.py\nindex 61387ba..3b5a9ba 100644\n--- a/test_case.py\n+++ b/test_case.py\n@@ -2,7 +2,9 @@ from buggy import serialize\n from models import User\n \n def test_uses_current_field_name():\n-    assert serialize(User(id=1, display_name=\"ada\")) == {\"id\": 1, \"name\": \"ada\"}\n+    user = User(id=1, display_name=\"ada\")\n+    result = serialize(user)\n+    assert result == {\"id\": 1, \"name\": user.display_name}\n \n def test_does_not_touch_removed_field():\n     user = User(id=2, display_name=\"grace\")\n",
+    "seconds": 130.9
+  },
+  {
+    "case": "b3_caller_contract",
+    "tier": "B",
+    "multi_file": true,
+    "orchestrator_success": false,
+    "tasks_completed": 0,
+    "tasks_failed": 2,
+    "cost_usd": 0.003601,
+    "tests_pass": false,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 19
+    },
+    "diff": "",
+    "seconds": 144.0
+  },
+  {
+    "case": "b4_enum_extension",
+    "tier": "B",
+    "multi_file": true,
+    "orchestrator_success": false,
+    "tasks_completed": 0,
+    "tasks_failed": 2,
+    "cost_usd": 0.006746,
+    "tests_pass": false,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 25
+    },
+    "diff": "",
+    "seconds": 228.2
+  },
+  {
+    "case": "c1_reuse_existing_helper",
+    "tier": "C",
+    "multi_file": true,
+    "orchestrator_success": true,
+    "tasks_completed": 4,
+    "tasks_failed": 0,
+    "cost_usd": 0.014317,
+    "tests_pass": true,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 38
+    },
+    "diff": "diff --git a/buggy.py b/buggy.py\nindex f872333..d73afff 100644\n--- a/buggy.py\n+++ b/buggy.py\n@@ -1,6 +1,6 @@\n-import os\n+from pathutils import normalize_path\n \n \n def resolve(path):\n     \"\"\"Turn a user-supplied path into an absolute one.\"\"\"\n-    return os.path.abspath(path)\n+    return normalize_path(path)\ndiff --git a/test_case.py b/test_case.py\nindex 97e02a2..087cdcc 100644\n--- a/test_case.py\n+++ b/test_case.py\n@@ -2,11 +2,16 @@ import os\n from buggy import resolve\n \n def test_absolute_path_unchanged():\n-    assert resolve(\"/tmp/x\") == \"/tmp/x\"\n+    result = resolve(\"/tmp/x\")\n+    assert result == \"/tmp/x\"\n+    assert os.path.isabs(result)\n \n def test_expands_home():\n     expected = os.path.join(os.path.expanduser(\"~\"), \"notes.txt\")\n-    assert resolve(\"~/notes.txt\") == expected\n+    result = resolve(\"~/notes.txt\")\n+    assert result == expected\n+    assert \"~\" not in result\n+    assert os.path.isabs(result)\n \n def test_collapses_dot_segments():\n     assert resolve(\"/tmp/a/../b\") == \"/tmp/b\"\n",
+    "seconds": 606.4
+  },
+  {
+    "case": "c2_use_project_error_type",
+    "tier": "C",
+    "multi_file": true,
+    "orchestrator_success": true,
+    "tasks_completed": 2,
+    "tasks_failed": 0,
+    "cost_usd": 0.00205,
+    "tests_pass": true,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 10
+    },
+    "diff": "diff --git a/buggy.py b/buggy.py\nindex 4e0e845..4ad9b9c 100644\n--- a/buggy.py\n+++ b/buggy.py\n@@ -1,5 +1,8 @@\n+from errors import ValidationError\n+\n+\n def check_age(age):\n     \"\"\"Validate an age, raising on bad input.\"\"\"\n     if age < 0:\n-        raise ValueError(\"age must not be negative\")\n-    return age\n+        raise ValidationError(\"age must not be negative\", field=\"age\")\n+    return age\n\\ No newline at end of file\n",
+    "seconds": 64.6
+  },
+  {
+    "case": "d1_contract_only_in_tests",
+    "tier": "D",
+    "multi_file": false,
+    "orchestrator_success": true,
+    "tasks_completed": 2,
+    "tasks_failed": 0,
+    "cost_usd": 0.004045,
+    "tests_pass": true,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 14
+    },
+    "diff": "diff --git a/buggy.py b/buggy.py\nindex 2e82570..33e5df0 100644\n--- a/buggy.py\n+++ b/buggy.py\n@@ -1,3 +1,18 @@\n def format_duration(seconds):\n     \"\"\"Render a duration for display.\"\"\"\n-    return f\"{seconds} seconds\"\n+    hours = seconds // 3600\n+    minutes = (seconds % 3600) // 60\n+    secs = seconds % 60\n+\n+    parts = []\n+    if hours:\n+        parts.append(f\"{hours}h\")\n+    if minutes:\n+        parts.append(f\"{minutes}m\")\n+    if secs:\n+        parts.append(f\"{secs}s\")\n+\n+    if not parts:\n+        return \"0s\"\n+\n+    return \" \".join(parts)\n",
+    "seconds": 112.6
+  },
+  {
+    "case": "d2_fix_belongs_in_the_helper",
+    "tier": "D",
+    "multi_file": false,
+    "orchestrator_success": false,
+    "tasks_completed": 0,
+    "tasks_failed": 2,
+    "cost_usd": 0.007774,
+    "tests_pass": false,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 27
+    },
+    "diff": "",
+    "seconds": 254.1
+  }
+]

@@ -1,0 +1,70 @@
+{
+  "session_id": "orch_a2b4ebf5",
+  "goal": "In scaffold/agent/prompt_evolver.py add a one-line docstring to should_evolve explaining it triggers prompt evolution every N sessions",
+  "status": "completed",
+  "started_at": "2026-06-16T08:19:42Z",
+  "files": [
+    {
+      "path": "scaffold/agent/prompt_evolver.py",
+      "status": "modified",
+      "lines_added": 1,
+      "lines_removed": 1,
+      "hunks": [
+        {
+          "old_start": 1,
+          "old_count": 3,
+          "new_start": 1,
+          "new_count": 3,
+          "lines": [
+            {
+              "type": "header",
+              "content": "@@ -1,3 +1,3 @@",
+              "old_line_no": null,
+              "new_line_no": null
+            },
+            {
+              "type": "context",
+              "content": "def should_evolve(self, session_count: int) -> bool:",
+              "old_line_no": 1,
+              "new_line_no": 1
+            },
+            {
+              "type": "remove",
+              "content": "        \"\"\"True every AWOS_PROMPT_EVOLVE_EVERY sessions when feature is enabled.\"\"\"",
+              "old_line_no": 2,
+              "new_line_no": null
+            },
+            {
+              "type": "add",
+              "content": "        \"\"\"Check whether enough sessions have passed since the last evolution to trigger a new prompt update.\"\"\"",
+              "old_line_no": null,
+              "new_line_no": 2
+            },
+            {
+              "type": "context",
+              "content": "        if os.getenv(\"AWOS_PROMPT_EVOLUTION\", \"\").lower() != \"true\":",
+              "old_line_no": 3,
+              "new_line_no": 3
+            }
+          ]
+        }
+      ],
+      "unified_diff": "--- scaffold/agent/prompt_evolver.py (before)\n+++ scaffold/agent/prompt_evolver.py (after)\n@@ -1,3 +1,3 @@\n def should_evolve(self, session_count: int) -> bool:\n\n-        \"\"\"True every AWOS_PROMPT_EVOLVE_EVERY sessions when feature is enabled.\"\"\"\n\n+        \"\"\"Check whether enough sessions have passed since the last evolution to trigger a new prompt update.\"\"\"\n\n         if os.getenv(\"AWOS_PROMPT_EVOLUTION\", \"\").lower() != \"true\":",
+      "before_excerpt": "def should_evolve(self, session_count: int) -> bool:\n        \"\"\"True every AWOS_PROMPT_EVOLVE_EVERY sessions when feature is enabled.\"\"\"\n        if os.getenv(\"AWOS_PROMPT_EVOLUTION\", \"\").lower() != \"true\":",
+      "after_excerpt": "def should_evolve(self, session_count: int) -> bool:\n        \"\"\"Check whether enough sessions have passed since the last evolution to trigger a new prompt update.\"\"\"\n        if os.getenv(\"AWOS_PROMPT_EVOLUTION\", \"\").lower() != \"true\":"
+    }
+  ],
+  "summary": {
+    "total_files": 1,
+    "created": 0,
+    "modified": 1,
+    "deleted": 0,
+    "lines_added": 1,
+    "lines_removed": 1
+  },
+  "completed_at": "2026-06-16T08:19:48Z",
+  "tasks_completed": 1,
+  "tasks_failed": 0,
+  "total_cost_usd": 0.00130525,
+  "elapsed_sec": 7.578802585601807
+}

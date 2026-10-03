@@ -1,0 +1,7 @@
+{
+  "id": "12_export_orders_csv",
+  "goal": "Merchants' accountants want the raw orders in a spreadsheet. Add an `export CUSTOMER FIRST LAST` command (days as YYYY-MM-DD, both included) that prints a CSV of every order in that period, any status, oldest first, with the columns order_id, local_time, amount_cents, status. The period must cover exactly the same orders as `breakdown` does for those days, local_time is the time the merchant saw on their clock, written the way the `orders` command writes times, and amount_cents is written the same way our other CSV outputs write money. Errors (unknown customer, bad or backwards dates) like every other command.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

@@ -1,0 +1,46 @@
+{
+  "root_id": "g_0587bd20e50b",
+  "nodes": {
+    "g_0587bd20e50b": {
+      "goal_id": "g_0587bd20e50b",
+      "description": "make divide return string",
+      "parent_ids": [],
+      "child_ids": [
+        "g_31a2a285698c"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-05-20T13:51:45Z",
+      "updated_at": "2026-05-20T13:51:45Z",
+      "completed_at": "2026-05-20T13:51:45Z",
+      "session_ids": [
+        "orch_23bede25"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_31a2a285698c": {
+      "goal_id": "g_31a2a285698c",
+      "description": "Make divide() return a string instead of float",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "src/math_utils.py",
+          "action": "Make divide() return a string instead of float",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-05-20T13:51:45Z",
+      "updated_at": "2026-05-20T13:51:45Z",
+      "completed_at": "2026-05-20T13:51:45Z",
+      "session_ids": [
+        "orch_23bede25"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

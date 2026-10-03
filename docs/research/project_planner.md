@@ -1,3 +1,9 @@
+---
+title: "Research: ProjectPlanner — Persistent Goal DAG (Phase 5C)"
+tags:
+  - doc/research
+---
+
 # Research: ProjectPlanner — Persistent Goal DAG (Phase 5C)
 
 > Canonical HTML: docs/research/project_planner.html

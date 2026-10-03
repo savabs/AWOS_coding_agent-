@@ -69,6 +69,9 @@ class BudgetLedger:
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "cost": round(cost, 8),
+            # Which process spent it: .awos/budget.json is shared by every
+            # run, and a goal's budget counts only its own process's calls.
+            "pid": os.getpid(),
         }
         self._append(entry)
         self._rebuild_totals()

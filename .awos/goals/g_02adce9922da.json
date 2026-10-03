@@ -1,0 +1,77 @@
+{
+  "root_id": "g_02adce9922da",
+  "nodes": {
+    "g_02adce9922da": {
+      "goal_id": "g_02adce9922da",
+      "description": "Add a dry_run parameter to Orchestrator.execute_feature in scaffold/agent/orchestrator.py that when True skips the worker LLM call and instead prints what patch it would have generated, useful for previewing agent intent without spending tokens",
+      "parent_ids": [],
+      "child_ids": [
+        "g_4996f20e5f76",
+        "g_2249cc5e5efe"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-05-24T09:48:35Z",
+      "updated_at": "2026-05-24T12:11:28Z",
+      "completed_at": "2026-05-24T12:11:28Z",
+      "session_ids": [
+        "orch_e9f01e2b",
+        "orch_37740043"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_4996f20e5f76": {
+      "goal_id": "g_4996f20e5f76",
+      "description": "Add the 'dry_run: bool = False' parameter to the signature of the 'Orchestrator.execute_feature' method.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "scaffold/agent/orchestrator.py",
+          "action": "Add the 'dry_run: bool = False' parameter to the signature of the 'Orchestrator.execute_feature' method.",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-05-24T09:48:50Z",
+      "updated_at": "2026-05-24T12:11:17Z",
+      "completed_at": "2026-05-24T12:11:17Z",
+      "session_ids": [
+        "orch_e9f01e2b",
+        "orch_f4b28501",
+        "orch_f3b5f59d",
+        "orch_37740043"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_2249cc5e5efe": {
+      "goal_id": "g_2249cc5e5efe",
+      "description": "Inside 'Orchestrator.execute_feature', implement the dry-run logic: wrap the worker LLM call (patch generation) with an 'if not dry_run:' condition. In the 'else' block, print a message indicating the worker LLM call was skipped and a placeholder for the patch that would have been generated (e.g., 'Dry run: Worker LLM would have generated a patch here. Actual content skipped.'), then return an empty string to simulate a successful but empty patch.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "file": "scaffold/agent/orchestrator.py",
+          "action": "Inside 'Orchestrator.execute_feature', implement the dry-run logic: wrap the worker LLM call (patch generation) with an 'if not dry_run:' condition. In the 'else' block, print a message indicating the worker LLM call was skipped and a placeholder for the patch that would have been generated (e.g., 'Dry run: Worker LLM would have generated a patch here. Actual content skipped.'), then return an empty string to simulate a successful but empty patch.",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-05-24T09:48:50Z",
+      "updated_at": "2026-05-24T12:11:28Z",
+      "completed_at": "2026-05-24T12:11:28Z",
+      "session_ids": [
+        "orch_e9f01e2b",
+        "orch_f4b28501",
+        "orch_f3b5f59d",
+        "orch_37740043"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

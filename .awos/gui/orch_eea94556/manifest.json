@@ -1,0 +1,20 @@
+{
+  "session_id": "orch_eea94556",
+  "goal": "Gauntlet G2 pause-mid-plan proof",
+  "status": "completed",
+  "started_at": "2026-06-18T08:31:06Z",
+  "files": [],
+  "summary": {
+    "total_files": 0,
+    "created": 0,
+    "modified": 0,
+    "deleted": 0,
+    "lines_added": 0,
+    "lines_removed": 0
+  },
+  "completed_at": "2026-06-18T08:31:06Z",
+  "tasks_completed": 0,
+  "tasks_failed": 0,
+  "total_cost_usd": 0.0,
+  "elapsed_sec": 3.2136032581329346
+}

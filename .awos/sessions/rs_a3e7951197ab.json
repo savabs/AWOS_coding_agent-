@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "session_id": "rs_a3e7951197ab",
+  "goal": "CI Rescue on clawcode: fix all 12 failing tests in tests/test_porting_workspace.py. Edit only src/ files. Do not modify tests/ or test files. Restore correct behavior for port manifest, query engine, commands, tools, subsystems, setup, remote modes, and bootstrap prompt output.",
+  "goal_hash": "939fee2244",
+  "status": "completed",
+  "created_at": "2026-06-26T05:56:08Z",
+  "updated_at": "2026-06-26T05:56:48Z",
+  "paused_at": null,
+  "codebase_root": "/home/becmachlean/2024/projects/clawcode/.awos/worktrees/a3e7951197ab",
+  "reasoning_session_id": null,
+  "goal_graph_id": null,
+  "progress": {
+    "completed_task_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12
+    ],
+    "failed_task_ids": [],
+    "current_task_id": null,
+    "total_tasks": 12,
+    "decomposition_depth": 0
+  },
+  "budget": {
+    "spent_usd": 0.0
+  },
+  "sandbox": {
+    "enabled": true,
+    "feature_id": "a3e7951197ab",
+    "worktree_path": "/home/becmachlean/2024/projects/clawcode/.awos/worktrees/a3e7951197ab",
+    "branch": "awos/feature/a3e7951197ab"
+  },
+  "parent_session_id": null,
+  "cancel_requested": false,
+  "pause_reason": null
+}

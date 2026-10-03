@@ -1,0 +1,7 @@
+{
+  "id": "12_prune_command",
+  "goal": "When the backup disk gets tight I want to clean up without making a new backup. Please add a `prune` command that deletes the backups the retention rules say should go right now, using exactly the same rules as the automatic pruning after `run` (retention_days and keep_last, from the settings file or the environment). Print one line `pruned <archive name>` per deleted backup, oldest first, then a summary like `3 backups pruned, 3.5 KiB freed` (`1 backup ...` for one; sizes in backupd's usual format). With `--dry-run`, delete nothing and print `would prune <archive name>` lines and `3 backups would be pruned, 3.5 KiB would be freed` instead. If there is nothing to delete, print `nothing to prune`. Only real backup archives may ever be touched. It shouldn't need the source directory to be configured, and the deletions should show up in the log like the automatic ones do.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

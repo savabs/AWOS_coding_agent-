@@ -1,3 +1,9 @@
+---
+title: "Agentic OS — Agent Operating Instructions"
+tags:
+  - doc/wiki
+---
+
 # Agentic OS — Agent Operating Instructions
 
 This project is **AWOS** — a learnable operating system for autonomous work.

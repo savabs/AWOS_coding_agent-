@@ -1,3 +1,9 @@
+---
+title: "Security Protocol"
+tags:
+  - doc/wiki
+---
+
 # Security Protocol
 
 > Based on OWASP Top 10. These checks are non-negotiable before any code reaches production.

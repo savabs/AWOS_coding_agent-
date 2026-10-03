@@ -1,0 +1,18 @@
+[
+  {
+    "task_id": 1,
+    "task_type": "edit_file",
+    "path": "discount_calculator.py",
+    "file": "discount_calculator.py",
+    "action": "Fix get_customer_tier: bronze at lifetime_spend >= TIER_THRESHOLDS['bronze'] (0), not >= 100",
+    "complexity": "low"
+  },
+  {
+    "task_id": 2,
+    "task_type": "edit_file",
+    "path": "discount_calculator.py",
+    "file": "discount_calculator.py",
+    "action": "Fix get_tier_discount: return TIER_DISCOUNTS[tier], not hardcoded 0.0",
+    "complexity": "low"
+  }
+]

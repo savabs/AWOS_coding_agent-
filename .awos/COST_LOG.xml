@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<cost-log>
+  <decision timestamp="2026-05-15T07:37:06.525203" task="Add type hints to module" model="claude-3-5-haiku" complexity="5" cost-estimate="0.002400" approved="no" />
+  <decision timestamp="2026-05-15T07:37:25.310782" task="Refactor database layer" model="claude-3-5-haiku" complexity="5" cost-estimate="0.002400" approved="no" />
+  <decision timestamp="2026-05-15T07:37:31.502386" task="Add tests to module" model="claude-3-5-haiku" complexity="5" cost-estimate="0.002400" approved="yes" />
+  <decision timestamp="2026-05-15T08:08:45.277281" task="Refactor module" model="claude-3-5-haiku" complexity="5" cost-estimate="0.002400" approved="no" />
+  <decision timestamp="2026-05-15T08:08:50.412462" task="Fix memory leak" model="claude-3-5-haiku" complexity="5" cost-estimate="0.002400" approved="yes" />
+</cost-log>

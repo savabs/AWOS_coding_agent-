@@ -1,3 +1,9 @@
+---
+title: "AWOS — Vision & Identity"
+tags:
+  - doc/wiki
+---
+
 # AWOS — Vision & Identity
 
 > **Canonical owner for what AWOS is, why it exists, and what we optimize for.**

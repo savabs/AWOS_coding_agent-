@@ -4,6 +4,7 @@ STRUCT.xml builder — Generates hierarchical repository map
 Steps 1.4-1.5: Build STRUCT.xml generator + file watcher
 """
 
+import importlib
 import os
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -26,17 +27,24 @@ class StructBuilder:
         self.struct_root.set('path', repo_path)
     
     def _init_cartographer(self) -> TreeSitterCartographer:
-        """Initialize cartographer with available languages."""
+        """
+        Initialize cartographer with available languages.
+
+        Uses the tree-sitter v0.22+ binding API: each grammar ships as its own
+        pip package exposing a .language() capsule. A grammar that is not
+        installed is skipped, so STRUCT.xml degrades to the languages present.
+        """
         langs = {}
-        try:
-            langs['python'] = Language('py_tree_sitter', 'python')
-        except: pass
-        try:
-            langs['cpp'] = Language('py_tree_sitter', 'cpp')
-        except: pass
-        try:
-            langs['rust'] = Language('py_tree_sitter', 'rust')
-        except: pass
+        for name, module_name in (
+            ('python', 'tree_sitter_python'),
+            ('cpp', 'tree_sitter_cpp'),
+            ('rust', 'tree_sitter_rust'),
+        ):
+            try:
+                module = importlib.import_module(module_name)
+                langs[name] = Language(module.language())
+            except Exception:
+                continue
         return TreeSitterCartographer(langs)
     
     def build(self) -> str:

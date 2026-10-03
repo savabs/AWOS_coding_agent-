@@ -1,0 +1,7 @@
+{
+  "id": "06_monthly_report",
+  "goal": "I need a month-by-month view for the bookkeeper. Add a `monthly` command that outputs a CSV with the columns month (YYYY-MM), orders, revenue, average_order — one row per calendar month that has orders, oldest month first. Cancelled orders are ignored entirely. Revenue is what customers actually pay (after discounts), and the average order value is revenue divided by the number of orders, rounded to the cent like every other amount in the tool. It should work like our other CSV commands: stdout or --output FILE, and the usual --from/--to date filters.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

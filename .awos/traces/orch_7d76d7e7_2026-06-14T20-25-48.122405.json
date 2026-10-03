@@ -1,0 +1,8 @@
+{
+  "session_id": "orch_7d76d7e7",
+  "goal": "create docs/e2e_uncensored_agent_guide.md about uncensored local agents",
+  "start_time": "2026-06-14T20:25:48.122405",
+  "total_cost": 0.0,
+  "final_success": true,
+  "traces": []
+}

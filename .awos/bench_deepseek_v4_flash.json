@@ -1,0 +1,445 @@
+{
+  "timestamp": "2026-09-23T06:24:34.852446+00:00",
+  "total_cases": 12,
+  "cases": [
+    {
+      "case": "a1_off_by_one_page",
+      "tier": "A",
+      "multi_file": false,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 0,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": ""
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 18.84,
+        "llm_calls": 4,
+        "tool_calls": 4,
+        "input_tokens": 6897,
+        "output_tokens": 1056,
+        "cost_usd": 0.0008007449999999998,
+        "detail": ""
+      },
+      "react": {
+        "solved": false,
+        "latency_sec": 3.65,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": "<function>\n<function_name>read_file</function_name>\n<function_input>\n{\"path\": \"/var/folders/8b/bnswn3jd6sv0tcc75_3n2x980000gn/T/tmpwbnbtww5/buggy.py\"}\n</functio"
+      }
+    },
+    {
+      "case": "a2_mutable_default",
+      "tier": "A",
+      "multi_file": false,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 0,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": ""
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 27.59,
+        "llm_calls": 5,
+        "tool_calls": 5,
+        "input_tokens": 8819,
+        "output_tokens": 746,
+        "cost_usd": 0.000916933,
+        "detail": ""
+      },
+      "react": {
+        "solved": false,
+        "latency_sec": 11.42,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": "Let me read the files to understand the exact contract.: \u001b[31m\u001b[31m\u001b[1m1 failed\u001b[0m, \u001b[32m2 passed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m"
+      }
+    },
+    {
+      "case": "a3_integer_midpoint",
+      "tier": "A",
+      "multi_file": false,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 0,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": ""
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 17.11,
+        "llm_calls": 5,
+        "tool_calls": 5,
+        "input_tokens": 8730,
+        "output_tokens": 718,
+        "cost_usd": 0.000904056,
+        "detail": ""
+      },
+      "react": {
+        "solved": false,
+        "latency_sec": 4.36,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": "<read_file>\n<path>buggy.py</path>\n</read_file>: \u001b[31m\u001b[31m\u001b[1m3 failed\u001b[0m, \u001b[32m1 passed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m"
+      }
+    },
+    {
+      "case": "a4_empty_input_crash",
+      "tier": "A",
+      "multi_file": false,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 0,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": ""
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 20.71,
+        "llm_calls": 5,
+        "tool_calls": 5,
+        "input_tokens": 9019,
+        "output_tokens": 624,
+        "cost_usd": 0.0009131389999999999,
+        "detail": ""
+      },
+      "react": {
+        "solved": false,
+        "latency_sec": 4.7,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": "<function=read_file>\n<function_name>read_file</function_name>\n<function_args>{\"path\": \"buggy.py\"}</function_args>\n</function>: \u001b[31m\u001b[31m\u001b[1m2 failed\u001b[0m, \u001b[32m"
+      }
+    },
+    {
+      "case": "b1_constant_mismatch",
+      "tier": "B",
+      "multi_file": true,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 0,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": ""
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 17.16,
+        "llm_calls": 6,
+        "tool_calls": 6,
+        "input_tokens": 11062,
+        "output_tokens": 852,
+        "cost_usd": 0.0011353219999999998,
+        "detail": ""
+      },
+      "react": {
+        "solved": true,
+        "latency_sec": 117.78,
+        "llm_calls": 12,
+        "tool_calls": 12,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "b2_schema_drift",
+      "tier": "B",
+      "multi_file": true,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 0,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": ""
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 45.76,
+        "llm_calls": 7,
+        "tool_calls": 7,
+        "input_tokens": 13496,
+        "output_tokens": 1082,
+        "cost_usd": 0.001392658,
+        "detail": ""
+      },
+      "react": {
+        "solved": false,
+        "latency_sec": 3.75,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": "<read_file>\n<path>buggy.py</path>\n</read_file>: \u001b[31m\u001b[31m\u001b[1m2 failed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m"
+      }
+    },
+    {
+      "case": "b3_caller_contract",
+      "tier": "B",
+      "multi_file": true,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 0,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": ""
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 46.72,
+        "llm_calls": 7,
+        "tool_calls": 8,
+        "input_tokens": 13945,
+        "output_tokens": 2504,
+        "cost_usd": 0.001684313,
+        "detail": ""
+      },
+      "react": {
+        "solved": true,
+        "latency_sec": 160.88,
+        "llm_calls": 12,
+        "tool_calls": 12,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "b4_enum_extension",
+      "tier": "B",
+      "multi_file": true,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 0,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": ""
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 30.68,
+        "llm_calls": 7,
+        "tool_calls": 7,
+        "input_tokens": 14415,
+        "output_tokens": 1753,
+        "cost_usd": 0.001593216,
+        "detail": ""
+      },
+      "react": {
+        "solved": false,
+        "latency_sec": 12.17,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": "Let me examine the files to understand the exact contract.\n\n<read_file>\n<path>buggy.py</path>\n<start_line>1</start_line>\n<end_line>21</end_line>\n</read_file>: \u001b"
+      }
+    },
+    {
+      "case": "c1_reuse_existing_helper",
+      "tier": "C",
+      "multi_file": true,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 0,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": ""
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 31.66,
+        "llm_calls": 7,
+        "tool_calls": 7,
+        "input_tokens": 13497,
+        "output_tokens": 1706,
+        "cost_usd": 0.001503195,
+        "detail": ""
+      },
+      "react": {
+        "solved": false,
+        "latency_sec": 24.44,
+        "llm_calls": 3,
+        "tool_calls": 1,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": "<\uff5cDSML\uff5cthought>Need to read test_case.py and pathutils.py to understand contract and helper.</\uff5cDSML\uff5cthought>\n<\uff5cDSML\uff5ctool>read_file</\uff5cDSML\uff5ctool>\n<\uff5cDSML\uff5ctool>test"
+      }
+    },
+    {
+      "case": "c2_use_project_error_type",
+      "tier": "C",
+      "multi_file": true,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 0,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": ""
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 42.02,
+        "llm_calls": 9,
+        "tool_calls": 9,
+        "input_tokens": 18934,
+        "output_tokens": 943,
+        "cost_usd": 0.001852037,
+        "detail": ""
+      },
+      "react": {
+        "solved": true,
+        "latency_sec": 174.38,
+        "llm_calls": 12,
+        "tool_calls": 11,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "d1_contract_only_in_tests",
+      "tier": "D",
+      "multi_file": false,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 0,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": ""
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 25.7,
+        "llm_calls": 5,
+        "tool_calls": 5,
+        "input_tokens": 9282,
+        "output_tokens": 1190,
+        "cost_usd": 0.001036728,
+        "detail": ""
+      },
+      "react": {
+        "solved": false,
+        "latency_sec": 3.79,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": "<read_file>\n<path>buggy.py</path>\n</read_file>: \u001b[31m\u001b[31m\u001b[1m6 failed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m"
+      }
+    },
+    {
+      "case": "d2_fix_belongs_in_the_helper",
+      "tier": "D",
+      "multi_file": false,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 0,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": ""
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 65.45,
+        "llm_calls": 7,
+        "tool_calls": 7,
+        "input_tokens": 14175,
+        "output_tokens": 4044,
+        "cost_usd": 0.001977363,
+        "detail": ""
+      },
+      "react": {
+        "solved": false,
+        "latency_sec": 2.89,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": "<read_file>\n<path>buggy.py</path>\n</read_file>: \u001b[31m\u001b[31m\u001b[1m2 failed\u001b[0m, \u001b[32m3 passed\u001b[0m\u001b[31m in 0.04s\u001b[0m\u001b[0m"
+      }
+    }
+  ],
+  "agent_loop": {
+    "solved": 12,
+    "pass_rate": 1.0,
+    "self_contained_solved": 6,
+    "self_contained_total": 6,
+    "multi_file_solved": 6,
+    "multi_file_total": 6,
+    "cost_usd": 0.01571
+  },
+  "react": {
+    "solved": 3,
+    "pass_rate": 0.25,
+    "self_contained_solved": 0,
+    "self_contained_total": 6,
+    "multi_file_solved": 3,
+    "multi_file_total": 6,
+    "cost_usd": 0.0
+  },
+  "delta_agent_vs_react": 0.75
+}

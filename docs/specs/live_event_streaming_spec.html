@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spec: Live Event Streaming — AWOS</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#21262d;--border:#30363d;--text:#c9d1d9;--muted:#8b949e;--accent:#58a6ff;--accent-green:#3fb950;--accent-red:#f85149;--accent-yellow:#d29922;--code-bg:#0d1117;--header:#161b22}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);border-bottom:1px solid var(--border);padding:20px 32px}
+header h1{font-size:20px;font-weight:600;margin-bottom:8px;color:var(--accent)}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:12px;color:var(--muted)}
+.tag{background:var(--surface2);color:var(--accent);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace;border:1px solid var(--border)}
+.status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status.active{background:var(--accent-yellow);color:#000}
+time{font-size:12px;color:var(--muted)}
+main{max-width:800px;margin:0 auto;padding:32px}
+h2{font-size:17px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border);color:var(--accent)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent-green)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+pre{background:var(--code-bg);border:1px solid var(--border);color:var(--text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px}
+p code,li code,td code{background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:12px;color:var(--accent)}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border);color:var(--muted)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.step{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin:10px 0}
+.step .step-num{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:4px}
+.step .step-title{font-weight:600;margin-bottom:6px;color:var(--accent)}
+.step .exit{font-size:12px;color:var(--muted);margin-top:6px;font-style:italic}
+.step .exit strong{color:var(--text)}
+.callout{background:var(--surface2);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb">AWOS / docs / specs</div>
+  <h1>Spec: Live Event Streaming</h1>
+  <div class="meta">
+    <span class="tag">doc/spec</span>
+    <span class="tag">phase/4</span>
+    <span class="tag">topic/live-streaming</span>
+    <span class="status active">active</span>
+    <time>2026-07-05</time>
+  </div>
+</header>
+
+<main>
+
+<h2>Goal</h2>
+<p>
+Wire the AWOS orchestrator to emit structured events at every phase (planning, routing, task execution, file edits, test results) through <code>GuiEventBus</code>. Replace the polling SSE endpoint in <code>gui/server.py</code> with one that reads new events from <code>.awos/gui/&lt;id&gt;/events.jsonl</code> and pushes them to the browser. The frontend renders each event type differently.
+</p>
+<p>
+Exit criterion: running <code>awos fix-ci</code> on the wedge corpus while <code>awos serve</code> is active shows live log entries in <code>agent.html</code> as the agent works.
+</p>
+
+<div class="callout">
+<strong>Governing research:</strong> <a href="../research/live_event_streaming.html">live_event_streaming.html</a><br>
+<strong>Task file:</strong> <a href="../../tasks/active/live_event_streaming.html">live_event_streaming.html</a>
+</div>
+
+<h2>Files Affected</h2>
+<table>
+<tr><th>File</th><th>Change type</th><th>Description</th></tr>
+<tr><td><code>scaffold/agent/gui_events.py</code></td><td>modify</td><td>Add event type constants + factory helpers for each event type</td></tr>
+<tr><td><code>scaffold/agent/orchestrator.py</code></td><td>modify</td><td>Create GuiEventBus at session start; emit events at each phase; pass GuiEventBus to _execute_single_task</td></tr>
+<tr><td><code>gui/server.py</code></td><td>modify</td><td>Replace polling SSE with event-file-tail SSE; add /api/agent/events endpoint</td></tr>
+<tr><td><code>gui/static/agent.html</code></td><td>modify</td><td>Connect to /api/agent/events; render each event type (model card, task log, diff, test)</td></tr>
+</table>
+
+<h2>Implementation Steps</h2>
+
+<div class="step">
+  <div class="step-num">Step 1</div>
+  <div class="step-title">Extend GuiEventBus with event type constants + emit helpers</div>
+  <p>Add a <code>class EventType</code> with string constants for all 9 event types. Add a <code>emit_<type>()</code> helper method for each that constructs the proper payload dict. Add a class method <code>event_types()</code> returning the set of valid types.</p>
+  <p>File: <code>scaffold/agent/gui_events.py</code></p>
+  <div class="exit"><strong>Exit condition:</strong> <code>pytest tests/test_gui_events.py -q</code> passes (create test: verify emit_* produces correct payload shape, verify EventType constants match event_types())</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 2</div>
+  <div class="step-title">Wire orchestrator to emit events at start and planning phase</div>
+  <p>In <code>orchestrator.py execute_feature()</code>: after session_id is created, instantiate <code>GuiEventBus(session_id, goal)</code>. Store as <code>self._gui_bus</code>. Emit <code>session_start</code> event. After codebase indexing, emit <code>codebase_indexed</code>. After planner returns, emit <code>plan_generated</code> with task list summary.</p>
+  <p>File: <code>scaffold/agent/orchestrator.py</code></p>
+  <div class="exit"><strong>Exit condition:</strong> Run <code>awos fix-ci</code> on wedge corpus (dry mode). Verify <code>.awos/gui/&lt;id&gt;/events.jsonl</code> contains session_start, codebase_indexed, plan_generated events.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 3</div>
+  <div class="step-title">Emit model_routed and task_start events from task execution</div>
+  <p>In <code>_execute_single_task()</code> and <code>_execute_task_via_react()</code>: after EscalationEngine returns a decision, emit <code>model_routed</code> with model_name, tier, reason, cost_estimate, provider. Before the worker executes, emit <code>task_start</code> with task_id, action, file, model info.</p>
+  <p>Pass <code>self._gui_bus</code> reference into these methods (or store as instance var).</p>
+  <p>Files: <code>scaffold/agent/orchestrator.py</code></p>
+  <div class="exit"><strong>Exit condition:</strong> Run <code>awos fix-ci</code> on wedge corpus (dry mode). Verify events.jsonl contains model_routed + task_start events per task.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 4</div>
+  <div class="step-title">Emit file_edit, test_result, task_complete events</div>
+  <p>After the react_worker returns with files_changed, emit <code>file_edit</code> for each changed file. After test runner completes, emit <code>test_result</code>. After task result is finalized, emit <code>task_complete</code> with success, cost_usd, n_edits, error.</p>
+  <p>At the end of <code>execute_feature()</code>, emit <code>session_done</code> with completed, failed, total_cost, elapsed.</p>
+  <p>File: <code>scaffold/agent/orchestrator.py</code></p>
+  <div class="exit"><strong>Exit condition:</strong> Run <code>awos fix-ci</code> on wedge corpus (full run). Verify events.jsonl contains all 9 event types with correct payloads.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 5</div>
+  <div class="step-title">Replace SSE endpoint to read from events.jsonl</div>
+  <p>In <code>gui/server.py</code>: Add a new endpoint <code>/api/agent/events</code> that maintains per-session byte offsets. Every 500ms, check the <code>.awos/gui/&lt;latest_session&gt;/events.jsonl</code> file. Read from the last known byte offset. Send any new lines as SSE <code>data: {json}\n\n</code>. If no session is active, send keepalive.</p>
+  <p>The endpoint should track the latest session by checking <code>.awos/gui/</code> directories sorted by mtime. When a new session appears, reset the offset to 0 for that session.</p>
+  <p>File: <code>gui/server.py</code></p>
+  <div class="exit"><strong>Exit condition:</strong> Start <code>awos serve</code>. Run <code>awos fix-ci</code> in another terminal. <code>curl http://localhost:8765/api/agent/events</code> shows SSE data lines with event payloads.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 6</div>
+  <div class="step-title">Update agent.html to render structured events</div>
+  <p>In <code>agent.html</code>: Change the SSE connection from <code>/api/agent/stream</code> to <code>/api/agent/events</code>. Parse each <code>event.data</code> as JSON. Based on <code>data.type</code>, render differently:</p>
+  <ul>
+    <li><code>session_start</code> → clear terminal, show header banner</li>
+    <li><code>model_routed</code> → show model card (icon + name + tier badge + reason text + cost estimate)</li>
+    <li><code>plan_generated</code> → show task count summary</li>
+    <li><code>task_start</code> → show task header with model info inline</li>
+    <li><code>file_edit</code> → show file path + diff or diff snippet</li>
+    <li><code>test_result</code> → colored pass/fail line with test name + duration</li>
+    <li><code>task_complete</code> → update task line with status + cost</li>
+    <li><code>session_done</code> → show final summary card</li>
+  </ul>
+  <p>Preserve all existing functionality (history sidebar, stats). Add a "Live" badge indicator when SSE is connected and receiving events.</p>
+  <p>File: <code>gui/static/agent.html</code></p>
+  <div class="exit"><strong>Exit condition:</strong> Open <code>http://localhost:8765/agent</code> while running <code>awos fix-ci</code>. See live log entries appearing in the terminal panel.</div>
+</div>
+
+<h2>Edge Cases</h2>
+<ul>
+  <li><strong>SSE connects before orchestrator starts:</strong> Session directory doesn't exist yet. SSE polls with 404 → retry every 1s until directory appears.</li>
+  <li><strong>Multiple rapid events:</strong> Each <code>emit()</code> writes one line. SSE reads new lines only (byte offset tracking). No race — writes are append-only.</li>
+  <li><strong>Orchestrator crashes:</strong> Events up to the crash are persisted. SSE shows "Session ended unexpectedly" when events stop coming for >30s.</li>
+  <li><strong>User refreshes browser:</strong> SSE reconnects, reads entire events.jsonl from offset 0 → replays all events.</li>
+  <li><strong>No active session:</strong> SSE sends <code>data: {"type":"idle"}</code> keepalive every 5s.</li>
+  <li><strong>events.jsonl missing or corrupt:</strong> SSE sends error line <code>data: {"type":"error","payload":{"message":"..."}}</code> and retries.</li>
+</ul>
+
+<h2>Testing Plan</h2>
+<table>
+<tr><th>Test</th><th>Input</th><th>Expected output</th><th>File</th></tr>
+<tr><td><code>test_event_type_constants</code></td><td>Import EventType</td><td>All 9 constants defined, no duplicates</td><td><code>tests/test_gui_events.py</code></td></tr>
+<tr><td><code>test_emit_helper_payload</code></td><td>Call emit_task_start(...) with sample data</td><td>Payload dict contains all required fields</td><td><code>tests/test_gui_events.py</code></td></tr>
+<tr><td><code>test_events_file_written</code></td><td>Create GuiEventBus, emit 3 events</td><td>events.jsonl has 3 lines, parseable JSON</td><td><code>tests/test_gui_events.py</code></td></tr>
+<tr><td><code>test_sse_reads_events</code></td><td>Write events.jsonl, start SSE reader</td><td>SSE outputs matching data lines</td><td><code>tests/test_sse_streaming.py</code></td></tr>
+<tr><td><code>test_sse_byte_offset</code></td><td>Write 2 events, read, write 2 more, read</td><td>Second read only returns last 2 events</td><td><code>tests/test_sse_streaming.py</code></td></tr>
+<tr><td><code>test_sse_no_session</code></td><td>Empty .awos/gui/</td><td>SSE sends idle keepalive</td><td><code>tests/test_sse_streaming.py</code></td></tr>
+</table>
+
+<h2>Related</h2>
+<ul>
+  <li><a href="../research/live_event_streaming.html">[[live_event_streaming]]</a> — research that informed this spec</li>
+  <li><a href="../../tasks/active/live_event_streaming.html">[[live_event_streaming_task]]</a> — execution checklist</li>
+  <li><a href="../../docs/product/TRANSPARENT_ROUTING.html">[[TRANSPARENT_ROUTING]]</a> — routing transparency UX spec</li>
+  <li><a href="../../docs/product/CI_RESCUE_PRODUCT.html">[[CI_RESCUE_PRODUCT]]</a> — CI Rescue wedge product spec</li>
+</ul>
+
+</main>
+</body>
+</html>

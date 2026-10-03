@@ -1,0 +1,50 @@
+{
+  "root_id": "g_7f7a8ffd82f4",
+  "nodes": {
+    "g_7f7a8ffd82f4": {
+      "goal_id": "g_7f7a8ffd82f4",
+      "description": "In scaffold/agent/token_tracker.py add a one-line docstring to check_guard explaining it blocks requests when the monthly budget cap is exceeded",
+      "parent_ids": [],
+      "child_ids": [
+        "g_f56261e5c34d"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-18T04:17:25Z",
+      "updated_at": "2026-06-18T04:17:33Z",
+      "completed_at": "2026-06-18T04:17:33Z",
+      "session_ids": [
+        "orch_1af5956d"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_f56261e5c34d": {
+      "goal_id": "g_f56261e5c34d",
+      "description": "Add a one-line docstring to the `check_guard` function.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "scaffold/agent/token_tracker.py",
+          "action": "Add a one-line docstring to the `check_guard` function.",
+          "complexity": "low",
+          "function_signature": "def check_guard(",
+          "constraints": "The docstring should explain that it blocks requests when the monthly budget cap is exceeded.",
+          "file": "scaffold/agent/token_tracker.py"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-18T04:17:29Z",
+      "updated_at": "2026-06-18T04:17:33Z",
+      "completed_at": "2026-06-18T04:17:33Z",
+      "session_ids": [
+        "orch_1af5956d"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}
