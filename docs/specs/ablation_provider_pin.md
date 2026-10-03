@@ -95,3 +95,35 @@ from cache at $0.018/M instead of $0.090/M.
   endpoints. Any quality shift is part of what this ablation measures.
 - **Time confound.** The baseline ran on 2026-10-02/03, and provider latency
   and load vary.
+
+## Result: run 20261003T114614, compared with baseline 20261002T223614 (scored 2026-10-03)
+
+The run was **VALID**: 0 fatal. There were 3 warnings, each a truncated
+notebook rewrite that was caught and retried. All 606 calls were served by
+providers on the list (DeepInfra and GMICloud).
+
+| Criterion | off | on |
+|---|---|---|
+| 1. Billed $/job falls ≥25% with CI excluding 0 | $0.0297 → $0.0133, **−55%**, CI [+0.0085, +0.0253], p = 0.001 ✅ | $0.0363 → $0.0151, **−58%**, CI [+0.0081, +0.0387], p = 0.004 ✅ |
+| 2. Agent cache-hit share ≥40% | **57%** ✅ | **67%** ✅ |
+| 3. Solved falls by at most 2 | 7 → 6, McNemar p = 1.0 ✅ | 9 → 6, discordant 3–0, p = 0.25 ❌ |
+| 4. Run is VALID | ✅ | ✅ |
+
+Solved per $1 rose from about 20 to about 35 in both arms.
+
+**Verdict: the cost effect is real and large. The on-arm guardrail failed,
+so this is not a clean pass.**
+
+The on-arm drop is not significant (p = 0.25; MDE about 37 pp). The evidence
+points to noise rather than a quality loss:
+
+- The off arm moved by only −1.
+- The three lost jobs (j1, j9, j11) ran on different providers: j1 mostly on
+  GMICloud, j9 mostly on DeepInfra, j11 on DeepInfra only. The solved jobs
+  also spread across both providers.
+- All three losses were near misses: 6/7, 11/14 and 11/12.
+
+**Decision rule applied: confirm before adopting.** Re-run both arms pinned
+with `--repeat 2`. Pinned runs now cost about $0.17 per arm-pass. Adopt the
+pin as the default if the on arm's pooled solve rate is within 2 jobs per 12
+of baseline.
