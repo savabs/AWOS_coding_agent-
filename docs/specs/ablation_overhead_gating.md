@@ -59,3 +59,42 @@ Everything else stays as in the adopted pinned configuration:
 5. **Health:** both runs are VALID.
 
 **Adopt** if 1, 3, 4 and 5 hold.
+
+## Result (scored 2026-10-05)
+
+Runs compared:
+
+- **Gated:** backupd run 20261005T100157, 2 passes.
+- **Pinned pool, no gating:** run 20261003T114614 plus the r1 pass of run
+  20261003T162359.
+
+Jobs are paired per job, averaged over passes. The real-issue runs were
+20261005T173405, 20261005T173622 and 20261005T174313. All runs were
+**VALID**.
+
+| Criterion | off | on |
+|---|---|---|
+| 1. Minutes per job fall ≥20% | 5.22 → 3.74, **−28%**, CI [+0.30, +2.85], p = 0.04 ✅ | 5.53 → 4.59, −17%, CI [−0.29, +2.48], p = 0.29 ❌ |
+| 2. Billed $ per job falls | $0.0135 → $0.0109, −19%, p = 0.49 (ns) | $0.0152 → $0.0189, **+25%**, p = 0.06 ✗ |
+| 3. Mechanism | **The planner was skipped on only 16/48 jobs (33%)** ❌. The reviewer was skipped on 47/48 single-task jobs ✅. No review call ran, so no timeouts. | (same) |
+| 4. Guardrail: solved within 2 per 12 | 12/24 → **14/24** ✅ | 13/24 → 13/24 ✅ |
+| 5. VALID | ✅ | ✅ |
+
+Real issues (AWOS off) were all solved again:
+
+- cachetools: 1.44 min (was 1.53).
+- sqlparse: 6.15 min (was 6.98); the planner ran.
+- more-itertools: 5.44 min (was 6.6).
+
+**Verdict: not adopted as configured.** Criteria 1 (on arm) and 3 fail.
+
+- **The reviewer gate works.** Keep it: it saves about 47 s per single-task
+  job, and the deadline removes the hang risk.
+- **The planner gate is mis-set.** Exploration hit counts include test files
+  and keyword noise. On backupd they exceed 6 on about two-thirds of jobs, so
+  the planner still ran, and that capped the time saved.
+- **The on-arm cost rise is unexplained.** Turns rose 11%, and per-job billed
+  figures carry billing-lag noise. Treat it as unresolved, not as a finding.
+- **Next.** Gate the planner on a better signal, either non-test source files
+  hit or `AWOS_PLANNER=never` for agent_loop. The evidence for the second
+  option: 71 of 72 past plans collapsed to one task. Then re-score.
