@@ -65,3 +65,60 @@ Everything else matches ablation 2 run 20261005T100157:
 5. **Health:** VALID.
 
 **Adopt** (make `AWOS_ONE_SHOT` default on) if 1, 3, 4 and 5 hold.
+
+## Result (scored 2026-10-05)
+
+- **One-shot run:** backupd run 20261005T183332, 2 passes.
+- **Comparison:** ablation 2 run 20261005T100157, paired per job.
+- **Real issues:** runs 20261005T220016, 20261005T220135 and 20261005T223535.
+- **Health:** all four runs were VALID.
+
+| Criterion | off | on |
+|---|---|---|
+| 1. Billed $ per job falls ≥30% | $0.0109 → $0.0106, −3%, p = 0.90 ❌ | $0.0189 → $0.0084, **−56%**, CI [+0.0054, +0.0157], p = 0.003 ✅ |
+| 2. Minutes per job fall ≥30% | 3.74 → 3.83, +2% ❌ | 4.59 → 3.35, −27%, p = 0.10 ❌ |
+| Turns per job | 24 → 13, **−46%**, p = 0.007 | 25 → 8, **−66%**, p = 0.001 |
+| 3. One-shot solves alone ≥25% | **10/24 (42%)** ✅ | **9/24 (38%)** ✅ |
+| 4. Guardrail: solved | 14 → **17/24** ✅ | 13 → 13/24 ✅ |
+| 4. Guardrail: real issues ≥2/3 | **3/3** ✅ (see below) | — |
+| 5. VALID | ✅ | ✅ |
+
+Real issues, in detail:
+
+- **cachetools:** solved in one call, $0.0023, 15 s.
+- **sqlparse:** solved through the fallback, 17 turns. The first attempt hung to the 30-minute timeout and was marked INVALID, then retried.
+- **more-itertools:** solved through the fallback, 24 turns. None of the 11 one-shot blocks applied.
+
+**Verdict: not adopted as configured.** Criterion 1 fails in the off arm, and
+criterion 2 fails in both arms.
+
+The mechanism works. About 40% of jobs finish in one call at Aider-level
+cost, the turn count drops sharply, and correctness holds or improves. The
+fallbacks are what erase the savings:
+
+- **B: truncated replies.** The one-shot reply was cut off at the 16k output
+  cap 5 times. Each time it retried once, then fell back. That wasted about
+  3 minutes and two large calls per job.
+- **Failed blocks.** On the larger jobs, one bad SEARCH block (or all of them
+  on more-itertools, where `more.py` exceeds the 24k context budget) sends the
+  job to the full agent loop. The cost of one-shot is then added to the cost
+  of the loop.
+- **C: stopping at visible tests.** One-shot ships as soon as the visible
+  tests pass. It then missed hidden requirements: on j05/j06/j07/j11/j12, off
+  j06/j12. These misses were more frequent in the on arm. Check whether
+  notebook text reaches the one-shot prompt.
+- **G: new.** sqlparse's first attempt hung until the job timeout. Find the
+  cause in its log.
+
+## Next
+
+1. **Fix B.** Turn reasoning off for the one-shot call, and fall back after
+   the first cut-off.
+2. **Add a repair call.** Re-send only the failed blocks, with the exact
+   current file text, before falling back.
+3. **Give large files their relevant sections.** Use the grep-hit regions
+   instead of skipping the whole file.
+4. **Fix C.** Write acceptance tests from the task's stated requirements and
+   gate "done" on them.
+
+Then re-score against this run.
