@@ -2134,9 +2134,50 @@ class Orchestrator:
         prompt = self._agent_loop_prompt(task, ctx)
         files_changed: list = []
         outcomes = []
+
+        # ── One shot first (AWOS_ONE_SHOT, ablation 3) ────────────────────
+        # One call with the relevant files preloaded, emitting SEARCH/REPLACE
+        # edits; if the tests then pass, the AgentLoop never runs. Otherwise
+        # its edits stay and the loop continues from them.
+        shot = self._one_shot_first(task, ctx, model, codebase_root, sandbox,
+                                    task_id, needs_edits)
+        shot_steps: list = []
+        shot_cost, shot_in, shot_out = 0.0, 0, 0
+        if shot is not None:
+            shot_cost, shot_in, shot_out = shot["cost_usd"], shot["input_tokens"], shot["output_tokens"]
+            shot_steps = [shot["step"]]
+            files_changed.extend(shot["applied"])
+            if shot["solved"]:
+                registry.close()
+                verdict = shot["verdict"]
+                result = {
+                    "success": True,
+                    "summary": verdict["summary"],
+                    "error": "",
+                    "files_changed": list(files_changed),
+                    "steps": shot_steps,
+                    "test_result": verdict["test_result"],
+                    "input_tokens": shot_in,
+                    "output_tokens": shot_out,
+                    "cost_usd": shot_cost,
+                    "model_used": model,
+                    "one_shot": True,
+                    "_applied_context": self._agent_applied_context(task, files_changed, verdict),
+                }
+                return self._record_tool_executor_result(
+                    result, task, ctx,
+                    tool_name="OneShot", tag="ONE-SHOT", marker="one_shot",
+                    failure_kind="one_shot_fail", task_id=task_id,
+                    esc_decision=esc_decision, _span=_span, _strategy=_strategy,
+                    _task_ts=_task_ts, _live_t=_live_t, _task_usage=_task_usage,
+                )
+            if shot["note"]:
+                prompt = prompt + "\n\n" + shot["note"]
+        base_prompt = prompt
+
         try:
             while True:
-                spent = sum(o.cost_usd for o in outcomes)
+                spent = shot_cost + sum(o.cost_usd for o in outcomes)
                 outcome = AgentLoop(
                     registry=registry,
                     client=client,
@@ -2173,7 +2214,7 @@ class Orchestrator:
                 if reason is None or retries_left <= 0:
                     break
                 if cost_cap is not None:
-                    spent = sum(o.cost_usd for o in outcomes)
+                    spent = shot_cost + sum(o.cost_usd for o in outcomes)
                     turns = sum(o.turns for o in outcomes) or 1
                     if cost_cap - spent < spent / turns:
                         # Not even one more turn fits under the task's cap.
@@ -2189,7 +2230,7 @@ class Orchestrator:
                 retries_left -= 1
                 print(f"[TASK {task_id}] AgentLoop resuming after: {reason}")
                 prompt = (
-                    self._agent_loop_prompt(task, ctx)
+                    base_prompt
                     + f"\n\nA previous attempt stopped: {reason}. "
                     + f"It changed these files: {', '.join(files_changed) or 'none'}. "
                     + f"Test status: {verdict['test_status']}. "
@@ -2214,7 +2255,7 @@ class Orchestrator:
             "summary": verdict["summary"],
             "error": error,
             "files_changed": files_changed,
-            "steps": [
+            "steps": shot_steps + [
                 SimpleNamespace(
                     thought=turn.get("text", ""),
                     action=",".join(c["name"] for c in turn.get("calls", [])),
@@ -2227,9 +2268,9 @@ class Orchestrator:
                 for turn in o.transcript
             ],
             "test_result": verdict["test_result"],
-            "input_tokens": sum(o.input_tokens for o in outcomes),
-            "output_tokens": sum(o.output_tokens for o in outcomes),
-            "cost_usd": sum(o.cost_usd for o in outcomes),
+            "input_tokens": shot_in + sum(o.input_tokens for o in outcomes),
+            "output_tokens": shot_out + sum(o.output_tokens for o in outcomes),
+            "cost_usd": shot_cost + sum(o.cost_usd for o in outcomes),
             "model_used": model,
             # The next task's prompt starts from this, not cold.
             "_applied_context": self._agent_applied_context(task, files_changed, verdict),
@@ -2250,6 +2291,120 @@ class Orchestrator:
             _live_t=_live_t,
             _task_usage=_task_usage,
         )
+
+    def _one_shot_first(
+        self, task: dict, ctx: dict, model: str, codebase_root: str, sandbox,
+        task_id, needs_edits: bool,
+    ) -> Optional[dict]:
+        """
+        AWOS_ONE_SHOT: one call with the relevant files preloaded, emitting
+        SEARCH/REPLACE edits, then the project's tests as _judge_agent_attempt
+        runs them. None when off or no client could be built; else a dict:
+        solved, applied, verdict, note (for the AgentLoop prompt on fallback),
+        step (one turn for the trace), cost_usd, input_tokens, output_tokens.
+        Never raises: a failed call falls back with no edits.
+        """
+        from types import SimpleNamespace
+
+        try:
+            from . import one_shot as one_shot_mod
+        except ImportError:
+            import one_shot as one_shot_mod
+        if not one_shot_mod.one_shot_enabled():
+            return None
+        try:
+            client = one_shot_mod.one_shot_client()
+        except Exception as exc:  # noqa: BLE001
+            client = None
+            logger.warning("[ONE-SHOT] no client: %s", exc)
+        if client is None:
+            print("[ONE-SHOT] fell back to the agent loop: no OpenAI-shaped client configured")
+            return None
+
+        task_text = str(task.get("action", ""))
+        files = task_files(task)
+        if files:
+            task_text += "\n\nFiles to change: " + ", ".join(files)
+        if task.get("prev_task_context"):
+            task_text += "\n\nThe previous task changed:\n" + str(task["prev_task_context"])[:2000]
+        try:
+            shot = one_shot_mod.run_one_shot(
+                client, model, codebase_root, task_text, ctx.get("exploration"),
+                tracker=getattr(self, "tracker", None),
+                allow_test_edits=_asks_for_tests(task),
+            )
+        except Exception as exc:  # noqa: BLE001 — run_one_shot should not raise
+            shot = one_shot_mod.OneShotResult(error=f"{type(exc).__name__}: {exc}", calls=1)
+
+        print(f"[ONE-SHOT] call: {shot.input_tokens} in / {shot.output_tokens} out tokens, "
+              f"${shot.cost_usd:.4f}, {shot.elapsed_s:.1f}s; context {shot.context_tokens} "
+              f"tokens over {len(shot.context_files)} file(s); {shot.blocks} block(s), "
+              f"{len(shot.applied)} file(s) changed, {len(shot.failed)} failed")
+        verdict = None
+        if shot.error:
+            reason = f"model call failed ({shot.error})"
+            logger.warning("[ONE-SHOT] %s", reason)
+        elif not shot.applied:
+            reason = ("no edit applied" + (f" ({len(shot.failed)} block(s) failed)"
+                                            if shot.failed else " (no SEARCH/REPLACE blocks)"))
+        else:
+            verdict = self._judge_agent_attempt(
+                task,
+                SimpleNamespace(stop_reason="completed",
+                                final_message=f"One-shot edits to {', '.join(shot.applied)}"),
+                list(shot.applied), needs_edits, codebase_root, sandbox, task_id,
+            )
+            tr = verdict["test_result"]
+            tests_ran = tr is not None and not getattr(tr, "no_tests_found", True)
+            green = tests_ran and tr.failed == 0 and tr.errors == 0 and tr.passed > 0
+            if green and not shot.failed:
+                reason = None
+            elif not tests_ran:
+                reason = "no tests ran"
+            elif not green:
+                reason = f"tests: {verdict['test_status']}"
+            else:
+                reason = f"{len(shot.failed)} block(s) failed to apply"
+
+        solved = reason is None
+        step = SimpleNamespace(
+            thought=shot.reply[:2000],
+            action="one_shot",
+            action_input={},
+            observation="",
+            success=solved,
+            latency_ms=shot.elapsed_s * 1000.0,
+        )
+        out = {
+            "solved": solved, "applied": [] if shot.error else list(shot.applied),
+            "verdict": verdict, "note": "", "step": step,
+            "cost_usd": shot.cost_usd, "input_tokens": shot.input_tokens,
+            "output_tokens": shot.output_tokens,
+        }
+        if solved:
+            print(f"[ONE-SHOT] solved in 1 call — {len(shot.applied)} file(s) changed, "
+                  f"tests {verdict['test_result'].passed} passed")
+            return out
+
+        print(f"[ONE-SHOT] fell back to the agent loop: {reason}")
+        if shot.error or not shot.applied:
+            return out  # nothing changed: the agent loop starts as it always did
+        parts = ["A first one-shot attempt already ran on this task."]
+        parts.append("It changed these files: " + (", ".join(shot.applied) or "none") + ".")
+        if shot.failed:
+            parts.append("These edit blocks failed to apply:\n" + "\n".join(
+                f"- {f.get('path')}: {str(f.get('reason', ''))[:300]}" for f in shot.failed[:8]))
+        tr = verdict["test_result"] if verdict else None
+        if tr is not None and getattr(tr, "raw_output", ""):
+            raw = tr.raw_output
+            trimmed = raw if len(raw) <= 3000 else "...\n" + raw[-3000:]
+            parts.append(f"Test status after it: {verdict['test_status']}. Test output:\n{trimmed}")
+        elif verdict:
+            parts.append(f"Test status after it: {verdict['test_status']}.")
+        parts.append("Continue from the current state of the files (its edits are in place); "
+                     "do not start over. Fix what is still wrong and run the tests.")
+        out["note"] = "\n\n".join(parts)
+        return out
 
     def _record_agent_loop_spend(self, model: str, outcome) -> None:
         """

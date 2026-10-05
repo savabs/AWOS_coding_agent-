@@ -77,7 +77,10 @@ PIN_ENV = {
 
 # Routing knobs taken from the launching shell (an ablation sets them): recorded
 # in every input manifest and the results, so a run says how it was routed.
-ROUTING_ENV = ("AWOS_OPENROUTER_PROVIDER", "AWOS_OPENROUTER_ALLOW_FALLBACKS")
+ROUTING_ENV = ("AWOS_OPENROUTER_PROVIDER", "AWOS_OPENROUTER_ALLOW_FALLBACKS",
+               # ablation knobs set by the launching shell, recorded the same way
+               "AWOS_ONE_SHOT", "AWOS_ONE_SHOT_BUDGET_TOKENS", "AWOS_PLANNER",
+               "AWOS_PLANNER_MAX_FILES", "AWOS_INTEGRATION_REVIEW")
 
 
 def routing_env() -> dict:
