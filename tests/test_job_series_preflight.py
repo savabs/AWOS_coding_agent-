@@ -182,6 +182,19 @@ def test_aider_files_from_report_and_log_and_empty_chat_flagged():
     assert {v["check"] for v in js.manifest_violations(rows)} == {"aider_no_files", "input_mismatch"}
 
 
+def test_repo_map_fallback_with_edits_is_a_warning():
+    # more-itertools: sources over the preload budget -> Aider's own repo-map
+    # mode; Aider added files itself and solved it. Fair, so only a warning.
+    fallback = {"source": "log", "selection": "repo_map", "added_count": 0, "read_only_count": 0}
+    rows = [{"arm": "aider", "job": 1, "inputs": {"project_sha256": "p", "task_sha256": "t",
+                                                  "aider_files": fallback}}]
+    [v] = js.manifest_violations(rows)
+    assert (v["check"], v["severity"]) == ("aider_repo_map_only", "warn")
+    rows[0]["aider_no_edit"] = "no_edits"  # never got to the code: still fatal
+    [v] = js.manifest_violations(rows)
+    assert (v["check"], v["severity"]) == ("aider_no_files", "fatal")
+
+
 # ── provenance ────────────────────────────────────────────────────────────────
 
 

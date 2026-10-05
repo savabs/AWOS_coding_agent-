@@ -457,10 +457,17 @@ def manifest_violations(results: list[dict]) -> list[dict]:
                  if af.get("source") == "report"
                  else af.get("added_count", 0) + af.get("read_only_count", 0))
             if n == 0:
-                out.append({"severity": "fatal", "check": "aider_no_files", "arm": r["arm"],
-                            "job": job, "repeat": rep,
+                # Over the preload budget the harness falls back to Aider's own
+                # mode (repo map; Aider adds files itself). That is fair while
+                # Aider got to the code; fatal only when it never edited.
+                fallback_ok = (af.get("selection") == "repo_map"
+                               and not r.get("aider_no_edit"))
+                out.append({"severity": "warn" if fallback_ok else "fatal",
+                            "check": "aider_repo_map_only" if fallback_ok else "aider_no_files",
+                            "arm": r["arm"], "job": job, "repeat": rep,
                             "detail": f"the harness put no file in Aider's chat "
-                                      f"(selection={af.get('selection')})"})
+                                      f"(selection={af.get('selection')})"
+                                      + ("; Aider added files itself and edited" if fallback_ok else "")})
     return out
 
 
