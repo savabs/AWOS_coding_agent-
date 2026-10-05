@@ -134,6 +134,50 @@ def _single_task_max_files() -> int:
         return 4
 
 
+def _planner_mode() -> str:
+    """
+    AWOS_PLANNER: auto (default) | always | never. auto skips the planner
+    when the pre-plan exploration hit at most AWOS_PLANNER_MAX_FILES files;
+    an unknown value is treated as auto.
+    """
+    mode = os.getenv("AWOS_PLANNER", "auto").strip().lower()
+    return mode if mode in ("auto", "always", "never") else "auto"
+
+
+def _planner_max_files() -> int:
+    """AWOS_PLANNER_MAX_FILES (default 6): auto mode's small-goal threshold."""
+    try:
+        return int(os.getenv("AWOS_PLANNER_MAX_FILES", "6"))
+    except ValueError:
+        return 6
+
+
+def _planner_skip_reason(exploration: Optional[dict]) -> Optional[str]:
+    """
+    Why the planner is skipped for this goal, or None to run it.
+
+    Measured (ablation 2): the planner cost ~53 s per job and 71 of 72 plans
+    were collapsed into one task anyway. In auto mode a goal whose
+    exploration hit few files runs as one task; with no exploration data
+    there is nothing to judge by, so the planner runs.
+    """
+    mode = _planner_mode()
+    if mode == "always":
+        return None
+    if mode == "never":
+        return "AWOS_PLANNER=never — running as one task"
+    if not exploration or "hit_files" not in exploration:
+        return None
+    n_files = len(exploration.get("hit_files") or [])
+    max_files = _planner_max_files()
+    if n_files > max_files:
+        return None
+    return (
+        f"small goal ({n_files} file(s) hit ≤ AWOS_PLANNER_MAX_FILES={max_files}) "
+        "— running as one task"
+    )
+
+
 def _run_cost_cap() -> Optional[float]:
     """AWOS_MAX_RUN_COST, read the way AgentLoop reads it; None when unset."""
     raw = os.getenv("AWOS_MAX_RUN_COST", "").strip()
@@ -1003,8 +1047,25 @@ class Orchestrator:
             for task in tasks:
                 print(f"  Task {task['task_id']}: {task['action']} (complexity: {task['complexity']})")
         else:
-            print(f"\n[PLANNER] Breaking down goal: {goal}")
-            plan, _plan_source, _planner_errors = self._plan_goal(goal, codebase_context, _live)
+            _skip_reason = (
+                _planner_skip_reason(_exploration_data)
+                if executor_choice() == "agent_loop" else None
+            )
+            if _skip_reason is not None:
+                # The task keeps no start file: grep hits include tests and
+                # keyword noise, and the prompt would present them as "Files
+                # to change". The exploration notes reach the prompt anyway.
+                print(f"\n[PLANNER] skipped: {_skip_reason}", flush=True)
+                plan = self._goal_as_single_task_plan(goal)
+                plan["reasoning"] = f"planner skipped: {_skip_reason}"
+                _plan_source = (
+                    "skipped_by_env" if _planner_mode() == "never" else "skipped_small_goal"
+                )
+            else:
+                print(f"\n[PLANNER] Breaking down goal: {goal}")
+                plan, _plan_source, _planner_errors = self._plan_goal(
+                    goal, codebase_context, _live
+                )
             tasks = plan.get("plan", [])
             # A layer-by-layer split (model → service → CLI) of a small
             # feature cost turns: task 1 did the whole goal, and each later
@@ -1416,10 +1477,13 @@ class Orchestrator:
         review = {"passed": True, "issues": [], "suggestions": []}
         if overall_success:
             try:
+                # n_tasks gates AWOS_INTEGRATION_REVIEW=auto: a cross-task
+                # check has nothing to cross-check after one task.
                 review = self.integration_reviewer.review(
                     codebase_root, self.execution_log,
                     agent_model=getattr(self, "_last_agent_model", None),
                     tracker=getattr(self, "tracker", None),
+                    n_tasks=tasks_completed + tasks_failed,
                 )
                 if review.get("skipped"):
                     print(f"[INTEGRATION] Review skipped: {review.get('skip_reason', '')}")
@@ -1522,6 +1586,7 @@ class Orchestrator:
             ],
             "time_elapsed": elapsed,
             # "planner" | "planner_fallback" | "goal_as_task" | "pre_planned"
+            # | "skipped_small_goal" | "skipped_by_env" (AWOS_PLANNER gate)
             "plan_source": _plan_source,
             "plan_collapsed": _plan_collapsed,
             "planner_errors": _planner_errors,

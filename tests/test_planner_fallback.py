@@ -63,6 +63,9 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("AWOS_GOAL_CHECK", "0")
     monkeypatch.setenv("AWOS_EXECUTOR", "agent_loop")
     monkeypatch.delenv("AWOS_PLANNER_MODEL", raising=False)
+    # These tests are about the planner chain: keep the small-goal gate
+    # (AWOS_PLANNER=auto) from skipping the planner on this tiny repo.
+    monkeypatch.setenv("AWOS_PLANNER", "always")
     # Other tests leave AWOS_CHEAP_ONLY set; the primary must be orch.planner.
     monkeypatch.setattr(orch_mod, "is_cheap_only", lambda: False)
     _BadJsonPlanner.calls = 0

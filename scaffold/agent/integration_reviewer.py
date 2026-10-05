@@ -11,7 +11,14 @@ skipped; there is no premium default (it used to be a hardcoded Sonnet whose
 spend was never recorded). The call goes through providers.utility_chat
 (role "review": bounded reasoning, empty/cut-off replies refused, spend
 recorded as request_type "integration_review", so it counts toward the goal
-budget). AWOS_INTEGRATION_REVIEW=0 turns it off.
+budget).
+
+AWOS_INTEGRATION_REVIEW: auto (default) runs the review only when more than
+one task executed (a cross-task check has nothing to cross-check after one;
+ablation 2 measured ~47 s per job for an advisory verdict); 1 always runs it;
+0 turns it off. AWOS_REVIEW_TIMEOUT_S (default 60) caps the call's wall-clock
+time: in a baseline run a review call never returned and held two jobs past
+the execution summary for 754 s and 545 s, until the job timeout.
 
 A skipped review returns {"passed": True, "skipped": True, "skip_reason": ...}.
 """
@@ -21,6 +28,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import threading
 from typing import Any, Optional
 
 try:
@@ -30,6 +38,8 @@ except ImportError:
 
 REVIEW_MODEL_ENV = "AWOS_REVIEW_MODEL"
 REVIEW_SWITCH_ENV = "AWOS_INTEGRATION_REVIEW"
+REVIEW_TIMEOUT_ENV = "AWOS_REVIEW_TIMEOUT_S"
+DEFAULT_REVIEW_TIMEOUT_S = 60.0
 REQUEST_TYPE = "integration_review"
 MAX_OUTPUT_TOKENS = 4096
 
@@ -42,8 +52,56 @@ _NOISE = re.compile(
 )
 
 
+def review_mode() -> str:
+    """AWOS_INTEGRATION_REVIEW: "auto" (default), "always" (1/true/yes/on) or "off"."""
+    value = os.getenv(REVIEW_SWITCH_ENV, "auto").strip().lower()
+    if value in ("0", "false", "no", "off"):
+        return "off"
+    if value in ("1", "true", "yes", "on", "always"):
+        return "always"
+    return "auto"
+
+
 def enabled() -> bool:
-    return os.getenv(REVIEW_SWITCH_ENV, "1").strip().lower() not in ("0", "false", "no", "off")
+    return review_mode() != "off"
+
+
+def review_timeout_s() -> float:
+    """AWOS_REVIEW_TIMEOUT_S, default 60; a bad or non-positive value falls back."""
+    try:
+        value = float(os.getenv(REVIEW_TIMEOUT_ENV, DEFAULT_REVIEW_TIMEOUT_S))
+    except ValueError:
+        return DEFAULT_REVIEW_TIMEOUT_S
+    return value if value > 0 else DEFAULT_REVIEW_TIMEOUT_S
+
+
+class ReviewTimeout(Exception):
+    """The review call did not finish within AWOS_REVIEW_TIMEOUT_S."""
+
+
+def _call_with_deadline(fn, timeout_s: float):
+    """
+    fn() on a daemon thread: its result, its exception re-raised, or
+    ReviewTimeout after `timeout_s`. The per-request HTTP timeout alone did
+    not bound the baseline hang, so the wall clock is enforced here; an
+    abandoned call cannot keep the process alive (daemon thread).
+    """
+    box: dict = {}
+
+    def run():
+        try:
+            box["value"] = fn()
+        except BaseException as exc:  # noqa: BLE001 — handed to the caller
+            box["error"] = exc
+
+    worker = threading.Thread(target=run, name="integration-review", daemon=True)
+    worker.start()
+    worker.join(timeout_s)
+    if worker.is_alive():
+        raise ReviewTimeout(f"no reply within {timeout_s:g}s")
+    if "error" in box:
+        raise box["error"]
+    return box.get("value")
 
 
 def review_model(agent_model: Optional[str] = None) -> Optional[str]:
@@ -85,15 +143,23 @@ class IntegrationReviewer:
     # ── Public API ─────────────────────────────────────────────────────────
 
     def review(self, codebase_root: str, execution_log: list[dict], *,
-               agent_model: Optional[str] = None, tracker: Any = None) -> dict[str, Any]:
+               agent_model: Optional[str] = None, tracker: Any = None,
+               n_tasks: Optional[int] = None) -> dict[str, Any]:
         """Review the total diff after task execution.
+
+        `n_tasks` is how many tasks the goal executed; in auto mode one task
+        (or none) skips the review. None means unknown: the review runs.
 
         Returns {"passed", "issues", "suggestions", "raw_response",
         "model_used"} or, when not run, {"passed": True, "skipped": True,
-        "skip_reason": str, ...}.
+        "skip_reason": str, ...}. A model failure or timeout is a skip, never
+        an exception.
         """
-        if not enabled():
+        mode = review_mode()
+        if mode == "off":
             return _skipped(f"{REVIEW_SWITCH_ENV}=0")
+        if mode == "auto" and n_tasks is not None and n_tasks <= 1:
+            return _skipped("single task")
         diff = self._get_diff(codebase_root)
         if not diff:
             return _skipped("no diff to review")
@@ -108,14 +174,25 @@ class IntegrationReviewer:
             return _skipped("no model client (OPENROUTER_API_KEY not set)")
 
         prompt = self._build_prompt(diff, execution_log)
+        timeout_s = review_timeout_s()
         try:
-            text, _info = utility_chat(
-                client, "review", model,
-                [{"role": "user", "content": prompt}],
-                max_tokens=MAX_OUTPUT_TOKENS,
-                tracker=tracker if tracker is not None else self.tracker,
-                request_type=REQUEST_TYPE,
+            # One SDK attempt with the cap as its HTTP timeout, and the same
+            # cap on the wall clock around the whole call (utility_chat's
+            # empty-reply retry included), so nothing can multiply it.
+            text, _info = _call_with_deadline(
+                lambda: utility_chat(
+                    client, "review", model,
+                    [{"role": "user", "content": prompt}],
+                    max_tokens=MAX_OUTPUT_TOKENS,
+                    tracker=tracker if tracker is not None else self.tracker,
+                    request_type=REQUEST_TYPE,
+                    sdk_retries=0,
+                    timeout=timeout_s,
+                ),
+                timeout_s,
             )
+        except ReviewTimeout:
+            return _skipped("timeout")
         except ModelReplyError as exc:
             return _skipped(f"unusable review reply: {exc}")
         except Exception as exc:
