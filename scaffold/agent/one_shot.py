@@ -518,6 +518,58 @@ def parse_blocks(reply: str) -> tuple[list[EditBlock], list[dict]]:
     return blocks, bad
 
 
+NO_OP_REASON = "no-op edit (replace identical to search)"
+NO_NET_CHANGE_REASON = "no net change: the applied edits left every file exactly as it was"
+_WS_RUN = re.compile(r"[ \t]+")
+
+
+def _norm_lines(text: str) -> list[str]:
+    """
+    Per-line normalisation consistent with the Verifier's whitespace tier
+    ([ \t]+ -> " ", rstrip, outer blank lines dropped) except that leading
+    indentation is kept as-is: a re-indent is a real change in Python.
+    """
+    out = []
+    for line in text.splitlines():
+        body = line.lstrip(" \t")
+        indent = line[:len(line) - len(body)]
+        out.append((indent + _WS_RUN.sub(" ", body)).rstrip())
+    while out and not out[0]:
+        out.pop(0)
+    while out and not out[-1]:
+        out.pop()
+    return out
+
+
+def is_no_op(b: EditBlock) -> bool:
+    """True when REPLACE changes nothing SEARCH matches (exactly or up to
+    in-line whitespace). An empty SEARCH (file create/append) is never a no-op."""
+    if not b.search.strip():
+        return False
+    return b.replace == b.search or _norm_lines(b.replace) == _norm_lines(b.search)
+
+
+def _resolve_rel(root: Path, path: str) -> Optional[str]:
+    raw = path.strip().strip("`")
+    target = (root / raw) if not os.path.isabs(raw) else Path(raw)
+    try:
+        return target.resolve().relative_to(root).as_posix()
+    except (ValueError, OSError):
+        return None
+
+
+def _snapshot(root: Path, blocks: list[EditBlock], snap: dict) -> None:
+    """Record each block's file bytes (None when absent) the first time it is seen."""
+    for b in blocks:
+        rel = _resolve_rel(root, b.path)
+        if rel is None or rel in snap:
+            continue
+        try:
+            snap[rel] = (root / rel).read_bytes()
+        except OSError:
+            snap[rel] = None
+
+
 def _edit_tool(root: Path):
     try:
         from .tools.code_edit import EditFileTool
@@ -555,6 +607,12 @@ def apply_blocks(project_root: str, blocks: list[EditBlock], *,
             continue
         if not allow_test_edits and (rel in read_only or (is_test_file(rel) and target.exists())):
             failed.append({"path": rel, "reason": "read-only test file"})
+            continue
+        if is_no_op(b):
+            # X -> X "succeeds" in EditFileTool but changes nothing; let it
+            # reach the repair call as a failed block instead of looking applied.
+            failed.append({"path": rel, "reason": NO_OP_REASON,
+                           "search": b.search[:300], "index": idx})
             continue
         if b.search.strip() == "" and target.exists() and target.read_text(
                 encoding="utf-8", errors="replace").strip():
@@ -623,6 +681,7 @@ Rules:
 - Copy SEARCH character for character from the current text shown, including indentation. Keep it short but unique.
 - Make the same change the failed block intended; do not make other changes.
 - If a change is already present in the current text, leave it out.
+- A block whose "Why" says "no-op edit" changed nothing: its REPLACE was identical to its SEARCH. Write the real change the task needs there; REPLACE must differ from SEARCH.
 - No explanations; only the blocks."""
 
 
@@ -880,6 +939,9 @@ def run_one_shot(client: Any, model: str, project_root: str, task: str,
     read_only = set(ctx.read_only)
     blocks, malformed = parse_blocks(reply.text)
     result.blocks = len(blocks)
+    root = Path(project_root).resolve()
+    before: dict = {}
+    _snapshot(root, blocks, before)
     applied, failed = apply_blocks(project_root, blocks, allow_test_edits=allow_test_edits,
                                    read_only=read_only)
     if reply.truncated:
@@ -902,6 +964,7 @@ def run_one_shot(client: Any, model: str, project_root: str, task: str,
             result.repair_error = fix.error or f"repair reply cut off at {cap} tokens"
         else:
             r_blocks, r_bad = parse_blocks(fix.text)
+            _snapshot(root, r_blocks, before)
             r_applied, r_failed = apply_blocks(project_root, r_blocks,
                                                allow_test_edits=allow_test_edits,
                                                read_only=read_only)
@@ -920,6 +983,19 @@ def run_one_shot(client: Any, model: str, project_root: str, task: str,
             else:
                 failed = others + r_bad + r_failed
 
+    # Only files whose bytes actually changed count (e.g. an edit undone by a
+    # later block leaves nothing to test).
+    changed = []
+    for rel in applied:
+        try:
+            now = (root / rel).read_bytes()
+        except OSError:
+            now = None
+        if now != before.get(rel):
+            changed.append(rel)
+    if applied and not changed:
+        failed = failed + [{"path": "?", "reason": NO_NET_CHANGE_REASON}]
+    applied = changed
     result.applied = applied
     result.failed = malformed + failed
     result.input_tokens, result.output_tokens = tap.input_tokens, tap.output_tokens
