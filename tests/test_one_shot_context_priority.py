@@ -61,19 +61,18 @@ TASK = "handler values are wrong"
 
 # ── ranking ─────────────────────────────────────────────────────────────────
 
-def test_relevant_sources_rank_ahead_of_tests_with_more_hits():
+def test_ranking_keeps_the_original_order():
     code = ["tests/test_a.py", "pkg/core.py", "pkg/other.py", "tests/test_b.py", "pkg/core.pyi"]
     hits = {"tests/test_a.py": 9, "tests/test_b.py": 5, "pkg/core.py": 1, "pkg/core.pyi": 3}
     ranked = rank_files(code, "fix it", hits)
-    assert ranked == ["pkg/core.pyi", "pkg/core.py", "tests/test_a.py", "tests/test_b.py",
-                      "pkg/other.py"]
+    assert ranked == ["tests/test_a.py", "tests/test_b.py", "pkg/core.pyi", "pkg/core.py",
+                      "pkg/other.py"]                 # most hits first, as before
+    assert one_shot._top_source(ranked, "fix it", hits) == "pkg/core.py"  # skips tests, .pyi
 
 
-def test_task_named_source_ranks_ahead_of_hit_tests_and_unrelated_last():
-    code = ["tests/test_core.py", "pkg/zzz.py", "pkg/parser.py", "tests/test_zzz.py"]
-    ranked = rank_files(code, "the parser drops tokens", {"tests/test_core.py": 4})
-    assert ranked[:2] == ["pkg/parser.py", "tests/test_core.py"]
-    assert ranked[2:] == ["pkg/zzz.py", "tests/test_zzz.py"]  # unrelated: sources first
+def test_no_top_source_among_unrelated_files():
+    ranked = rank_files(["tests/test_a.py", "pkg/zzz.py"], "fix it", {"tests/test_a.py": 2})
+    assert one_shot._top_source(ranked, "fix it", {"tests/test_a.py": 2}) is None
 
 
 # ── whole-source rule ───────────────────────────────────────────────────────
@@ -122,7 +121,9 @@ def test_small_source_unchanged(monkeypatch):
     monkeypatch.delenv("AWOS_ONE_SHOT_WHOLE_SOURCE_FRACTION", raising=False)
     root = _repo(src_funcs=50)                        # under the cap anyway
     ctx = build_context(str(root), TASK, _exploration(root), 24000)
-    assert ctx.files[:2] == ["pkg/core.pyi", "pkg/core.py"]
+    monkeypatch.setenv("AWOS_ONE_SHOT_WHOLE_SOURCE_FRACTION", "0")
+    off = build_context(str(root), TASK, _exploration(root), 24000)
+    assert ctx.text == off.text                        # rule does not apply
     assert ctx.sections == []
 
 

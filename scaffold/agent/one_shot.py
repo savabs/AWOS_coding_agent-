@@ -354,18 +354,15 @@ def _relevance(rel: str, goal_lower: str, hit_counts: dict) -> tuple:
 
 
 def rank_files(code: list, goal_lower: str, hit_counts: dict) -> list:
-    """
-    Fill order for the context: relevant files (grep hits, then files the
-    task names) with every non-test source ahead of every test, then the
-    rest, sources before tests. Tests with many keyword hits used to fill
-    the budget before the source that needed the edit.
-    """
+    """Fill order: exploration grep hits first (most hits first), then files
+    the task names, then the rest (sources before tests, best name overlap)."""
     def key(rel: str) -> tuple:
         tier, weight = _relevance(rel, goal_lower, hit_counts)
-        test = is_test_file(rel)
-        if tier < 2:
-            return (0, test, tier, -weight, rel)
-        return (1, test, -weight, rel.count("/"), rel)
+        if tier == 0:
+            return (0, -weight, is_test_file(rel), rel)
+        if tier == 1:
+            return (1, -weight, is_test_file(rel), rel)
+        return (2, is_test_file(rel), -weight, rel.count("/"), rel)
     return sorted(code, key=key)
 
 
@@ -377,6 +374,12 @@ def _top_source(ranked: list, goal_lower: str, hit_counts: dict) -> Optional[str
         if not is_test_file(rel) and not rel.endswith(".pyi"):
             return rel
     return None
+
+
+def _file_block(rel: str, content: str) -> str:
+    fence = "````" if "```" in content else "```"
+    header = f"{rel}" + ("  (read-only test file)" if is_test_file(rel) else "")
+    return f"{header}\n{fence}\n{content}{'' if content.endswith(chr(10)) else chr(10)}{fence}\n"
 
 
 @dataclass
@@ -391,15 +394,15 @@ class OneShotContext:
 def build_context(project_root: str, task: str, exploration: Optional[dict] = None,
                   budget: Optional[int] = None) -> OneShotContext:
     """
-    A compact repo map plus whole candidate files, ranked: relevant files
-    (exploration grep hits, most hits first, then files the task names) with
-    sources before tests, then the rest (sources before tests, best name
-    overlap first). Each file is included whole while it fits the budget
-    (chars/4). A file above the per-file cap (AWOS_ONE_SHOT_FILE_CAP_TOKENS)
-    is shown as its relevant sections (see file_sections) instead, except the
-    top-ranked relevant source file (not a test, not a .pyi stub): it goes
-    whole while it costs at most whole_source_fraction() of the budget, so
-    the code to change is not cut to keyword-hit windows while tests fill
+    A compact repo map plus whole candidate files, ranked (rank_files):
+    exploration grep hits first (most hits first), then files the task
+    names, then the rest (sources before tests, best name overlap first).
+    Each file is included whole while it fits the budget (chars/4). A file
+    above the per-file cap (AWOS_ONE_SHOT_FILE_CAP_TOKENS) is shown as its
+    relevant sections (see file_sections) instead, except the top-ranked
+    relevant source (not a test, not a .pyi stub): while it costs at most
+    whole_source_fraction() of the budget it goes whole and first, so the
+    code to change is not cut to keyword-hit windows while tests fill
     the budget. Any other file that does not fit is skipped.
     """
     root = Path(project_root).resolve()
@@ -426,8 +429,20 @@ def build_context(project_root: str, task: str, exploration: Optional[dict] = No
     ranked = rank_files(code, goal_lower, hit_counts)
     file_budget = budget - min(MAP_BUDGET_TOKENS, budget // 4)
     cap = file_cap_tokens()
+    # Whole-source rule: the top relevant source above the per-file cap but
+    # within whole_source_fraction() of the budget goes whole and first; the
+    # rest keeps its order and sectioning.
     whole_src = _top_source(ranked, goal_lower, hit_counts)
-    whole_src_cap = int(budget * whole_source_fraction())
+    if whole_src is not None:
+        try:
+            src_cost = estimate_tokens(_file_block(
+                whole_src, (root / whole_src).read_text(encoding="utf-8", errors="replace")))
+        except OSError:
+            src_cost = 0
+        if cap < src_cost <= min(file_budget, int(budget * whole_source_fraction())):
+            ranked = [whole_src] + [r for r in ranked if r != whole_src]
+        else:
+            whole_src = None
     chosen, sectioned, used = [], [], 0
     blocks = []
     for rel in ranked:
@@ -436,12 +451,9 @@ def build_context(project_root: str, task: str, exploration: Optional[dict] = No
         except OSError:
             continue
         ro = is_test_file(rel)
-        fence = "````" if "```" in content else "```"
-        header = f"{rel}" + ("  (read-only test file)" if ro else "")
-        block = f"{header}\n{fence}\n{content}{'' if content.endswith(chr(10)) else chr(10)}{fence}\n"
+        block = _file_block(rel, content)
         cost = estimate_tokens(block)
-        whole_ok = rel == whole_src and cost <= whole_src_cap and used + cost <= file_budget
-        if cost > cap and not whole_ok:
+        if cost > cap and rel != whole_src:
             room = min(cap, file_budget - used)
             if room < 500:
                 continue
