@@ -50,9 +50,11 @@ ONE_SHOT_ENV = "AWOS_ONE_SHOT"
 BUDGET_ENV = "AWOS_ONE_SHOT_BUDGET_TOKENS"
 MAX_TOKENS_ENV = "AWOS_ONE_SHOT_MAX_TOKENS"
 FILE_CAP_ENV = "AWOS_ONE_SHOT_FILE_CAP_TOKENS"
+WHOLE_SOURCE_FRACTION_ENV = "AWOS_ONE_SHOT_WHOLE_SOURCE_FRACTION"
 REASONING_ENV = "AWOS_REASONING_ONE_SHOT"
 DEFAULT_BUDGET_TOKENS = 24000
 DEFAULT_FILE_CAP_TOKENS = 6000
+DEFAULT_WHOLE_SOURCE_FRACTION = 0.5  # the top source goes whole up to this share of the budget
 SECTION_RADIUS = 60        # lines shown around each anchor of a large file
 REPAIR_RADIUS = 40         # lines shown around a failed block's best match
 REPAIR_WHOLE_LINES = 300   # a file up to this many lines goes to repair whole
@@ -96,6 +98,18 @@ def max_reply_tokens() -> int:
 
 def file_cap_tokens() -> int:
     return max(500, _env_int(FILE_CAP_ENV, DEFAULT_FILE_CAP_TOKENS))
+
+
+def whole_source_fraction() -> float:
+    """AWOS_ONE_SHOT_WHOLE_SOURCE_FRACTION: the top-ranked source file is sent
+    whole while it costs at most this share of the budget, even above the
+    per-file cap. 0 turns the rule off; clamped to [0, 1]."""
+    try:
+        value = float(os.getenv(WHOLE_SOURCE_FRACTION_ENV, "").strip()
+                      or DEFAULT_WHOLE_SOURCE_FRACTION)
+    except ValueError:
+        value = DEFAULT_WHOLE_SOURCE_FRACTION
+    return min(1.0, max(0.0, value))
 
 
 def one_shot_reasoning() -> Optional[dict]:
@@ -331,6 +345,40 @@ def _goal_score(rel: str, goal_lower: str) -> int:
     return sum(1 for p in parts if p in goal_lower)
 
 
+def _relevance(rel: str, goal_lower: str, hit_counts: dict) -> tuple:
+    """(tier, weight): tier 0 = exploration hit, 1 = named by the task, 2 = other."""
+    if rel in hit_counts:
+        return (0, hit_counts[rel])
+    score = _goal_score(rel, goal_lower)
+    return (1, score) if score >= 50 else (2, score)
+
+
+def rank_files(code: list, goal_lower: str, hit_counts: dict) -> list:
+    """
+    Fill order for the context: relevant files (grep hits, then files the
+    task names) with every non-test source ahead of every test, then the
+    rest, sources before tests. Tests with many keyword hits used to fill
+    the budget before the source that needed the edit.
+    """
+    def key(rel: str) -> tuple:
+        tier, weight = _relevance(rel, goal_lower, hit_counts)
+        test = is_test_file(rel)
+        if tier < 2:
+            return (0, test, tier, -weight, rel)
+        return (1, test, -weight, rel.count("/"), rel)
+    return sorted(code, key=key)
+
+
+def _top_source(ranked: list, goal_lower: str, hit_counts: dict) -> Optional[str]:
+    """The highest-ranked relevant source file (not a test, not a .pyi stub)."""
+    for rel in ranked:
+        if _relevance(rel, goal_lower, hit_counts)[0] >= 2:
+            return None
+        if not is_test_file(rel) and not rel.endswith(".pyi"):
+            return rel
+    return None
+
+
 @dataclass
 class OneShotContext:
     text: str
@@ -343,12 +391,16 @@ class OneShotContext:
 def build_context(project_root: str, task: str, exploration: Optional[dict] = None,
                   budget: Optional[int] = None) -> OneShotContext:
     """
-    A compact repo map plus whole candidate files, ranked: exploration grep
-    hits first (most hits first), then files the task names, then the rest
-    (sources before tests, best name overlap first). Each file is included
-    whole while it fits the budget (chars/4). A file above the per-file cap
-    (AWOS_ONE_SHOT_FILE_CAP_TOKENS) is shown as its relevant sections (see
-    file_sections) instead; any other file that does not fit is skipped.
+    A compact repo map plus whole candidate files, ranked: relevant files
+    (exploration grep hits, most hits first, then files the task names) with
+    sources before tests, then the rest (sources before tests, best name
+    overlap first). Each file is included whole while it fits the budget
+    (chars/4). A file above the per-file cap (AWOS_ONE_SHOT_FILE_CAP_TOKENS)
+    is shown as its relevant sections (see file_sections) instead, except the
+    top-ranked relevant source file (not a test, not a .pyi stub): it goes
+    whole while it costs at most whole_source_fraction() of the budget, so
+    the code to change is not cut to keyword-hit windows while tests fill
+    the budget. Any other file that does not fit is skipped.
     """
     root = Path(project_root).resolve()
     budget = budget or budget_tokens()
@@ -371,17 +423,11 @@ def build_context(project_root: str, task: str, exploration: Optional[dict] = No
         if rel:
             hit_counts.setdefault(rel, 1)
 
-    def rank(rel: str) -> tuple:
-        if rel in hit_counts:
-            return (0, -hit_counts[rel], is_test_file(rel), rel)
-        score = _goal_score(rel, goal_lower)
-        if score >= 50:
-            return (1, -score, is_test_file(rel), rel)
-        return (2, is_test_file(rel), -score, rel.count("/"), rel)
-
-    ranked = sorted(code, key=rank)
+    ranked = rank_files(code, goal_lower, hit_counts)
     file_budget = budget - min(MAP_BUDGET_TOKENS, budget // 4)
     cap = file_cap_tokens()
+    whole_src = _top_source(ranked, goal_lower, hit_counts)
+    whole_src_cap = int(budget * whole_source_fraction())
     chosen, sectioned, used = [], [], 0
     blocks = []
     for rel in ranked:
@@ -394,7 +440,8 @@ def build_context(project_root: str, task: str, exploration: Optional[dict] = No
         header = f"{rel}" + ("  (read-only test file)" if ro else "")
         block = f"{header}\n{fence}\n{content}{'' if content.endswith(chr(10)) else chr(10)}{fence}\n"
         cost = estimate_tokens(block)
-        if cost > cap:
+        whole_ok = rel == whole_src and cost <= whole_src_cap and used + cost <= file_budget
+        if cost > cap and not whole_ok:
             room = min(cap, file_budget - used)
             if room < 500:
                 continue
