@@ -2145,7 +2145,7 @@ class Orchestrator:
         shot_cost, shot_in, shot_out = 0.0, 0, 0
         if shot is not None:
             shot_cost, shot_in, shot_out = shot["cost_usd"], shot["input_tokens"], shot["output_tokens"]
-            shot_steps = [shot["step"]]
+            shot_steps = list(shot.get("steps") or [shot["step"]])
             files_changed.extend(shot["applied"])
             if shot["solved"]:
                 registry.close()
@@ -2336,10 +2336,18 @@ class Orchestrator:
         except Exception as exc:  # noqa: BLE001 — run_one_shot should not raise
             shot = one_shot_mod.OneShotResult(error=f"{type(exc).__name__}: {exc}", calls=1)
 
+        sections = getattr(shot, "context_sections", []) or []
         print(f"[ONE-SHOT] call: {shot.input_tokens} in / {shot.output_tokens} out tokens, "
               f"${shot.cost_usd:.4f}, {shot.elapsed_s:.1f}s; context {shot.context_tokens} "
-              f"tokens over {len(shot.context_files)} file(s); {shot.blocks} block(s), "
-              f"{len(shot.applied)} file(s) changed, {len(shot.failed)} failed")
+              f"tokens over {len(shot.context_files)} file(s)"
+              + (f" + sections of {len(sections)}" if sections else "")
+              + f"; {shot.blocks} block(s), "
+              f"{len(shot.applied)} file(s) changed, {len(shot.failed)} failed"
+              + ("; reply cut off (not retried)" if getattr(shot, "truncated", False) else ""))
+        if getattr(shot, "repair_calls", 0):
+            print(f"[ONE-SHOT] repair call: {shot.repaired} block(s) applied, "
+                  f"{shot.repair_failed} still failed"
+                  + (f" ({shot.repair_error})" if shot.repair_error else ""))
         verdict = None
         if shot.error:
             reason = f"model call failed ({shot.error})"
@@ -2347,6 +2355,8 @@ class Orchestrator:
         elif not shot.applied:
             reason = ("no edit applied" + (f" ({len(shot.failed)} block(s) failed)"
                                             if shot.failed else " (no SEARCH/REPLACE blocks)"))
+            if getattr(shot, "truncated", False):
+                reason += "; reply cut off"
         else:
             verdict = self._judge_agent_attempt(
                 task,
@@ -2363,10 +2373,13 @@ class Orchestrator:
                 reason = "no tests ran"
             elif not green:
                 reason = f"tests: {verdict['test_status']}"
+            elif getattr(shot, "truncated", False):
+                reason = "reply cut off (its complete blocks applied; the rest is missing)"
             else:
                 reason = f"{len(shot.failed)} block(s) failed to apply"
 
         solved = reason is None
+        repairs = int(getattr(shot, "repair_calls", 0) or 0)
         step = SimpleNamespace(
             thought=shot.reply[:2000],
             action="one_shot",
@@ -2375,14 +2388,24 @@ class Orchestrator:
             success=solved,
             latency_ms=shot.elapsed_s * 1000.0,
         )
+        # One turn per call: the repair call is a turn of its own.
+        steps = [step] + [
+            SimpleNamespace(thought=(getattr(shot, "repair_reply", "") or "")[:2000],
+                            action="one_shot_repair", action_input={}, observation="",
+                            success=solved, latency_ms=0.0)
+            for _ in range(repairs)
+        ]
         out = {
             "solved": solved, "applied": [] if shot.error else list(shot.applied),
-            "verdict": verdict, "note": "", "step": step,
+            "verdict": verdict, "note": "", "step": step, "steps": steps,
             "cost_usd": shot.cost_usd, "input_tokens": shot.input_tokens,
             "output_tokens": shot.output_tokens,
         }
         if solved:
-            print(f"[ONE-SHOT] solved in 1 call — {len(shot.applied)} file(s) changed, "
+            calls = 1 + repairs
+            print(f"[ONE-SHOT] solved in {calls} call{'s' if calls > 1 else ''}"
+                  + (" (1 repair)" if repairs else "")
+                  + f" — {len(shot.applied)} file(s) changed, "
                   f"tests {verdict['test_result'].passed} passed")
             return out
 

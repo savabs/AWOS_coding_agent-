@@ -376,6 +376,8 @@ def utility_chat(
     temperature: Optional[float] = 0,
     send_reasoning: Optional[bool] = None,
     sdk_retries: Optional[int] = None,
+    reasoning: Any = "role",
+    retry: bool = True,
     **extra: Any,
 ) -> tuple[str, dict]:
     """
@@ -388,7 +390,10 @@ def utility_chat(
       off, then raises EmptyReplyError / TruncatedReplyError;
     - every call's spend is recorded under `request_type` (default `role`),
       the wasted one included, so it counts toward the goal budget;
-    - `sdk_retries=0` turns the SDK's own retries off.
+    - `sdk_retries=0` turns the SDK's own retries off;
+    - `reasoning` overrides reasoning_for(role) (a dict, or None for none);
+    - `retry=False` makes one call only: a bad reply raises at once (the
+      caller handles it — one-shot falls back rather than pay twice).
 
     Returns (text, info), info = {"cost_usd", "calls", "finish_reason",
     "model"}. Transport errors propagate unchanged.
@@ -400,7 +405,10 @@ def utility_chat(
         send_reasoning = _is_routed(client)
     tokens = max(int(max_tokens or 0), UTILITY_MIN_MAX_TOKENS)
     # The retry switches reasoning off where it can; elsewhere it asks again.
-    attempts = [reasoning_for(role), dict(REASONING_OFF)] if send_reasoning else [None, None]
+    first = reasoning_for(role) if reasoning == "role" else reasoning
+    attempts = [first, dict(REASONING_OFF)] if send_reasoning else [None, None]
+    if not retry:
+        attempts = attempts[:1]
 
     info: dict = {"cost_usd": 0.0, "calls": 0, "finish_reason": None, "model": model}
     text, finish = "", None

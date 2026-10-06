@@ -261,6 +261,20 @@ def test_detect_invalid_zero_turns_and_clean_runs():
                                        "API key expired", "Connection error"}
 
 
+def test_timed_out_job_counts_turns_from_the_call_log(tmp_path):
+    # sqlparse: killed at the job limit after 130 agent turns with no real edit.
+    # Spans were never written, so it read as "0 turns, crashed" and was retried.
+    awos = tmp_path / ".awos"
+    awos.mkdir()
+    rows = ([{"component": "planner"}] + [{"component": "one_shot", "cost_usd": 0.003}]
+            + [{"component": "agent", "cost_usd": 0.001}] * 130)
+    (awos / "llm_calls.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\nnot json\n")
+    calls = js.read_calls(tmp_path)
+    assert sum(1 for c in calls if c.get("component") in ("agent", "one_shot")) == 131
+    # With those turns counted, a plain timeout is the agent's failure, not invalid.
+    assert js.detect_invalid("[job_series] hit the 30-minute limit\n", turns=131, dry_run=False) is None
+
+
 def test_aider_answer_without_edit_is_a_fair_failure_not_a_crash():
     # Aider counts 0 turns when it answers without an edit; with the code in its
     # chat that is the model failing (backupd j02: 5.8 min of analysis, no edit),

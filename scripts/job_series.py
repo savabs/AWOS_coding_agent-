@@ -703,6 +703,21 @@ def read_spans(state: Path) -> list:
     return spans
 
 
+def read_calls(state: Path) -> list:
+    """The child's per-call log (.awos/llm_calls.jsonl), one dict per model call."""
+    try:
+        lines = (state / ".awos" / "llm_calls.jsonl").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    calls = []
+    for line in lines:
+        try:
+            calls.append(json.loads(line))
+        except ValueError:
+            continue
+    return calls
+
+
 def ledger_metrics(entries: list) -> dict:
     return {
         "llm_calls": len(entries),
@@ -968,6 +983,7 @@ def run_job(arm: str, number: int, job_dir: Path, sdir: Path, jobs: list, arm_di
 
     ledger_before = len(read_ledger(state))
     spans_before = len(read_spans(state))
+    calls_before = len(read_calls(state))
     billed_before = None if dry_run else key_usage(state)
     child = ARM_CHILDREN[arm]
     env = {**os.environ, "PYTHONUNBUFFERED": "1", **child["env"], "AWOS_SERIES_ARM": arm}
@@ -1022,6 +1038,16 @@ def run_job(arm: str, number: int, job_dir: Path, sdir: Path, jobs: list, arm_di
         usage["turns"] = sum(int(s.get("attempt_count", 0) or 0)
                              for s in read_spans(state)[spans_before:])
         usage["usage_source"] = "ledger"
+    if timed_out and not usage["turns"]:
+        # Spans and report.json are written when a task ends, so a child killed
+        # at the job limit reported 0 turns and read as "crashed" (sqlparse: 130
+        # turns, no real edit). The per-call log shows the work it did.
+        new_calls = read_calls(state)[calls_before:]
+        usage["turns"] = sum(1 for c in new_calls if c.get("component") in ("agent", "one_shot"))
+        logged = sum(float(c.get("cost_usd") or 0) for c in new_calls)
+        if logged > usage.get("cost_usd", 0):
+            usage["cost_usd"] = round(logged, 6)
+        usage["usage_source"] = "call_log (timed out)"
     usage["billed_usd"] = billed_since(state, billed_before)
     invalid_reason = detect_invalid(log_text, usage["turns"], dry_run)
     result = {
