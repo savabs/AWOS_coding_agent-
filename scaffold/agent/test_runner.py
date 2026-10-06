@@ -27,7 +27,17 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ────────────────────────────────────────────────────────────
 _DEFAULT_TIMEOUT_SEC = 60
+#: The whole visible suite is slower than a few mapped files; a real project's
+#: suite (sqlparse, more-itertools) runs in seconds, so this is headroom.
+_FULL_SUITE_TIMEOUT_SEC = 180
 _SAFETY_ENV_VAR = "AWOS_SAFE_TO_RUN_TESTS"
+
+#: Directories never searched for tests (vendored code, envs, build output).
+_SKIP_DIRS = {
+    "node_modules", "venv", "env", "build", "dist", "__pycache__",
+    "site-packages", "htmlcov",
+}
+_MAX_WALK_FILES = 20000
 
 
 @dataclass
@@ -53,6 +63,9 @@ class TestResult:
     timed_out: bool = False
     test_command: List[str] = field(default_factory=list)
     no_tests_found: bool = False
+    #: "mapped" — only tests matched to the changed files ran; "full" — the
+    #: project's whole visible suite ran; "" — nothing was run.
+    mode: str = ""
 
 
 #: Through the running interpreter, not a bare `pytest` on PATH: without an
@@ -113,7 +126,129 @@ class TestRunner:
             logger.info("[test_runner] No test framework detected")
             return TestResult(raw_output="No test framework detected.", no_tests_found=True)
 
-        return self._execute(cfg)
+        if cfg.runner != "pytest":
+            result = self._execute(cfg)
+            result.mode = "full"
+            return result
+        return self._run_pytest(cfg, changed_files or [])
+
+    # ── pytest: mapped tests first, else the whole visible suite ─────────
+
+    def _run_pytest(self, cfg: TestConfig, changed_files: List[str]) -> TestResult:
+        """
+        Run the tests mapped to changed_files; when the mapping finds none, or
+        they collect nothing, run the whole visible suite instead. Source and
+        test files are often named differently (sqlparse/sql.py is covered by
+        tests/test_tokenize.py), so an empty mapping is not "no tests".
+        """
+        # No cache plugin: nothing written to .pytest_cache, inside a sandbox
+        # or not. No color: ANSI codes would sit inside the summary line.
+        base = list(cfg.command) + ["-p", "no:cacheprovider", "--color=no"]
+        mapped = self.map_tests(changed_files)
+        if mapped:
+            result = self._execute(TestConfig("pytest", base + mapped, self.timeout_sec))
+            if not result.no_tests_found:
+                result.mode = "mapped"
+                logger.info("[test_runner] mode=mapped (%d test file(s))", len(mapped))
+                return result
+            logger.info("[test_runner] mapped tests collected nothing; running the full suite")
+
+        targets = self._full_suite_targets()
+        timeout = max(self.timeout_sec, _FULL_SUITE_TIMEOUT_SEC)
+        result = self._execute(TestConfig("pytest", base + targets, timeout))
+        result.mode = "full"
+        logger.info("[test_runner] mode=full targets=%s", targets or "(pytest config)")
+        return result
+
+    def find_test_files(self) -> List[str]:
+        """Visible pytest-style test files, relative to project_root, sorted."""
+        found: List[str] = []
+        seen = 0
+        root = str(self.project_root)
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [
+                d for d in dirnames
+                if not d.startswith(".") and d not in _SKIP_DIRS and not d.endswith(".egg-info")
+            ]
+            for name in filenames:
+                seen += 1
+                if name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py")):
+                    found.append(os.path.relpath(os.path.join(dirpath, name), root))
+            if seen > _MAX_WALK_FILES:
+                break
+        return sorted(found)
+
+    def map_tests(self, changed_files: List[str]) -> List[str]:
+        """
+        Test files matched to changed_files by name: a changed test file
+        itself, or test_<stem>.py / test_<stem>_*.py / <stem>_test.py for a
+        changed source file. Empty when nothing matches.
+        """
+        if not changed_files:
+            return []
+        tests = self.find_test_files()
+        mapped: List[str] = []
+        for changed in changed_files:
+            path = Path(changed)
+            if path.is_absolute():
+                try:
+                    path = path.relative_to(self.project_root.resolve())
+                except ValueError:
+                    continue
+            if path.suffix != ".py":
+                continue
+            name = path.name
+            if name.startswith("test_") or name.endswith("_test.py"):
+                if (self.project_root / path).is_file():
+                    mapped.append(str(path))
+                continue
+            stem = path.parent.name if path.stem == "__init__" else path.stem
+            stem = stem.lstrip("_")
+            if not stem:
+                continue
+            for test in tests:
+                tstem = Path(test).stem
+                if tstem in (f"test_{stem}", f"{stem}_test") or tstem.startswith(f"test_{stem}_"):
+                    mapped.append(test)
+        return list(dict.fromkeys(mapped))
+
+    def _full_suite_targets(self) -> List[str]:
+        """
+        Paths for a whole-suite run. With `testpaths` in the pytest config,
+        none: pytest uses it. Otherwise tests/ (or test/) when it holds tests,
+        else none and pytest discovers from the root.
+        """
+        if self._configured_testpaths():
+            return []
+        tests = self.find_test_files()
+        for d in ("tests", "test"):
+            if any(t.startswith(d + os.sep) for t in tests):
+                return [d]
+        return []
+
+    def _configured_testpaths(self) -> bool:
+        root = self.project_root
+        for name, section in (
+            ("pytest.ini", "[pytest]"),
+            ("pyproject.toml", "[tool.pytest.ini_options]"),
+            ("tox.ini", "[pytest]"),
+            ("setup.cfg", "[tool:pytest]"),
+        ):
+            content = self._read(root / name)
+            if section not in content:
+                continue
+            body = content.split(section, 1)[1]
+            body = re.split(r"^\[", body, maxsplit=1, flags=re.MULTILINE)[0]
+            if re.search(r"^\s*testpaths\s*=", body, re.MULTILINE):
+                return True
+        return False
+
+    @staticmethod
+    def _read(path: Path) -> str:
+        try:
+            return path.read_text(encoding="utf-8") if path.is_file() else ""
+        except (OSError, UnicodeDecodeError):
+            return ""
 
     # ── Detection helpers ───────────────────────────────────────────────
 
@@ -134,6 +269,14 @@ class TestRunner:
             content = setup_cfg.read_text(encoding="utf-8")
             if "[tool:pytest]" in content:
                 return TestConfig("pytest", _PYTEST_CMD)
+
+        if "[pytest]" in self._read(root / "tox.ini"):
+            return TestConfig("pytest", _PYTEST_CMD)
+
+        # No pytest config: most real projects (sqlparse, more-itertools) have
+        # none, yet pytest runs their tests/ (unittest-style included).
+        if (root / "conftest.py").exists() or self.find_test_files():
+            return TestConfig("pytest", _PYTEST_CMD)
 
         return None
 
@@ -256,6 +399,8 @@ class TestRunner:
     def _parse_pytest(self, stdout: str, stderr: str, command: List[str]) -> TestResult:
         """Parse pytest --tb=short -q output."""
         combined = f"{stdout}\n{stderr}"
+        if "\x1b[" in combined:
+            combined = re.sub(r"\x1b\[[0-9;]*m", "", combined)
 
         # pytest outputs summary lines like:
         #   "3 passed, 1 failed, 2 errors in 0.12s"

@@ -258,7 +258,7 @@ def _judge(stop, files, result, action="fix add in calc.py"):
     return outcome, verdict
 
 
-@pytest.mark.parametrize("stop", ["max_turns", "repeated_tool_call"])
+@pytest.mark.parametrize("stop", ["max_turns", "repeated_tool_call", "wall_budget"])
 def test_green_stop_is_a_success_and_not_resumed(stop):
     outcome, verdict = _judge(stop, ["calc.py"], GREEN)
     assert verdict["green_stop"] is True

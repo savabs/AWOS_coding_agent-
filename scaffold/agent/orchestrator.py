@@ -269,6 +269,11 @@ def _agent_resume_reason(outcome, verdict: dict, model_errors: int) -> Optional[
         # Stopped after its edits turned the tests green: a resume only
         # re-reads finished work (one ran 22 more turns to change nothing).
         return None
+    if stop in ("no_progress", "wall_budget"):
+        # The attempt circled without changing anything, or used the run's
+        # wall-clock budget: a fresh prompt into the same dead end only spends
+        # more (one sqlparse attempt ran 130 idle turns). Fail with the reason.
+        return None
     if stop == "max_turns":
         return "it ran out of turns (max_turns)"
     if stop == "repeated_tool_call":
@@ -2495,10 +2500,10 @@ class Orchestrator:
             and test_result.passed > 0
         )
 
-        # A turn-budget or repeat stop after its edits turned the tests green
-        # is finished work; resuming it spent 20+ turns re-reading it.
+        # A turn-budget, repeat or wall-clock stop after its edits turned the
+        # tests green is finished work; resuming it spent 20+ turns re-reading it.
         green_stop = (
-            outcome.stop_reason in ("max_turns", "repeated_tool_call")
+            outcome.stop_reason in ("max_turns", "repeated_tool_call", "wall_budget")
             and bool(files_changed)
             and tests_ran
             and test_result.failed == 0

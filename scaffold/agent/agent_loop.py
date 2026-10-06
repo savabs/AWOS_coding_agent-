@@ -27,6 +27,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -81,6 +82,27 @@ GREEN_MESSAGE = (
 #: any fix resets the count, so 6 leaves headroom for it while still cutting
 #: repeated smoke checks.
 DEFAULT_POST_GREEN_TURNS = 6
+#: Consecutive tool-calling turns without progress (a successful edit, a
+#: command that changed the workspace, or a run_tests whose counts improved)
+#: before the loop stops with "no_progress". A sqlparse run spent 130 turns
+#: re-reading the same lines and probing until the 30-minute job kill.
+#: AWOS_AGENT_NO_PROGRESS_TURNS; 0 disables.
+DEFAULT_NO_PROGRESS_TURNS = 25
+#: Share of that budget at which the model is told once (per streak) to act.
+NO_PROGRESS_NUDGE_FRACTION = 0.6
+NO_PROGRESS_MESSAGE = (
+    "You have gone {n} turns without changing anything; make the most likely "
+    "fix now with edit_file, or stop and explain what blocks you."
+)
+#: Wall-clock seconds per run before the loop stops with "wall_budget", below
+#: the benchmark runner's 30-minute job kill so the run ends cleanly (spans
+#: and report written) instead of by SIGKILL. AWOS_AGENT_WALL_S; 0 disables.
+DEFAULT_WALL_S = 1500
+#: Reads of a range already sent this many times (same file, nothing changed
+#: since) get a short note instead of the same lines again.
+MAX_RANGE_READS = 3
+#: Stand-in end line for a read_file call with no end (the whole file).
+_EOF_LINE = 10**9
 ELIDED_PREFIX = "[earlier tool output elided"
 DEFAULT_MAX_REPEATS = 3
 
@@ -521,6 +543,8 @@ class LoopOutcome:
     elided_results: int = 0
     #: True when the run was ended by the post-green cap, not by the model.
     post_green_stop: bool = False
+    #: read_file calls answered with "already read" instead of the lines.
+    reread_notes: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -561,6 +585,8 @@ class AgentLoop:
         keep_turns: Optional[int] = None,
         tool_result_chars: Optional[int] = None,
         post_green_turns: Optional[int] = None,
+        no_progress_turns: Optional[int] = None,
+        wall_s: Optional[float] = None,
     ) -> None:
         self.registry = registry
         self.client = client
@@ -581,6 +607,18 @@ class AgentLoop:
             post_green_turns
             if post_green_turns is not None
             else _int_env("AWOS_AGENT_POST_GREEN_TURNS", DEFAULT_POST_GREEN_TURNS)
+        )
+        # Turns without progress tolerated before stopping; 0 or less never stops.
+        self.no_progress_turns = (
+            no_progress_turns
+            if no_progress_turns is not None
+            else _int_env("AWOS_AGENT_NO_PROGRESS_TURNS", DEFAULT_NO_PROGRESS_TURNS)
+        )
+        # Wall-clock budget for one run in seconds; 0 or less never stops.
+        self.wall_s = (
+            wall_s
+            if wall_s is not None
+            else (_float_env("AWOS_AGENT_WALL_S", float(DEFAULT_WALL_S)) or 0.0)
         )
         self.max_repeats = max_repeats
         self.system_prompt = system_prompt
@@ -650,9 +688,30 @@ class AgentLoop:
         edited = False
         green = False
         idle = 0
+        # No-progress tracking: tool-calling turns in a row that changed
+        # nothing, whether this streak was already nudged, and the best
+        # (failed, -passed) run_tests result so far.
+        stalled = 0
+        stall_nudged = False
+        best_tests: Optional[tuple[int, int]] = None
+        nudge_at = (max(1, math.ceil(self.no_progress_turns * NO_PROGRESS_NUDGE_FRACTION))
+                    if self.no_progress_turns > 0 else 0)
+        # read_file ranges sent so far: path -> [(start, end, turn, version)].
+        reads: dict[str, list[tuple[int, int, int, int]]] = {}
 
         for turn in range(1, self.max_turns + 1):
             outcome.turns = turn
+
+            elapsed = time.monotonic() - started
+            if self.wall_s and self.wall_s > 0 and elapsed >= self.wall_s:
+                outcome.turns = turn - 1
+                outcome.stop_reason = "wall_budget"
+                outcome.final_message = (
+                    f"Stopped after {elapsed:.0f}s, the {self.wall_s:.0f}s wall-clock "
+                    "budget for one run (AWOS_AGENT_WALL_S)."
+                )
+                self._emit("wall_budget", elapsed_sec=elapsed)
+                break
 
             blocked, reason = self._budget_blocked()
             if blocked:
@@ -749,6 +808,8 @@ class AgentLoop:
             results = []
             notes: dict[int, str] = {}  # result index -> text shown after it
             fresh_green = False  # green (re-)established by this turn
+            turn_version = state_version
+            progressed = False
             for call in reply.tool_calls:
                 signature = f"{call.name}:{json.dumps(call.arguments, sort_keys=True, default=str)}"
                 key = (signature, state_version)
@@ -769,6 +830,27 @@ class AgentLoop:
                     outcome.stop_reason = "repeated_tool_call"
                     _trace_call(turn, call, results[-1], None)
                     continue
+
+                if call.name == "read_file":
+                    span = _read_span(call.arguments, root)
+                    if span is not None:
+                        path, start, end = span
+                        prior = [r for r in reads.get(path, ())
+                                 if r[3] == state_version and r[0] <= start and end <= r[1]]
+                        if len(prior) >= MAX_RANGE_READS:
+                            shown = f"{start}-{end}" if end < _EOF_LINE else f"{start}-end"
+                            result = _synthetic_note(
+                                f"You already read these lines ({call.arguments.get('path')} "
+                                f"{shown}) at turn {prior[-1][2]} and nothing has changed "
+                                "since; they are not sent again. Use what you read, or make "
+                                "the change now with edit_file."
+                            )
+                            outcome.reread_notes += 1
+                            _trace_call(turn, call, result, None)
+                            results.append(result)
+                            self._emit("tool", name=call.name, ok=True)
+                            continue
+                        reads.setdefault(path, []).append((start, end, turn, state_version))
 
                 is_command = call.name in COMMAND_TOOLS
                 version_before = state_version
@@ -809,6 +891,12 @@ class AgentLoop:
                     edited = True
                 if call.name == "run_tests":
                     data = getattr(result, "data", None) or {}
+                    score = _test_score(data)
+                    if score is not None:
+                        if best_tests is not None and score < best_tests:
+                            progressed = True
+                        if best_tests is None or score < best_tests:
+                            best_tests = score
                     if (result.success and data.get("failed") == 0
                             and (data.get("passed") or 0) > 0):
                         if edited:
@@ -837,6 +925,29 @@ class AgentLoop:
                 not r.success for r in results
             ):
                 break
+
+            if progressed or state_version != turn_version:
+                stalled, stall_nudged = 0, False
+            else:
+                stalled += 1
+            if self.no_progress_turns > 0:
+                if stalled > self.no_progress_turns:
+                    outcome.stop_reason = "no_progress"
+                    outcome.final_message = (
+                        f"Stopped: {stalled} turns in a row without changing anything "
+                        "(no edit, no workspace change, no test improvement; "
+                        "AWOS_AGENT_NO_PROGRESS_TURNS)."
+                    )
+                    self._emit("no_progress", turn=turn, turns=stalled)
+                    _trace(f"t{turn} stopped: {stalled} turns without progress")
+                    break
+                if stalled >= nudge_at and not stall_nudged and results:
+                    stall_nudged = True
+                    last = len(results) - 1
+                    message = NO_PROGRESS_MESSAGE.format(n=stalled)
+                    notes[last] = f"{notes[last]}\n\n{message}" if last in notes else message
+                    self._emit("no_progress_nudge", turn=turn, turns=stalled)
+                    _trace(f"t{turn} nudged: {stalled} turns without progress")
 
             if green and not fresh_green:
                 idle += 1
@@ -1016,6 +1127,45 @@ def _condense_history(messages: list[dict[str, Any]], keep_turns: int) -> int:
             if changed:
                 messages[i] = {**message, "content": new_blocks}
     return stubbed
+
+
+def _read_span(args: Any, root: Optional[str]) -> Optional[tuple[str, int, int]]:
+    """(normalised path, first line, last line) a read_file call asks for.
+
+    None when the arguments cannot be read plainly; such a call is not tracked.
+    """
+    if not isinstance(args, dict):
+        return None
+    path = args.get("path")
+    if not isinstance(path, str) or not path.strip():
+        return None
+    try:
+        start = int(args.get("start_line") or 1)
+        end_raw = args.get("end_line")
+        end = int(end_raw) if end_raw not in (None, "", 0, "0") else _EOF_LINE
+    except (TypeError, ValueError):
+        return None
+    start = max(1, start)
+    end = max(end, start)
+    full = path if os.path.isabs(path) or not root else os.path.join(root, path)
+    return os.path.normpath(full), start, end
+
+
+def _test_score(data: dict) -> Optional[tuple[int, int]]:
+    """Sortable run_tests result, lower is better: (failed, -passed)."""
+    failed, passed = data.get("failed"), data.get("passed")
+    if not isinstance(failed, int) or not isinstance(passed, int):
+        return None
+    return failed, -passed
+
+
+def _synthetic_note(message: str) -> Any:
+    """A successful ToolResult produced by the loop rather than a tool."""
+    try:
+        from .tools.base import ToolResult
+    except ImportError:
+        from tools.base import ToolResult
+    return ToolResult.ok(message, {})
 
 
 def _with_note(result: Any, note: str) -> Any:
