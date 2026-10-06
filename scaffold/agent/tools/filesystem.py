@@ -323,8 +323,21 @@ class GrepTool(_RootedTool):
         if refusal:
             return ToolResult.fail(refusal)
 
+        if not root.exists():
+            return ToolResult.fail(f"path not found: {root}")
+
+        # A single file as root: rglob on a file yields nothing, which used to
+        # read as a silent "(no matches)". Search that file; file_glob is moot
+        # because the caller named the file explicitly.
+        if root.is_file():
+            candidates = [root]
+            base = root.parent
+        else:
+            candidates = sorted(root.rglob(file_glob))
+            base = root
+
         hits: list[dict] = []
-        for filepath in sorted(root.rglob(file_glob)):
+        for filepath in candidates:
             if not filepath.is_file() or self._refusal(filepath.resolve()):
                 continue
             try:
@@ -333,7 +346,7 @@ class GrepTool(_RootedTool):
                 continue
             for lineno, line in enumerate(text.splitlines(), 1):
                 if regex.search(line):
-                    hits.append({"file": str(filepath.relative_to(root)), "line": lineno, "text": line.rstrip()})
+                    hits.append({"file": str(filepath.relative_to(base)), "line": lineno, "text": line.rstrip()})
                     if len(hits) >= max_results:
                         break
             if len(hits) >= max_results:
