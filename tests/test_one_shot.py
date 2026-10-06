@@ -316,8 +316,11 @@ def test_model_error_falls_back_with_no_edits(capsys):
     assert "model call failed" in capsys.readouterr().out
 
 
-def test_off_by_default_leaves_behaviour_unchanged(monkeypatch):
+def test_on_by_default_and_env_zero_leaves_behaviour_unchanged(monkeypatch):
+    # Adopted by ablation 3b: on unless AWOS_ONE_SHOT says otherwise.
     monkeypatch.delenv("AWOS_ONE_SHOT", raising=False)
+    assert one_shot.one_shot_enabled() is True
+    monkeypatch.setenv("AWOS_ONE_SHOT", "0")
     assert one_shot.one_shot_enabled() is False
     r = _run(FIX, [GREEN], env="0")
     assert r.fake.calls == []

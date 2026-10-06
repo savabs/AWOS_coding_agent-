@@ -61,3 +61,45 @@ agent loop executor.
 
 **Then compare with Aider.** Use the backupd baseline, run 20261002T223614:
 Aider solved 5/12 at $0.0012 per job.
+
+## Result (scored 2026-10-06): ADOPTED
+
+Runs:
+
+- **Ablation 3b:** backupd run 20261006T113109, 2 passes.
+- **Comparison:** ablation 3 run 20261005T183332, paired per job.
+- **Real issues:** runs 20261006T140351, 20261006T140543 and 20261006T142225.
+- **Health:** all four runs are VALID.
+
+| Criterion | off | on |
+|---|---|---|
+| 1. Billed $ per job (off −25%; on must not rise) | $0.0106 → **$0.0055, −48%**, CI [+0.0009, +0.0093], p = 0.05 ✅ | $0.0084 → $0.0082, −2% ✅ |
+| 2. Minutes per job fall ≥20% | 3.83 → **1.94, −49%**, p = 0.01 ✅ | 3.35 → 2.31, −31%, p = 0.13 |
+| 3. No retry after a cut-off | ✅ | ✅ |
+| 3. Repair call fixes ≥ half of failed blocks | **13 of 14** ✅ | (pooled) |
+| 3. more-itertools: ≥1 block applied | ✅ sections of `more.py` shown; the repair fixed the only failed block | — |
+| 4. Guardrail: solved | 15/24 (≥13) ✅ | 13/24 (≥9) ✅ |
+| 4. Guardrail: real issues | **3/3** ✅ | — |
+| 5. VALID | ✅ | ✅ |
+
+**Decision.** `AWOS_ONE_SHOT` now defaults to on. Set `AWOS_ONE_SHOT=0` to
+turn it off.
+
+**Against Aider** (backupd):
+
+- AWOS off solves 62% of jobs at $0.0055 per job, about 114 solved per $1.
+- Aider solves 42% at $0.0012, about 347 solved per $1.
+- The gap was about 25× at the start of the cost work. It is now about 3×,
+  and AWOS solves more jobs.
+
+**Still open:**
+
+- **(C) One-shot accepts visible tests alone.** It missed hidden requirements
+  on j07, j11 and j12.
+- **(G) The agent loop has no no-progress stop.** Real sqlparse took 90 turns
+  and $0.085 before it recovered.
+- **New: "no tests ran" after a one-shot.** The test runner apparently
+  matches tests to changed files by name, and real repos name their tests
+  differently. This sent sqlparse twice and more-itertools once to the agent
+  loop after their edits had applied. The fix is to run the full visible suite
+  when no matched tests are found.

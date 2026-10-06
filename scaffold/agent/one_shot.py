@@ -73,7 +73,10 @@ MAX_FILE_BYTES = 400_000
 
 
 def one_shot_enabled() -> bool:
-    return os.getenv(ONE_SHOT_ENV, "0").strip().lower() in ("1", "on", "true", "yes")
+    """On by default since ablation 3b (docs/specs/ablation_one_shot_b.md): off-arm
+    cost -48% and time -49% on held-out backupd, solves within the guardrail.
+    AWOS_ONE_SHOT=0 turns it off."""
+    return os.getenv(ONE_SHOT_ENV, "1").strip().lower() in ("1", "on", "true", "yes")
 
 
 def _env_int(name: str, default: int) -> int:
