@@ -26,7 +26,10 @@ files to the chat" and, run non-interactively, often never edits at all (run
 20260929T131340 j08/j11/j12, 20260930T170402 j03/j04/j06). AWOS's agent can read
 any file, so for a fair start `auto` adds every non-test source file (editable)
 and the visible tests (--read, read-only) while they fit a token budget, else
-only the sources, else none (repo map + Aider's own requests). A run that ends
+only the sources, else the sources that define what the goal names, whole, up
+to --relevant-cap-tokens (select_files "relevant"; pyparsing/more-itertools
+runs of 2026-10-06 asked to add files without it), else none (repo map +
+Aider's own requests). A run that ends
 with no edits is reported as `aider_no_edit` (see no_edit_reason). Its history files go to
 the state dir; its repo-map cache is removed from the project after the run.
 
@@ -505,6 +508,10 @@ def test_files(project: Path) -> list[str]:
 # Chat budget for --add-files auto, in estimated tokens (bytes / 4). The job
 # series' projects are ~10k tokens with their tests; Flash has a 1M context.
 DEFAULT_FILE_BUDGET_TOKENS = 40000
+# Hard cap for the "relevant" fallback: the source files that define what the
+# goal names go in whole even when one of them alone is over the budget (a
+# huge core module, e.g. pyparsing/core.py ~63k tokens), up to this cap.
+DEFAULT_RELEVANT_CAP_TOKENS = 120000
 
 
 def estimate_tokens(project: Path, files: list[str]) -> int:
@@ -517,12 +524,101 @@ def estimate_tokens(project: Path, files: list[str]) -> int:
     return total // 4
 
 
+_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
+_CODE = re.compile(r"```.*?(?:```|\Z)|`[^`\n]+`", re.S)
+_DEFINES = re.compile(r"^[ \t]*(?:async[ \t]+)?(?:def|class)[ \t]+([A-Za-z_]\w*)"
+                      r"|^([A-Za-z_]\w*)[ \t]*(?::[^=\n]*)?=(?!=)", re.M)
+
+
+def goal_identifiers(goal: str) -> tuple[set[str], set[str]]:
+    """(title identifiers, all identifiers) the goal names as code.
+
+    Code-shaped words: anything inside `backticks` or ``` fences, plus words
+    with an underscore or an inner capital (match_previous_expr, parseString).
+    Title = the goal's first line (the issue title), the strongest signal.
+    """
+    goal = goal or ""
+
+    def code_words(text: str) -> set[str]:
+        words = {w for m in _CODE.finditer(text) for w in _IDENT.findall(m.group(0))}
+        words |= {w for w in _IDENT.findall(text)
+                  if "_" in w.strip("_") or re.search(r"[a-z][A-Z]", w)}
+        return words
+
+    title = goal.strip().split("\n", 1)[0]
+    return code_words(title), code_words(goal)
+
+
+def relevant_sources(project: Path, src: list[str], goal: str) -> list[str]:
+    """Sources that define (def/class/module-level name) what the goal names,
+    most relevant first.
+
+    The files defining an identifier of the goal's title (the issue title names
+    the function to fix: match_previous_expr, value_chain, backoff) if any;
+    else the files defining a distinctive goal identifier - one defined in at
+    most 2 sources, so `expr = ...` in 40 example scripts does not count.
+    Ranked by title identifiers defined, then by rarity-weighted names, then path.
+    """
+    title_ids, all_ids = goal_identifiers(goal)
+    if not all_ids:
+        return []
+    defs: dict[str, set[str]] = {}
+    for rel in src:
+        try:
+            text = (project / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        hits = {a or b for a, b in _DEFINES.findall(text)} & all_ids
+        if hits:
+            defs[rel] = hits
+    df: dict[str, int] = {}
+    for hits in defs.values():
+        for name in hits:
+            df[name] = df.get(name, 0) + 1
+    if any(hits & title_ids for hits in defs.values()):
+        keep = {rel: hits for rel, hits in defs.items() if hits & title_ids}
+    else:
+        keep = {rel: {n for n in hits if df[n] <= 2} for rel, hits in defs.items()}
+        keep = {rel: hits for rel, hits in keep.items() if hits}
+    # Rarer names weigh more: a name only this file defines counts 1, one of 2 counts 1/2.
+    return sorted(keep, key=lambda rel: (-len(keep[rel] & title_ids),
+                                         -sum(1 / df[n] for n in keep[rel]), rel))
+
+
+def relevant_tests(project: Path, tests: list[str], edit: list[str], goal: str) -> list[str]:
+    """Tests that name an edited module's stem in their path or mention a goal
+    title identifier (any goal identifier when the title names none), most
+    relevant first; unrelated tests are left out."""
+    title_ids, all_ids = goal_identifiers(goal)
+    wanted = title_ids or all_ids
+    stems = {Path(rel).stem for rel in edit if Path(rel).stem != "__init__"}
+    stems |= {Path(rel).parent.name for rel in edit if Path(rel).stem == "__init__"}
+    scored = []
+    for rel in tests:
+        try:
+            text = (project / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        named = any(s and s in Path(rel).stem for s in stems)
+        mentioned = len(set(_IDENT.findall(text)) & wanted)
+        if named or mentioned:
+            scored.append((not named, -mentioned, rel))
+    return [rel for *_, rel in sorted(scored)]
+
+
 def select_files(project: Path, mode: str = "auto",
-                 budget_tokens: int = DEFAULT_FILE_BUDGET_TOKENS) -> tuple[list[str], list[str], str]:
+                 budget_tokens: int = DEFAULT_FILE_BUDGET_TOKENS, goal: str = "",
+                 cap_tokens: int = DEFAULT_RELEVANT_CAP_TOKENS,
+                 ) -> tuple[list[str], list[str], str]:
     """(editable files, read-only files, how) Aider starts with in its chat.
 
     auto: sources + tests (read-only) if both fit the budget; else sources only
-    if they fit; else nothing (Aider works from its repo map and asks for files).
+    if they fit; else "relevant": the sources that define what the goal names
+    (relevant_sources), most relevant first, each added whole while the total
+    stays under cap_tokens, even if one file alone is over the budget (else
+    Aider asks to add it and never edits); then tests read-only, only while the
+    total stays under the budget (tests are dropped first). No relevant source
+    fits: nothing (Aider works from its repo map and asks for files).
     src: every source file, no budget. none: nothing.
     """
     if mode == "none":
@@ -536,7 +632,21 @@ def select_files(project: Path, mode: str = "auto",
         return src, tests, "src+tests"
     if src and src_tokens <= budget_tokens:
         return src, [], "src"
-    return [], [], "repo_map"
+    edit, used = [], 0
+    for rel in relevant_sources(project, src, goal):
+        cost = estimate_tokens(project, [rel])
+        if used + cost <= cap_tokens:
+            edit.append(rel)
+            used += cost
+    if not edit:
+        return [], [], "repo_map"
+    read = []
+    for rel in relevant_tests(project, tests, edit, goal):
+        cost = estimate_tokens(project, [rel])
+        if used + cost <= budget_tokens:
+            read.append(rel)
+            used += cost
+    return edit, read, "relevant"
 
 
 # ── run ───────────────────────────────────────────────────────────────────────
@@ -597,11 +707,15 @@ def main(argv: list[str] | None = None) -> int:
                     help="automatic follow-up rounds per message (stock Aider: 3)")
     ap.add_argument("--add-files", choices=["auto", "src", "none"], default="auto",
                     help="auto (default): every non-test source file plus the visible tests "
-                         "read-only, under --file-budget-tokens (else sources only, else none); "
+                         "read-only, under --file-budget-tokens (else sources only, else the sources "
+                         "defining what the goal names, under --relevant-cap-tokens, else none); "
                          "src: every non-test .py file, no budget; none: Aider picks files from "
                          "its repo map and asks for them")
     ap.add_argument("--file-budget-tokens", type=int, default=DEFAULT_FILE_BUDGET_TOKENS,
                     help="estimated-token budget for --add-files auto")
+    ap.add_argument("--relevant-cap-tokens", type=int, default=DEFAULT_RELEVANT_CAP_TOKENS,
+                    help="when sources are over the budget, auto still adds the sources that "
+                         "define what the goal names (whole), up to this many estimated tokens")
     ap.add_argument("--edit-format", default=None, help="override the edit format (default diff)")
     ap.add_argument("--map-tokens", type=int, default=None, help="repo map budget (Aider default: by context size)")
     ap.add_argument("--request-timeout", type=float, default=None,
@@ -631,7 +745,8 @@ def main(argv: list[str] | None = None) -> int:
         metadata_file = state / "aider.model.metadata.json"
         metadata_file.write_text(json.dumps(meta, indent=2), encoding="utf-8")
     test_cmd = args.test_cmd or f"{shlex.quote(sys.executable)} -m pytest -q -p no:cacheprovider"
-    files, read_files, files_how = select_files(project, args.add_files, args.file_budget_tokens)
+    files, read_files, files_how = select_files(project, args.add_files, args.file_budget_tokens,
+                                              goal, args.relevant_cap_tokens)
     request_timeout = args.request_timeout or model_timeout_s()
     cmd = build_command(prefix, args.model, goal, state, test_cmd, settings_file, metadata_file,
                         args.edit_format, args.map_tokens, files, request_timeout, read_files)
