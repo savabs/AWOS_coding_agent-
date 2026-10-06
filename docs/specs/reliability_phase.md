@@ -91,3 +91,47 @@ more-itertools from 0/0 to 595 mapped / 740 full.
 **Run 2** re-runs AWOS on all 28 issues with these fixes. Aider's first 9
 issues are reused, and it runs on the other 19. The run 1 AWOS rows stay as the
 pre-fix record.
+
+## Run 2 result (2026-10-07): 28 real issues, K = 2
+
+Report: `docs/memory/runs/report_real_issues_run2/report.md`.
+
+| | AWOS (`off`) | Aider + Flash |
+|---|---|---|
+| Solved (paired, 55 runs) | 36 (65.5%, Wilson [52, 77]) | 37 (67.3%, [54, 78]) |
+| pass@1 / pass^2 | 64.3% / 55.6% | 66.1% / 51.9% |
+| Billed $/job | $0.0079 | $0.0088 |
+| Mean turns | 10.2 | 1.6 |
+| Minutes/job | 2.5 | 2.5 |
+
+- **Solve rate:** paired difference −1.8 pp, CI [−18, +14], p = 1.0. There is
+  no detectable difference; the MDE is about 23 pp at 28 tasks.
+- **Cost:** about the same. Turns differ significantly (+8.9, p = 1e-4), but
+  most AWOS turns are cache hits.
+- **Caveat: the Aider arm was partly handicapped.**
+  - On repos whose source is over its 40k budget (boltons, more-itertools,
+    pyparsing, tomlkit), `--add-files auto` fell back to `repo_map` with 0
+    files. Fix: `0359f8a`.
+  - One Aider row is invalid (pyparsing_560 r2).
+  - The comparison has to be re-run with the fixed harness before any claim.
+
+**The 20 AWOS failures by cause:**
+
+| Cause | Runs | Issues |
+|---|---|---|
+| No committed edit (no-progress stop at 27 turns or more) | 10 | parse ×3, pyparsing ×4, sqlparse ×3 |
+| (C): visible tests green, hidden requirement missed (mostly one-shot "solved in 1 call") | 9 | more-itertools_1304 ×2, toolz_634 ×2, toolz_635 ×2, parse_249, pyparsing_647, tabulate_176 |
+| Broken edit, rolled back as intended | 1 | cachetools_405 |
+
+Aider also fails toolz_634 ×2, so that hidden requirement may not be
+reachable from the issue text.
+
+**Next, one change per run:**
+
+1. Merge the grep single-file fix (`075a0a6`, a bug) and the Aider
+   file-selection fix (`0359f8a`, harness). Re-run Aider on the affected repos.
+2. Ablation 4, whole top source (`docs/specs/ablation_whole_source.md`). It
+   targets the no-edit group on parse.
+3. Ablation (C): acceptance check from the issue's reproduction snippet. It
+   targets 9 runs.
+4. Agent-loop memory and nudges for the remaining no-edit cases.
