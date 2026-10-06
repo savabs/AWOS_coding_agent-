@@ -445,6 +445,50 @@ class TestRunner:
                 return ln[:300]
         return lines[-1][:300] if lines else "pytest produced no output"
 
+    def _crash_result(self, combined: str, command: List[str], exit_code: Optional[int]) -> TestResult:
+        """
+        pytest died before counting anything. When the traceback points into
+        the project (its conftest, its package import), the code under test is
+        broken — an edit that breaks the import must fail, so it counts as one
+        error. Otherwise the environment stopped pytest: no evidence.
+        """
+        # The sandbox denying a file is environmental even when project code
+        # (a conftest reading it) is where the error surfaced.
+        denied = re.search(r"PermissionError|Operation not permitted|\bEPERM\b", combined)
+        if not denied and self._crash_in_project(combined):
+            reason = self._crash_reason(combined)
+            logger.info("[test_runner] pytest crashed in project code — %s", reason)
+            return TestResult(
+                errors=1,
+                pass_rate=0.0,
+                raw_output=f"pytest crashed loading project code: {reason}\n\n{combined}",
+                test_command=command,
+            )
+        return self._infra_result(combined, command, exit_code)
+
+    def _project_roots(self) -> List[str]:
+        roots = {str(self.project_root.resolve()), os.path.realpath(self.project_root)}
+        mount = getattr(self.sandbox, "MOUNT", None)  # Docker: the container's path
+        if isinstance(mount, str) and mount:
+            roots.add(mount)
+        return [r.rstrip(os.sep) + os.sep for r in roots]
+
+    def _crash_in_project(self, text: str) -> bool:
+        """True when a traceback frame or conftest path names a project file."""
+        paths = re.findall(r'File "([^"]+)"', text)
+        paths += re.findall(r"conftest '([^']+)'", text)
+        paths += re.findall(r"^(?:INTERNALERROR> )?\s*([^\s:\"']+\.py):\d+: in ", text, re.MULTILINE)
+        roots = self._project_roots()
+        for path in paths:
+            if "site-packages" in path or path.startswith("<"):
+                continue
+            if os.path.isabs(path):
+                if any(path.startswith(r) for r in roots):
+                    return True
+            elif (self.project_root / path).is_file():
+                return True
+        return False
+
     def _infra_result(self, combined: str, command: List[str], exit_code: Optional[int]) -> TestResult:
         reason = self._crash_reason(combined)
         if exit_code is not None:
@@ -493,7 +537,7 @@ class TestRunner:
                 exit_code in _PYTEST_CRASH_CODES or self._looks_crashed(combined)
             ):
                 # A crash whose traceback happens to contain "in 1.0s".
-                return self._infra_result(combined, command, exit_code)
+                return self._crash_result(combined, command, exit_code)
 
             pass_rate = passed / total if total > 0 else 0.0
             return TestResult(
@@ -512,7 +556,7 @@ class TestRunner:
             or self._looks_crashed(combined)
             or "error" in combined.lower()
         ):
-            return self._infra_result(combined, command, exit_code)
+            return self._crash_result(combined, command, exit_code)
 
         # Fallback: generic regex
         return self._parse_generic(stdout, stderr, command)

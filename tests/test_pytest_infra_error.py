@@ -164,3 +164,55 @@ def test_sandbox_exit_code_reaches_the_parser(tmp_path):
 
     result = TestRunner(str(root), sandbox=_Crashing()).run(changed_files=["mod.py"])
     assert result.infra_error and "exit code 4" in result.infra_reason
+
+
+# ── A crash inside project code is a real failure, not "could not run" ──
+
+def test_conftest_import_error_from_a_project_module_is_a_counted_error(tmp_path):
+    # An edit that breaks the package import must still fail the task.
+    root = _jsonpointer_like(tmp_path)
+    _write(root, "tests/conftest.py", "import mod\n")
+    _write(root, "mod.py", "def f(:\n    return 1\n")  # SyntaxError
+    result = TestRunner(str(root)).run(changed_files=["mod.py"])
+    assert result.infra_error is False and result.no_tests_found is False
+    assert result.errors >= 1 and result.pass_rate == 0.0
+    assert "SyntaxError" in result.raw_output
+
+
+def test_conftest_import_error_text_is_a_counted_error(tmp_path):
+    root = _jsonpointer_like(tmp_path)
+    _write(root, "tests/conftest.py", "import mod\n")
+    out = (f"ImportError while loading conftest '{root.resolve()}/tests/conftest.py'.\n"
+           "tests/conftest.py:1: in <module>\n    import mod\n"
+           "mod.py:1: in <module>\n    import nope\n"
+           "E   ModuleNotFoundError: No module named 'nope'\n")
+    result = TestRunner(str(root))._parse_pytest("", out, [], exit_code=4)
+    assert (result.errors, result.infra_error, result.no_tests_found) == (1, False, False)
+    assert "ModuleNotFoundError" in result.raw_output
+
+
+def test_project_traceback_without_exit_code_is_a_counted_error(tmp_path):
+    root = _jsonpointer_like(tmp_path)
+    out = ("Traceback (most recent call last):\n"
+           f'  File "{root.resolve()}/mod.py", line 3, in <module>\n'
+           "NameError: name 'x' is not defined\n")
+    result = TestRunner(str(root))._parse_pytest("", out, [])
+    assert (result.errors, result.infra_error) == (1, False)
+
+
+def test_permission_error_on_a_parent_pytest_ini_is_infra(tmp_path):
+    root = _jsonpointer_like(tmp_path / "ws")
+    out = ("Traceback (most recent call last):\n"
+           '  File "/venv/lib/python3.12/site-packages/_pytest/config/findpaths.py", line 120, in locate_config\n'
+           f"PermissionError: [Errno 1] Operation not permitted: '{tmp_path}/pytest.ini'\n")
+    result = TestRunner(str(root))._parse_pytest("", out, [], exit_code=1)
+    assert (result.infra_error, result.no_tests_found, result.errors) == (True, True, 0)
+
+
+def test_internal_error_outside_the_project_is_infra(tmp_path):
+    root = _jsonpointer_like(tmp_path)
+    out = ("INTERNALERROR> Traceback (most recent call last):\n"
+           'INTERNALERROR>   File "/venv/lib/python3.12/site-packages/_pytest/main.py", line 283, in wrap_session\n'
+           "INTERNALERROR> KeyError: 'x'\n")
+    result = TestRunner(str(root))._parse_pytest(out, "", [], exit_code=3)
+    assert (result.infra_error, result.errors) == (True, 0)
