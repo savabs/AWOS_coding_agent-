@@ -293,6 +293,13 @@ def _agent_resume_reason(outcome, verdict: dict, model_errors: int) -> Optional[
         return f"{result.failed} test(s) failed after its edits"
     return None
 
+def _tests_not_run_status(result) -> str:
+    """Status text when no test counts exist; says so when pytest crashed."""
+    if getattr(result, "infra_error", False):
+        return f"tests could not run ({getattr(result, 'infra_reason', '')[:200]})"
+    return "no tests ran"
+
+
 try:
     from .agent_state_manager import AgentStateManager
     from .cheap_planner import CheapPlanner
@@ -2375,7 +2382,7 @@ class Orchestrator:
             if green and not shot.failed:
                 reason = None
             elif not tests_ran:
-                reason = "no tests ran"
+                reason = verdict["test_status"]
             elif not green:
                 reason = f"tests: {verdict['test_status']}"
             elif getattr(shot, "truncated", False):
@@ -2486,7 +2493,7 @@ class Orchestrator:
         test_status = (
             f"{test_result.passed} passed, {test_result.failed} failed"
             if tests_ran
-            else "no tests ran"
+            else _tests_not_run_status(test_result)
         )
         # "Nothing left to do" is only credible when an earlier task in this run
         # changed files. On new work the old tests pass before anything is done —
@@ -2725,6 +2732,11 @@ class Orchestrator:
             task["test_result"] = test_result
             if test_result.failed > 0:
                 success = False
+        elif getattr(test_result, "infra_error", False):
+            # The edit stays: a test runner that crashed is no evidence
+            # against it, and rolling it back discarded correct work.
+            print(f"[TASK {task_id}] {_tests_not_run_status(test_result)}")
+            task["test_result"] = test_result
 
         _cost = float(_task_usage.get("cost_usd", 0)) or esc_decision.spec.cost_per_req
         _aid = esc_decision.spec.level.value

@@ -66,12 +66,32 @@ class TestResult:
     #: "mapped" — only tests matched to the changed files ran; "full" — the
     #: project's whole visible suite ran; "" — nothing was run.
     mode: str = ""
+    #: pytest itself crashed before counting anything (internal error, usage
+    #: error, a config-discovery traceback): the tests could not run, which is
+    #: not "0 passed, 0 failed". no_tests_found is set too, so every consumer
+    #: treats it as no evidence rather than a red suite.
+    infra_error: bool = False
+    infra_reason: str = ""
 
 
 #: Through the running interpreter, not a bare `pytest` on PATH: without an
 #: activated venv the bare command is "not found", and verification silently
 #: ran nothing.
 _PYTEST_CMD = [sys.executable, "-m", "pytest", "--tb=short", "-q"]
+
+#: For a project with no pytest config: stop pytest's upward search. Without
+#: these, rootdir/inifile discovery stats pytest.ini, pyproject.toml, tox.ini
+#: and setup.cfg in every parent dir, and conftest.py lookup does the same; in
+#: the seatbelt sandbox a parent under /Users that holds one of those files
+#: (the AWOS checkout around a job workspace) answers EPERM and pytest dies
+#: before collecting. /dev/null as the ini adds nothing to the project tree
+#: (no file in the agent's diff) and exists in a container too; the paths are
+#: relative because the sandbox's cwd is the workspace in both backends.
+_NO_CONFIG_ARGS = ["-c", os.devnull, "--rootdir=.", "--confcutdir=."]
+
+#: pytest exit codes meaning it never got to run tests: interrupted (also
+#: collection errors), internal error, usage error.
+_PYTEST_CRASH_CODES = {2, 3, 4}
 
 
 class TestRunner:
@@ -144,6 +164,8 @@ class TestRunner:
         # No cache plugin: nothing written to .pytest_cache, inside a sandbox
         # or not. No color: ANSI codes would sit inside the summary line.
         base = list(cfg.command) + ["-p", "no:cacheprovider", "--color=no"]
+        if not self._has_pytest_config():
+            base += _NO_CONFIG_ARGS
         mapped = self.map_tests(changed_files)
         if mapped:
             result = self._execute(TestConfig("pytest", base + mapped, self.timeout_sec))
@@ -225,6 +247,22 @@ class TestRunner:
             if any(t.startswith(d + os.sep) for t in tests):
                 return [d]
         return []
+
+    def _has_pytest_config(self) -> bool:
+        """
+        True when project_root holds a file pytest takes as its config, which
+        ends the upward search there. A pyproject.toml or setup.cfg without a
+        pytest section does not: pytest keeps walking up past it.
+        """
+        root = self.project_root
+        for name in ("pytest.ini", ".pytest.ini", "pytest.toml", ".pytest.toml"):
+            if (root / name).is_file():
+                return True
+        return (
+            "[tool.pytest" in self._read(root / "pyproject.toml")
+            or "[pytest]" in self._read(root / "tox.ini")
+            or "[tool:pytest]" in self._read(root / "setup.cfg")
+        )
 
     def _configured_testpaths(self) -> bool:
         root = self.project_root
@@ -362,7 +400,7 @@ class TestRunner:
                 no_tests_found=True,
             )
 
-        return self._parse(cfg, result.stdout or "", result.stderr or "")
+        return self._parse(cfg, result.stdout or "", result.stderr or "", getattr(result, "returncode", None))
 
     def _execute_in_sandbox(self, cfg: TestConfig) -> TestResult:
         """Run the test command inside the sandbox; same parsing as on the host."""
@@ -381,12 +419,14 @@ class TestRunner:
             return TestResult(
                 raw_output=result.stderr[-2000:], test_command=command, no_tests_found=True
             )
-        return self._parse(cfg, result.stdout, result.stderr)
+        return self._parse(cfg, result.stdout, result.stderr, getattr(result, "exit_code", None))
 
-    def _parse(self, cfg: TestConfig, stdout: str, stderr: str) -> TestResult:
+    def _parse(
+        self, cfg: TestConfig, stdout: str, stderr: str, exit_code: Optional[int] = None
+    ) -> TestResult:
         # Dispatch to parser
         if cfg.runner == "pytest":
-            return self._parse_pytest(stdout, stderr, cfg.command)
+            return self._parse_pytest(stdout, stderr, cfg.command, exit_code=exit_code)
         elif cfg.runner == "jest":
             return self._parse_jest(stdout, stderr, cfg.command)
         elif cfg.runner == "vitest":
@@ -396,7 +436,31 @@ class TestRunner:
 
     # ── Parsers ─────────────────────────────────────────────────────────
 
-    def _parse_pytest(self, stdout: str, stderr: str, command: List[str]) -> TestResult:
+    @staticmethod
+    def _crash_reason(text: str) -> str:
+        """The line that says why pytest died, for the log and the agent."""
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        for ln in reversed(lines):
+            if re.search(r"(Error|Exception)\b|^ERROR:|INTERNALERROR", ln):
+                return ln[:300]
+        return lines[-1][:300] if lines else "pytest produced no output"
+
+    def _infra_result(self, combined: str, command: List[str], exit_code: Optional[int]) -> TestResult:
+        reason = self._crash_reason(combined)
+        if exit_code is not None:
+            reason = f"pytest exit code {exit_code}: {reason}"
+        logger.warning("[test_runner] tests could not run — %s", reason)
+        return TestResult(
+            raw_output=combined,
+            test_command=command,
+            no_tests_found=True,
+            infra_error=True,
+            infra_reason=reason,
+        )
+
+    def _parse_pytest(
+        self, stdout: str, stderr: str, command: List[str], exit_code: Optional[int] = None
+    ) -> TestResult:
         """Parse pytest --tb=short -q output."""
         combined = f"{stdout}\n{stderr}"
         if "\x1b[" in combined:
@@ -425,6 +489,11 @@ class TestRunner:
                     test_command=command,
                     no_tests_found=True,
                 )
+            if total == 0 and (
+                exit_code in _PYTEST_CRASH_CODES or self._looks_crashed(combined)
+            ):
+                # A crash whose traceback happens to contain "in 1.0s".
+                return self._infra_result(combined, command, exit_code)
 
             pass_rate = passed / total if total > 0 else 0.0
             return TestResult(
@@ -436,15 +505,25 @@ class TestRunner:
                 test_command=command,
             )
 
-        # Collection errors or other pytest errors
-        if "error" in combined.lower():
-            return TestResult(
-                raw_output=combined,
-                test_command=command,
-            )
+        # No summary line: pytest died before reporting (config discovery,
+        # plugin load, internal or usage error). Nothing was counted.
+        if (
+            exit_code in _PYTEST_CRASH_CODES
+            or self._looks_crashed(combined)
+            or "error" in combined.lower()
+        ):
+            return self._infra_result(combined, command, exit_code)
 
         # Fallback: generic regex
         return self._parse_generic(stdout, stderr, command)
+
+    @staticmethod
+    def _looks_crashed(text: str) -> bool:
+        return (
+            "INTERNALERROR" in text
+            or "ERROR: usage" in text
+            or "Traceback (most recent call last)" in text
+        )
 
     def _parse_jest(self, stdout: str, stderr: str, command: List[str]) -> TestResult:
         """Parse jest output."""

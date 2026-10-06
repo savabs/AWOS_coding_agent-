@@ -245,3 +245,24 @@ def test_no_single_file_fails_cleanly_for_the_single_file_executors(monkeypatch)
     out, orch = _single_task("", "worker", monkeypatch)
     assert out["success"] is False and out["failure_kind"] == "file_not_found"
     orch._execute_task_via_agent_loop.assert_not_called()
+
+
+def test_tests_that_could_not_run_keep_the_edit(capsys):
+    # real_jsonpointer: pytest crashed in the sandbox; a clean 0/0 failed the
+    # task and the full rollback discarded a correct edit.
+    crashed = TestResult(raw_output="PermissionError", no_tests_found=True,
+                         infra_error=True, infra_reason="PermissionError: '/Users/x/pytest.ini'")
+    out, ctx, root = _run(EDIT, test_result=crashed)
+    assert out["success"] is True
+    assert "a + b" in (root / "calc.py").read_text()
+    ctx["git"].rollback_file.assert_not_called()
+    assert "tests could not run (PermissionError" in capsys.readouterr().out
+
+
+def test_tests_not_run_status_text():
+    from scaffold.agent.orchestrator import _tests_not_run_status
+
+    assert _tests_not_run_status(None) == "no tests ran"
+    assert _tests_not_run_status(TestResult(no_tests_found=True)) == "no tests ran"
+    crashed = TestResult(no_tests_found=True, infra_error=True, infra_reason="exit code 3: boom")
+    assert _tests_not_run_status(crashed) == "tests could not run (exit code 3: boom)"
