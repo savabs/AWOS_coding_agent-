@@ -80,7 +80,8 @@ PIN_ENV = {
 ROUTING_ENV = ("AWOS_OPENROUTER_PROVIDER", "AWOS_OPENROUTER_ALLOW_FALLBACKS",
                # ablation knobs set by the launching shell, recorded the same way
                "AWOS_ONE_SHOT", "AWOS_ONE_SHOT_BUDGET_TOKENS", "AWOS_PLANNER",
-               "AWOS_PLANNER_MAX_FILES", "AWOS_INTEGRATION_REVIEW")
+               "AWOS_PLANNER_MAX_FILES", "AWOS_INTEGRATION_REVIEW",
+               "AWOS_ONE_SHOT_WHOLE_SOURCE_FRACTION")
 
 
 def routing_env() -> dict:
