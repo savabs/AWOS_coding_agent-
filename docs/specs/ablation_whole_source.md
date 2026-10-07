@@ -62,3 +62,45 @@ fix, so it is not part of this comparison.
 - If boltons_458 drops but parse rises, report it and consider a lower
   fraction. Do not pick a fraction after seeing the data: a re-tune would be
   its own run.
+
+## Result (2026-10-07): ADOPTED (default 0.5)
+
+Runs started 20261007T124029, K = 2, interleaved per series, with the grep fix
+in both arms. Report: `docs/memory/runs/report_ablation4_whole_source/report.md`.
+
+| Issue | Control (frac 0) | Whole source (frac 0.5) |
+|---|---|---|
+| parse_137 | 1/2 · $0.036 | **2/2** · $0.005 |
+| parse_159 | 2/2 · $0.018 | 2/2 · $0.006 |
+| parse_249 | 1/2 · $0.002 | 1/2 · $0.017 |
+| boltons_458 | 1/2 · $0.019 | 1/2 · $0.002 |
+| boltons_474 | 2/2 · $0.002 | 2/2 · $0.002 |
+| tomlkit_591 | 2/2 · $0.012 | 2/2 · $0.025 |
+| toolz_635 | 0/2 · $0.003 | **1/2** · $0.003 |
+| **Affected** | **9/14** | **11/14** |
+| boltons_428 (control) | 2/2 | 2/2 |
+| jsonpointer_64 (control) | 2/2 | 2/2 |
+
+Dollar amounts are logged $ per run.
+
+**Decision checks:**
+
+- **Solve rate up:** +14 pp per issue, CI [0, +29], sign-flip p = 0.50. That
+  is not significant, but the rule did not require significance.
+- **Issues:** 2 improved, 0 worse.
+- **Cost:** billed +2%, logged −33%, within the 50% guardrail.
+- **Collapse:** no affected issue went from 2/2 to 0/2.
+- **Controls:** unchanged.
+
+All checks pass, so the change is adopted. `AWOS_ONE_SHOT_WHOLE_SOURCE_FRACTION`
+stays at 0.5, which is already the code default since commit 39a3d11.
+
+**Observations:**
+
+- On parse, the one-shot now sees the fix region. It emits real blocks in
+  about 6 s, where before it rambled to the 16k cap.
+- On tomlkit_591 the whole source made the one-shot worse: one malformed
+  174 s reply and one partial edit. The agent loop still solved both runs, at
+  about 2× cost. Watch this pattern.
+- boltons_458 did not regress, even though its test file was pushed out of
+  the context.
