@@ -293,6 +293,11 @@ def _agent_resume_reason(outcome, verdict: dict, model_errors: int) -> Optional[
         return f"{result.failed} test(s) failed after its edits"
     return None
 
+#: Stops after which a green verdict may be resumed for failing acceptance
+#: tests: not wall_budget / no_progress (final by the resume rules above).
+_ACCEPTANCE_RESUMABLE_STOPS = ("completed", "max_turns", "repeated_tool_call")
+
+
 def _tests_not_run_status(result) -> str:
     """Status text when no test counts exist; says so when pytest crashed."""
     if getattr(result, "infra_error", False):
@@ -2151,16 +2156,27 @@ class Orchestrator:
         # One call with the relevant files preloaded, emitting SEARCH/REPLACE
         # edits; if the tests then pass, the AgentLoop never runs. Otherwise
         # its edits stay and the loop continues from them.
+        # AWOS_ACCEPTANCE (ablation C): acceptance tests from the issue, kept
+        # only where they fail on this start state; they gate "done" below.
+        self._acceptance_suite = self._acceptance_prepare(task, ctx, model, codebase_root,
+                                                          sandbox)
+        acc = self._acceptance_suite
+        acc_cost = acc.cost_usd if acc is not None else 0.0
+        acc_in = acc.input_tokens if acc is not None else 0
+        acc_out = acc.output_tokens if acc is not None else 0
         shot = self._one_shot_first(task, ctx, model, codebase_root, sandbox,
                                     task_id, needs_edits)
         shot_steps: list = []
-        shot_cost, shot_in, shot_out = 0.0, 0, 0
+        shot_cost, shot_in, shot_out = acc_cost, acc_in, acc_out
         if shot is not None:
-            shot_cost, shot_in, shot_out = shot["cost_usd"], shot["input_tokens"], shot["output_tokens"]
+            shot_cost += shot["cost_usd"]
+            shot_in += shot["input_tokens"]
+            shot_out += shot["output_tokens"]
             shot_steps = list(shot.get("steps") or [shot["step"]])
             files_changed.extend(shot["applied"])
             if shot["solved"]:
                 registry.close()
+                self._acceptance_cleanup(codebase_root)
                 verdict = shot["verdict"]
                 result = {
                     "success": True,
@@ -2223,7 +2239,17 @@ class Orchestrator:
                 )
                 model_errors = sum(o.stop_reason == "model_error" for o in outcomes)
                 reason = _agent_resume_reason(outcome, verdict, model_errors)
+                acc_feedback = ""
+                if (reason is None and verdict["success"]
+                        and outcome.stop_reason in _ACCEPTANCE_RESUMABLE_STOPS):
+                    acc_ok, acc_summary, acc_feedback = self._acceptance_check(
+                        codebase_root, sandbox)
+                    if not acc_ok:
+                        reason = f"acceptance tests failing ({acc_summary})"
                 if reason is None or retries_left <= 0:
+                    if acc_feedback:
+                        print(f"[ACCEPTANCE] still failing at the end ({acc_summary}); "
+                              "the visible-test verdict stands, edits kept")
                     break
                 if cost_cap is not None:
                     spent = shot_cost + sum(o.cost_usd for o in outcomes)
@@ -2247,9 +2273,11 @@ class Orchestrator:
                     + f"It changed these files: {', '.join(files_changed) or 'none'}. "
                     + f"Test status: {verdict['test_status']}. "
                     + "Continue from the current state of the files; do not start over."
+                    + (f"\n\n{acc_feedback}" if acc_feedback else "")
                 )
         finally:
             registry.close()  # a docker sandbox holds a container until closed
+            self._acceptance_cleanup(codebase_root)
 
         traces = getattr(self, "_notebook_traces", None)
         if traces is not None and outcomes:
@@ -2361,6 +2389,7 @@ class Orchestrator:
                   f"{shot.repair_failed} still failed"
                   + (f" ({shot.repair_error})" if shot.repair_error else ""))
         verdict = None
+        acc_feedback = ""
         if shot.error:
             reason = f"model call failed ({shot.error})"
             logger.warning("[ONE-SHOT] %s", reason)
@@ -2381,6 +2410,9 @@ class Orchestrator:
             green = tests_ran and tr.failed == 0 and tr.errors == 0 and tr.passed > 0
             if green and not shot.failed:
                 reason = None
+                acc_ok, acc_summary, acc_feedback = self._acceptance_check(codebase_root, sandbox)
+                if not acc_ok:
+                    reason = f"acceptance: {acc_summary}"
             elif not tests_ran:
                 reason = verdict["test_status"]
             elif not green:
@@ -2436,10 +2468,73 @@ class Orchestrator:
             parts.append(f"Test status after it: {verdict['test_status']}. Test output:\n{trimmed}")
         elif verdict:
             parts.append(f"Test status after it: {verdict['test_status']}.")
+        if acc_feedback:
+            parts.append(acc_feedback)
         parts.append("Continue from the current state of the files (its edits are in place); "
                      "do not start over. Fix what is still wrong and run the tests.")
         out["note"] = "\n\n".join(parts)
         return out
+
+    def _acceptance_prepare(self, task: dict, ctx: dict, model: str, codebase_root: str,
+                            sandbox):
+        """
+        AWOS_ACCEPTANCE=1: generate acceptance tests from the goal and keep the
+        ones that fail on the start state. None when off; never raises.
+        """
+        try:
+            from . import acceptance as acc_mod
+            from . import one_shot as one_shot_mod
+        except ImportError:
+            import acceptance as acc_mod
+            import one_shot as one_shot_mod
+        if not acc_mod.acceptance_enabled():
+            return None
+        acc_mod.remove_leftovers(codebase_root)
+        goal = getattr(ctx.get("session"), "goal", "")
+        action = str(task.get("action", ""))
+        text = goal if isinstance(goal, str) and len(goal) >= len(action) else action
+        try:
+            client = one_shot_mod.one_shot_client()
+            if client is None:
+                print("[ACCEPTANCE] gate inactive: no OpenAI-shaped client configured")
+                return None
+            suite = acc_mod.build_suite(text, codebase_root, ctx.get("exploration"),
+                                        client=client, model=model, sandbox=sandbox,
+                                        tracker=getattr(self, "tracker", None))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[ACCEPTANCE] gate inactive: {type(exc).__name__}: {exc}")
+            return None
+        dropped = ", ".join(f"{v} {k}" for k, v in suite.dropped.items())
+        print(f"[ACCEPTANCE] generated {suite.generated} tests, kept {len(suite.kept)} "
+              f"(failed on start), ${suite.cost_usd:.4f}"
+              + (f"; dropped: {dropped}" if dropped else "")
+              + (f"; {suite.error}" if suite.error else "")
+              + ("" if suite.active else "; gate inactive"))
+        if suite.active:
+            print(f"[ACCEPTANCE] kept: {', '.join(suite.kept)}")
+        return suite
+
+    def _acceptance_check(self, codebase_root: str, sandbox) -> tuple:
+        """(all_passed, summary, feedback); passes when the gate is inactive."""
+        suite = getattr(self, "_acceptance_suite", None)
+        if suite is None or not suite.active:
+            return True, "inactive", ""
+        try:
+            from .acceptance import run_acceptance
+        except ImportError:
+            from acceptance import run_acceptance
+        return run_acceptance(codebase_root, suite, sandbox)
+
+    def _acceptance_cleanup(self, codebase_root: str) -> None:
+        """The acceptance tests never outlive their task, on disk or in memory."""
+        if getattr(self, "_acceptance_suite", None) is None:
+            return
+        self._acceptance_suite = None
+        try:
+            from .acceptance import remove_leftovers
+        except ImportError:
+            from acceptance import remove_leftovers
+        remove_leftovers(codebase_root)
 
     def _record_agent_loop_spend(self, model: str, outcome) -> None:
         """
