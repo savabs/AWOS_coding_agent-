@@ -497,7 +497,9 @@ def _big_module() -> str:
     return "\n".join(out) + "\n"
 
 
-def test_large_file_gets_sections_with_line_headers_and_outline():
+def test_large_file_gets_sections_with_line_headers_and_outline(monkeypatch):
+    # The top source would otherwise go whole (whole-source rule); test sections.
+    monkeypatch.setenv("AWOS_ONE_SHOT_WHOLE_SOURCE_FRACTION", "0")
     root = _project()
     src = _big_module()
     (root / "pkg" / "more.py").write_text(src, encoding="utf-8")
@@ -513,7 +515,8 @@ def test_large_file_gets_sections_with_line_headers_and_outline():
     assert ctx.tokens <= 24000 + 50
 
 
-def test_block_copied_from_a_section_applies():
+def test_block_copied_from_a_section_applies(monkeypatch):
+    monkeypatch.setenv("AWOS_ONE_SHOT_WHOLE_SOURCE_FRACTION", "0")
     root = _project()
     (root / "pkg" / "more.py").write_text(_big_module(), encoding="utf-8")
     ctx = build_context(str(root), "fix bucket_lookup", None, 24000)
