@@ -44,6 +44,16 @@ acceptance test, one that fails on start and also on a correct fix, could
 push a correct solution into the agent loop, adding cost, or mislead the
 agent. The must-fail-first filter limits this but cannot remove it.
 
+**Implementation note (`be152a4`, recorded before the run).** If the
+acceptance tests still fail after the last allowed agent retry, the task keeps
+its visible-test verdict and its edits. There is no rollback, because a wrong
+acceptance test must not throw away a correct patch. So the gate's power is
+that it forces more work, not that it vetoes the result.
+
+This does not change the measurement: hidden tests decide "solved" in both
+arms. The tests are written to a hidden directory in the workspace only while
+they run, then deleted, so they never reach the patch.
+
 ## Design
 
 - **Target issues** (a (C) miss in run 2 or ablation 4): more-itertools_1304,
