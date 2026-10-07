@@ -126,10 +126,37 @@ Report: `docs/memory/runs/report_real_issues_run2/report.md`.
 Aider also fails toolz_634 ×2, so that hidden requirement may not be
 reachable from the issue text.
 
+### Aider fairness re-run (2026-10-07, harness `0359f8a`)
+
+Aider was re-run on the 12 large-source issues (boltons, more-itertools,
+pyparsing, tomlkit; K = 2) with sources selected by the goal's identifiers.
+Report: `docs/memory/runs/report_real_issues_run2_fair/report.md`.
+
+| | AWOS (`off`) | Aider + Flash (fixed harness) |
+|---|---|---|
+| Solved (56 paired runs, all valid) | 36 (64.3%, Wilson [51, 76]) | 34 (60.7%, [48, 72]) |
+| pass@1 / pass^2 | 64.3% / **53.6%** | 60.7% / 42.9% |
+| Billed $/job | $0.0084 | $0.0066 |
+| Mean turns / minutes | 10.8 / 2.7 | 1.1 / 2.4 |
+
+- **Solve rate:** AWOS − Aider = +3.6 pp, CI [−14, +21], p = 0.84, which is
+  not significant (MDE about 25 pp). Cost: +$0.0018/job, p = 0.30, not
+  significant.
+- **The fix did not help Aider.** With the right files it lost runs on
+  boltons_428, tomlkit_619 (0/2 instead of 2/2) and more-itertools_1304, to
+  two model behaviours:
+  - DeepSeek Flash repeating itself until the 16k output cap;
+  - "asked for files it had".
+- **Verdict at n = 28:** AWOS and Aider are at parity on solve rate and cost,
+  with no detectable difference. AWOS solves both repeats more often
+  (pass^2 54% vs 43%). The real-issue gap to close is the 20 AWOS failures
+  above, not Aider.
+
 **Next, one change per run:**
 
-1. Merge the grep single-file fix (`075a0a6`, a bug) and the Aider
-   file-selection fix (`0359f8a`, harness). Re-run Aider on the affected repos.
+1. ~~Merge the grep single-file fix (`075a0a6`, a bug) and the Aider
+   file-selection fix (`0359f8a`, harness). Re-run Aider on the affected
+   repos.~~ Done, see above.
 2. Ablation 4, whole top source (`docs/specs/ablation_whole_source.md`). It
    targets the no-edit group on parse.
 3. Ablation (C): acceptance check from the issue's reproduction snippet. It
