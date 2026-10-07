@@ -86,3 +86,68 @@ Significance is not required at this n; a consistent direction is.
 **Reject (default 0)** otherwise. Report the false-alarm rate either way: a
 high rate means the generator needs work, not that the idea is wrong. Tuning
 the prompt after seeing the data needs a new pre-registered run.
+
+## Result (2026-10-08): REJECTED (default stays 0)
+
+Runs 2026-10-07 17:00 to 2026-10-08 01:39, K = 2, interleaved per issue. The
+Mac slept through several gaps, and the clock-based timings exclude sleep.
+
+| Issue | Control (acc 0) | Acceptance (acc 1) |
+|---|---|---|
+| more-itertools_1304 | 2/2 · $0.002 | 2/2 · $0.004 |
+| parse_249 | 2/2 · $0.008 | 2/2 · $0.005 |
+| pyparsing_647 | 2/2 · $0.014 | 2/2 · $0.011 |
+| tabulate_176 | 1/2 · $0.014 | **2/2** · $0.035 |
+| toolz_634 | 1/2 · $0.026 | 0/2 · $0.013 |
+| toolz_635 | 2/2 · $0.003 | 2/2 · $0.003 |
+| boltons_458 | 1/2 · $0.002 | **2/2** · $0.011 |
+| **Target** | **11/14** | **12/14** |
+| boltons_474 (control) | 2/2 | 2/2 |
+| tabulate_256 (control) | 2/2 · $0.002 | **0/2** · $0.036 |
+| jsonpointer_64 (control) | 2/2 | 2/2 |
+| sqlparse_867 (control) | 2/2 · $0.002 | **0/2** · $0.142 |
+
+Dollar amounts are logged $ per run.
+
+**Decision checks:**
+
+- **Solve rate:** target +7 pp, with 2 improved and 1 worse (p = 1.0). This
+  check passes.
+- **Cost:** billed $/run over all 11 issues rose **+215%** (limit +50%). This
+  check fails.
+- **Collapse:** **2 controls fell from 2/2 to 0/2.** This check fails.
+
+The change is rejected.
+
+**Why: wrong acceptance tests that the must-fail-first filter cannot catch.**
+On both collapsed controls the sequence was the same:
+
+1. The one-shot made the edit that solves the issue in one call without the
+   gate.
+2. The kept acceptance tests still failed: sqlparse 0/4 passed, tabulate 2/5.
+   They were **wrong tests**. They fail on the start state **and** on a
+   correct fix, so the must-fail-first filter cannot tell them from real
+   tests of new behaviour.
+3. The agent chased them, up to 136 turns and $0.25 logged, made no progress,
+   and was stopped (no_progress or retries).
+4. The task was marked failed, and the full rollback **discarded the correct
+   one-shot edit**, so the hidden tests saw the base.
+
+So the "no rollback on a final acceptance failure" rule (`be152a4`) only
+covered the green-loop path. An acceptance-triggered fallback that ends in
+`no_progress` still rolls back.
+
+The gate was active on 23 of 24 acceptance runs. One generator call timed
+out after a wake from sleep, and the gate was inactive for that run.
+
+**What a revised C would need.** Each item is its own pre-registered run.
+
+1. **Never lose the one-shot edit.** If a fallback was triggered **only** by
+   acceptance tests and the agent loop then fails, restore the post-one-shot
+   state and its visible-green verdict, not a rollback to base. This alone
+   would have kept both collapsed controls at 2/2.
+2. **Bound the extra work.** An acceptance failure buys at most one repair
+   attempt (a few turns), not a full agent loop.
+3. **Arbitrate test validity.** When visible tests are green and acceptance
+   fails, one cheap call decides whether the code or the test is wrong, and
+   drops the tests it judges wrong.
