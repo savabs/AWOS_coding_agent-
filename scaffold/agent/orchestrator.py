@@ -298,6 +298,15 @@ def _agent_resume_reason(outcome, verdict: dict, model_errors: int) -> Optional[
 _ACCEPTANCE_RESUMABLE_STOPS = ("completed", "max_turns", "repeated_tool_call")
 
 
+def _acceptance_mode() -> str:
+    """AWOS_ACCEPTANCE: "0" off, "1" ablation C, "2" the fail-safe gate (C2)."""
+    try:
+        from .acceptance import acceptance_mode
+    except ImportError:
+        from acceptance import acceptance_mode
+    return acceptance_mode()
+
+
 def _tests_not_run_status(result) -> str:
     """Status text when no test counts exist; says so when pytest crashed."""
     if getattr(result, "infra_error", False):
@@ -2175,9 +2184,38 @@ class Orchestrator:
             shot_steps = list(shot.get("steps") or [shot["step"]])
             files_changed.extend(shot["applied"])
             if shot["solved"]:
-                registry.close()
-                self._acceptance_cleanup(codebase_root)
                 verdict = shot["verdict"]
+                extra = {}
+                if shot.get("acceptance_pending"):
+                    # AWOS_ACCEPTANCE=2: arbitrate, one bounded repair, and
+                    # the green one-shot edit restored if the repair fails.
+                    try:
+                        fs = self._acceptance_failsafe(
+                            task=task, failing=shot["acceptance_pending"][1],
+                            green_verdict=verdict, files_changed=files_changed,
+                            base_prompt=prompt, registry=registry, client=client,
+                            on_event=_on_event, cost_cap=cost_cap, spent=shot_cost,
+                            model=model, codebase_root=codebase_root, sandbox=sandbox,
+                            task_id=task_id, needs_edits=needs_edits)
+                    finally:
+                        registry.close()
+                        self._acceptance_cleanup(codebase_root)
+                    verdict = fs["verdict"]
+                    files_changed[:] = fs["files_changed"]
+                    shot_cost += fs["cost_usd"]
+                    shot_in += fs["input_tokens"]
+                    shot_out += fs["output_tokens"]
+                    if fs["outcome"] is not None:
+                        o = fs["outcome"]
+                        shot_cost += o.cost_usd
+                        shot_in += o.input_tokens
+                        shot_out += o.output_tokens
+                        shot_steps += self._agent_steps([o])
+                    extra = {"acceptance_repaired": fs["repaired"],
+                             "acceptance_restored": fs["restored"]}
+                else:
+                    registry.close()
+                    self._acceptance_cleanup(codebase_root)
                 result = {
                     "success": True,
                     "summary": verdict["summary"],
@@ -2190,6 +2228,7 @@ class Orchestrator:
                     "cost_usd": shot_cost,
                     "model_used": model,
                     "one_shot": True,
+                    **extra,
                     "_applied_context": self._agent_applied_context(task, files_changed, verdict),
                 }
                 return self._record_tool_executor_result(
@@ -2242,6 +2281,28 @@ class Orchestrator:
                 acc_feedback = ""
                 if (reason is None and verdict["success"]
                         and outcome.stop_reason in _ACCEPTANCE_RESUMABLE_STOPS):
+                    if _acceptance_mode() == "2":
+                        # Fail-safe gate: never an acceptance-triggered resume;
+                        # arbitrate, one bounded repair, restore if it fails.
+                        acc_ok, _, _, acc_failing = self._acceptance_check_detail(
+                            codebase_root, sandbox)
+                        if not acc_ok:
+                            fs = self._acceptance_failsafe(
+                                task=task, failing=acc_failing, green_verdict=verdict,
+                                files_changed=files_changed, base_prompt=base_prompt,
+                                registry=registry, client=client, on_event=_on_event,
+                                cost_cap=cost_cap,
+                                spent=shot_cost + sum(o.cost_usd for o in outcomes),
+                                model=model, codebase_root=codebase_root, sandbox=sandbox,
+                                task_id=task_id, needs_edits=needs_edits)
+                            verdict = fs["verdict"]
+                            files_changed[:] = fs["files_changed"]
+                            shot_cost += fs["cost_usd"]
+                            shot_in += fs["input_tokens"]
+                            shot_out += fs["output_tokens"]
+                            if fs["outcome"] is not None:
+                                outcomes.append(fs["outcome"])
+                        break
                     acc_ok, acc_summary, acc_feedback = self._acceptance_check(
                         codebase_root, sandbox)
                     if not acc_ok:
@@ -2390,6 +2451,7 @@ class Orchestrator:
                   + (f" ({shot.repair_error})" if shot.repair_error else ""))
         verdict = None
         acc_feedback = ""
+        acc_pending = None  # mode 2: (summary, failing detail) for the fail-safe gate
         if shot.error:
             reason = f"model call failed ({shot.error})"
             logger.warning("[ONE-SHOT] %s", reason)
@@ -2410,9 +2472,18 @@ class Orchestrator:
             green = tests_ran and tr.failed == 0 and tr.errors == 0 and tr.passed > 0
             if green and not shot.failed:
                 reason = None
-                acc_ok, acc_summary, acc_feedback = self._acceptance_check(codebase_root, sandbox)
-                if not acc_ok:
-                    reason = f"acceptance: {acc_summary}"
+                if _acceptance_mode() == "2":
+                    # Fail-safe gate: a green one-shot is never sent to the full
+                    # loop for acceptance; the caller arbitrates and repairs.
+                    acc_ok, acc_summary, _, acc_failing = self._acceptance_check_detail(
+                        codebase_root, sandbox)
+                    if not acc_ok:
+                        acc_pending = (acc_summary, acc_failing)
+                else:
+                    acc_ok, acc_summary, acc_feedback = self._acceptance_check(
+                        codebase_root, sandbox)
+                    if not acc_ok:
+                        reason = f"acceptance: {acc_summary}"
             elif not tests_ran:
                 reason = verdict["test_status"]
             elif not green:
@@ -2444,6 +2515,7 @@ class Orchestrator:
             "verdict": verdict, "note": "", "step": step, "steps": steps,
             "cost_usd": shot.cost_usd, "input_tokens": shot.input_tokens,
             "output_tokens": shot.output_tokens,
+            "acceptance_pending": acc_pending,
         }
         if solved:
             calls = 1 + repairs
@@ -2493,6 +2565,8 @@ class Orchestrator:
         goal = getattr(ctx.get("session"), "goal", "")
         action = str(task.get("action", ""))
         text = goal if isinstance(goal, str) and len(goal) >= len(action) else action
+        self._acceptance_goal_text = text
+        self._acceptance_repair_used = False
         try:
             client = one_shot_mod.one_shot_client()
             if client is None:
@@ -2524,6 +2598,162 @@ class Orchestrator:
         except ImportError:
             from acceptance import run_acceptance
         return run_acceptance(codebase_root, suite, sandbox)
+
+    @staticmethod
+    def _agent_steps(outcomes: list) -> list:
+        """One trace step per AgentLoop turn, as the agent-loop result records them."""
+        from types import SimpleNamespace
+        return [
+            SimpleNamespace(
+                thought=turn.get("text", ""),
+                action=",".join(c["name"] for c in turn.get("calls", [])),
+                action_input={}, observation="",
+                success=all(c["ok"] for c in turn.get("calls", [])),
+                latency_ms=0.0,
+            )
+            for o in outcomes
+            for turn in o.transcript
+        ]
+
+    def _acceptance_check_detail(self, codebase_root: str, sandbox) -> tuple:
+        """Mode 2: (all_passed, summary, feedback, {failing test: its failure text})."""
+        suite = getattr(self, "_acceptance_suite", None)
+        if suite is None or not suite.active:
+            return True, "inactive", "", {}
+        try:
+            from .acceptance import run_acceptance_detail
+        except ImportError:
+            from acceptance import run_acceptance_detail
+        return run_acceptance_detail(codebase_root, suite, sandbox)
+
+    def _acceptance_failsafe(
+        self, *, task: dict, failing: dict, green_verdict: dict, files_changed: list,
+        base_prompt: str, registry, client, on_event, cost_cap: Optional[float],
+        spent: float, model: str, codebase_root: str, sandbox, task_id,
+        needs_edits: bool,
+    ) -> dict:
+        """
+        AWOS_ACCEPTANCE=2 (ablation C2): the visible suite is green and some
+        kept acceptance tests fail. Arbitrate them (one utility call), drop the
+        WRONG_TEST ones, and give CODE_INCOMPLETE ones exactly one bounded
+        repair (AWOS_ACCEPTANCE_REPAIR_TURNS turns). The visible-green state is
+        snapshotted first and put back unless the repair ends visible-green AND
+        acceptance-passing, so an acceptance failure can only add bounded work.
+        Returns {"verdict", "files_changed", "outcome" (the repair's or None),
+        "cost_usd", "input_tokens", "output_tokens" (arbitration), "repaired",
+        "restored"}. Never raises.
+        """
+        try:
+            from . import acceptance as acc_mod
+            from . import one_shot as one_shot_mod
+            from .agent_loop import AgentLoop
+        except ImportError:
+            import acceptance as acc_mod
+            import one_shot as one_shot_mod
+            from agent_loop import AgentLoop
+
+        out = {"verdict": green_verdict, "files_changed": list(files_changed),
+               "outcome": None, "cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0,
+               "repaired": False, "restored": False}
+        suite = getattr(self, "_acceptance_suite", None)
+        if suite is None or not suite.active or not failing:
+            return out
+
+        # 1. Arbitration: which failing tests are wrong, which find missing code.
+        try:
+            arb_client = one_shot_mod.one_shot_client()
+        except Exception:  # noqa: BLE001
+            arb_client = None
+        goal = getattr(self, "_acceptance_goal_text", "") or str(task.get("action", ""))
+        if arb_client is None:
+            arb = {"verdicts": {n: acc_mod.WRONG_TEST for n in failing}, "cost_usd": 0.0,
+                   "input_tokens": 0, "output_tokens": 0,
+                   "error": "no client (fail-safe: all WRONG_TEST)"}
+        else:
+            arb = acc_mod.arbitrate(goal, suite, failing, acc_mod.workspace_diff(codebase_root),
+                                    client=arb_client, model=model,
+                                    tracker=getattr(self, "tracker", None))
+        out["cost_usd"] = float(arb.get("cost_usd") or 0.0)
+        out["input_tokens"] = int(arb.get("input_tokens") or 0)
+        out["output_tokens"] = int(arb.get("output_tokens") or 0)
+        wrong = [n for n, v in arb["verdicts"].items() if v != acc_mod.CODE_INCOMPLETE]
+        incomplete = [n for n, v in arb["verdicts"].items() if v == acc_mod.CODE_INCOMPLETE]
+        suite.kept = [n for n in suite.kept if n not in wrong]
+        print(f"[ACCEPTANCE] arbitration: {len(failing)} failing -> {len(wrong)} wrong_test, "
+              f"{len(incomplete)} code_incomplete, ${out['cost_usd']:.4f}"
+              + (f" ({arb['error']})" if arb.get("error") else ""))
+        if not incomplete:
+            print("[ACCEPTANCE] no code_incomplete test left; the visible-green result stands")
+            return out
+
+        # 2. Bounded repair: one per task, never a full loop.
+        if getattr(self, "_acceptance_repair_used", False):
+            print("[ACCEPTANCE] repair already used for this task; the visible-green "
+                  "result stands")
+            return out
+        spent += out["cost_usd"]
+        if cost_cap is not None and cost_cap - spent <= 0:
+            print(f"[ACCEPTANCE] no repair: ${spent:.4f} of the ${cost_cap:.4f} cap spent; "
+                  "the visible-green result stands")
+            return out
+        if self._goal_budget_exhausted():
+            print(f"[ACCEPTANCE] no repair: {GOAL_BUDGET_REASON}; the visible-green "
+                  "result stands")
+            return out
+        # 3. Never lose the green edit.
+        try:
+            snap = acc_mod.snapshot_workspace(codebase_root)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[ACCEPTANCE] no repair: snapshot failed ({exc}); the visible-green "
+                  "result stands")
+            return out
+        self._acceptance_repair_used = True
+        turns = acc_mod.repair_turns()
+        print(f"[TASK {task_id}] [ACCEPTANCE] bounded repair: {len(incomplete)} "
+              f"code_incomplete test(s), at most {turns} turns")
+        prompt = (base_prompt + "\n\n"
+                  + acc_mod.repair_feedback(suite, {n: failing[n] for n in incomplete}))
+        outcome = None
+        repaired_green = False
+        rfiles = list(files_changed)
+        try:
+            outcome = AgentLoop(
+                registry=registry, client=client, on_event=on_event,
+                max_turns=turns, require_edits=False,
+                max_cost_usd=None if cost_cap is None else cost_cap - spent,
+            ).run(prompt)
+            self._record_agent_loop_spend(model, outcome)
+            for path in [*outcome.files_touched,
+                         *_not_ignored(codebase_root, getattr(outcome, "files_written", []))]:
+                rel = os.path.relpath(path, codebase_root)
+                if rel not in rfiles:
+                    rfiles.append(rel)
+            rverdict = self._judge_agent_attempt(task, outcome, rfiles, needs_edits,
+                                                 codebase_root, sandbox, task_id)
+            tr = rverdict["test_result"]
+            tests_bad = (tr is not None and not getattr(tr, "no_tests_found", True)
+                         and (tr.failed > 0 or tr.errors > 0))
+            visible_green = (rverdict["success"] and not tests_bad
+                             and outcome.stop_reason not in ("cost_cap", "budget_blocked")
+                             and _agent_resume_reason(outcome, rverdict, 0) is None)
+            if visible_green:
+                acc_ok, acc_summary, _, _ = self._acceptance_check_detail(codebase_root,
+                                                                          sandbox)
+                repaired_green = acc_ok
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[ACCEPTANCE] repair attempt raised: %s", exc)
+        out["outcome"] = outcome
+        stop = outcome.stop_reason if outcome is not None else "error"
+        if repaired_green:
+            print(f"[ACCEPTANCE] repair passed ({stop}, {outcome.turns} turn(s))")
+            out.update(verdict=rverdict, files_changed=rfiles, repaired=True)
+            return out
+        touched = acc_mod.restore_workspace(snap)
+        print(f"[ACCEPTANCE] repair failed; restored the green edit ({stop}"
+              + (f", {outcome.turns} turn(s)" if outcome is not None else "")
+              + f"; {len(touched)} path(s) restored)")
+        out["restored"] = True
+        return out
 
     def _acceptance_cleanup(self, codebase_root: str) -> None:
         """The acceptance tests never outlive their task, on disk or in memory."""
