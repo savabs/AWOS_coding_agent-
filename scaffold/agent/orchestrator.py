@@ -81,6 +81,38 @@ def _asks_for_tests(task: dict) -> bool:
     return False
 
 
+def _session_goal(ctx: Optional[dict]) -> str:
+    """The user's goal, verbatim (ReasoningSession.goal); '' when unknown."""
+    goal = getattr((ctx or {}).get("session"), "goal", "")
+    return goal.strip() if isinstance(goal, str) else ""
+
+
+def worker_task_text(task: dict, ctx: Optional[dict]) -> str:
+    """
+    What the worker (one shot, agent loop) is told to do. The user's goal is
+    always there verbatim: a single-task plan's action is the planner's
+    paraphrase, and on backupd jobs 2 and 5 it invented details (".tar.gz",
+    "modification time") and dropped requirements ("report it like
+    backupd's other errors") while the goal itself never reached the model.
+    The action is returned unchanged when it is the goal or already carries
+    it (the planner-skipped and merged-plan paths); otherwise it follows the
+    goal as a note the goal overrides.
+    """
+    action = str(task.get("action", "") or "").strip()
+    goal = _session_goal(ctx)
+    if not goal or goal in action:
+        return action
+    if not action:
+        return goal
+    total = int((ctx or {}).get("_total_tasks") or 1)
+    if total > 1:
+        note = (f"This task (step of a {total}-task plan toward the goal; planner's "
+                "wording, may be wrong; the goal above wins):")
+    else:
+        note = "Planner's note (may be wrong; the goal above wins):"
+    return f"Goal (verbatim):\n{goal}\n\n{note}\n{action}"
+
+
 def _not_ignored(root: str, paths: list) -> list:
     """
     `paths` minus what the project's .gitignore excludes: a command also
@@ -2490,7 +2522,7 @@ class Orchestrator:
             print("[ONE-SHOT] fell back to the agent loop: no OpenAI-shaped client configured")
             return None
 
-        task_text = str(task.get("action", ""))
+        task_text = worker_task_text(task, ctx)
         files = task_files(task)
         if files:
             task_text += "\n\nFiles to change: " + ", ".join(files)
@@ -2659,9 +2691,9 @@ class Orchestrator:
         if not acc_mod.acceptance_enabled():
             return None
         acc_mod.remove_leftovers(codebase_root)
-        goal = getattr(ctx.get("session"), "goal", "")
-        action = str(task.get("action", ""))
-        text = goal if isinstance(goal, str) and len(goal) >= len(action) else action
+        # The user's goal verbatim: a planner action longer than the goal (job 2's
+        # was) used to win here and seed the tests with its invented details.
+        text = _session_goal(ctx) or str(task.get("action", ""))
         self._acceptance_goal_text = text
         self._acceptance_repair_used = False
         try:
@@ -2986,7 +3018,7 @@ class Orchestrator:
 
     @staticmethod
     def _agent_loop_prompt(task: dict, ctx: dict) -> str:
-        parts = [task.get("action", "")]
+        parts = [worker_task_text(task, ctx)]
         files = task_files(task)
         if files:
             parts.append("Files to change: " + ", ".join(files))
