@@ -92,8 +92,15 @@ Rules:
 
 
 def acceptance_mode() -> str:
-    """"0" off, "1" ablation C (v1 gate), "2" ablation C2 (fail-safe gate)."""
-    raw = os.getenv(ACCEPTANCE_ENV, "0").strip().lower()
+    """
+    "0" off, "1" ablation C (v1 gate), "2" ablation C2 (fail-safe gate).
+
+    Unset means "2": the fail-safe gate was adopted by ablation C2
+    (docs/specs/ablation_acceptance_v2.md). Under pytest, unset means "0" so
+    unit tests never make a model call unless they set the variable.
+    """
+    default = "0" if "PYTEST_CURRENT_TEST" in os.environ else "2"
+    raw = os.getenv(ACCEPTANCE_ENV, default).strip().lower()
     if raw == "2":
         return "2"
     return "1" if raw in ("1", "on", "true", "yes") else "0"

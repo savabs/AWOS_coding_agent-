@@ -146,6 +146,18 @@ def test_parse_outcomes_and_collection_error():
     assert coll and filter_start_failing({}, coll)[0] == []
 
 
+def test_default_is_failsafe_gate_but_off_under_pytest(monkeypatch):
+    # Adopted by ablation C2: unset means mode "2" in real runs...
+    monkeypatch.delenv("AWOS_ACCEPTANCE", raising=False)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    assert acceptance.acceptance_mode() == "2"
+    monkeypatch.setenv("AWOS_ACCEPTANCE", "0")
+    assert acceptance.acceptance_mode() == "0"
+    # ...and "0" under pytest, so unit tests never call a model by accident.
+    monkeypatch.delenv("AWOS_ACCEPTANCE", raising=False)
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "x")
+
+
 def test_env_default_off(monkeypatch):
     monkeypatch.delenv("AWOS_ACCEPTANCE", raising=False)
     assert acceptance.acceptance_enabled() is False
