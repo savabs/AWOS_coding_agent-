@@ -85,3 +85,61 @@ defaults to 2, and ablation A may also be adopted before this runs. Both arms
 run on the defaults current at launch, and the launch records them in each
 run's inputs. Everything else is unchanged. Recorded before any ablation B
 run.
+
+## Result (2026-10-08): REJECTED (default stays 0), with a promising signal
+
+The 4 backupd passes ran in the order 0, 1, 0, 1 from 18:40 to about 22:15.
+The C2 gate was on in both arms. One run was invalid and retried
+automatically. Report: `docs/memory/runs/report_ablationB_experience/report.md`.
+
+| Job | Control (exp 0) | Experience (exp 1) |
+|---|---|---|
+| 1 | 2/2 | 2/2 |
+| 2 | 1/2 | **2/2** |
+| 3 | 2/2 | 2/2 |
+| 4 | 1/2 | **2/2** |
+| 5 | 0/2 | **2/2** |
+| 6 | 0/2 | 0/2 |
+| 7 | 0/2 | **1/2** |
+| 8 | 2/2 | 2/2 |
+| 9 | 0/2 | **1/2** |
+| 10 | 0/2 | 0/2 |
+| 11 | 0/2 | **1/2** |
+| 12 | 2/2 | **0/2** |
+| **Total** | **10/24** | **15/24** |
+
+**Decision checks:**
+
+- **Solve rate:** +21 pp per job, CI [−8, +46], sign-flip p = 0.28, with
+  6 jobs better and 1 worse. This check passes.
+- **Cost:** billed **+50%** (logged +49%) over all 12 jobs, against a +30%
+  limit. This check fails.
+- **Collapse:** **job 12 went from 2/2 to 0/2**, very likely misled by
+  retrieved changes. This check fails.
+
+The change is rejected. `AWOS_EXPERIENCE` stays 0. The trajectory log stays
+on, as pre-registered.
+
+**Why job 12 failed.** A record is saved on visible-green success, which is
+the only signal available at run time. Visible-green fixes can still be
+wrong. By job 12 the store held 11 records (jobs 1–11), about 4 of which
+fail their hidden tests.
+
+Job 12 ("prune with exactly the same rules as automatic pruning, keep_last
+from the settings file") received 3 records (about 2.7k tokens). In both
+passes it failed exactly `test_keep_last_from_ini`, `test_prune` and
+`test_pruning_is_logged`. So the store can spread mistakes as well as
+knowledge.
+
+**Confound.** The jobs B improved most (J2, J4, J5) are the ones hurt by the
+planner single-task rewrite bug found during this run, and by variance. Past
+records from the same project may restate what the goal really wanted. The
+goal-preservation fix (`6e585bb`) may capture part of this gain by itself.
+
+**A revised B (B2) would need these changes,** run as its own pre-registered
+run on top of the goal fix:
+
+1. Store only records whose acceptance check (the C2 gate) was active and
+   passed. That is a stronger trust signal than visible-green alone.
+2. Inject at most 2 records and about 1.5k tokens, to bring the cost down.
+3. Label the injected records "may contain mistakes; the goal and tests win".
