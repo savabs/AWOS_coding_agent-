@@ -34,7 +34,8 @@ Filter policy (start state):
   FAILED (assertion, ImportError/AttributeError/TypeError for a name or
   argument the issue says should exist)  -> keep: the failure is informative
   FAILED with NameError / SyntaxError (a bug in the test itself)  -> drop
-  PASSED, ERROR (fixture/setup), SKIPPED, XFAIL  -> drop
+  ERROR for a fixture the project does not define  -> drop (test bug)
+  PASSED, other ERROR (setup), SKIPPED, XFAIL  -> drop
   collection error of the whole file (SyntaxError, module-level import)
   or a crashed/timed-out run  -> drop all (gate inactive)
 The prompt asks for project imports INSIDE each test so a missing name fails
@@ -50,6 +51,7 @@ import os
 import re
 import shutil
 import subprocess
+import textwrap
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -69,6 +71,7 @@ DEFAULT_REPAIR_TURNS = 10
 ARBITRATION_MAX_TOKENS = 1024
 ARBITRATION_DIFF_CHARS = 6000
 ARBITRATION_TEST_CHARS = 2500
+ARBITRATION_REPLY_CHARS = 600
 WRONG_TEST = "WRONG_TEST"
 CODE_INCOMPLETE = "CODE_INCOMPLETE"
 
@@ -215,27 +218,49 @@ def parse_outcomes(output: str) -> tuple[dict, bool]:
         outcomes[name] = (status, reason or "")
     if "error during collection" in (output or "") or "errors during collection" in (output or ""):
         collection_error = True
-    # The short summary's reason is cut to the terminal width: take each
-    # failed test's error ("E   ..." lines) from its FAILURES section instead.
-    for name, body in _failure_sections(output or "").items():
-        if name in outcomes:
-            errors = [ln.strip()[1:].strip() for ln in body.splitlines()
-                      if ln.startswith("E ")]
-            outcomes[name] = (outcomes[name][0], " | ".join(errors)[:500] or outcomes[name][1])
+    # The short summary's reason is cut to the terminal width (and empty for
+    # a setup ERROR): take each failed/errored test's error ("E   ..." lines)
+    # from its FAILURES/ERRORS section instead.
+    sections = _failure_sections(output or "")
+    for name in outcomes:
+        body = section_for(sections, name)
+        if body is None:
+            continue
+        errors = [ln.strip()[1:].strip() for ln in body.splitlines() if ln.startswith("E ")]
+        outcomes[name] = (outcomes[name][0], " | ".join(errors)[:500] or outcomes[name][1])
     return outcomes, collection_error
 
 
-_SECTION_HEAD = re.compile(r"^_{3,} (\S+) _{3,}$", re.MULTILINE)
+_SECTION_HEAD = re.compile(
+    r"^_{3,} (?:ERROR at (?:setup|teardown) of )?(\S+) _{3,}$", re.MULTILINE)
+
+
+def section_key(name: str) -> str:
+    """
+    One key for a test in both spellings: the node id after the file
+    ("TestX::test_y[p]") and pytest's FAILURES/ERRORS header ("TestX.test_y[p]").
+    """
+    name = (name or "").strip()
+    if "::" in name.split("[", 1)[0] and name.split("::", 1)[0].endswith(".py"):
+        name = name.split("::", 1)[1]  # a full node id with its file
+    head, sep, param = name.partition("[")
+    return head.replace("::", ".") + sep + param
+
+
+def section_for(sections: dict, name: str) -> Optional[str]:
+    """The FAILURES/ERRORS section of test `name` (node id or header form), or None."""
+    return sections.get(section_key(name))
 
 
 def _failure_sections(output: str) -> dict:
+    """{section_key(test): section body}; the first section of a test wins."""
     heads = list(_SECTION_HEAD.finditer(output))
     out = {}
     for i, m in enumerate(heads):
         end = heads[i + 1].start() if i + 1 < len(heads) else len(output)
         body = output[m.end():end]
         body = re.split(r"^={3,}", body, maxsplit=1, flags=re.MULTILINE)[0]
-        out[m.group(1)] = body
+        out.setdefault(section_key(m.group(1)), body)
     return out
 
 
@@ -264,6 +289,7 @@ def run_tests_once(project_root: str, source: str, names: Optional[list] = None,
     try:
         hidden.mkdir()
         (hidden / TEST_FILENAME).write_text(source, encoding="utf-8")
+        _copy_conftest(Path(project_root), hidden)
         command = list(cfg.command) + ["-p", "no:cacheprovider", "--color=no", "-rA"]
         if not runner._has_pytest_config():
             command += _NO_CONFIG_ARGS
@@ -274,6 +300,21 @@ def run_tests_once(project_root: str, source: str, names: Optional[list] = None,
     out["result"] = result
     out["outcomes"], out["collection_error"] = parse_outcomes(result.raw_output)
     return out
+
+
+def _copy_conftest(root: Path, hidden: Path) -> None:
+    """
+    The hidden dir sits beside tests/, not in it, so tests/conftest.py's
+    fixtures would be out of scope: copy it in. The hidden dir is at the same
+    depth as tests/, so a conftest's Path(__file__).parents[1] (or
+    parent.parent) still resolves to the project root.
+    """
+    conftest = root / "tests" / "conftest.py"
+    try:
+        if conftest.is_file():
+            shutil.copyfile(conftest, hidden / "conftest.py")
+    except OSError as exc:
+        logger.warning("[ACCEPTANCE] could not copy tests/conftest.py: %s", exc)
 
 
 def remove_leftovers(project_root: str) -> None:
@@ -293,7 +334,9 @@ def filter_start_failing(outcomes: dict, collection_error: bool) -> tuple[list, 
         return [], dropped
     kept = []
     for name, (status, reason) in outcomes.items():
-        if status != "FAILED":
+        if status == "ERROR" and "fixture '" in reason:
+            key = "test bug"  # a fixture the project does not define
+        elif status != "FAILED":
             key = "passed on start" if status == "PASSED" else status.lower()
         elif any(m in reason for m in TEST_BUG_MARKERS):
             key = "test bug"
@@ -380,7 +423,7 @@ def run_acceptance_detail(project_root: str, suite: AcceptanceSuite,
         status, reason = run["outcomes"].get(n, ("MISSING", "no result (timed out or not run)"))
         if status == "PASSED":
             continue
-        text = sections.get(n) or f"{status}: {reason}"
+        text = section_for(sections, n) or f"{status}: {reason}"
         failing_detail[n] = text[-FEEDBACK_CHARS:]
     return False, f"{k - passed} failing of {k}", feedback, failing_detail
 
@@ -393,29 +436,51 @@ The project's own visible test suite PASSES on the current code. Some acceptance
 tests, written from the issue text before the fix, still FAIL. For each failing
 test decide which is wrong:
 
-- WRONG_TEST: the test expects behaviour the issue does not require, guesses an
-  exact output/format/message the issue does not state, or contradicts the
+- CODE_INCOMPLETE: the current code misses a requirement the issue states. An
+  error raised by the project's own code (NameError, ImportError,
+  AttributeError, TypeError, or any unhandled exception) while the test
+  exercises behaviour the issue requires is CODE_INCOMPLETE.
+- WRONG_TEST: only when the test asserts an exact output format, name, message
+  or internal mechanism that the issue does not state, or contradicts the
   visible tests or the issue's own examples.
-- CODE_INCOMPLETE: the current code misses a requirement the issue clearly states.
 
-When unsure, answer WRONG_TEST.
 Reply with ONE JSON object only, mapping each failing test name to
 "WRONG_TEST" or "CODE_INCOMPLETE", for example:
 {"test_a": "WRONG_TEST", "test_b": "CODE_INCOMPLETE"}"""
 
 
 def test_function_source(source: str, name: str) -> str:
-    """The source of test function `name` in `source` (the whole file as fallback)."""
-    base = name.split("[", 1)[0]
+    """
+    The source of test `name` in `source`: a node id ("test_x", "test_x[p]",
+    "TestY::test_x[p]", with or without the file) or a header ("TestY.test_x").
+    A method is looked up in its class first. The whole file as fallback.
+    """
+    parts = [p for p in re.split(r"::|\.", section_key(name).split("[", 1)[0]) if p]
+    base = parts[-1] if parts else ""
+    cls = parts[-2] if len(parts) > 1 else ""
+    funcs = (ast.FunctionDef, ast.AsyncFunctionDef)
     try:
         tree = ast.parse(source)
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == base:
-                seg = ast.get_source_segment(source, node)
-                if seg:
-                    return seg
     except SyntaxError:
-        pass
+        return source
+    found = None
+    if cls:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name == cls:
+                found = next((f for f in node.body
+                              if isinstance(f, funcs) and f.name == base), None)
+                if found:
+                    break
+    if found is None:
+        found = next((n for n in ast.walk(tree) if isinstance(n, funcs) and n.name == base),
+                     None)
+    if found is not None and getattr(found, "end_lineno", None):
+        # From the first decorator (parametrize) to the end of the body.
+        start = min([found.lineno] + [d.lineno for d in found.decorator_list])
+        lines = source.splitlines()[start - 1:found.end_lineno]
+        seg = textwrap.dedent("\n".join(lines)).strip("\n")
+        if seg:
+            return seg
     return source
 
 
@@ -483,7 +548,7 @@ def arbitrate(goal_text: str, suite: AcceptanceSuite, failing: dict, diff: str, 
         from providers import REASONING_OFF, utility_chat
     names = list(failing)
     out = {"verdicts": {n: WRONG_TEST for n in names}, "parsed": False, "cost_usd": 0.0,
-           "input_tokens": 0, "output_tokens": 0, "error": ""}
+           "input_tokens": 0, "output_tokens": 0, "error": "", "reply": ""}
     if not names:
         return out
     tap = one_shot._UsageTap(client)
@@ -497,6 +562,9 @@ def arbitrate(goal_text: str, suite: AcceptanceSuite, failing: dict, diff: str, 
             reasoning=dict(REASONING_OFF), retry=False,
         )
         out["cost_usd"] = float(info.get("cost_usd") or 0.0)
+        out["reply"] = (text or "")[:ARBITRATION_REPLY_CHARS]
+        print("[ACCEPTANCE] arbitration reply: "
+              + (" ".join(out["reply"].split()) or "(empty)"))
         out["verdicts"], out["parsed"] = parse_arbitration(text, names)
         if not out["parsed"]:
             out["error"] = "reply was not JSON (fail-safe: all WRONG_TEST)"
