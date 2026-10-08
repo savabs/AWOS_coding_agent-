@@ -88,3 +88,52 @@ The confirmation run therefore tests **both** fixes together:
 The design, controls and decision rule are unchanged, with one addition:
 also report whether J2 and J5 recover. They were 4/4 solved before today.
 Recorded before any run.
+
+## Result (2026-10-09): KEPT
+
+The run used `22c55e9` (arbitration fix plus goal fix) from 2026-10-08 22:01
+to 2026-10-09 01:08, K = 2, with current defaults: the acceptance gate (mode
+2) on, the experience store off and best-of-N off.
+
+| Set | C2.1 | Same-day control |
+|---|---|---|
+| backupd (12 jobs × 2) | **15/24** | 10/24 (ablation B exp0 passes) |
+| C2 targets (7 × 2) | **11/14** | 10/14 (C2 acc=2 arm) |
+| **Combined** | **26/38** | **20/38** |
+
+backupd per job, new vs control:
+
+| Job | New | Control |
+|---|---|---|
+| J2 | 2/2 | 1/2 |
+| J4 | 2/2 | 1/2 |
+| J5 | 1/2 | 0/2 |
+| J7 | 2/2 | 0/2 |
+| J8 | **1/2** | 2/2 |
+| J11 | 1/2 | 0/2 |
+
+All other backupd jobs were equal. Among the targets, toolz_635 went from 1/2
+to 2/2 and the rest were equal.
+
+**Decision checks:**
+
+- **Solve rate:** +6 runs. This check passes.
+- **Cost:** billed +37%, logged +35% per run (limit +50%). This check passes.
+- **The gate on backupd:** it did real work. It made 24 arbitrations, now
+  with mixed verdicts, and triggered 11 bounded repairs: 5 passed, and 6
+  failed with the green edit restored. Only 1 inactive gate out of 39
+  generated suites. This check passes.
+
+Both fixes are kept. J2 and J5, the planner-rewrite failures, recovered
+(2/2 and 1/2), and J5's one solve came through a wrong CODE_INCOMPLETE call
+that the restore rule absorbed.
+
+**Watch:**
+
+- **J8 regressed** (2/2 → 1/2). In the failing run, the arbiter dismissed 4
+  failing tests as WRONG_TEST on a wrong fix.
+- **Arbiter accuracy is still imperfect.** Some correct fixes still trigger
+  repairs, which costs turns, and some wrong fixes still pass. Cost per run
+  rose, mostly from repairs.
+- **The controls are earlier same-day runs**, not interleaved, so this is
+  weaker evidence than an ablation.
