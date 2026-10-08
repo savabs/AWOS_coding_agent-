@@ -82,7 +82,7 @@ ROUTING_ENV = ("AWOS_OPENROUTER_PROVIDER", "AWOS_OPENROUTER_ALLOW_FALLBACKS",
                "AWOS_ONE_SHOT", "AWOS_ONE_SHOT_BUDGET_TOKENS", "AWOS_PLANNER",
                "AWOS_PLANNER_MAX_FILES", "AWOS_INTEGRATION_REVIEW",
                "AWOS_ONE_SHOT_WHOLE_SOURCE_FRACTION", "AWOS_ACCEPTANCE",
-               "AWOS_ACCEPTANCE_REPAIR_TURNS")
+               "AWOS_ACCEPTANCE_REPAIR_TURNS", "AWOS_EXPERIENCE")
 
 
 def routing_env() -> dict:
@@ -850,19 +850,29 @@ def detect_invalid(log_text: str, turns: int, dry_run: bool) -> str | None:
     return None
 
 
-def snapshot_notebook(state: Path) -> Path | None:
-    """Copy state/.awos/projects (the notebook) aside; None if it doesn't exist yet."""
-    src = state / ".awos" / "projects"
+def experience_env(arm_dir: Path, sdir: Path) -> dict:
+    """AWOS_EXPERIENCE (ablation B) store for one (arm, repeat): the arm dir is
+    fresh per repeat (run_root[/r<k>]/<arm>), so the store persists across the
+    jobs of one pass and is never shared with another arm or repeat. The
+    series name is the repo_key: every job of the series is one project."""
+    return {"AWOS_EXPERIENCE_DIR": str(arm_dir / "state" / ".awos" / "experience"),
+            "AWOS_EXPERIENCE_REPO_KEY": sdir.name}
+
+
+def snapshot_notebook(state: Path, name: str = "projects") -> Path | None:
+    """Copy state/.awos/<name> (default the notebook; "experience" is the
+    AWOS_EXPERIENCE store) aside; None if it doesn't exist yet."""
+    src = state / ".awos" / name
     if not src.is_dir():
         return None
-    dest = Path(tempfile.mkdtemp(prefix="job_series_nb_")) / "projects"
+    dest = Path(tempfile.mkdtemp(prefix="job_series_nb_")) / name
     shutil.copytree(src, dest)
     return dest
 
 
-def restore_notebook(state: Path, snap: Path | None) -> None:
-    """Put state/.awos/projects back exactly as snapshot_notebook saw it."""
-    target = state / ".awos" / "projects"
+def restore_notebook(state: Path, snap: Path | None, name: str = "projects") -> None:
+    """Put state/.awos/<name> back exactly as snapshot_notebook saw it."""
+    target = state / ".awos" / name
     if target.exists():
         shutil.rmtree(target)
     if snap is not None:
@@ -997,6 +1007,7 @@ def run_job(arm: str, number: int, job_dir: Path, sdir: Path, jobs: list, arm_di
     # provider that holds its prompt cache, and jobs never share a cache.
     import hashlib
     env["AWOS_SESSION_ID"] = hashlib.sha256(f"{arm_dir}:{number}".encode()).hexdigest()[:24]
+    env.update(experience_env(arm_dir, sdir))
     fill = {"{runner}": str(Path(__file__).resolve()), "{job_dir}": str(job_dir),
             "{project}": str(project)}
     cmd = ([PY, "{runner}", "_dry_child", "{job_dir}", "{project}"] if dry_run
@@ -1102,13 +1113,16 @@ def run_job_with_retries(arm: str, number: int, job_dir: Path, sdir: Path, jobs:
     failed: list[dict] = []
     while True:
         snap = snapshot_notebook(state)
+        exp_snap = snapshot_notebook(state, "experience")
         try:
             result = run_job(arm, number, job_dir, sdir, jobs, arm_dir, dry_run)
             if result["invalid"]:
                 restore_notebook(state, snap)
+                restore_notebook(state, exp_snap, "experience")
                 result["notebook_chars"] = notebook_chars(state)
         finally:
             drop_snapshot(snap)
+            drop_snapshot(exp_snap)
         result["attempts"] = len(failed) + 1
         if failed:
             result["failed_attempts"] = failed

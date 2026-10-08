@@ -389,10 +389,12 @@ class OneShotContext:
     read_only: list = field(default_factory=list)   # test files among them
     tokens: int = 0
     sections: list = field(default_factory=list)    # large files shown in part
+    extra: str = ""   # extra context ahead of the repository (AWOS_EXPERIENCE)
 
 
 def build_context(project_root: str, task: str, exploration: Optional[dict] = None,
-                  budget: Optional[int] = None) -> OneShotContext:
+                  budget: Optional[int] = None,
+                  extra_context: Optional[str] = None) -> OneShotContext:
     """
     A compact repo map plus whole candidate files, ranked (rank_files):
     exploration grep hits first (most hits first), then files the task
@@ -404,7 +406,13 @@ def build_context(project_root: str, task: str, exploration: Optional[dict] = No
     whole_source_fraction() of the budget it goes whole and first, so the
     code to change is not cut to keyword-hit windows while tests fill
     the budget. Any other file that does not fit is skipped.
+
+    extra_context (default: exploration["extra_context"], e.g. past verified
+    changes under AWOS_EXPERIENCE) is carried as `extra`, outside the budget,
+    and shown ahead of the repository by build_messages.
     """
+    if extra_context is None:
+        extra_context = str((exploration or {}).get("extra_context") or "")
     root = Path(project_root).resolve()
     budget = budget or budget_tokens()
     all_files = _walk(root)
@@ -484,6 +492,7 @@ def build_context(project_root: str, task: str, exploration: Optional[dict] = No
         read_only=[f for f in chosen + sectioned if is_test_file(f)],
         tokens=estimate_tokens(text),
         sections=sectioned,
+        extra=extra_context or "",
     )
 
 
@@ -812,8 +821,11 @@ def _sends_reasoning(client: Any) -> bool:
 
 
 def build_messages(task: str, context: OneShotContext) -> list:
+    extra = (getattr(context, "extra", "") or "").strip()
     user = (
-        f"# Task\n\n{task.strip()}\n\n# Repository\n\n{context.text}\n\n"
+        f"# Task\n\n{task.strip()}\n\n"
+        + (f"{extra}\n\n" if extra else "")
+        + f"# Repository\n\n{context.text}\n\n"
         "Reply with the SEARCH/REPLACE blocks that complete the task."
     )
     return [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user}]
@@ -963,7 +975,8 @@ def build_repair_messages(task: str, project_root: str, failed: list[tuple[EditB
 def run_one_shot(client: Any, model: str, project_root: str, task: str,
                  exploration: Optional[dict] = None, *, tracker: Any = None,
                  allow_test_edits: bool = False, budget: Optional[int] = None,
-                 max_tokens: Optional[int] = None) -> OneShotResult:
+                 max_tokens: Optional[int] = None,
+                 extra_context: Optional[str] = None) -> OneShotResult:
     """
     One call, then apply; if blocks failed to apply, one repair call for just
     those. A cut-off reply is not retried: its complete blocks are applied
@@ -973,7 +986,8 @@ def run_one_shot(client: Any, model: str, project_root: str, task: str,
     start = time.time()
     result = OneShotResult()
     try:
-        ctx = build_context(project_root, task, exploration, budget)
+        ctx = build_context(project_root, task, exploration, budget,
+                            extra_context=extra_context)
     except Exception as exc:  # noqa: BLE001
         result.error = f"context build failed: {exc}"
         return result

@@ -1239,6 +1239,12 @@ class Orchestrator:
         elif _reason:
             print(f"[BUDGET] {_reason}")
 
+        # AWOS_EXPERIENCE (ablation B): this repo's most similar past verified
+        # changes, for the one-shot context and the agent's first message.
+        _experience = self._experience_context(goal, codebase_root)
+        if _experience:
+            _exploration_data = {**(_exploration_data or {}), "extra_context": _experience}
+
         # Bind context needed by _execute_single_task into a closure
         _ctx = dict(
             codebase_root=codebase_root,
@@ -1251,6 +1257,7 @@ class Orchestrator:
             exploration=_exploration_data,
             # Read once per goal; every agent-loop prompt of the goal carries it.
             notebook=self._read_project_notebook(codebase_root),
+            experience=_experience,
         )
 
         while True:
@@ -1365,10 +1372,12 @@ class Orchestrator:
 
         # ── Goal check: every task passing is not the goal being done ──────
         goal_complete, goal_check_reasoning = True, ""
+        _gc_results: list = []
         if tasks_failed == 0 and not self._pause_requested and not self._goal_budget_exhausted():
             goal_complete, extra, goal_check_reasoning = self._goal_check_rounds(
                 goal, _ctx, use_parallel,
             )
+            _gc_results = list(extra)
             tasks_completed += sum(1 for r in extra if r["success"])
             tasks_failed += sum(1 for r in extra if not r["success"] and not r.get("superseded"))
             total_tasks_all_cycles += len(extra)
@@ -1395,6 +1404,9 @@ class Orchestrator:
             "goal_check": self._goal_check_summary(goal_complete, goal_check_reasoning),
             "incomplete_reason": incomplete_reason,
         })
+        # ── Experience store + trajectory log: the goal's outcome is final ──
+        self._experience_goal_end(goal, codebase_root, start_time, overall_success,
+                                  list(results) + _gc_results)
 
         # ── Phase 1: Observability — print metrics summary after execution ──
         print()
@@ -1871,6 +1883,62 @@ class Orchestrator:
                 "reasoning": verdict.reasoning}
 
     # ── Project notebook ──────────────────────────────────────────────────────
+
+    # ── Experience store (AWOS_EXPERIENCE) + trajectory log ──────────────────
+
+    @staticmethod
+    def _experience_context(goal: str, codebase_root: str) -> str:
+        """Past verified changes like this goal; "" when off or none. Never raises."""
+        try:
+            try:
+                from .experience import experience_context
+            except ImportError:
+                from experience import experience_context
+            return experience_context(goal, codebase_root)[0]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[EXPERIENCE] retrieval failed: %s", exc)
+            return ""
+
+    def _experience_goal_end(self, goal: str, codebase_root: str, start_ts: float,
+                             success: bool, results: list) -> None:
+        """
+        The goal's outcome is final: append its trajectory (always) and, under
+        AWOS_EXPERIENCE with success and the last visible test run green, one
+        experience record. Advisory: never raises.
+        """
+        try:
+            try:
+                from . import experience as exp
+                from .goal_check import working_tree_changes
+            except ImportError:
+                import experience as exp
+                from goal_check import working_tree_changes
+            test_result = None
+            for r in results:
+                tr = (r.get("task") or {}).get("test_result") if isinstance(r, dict) else None
+                if tr is not None:
+                    test_result = tr
+            changed, diff = working_tree_changes(codebase_root)
+            if not changed:
+                changed = sorted(getattr(self, "_run_files_changed", set()))
+            cost = _ledger_spend_since(start_ts)
+            end_ts = time.time()
+            turns = len(exp.call_log_slice(start_ts, end_ts))
+            green = exp.is_green(test_result)
+            exp.write_trajectory(
+                goal=goal, model=getattr(self, "_last_agent_model", None),
+                verdict={"success": bool(success), "visible_tests_green": green,
+                         "test_status": (f"{getattr(test_result, 'passed', 0)} passed, "
+                                         f"{getattr(test_result, 'failed', 0)} failed")
+                         if test_result is not None else "no tests ran"},
+                files_changed=changed, diff=diff, start_ts=start_ts, end_ts=end_ts,
+                cost_usd=cost, turns=turns,
+            )
+            exp.save_record(codebase_root, goal=goal, files=changed, diff=diff,
+                            success=success, test_result=test_result,
+                            cost_usd=cost, turns=turns)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[EXPERIENCE] goal-end hook failed: %s", exc)
 
     @staticmethod
     def _read_project_notebook(codebase_root: str) -> str:
@@ -2908,6 +2976,8 @@ class Orchestrator:
             except ImportError:
                 from project_notebook import prompt_section
             parts.append(prompt_section(ctx["notebook"]))
+        if ctx.get("experience"):
+            parts.append(str(ctx["experience"]))
         parts.append(
             "Read what you need, make the change with edit_file, and run the "
             "tests to check your work."
