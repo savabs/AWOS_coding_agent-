@@ -64,3 +64,27 @@ rises more than 50%.
 Because the controls come from earlier the same day rather than being
 interleaved, this is a weaker design than an ablation. That is acceptable
 here because two of the three changes are bug fixes.
+
+## Amendment before running (2026-10-08): add the goal-preservation fix
+
+A job-by-job diagnosis of the backupd drop (today's pass 1: 3/11, against 67%
+earlier) cleared all recent commits:
+
+- the context was identical to before;
+- backupd has its own pytest config;
+- there were no no-progress or wall-budget stops;
+- the gate vetoed nothing.
+
+Jobs J2 and J5 failed because the **planner's single-task rewrite replaced
+the original goal**, inventing details and dropping requirements. That
+behaviour predates the recent commits. J4 failed through model variance.
+
+The confirmation run therefore tests **both** fixes together:
+
+- the arbitration fix (`2d73bdb`);
+- the goal fix: the worker always gets the original goal verbatim, with the
+  planner text as a labelled note.
+
+The design, controls and decision rule are unchanged, with one addition:
+also report whether J2 and J5 recover. They were 4/4 solved before today.
+Recorded before any run.
