@@ -77,3 +77,11 @@ and also, in both cases:
   the logs for any 2→0 job).
 
 **Reject (default 0)** otherwise. The training-data log stays on either way.
+
+## Amendment before running (2026-10-08)
+
+Ablation C2 was adopted after this spec was written, so `AWOS_ACCEPTANCE` now
+defaults to 2, and ablation A may also be adopted before this runs. Both arms
+run on the defaults current at launch, and the launch records them in each
+run's inputs. Everything else is unchanged. Recorded before any ablation B
+run.

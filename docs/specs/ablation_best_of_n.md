@@ -71,3 +71,10 @@ issues.
 
 **Reject (default 1)** otherwise. A different N or scoring rule is a new
 pre-registered run.
+
+## Amendment before running (2026-10-08)
+
+Ablation C2 was adopted after this spec was written, so `AWOS_ACCEPTANCE` now
+defaults to 2. Both arms run on that new default: the fail-safe gate is on in
+both, which measures best-of-N on top of AWOS as it now ships. Everything
+else is unchanged. Recorded before any ablation A run.
