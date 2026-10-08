@@ -286,3 +286,64 @@ def test_experience_env_and_snapshot(tmp_path):
     js.restore_notebook(state, snap, "experience")
     js.drop_snapshot(snap)
     assert (state / ".awos" / "experience" / "k.jsonl").read_text() == "one\n"
+
+
+# ── Interaction with ablation A (best-of-N) ─────────────────────────────────
+
+def _bon_run(monkeypatch, exploration):
+    sys.path.insert(0, os.path.dirname(__file__))
+    from test_best_of_n import FIX, WRONG, _SyncPool, _judge_for
+    from test_acceptance import _project as acc_project
+    from test_acceptance_v2 import _SeqClient
+    from scaffold.agent import best_of_n as bon
+
+    monkeypatch.setenv("AWOS_SAFE_TO_RUN_TESTS", "1")
+    monkeypatch.setattr(bon, "ThreadPoolExecutor", _SyncPool)
+    root = acc_project()
+    client = _SeqClient([WRONG, FIX, WRONG])
+    bon.run_best_of_n(3, client=client, model="deepseek/deepseek-chat",
+                      codebase_root=str(root), task_text="fix add in pkg/calc.py",
+                      exploration=exploration, tracker=None, allow_test_edits=False,
+                      judge=_judge_for(root))
+    return [c["messages"][1]["content"] for c in client.calls
+            if c.get("messages") and len(c["messages"]) > 1]
+
+
+def test_best_of_n_each_candidate_sees_experience_once(monkeypatch):
+    block = f"## {exp.HEADER}\n\n### Past change 1: fix sub\nFiles: pkg/calc.py\n"
+    prompts = _bon_run(monkeypatch, {"extra_context": block})
+    assert len(prompts) >= 3
+    for p in prompts[:3]:
+        assert p.count(exp.HEADER) == 1
+        assert p.index(exp.HEADER) < p.index("# Repository")
+
+
+def test_best_of_n_without_experience_prompts_unchanged(monkeypatch):
+    prompts = _bon_run(monkeypatch, {})
+    assert prompts and all(exp.HEADER not in p for p in prompts)
+    assert all(p.startswith("# Task\n\nfix add in pkg/calc.py\n\n# Repository\n\n")
+               for p in prompts[:3])
+
+
+def test_prebuilt_context_gets_extra_once():
+    import dataclasses
+
+    root = _project()
+    ctx = one_shot.build_context(str(root), "t", {"extra_context": "EXTRA"})
+    assert ctx.extra == "EXTRA"
+    bare = dataclasses.replace(ctx, extra="")
+    captured = []
+
+    class _C:
+        def __init__(self):
+            self.chat = self.completions = self
+
+        def create(self, **kw):
+            captured.append(kw["messages"][1]["content"])
+            return SimpleNamespace(choices=[SimpleNamespace(
+                message=SimpleNamespace(content="no blocks"), finish_reason="stop")],
+                usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1))
+    one_shot.run_one_shot(_C(), "m", str(root), "t", context=ctx, extra_context="EXTRA")
+    one_shot.run_one_shot(_C(), "m", str(root), "t", context=bare, extra_context="EXTRA")
+    one_shot.run_one_shot(_C(), "m", str(root), "t", context=bare)
+    assert [c.count("EXTRA") for c in captured] == [1, 1, 0]

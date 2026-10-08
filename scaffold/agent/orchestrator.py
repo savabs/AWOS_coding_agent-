@@ -2497,11 +2497,40 @@ class Orchestrator:
         if task.get("prev_task_context"):
             task_text += "\n\nThe previous task changed:\n" + str(task["prev_task_context"])[:2000]
         try:
-            shot = one_shot_mod.run_one_shot(
-                client, model, codebase_root, task_text, ctx.get("exploration"),
-                tracker=getattr(self, "tracker", None),
-                allow_test_edits=_asks_for_tests(task),
-            )
+            from . import best_of_n as bon_mod
+        except ImportError:
+            import best_of_n as bon_mod
+        n_shots = bon_mod.best_of_n()
+        bon_verdict = None  # AWOS_BEST_OF_N > 1: the winner's verdict, already run
+        try:
+            if n_shots > 1:
+                def _bon_judge(applied: list) -> dict:
+                    return self._judge_agent_attempt(
+                        task,
+                        SimpleNamespace(stop_reason="completed",
+                                        final_message=f"One-shot edits to {', '.join(applied)}"),
+                        list(applied), needs_edits, codebase_root, sandbox, task_id)
+
+                def _bon_acceptance():
+                    suite = getattr(self, "_acceptance_suite", None)
+                    if suite is None or not suite.active:
+                        return None
+                    _, _, _, failing = self._acceptance_check_detail(codebase_root, sandbox)
+                    return len(suite.kept) - len(failing or {})
+
+                bon = bon_mod.run_best_of_n(
+                    n_shots, client=client, model=model, codebase_root=codebase_root,
+                    task_text=task_text, exploration=ctx.get("exploration"),
+                    tracker=getattr(self, "tracker", None),
+                    allow_test_edits=_asks_for_tests(task), judge=_bon_judge,
+                    acceptance_passed=_bon_acceptance)
+                shot, bon_verdict = bon.shot, bon.verdict
+            else:
+                shot = one_shot_mod.run_one_shot(
+                    client, model, codebase_root, task_text, ctx.get("exploration"),
+                    tracker=getattr(self, "tracker", None),
+                    allow_test_edits=_asks_for_tests(task),
+                )
         except Exception as exc:  # noqa: BLE001 — run_one_shot should not raise
             shot = one_shot_mod.OneShotResult(error=f"{type(exc).__name__}: {exc}", calls=1)
 
@@ -2529,7 +2558,7 @@ class Orchestrator:
             if getattr(shot, "truncated", False):
                 reason += "; reply cut off"
         else:
-            verdict = self._judge_agent_attempt(
+            verdict = bon_verdict if bon_verdict is not None else self._judge_agent_attempt(
                 task,
                 SimpleNamespace(stop_reason="completed",
                                 final_message=f"One-shot edits to {', '.join(shot.applied)}"),

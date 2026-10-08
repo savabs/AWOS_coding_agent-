@@ -841,7 +841,8 @@ class _Reply:
 
 
 def _call(tap: _UsageTap, model: str, messages: list, *, max_tokens: int,
-          tracker: Any, request_type: str, send_reasoning: bool) -> _Reply:
+          tracker: Any, request_type: str, send_reasoning: bool,
+          temperature: float = 0) -> _Reply:
     """
     One call, never retried: reasoning per one_shot_reasoning(); a cut-off
     reply comes back with truncated=True and whatever text it had.
@@ -854,7 +855,7 @@ def _call(tap: _UsageTap, model: str, messages: list, *, max_tokens: int,
         text, info = utility_chat(
             tap, "one_shot", model, messages,
             max_tokens=max_tokens, tracker=tracker, request_type=request_type,
-            temperature=0, send_reasoning=send_reasoning,
+            temperature=temperature, send_reasoning=send_reasoning,
             reasoning=one_shot_reasoning(), retry=False,
         )
         return _Reply(text=text, cost_usd=float(info.get("cost_usd") or 0.0),
@@ -975,22 +976,35 @@ def build_repair_messages(task: str, project_root: str, failed: list[tuple[EditB
 def run_one_shot(client: Any, model: str, project_root: str, task: str,
                  exploration: Optional[dict] = None, *, tracker: Any = None,
                  allow_test_edits: bool = False, budget: Optional[int] = None,
-                 max_tokens: Optional[int] = None,
+                 max_tokens: Optional[int] = None, temperature: float = 0,
+                 context: Optional[OneShotContext] = None,
                  extra_context: Optional[str] = None) -> OneShotResult:
     """
     One call, then apply; if blocks failed to apply, one repair call for just
     those. A cut-off reply is not retried: its complete blocks are applied
     and the cut-off counts as a failed block (no repair: the rest is unknown).
     Never raises: a failed call sets `error`.
+
+    `context` (best-of-N): a context already built from the real workspace,
+    so a candidate run in a scratch copy sees exactly the same prompt;
+    `temperature` is that candidate's sampling temperature (0 by default).
     """
     start = time.time()
     result = OneShotResult()
-    try:
-        ctx = build_context(project_root, task, exploration, budget,
-                            extra_context=extra_context)
-    except Exception as exc:  # noqa: BLE001
-        result.error = f"context build failed: {exc}"
-        return result
+    if context is not None:
+        ctx = context
+        # A prebuilt context (best-of-N) already carries the extra text when it
+        # was built with it; add it only when it is missing, never twice.
+        if extra_context and not getattr(ctx, "extra", ""):
+            import dataclasses
+            ctx = dataclasses.replace(ctx, extra=extra_context)
+    else:
+        try:
+            ctx = build_context(project_root, task, exploration, budget,
+                                extra_context=extra_context)
+        except Exception as exc:  # noqa: BLE001
+            result.error = f"context build failed: {exc}"
+            return result
     result.context_tokens = ctx.tokens
     result.context_files = list(ctx.files)
     result.context_sections = list(ctx.sections)
@@ -999,7 +1013,8 @@ def run_one_shot(client: Any, model: str, project_root: str, task: str,
     cap = max(int(max_tokens or 0), max_reply_tokens())
     send_reasoning = _sends_reasoning(client)
     reply = _call(tap, model, build_messages(task, ctx), max_tokens=cap, tracker=tracker,
-                  request_type="one_shot", send_reasoning=send_reasoning)
+                  request_type="one_shot", send_reasoning=send_reasoning,
+                  temperature=temperature)
     result.cost_usd, result.calls = reply.cost_usd, reply.calls
     result.reply, result.reply_chars = reply.text, len(reply.text)
     result.truncated = reply.truncated
@@ -1028,7 +1043,8 @@ def run_one_shot(client: Any, model: str, project_root: str, task: str,
         others = [f for f in failed if not ("index" in f and blocks[f["index"]].search.strip())]
         messages = build_repair_messages(task, project_root, repairable, budget)
         fix = _call(tap, model, messages, max_tokens=cap, tracker=tracker,
-                    request_type="one_shot_repair", send_reasoning=send_reasoning)
+                    request_type="one_shot_repair", send_reasoning=send_reasoning,
+                    temperature=temperature)
         result.repair_calls = 1
         result.calls += fix.calls
         result.cost_usd += fix.cost_usd
