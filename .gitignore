@@ -65,6 +65,10 @@ secrets/
 # Job-series runs: per-arm scratch state and project checkouts (with their own
 # .git and a copy of .env). The results file .awos/job_series_<ts>.json is kept.
 .awos/job_series/
+# Per-machine logs that can hold diffs of private code: the experience store
+# (AWOS_EXPERIENCE) and the trajectory log (training data). They stay on the box.
+.awos/experience/
+.awos/trajectories/
 
 # Model artifacts (large files — store separately)
 *.pkl
