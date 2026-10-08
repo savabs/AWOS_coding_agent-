@@ -78,3 +78,57 @@ Ablation C2 was adopted after this spec was written, so `AWOS_ACCEPTANCE` now
 defaults to 2. Both arms run on that new default: the fail-safe gate is on in
 both, which measures best-of-N on top of AWOS as it now ships. Everything
 else is unchanged. Recorded before any ablation A run.
+
+## Result (2026-10-08): REJECTED (default stays 1)
+
+Runs 2026-10-08 15:30 to 18:30, K = 2, interleaved per issue, with the
+acceptance gate (C2) on in both arms. No invalid runs. Report:
+`docs/memory/runs/report_ablationA_best_of_n/report.md`.
+
+| Issue | Control (N=1) | Best-of-3 |
+|---|---|---|
+| cachetools_405 | 1/2 · $0.097 | **2/2** · $0.049 |
+| parse_137 | 2/2 | 2/2 |
+| boltons_458 | 2/2 | 2/2 |
+| tabulate_176 | 2/2 | 2/2 |
+| toolz_634 | 0/2 | 0/2 |
+| pyparsing_647 | 2/2 | 2/2 |
+| sqlparse_332 | 1/2 | 1/2 |
+| more-itertools_1304 | 2/2 | 2/2 |
+| **Target** | **12/16** | **13/16** |
+| Controls (4) | 8/8 · $0.001–0.003/run | 8/8 · $0.003–0.013/run |
+
+Dollar amounts are logged $ per run.
+
+**Decision checks:**
+
+- **Solve rate:** only **1** target improved; the rule needs 2. This check
+  fails.
+- **Collapse:** 0 issues worse, and the controls are intact.
+- **Cost:** billed +13%, logged −7% over all 12 issues (limit +100%). This
+  check passes.
+
+The change is rejected. `AWOS_BEST_OF_N` stays 1 and the code stays behind
+the flag.
+
+**Why the gain was small:**
+
+1. **The headroom was already taken.** The run 2 estimate (pass@1 64% →
+   about 75% if either of two runs counted) predates ablation 4 and C2. With
+   both adopted, the control solved 12/16 of these targets, and the C2 gate
+   already catches many of the misses that sampling would.
+2. **The ranking puts visible-green above acceptance.** The visible suite is
+   often already green on the base, so a near-no-op candidate (a failed block,
+   0/6 acceptance) can outrank candidates that implement the feature (6/6
+   acceptance) but break 2 visible tests. This happened on parse_137. No
+   candidate was green in 6 of 25 phases.
+3. **Time.** Visible tests run N times. The phase took 75–220 s on
+   pyparsing, about 1,850 tests.
+
+**Selection statistics:** a candidate other than #1 was chosen in 16 of 25
+phases.
+
+**A revised A, if ever:** rank by acceptance passes first when the gate is
+active, and sample extra candidates only after the first one fails. That
+would be a new pre-registered run. It is low priority: the measured gain
+here is small.
