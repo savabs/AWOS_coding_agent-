@@ -304,3 +304,62 @@ def test_handoff_json_redacts_json_escaped_env_secret(setup):
     raw = Path(res["handoff_path"]).read_text()
     assert json.dumps(secret)[1:-1] not in raw
     assert "[REDACTED:MY_SERVICE_TOKEN]" in raw
+
+
+# --------------------------------------------------------------------------- #
+# Regression tests for re-review findings (host-handoff fix pass r2)
+# --------------------------------------------------------------------------- #
+def _pack_listing(repo):
+    pack = repo / ".git" / "objects" / "pack"
+    return sorted(p.name for p in pack.iterdir()) if pack.exists() else []
+
+
+def test_big_file_over_bigfilethreshold_promoted_and_repo_fsck_clean(setup):
+    repo, ws, job, _ = setup
+    git(repo, "config", "core.bigFileThreshold", "10")
+    packs_before = _pack_listing(repo)
+    body = b"x" * 501 + b"\n"
+    (ws / "big.txt").write_bytes(body)
+    res = finish(job, str(ws), {}, env=CLEAN_ENV)
+    assert res["status"] == "handed_off"
+    assert _pack_listing(repo) == packs_before
+    br = f"awos/{job['id'][:8]}"
+    shown = subprocess.run(["git", "show", f"{br}:big.txt"], cwd=repo,
+                           capture_output=True, check=True).stdout
+    assert shown == body
+    fsck = subprocess.run(["git", "fsck", "--strict", "--no-dangling"], cwd=repo,
+                          capture_output=True, text=True)
+    assert fsck.returncode == 0, fsck.stdout + fsck.stderr
+
+
+def test_missing_object_after_promotion_fails_closed(setup, monkeypatch):
+    repo, ws, job, _ = setup
+    (ws / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    # simulate a promotion that copies nothing (e.g. object stuck in a staging pack)
+    real_git = handoff._git
+
+    def no_copy(repo_, senv, commit, base):
+        out = real_git(["rev-list", "--objects", commit, "--not", base], cwd=repo_, env=senv)
+        handoff._verify_objects_in_repo(repo_, out)
+
+    monkeypatch.setattr(handoff, "_promote_objects", no_copy)
+    res = finish(job, str(ws), {}, env=CLEAN_ENV)
+    assert res["status"] == "error" and res["branch"] is None
+    assert git(repo, "branch", "--list", "awos/*").strip() == ""
+    assert subprocess.run(["git", "fsck", "--no-dangling"], cwd=repo,
+                          capture_output=True).returncode == 0
+
+
+@pytest.mark.parametrize("enc", ["utf-16-le", "utf-16-be", "utf-16"])
+def test_utf16_secret_in_binary_file_blocks(setup, enc):
+    repo, ws, job, _ = setup
+    (ws / "u16.bin").write_bytes(("token = ghp_" + "f" * 36 + "\n").encode(enc))
+    res = finish(job, str(ws), {}, env=CLEAN_ENV)
+    assert res["status"] == "blocked_secret" and res["branch"] is None
+
+
+def test_utf16_odd_offset_secret_blocks(setup):
+    repo, ws, job, _ = setup
+    (ws / "u16o.bin").write_bytes(b"\x00\x01\x02" + ("AKIA" + "Q" * 16 + " ").encode("utf-16-le"))
+    res = finish(job, str(ws), {}, env=CLEAN_ENV)
+    assert res["status"] == "blocked_secret"

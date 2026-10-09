@@ -46,6 +46,9 @@ SECRET_PATTERNS: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
 SECRET_ENV_NAME = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL", re.I)
 MIN_ENV_SECRET_LEN = 8
 JOB_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
+# Larger than any file a workspace can hold; keeps staged blobs loose.
+STAGING_BIG_FILE_THRESHOLD = "1024g"
+_NON_ASCII_TEXT = re.compile(r"[^\t\n\r\x20-\x7e]")
 
 _GIT_IDENTITY = {
     "GIT_AUTHOR_NAME": "AWOS host",
@@ -169,8 +172,14 @@ def _staging_env(repo_objects: str, staging_objects: str) -> Dict[str, str]:
     repo objects as an alternate. Nothing lands in the user's repo until
     ``_promote_objects`` copies the objects a created commit actually needs, so
     excluded files and blocked (secret-bearing) content are never stored there."""
+    # core.bigFileThreshold is forced very high so ``git add`` never streams a
+    # large blob into a packfile (``_promote_objects`` copies loose objects
+    # only). GIT_CONFIG_* overrides beat repo/global config.
     return {"GIT_OBJECT_DIRECTORY": staging_objects,
-            "GIT_ALTERNATE_OBJECT_DIRECTORIES": repo_objects}
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES": repo_objects,
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "core.bigFileThreshold",
+            "GIT_CONFIG_VALUE_0": STAGING_BIG_FILE_THRESHOLD}
 
 
 def _promote_objects(repo: str, senv: Dict[str, str], commit: str, base: str) -> None:
@@ -193,6 +202,37 @@ def _promote_objects(repo: str, senv: Dict[str, str], commit: str, base: str) ->
         tmp = dst.with_name(dst.name + f".awos-tmp-{os.getpid()}")
         shutil.copyfile(src, tmp)
         os.replace(tmp, dst)
+    _verify_objects_in_repo(repo, out)
+
+
+def _verify_objects_in_repo(repo: str, rev_list_out: str) -> None:
+    """Fail closed unless every object the new commit needs is readable from the
+    user's repo *without* the staging alternate (e.g. a blob that ended up in a
+    staging packfile instead of a loose object). Called before ``update-ref``."""
+    shas = [l.split(" ", 1)[0].strip() for l in rev_list_out.splitlines()]
+    shas = [x for x in shas if x]
+    if not shas:
+        return
+    out = _git(["cat-file", "--batch-check=%(objectname)"], cwd=repo,
+               input_text="\n".join(shas) + "\n")
+    missing = [l.split()[0] for l in out.splitlines() if l.endswith(" missing")]
+    if missing:
+        raise HandoffError(f"{len(missing)} object(s) could not be promoted into the repo "
+                           f"(first: {missing[0][:12]}); branch NOT created")
+
+
+def _binary_text_views(data: bytes) -> List[str]:
+    """Text views of raw bytes for the key scan: UTF-8, and UTF-16 at both byte
+    alignments (LE at offset 0 / offset 1 also covers big-endian ASCII-range
+    text, which is all the key patterns match)."""
+    views = [data.decode("utf-8", "replace")]
+    for off in (0, 1):
+        chunk = data[off:]
+        chunk = chunk[: len(chunk) - (len(chunk) % 2)]
+        # Non-ASCII code units (misaligned junk, BOMs) become spaces so they
+        # cannot glue onto a key and defeat the patterns' \b anchors.
+        views.append(_NON_ASCII_TEXT.sub(" ", chunk.decode("utf-16-le", "replace")))
+    return views
 
 
 def _scan_binary_blobs(repo: str, senv: Dict[str, str], base_tree: str, tree: str,
@@ -213,8 +253,13 @@ def _scan_binary_blobs(repo: str, senv: Dict[str, str], base_tree: str, tree: st
             meta = ent.split("\t", 1)[0].split()
             if len(meta) == 3 and meta[1] == "blob":
                 data = _git_bytes(["cat-file", "blob", meta[2]], cwd=repo, env=senv)
-                for f in scan_secrets(data.decode("utf-8", "replace"), env):
-                    findings.append(dict(f, path=path))
+                seen = set()
+                for text in _binary_text_views(data):
+                    for f in scan_secrets(text, env):
+                        key = (f["kind"], f["name"])
+                        if key not in seen:
+                            seen.add(key)
+                            findings.append(dict(f, path=path))
     return findings
 
 
