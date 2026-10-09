@@ -5,7 +5,12 @@ With OPENROUTER_API_KEY set, every client routes through OpenRouter and direct
 provider keys are ignored: one key, one balance, one way to fail. Without it,
 callers fall back to the direct provider they name.
 
-See docs/specs/openrouter_only_spec.md.
+AWOS_PROVIDER=local (or AWOS_AGENT_MODEL=local/<name>) overrides both: every
+client talks to one OpenAI-compatible local server (llama-server, see
+scripts/local_model.sh) at AWOS_LOCAL_BASE_URL, no key, $0 cost. Whatever model
+a caller asks for is served by the one loaded model, AWOS_LOCAL_MODEL.
+
+See docs/specs/openrouter_only_spec.md and docs/specs/local_provider_spec.md.
 """
 from __future__ import annotations
 
@@ -177,7 +182,73 @@ def with_openrouter_routing(kwargs: dict) -> dict:
 
 
 def openrouter_key() -> Optional[str]:
+    """The OpenRouter key, or None. None under AWOS_PROVIDER=local, so no
+    caller routes (or renames a model) for OpenRouter while running local."""
+    if local_mode():
+        return None
     return os.getenv("OPENROUTER_API_KEY") or None
+
+
+# ── Local provider (docs/specs/local_provider_spec.md) ───────────────────────
+
+PROVIDER_ENV = "AWOS_PROVIDER"
+LOCAL_BASE_URL_ENV = "AWOS_LOCAL_BASE_URL"
+LOCAL_MODEL_ENV = "AWOS_LOCAL_MODEL"
+LOCAL_API_KEY_ENV = "AWOS_LOCAL_API_KEY"
+LOCAL_DEFAULT_BASE_URL = "http://127.0.0.1:8080/v1"
+LOCAL_DEFAULT_MODEL = "qwen3.5-9b"
+#: Accounting prefix: "local/<name>" prices at $0 (agent_loop.PRICES["local"]).
+LOCAL_PREFIX = "local/"
+
+
+def provider_pin() -> str:
+    """AWOS_PROVIDER, normalised ("" when unset)."""
+    return os.getenv(PROVIDER_ENV, "").strip().lower()
+
+
+def local_mode() -> bool:
+    """True when every model call should go to the local server."""
+    if provider_pin() == "local":
+        return True
+    return os.getenv("AWOS_AGENT_MODEL", "").strip().lower().startswith(LOCAL_PREFIX)
+
+
+def local_base_url() -> str:
+    """AWOS_LOCAL_BASE_URL, else AWOS_BASE_URL, else http://127.0.0.1:8080/v1."""
+    return (os.getenv(LOCAL_BASE_URL_ENV, "").strip()
+            or os.getenv("AWOS_BASE_URL", "").strip()
+            or LOCAL_DEFAULT_BASE_URL).rstrip("/")
+
+
+def local_model_name() -> str:
+    """The served model: AWOS_LOCAL_MODEL, else AWOS_AGENT_MODEL's local/<name>."""
+    name = os.getenv(LOCAL_MODEL_ENV, "").strip()
+    if name:
+        return name[len(LOCAL_PREFIX):] if name.startswith(LOCAL_PREFIX) else name
+    agent = os.getenv("AWOS_AGENT_MODEL", "").strip()
+    if agent.lower().startswith(LOCAL_PREFIX) and len(agent) > len(LOCAL_PREFIX):
+        return agent[len(LOCAL_PREFIX):]
+    return LOCAL_DEFAULT_MODEL
+
+
+def local_model_id(requested: Optional[str] = None) -> str:
+    """The accounting id for a call made locally: "local/<name>".
+
+    A requested "local/<x>" passes through; any other id (a cloud model a
+    caller or the escalation ladder named) is served by the loaded model."""
+    if requested and requested.strip().lower().startswith(LOCAL_PREFIX):
+        return requested.strip()
+    return LOCAL_PREFIX + local_model_name()
+
+
+def local_wire_model(requested: Optional[str] = None) -> str:
+    """The id sent to the server: local_model_id() without the prefix."""
+    return local_model_id(requested)[len(LOCAL_PREFIX):]
+
+
+def _local_key() -> str:
+    # llama-server ignores the key unless started with --api-key; the SDK insists on one.
+    return os.getenv(LOCAL_API_KEY_ENV, "").strip() or "not-needed"
 
 
 def openrouter_model_id(model_id: str) -> str:
@@ -198,12 +269,14 @@ def openrouter_model_id(model_id: str) -> str:
 
 
 class _RewriteModel:
-    """Every method call on `target` gets its `model=` mapped to an OpenRouter id."""
+    """Every method call on `target` gets its `model=` mapped by `mapper`
+    (default: to an OpenRouter id)."""
 
-    def __init__(self, target: Any, chat: bool = False) -> None:
+    def __init__(self, target: Any, chat: bool = False, mapper: Any = None) -> None:
         self._target = target
         # Chat-completions calls also get the provider pin / session id.
         self._chat = chat
+        self._mapper = mapper or openrouter_model_id
 
     def __getattr__(self, name):
         attr = getattr(self._target, name)
@@ -212,7 +285,7 @@ class _RewriteModel:
 
         def call(*args, **kwargs):
             if "model" in kwargs:
-                kwargs["model"] = openrouter_model_id(kwargs["model"])
+                kwargs["model"] = self._mapper(kwargs["model"])
             if self._chat:
                 kwargs = with_openrouter_routing(kwargs)
             return attr(*args, **kwargs)
@@ -220,21 +293,67 @@ class _RewriteModel:
         return call
 
 
-class _Routed:
-    """A client whose `<path>.*(model=...)` calls — create, stream — get OpenRouter ids."""
+class _Rewritten:
+    """A client whose `<path>.*(model=...)` calls — create, stream — get `model` mapped."""
 
-    def __init__(self, inner: Any, path: tuple[str, ...]) -> None:
+    def __init__(self, inner: Any, path: tuple[str, ...], *, chat: bool, mapper: Any) -> None:
         self._inner = inner
         target = inner
         for part in path:
             target = getattr(target, part)
-        namespace: Any = _RewriteModel(target, chat=tuple(path) == ("chat", "completions"))
+        namespace: Any = _RewriteModel(target, chat=chat, mapper=mapper)
         for part in reversed(path[1:]):
             namespace = SimpleNamespace(**{part: namespace})
         setattr(self, path[0], namespace)
 
     def __getattr__(self, name):
         return getattr(self._inner, name)
+
+
+class _Routed(_Rewritten):
+    """A client whose `<path>.*(model=...)` calls — create, stream — get OpenRouter ids."""
+
+    def __init__(self, inner: Any, path: tuple[str, ...]) -> None:
+        super().__init__(inner, path, chat=tuple(path) == ("chat", "completions"),
+                         mapper=openrouter_model_id)
+
+
+class _LocalRouted(_Rewritten):
+    """A local-server client: every `model=` becomes the loaded model's id.
+
+    Not a _Routed, so nothing OpenRouter-only (reasoning field, provider pin)
+    is sent to the local server."""
+
+    local = True
+
+    def __init__(self, inner: Any, path: tuple[str, ...]) -> None:
+        super().__init__(inner, path, chat=False, mapper=local_wire_model)
+
+
+def is_local_client(client: Any) -> bool:
+    return isinstance(client, _LocalRouted)
+
+
+def local_chat_client(*, max_retries: Optional[int] = None) -> Any:
+    """OpenAI-shaped client on the local server (AWOS_LOCAL_BASE_URL)."""
+    options = client_options()
+    if max_retries is not None:
+        options["max_retries"] = max(0, int(max_retries))
+    return _LocalRouted(
+        OpenAI(api_key=_local_key(), base_url=local_base_url(), **options),
+        ("chat", "completions"),
+    )
+
+
+def local_messages_client() -> Any:
+    """Anthropic-shaped client on the local server (llama-server serves /v1/messages)."""
+    base = local_base_url()
+    if base.endswith("/v1"):
+        base = base[: -len("/v1")]  # the Anthropic SDK appends /v1/messages itself
+    return _LocalRouted(
+        Anthropic(base_url=base, api_key=_local_key(), **client_options()),
+        ("messages",),
+    )
 
 
 def chat_client(
@@ -248,6 +367,8 @@ def chat_client(
     provider. `max_retries` overrides the SDK retries (0 turns them off, for a
     caller that retries on its own terms).
     """
+    if local_mode():
+        return local_chat_client(max_retries=max_retries)
     options = client_options()
     if max_retries is not None:
         options["max_retries"] = max(0, int(max_retries))
@@ -264,6 +385,8 @@ def chat_client(
 
 def messages_client(direct_key: Optional[str] = None) -> Any:
     """Anthropic-shaped client: OpenRouter's Messages endpoint when its key is set."""
+    if local_mode():
+        return local_messages_client()
     key = openrouter_key()
     if key:
         return _Routed(

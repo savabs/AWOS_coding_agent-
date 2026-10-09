@@ -160,7 +160,21 @@ def default_allowed_models(meta: dict, aider_models: set[str]) -> set[str]:
             env = {}
     allowed.update(v for k, v in env.items() if k.endswith("_MODEL") and v)
     allowed.update(aider_models)
+    routing = dict(pin.get("routing") or {})
+    if str(routing.get("AWOS_PROVIDER", "")).strip().lower() == "local":
+        # Every call was served by the local model (docs/specs/local_provider_spec.md).
+        name = str(routing.get("AWOS_LOCAL_MODEL") or "").strip().removeprefix("local/")
+        allowed.add("local/" + (name or _default_local_model()))
     return {_norm(m) for m in allowed}
+
+
+def _default_local_model() -> str:
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scaffold"))
+        from agent.providers import LOCAL_DEFAULT_MODEL  # noqa: WPS433
+        return LOCAL_DEFAULT_MODEL
+    except Exception:
+        return "qwen3.5-9b"
 
 
 # ── aider ─────────────────────────────────────────────────────────────────────

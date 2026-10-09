@@ -18,6 +18,7 @@ model, and it costs a full benchmark run to discover.
 Usage:
     python3 scripts/check_backend.py
     python3 scripts/check_backend.py --model anthropic/claude-haiku-4.5
+    AWOS_PROVIDER=local python3 scripts/check_backend.py   # scripts/local_model.sh
 
 Exits 0 when the backend is usable, 1 otherwise.
 """
@@ -39,6 +40,7 @@ except ImportError:
     pass
 
 from agent.agent_loop import build_client_from_env, estimate_cost
+from agent.providers import local_mode
 from agent.tools.base import Tool, ToolRegistry, ToolResult
 
 
@@ -92,6 +94,8 @@ def main() -> int:
     print(f"  backend   {type(client).__name__}")
     print(f"  endpoint  {endpoint}")
     print(f"  model     {client.model}")
+    if local_mode():
+        print("  provider  local (no key, $0)")
 
     registry = ToolRegistry()
     registry.register(_PingTool())
@@ -107,6 +111,11 @@ def main() -> int:
         text = str(exc)
         lowered = text.lower()
         if "connect" in lowered or "ssl" in lowered or "timed out" in lowered:
+            if local_mode():
+                return _fail(
+                    f"cannot reach the local server at {endpoint}",
+                    "  Start it with: scripts/local_model.sh start",
+                )
             return _fail(
                 f"cannot reach {endpoint}",
                 "  The endpoint is unreachable from this machine. On a sandboxed\n"
