@@ -13,7 +13,9 @@ docs/research/evaluation_first_principles_2026-10.md:
 - cost and turns as co-primary paired endpoints, with the minimum detectable
   difference (Miller 2411.00640: MDE ~= 2.8 * sqrt(var(diff) / n));
 - a solve-rate vs $ Pareto chart;
-- per-job verdicts and failing hidden tests so the discordant tasks get read.
+- per-job verdicts and failing hidden tests so the discordant tasks get read;
+- a "Decision (stats rule)" section: KEEP / REJECT / INCONCLUSIVE from the paired
+  Bayesian P(delta>0) and task-level exact McNemar (docs/specs/stats_decision_rule.md).
 
 Paired exclusion matches scripts/job_series.py: a (repeat, job) invalid in any
 arm is dropped from every arm's per-arm numbers. Pairwise comparisons use the
@@ -259,6 +261,152 @@ def paired(results: list[dict], a: str, b: str, k_rep: int) -> dict:
     return res
 
 
+# ── forward decision rule (docs/specs/stats_decision_rule.md) ────────────────
+
+DECIDE_DRAWS = 20_000
+DECIDE_SEED = 20261009
+P_KEEP = 0.95
+P_REJECT = 0.20
+JEFFREYS = 0.5  # Beta(0.5, 0.5) prior on each task's per-arm solve probability
+
+
+def task_table(results: list[dict], base: str, cand: str) -> dict:
+    """{task: (solved_base, n_base, solved_cand, n_cand)} over valid rows.
+
+    The unit is the task (`job`). Repeats are pooled per task and arm, not paired
+    by repeat index: repeat r of one arm shares nothing with repeat r of the other
+    except the task. A task needs at least one valid row in each arm. Duplicate
+    (arm, repeat, job) rows keep the valid one (last valid wins).
+    """
+    rows: dict[tuple[str, int, int], dict] = {}
+    for r in results:
+        if r["arm"] not in (base, cand):
+            continue
+        key = (r["arm"], _rep(r), r["job"])
+        if key in rows and not rows[key].get("invalid") and r.get("invalid"):
+            continue
+        rows[key] = r
+    agg: dict[int, list[int]] = {}
+    for (arm, _, job), r in rows.items():
+        if r.get("invalid"):
+            continue
+        t = agg.setdefault(job, [0, 0, 0, 0])
+        i = 0 if arm == base else 2
+        t[i] += bool(r["solved"])
+        t[i + 1] += 1
+    return {j: tuple(v) for j, v in sorted(agg.items()) if v[1] and v[3]}
+
+
+def p_delta_positive(table: dict, draws: int = DECIDE_DRAWS, seed: int = DECIDE_SEED,
+                     prior: float = JEFFREYS) -> dict:
+    """Paired posterior of Δ = mean over tasks of (p_cand − p_base).
+
+    Two noise sources (Wang 2512.21326): data noise (which tasks) via Rubin's
+    Bayesian bootstrap — Dirichlet(1,…,1) weights over tasks — and prediction
+    noise (which runs) via an independent Beta(prior + s, prior + n − s) posterior
+    per task and arm. Returns P(Δ>0), the posterior mean and a 95% credible
+    interval, plus the plain Bayesian bootstrap on observed task deltas (ties
+    counted ½) for reference.
+    """
+    tasks = list(table.values())
+    if not tasks:
+        return {"p": 0.5, "mean": 0.0, "cri": (0.0, 0.0), "p_bb": 0.5, "draws": 0, "seed": seed}
+    rng = random.Random(seed)
+    obs = [sc / nc - sb / nb for sb, nb, sc, nc in tasks]
+    beta = rng.betavariate
+    deltas: list[float] = []
+    pos = bb_pos = 0.0
+    for _ in range(draws):
+        w = [rng.expovariate(1.0) for _ in tasks]
+        tw = sum(w)
+        d = sum(wi * (beta(prior + sc, prior + nc - sc) - beta(prior + sb, prior + nb - sb))
+                for wi, (sb, nb, sc, nc) in zip(w, tasks)) / tw
+        deltas.append(d)
+        pos += d > 0
+        o = sum(wi * oi for wi, oi in zip(w, obs)) / tw
+        bb_pos += 1.0 if o > 1e-12 else (0.5 if abs(o) <= 1e-12 else 0.0)
+    deltas.sort()
+    lo = deltas[int(0.025 * draws)]
+    hi = deltas[min(draws - 1, int(math.ceil(0.975 * draws)) - 1)]
+    return {"p": pos / draws, "mean": sum(deltas) / draws, "cri": (lo, hi),
+            "p_bb": bb_pos / draws, "draws": draws, "seed": seed}
+
+
+def mcnemar_tasks(table: dict) -> dict:
+    """Exact McNemar at the task level: b = tasks where cand's solve rate beats
+    base's, c = the reverse; ties are concordant. With one run per task this is
+    the classic McNemar; with K runs it is the exact sign test on task deltas."""
+    b = sum(1 for sb, nb, sc, nc in table.values() if sc / nc > sb / nb)
+    c = sum(1 for sb, nb, sc, nc in table.values() if sc / nc < sb / nb)
+    return {"b": b, "c": c, "p": mcnemar_exact(b, c)}
+
+
+def _cost_per_run(results: list[dict], arm: str, tasks) -> float | None:
+    xs = [_money(r)[0] for r in results if r["arm"] == arm and r["job"] in tasks
+          and not r.get("invalid")]
+    xs = [x for x in xs if x is not None]
+    return sum(xs) / len(xs) if xs else None
+
+
+def decision(results: list[dict], base: str, cand: str, cost_budget: float | None = None,
+             draws: int = DECIDE_DRAWS, seed: int = DECIDE_SEED) -> dict:
+    """KEEP / REJECT / INCONCLUSIVE for candidate arm `cand` against `base`.
+
+    KEEP iff P(Δ>0) >= 0.95 and task-level exact McNemar p <= 0.05 and (when
+    `cost_budget` is given) cand's mean $/run <= base's * (1 + cost_budget).
+    REJECT iff P(Δ>0) <= 0.20. Otherwise INCONCLUSIVE: extend n, do not ship.
+    """
+    table = task_table(results, base, cand)
+    post = p_delta_positive(table, draws=draws, seed=seed)
+    mc = mcnemar_tasks(table)
+    diffs = [sc / nc - sb / nb for sb, nb, sc, nc in table.values()]
+    cb, cc = _cost_per_run(results, base, table), _cost_per_run(results, cand, table)
+    ratio = cc / cb if cb and cc is not None else None
+    within = cost_budget is None or ratio is None or ratio <= 1 + cost_budget
+    reasons = []
+    if post["p"] >= P_KEEP and mc["p"] <= ALPHA and within:
+        label = "KEEP"
+    elif post["p"] <= P_REJECT:
+        label = "REJECT"
+    else:
+        label = "INCONCLUSIVE"
+        if post["p"] < P_KEEP:
+            reasons.append(f"P(Δ>0) = {post['p']:.3f} < {P_KEEP}")
+        if mc["p"] > ALPHA:
+            reasons.append(f"McNemar p = {mc['p']:.3f} > {ALPHA}")
+        if not within:
+            reasons.append(f"cost ×{ratio:.2f} over budget +{100 * cost_budget:.0f}%")
+    runs = lambda i: sum(t[i] for t in table.values())  # noqa: E731
+    return {"label": label, "base": base, "cand": cand, "n_tasks": len(table),
+            "runs_base": (runs(0), runs(1)), "runs_cand": (runs(2), runs(3)),
+            "delta_obs": _mean(diffs), "p_pos": post["p"], "p_pos_bb": post["p_bb"],
+            "delta_post": post["mean"], "cri": post["cri"],
+            "mcnemar_b": mc["b"], "mcnemar_c": mc["c"], "mcnemar_p": mc["p"],
+            "mde": mde(diffs), "cost_base": cb, "cost_cand": cc, "cost_ratio": ratio,
+            "cost_budget": cost_budget, "reasons": reasons, "draws": post["draws"],
+            "seed": post["seed"]}
+
+
+def decision_lines(d: dict) -> list[str]:
+    """Markdown lines describing one decision()."""
+    sb, nb = d["runs_base"]
+    sc, nc = d["runs_cand"]
+    cost = ("-" if d["cost_ratio"] is None else
+            f"{_usd(d['cost_cand'])} vs {_usd(d['cost_base'])} per run (×{d['cost_ratio']:.2f})")
+    out = [f"- **{d['label']}** — candidate `{d['cand']}` vs base `{d['base']}`, "
+           f"{d['n_tasks']} tasks (runs {sc}/{nc} vs {sb}/{nb})",
+           f"- P(Δ>0) = {d['p_pos']:.3f} (Dirichlet over tasks × Beta per task, "
+           f"{d['draws']} draws, seed {d['seed']}); posterior Δ {_pct(d['delta_post'])} "
+           f"95% CrI {_ci(d['cri'])}; observed per-task Δ {_pct(d['delta_obs'])}; "
+           f"plain Bayesian bootstrap P = {d['p_pos_bb']:.3f}",
+           f"- task-level exact McNemar: b = {d['mcnemar_b']} tasks better, "
+           f"c = {d['mcnemar_c']} worse → p = {_p(d['mcnemar_p'])}",
+           f"- MDE ≈ {_pct(d['mde'])} · cost {cost}"]
+    if d["reasons"]:
+        out.append("- why not KEEP: " + "; ".join(d["reasons"]))
+    return out
+
+
 # ── health banner ────────────────────────────────────────────────────────────
 
 def find_health(results_path: Path, out_dir: Path) -> Path | None:
@@ -497,6 +645,18 @@ def build_report(data: dict, results_path: Path, out_dir: Path) -> tuple[str, st
         lines.append(f"- turns difference: {_num(t['diff'], 1)} · CI "
                      f"{'-' if t['ci'] is None else '[%+.1f, %+.1f]' % t['ci']} · "
                      f"sign-flip p = {_p(t['p'])} ({t['n']} tasks)")
+        lines.append("")
+
+    # 3b. forward decision rule
+    lines += ["## Decision (stats rule)", "",
+              "Rule (`docs/specs/stats_decision_rule.md`): KEEP only if P(Δ>0) ≥ 0.95 and "
+              "task-level exact McNemar p ≤ 0.05 (within the cost budget); REJECT if "
+              "P(Δ>0) ≤ 0.20; otherwise INCONCLUSIVE — extend n, do not ship. Candidate = "
+              "first arm of each pair, base = second; Δ = candidate − base per task.", ""]
+    for a, b in itertools.combinations(arms, 2):
+        lines.append(f"### `{a}` vs `{b}`")
+        lines.append("")
+        lines += decision_lines(decision(results, base=b, cand=a))
         lines.append("")
 
     # 4. per job
