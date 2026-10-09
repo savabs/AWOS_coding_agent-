@@ -1,0 +1,1274 @@
+{
+  "name": "R40 routine-task set",
+  "spec": "docs/specs/compiled_tools_design.md#11.2; docs/research/local_first_architecture_2026-10.md X4",
+  "workload": "synthetic (routine tasks from this repo's workflow); report as such",
+  "layout": "one job-series per task; run with scripts/job_series.py --series-root <out>",
+  "counts": {
+    "tasks": 48,
+    "families": 10,
+    "instances": 40,
+    "near_misses": 8
+  },
+  "families": {
+    "f01_run_tests_report": {
+      "kind": "Tool",
+      "instances": [
+        "r40_f01_i1_report_stats",
+        "r40_f01_i2_report_parse",
+        "r40_f01_i3_report_fmt",
+        "r40_f01_i4_report_kexpr"
+      ],
+      "near_misses": [
+        "r40_f01_nm_bench_not_tests"
+      ]
+    },
+    "f02_bump_version": {
+      "kind": "Tool",
+      "instances": [
+        "r40_f02_i1_to_0_9_3",
+        "r40_f02_i2_to_1_0_0",
+        "r40_f02_i3_to_1_1_0rc1",
+        "r40_f02_i4_to_0_10_0"
+      ],
+      "near_misses": [
+        "r40_f02_nm_bump_requests_dep"
+      ]
+    },
+    "f03_add_cli_flag": {
+      "kind": "Routine",
+      "instances": [
+        "r40_f03_i1_flag_json",
+        "r40_f03_i2_flag_limit",
+        "r40_f03_i3_flag_goals",
+        "r40_f03_i4_flag_min_jobs"
+      ],
+      "near_misses": [
+        "r40_f03_nm_limit_ignored"
+      ]
+    },
+    "f04_dataclass_field": {
+      "kind": "Routine",
+      "instances": [
+        "r40_f04_i1_jobresult_wall_wh",
+        "r40_f04_i2_callrecord_cached_tokens",
+        "r40_f04_i3_spanrecord_status",
+        "r40_f04_i4_jobresult_tags"
+      ],
+      "near_misses": []
+    },
+    "f05_fix_lint_class": {
+      "kind": "Tool",
+      "instances": [
+        "r40_f05_i1_unused_imports",
+        "r40_f05_i2_none_bool_compare",
+        "r40_f05_i3_unused_locals",
+        "r40_f05_i4_bare_except"
+      ],
+      "near_misses": [
+        "r40_f05_nm_logic_not_lint"
+      ]
+    },
+    "f06_md_table_from_json": {
+      "kind": "Tool",
+      "instances": [
+        "r40_f06_i1_e1_arms",
+        "r40_f06_i2_prices",
+        "r40_f06_i3_cache_components",
+        "r40_f06_i4_series_sizes"
+      ],
+      "near_misses": [
+        "r40_f06_nm_json_from_table"
+      ]
+    },
+    "f07_rename_function": {
+      "kind": "Routine",
+      "instances": [
+        "r40_f07_i1_num_to_as_number",
+        "r40_f07_i2_bucket_of_to_component_bucket",
+        "r40_f07_i3_summarise_to_summarize",
+        "r40_f07_i4_find_logs_to_discover_logs"
+      ],
+      "near_misses": [
+        "r40_f07_nm_alias_bucket_of"
+      ]
+    },
+    "f08_config_env_var": {
+      "kind": "Routine",
+      "instances": [
+        "r40_f08_i1_max_retries",
+        "r40_f08_i2_stable_prefix",
+        "r40_f08_i3_arbiter_timeout_s",
+        "r40_f08_i4_trace_dir"
+      ],
+      "near_misses": [
+        "r40_f08_nm_notebook_default_off"
+      ]
+    },
+    "f09_unit_test_pure_fn": {
+      "kind": "Routine",
+      "instances": [
+        "r40_f09_i1_test_parse_jobs",
+        "r40_f09_i2_test_spread",
+        "r40_f09_i3_test_num_or_zero",
+        "r40_f09_i4_test_bucket_of"
+      ],
+      "near_misses": [
+        "r40_f09_nm_percentile_empty_bug"
+      ]
+    },
+    "f10_spec_section_from_json": {
+      "kind": "Tool",
+      "instances": [
+        "r40_f10_i1_e1_edit_reliability",
+        "r40_f10_i2_t7b_stable_prefix",
+        "r40_f10_i3_one_shot_default",
+        "r40_f10_i4_loop_breaker"
+      ],
+      "near_misses": []
+    }
+  },
+  "tasks": [
+    {
+      "series": "r40_f01_i1_report_stats",
+      "family": "f01_run_tests_report",
+      "kind": "Tool",
+      "instance": 1,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Run `python -m pytest checks/test_stats.py` (these are the known-issue checks, not part of the normal suite) and write what happened to `reports/stats_failures.json` as JSON: {\"target\": \"<what you ran>\", \"collected\": <number of tests that ran; deselected ones do not count>, \"passed\": <n>, \"failed\": [<pytest node ids of the failing tests, e.g. \"checks/test_x.py::test_y\", sorted>], \"exit_code\": <pytest exit code>}. Don't fix anything, just report.",
+      "params": {
+        "target": "checks/test_stats.py",
+        "report": "reports/stats_failures.json",
+        "expected": {
+          "collected": 7,
+          "passed": 5,
+          "failed": [
+            "checks/test_stats.py::test_median_even",
+            "checks/test_stats.py::test_pct_negative_whole"
+          ],
+          "exit_code": 1
+        }
+      },
+      "check": "report JSON has the true collected/passed/failed ids/exit code of that pytest run",
+      "write_set": [
+        "reports/stats_failures.json"
+      ],
+      "base_files": 9,
+      "sources": [
+        "scripts/job_series.py (parse_jobs)"
+      ],
+      "content_sha": "0149ecbeb96cd0d0"
+    },
+    {
+      "series": "r40_f01_i2_report_parse",
+      "family": "f01_run_tests_report",
+      "kind": "Tool",
+      "instance": 2,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Run `python -m pytest checks/test_parse.py` (these are the known-issue checks, not part of the normal suite) and write what happened to `reports/parse_failures.json` as JSON: {\"target\": \"<what you ran>\", \"collected\": <number of tests that ran; deselected ones do not count>, \"passed\": <n>, \"failed\": [<pytest node ids of the failing tests, e.g. \"checks/test_x.py::test_y\", sorted>], \"exit_code\": <pytest exit code>}. Don't fix anything, just report.",
+      "params": {
+        "target": "checks/test_parse.py",
+        "report": "reports/parse_failures.json",
+        "expected": {
+          "collected": 7,
+          "passed": 5,
+          "failed": [
+            "checks/test_parse.py::test_duration_plain_number",
+            "checks/test_parse.py::test_parse_cost_commas"
+          ],
+          "exit_code": 1
+        }
+      },
+      "check": "report JSON has the true collected/passed/failed ids/exit code of that pytest run",
+      "write_set": [
+        "reports/parse_failures.json"
+      ],
+      "base_files": 9,
+      "sources": [
+        "scripts/job_series.py (parse_jobs)"
+      ],
+      "content_sha": "70ba1424429d6973"
+    },
+    {
+      "series": "r40_f01_i3_report_fmt",
+      "family": "f01_run_tests_report",
+      "kind": "Tool",
+      "instance": 3,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Run `python -m pytest checks/test_fmt.py` (these are the known-issue checks, not part of the normal suite) and write what happened to `reports/fmt_failures.json` as JSON: {\"target\": \"<what you ran>\", \"collected\": <number of tests that ran; deselected ones do not count>, \"passed\": <n>, \"failed\": [<pytest node ids of the failing tests, e.g. \"checks/test_x.py::test_y\", sorted>], \"exit_code\": <pytest exit code>}. Don't fix anything, just report.",
+      "params": {
+        "target": "checks/test_fmt.py",
+        "report": "reports/fmt_failures.json",
+        "expected": {
+          "collected": 4,
+          "passed": 4,
+          "failed": [],
+          "exit_code": 0
+        }
+      },
+      "check": "report JSON has the true collected/passed/failed ids/exit code of that pytest run",
+      "write_set": [
+        "reports/fmt_failures.json"
+      ],
+      "base_files": 9,
+      "sources": [
+        "scripts/job_series.py (parse_jobs)"
+      ],
+      "content_sha": "043f7fe93b98a947"
+    },
+    {
+      "series": "r40_f01_i4_report_kexpr",
+      "family": "f01_run_tests_report",
+      "kind": "Tool",
+      "instance": 4,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Run `python -m pytest checks -k \"median or cost\"` (these are the known-issue checks, not part of the normal suite) and write what happened to `reports/median_cost_failures.json` as JSON: {\"target\": \"<what you ran>\", \"collected\": <number of tests that ran; deselected ones do not count>, \"passed\": <n>, \"failed\": [<pytest node ids of the failing tests, e.g. \"checks/test_x.py::test_y\", sorted>], \"exit_code\": <pytest exit code>}. Don't fix anything, just report.",
+      "params": {
+        "target": "checks -k \"median or cost\"",
+        "report": "reports/median_cost_failures.json",
+        "expected": {
+          "collected": 5,
+          "passed": 3,
+          "failed": [
+            "checks/test_parse.py::test_parse_cost_commas",
+            "checks/test_stats.py::test_median_even"
+          ],
+          "exit_code": 1
+        }
+      },
+      "check": "report JSON has the true collected/passed/failed ids/exit code of that pytest run",
+      "write_set": [
+        "reports/median_cost_failures.json"
+      ],
+      "base_files": 9,
+      "sources": [
+        "scripts/job_series.py (parse_jobs)"
+      ],
+      "content_sha": "a22cdfe4a3334dd5"
+    },
+    {
+      "series": "r40_f01_nm_bench_not_tests",
+      "family": "f01_run_tests_report",
+      "kind": "Tool",
+      "instance": null,
+      "near_miss": true,
+      "near_miss_reason": "asks to run a benchmark script and save stdout, not a pytest target + JSON report",
+      "label": "near_miss",
+      "goal": "Run the parse benchmark — `python scripts/bench_parse.py --n 2000`, the benchmark script, not the test checks — and save exactly what it prints to `reports/bench.txt`.",
+      "params": {
+        "command": "python scripts/bench_parse.py --n 2000"
+      },
+      "check": "reports/bench.txt holds the benchmark's items/total line and an elapsed_s line",
+      "write_set": [
+        "reports/bench.txt"
+      ],
+      "base_files": 10,
+      "sources": [],
+      "content_sha": "f244addafed0ada0"
+    },
+    {
+      "series": "r40_f02_i1_to_0_9_3",
+      "family": "f02_bump_version",
+      "kind": "Tool",
+      "instance": 1,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Cut release 0.9.3 dated 2026-10-10: bump the version in pyproject.toml and awos_meta/__init__.py from 0.9.2 to 0.9.3, and add a `## [0.9.3] - 2026-10-10` section to CHANGELOG.md directly under `## [Unreleased]` with the bullet `- One-shot is the default for the coding app.`.",
+      "params": {
+        "old": "0.9.2",
+        "new": "0.9.3",
+        "date": "2026-10-10",
+        "note": "One-shot is the default for the coding app."
+      },
+      "check": "pyproject + __version__ == new; CHANGELOG heading right under Unreleased with the note",
+      "write_set": [
+        "CHANGELOG.md",
+        "awos_meta/__init__.py",
+        "pyproject.toml"
+      ],
+      "base_files": 5,
+      "sources": [],
+      "content_sha": "f9daad17e8a8a4bf"
+    },
+    {
+      "series": "r40_f02_i2_to_1_0_0",
+      "family": "f02_bump_version",
+      "kind": "Tool",
+      "instance": 2,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Cut release 1.0.0 dated 2026-10-12: bump the version in pyproject.toml and awos_meta/__init__.py from 0.9.7 to 1.0.0, and add a `## [1.0.0] - 2026-10-12` section to CHANGELOG.md directly under `## [Unreleased]` with the bullet `- Stage 1 worker declared stable.`.",
+      "params": {
+        "old": "0.9.7",
+        "new": "1.0.0",
+        "date": "2026-10-12",
+        "note": "Stage 1 worker declared stable."
+      },
+      "check": "pyproject + __version__ == new; CHANGELOG heading right under Unreleased with the note",
+      "write_set": [
+        "CHANGELOG.md",
+        "awos_meta/__init__.py",
+        "pyproject.toml"
+      ],
+      "base_files": 5,
+      "sources": [],
+      "content_sha": "dc7b19c59231d467"
+    },
+    {
+      "series": "r40_f02_i3_to_1_1_0rc1",
+      "family": "f02_bump_version",
+      "kind": "Tool",
+      "instance": 3,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Cut release 1.1.0rc1 dated 2026-10-15: bump the version in pyproject.toml and awos_meta/__init__.py from 1.0.4 to 1.1.0rc1, and add a `## [1.1.0rc1] - 2026-10-15` section to CHANGELOG.md directly under `## [Unreleased]` with the bullet `- Pre-release: stable prompt prefix behind AWOS_STABLE_PREFIX.`.",
+      "params": {
+        "old": "1.0.4",
+        "new": "1.1.0rc1",
+        "date": "2026-10-15",
+        "note": "Pre-release: stable prompt prefix behind AWOS_STABLE_PREFIX."
+      },
+      "check": "pyproject + __version__ == new; CHANGELOG heading right under Unreleased with the note",
+      "write_set": [
+        "CHANGELOG.md",
+        "awos_meta/__init__.py",
+        "pyproject.toml"
+      ],
+      "base_files": 5,
+      "sources": [],
+      "content_sha": "716bb523b484bcf1"
+    },
+    {
+      "series": "r40_f02_i4_to_0_10_0",
+      "family": "f02_bump_version",
+      "kind": "Tool",
+      "instance": 4,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Cut release 0.10.0 dated 2026-10-20: bump the version in pyproject.toml and awos_meta/__init__.py from 0.9.12 to 0.10.0, and add a `## [0.10.0] - 2026-10-20` section to CHANGELOG.md directly under `## [Unreleased]` with the bullet `- Fuzzy-apply ladder behind AWOS_FUZZY_APPLY.`.",
+      "params": {
+        "old": "0.9.12",
+        "new": "0.10.0",
+        "date": "2026-10-20",
+        "note": "Fuzzy-apply ladder behind AWOS_FUZZY_APPLY."
+      },
+      "check": "pyproject + __version__ == new; CHANGELOG heading right under Unreleased with the note",
+      "write_set": [
+        "CHANGELOG.md",
+        "awos_meta/__init__.py",
+        "pyproject.toml"
+      ],
+      "base_files": 5,
+      "sources": [],
+      "content_sha": "e4b3981c1a28864d"
+    },
+    {
+      "series": "r40_f02_nm_bump_requests_dep",
+      "family": "f02_bump_version",
+      "kind": "Tool",
+      "instance": null,
+      "near_miss": true,
+      "near_miss_reason": "'bump' targets a dependency pin; running the version-bump routine is wrong",
+      "label": "near_miss",
+      "goal": "Bump the requests dependency in pyproject.toml to >=2.32.3 (security fix). This is not a release: leave the package version and the CHANGELOG releases alone.",
+      "params": {
+        "dependency": "requests>=2.32.3"
+      },
+      "check": "requests>=2.32.3 in dependencies; project version and release headings unchanged",
+      "write_set": [
+        "pyproject.toml"
+      ],
+      "base_files": 5,
+      "sources": [],
+      "content_sha": "a2c08581b59f2a64"
+    },
+    {
+      "series": "r40_f03_i1_flag_json",
+      "family": "f03_add_cli_flag",
+      "kind": "Routine",
+      "instance": 1,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Add a `--json` flag to the `list` subcommand of scripts/series_tool.py: with it, print a JSON array of objects `{\"series\": <name>, \"jobs\": <job count>}` in the same order as the plain listing. Without the flag the output must not change.",
+      "params": {
+        "subcommand": "list",
+        "flag": "json"
+      },
+      "check": "--help lists the flag; the flag changes output as specified; default output unchanged",
+      "write_set": [
+        "scripts/series_tool.py"
+      ],
+      "base_files": 14,
+      "sources": [
+        "scripts/job_series.py (discover_jobs, load)"
+      ],
+      "content_sha": "07accdd86f50e9db"
+    },
+    {
+      "series": "r40_f03_i2_flag_limit",
+      "family": "f03_add_cli_flag",
+      "kind": "Routine",
+      "instance": 2,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Add a `--limit N` option to the `list` subcommand of scripts/series_tool.py that prints only the first N series (N >= 1, same order as now). Without the option everything is listed as before.",
+      "params": {
+        "subcommand": "list",
+        "flag": "limit"
+      },
+      "check": "--help lists the flag; the flag changes output as specified; default output unchanged",
+      "write_set": [
+        "scripts/series_tool.py"
+      ],
+      "base_files": 14,
+      "sources": [
+        "scripts/job_series.py (discover_jobs, load)"
+      ],
+      "content_sha": "4acf5accef60bc30"
+    },
+    {
+      "series": "r40_f03_i3_flag_goals",
+      "family": "f03_add_cli_flag",
+      "kind": "Routine",
+      "instance": 3,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Add a `--goals` flag to the `show` subcommand of scripts/series_tool.py: after each job's line, print an indented line `    goal: <first line of the job's goal>`. Without the flag the output stays as it is.",
+      "params": {
+        "subcommand": "show",
+        "flag": "goals"
+      },
+      "check": "--help lists the flag; the flag changes output as specified; default output unchanged",
+      "write_set": [
+        "scripts/series_tool.py"
+      ],
+      "base_files": 14,
+      "sources": [
+        "scripts/job_series.py (discover_jobs, load)"
+      ],
+      "content_sha": "c4490c827adcc59d"
+    },
+    {
+      "series": "r40_f03_i4_flag_min_jobs",
+      "family": "f03_add_cli_flag",
+      "kind": "Routine",
+      "instance": 4,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Add a `--min-jobs N` option to the `list` subcommand of scripts/series_tool.py: only series with at least N jobs are listed. Default behaviour (no option) is unchanged.",
+      "params": {
+        "subcommand": "list",
+        "flag": "min_jobs"
+      },
+      "check": "--help lists the flag; the flag changes output as specified; default output unchanged",
+      "write_set": [
+        "scripts/series_tool.py"
+      ],
+      "base_files": 14,
+      "sources": [
+        "scripts/job_series.py (discover_jobs, load)"
+      ],
+      "content_sha": "c8e3198868f58d29"
+    },
+    {
+      "series": "r40_f03_nm_limit_ignored",
+      "family": "f03_add_cli_flag",
+      "kind": "Routine",
+      "instance": null,
+      "near_miss": true,
+      "near_miss_reason": "the flag already exists (a precondition of add-flag fails); the job is a bug fix",
+      "label": "near_miss",
+      "goal": "`python scripts/series_tool.py list --limit 2` still prints all four series — the --limit option of `list` seems to do nothing. Please fix it.",
+      "params": {},
+      "check": "--limit truncates the listing; the option is still defined exactly once",
+      "write_set": [
+        "scripts/series_tool.py"
+      ],
+      "base_files": 14,
+      "sources": [
+        "scripts/job_series.py (discover_jobs, load)"
+      ],
+      "content_sha": "85f692a294dd404a"
+    },
+    {
+      "series": "r40_f04_i1_jobresult_wall_wh",
+      "family": "f04_dataclass_field",
+      "kind": "Routine",
+      "instance": 1,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Add a `wall_wh: float` field (wall-meter watt-hours, default 0.0) to the `JobResult` dataclass in awos_records/records.py. It must be written by `to_dict()` under the key \"wall_wh\" and read back by `from_dict()`; ledger lines written before this change (no \"wall_wh\" key) must still load, getting the default. Existing positional construction must keep working.",
+      "params": {
+        "class": "JobResult",
+        "field": "wall_wh",
+        "default": "0.0"
+      },
+      "check": "field default, to_dict key, from_dict round trip, legacy line loads with default",
+      "write_set": [
+        "awos_records/records.py"
+      ],
+      "base_files": 4,
+      "sources": [],
+      "content_sha": "6169f658edbdf4d6"
+    },
+    {
+      "series": "r40_f04_i2_callrecord_cached_tokens",
+      "family": "f04_dataclass_field",
+      "kind": "Routine",
+      "instance": 2,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Add a `cached_tokens: int` field (prompt tokens served from cache, default 0) to the `CallRecord` dataclass in awos_records/records.py. It must be written by `to_dict()` under the key \"cached_tokens\" and read back by `from_dict()`; ledger lines written before this change (no \"cached_tokens\" key) must still load, getting the default. Existing positional construction must keep working.",
+      "params": {
+        "class": "CallRecord",
+        "field": "cached_tokens",
+        "default": "0"
+      },
+      "check": "field default, to_dict key, from_dict round trip, legacy line loads with default",
+      "write_set": [
+        "awos_records/records.py"
+      ],
+      "base_files": 4,
+      "sources": [],
+      "content_sha": "0c728d588e9c8327"
+    },
+    {
+      "series": "r40_f04_i3_spanrecord_status",
+      "family": "f04_dataclass_field",
+      "kind": "Routine",
+      "instance": 3,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Add a `status: str` field (\"ok\" or \"error\", default \"ok\") to the `SpanRecord` dataclass in awos_records/records.py. It must be written by `to_dict()` under the key \"status\" and read back by `from_dict()`; ledger lines written before this change (no \"status\" key) must still load, getting the default. Existing positional construction must keep working.",
+      "params": {
+        "class": "SpanRecord",
+        "field": "status",
+        "default": "\"ok\""
+      },
+      "check": "field default, to_dict key, from_dict round trip, legacy line loads with default",
+      "write_set": [
+        "awos_records/records.py"
+      ],
+      "base_files": 4,
+      "sources": [],
+      "content_sha": "a3135a648a9f685a"
+    },
+    {
+      "series": "r40_f04_i4_jobresult_tags",
+      "family": "f04_dataclass_field",
+      "kind": "Routine",
+      "instance": 4,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Add a `tags: list[str]` field (free-form labels, default an empty list) to the `JobResult` dataclass in awos_records/records.py. It must be written by `to_dict()` under the key \"tags\" and read back by `from_dict()`; ledger lines written before this change (no \"tags\" key) must still load, getting the default. Existing positional construction must keep working.",
+      "params": {
+        "class": "JobResult",
+        "field": "tags",
+        "default": "[]"
+      },
+      "check": "field default, to_dict key, from_dict round trip, legacy line loads with default",
+      "write_set": [
+        "awos_records/records.py"
+      ],
+      "base_files": 4,
+      "sources": [],
+      "content_sha": "79995b1708d3f8ac"
+    },
+    {
+      "series": "r40_f05_i1_unused_imports",
+      "family": "f05_fix_lint_class",
+      "kind": "Tool",
+      "instance": 1,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "`ruff check --select F401 tools/report_util.py` reports errors. Fix every F401 error in that file without changing what the code does (no `# noqa`, no ruff config changes).",
+      "params": {
+        "codes": "F401",
+        "file": "tools/report_util.py"
+      },
+      "check": "ruff --select F401 clean on the file; no noqa; behaviour tests still pass",
+      "write_set": [
+        "tools/report_util.py"
+      ],
+      "base_files": 4,
+      "sources": [],
+      "content_sha": "73acf92ed4f2f89f"
+    },
+    {
+      "series": "r40_f05_i2_none_bool_compare",
+      "family": "f05_fix_lint_class",
+      "kind": "Tool",
+      "instance": 2,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "`ruff check --select E711,E712 tools/filters.py` reports errors. Fix every E711,E712 error in that file without changing what the code does (no `# noqa`, no ruff config changes).",
+      "params": {
+        "codes": "E711,E712",
+        "file": "tools/filters.py"
+      },
+      "check": "ruff --select E711,E712 clean on the file; no noqa; behaviour tests still pass",
+      "write_set": [
+        "tools/filters.py"
+      ],
+      "base_files": 4,
+      "sources": [],
+      "content_sha": "fc10472a86f35cb2"
+    },
+    {
+      "series": "r40_f05_i3_unused_locals",
+      "family": "f05_fix_lint_class",
+      "kind": "Tool",
+      "instance": 3,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "`ruff check --select F841 tools/aggregate.py` reports errors. Fix every F841 error in that file without changing what the code does (no `# noqa`, no ruff config changes).",
+      "params": {
+        "codes": "F841",
+        "file": "tools/aggregate.py"
+      },
+      "check": "ruff --select F841 clean on the file; no noqa; behaviour tests still pass",
+      "write_set": [
+        "tools/aggregate.py"
+      ],
+      "base_files": 4,
+      "sources": [],
+      "content_sha": "bbb000f530e03ccd"
+    },
+    {
+      "series": "r40_f05_i4_bare_except",
+      "family": "f05_fix_lint_class",
+      "kind": "Tool",
+      "instance": 4,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "`ruff check --select E722 tools/loader.py` reports errors. Fix every E722 error in that file without changing what the code does (no `# noqa`, no ruff config changes).",
+      "params": {
+        "codes": "E722",
+        "file": "tools/loader.py"
+      },
+      "check": "ruff --select E722 clean on the file; no noqa; behaviour tests still pass",
+      "write_set": [
+        "tools/loader.py"
+      ],
+      "base_files": 4,
+      "sources": [],
+      "content_sha": "69613e5efda9ff16"
+    },
+    {
+      "series": "r40_f05_nm_logic_not_lint",
+      "family": "f05_fix_lint_class",
+      "kind": "Tool",
+      "instance": null,
+      "near_miss": true,
+      "near_miss_reason": "file is already lint-clean; the defect is a logic error a lint routine cannot fix",
+      "label": "near_miss",
+      "goal": "Clean up tools/stats_util.py: `ruff check` is already happy with it, but `median()` is wrong for even-length input — median([1, 2, 3, 4]) returns 3, it should be 2.5.",
+      "params": {
+        "file": "tools/stats_util.py"
+      },
+      "check": "median correct for even-length input; file stays ruff-clean (E,F)",
+      "write_set": [
+        "tools/stats_util.py"
+      ],
+      "base_files": 4,
+      "sources": [],
+      "content_sha": "6b32f9a721649229"
+    },
+    {
+      "series": "r40_f06_i1_e1_arms",
+      "family": "f06_md_table_from_json",
+      "kind": "Tool",
+      "instance": 1,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Regenerate the table between `<!-- table:e1 start -->` and `<!-- table:e1 end -->` in docs/RESULTS.md from reports/e1_summary.json: header `| Arm | Solved | Runs | $/run |`, one row per arm sorted by arm name, $/run = cost_usd / runs with 3 decimals (no `$` sign). Leave everything outside the markers unchanged.",
+      "params": {
+        "doc": "docs/RESULTS.md",
+        "json": "reports/e1_summary.json",
+        "table": "e1"
+      },
+      "check": "table cells between the markers equal the recomputation; text outside unchanged",
+      "write_set": [
+        "docs/RESULTS.md"
+      ],
+      "base_files": 3,
+      "sources": [],
+      "content_sha": "bafadb2cfeb62808"
+    },
+    {
+      "series": "r40_f06_i2_prices",
+      "family": "f06_md_table_from_json",
+      "kind": "Tool",
+      "instance": 2,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Regenerate the table between `<!-- table:prices start -->` and `<!-- table:prices end -->` in docs/MODELS.md from reports/prices.json: header `| Model | Input $/M | Output $/M |`, one row per model sorted by input price ascending (ties by id), prices with 2 decimals. Leave everything outside the markers unchanged.",
+      "params": {
+        "doc": "docs/MODELS.md",
+        "json": "reports/prices.json",
+        "table": "prices"
+      },
+      "check": "table cells between the markers equal the recomputation; text outside unchanged",
+      "write_set": [
+        "docs/MODELS.md"
+      ],
+      "base_files": 3,
+      "sources": [],
+      "content_sha": "71be495d937ec615"
+    },
+    {
+      "series": "r40_f06_i3_cache_components",
+      "family": "f06_md_table_from_json",
+      "kind": "Tool",
+      "instance": 3,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Regenerate the table between `<!-- table:cache start -->` and `<!-- table:cache end -->` in docs/CACHE.md from reports/cache_summary.json: header `| Component | Calls | Hit % |`, one row per component in the JSON's order, Hit % = cache_hit_ratio x 100 with 1 decimal, or `-` when it is null. Leave everything outside the markers unchanged.",
+      "params": {
+        "doc": "docs/CACHE.md",
+        "json": "reports/cache_summary.json",
+        "table": "cache"
+      },
+      "check": "table cells between the markers equal the recomputation; text outside unchanged",
+      "write_set": [
+        "docs/CACHE.md"
+      ],
+      "base_files": 3,
+      "sources": [],
+      "content_sha": "a6a1a5513f7d4e0a"
+    },
+    {
+      "series": "r40_f06_i4_series_sizes",
+      "family": "f06_md_table_from_json",
+      "kind": "Tool",
+      "instance": 4,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Regenerate the table between `<!-- table:series start -->` and `<!-- table:series end -->` in docs/SERIES.md from reports/series.json: header `| Series | Jobs | Difficulty |`, one row per series sorted by jobs descending, ties by name ascending. Leave everything outside the markers unchanged.",
+      "params": {
+        "doc": "docs/SERIES.md",
+        "json": "reports/series.json",
+        "table": "series"
+      },
+      "check": "table cells between the markers equal the recomputation; text outside unchanged",
+      "write_set": [
+        "docs/SERIES.md"
+      ],
+      "base_files": 3,
+      "sources": [],
+      "content_sha": "dd3581d25cf9be7f"
+    },
+    {
+      "series": "r40_f06_nm_json_from_table",
+      "family": "f06_md_table_from_json",
+      "kind": "Tool",
+      "instance": null,
+      "near_miss": true,
+      "near_miss_reason": "data flows table -> JSON; regenerating the table from JSON destroys the truth",
+      "label": "near_miss",
+      "goal": "The E1 table in docs/RESULTS.md (between the `table:e1` markers) was hand-checked against the logs and is correct; reports/e1_summary.json is out of date. Update the solved/runs numbers in reports/e1_summary.json to match the table. Don't touch the doc.",
+      "params": {
+        "doc": "docs/RESULTS.md",
+        "json": "reports/e1_summary.json"
+      },
+      "check": "JSON arms equal the table; the markdown doc is byte-identical",
+      "write_set": [
+        "reports/e1_summary.json"
+      ],
+      "base_files": 3,
+      "sources": [],
+      "content_sha": "c29f956e7490aae0"
+    },
+    {
+      "series": "r40_f07_i1_num_to_as_number",
+      "family": "f07_rename_function",
+      "kind": "Routine",
+      "instance": 1,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Rename the function `_num` in scripts/cache_report.py to `as_number` and update every caller in the project (scripts and tests). Don't keep the old name around; behaviour must not change.",
+      "params": {
+        "old": "_num",
+        "new": "as_number"
+      },
+      "check": "AST: old identifier gone from scripts/ and tests/; new one defined; cache_compare output unchanged",
+      "write_set": [
+        "scripts/cache_compare.py",
+        "scripts/cache_report.py",
+        "tests/test_cache_report.py"
+      ],
+      "base_files": 6,
+      "sources": [
+        "scripts/cache_report.py"
+      ],
+      "content_sha": "e383dd1e792863d6"
+    },
+    {
+      "series": "r40_f07_i2_bucket_of_to_component_bucket",
+      "family": "f07_rename_function",
+      "kind": "Routine",
+      "instance": 2,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Rename the function `bucket_of` in scripts/cache_report.py to `component_bucket` and update every caller in the project (scripts and tests). Don't keep the old name around; behaviour must not change.",
+      "params": {
+        "old": "bucket_of",
+        "new": "component_bucket"
+      },
+      "check": "AST: old identifier gone from scripts/ and tests/; new one defined; cache_compare output unchanged",
+      "write_set": [
+        "scripts/cache_compare.py",
+        "scripts/cache_report.py",
+        "tests/test_cache_report.py"
+      ],
+      "base_files": 6,
+      "sources": [
+        "scripts/cache_report.py"
+      ],
+      "content_sha": "74eab4324eb197ec"
+    },
+    {
+      "series": "r40_f07_i3_summarise_to_summarize",
+      "family": "f07_rename_function",
+      "kind": "Routine",
+      "instance": 3,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Rename the function `summarise` in scripts/cache_report.py to `summarize` and update every caller in the project (scripts and tests). Don't keep the old name around; behaviour must not change.",
+      "params": {
+        "old": "summarise",
+        "new": "summarize"
+      },
+      "check": "AST: old identifier gone from scripts/ and tests/; new one defined; cache_compare output unchanged",
+      "write_set": [
+        "scripts/cache_compare.py",
+        "scripts/cache_report.py",
+        "tests/test_cache_report.py"
+      ],
+      "base_files": 6,
+      "sources": [
+        "scripts/cache_report.py"
+      ],
+      "content_sha": "86553ed5734c8d7f"
+    },
+    {
+      "series": "r40_f07_i4_find_logs_to_discover_logs",
+      "family": "f07_rename_function",
+      "kind": "Routine",
+      "instance": 4,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Rename the function `find_logs` in scripts/cache_report.py to `discover_logs` and update every caller in the project (scripts and tests). Don't keep the old name around; behaviour must not change.",
+      "params": {
+        "old": "find_logs",
+        "new": "discover_logs"
+      },
+      "check": "AST: old identifier gone from scripts/ and tests/; new one defined; cache_compare output unchanged",
+      "write_set": [
+        "scripts/cache_compare.py",
+        "scripts/cache_report.py",
+        "tests/test_cache_report.py"
+      ],
+      "base_files": 6,
+      "sources": [
+        "scripts/cache_report.py"
+      ],
+      "content_sha": "b3124d2643f0a415"
+    },
+    {
+      "series": "r40_f07_nm_alias_bucket_of",
+      "family": "f07_rename_function",
+      "kind": "Routine",
+      "instance": null,
+      "near_miss": true,
+      "near_miss_reason": "a plain rename deletes bucket_of, which the request says must keep working",
+      "label": "near_miss",
+      "goal": "We want `bucket_of` in scripts/cache_report.py to be called `component_bucket`, but external notebooks still import `bucket_of`. Make `component_bucket` the real function (used everywhere inside the project) and keep `bucket_of` as a deprecated alias that emits a DeprecationWarning and returns the same result.",
+      "params": {
+        "old": "bucket_of",
+        "new": "component_bucket"
+      },
+      "check": "component_bucket works without warnings; bucket_of still exists and warns DeprecationWarning",
+      "write_set": [
+        "scripts/cache_compare.py",
+        "scripts/cache_report.py"
+      ],
+      "base_files": 6,
+      "sources": [
+        "scripts/cache_report.py"
+      ],
+      "content_sha": "1a776f38df931160"
+    },
+    {
+      "series": "r40_f08_i1_max_retries",
+      "family": "f08_config_env_var",
+      "kind": "Routine",
+      "instance": 1,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Add a new setting `AWOS_MAX_RETRIES` (an int, default 3) exposed as `Settings.max_retries` in awos_cfg/config.py and parsed by `load_settings` the same way as the other int settings. Document it as a row in the table in docs/CONFIG.md (variable, default, meaning).",
+      "params": {
+        "var": "AWOS_MAX_RETRIES",
+        "field": "max_retries",
+        "type": "int",
+        "default": 3
+      },
+      "check": "default, env override parsing, existing settings unchanged, one doc row with the default",
+      "write_set": [
+        "awos_cfg/config.py",
+        "docs/CONFIG.md"
+      ],
+      "base_files": 5,
+      "sources": [],
+      "content_sha": "014fc066204fee6e"
+    },
+    {
+      "series": "r40_f08_i2_stable_prefix",
+      "family": "f08_config_env_var",
+      "kind": "Routine",
+      "instance": 2,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Add a new setting `AWOS_STABLE_PREFIX` (a bool, default off (`0`)) exposed as `Settings.stable_prefix` in awos_cfg/config.py and parsed by `load_settings` the same way as the other bool settings. Document it as a row in the table in docs/CONFIG.md (variable, default, meaning).",
+      "params": {
+        "var": "AWOS_STABLE_PREFIX",
+        "field": "stable_prefix",
+        "type": "bool",
+        "default": false
+      },
+      "check": "default, env override parsing, existing settings unchanged, one doc row with the default",
+      "write_set": [
+        "awos_cfg/config.py",
+        "docs/CONFIG.md"
+      ],
+      "base_files": 5,
+      "sources": [],
+      "content_sha": "fed9f2a38210ad11"
+    },
+    {
+      "series": "r40_f08_i3_arbiter_timeout_s",
+      "family": "f08_config_env_var",
+      "kind": "Routine",
+      "instance": 3,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Add a new setting `AWOS_ARBITER_TIMEOUT_S` (a float in seconds, default 45) exposed as `Settings.arbiter_timeout_s` in awos_cfg/config.py and parsed by `load_settings` the same way as the other float settings. Document it as a row in the table in docs/CONFIG.md (variable, default, meaning).",
+      "params": {
+        "var": "AWOS_ARBITER_TIMEOUT_S",
+        "field": "arbiter_timeout_s",
+        "type": "float",
+        "default": 45.0
+      },
+      "check": "default, env override parsing, existing settings unchanged, one doc row with the default",
+      "write_set": [
+        "awos_cfg/config.py",
+        "docs/CONFIG.md"
+      ],
+      "base_files": 5,
+      "sources": [],
+      "content_sha": "651f97ebd9c08c12"
+    },
+    {
+      "series": "r40_f08_i4_trace_dir",
+      "family": "f08_config_env_var",
+      "kind": "Routine",
+      "instance": 4,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Add a new setting `AWOS_TRACE_DIR` (a path string, default `.awos/traces`) exposed as `Settings.trace_dir` in awos_cfg/config.py and parsed by `load_settings` the same way as the other str settings. Document it as a row in the table in docs/CONFIG.md (variable, default, meaning).",
+      "params": {
+        "var": "AWOS_TRACE_DIR",
+        "field": "trace_dir",
+        "type": "str",
+        "default": ".awos/traces"
+      },
+      "check": "default, env override parsing, existing settings unchanged, one doc row with the default",
+      "write_set": [
+        "awos_cfg/config.py",
+        "docs/CONFIG.md"
+      ],
+      "base_files": 5,
+      "sources": [],
+      "content_sha": "91a1b9e375d0ee9c"
+    },
+    {
+      "series": "r40_f08_nm_notebook_default_off",
+      "family": "f08_config_env_var",
+      "kind": "Routine",
+      "instance": null,
+      "near_miss": true,
+      "near_miss_reason": "changes an existing variable's default; adding a new env var is wrong",
+      "label": "near_miss",
+      "goal": "Make the notebook opt-in: `AWOS_NOTEBOOK` should default to off (`0`) instead of on. Update awos_cfg/config.py and the default shown in docs/CONFIG.md.",
+      "params": {
+        "var": "AWOS_NOTEBOOK",
+        "new_default": false
+      },
+      "check": "AWOS_NOTEBOOK defaults to False in code and doc; no new setting or doc row",
+      "write_set": [
+        "awos_cfg/config.py",
+        "docs/CONFIG.md"
+      ],
+      "base_files": 5,
+      "sources": [],
+      "content_sha": "9a4bbd4e19c39bb3"
+    },
+    {
+      "series": "r40_f09_i1_test_parse_jobs",
+      "family": "f09_unit_test_pure_fn",
+      "kind": "Routine",
+      "instance": 1,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Write unit tests for `parse_jobs` in awos_util/pure.py, in a new file `tests/test_parse_jobs.py`. Cover a range like '1-3', a comma list like '1,4', numbers not in `available` being dropped, and an empty or None spec returning all of `available`. Don't change the function itself.",
+      "params": {
+        "function": "parse_jobs",
+        "test_file": "tests/test_parse_jobs.py",
+        "mutants": 3
+      },
+      "check": "new test file passes on HEAD, function unchanged, and fails on each of 3 planted mutants",
+      "write_set": [
+        "tests/test_parse_jobs.py"
+      ],
+      "base_files": 4,
+      "sources": [
+        "scripts/job_series.py (parse_jobs, _spread)",
+        "scripts/cache_report.py (_num, bucket_of)"
+      ],
+      "content_sha": "5c1fad18a2a2b61a"
+    },
+    {
+      "series": "r40_f09_i2_test_spread",
+      "family": "f09_unit_test_pure_fn",
+      "kind": "Routine",
+      "instance": 2,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Write unit tests for `spread` in awos_util/pure.py, in a new file `tests/test_spread.py`. Cover the sample standard deviation (n-1) on a small list like [1, 2, 3], None values being skipped, and an empty input giving n=0 with every other value None. Don't change the function itself.",
+      "params": {
+        "function": "spread",
+        "test_file": "tests/test_spread.py",
+        "mutants": 3
+      },
+      "check": "new test file passes on HEAD, function unchanged, and fails on each of 3 planted mutants",
+      "write_set": [
+        "tests/test_spread.py"
+      ],
+      "base_files": 4,
+      "sources": [
+        "scripts/job_series.py (parse_jobs, _spread)",
+        "scripts/cache_report.py (_num, bucket_of)"
+      ],
+      "content_sha": "0a68b267acea8667"
+    },
+    {
+      "series": "r40_f09_i3_test_num_or_zero",
+      "family": "f09_unit_test_pure_fn",
+      "kind": "Routine",
+      "instance": 3,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Write unit tests for `num_or_zero` in awos_util/pure.py, in a new file `tests/test_num_or_zero.py`. Cover numbers and numeric strings ('2.5' -> 2.5), None -> 0.0, booleans -> 0.0 (True is not 1 here), and junk like 'abc' -> 0.0. Don't change the function itself.",
+      "params": {
+        "function": "num_or_zero",
+        "test_file": "tests/test_num_or_zero.py",
+        "mutants": 3
+      },
+      "check": "new test file passes on HEAD, function unchanged, and fails on each of 3 planted mutants",
+      "write_set": [
+        "tests/test_num_or_zero.py"
+      ],
+      "base_files": 4,
+      "sources": [
+        "scripts/job_series.py (parse_jobs, _spread)",
+        "scripts/cache_report.py (_num, bucket_of)"
+      ],
+      "content_sha": "984d2f768f750bf4"
+    },
+    {
+      "series": "r40_f09_i4_test_bucket_of",
+      "family": "f09_unit_test_pure_fn",
+      "kind": "Routine",
+      "instance": 4,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Write unit tests for `bucket_of` in awos_util/pure.py, in a new file `tests/test_bucket_of.py`. Cover known components mapping to themselves (one_shot, agent, acceptance), the arbiter (component 'arbiter', or request_type 'acceptance_arbitration' even when the component is 'acceptance'), and anything else mapping to 'other'. Don't change the function itself.",
+      "params": {
+        "function": "bucket_of",
+        "test_file": "tests/test_bucket_of.py",
+        "mutants": 3
+      },
+      "check": "new test file passes on HEAD, function unchanged, and fails on each of 3 planted mutants",
+      "write_set": [
+        "tests/test_bucket_of.py"
+      ],
+      "base_files": 4,
+      "sources": [
+        "scripts/job_series.py (parse_jobs, _spread)",
+        "scripts/cache_report.py (_num, bucket_of)"
+      ],
+      "content_sha": "1e269d614e9f22af"
+    },
+    {
+      "series": "r40_f09_nm_percentile_empty_bug",
+      "family": "f09_unit_test_pure_fn",
+      "kind": "Routine",
+      "instance": null,
+      "near_miss": true,
+      "near_miss_reason": "the function violates its docstring; a test-only routine cannot make the test pass",
+      "label": "near_miss",
+      "goal": "Add tests/test_percentile.py with a regression test that `percentile([], 50)` in awos_util/pure.py raises ValueError, as its docstring promises, plus a nearest-rank case. The new tests must pass.",
+      "params": {
+        "function": "percentile"
+      },
+      "check": "percentile([]) raises ValueError; nearest-rank behaviour unchanged; new test file green",
+      "write_set": [
+        "awos_util/pure.py",
+        "tests/test_percentile.py"
+      ],
+      "base_files": 4,
+      "sources": [],
+      "content_sha": "2bd012689512376d"
+    },
+    {
+      "series": "r40_f10_i1_e1_edit_reliability",
+      "family": "f10_spec_section_from_json",
+      "kind": "Tool",
+      "instance": 1,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Fill in the `## Results` section of docs/specs/e1_edit_reliability.md from reports/e1_edit_reliability_summary.json. The section should read: a line ``Run `<run>`.``; then one bullet per arm in the JSON's order, `- <arm>: <solved>/<runs> solved, $<cost_usd / runs, 3 decimals> per run`; then `Decision: <label> (P(delta>0) = <p_delta_positive, 2 decimals>)`. Replace the pending placeholder; leave every other section exactly as it is.",
+      "params": {
+        "doc": "docs/specs/e1_edit_reliability.md",
+        "summary": "reports/e1_edit_reliability_summary.json",
+        "arms": [
+          "off",
+          "on"
+        ]
+      },
+      "check": "Results section lines equal the JSON-derived lines; all other sections untouched",
+      "write_set": [
+        "docs/specs/e1_edit_reliability.md"
+      ],
+      "base_files": 3,
+      "sources": [],
+      "content_sha": "08c1d89448e72209"
+    },
+    {
+      "series": "r40_f10_i2_t7b_stable_prefix",
+      "family": "f10_spec_section_from_json",
+      "kind": "Tool",
+      "instance": 2,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Fill in the `## Results` section of docs/specs/t7b_stable_prefix.md from reports/t7b_stable_prefix_summary.json. The section should read: a line ``Run `<run>`.``; then one bullet per arm in the JSON's order, `- <arm>: <solved>/<runs> solved, $<cost_usd / runs, 3 decimals> per run`; then `Decision: <label> (P(delta>0) = <p_delta_positive, 2 decimals>)`. Replace the pending placeholder; leave every other section exactly as it is.",
+      "params": {
+        "doc": "docs/specs/t7b_stable_prefix.md",
+        "summary": "reports/t7b_stable_prefix_summary.json",
+        "arms": [
+          "prefix_off",
+          "prefix_on"
+        ]
+      },
+      "check": "Results section lines equal the JSON-derived lines; all other sections untouched",
+      "write_set": [
+        "docs/specs/t7b_stable_prefix.md"
+      ],
+      "base_files": 3,
+      "sources": [],
+      "content_sha": "2b0b284a39ce49c2"
+    },
+    {
+      "series": "r40_f10_i3_one_shot_default",
+      "family": "f10_spec_section_from_json",
+      "kind": "Tool",
+      "instance": 3,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Fill in the `## Results` section of docs/specs/one_shot_default.md from reports/one_shot_default_summary.json. The section should read: a line ``Run `<run>`.``; then one bullet per arm in the JSON's order, `- <arm>: <solved>/<runs> solved, $<cost_usd / runs, 3 decimals> per run`; then `Decision: <label> (P(delta>0) = <p_delta_positive, 2 decimals>)`. Replace the pending placeholder; leave every other section exactly as it is.",
+      "params": {
+        "doc": "docs/specs/one_shot_default.md",
+        "summary": "reports/one_shot_default_summary.json",
+        "arms": [
+          "agent",
+          "one_shot",
+          "aider"
+        ]
+      },
+      "check": "Results section lines equal the JSON-derived lines; all other sections untouched",
+      "write_set": [
+        "docs/specs/one_shot_default.md"
+      ],
+      "base_files": 3,
+      "sources": [],
+      "content_sha": "59049f8e84c148dd"
+    },
+    {
+      "series": "r40_f10_i4_loop_breaker",
+      "family": "f10_spec_section_from_json",
+      "kind": "Tool",
+      "instance": 4,
+      "near_miss": false,
+      "near_miss_reason": null,
+      "label": "instance",
+      "goal": "Fill in the `## Results` section of docs/specs/loop_breaker.md from reports/loop_breaker_summary.json. The section should read: a line ``Run `<run>`.``; then one bullet per arm in the JSON's order, `- <arm>: <solved>/<runs> solved, $<cost_usd / runs, 3 decimals> per run`; then `Decision: <label> (P(delta>0) = <p_delta_positive, 2 decimals>)`. Replace the pending placeholder; leave every other section exactly as it is.",
+      "params": {
+        "doc": "docs/specs/loop_breaker.md",
+        "summary": "reports/loop_breaker_summary.json",
+        "arms": [
+          "off",
+          "on"
+        ]
+      },
+      "check": "Results section lines equal the JSON-derived lines; all other sections untouched",
+      "write_set": [
+        "docs/specs/loop_breaker.md"
+      ],
+      "base_files": 3,
+      "sources": [],
+      "content_sha": "37754551651436ee"
+    }
+  ]
+}
