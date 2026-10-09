@@ -126,6 +126,11 @@ def fields_from_response(response: Any) -> dict:
         cost = _get(usage, "cost")
         if isinstance(cost, (int, float)) and not isinstance(cost, bool):
             out["cost_usd"] = float(cost)
+        # Loop breaker (loop_guard.py): "resampled" / "tripped" on a guarded
+        # call that hit a repetition loop; absent otherwise.
+        guard = None if isinstance(response, dict) else getattr(response, "loop_guard", None)
+        if isinstance(guard, str) and guard:
+            out["loop_guard"] = guard
     except Exception:
         pass
     return out

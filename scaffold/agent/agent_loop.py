@@ -361,13 +361,23 @@ class OpenAIToolClient:
             except ImportError:
                 from providers import with_openrouter_routing
             extra = with_openrouter_routing(extra)
-        response = self._client.chat.completions.create(
+        kwargs = dict(
             model=self.model,
             max_tokens=self.max_tokens,
             messages=[{"role": "system", "content": system}, *messages],
             tools=registry.openai_schemas(),
             **extra,
         )
+        try:
+            from . import loop_guard
+        except ImportError:
+            import loop_guard
+        if loop_guard.enabled():
+            # Stream, abort a verbatim loop early, trim, resample once.
+            response = loop_guard.guarded_create(
+                self._client.chat.completions.create, kwargs, component="agent")
+        else:
+            response = self._client.chat.completions.create(**kwargs)
         message = response.choices[0].message
         calls = []
         for raw_call in getattr(message, "tool_calls", None) or []:

@@ -793,7 +793,16 @@ class _UsageTap:
         self.completions = self
 
     def create(self, **kwargs):
-        response = self._inner.chat.completions.create(**kwargs)
+        try:
+            from . import loop_guard
+        except ImportError:
+            import loop_guard
+        if loop_guard.enabled():
+            # Stream, abort a verbatim loop early, trim, resample once.
+            response = loop_guard.guarded_create(
+                self._inner.chat.completions.create, kwargs, component="one_shot")
+        else:
+            response = self._inner.chat.completions.create(**kwargs)
         usage = getattr(response, "usage", None)
         self.input_tokens += int(getattr(usage, "prompt_tokens", 0) or 0)
         self.output_tokens += int(getattr(usage, "completion_tokens", 0) or 0)
