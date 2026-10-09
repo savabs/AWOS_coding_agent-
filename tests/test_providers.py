@@ -147,6 +147,8 @@ def test_refine_goal_keeps_goal_when_reply_is_empty(openrouter):
 def no_timeout_env(monkeypatch):
     monkeypatch.delenv("AWOS_MODEL_TIMEOUT_S", raising=False)
     monkeypatch.delenv("AWOS_MODEL_MAX_RETRIES", raising=False)
+    monkeypatch.delenv("AWOS_PROVIDER", raising=False)
+    monkeypatch.delenv("AWOS_AGENT_MODEL", raising=False)
 
 
 def _inner(client):
@@ -157,6 +159,29 @@ def test_client_options_defaults(no_timeout_env):
     assert providers.client_options() == {"timeout": 120.0, "max_retries": 2}
 
 
+def test_local_mode_timeout_default_is_900(no_timeout_env, monkeypatch):
+    monkeypatch.setenv("AWOS_PROVIDER", "local")
+    assert providers.model_timeout_s() == 900.0
+    assert providers.client_options() == {"timeout": 900.0, "max_retries": 2}
+
+
+def test_local_agent_model_also_gets_900(no_timeout_env, monkeypatch):
+    monkeypatch.setenv("AWOS_AGENT_MODEL", "local/qwen3.5-9b")
+    assert providers.model_timeout_s() == 900.0
+
+
+def test_cloud_timeout_default_unchanged(no_timeout_env, monkeypatch):
+    monkeypatch.setenv("AWOS_PROVIDER", "openrouter")
+    assert providers.model_timeout_s() == 120.0
+
+
+@pytest.mark.parametrize("raw, want", [("60", 60.0), ("abc", 900.0), ("0", 900.0), ("", 900.0)])
+def test_local_mode_explicit_timeout_wins_bad_falls_back_to_900(no_timeout_env, monkeypatch, raw, want):
+    monkeypatch.setenv("AWOS_PROVIDER", "local")
+    monkeypatch.setenv("AWOS_MODEL_TIMEOUT_S", raw)
+    assert providers.model_timeout_s() == want
+
+
 def test_client_options_from_env(monkeypatch):
     monkeypatch.setenv("AWOS_MODEL_TIMEOUT_S", "30")
     monkeypatch.setenv("AWOS_MODEL_MAX_RETRIES", "0")
@@ -165,6 +190,8 @@ def test_client_options_from_env(monkeypatch):
 
 @pytest.mark.parametrize("timeout, retries", [("abc", "x"), ("0", "-1"), ("-5", "")])
 def test_client_options_bad_env_falls_back(monkeypatch, timeout, retries):
+    monkeypatch.delenv("AWOS_PROVIDER", raising=False)
+    monkeypatch.delenv("AWOS_AGENT_MODEL", raising=False)
     monkeypatch.setenv("AWOS_MODEL_TIMEOUT_S", timeout)
     monkeypatch.setenv("AWOS_MODEL_MAX_RETRIES", retries)
     assert providers.client_options() == {"timeout": 120.0, "max_retries": 2}
