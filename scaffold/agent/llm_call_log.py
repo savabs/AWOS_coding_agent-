@@ -61,6 +61,26 @@ def _int(value: Any) -> Optional[int]:
         return None
 
 
+def _extra(obj: Any, name: str) -> Any:
+    """A field the OpenAI SDK keeps in model_extra (e.g. llama-server timings)."""
+    value = _get(obj, name)
+    if value is None and obj is not None and not isinstance(obj, dict):
+        extra = getattr(obj, "model_extra", None)
+        if isinstance(extra, dict):
+            value = extra.get(name)
+    return value
+
+
+def _ratio(cached: Any, total: Any) -> Optional[float]:
+    """cached / total rounded to 4 places, None when unknown or total is 0."""
+    try:
+        if cached is None or total is None or int(total) <= 0:
+            return None
+        return round(min(1.0, max(0.0, int(cached) / int(total))), 4)
+    except (TypeError, ValueError):
+        return None
+
+
 def _provider(response: Any) -> Optional[str]:
     """The serving provider OpenRouter names in its response (`provider`).
 
@@ -94,6 +114,8 @@ def fields_from_response(response: Any) -> dict:
     reasoning_tokens, cached_tokens, cost_usd (usage.cost when the provider
     reports it, e.g. OpenRouter), visible_chars, provider (OpenRouter's serving
     provider). Missing values are None.
+    cached_tokens falls back to DeepSeek's prompt_cache_hit_tokens and
+    llama-server's timings.cache_n (cache_fields adds the rest).
     Never raises.
     """
     out: dict = dict(response_model=None, finish_reason=None, input_tokens=None,
@@ -112,6 +134,10 @@ def fields_from_response(response: Any) -> dict:
             out["input_tokens"] = _int(_get(usage, "prompt_tokens"))
             out["output_tokens"] = _int(_get(usage, "completion_tokens"))
             out["cached_tokens"] = _int(_get(_get(usage, "prompt_tokens_details"), "cached_tokens"))
+            if out["cached_tokens"] is None:  # DeepSeek direct
+                out["cached_tokens"] = _int(_get(usage, "prompt_cache_hit_tokens"))
+            if out["cached_tokens"] is None:  # llama-server
+                out["cached_tokens"] = _int(_get(_extra(response, "timings"), "cache_n"))
             out["reasoning_tokens"] = _int(
                 _get(_get(usage, "completion_tokens_details"), "reasoning_tokens"))
         else:  # Anthropic Messages shape
@@ -131,6 +157,32 @@ def fields_from_response(response: Any) -> dict:
         guard = None if isinstance(response, dict) else getattr(response, "loop_guard", None)
         if isinstance(guard, str) and guard:
             out["loop_guard"] = guard
+    except Exception:
+        pass
+    return out
+
+
+def cache_fields(response: Any) -> dict:
+    """Prompt-cache telemetry of a response (docs/specs/prompt_caching.md).
+
+    Keys: cache_write_tokens (OpenRouter prompt_tokens_details.cache_write_tokens
+    / Anthropic cache_creation_input_tokens) and cache_hit_ratio (cached share
+    of the *whole* prompt; Anthropic's input_tokens excludes cache reads and
+    writes, so they are added back). None when unknown. Never raises.
+    """
+    out: dict = {"cache_write_tokens": None, "cache_hit_ratio": None}
+    try:
+        fields = fields_from_response(response)
+        usage = _get(response, "usage")
+        if _get(response, "choices"):
+            out["cache_write_tokens"] = _int(
+                _get(_get(usage, "prompt_tokens_details"), "cache_write_tokens"))
+            out["cache_hit_ratio"] = _ratio(fields["cached_tokens"], fields["input_tokens"])
+        else:  # Anthropic Messages shape
+            out["cache_write_tokens"] = _int(_get(usage, "cache_creation_input_tokens"))
+            out["cache_hit_ratio"] = _ratio(fields["cached_tokens"], sum(
+                v or 0 for v in (fields["input_tokens"], fields["cached_tokens"],
+                                 out["cache_write_tokens"])))
     except Exception:
         pass
     return out
@@ -176,6 +228,8 @@ def record_call(component: str, requested_model: Optional[str], response_model: 
             line["fallbacks_allowed"] = os.environ.get(
                 "AWOS_OPENROUTER_ALLOW_FALLBACKS", "0").strip().lower() in ("1", "true", "yes")
         line.update(extra)
+        if line.get("cache_hit_ratio") is None and line.get("cached_tokens") is not None:
+            line["cache_hit_ratio"] = _ratio(line["cached_tokens"], line["input_tokens"])
         if not line.get("provider") and _local_mode():
             line["provider"] = "local"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -192,6 +246,10 @@ def record_response(component: str, requested_model: Optional[str], response: An
     try:
         fields = fields_from_response(response)
         cost = overrides.pop("cost_usd", None)
+        fields["cost_source"] = "provider" if fields["cost_usd"] is not None else (
+            "estimate" if cost is not None else None)
+        fields["cost_est_usd"] = _cache_aware_estimate(requested_model, response)
+        fields.update(cache_fields(response))
         if fields["cost_usd"] is None:
             fields["cost_usd"] = cost
         for key, value in overrides.items():
@@ -200,6 +258,22 @@ def record_response(component: str, requested_model: Optional[str], response: An
         record_call(component, requested_model, **fields)
     except Exception:
         pass
+
+
+def _cache_aware_estimate(model: Optional[str], response: Any) -> Optional[float]:
+    """providers.estimate_cost_cached for this response's usage, None on failure."""
+    try:
+        if not model or _get(response, "usage") is None:
+            return None
+        try:
+            from .providers import estimate_cost_cached, usage_tokens
+        except ImportError:
+            from providers import estimate_cost_cached, usage_tokens
+        tok = usage_tokens(_get(response, "usage"), _extra(response, "timings"))
+        return round(estimate_cost_cached(model, tok["input"], tok["output"], tok["cached"],
+                                          tok["cache_write"]), 10)
+    except Exception:
+        return None
 
 
 def record_error(component: str, requested_model: Optional[str], exc: BaseException,
