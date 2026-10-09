@@ -1,6 +1,7 @@
 # Spec: compiled verified tools and Routines (Trick T8)
 
-Status: **design only, 2026-10-09. Nothing is built, and E7 is not yet run.**
+Status: **design, 2026-10-09. Steps 1–2 built as a skeleton on 2026-10-10 (see §12.1);
+not wired into the orchestrator. E7 is not yet run.**
 Sources: `docs/research/trick_book_2026-10.md` §1 #8, §2.1, §3 combination 1, §5 E7;
 `docs/research/local_first_architecture_2026-10.md` §2.2, §2.5, §2.6.
 VISION fit: Stage 1 (one excellent worker). It advances memory, capability reuse
@@ -585,6 +586,45 @@ Total: about **18 days** to the E7 verdict (steps 1–11). The Trick Book's "3�
 covers only the core of steps 4, 5 and 7. The rest is the safety, regression and
 measurement work that the experience-store failure showed is not optional.
 Step 12 follows the M3 milestone.
+
+### 12.1 Implementation notes (steps 1–2, built 2026-10-10)
+
+What exists, all new files, nothing wired into the run path:
+
+| Piece | File | Notes |
+|---|---|---|
+| Repetition meter | `scaffold/agent/compiled/repetition.py` | `log_task(goal, files=, actions=, root=, outcome=, evidence_level=)` appends `{family, goal_template, goal_sha, file_pattern, action_shape, intent_key, structure_key}` to `.awos/repetition/log.jsonl`. The raw goal is never stored. `AWOS_REPETITION_LOG` overrides the path or turns it `off`; off under pytest unless set. Never raises |
+| Repeat-rate report | `scripts/repetition_report.py` | Trailing-window (28 d) repeat rate per family on the structure key (the E7 key) and the intent key (upper bound); prints `E7 prerequisite … MET/NOT MET` at 20% |
+| Record format | `scaffold/agent/compiled/record.py` | Dataclasses mirroring §4, `RECORD_SCHEMA`, a dependency-free JSON-schema subset validator, `taint_fields`, closed-schema `validate_params`, `compute_fingerprint`/`check_fingerprint` (file sha256 + lockfile), atomic `save_record` with `INDEX.json` = one live record per family. Adds `s_indep`, `consecutive_ok`, `fail_ts`, `last_used_ts` to `evidence` for the §7 rules |
+| Beta math + state machine | `scaffold/agent/compiled/beta.py` | Exact integer Beta CDF (binomial tail) + bisection; reproduces the §7 table (28/44/58/72). `apply_event` implements §7 (admit, ok, fail, mismatch, idle); `fold_executions` recomputes counts from the execution log |
+| Admission skeleton | `scaffold/agent/compiled/admit.py` | A1, A2 (8 gen + 4 indep), A3, A4 (guard = trigger matcher → params schema → fingerprint → tool preconditions), A6, each case on a fresh clone of the golden repo. `python -m scaffold.agent.compiled.admit --demo` admits the hand-written `examples/bump_version.py` |
+
+Deviations from the step table: step 1 lives in `compiled/repetition.py` and
+`scripts/repetition_report.py` rather than `experience.py` and
+`scripts/intent_repetition.py`, so the trajectory log is untouched. The code is
+under `scaffold/agent/compiled/` (transitional) rather than `kernel/compiled/`.
+
+**Not done in the skeleton:** A2b trace rewrite, A5 regression set, running inside
+`make_sandbox()` (the tool runs in-process against the clone, so only hand-written,
+trusted Tools may use it), the `awos compiled` CLI, the execution log on disk, the
+full matcher (step 7), and the evidence-level field on trajectories.
+
+**Orchestrator hook (not wired).** The meter belongs in
+`Orchestrator._experience_goal_end` (`orchestrator.py`, the "Experience store +
+trajectory log" block), right after `exp.write_trajectory(...)`, inside the same
+`try`:
+
+```python
+from .compiled.repetition import log_task
+log_task(goal, files=changed,
+         actions=[c.get("tool") for c in exp.call_log_slice(start_ts, end_ts)],
+         root=codebase_root, outcome="success" if success else "fail",
+         evidence_level="L1" if green else "L0")
+```
+
+The action list should come from the agent loop's tool-call record rather than the
+LLM call log once that is threaded through; until then the shape is coarse. The
+call is advisory (never raises) and costs one small JSON line per finished goal.
 
 ---
 
