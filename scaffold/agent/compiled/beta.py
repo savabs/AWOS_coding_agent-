@@ -12,7 +12,8 @@ State machine (apply_event):
   admitted/demoted --ok--> ... promoted when LB>=0.9 and s_live>=3 and s_indep>=5
   promoted --fail--> demoted (one failure; R0 off; R1 again after 10 consecutive passes)
   admitted/demoted --second fail within 30 days--> retired
-  any --precondition mismatch / lockfile change--> suspended (no f increment)
+  any live state --precondition mismatch / lockfile change--> suspended (no f
+  increment); retired and rejected are terminal and stay put
   promoted --idle 60 days--> admitted
 """
 
@@ -29,6 +30,7 @@ PROMOTE_S_INDEP = 5
 DEMOTED_REUSE_PASSES = 10
 RETIRE_WINDOW_S = 30 * 86400
 IDLE_DEMOTE_S = 60 * 86400
+TERMINAL = ("retired", "rejected")
 
 
 def beta_cdf(x: float, a: int, b: int) -> float:
@@ -107,7 +109,7 @@ def apply_event(rec: dict, event: str, *, live: bool = False, indep: bool = Fals
     elif event == "reject":
         new = "rejected" if state == "candidate" else state
     elif event == "mismatch":
-        new = "suspended"
+        new = state if state in TERMINAL else "suspended"
     elif event == "idle":
         last = ev.get("last_used_ts") or 0
         if state == "promoted" and ts - last >= IDLE_DEMOTE_S:

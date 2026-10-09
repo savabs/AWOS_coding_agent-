@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -49,9 +50,20 @@ except ImportError:  # pragma: no cover — script use
 N_GEN = 8
 N_INDEP = 4
 MIN_NEAR_MISS = 5
-_GIT_ENV = {"GIT_AUTHOR_NAME": "awos", "GIT_AUTHOR_EMAIL": "awos@example.invalid",
-            "GIT_COMMITTER_NAME": "awos", "GIT_COMMITTER_EMAIL": "awos@example.invalid",
-            "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"}
+_GIT_FALLBACK_PATH = "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"
+
+
+def _git_env() -> dict:
+    """A minimal git env: the caller's PATH (+ common dirs) and HOME, a fixed identity,
+    and no global/system git config so user hooks or signing never leak in."""
+    path = os.environ.get("PATH", "")
+    env = {"GIT_AUTHOR_NAME": "awos", "GIT_AUTHOR_EMAIL": "awos@example.invalid",
+           "GIT_COMMITTER_NAME": "awos", "GIT_COMMITTER_EMAIL": "awos@example.invalid",
+           "PATH": f"{path}:{_GIT_FALLBACK_PATH}" if path else _GIT_FALLBACK_PATH,
+           "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+    if os.environ.get("HOME"):
+        env["HOME"] = os.environ["HOME"]
+    return env
 
 
 # ── Deterministic trigger matcher (minimal; the full matcher is step 7) ───────
@@ -113,7 +125,7 @@ class AdmissionReport:
 
 def _git(root: Path, *argv: str) -> str:
     return subprocess.run(["git", *argv], cwd=root, check=True, capture_output=True,
-                          text=True, env=_GIT_ENV).stdout
+                          text=True, env=_git_env()).stdout
 
 
 def changed_files(root: Path) -> list[str]:
@@ -146,7 +158,7 @@ class Harness:
         self._n += 1
         dst = self.workdir / f"case{self._n:03d}"
         subprocess.run(["git", "clone", "-q", str(self.golden), str(dst)], check=True,
-                       capture_output=True, env=_GIT_ENV)
+                       capture_output=True, env=_git_env())
         return dst
 
     def guard(self, goal: str, params: Any, root: Path) -> tuple[bool, str]:
@@ -305,11 +317,16 @@ def top_up(rec_d: dict, harness: Harness, n: int, seed0: int = 5000) -> list[dic
         ok, why = harness.guard(harness.tool.goal_for(params), params, root)
         if not ok:
             continue
-        harness.tool.run(params, ctx)
-        res = harness.tool.probe(params, ctx)
-        beta.apply_event(rec_d, "ok" if res["ok"] else "fail", indep=src == "indep")
+        try:
+            harness.tool.run(params, ctx)
+            res = harness.tool.probe(params, ctx)
+            outcome = "ok" if res["ok"] else "probe_fail"
+        except Exception as exc:  # noqa: BLE001 - a raising tool is a failure, not a crash
+            res, outcome = {"ok": False, "error": str(exc)}, "run_error"
+        beta.apply_event(rec_d, "ok" if res["ok"] else "fail", indep=src == "indep",
+                         detail="" if res["ok"] else str(res.get("error", "")))
         execs.append({"record_id": rec_d["id"], "source": src, "params": params,
-                      "probe_result": res, "outcome": "ok" if res["ok"] else "probe_fail"})
+                      "probe_result": res, "outcome": outcome})
     return execs
 
 

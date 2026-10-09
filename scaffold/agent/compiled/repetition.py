@@ -14,7 +14,10 @@ Every finished task gets one cheap intent fingerprint appended to
   intent_key      sha(template)[:12]                -> "same kind of request"
   structure_key   sha(template | files | actions)[:12] -> "same request, same shape"
 
-The raw goal is never stored: only its template and a sha. No LLM, no network.
+The raw goal is never stored: only its template and a sha. Secrets are slotted
+out before templating (key-like tokens such as sk-/ghp_/xox*-/AKIA ids, values
+after NAME_KEY=/TOKEN=/SECRET=/PASSWORD= style assignments or after the word
+"password", and long mixed letter+digit strings) -> <secret>. No LLM, no network.
 Writing never raises (advisory).
 
 scripts/repetition_report.py folds the log into a repeat rate per family: the
@@ -46,10 +49,38 @@ ROOT_TOKEN = "<PROJECT_ROOT>"
 _OFF = {"0", "off", "false", "no", ""}
 SCHEMA_VERSION = 1
 
+# Secrets are slotted on the original-case text, before anything else, so no
+# credential reaches goal_template (which is written to the log).
+_SECRET = "<secret>"
+_SECRET_ASSIGN = re.compile(
+    r"(?i)(\b[\w.-]*(?:key|token|secret|passw(?:or)?d|pwd|passphrase|credentials?)\s*[=:]\s*)"
+    r"(\"[^\"]*\"|'[^']*'|\S+)")
+_SECRET_WORD = re.compile(r"(?i)(\b(?:password|passwd|passphrase)\s+(?:is\s+)?)(\S+)")
+_SECRET_TOKEN = re.compile(
+    r"\b(?:sk-[\w-]{8,}|gh[pousr]_\w{16,}|github_pat_\w{16,}|xox[abprs]-[\w-]{8,}"
+    r"|AKIA[0-9A-Z]{12,}|AIza[\w-]{20,}|glpat-[\w-]{16,})")
+# Long mixed letter+digit runs (base64/hex-ish keys). Pure hex <= 40 chars is a
+# commit id and keeps its <hex> slot; '/' is excluded so paths stay paths.
+_SECRET_LONG = re.compile(r"(?<![\w/.-])(?=[\w+=-]*\d)(?=[\w+=-]*[A-Za-z])[\w+=-]{24,}(?![\w/.-])")
+
+
+def _redact_secrets(text: str) -> str:
+    text = _SECRET_TOKEN.sub(_SECRET, text)
+    text = _SECRET_ASSIGN.sub(lambda m: f"{m.group(1)} {_SECRET} ", text)
+    text = _SECRET_WORD.sub(lambda m: f"{m.group(1)}{_SECRET}", text)
+
+    def _long(m: re.Match) -> str:
+        tok = m.group(0)
+        if len(tok) <= 40 and re.fullmatch(r"[0-9a-fA-F]+", tok):
+            return tok
+        return _SECRET
+    return _SECRET_LONG.sub(_long, text)
+
+
 # Order matters: the most specific patterns first.
 _SLOTS: list[tuple[str, re.Pattern]] = [
     ("<code>", re.compile(r"`[^`]*`")),
-    ("<str>", re.compile(r"\"[^\"]*\"|'[^'\s][^']*'")),
+    ("<str>", re.compile(r"\"[^\"]*\"|(?<!\w)'[^'\s][^']*'(?!\w)")),
     ("<url>", re.compile(r"https?://\S+")),
     ("<path>", re.compile(r"(?:[\w.~-]+/)+[\w.-]+|\b[\w-]+\.(?:py|toml|md|json|jsonl|txt|yaml|yml|cfg|ini|js|ts|tsx|sh|lock)\b")),
     ("<semver>", re.compile(r"\bv?\d+\.\d+\.\d+(?:[-+][\w.]+)?\b")),
@@ -69,7 +100,7 @@ def _sha(text: str, n: int = 12) -> str:
 
 def goal_template(goal: str) -> str:
     """Typed-slot template of a goal: the same request with other values maps equal."""
-    text = (goal or "").strip().lower()
+    text = _redact_secrets((goal or "").strip()).lower()
     for slot, pat in _SLOTS:
         text = pat.sub(f" {slot} ", text)
     text = re.sub(r"[^\w<>\s-]", " ", text)
@@ -87,9 +118,12 @@ def _normalise_path(path: str, root: Optional[str]) -> str:
     p = str(path).replace("\\", "/")
     if root:
         r = str(root).replace("\\", "/").rstrip("/")
-        if p.startswith(r + "/"):
-            p = p[len(r) + 1:]
-        p = p.replace(r, ROOT_TOKEN)
+        if not r:  # root "/" (or "\\"): every absolute path is under it
+            p = p.lstrip("/")
+        else:
+            if p.startswith(r + "/"):
+                p = p[len(r) + 1:]
+            p = p.replace(r, ROOT_TOKEN)
     return p.removeprefix("./")
 
 

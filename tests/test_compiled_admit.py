@@ -91,6 +91,7 @@ def test_matcher():
     assert not admit.match_intent("fix the parser", intent)[0]
 
 
+@pytest.mark.timeout(60)  # ~28 fresh clones; 10s default is too tight under load
 def test_top_up_reaches_lb(golden, tmp_path):
     rec, rep = _run(golden, tmp_path, tool)
     d = admit.apply_admission(rec, rep)
@@ -98,6 +99,30 @@ def test_top_up_reaches_lb(golden, tmp_path):
     admit.top_up(d, h, 16)
     assert d["evidence"]["s"] == 28 and d["evidence"]["lb95"] >= 0.9
     assert d["state"] == "admitted"            # still blocked by s_live
+
+
+@pytest.mark.timeout(60)
+def test_top_up_records_raising_tool_as_fail(golden, tmp_path):
+    def run(params, ctx):
+        raise RuntimeError("boom")
+    mod = _variant(run=run)
+    rec = admit.build_record(mod, golden)
+    d = rec.to_dict()
+    d["state"] = "admitted"
+    h = admit.Harness(rec, mod, golden, workdir=tmp_path / "topup")
+    execs = admit.top_up(d, h, 2)
+    assert [e["outcome"] for e in execs] == ["run_error", "run_error"]
+    assert d["evidence"]["f"] == 2 and d["state"] == "retired"
+    assert "boom" in d["evidence"]["last_fail"]["detail"]
+
+
+def test_git_env_keeps_caller_path_and_home(monkeypatch):
+    monkeypatch.setenv("PATH", "/opt/custom/bin")
+    monkeypatch.setenv("HOME", "/home/someone")
+    env = admit._git_env()
+    assert env["PATH"].startswith("/opt/custom/bin:") and "/usr/bin" in env["PATH"]
+    assert env["HOME"] == "/home/someone"
+    assert env["GIT_CONFIG_NOSYSTEM"] == "1"
 
 
 def test_cli_table(capsys):

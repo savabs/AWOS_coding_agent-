@@ -141,3 +141,81 @@ def test_fold_executions_counts():
            {"record_id": "b", "source": "gen", "probe_result": {"ok": True}}]
     ev = beta.fold_executions(log, "a")
     assert (ev["s"], ev["f"], ev["s_indep"], ev["f_live"], ev["s_live"]) == (2, 1, 1, 1, 0)
+
+
+# ── Review fixes (compiled-tools-1) ───────────────────────────────────────────
+
+def test_record_schema_requires_closed_params(golden):
+    d = build_record(tool, golden).to_dict()
+    del d["params_schema"]["additionalProperties"]
+    errs = R.validate_record(d)
+    assert any("additionalProperties" in e for e in errs), errs
+
+
+def test_enum_does_not_confuse_bool_and_int():
+    assert R.validate(0, {"enum": [False]})
+    assert R.validate(1, {"enum": [True]})
+    assert R.validate(False, {"enum": [0]})
+    assert R.validate(False, {"enum": [False]}) == []
+    assert R.validate(2, {"enum": [2.0]}) == []
+
+
+def test_save_record_concurrent_threads_keep_every_family(tmp_path, golden):
+    import threading
+    base = build_record(tool, golden).to_dict()
+    store = tmp_path / "store"
+    n = 16
+    barrier = threading.Barrier(n)
+    errors = []
+
+    def worker(i):
+        d = json.loads(json.dumps(base))
+        d["family"], d["id"] = f"fam_{i}", ""
+        rec = R.Record.from_dict(d)
+        barrier.wait()
+        try:
+            for _ in range(5):
+                R.save_record(store, rec)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors, errors
+    idx = json.loads((store / "INDEX.json").read_text())
+    assert sorted(idx) == sorted(f"fam_{i}" for i in range(n))
+
+
+def test_file_sha_unreadable_is_none(tmp_path):
+    import os
+    p = tmp_path / "secret.txt"
+    p.write_text("x")
+    os.chmod(p, 0)
+    try:
+        if os.access(p, os.R_OK):
+            pytest.skip("running as root")
+        assert R.file_sha(p) is None
+    finally:
+        os.chmod(p, 0o600)
+
+
+def test_check_fingerprint_refuses_paths_outside_root(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("o")
+    want = R.file_sha(outside)
+    fp = {"files": {"../outside.txt": want, str(outside): want},
+          "lockfile": {"../outside.txt": want}}
+    out = R.check_fingerprint(root, fp)
+    assert len(out) == 3 and all("unsafe path" in o for o in out), out
+
+
+def test_mismatch_keeps_terminal_states():
+    for st in ("retired", "rejected"):
+        d = _ev(state=st)
+        beta.apply_event(d, "mismatch")
+        assert d["state"] == st

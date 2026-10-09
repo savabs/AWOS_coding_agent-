@@ -10,6 +10,32 @@ from scaffold.agent.compiled import repetition as rep
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_secrets_never_reach_template(tmp_path):
+    goal = ("set OPENAI_API_KEY=sk-proj-AbCdEfGhIjKlMnOp and password hunter2 deploy "
+            "with ghp_abcdefghijklmnopqrstuvwxyz12 and aB3dE5fG7hI9jK1lM3nO5pQ7rS")
+    tpl = rep.goal_template(goal)
+    for leak in ("sk-proj", "abcdefghijklmnop", "hunter2", "ghp_", "ab3de5fg7h"):
+        assert leak not in tpl, tpl
+    assert tpl.startswith("set openai_api_key <secret> and password <secret> deploy")
+    entry = rep.log_task(goal, path=tmp_path / "log.jsonl")
+    raw = (tmp_path / "log.jsonl").read_text().lower()
+    assert entry and "hunter2" not in raw and "abcdefghijklmnop" not in raw
+    # ordinary goals and commit ids keep their slots
+    assert rep.goal_template("revert commit 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b") == \
+        "revert commit <hex>"
+    assert rep.goal_template("rotate the api key for the service") == \
+        "rotate the api key for the service"
+
+
+def test_apostrophes_are_not_str_slots():
+    assert rep.goal_template("don't touch it's file") == "don t touch it s file"
+    assert rep.goal_template("rename 'foo' to bar") == "rename <str> to bar"
+
+
+def test_file_pattern_root_slash():
+    assert rep.file_pattern(["/a/b.py", "/c.md"], root="/") == ["*.md", "a/*.py"]
+
+
 def test_template_slots_values():
     a = rep.goal_template("Bump version to 0.9.4 in pyproject.toml")
     b = rep.goal_template("bump version to 1.2.0 in pyproject.toml")

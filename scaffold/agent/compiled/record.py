@@ -21,6 +21,8 @@ import hashlib
 import json
 import os
 import re
+import threading
+import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -45,6 +47,11 @@ def _type_ok(value: Any, t: str) -> bool:
     return isinstance(value, _TYPES[t])
 
 
+def _same(a: Any, b: Any) -> bool:
+    """JSON equality: unlike Python ==, a bool never equals a number (0 != False)."""
+    return isinstance(a, bool) == isinstance(b, bool) and a == b
+
+
 def validate(value: Any, schema: dict, path: str = "$") -> list[str]:
     """Errors for `value` against a JSON-schema subset; [] means valid."""
     errs: list[str] = []
@@ -55,7 +62,7 @@ def validate(value: Any, schema: dict, path: str = "$") -> list[str]:
         types = t if isinstance(t, list) else [t]
         if not any(_type_ok(value, x) for x in types):
             return [f"{path}: expected {t}, got {type(value).__name__}"]
-    if "enum" in schema and value not in schema["enum"]:
+    if "enum" in schema and not any(_same(value, e) for e in schema["enum"]):
         errs.append(f"{path}: {value!r} not in enum")
     if isinstance(value, str):
         if "pattern" in schema and not re.search(schema["pattern"], value):
@@ -106,8 +113,15 @@ def validate_params(params_schema: dict, params: Any) -> list[str]:
 def file_sha(path: Path) -> Optional[str]:
     try:
         return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
-    except (FileNotFoundError, IsADirectoryError):
+    except OSError:  # missing, a directory, unreadable (PermissionError), ...
         return None
+
+
+def _safe_rel(f: str) -> bool:
+    """A fingerprint path must be repo-relative: no absolute paths, no '..'."""
+    p = str(f).replace("\\", "/")
+    return bool(p) and not p.startswith("/") and not re.match(r"^[A-Za-z]:", p) \
+        and ".." not in p.split("/")
 
 
 def compute_fingerprint(root: Path, files: list[str], toolchain: Optional[dict] = None) -> dict:
@@ -126,10 +140,16 @@ def check_fingerprint(root: Path, fp: dict) -> list[str]:
     root = Path(root)
     out = []
     for f, want in (fp.get("files") or {}).items():
+        if not _safe_rel(f):
+            out.append(f"{f}: unsafe path (must be repo-relative)")
+            continue
         got = file_sha(root / f)
         if got != want:
             out.append(f"{f}: {'missing' if got is None else 'changed'}")
     for f, want in (fp.get("lockfile") or {}).items():
+        if not _safe_rel(f):
+            out.append(f"lockfile {f}: unsafe path (must be repo-relative)")
+            continue
         if file_sha(root / f) != want:
             out.append(f"lockfile {f}: changed")
     return out
@@ -246,7 +266,8 @@ RECORD_SCHEMA: dict = {
                    "properties": {"summary": {"type": "string"}, "triggers": _STR_LIST,
                                   "anti_triggers": _STR_LIST,
                                   "embedding_key": {"type": ["string", "null"]}}},
-        "params_schema": {"type": "object", "required": ["type", "properties"],
+        "params_schema": {"type": "object",
+                          "required": ["type", "properties", "additionalProperties"],
                           "properties": {"type": {"enum": ["object"]},
                                          "additionalProperties": {"enum": [False]}}},
         "preconditions": {"type": "object", "required": ["fingerprint", "drift_policy"],
@@ -286,7 +307,7 @@ def validate_record(d: dict) -> list[str]:
 def write_json_atomic(path: Path, data: Any) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
     try:
         tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
         os.replace(tmp, path)
@@ -304,13 +325,49 @@ def save_record(store_dir: Path, rec: Record) -> Path:
     path = store_dir / f"{rec.id}.v{rec.version}.json"
     write_json_atomic(path, rec.to_dict())
     idx_path = store_dir / "INDEX.json"
-    try:
-        idx = json.loads(idx_path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
-        idx = {}
-    idx[rec.family] = path.name
-    write_json_atomic(idx_path, idx)
+    with _IndexLock(store_dir):
+        try:
+            idx = json.loads(idx_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            idx = {}
+        idx[rec.family] = path.name
+        write_json_atomic(idx_path, idx)
     return path
+
+
+_THREAD_LOCK = threading.Lock()
+
+
+class _IndexLock:
+    """INDEX.json read-modify-write lock: a thread lock plus an flock across processes."""
+
+    def __init__(self, store_dir: Path):
+        self.path = Path(store_dir) / "INDEX.lock"
+        self.fh = None
+
+    def __enter__(self):
+        _THREAD_LOCK.acquire()
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.fh = open(self.path, "a")
+            try:
+                import fcntl
+                fcntl.flock(self.fh, fcntl.LOCK_EX)
+            except ImportError:  # pragma: no cover - non-POSIX: thread lock only
+                pass
+        except BaseException:
+            if self.fh:
+                self.fh.close()
+            _THREAD_LOCK.release()
+            raise
+        return self
+
+    def __exit__(self, *exc):
+        try:
+            self.fh.close()  # releases the flock
+        finally:
+            _THREAD_LOCK.release()
+        return False
 
 
 def load_record(path: Path) -> Record:
