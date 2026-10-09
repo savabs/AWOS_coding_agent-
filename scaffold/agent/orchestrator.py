@@ -2253,6 +2253,18 @@ class Orchestrator:
         # $1 cap resumed with another $1.
         cost_cap = _run_cost_cap()
         registry = build_coding_registry(codebase_root)
+        # AWOS_STATIC_GATE_TESTS (trick T3, docs/specs/static_gate.md): existing
+        # test files are read-only in the loop too, matching one_shot's rule.
+        try:
+            from . import static_gate as _sg
+        except ImportError:
+            import static_gate as _sg
+        _gate_mark = _sg.total_rejections()
+        _sg.new_task()
+        if _sg.tests_read_only() and not _asks_for_tests(task):
+            _edit = registry.get("edit_file") if hasattr(registry, "get") else None
+            if _edit is not None and hasattr(_edit, "protect_tests"):
+                _edit.protect_tests = True
         # The same sandbox later runs the verification tests: code the model
         # wrote (a conftest.py, say) must never execute on the host.
         sandbox = getattr(registry, "sandbox", None)
@@ -2331,6 +2343,10 @@ class Orchestrator:
                     **extra,
                     "_applied_context": self._agent_applied_context(task, files_changed, verdict),
                 }
+                if _sg.enabled():
+                    result["static_gate_rejections"] = _sg.total_rejections() - _gate_mark
+                    print(f"[STATIC-GATE] task {task_id}: "
+                          f"{result['static_gate_rejections']} rejection(s)")
                 return self._record_tool_executor_result(
                     result, task, ctx,
                     tool_name="OneShot", tag="ONE-SHOT", marker="one_shot",
@@ -2476,6 +2492,10 @@ class Orchestrator:
             # The next task's prompt starts from this, not cold.
             "_applied_context": self._agent_applied_context(task, files_changed, verdict),
         }
+        if _sg.enabled():
+            result["static_gate_rejections"] = _sg.total_rejections() - _gate_mark
+            print(f"[STATIC-GATE] task {task_id}: "
+                  f"{result['static_gate_rejections']} rejection(s)")
         return self._record_tool_executor_result(
             result,
             task,

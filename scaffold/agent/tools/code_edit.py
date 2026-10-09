@@ -36,6 +36,27 @@ def _load_verifier():
     return Verifier
 
 
+def _load_static_gate():
+    try:
+        from .. import static_gate
+    except ImportError:
+        import static_gate
+    return static_gate
+
+
+def _is_test_path(rel: str) -> bool:
+    """Same rule as one_shot.is_test_file (kept local: no import cycle)."""
+    parts = rel.replace("\\", "/").split("/")
+    name = parts[-1]
+    return (
+        name.startswith("test_")
+        or name.endswith("_test.py")
+        or name == "conftest.py"
+        or ".test." in name
+        or any(p in ("tests", "test") for p in parts[:-1])
+    )
+
+
 def _load_test_runner():
     try:
         from ..test_runner import TestRunner
@@ -47,8 +68,22 @@ def _load_test_runner():
 class EditFileTool(Tool):
     """Replace an exact snippet in a file, validated before it is written."""
 
-    def __init__(self, project_root: str = ".") -> None:
+    def __init__(self, project_root: str = ".", protect_tests: bool = False) -> None:
         self.project_root = Path(project_root)
+        #: V0 "tests are read-only": refuse edits to EXISTING test files. Set by
+        #: the orchestrator under AWOS_STATIC_GATE_TESTS=1 unless the task asks
+        #: for tests (one_shot.apply_blocks enforces the same rule on its own path).
+        self.protect_tests = protect_tests
+
+    def _gate(self, path: Path, new_text: str, old_text: str) -> ToolResult | None:
+        """AWOS_STATIC_GATE: a failure ToolResult when the write must not happen."""
+        gate = _load_static_gate()
+        if not gate.enabled():
+            return None
+        ok, msgs = gate.check(str(path), new_text, old_text)
+        if ok:
+            return None
+        return ToolResult.fail(gate.rejection_message(str(path), msgs))
 
     @property
     def name(self) -> str:
@@ -96,6 +131,18 @@ class EditFileTool(Tool):
         old_string = args["old_string"]
         new_string = args["new_string"]
 
+        if self.protect_tests and path.exists():
+            try:
+                rel = path.resolve().relative_to(self.project_root.resolve()).as_posix()
+            except (ValueError, OSError):
+                rel = path.as_posix()
+            if _is_test_path(rel):
+                print(f"[STATIC-GATE] rejected {rel}: read-only test file")
+                return ToolResult.fail(
+                    f"{rel} is a test file and tests are read-only for this task. "
+                    "Change the source code so the existing tests pass instead."
+                )
+
         # Creation path: Verifier's SEARCH/REPLACE contract assumes an existing
         # file, so an empty old_string is handled here instead.
         if old_string == "":
@@ -104,6 +151,10 @@ class EditFileTool(Tool):
                     f"{path} already exists and is not empty. Pass the text you "
                     "want to replace as old_string rather than an empty string."
                 )
+            old_text = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+            rejected = self._gate(path, new_string, old_text)
+            if rejected is not None:
+                return rejected
             try:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(new_string, encoding="utf-8")
@@ -129,7 +180,16 @@ class EditFileTool(Tool):
             )
 
         Verifier = _load_verifier()
-        outcome = Verifier().verify_and_apply(
+        verifier = Verifier()
+        if _load_static_gate().enabled():
+            # Preview the exact text Verifier would write (same fuzzy matcher);
+            # a non-match falls through so Verifier reports it as before.
+            matched, preview, _tier = verifier._apply_fuzzy(content, old_string, new_string)
+            if matched:
+                rejected = self._gate(path, preview, content)
+                if rejected is not None:
+                    return rejected
+        outcome = verifier.verify_and_apply(
             {"search": old_string, "replace": new_string},
             str(path),
             check_type="syntax",

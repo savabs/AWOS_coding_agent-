@@ -87,7 +87,9 @@ ROUTING_ENV = ("AWOS_OPENROUTER_PROVIDER", "AWOS_OPENROUTER_ALLOW_FALLBACKS",
                # (docs/specs/local_provider_spec.md); eval_health allows its id.
                "AWOS_PROVIDER", "AWOS_LOCAL_MODEL", "AWOS_LOCAL_BASE_URL",
                # T2 loop breaker (docs/specs/loop_breaker.md)
-               "AWOS_LOOP_BREAKER")
+               "AWOS_LOOP_BREAKER",
+               # trick T3: static gate at edit-apply time (docs/specs/static_gate.md)
+               "AWOS_STATIC_GATE", "AWOS_STATIC_GATE_TESTS")
 
 
 def routing_env() -> dict:
