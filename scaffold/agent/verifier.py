@@ -14,12 +14,25 @@ from pathlib import Path
 from typing import Optional
 
 
+def _fuzzy_module():
+    try:
+        from . import fuzzy_apply
+    except ImportError:
+        import fuzzy_apply
+    return fuzzy_apply
+
+
+def _fuzzy_on() -> bool:
+    """AWOS_FUZZY_APPLY (T4); read per call so tests can toggle it."""
+    return os.getenv("AWOS_FUZZY_APPLY", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 class Verifier:
     """Applies code changes and validates them with local compiler/linter."""
     
     def __init__(self):
         """Initialize Verifier."""
-        pass
+        self._last_fuzzy_reason = ""
     
     def verify_and_apply(
         self,
@@ -158,6 +171,10 @@ class Verifier:
         )
         if not matched:
             nearby_hint = self._find_nearby_content(original_content, search_text)
+            refusal = getattr(self, "_last_fuzzy_reason", "") if _fuzzy_on() else ""
+            if refusal:
+                print(f"[FUZZY-APPLY] refused file={file_path}: {refusal}")
+                nearby_hint = f"Not applied: {refusal}.\n\n{nearby_hint}"
             return {
                 "success": False,
                 "applied": False,
@@ -172,6 +189,9 @@ class Verifier:
             }
         if match_tier != "exact":
             print(f"[VERIFIER] Fuzzy match applied (tier={match_tier})")
+            if _fuzzy_on():
+                print(f"[FUZZY-APPLY] tier={match_tier.split(':')[0].replace('ladder', '')} "
+                      f"({match_tier}) file={file_path}")
 
         fidelity_errors = self._check_edit_fidelity(original_content, modified_content, search_replace.get("task_spec"))
         if fidelity_errors:
@@ -353,7 +373,14 @@ class Verifier:
         """
         4-tier fuzzy matching (Aider-inspired).
         Returns (matched: bool, modified_content: str, tier: str).
+
+        AWOS_FUZZY_APPLY=1 swaps in the unique-match ladder (fuzzy_apply.py);
+        its refusal reason is kept on self._last_fuzzy_reason.
         """
+        if _fuzzy_on():
+            m = _fuzzy_module().apply(original_content, search_text, replace_text)
+            self._last_fuzzy_reason = "" if m.matched else m.reason
+            return m.matched, m.content, m.label
         # Tier 1: exact
         if search_text in original_content:
             return True, original_content.replace(search_text, replace_text, 1), "exact"
