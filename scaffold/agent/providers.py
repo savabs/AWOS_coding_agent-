@@ -60,7 +60,11 @@ DEFAULT_MODEL_MAX_RETRIES = 2
 
 
 def default_model_timeout_s() -> float:
-    """900 s in local mode (AWOS_PROVIDER=local or a local/ agent model), else 120 s."""
+    """900 s in local mode (AWOS_PROVIDER=local or a local/ agent model), else 120 s.
+
+    Worst case: with the default 2 SDK retries a hung local call blocks for
+    up to 3 x 900 s = 45 minutes (cloud: 3 x 120 s = 6 minutes). Lower
+    AWOS_MODEL_TIMEOUT_S or AWOS_MODEL_MAX_RETRIES to bound it."""
     return DEFAULT_LOCAL_MODEL_TIMEOUT_S if local_mode() else DEFAULT_MODEL_TIMEOUT_S
 
 

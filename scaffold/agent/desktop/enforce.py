@@ -231,16 +231,19 @@ def _demo(audit_path: Optional[str]) -> int:
         ran: list = []
         asked: list = []
 
-        def approver(d: Decision) -> bool:          # owner approves only pytest runs
+        def approver(d: Decision) -> bool:          # owner approves only print(1)
             asked.append(d.action.description)
-            return "pytest" in d.action.description
+            return "print(1)" in d.action.description
 
         enf = Enforcer(policy, Mode.ENFORCE, approver, AuditLog(log_path))
-        print("\nEnforcement (dry-run executor; approver says yes only to pytest)\n")
+        print("\nEnforcement (dry-run executor; approver says yes only to print(1))\n")
+        # covers all four outcomes: allow -> ran, ask+yes -> ran (approved),
+        # ask+no -> blocked, deny -> blocked without asking
         for cmd, who in [
             ("ls -la", Provenance.AGENT),
             ("nice -n 5 timeout 60 python3 -m pytest -q 2>/dev/null", Provenance.AGENT),
-            ("python3 -c 'print(1)'", Provenance.AGENT),
+            ("python3 -c 'print(1)'", Provenance.AGENT),               # ask -> approved
+            ("osascript -e 'beep'", Provenance.AGENT),                 # ask -> refused
             ('bash -c "rm -rf ~/Documents"', Provenance.UNTRUSTED),   # injected screen text
             ("echo a.txt | xargs rm", Provenance.UNTRUSTED),
             ("git push origin main", Provenance.AGENT),

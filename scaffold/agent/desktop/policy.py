@@ -171,6 +171,10 @@ class AuditLog:
 
 
 def _inside(path: str, root: Path) -> bool:
+    # Unexpanded shell text ($VAR, $(...), `...`, a NUL placeholder) has no
+    # known location: fail closed (treated as outside the sandbox).
+    if any(c in path for c in ("$", "`", "\x00")):
+        return False
     try:
         p = Path(os.path.realpath(os.path.expanduser(path) if os.path.isabs(os.path.expanduser(path))
                                   else root / path))
@@ -244,12 +248,23 @@ class SinkPolicy:
 #     also count as a write outside the sandbox
 #   * shells with -c, and eval -> the inline script, parsed recursively
 #   * find -exec/-ok -> the exec'd command; find -delete -> DELETE
+#   * trap HANDLER, watch CMD, busybox/toybox APPLET -> the inner command
+#   * sed -i / perl -pi / ruby -i -> writes to each edited file
+#   * git push -> GIT_PUSH on the real remote (--repo counts) plus DELETE for
+#     force/delete/mirror/prune/+ref/:ref, so a push grant never covers those
+# Write targets the classifier cannot resolve ($VAR, ${VAR}, $(...), `...`)
+# are WRITE_OUTSIDE, and after a cd/pushd that leaves (or may leave) the
+# sandbox every later relative write in the chain is WRITE_OUTSIDE too.
 # Code the classifier cannot see into is OPAQUE, the most dangerous class:
 # the policy asks for it at best and denies it from untrusted initiators.
 #   * interpreter inline code: python -c, node -e, perl/ruby -e, php -r,
 #     osascript -e, awk programs that call system()/pipes/redirects
 #   * a shell or interpreter reading code from stdin (`curl x | sh`)
 #   * a dynamic program name ($CMD, or $(...) as the command)
+#   * source/. of a file (except a relative */bin/activate), git -c keys or
+#     options that name a command (core.sshCommand, alias.*=!, --upload-pack,
+#     ...), env vars that name one (GIT_SSH_COMMAND, PAGER, LD_PRELOAD, ...),
+#     sed's e command / s///e flag
 #   * unbalanced quotes / substitutions, or nesting deeper than _MAX_DEPTH
 # Over-approximation is deliberate: a quoted ';' or a $( inside double quotes
 # can only make the verdict stricter, never looser.
@@ -283,7 +298,31 @@ _WRAPPERS = {
     "timeout": {"-s", "-k", "--signal", "--kill-after"},
     "stdbuf": {"-i", "-o", "-e"}, "caffeinate": {"-t", "-w"},
     "command": set(), "exec": {"-a"}, "builtin": set(), "ionice": {"-c", "-n", "-p"},
+    "busybox": set(), "toybox": set(),
 }
+#: watch runs its arguments through `sh -c`; options that take a value
+_WATCH_OPTS = {"-n", "--interval", "-q", "--equexit"}
+#: git config keys (lower-case) whose value is a command git will run
+_GIT_CODE_KEYS = {
+    "core.sshcommand", "core.pager", "core.editor", "core.fsmonitor",
+    "core.hookspath", "core.askpass", "core.gitproxy", "sequence.editor",
+    "diff.external", "gpg.program", "credential.helper", "uploadpack.packobjectshook",
+    "interactive.difffilter",
+}
+_GIT_CODE_SUFFIXES = (".command", ".cmd", ".helper", ".program", ".textconv",
+                      ".uploadpack", ".receivepack", ".clean", ".smudge", ".process",
+                      ".driver", ".tool", ".sshcommand")
+#: git subcommand options whose value is a command run on the remote side
+_GIT_CODE_OPTS = ("--upload-pack", "--receive-pack", "--exec")
+#: environment variables whose value is a command (or code) a program will run
+_CODE_ENV = {"GIT_SSH_COMMAND", "GIT_SSH", "GIT_EXTERNAL_DIFF", "GIT_PAGER", "GIT_EDITOR",
+             "GIT_ASKPASS", "GIT_PROXY_COMMAND", "SSH_ASKPASS", "PAGER", "EDITOR", "VISUAL",
+             "LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "BASH_ENV", "ENV", "PROMPT_COMMAND",
+             "PERL5OPT", "NODE_OPTIONS", "PYTHONSTARTUP"}
+#: git push options that rewrite or remove remote history
+_PUSH_DESTRUCTIVE = {"-f", "--force", "--force-with-lease", "--force-if-includes",
+                     "-d", "--delete", "--mirror", "--prune", "--all"}
+_PUSH_VALUE_OPTS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
 _SHELL_KEYWORDS = {"if", "then", "else", "elif", "fi", "do", "done", "while", "until",
                    "!", "{", "}", "case", "esac"}
 _ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
@@ -295,6 +334,60 @@ _MAX_DEPTH = 6
 
 def _opaque(why: str) -> tuple:
     return (ActionClass.OPAQUE, why.replace(_SUBST, "$(...)")[:120])
+
+
+def _is_dynamic(target: str) -> bool:
+    """A target the shell expands at run time: $VAR, ${VAR}, $(...), `...`."""
+    return _SUBST in target or "$" in target or "`" in target
+
+
+def _write(target: str) -> tuple:
+    """A write to `target`. A dynamic target has no known location, so it is a
+    write outside the sandbox (fails closed), never a sandbox write."""
+    if _is_dynamic(target):
+        return (ActionClass.WRITE_OUTSIDE, target.replace(_SUBST, "$(...)"))
+    return (ActionClass.WRITE_SANDBOX, target)
+
+
+def _code_assign(word: str) -> bool:
+    return bool(_ASSIGN_RE.match(word)) and word.split("=", 1)[0] in _CODE_ENV
+
+
+def _git_code_config(kv: str) -> bool:
+    key, _, val = kv.partition("=")
+    key = key.lower()
+    return (val.lstrip().startswith("!") or key in _GIT_CODE_KEYS
+            or key.startswith("pager.") or key.endswith(_GIT_CODE_SUFFIXES))
+
+
+def _sed_targets(args: List[str]) -> Optional[List[str]]:
+    """Files `sed -i` edits in place, or None when it is not in-place."""
+    in_place = any(a.startswith("--in-place") or
+                   (not a.startswith("--") and _short_flag_has(a, "i")) for a in args)
+    if not in_place:
+        return None
+    pos: List[str] = []
+    script_given, k = False, 0
+    while k < len(args):
+        a = args[k]
+        if a in ("-e", "-f", "--expression", "--file", "-l", "--line-length"):
+            script_given = script_given or a in ("-e", "-f", "--expression", "--file")
+            k += 2
+            continue
+        if a.startswith(("--expression=", "--file=")):
+            script_given = True
+        elif a and (not a.startswith("-") or a == "-"):    # "" = BSD `-i ''` suffix
+            pos.append(a)
+        k += 1
+    return pos if script_given else pos[1:]
+
+
+_SED_EXEC_RE = re.compile(r"(^|[;\n{])\s*e(\s|$|;)|^s(.).*\3.*\3[gpIiMm0-9w]*e")
+
+
+def _sed_runs_code(args: List[str]) -> bool:
+    """GNU sed's `e` command and s///e flag run shell commands."""
+    return any(_SED_EXEC_RE.search(a) for a in args if not a.startswith("-"))
 
 
 def _interp_key(prog: str) -> Optional[str]:
@@ -454,6 +547,8 @@ def _classify_argv(argv: List[str], depth: int) -> List[tuple]:
     if depth > _MAX_DEPTH:
         return [_opaque("nesting too deep")]
     while argv and (argv[0] in _SHELL_KEYWORDS or _ASSIGN_RE.match(argv[0])):
+        if _code_assign(argv[0]):
+            return [_opaque(f"{argv[0].split('=', 1)[0]} names a command to run")]
         argv = argv[1:]
     if not argv:
         return []
@@ -465,6 +560,8 @@ def _classify_argv(argv: List[str], depth: int) -> List[tuple]:
 
     if prog in _WRAPPERS:
         if prog == "env":
+            if any(_code_assign(a) for a in args):
+                return [_opaque("env sets a variable that names a command")]
             for k, a in enumerate(args):                # env -S "cmd args" re-splits
                 if a in ("-S", "--split-string") and k + 1 < len(args):
                     return _classify(" ".join(args[k + 1:]), depth + 1)
@@ -478,6 +575,42 @@ def _classify_argv(argv: List[str], depth: int) -> List[tuple]:
                 out.append((ActionClass.READ, "."))     # xargs echo / env listing
             return out
         return out + _classify_argv(inner, depth + 1)
+
+    if prog in ("source", "."):
+        script = args[0] if args else ""
+        if (re.fullmatch(r"(\.?[\w-]+/)*bin/activate(\.\w+)?", script)
+                and ".." not in script.split("/")):
+            return [(ActionClass.WRITE_SANDBOX, ".")]   # a relative venv activate
+        return [_opaque(f"{prog} runs {script or 'a file'} in the current shell")]
+
+    if prog == "trap":
+        handler = next((a for a in args if a != "--"), "")
+        if not handler or handler in ("-", "-l", "-p") or len(args) < 2:
+            return [(ActionClass.READ, ".")]
+        if _SUBST in handler:
+            return [_opaque("trap of substituted text")]
+        return _classify(handler, depth + 1)
+
+    if prog == "watch":
+        k = 0
+        while k < len(args) and args[k].startswith("-") and args[k] != "--":
+            k += 2 if args[k] in _WATCH_OPTS else 1
+        if k < len(args) and args[k] == "--":
+            k += 1
+        inner = args[k:]
+        if not inner:
+            return [(ActionClass.READ, ".")]
+        if any(_SUBST in a for a in inner):
+            return [_opaque("watch of substituted text")]
+        return _classify(" ".join(inner), depth + 1)
+
+    if prog == "sed":
+        if _sed_runs_code(args):
+            return [_opaque("sed script runs commands")]
+        targets = _sed_targets(args)
+        if targets is not None:
+            return [_write(t) for t in targets] or [(ActionClass.WRITE_SANDBOX, ".")]
+        return [(ActionClass.WRITE_SANDBOX, ".")]
 
     if prog == "eval":
         if any(_SUBST in a for a in args):
@@ -511,6 +644,9 @@ def _classify_argv(argv: List[str], depth: int) -> List[tuple]:
             return out + [_opaque(f"{prog} inline code")]
         if "-" in args or not [a for a in args if not a.startswith("-")]:
             return out + [_opaque(f"{prog} reading code from stdin")]
+        if key in ("perl", "ruby") and any(_short_flag_has(a, "i") for a in args):
+            files = [a for a in args if not a.startswith("-")][1:]   # after the script
+            out += [_write(t) for t in files]
         return out or [(ActionClass.WRITE_SANDBOX, ".")]
 
     if prog in _AWK:
@@ -535,16 +671,25 @@ def _classify_argv(argv: List[str], depth: int) -> List[tuple]:
         return out
 
     if prog == "git":
-        rest, k = [], 0
+        k = 0
         while k < len(args):                            # git's global options
-            if args[k] in ("-C", "-c", "--git-dir", "--work-tree", "--namespace"):
+            a = args[k]
+            if a == "-c" and k + 1 < len(args) and _git_code_config(args[k + 1]):
+                return [_opaque(f"git -c {args[k + 1].split('=', 1)[0]} runs a command")]
+            if a.startswith("--config-env"):
+                return [_opaque("git --config-env sets config from the environment")]
+            if a in ("-C", "-c", "--git-dir", "--work-tree", "--namespace"):
                 k += 2
                 continue
-            rest.append(args[k])
+            if not a.startswith("-"):
+                break
             k += 1
-        sub = [x for x in rest if not x.startswith("-")]
-        if sub[:1] == ["push"]:
-            return [(ActionClass.GIT_PUSH, " ".join(sub[1:3]) or "origin")]
+        sub, sargs = (args[k], args[k + 1:]) if k < len(args) else ("", [])
+        if any(a.split("=", 1)[0] in _GIT_CODE_OPTS for a in sargs) or (
+                sub in ("clone", "fetch", "pull", "ls-remote", "archive") and "-u" in sargs):
+            return [_opaque(f"git {sub} with a custom remote command")]
+        if sub == "push":
+            return _git_push(sargs)
         return [(ActionClass.WRITE_SANDBOX, ".")]
 
     pos = [x for x in args if not x.startswith("-")]
@@ -562,11 +707,47 @@ def _classify_argv(argv: List[str], depth: int) -> List[tuple]:
             targets = [x[3:] for x in pos if x.startswith("of=")]
         else:
             targets = pos[-1:] if prog in ("mv", "cp", "ln", "install") else pos[:1]
-        out += [(ActionClass.WRITE_SANDBOX, t) for t in targets] or [(ActionClass.WRITE_SANDBOX, ".")]
+        out += [_write(t) for t in targets] or [(ActionClass.WRITE_SANDBOX, ".")]
     elif prog in _READ:
         out.append((ActionClass.READ, pos[0] if pos else "."))
     else:
         out.append((ActionClass.WRITE_SANDBOX, "."))
+    return out
+
+
+def _git_push(args: List[str]) -> List[tuple]:
+    """GIT_PUSH on the real destination (--repo counts), plus DELETE when the
+    push can rewrite or remove remote history (force, delete, mirror, prune,
+    a +refspec or :refspec): a plain push grant never covers that."""
+    pos: List[str] = []
+    repo: Optional[str] = None
+    destructive: List[str] = []
+    k = 0
+    while k < len(args):
+        a = args[k]
+        name = a.split("=", 1)[0]
+        if a == "--":
+            pos += args[k + 1:]
+            break
+        if name == "--repo":
+            repo = a.split("=", 1)[1] if "=" in a else (args[k + 1] if k + 1 < len(args) else "")
+        if name in _PUSH_DESTRUCTIVE or (a.startswith("-") and not a.startswith("--")
+                                         and set(a[1:]) & {"f", "d"}):
+            destructive.append(name)
+        if a in _PUSH_VALUE_OPTS:
+            k += 2
+            continue
+        if not a.startswith("-"):
+            pos.append(a)
+        k += 1
+    if repo is not None:                       # --repo replaces the remote
+        pos = [repo] + pos
+    target = " ".join(pos[:2]) or "origin"
+    remote = pos[0] if pos else "origin"
+    destructive += [r for r in pos[1:] if r.startswith((":", "+"))]
+    out = [(ActionClass.GIT_PUSH, target)]
+    if destructive:
+        out.append((ActionClass.DELETE, f"git:{remote} {' '.join(destructive)}"))
     return out
 
 
@@ -584,10 +765,47 @@ def _classify(cmd: str, depth: int) -> List[tuple]:
     out: List[tuple] = []
     for inner in inners:
         out += _classify(inner, depth + 1)
+    cwd: Optional[str] = None      # set by cd/pushd; "" = the sandbox root
+    escaped = False                # a cd/pushd left (or may have left) the sandbox
     for argv, outs in _segments(tokens):
-        out += _classify_argv(argv, depth)
-        out += [(ActionClass.WRITE_SANDBOX, t.replace(_SUBST, "$(...)")) for t in outs]
-    return out
+        seg = _classify_argv(argv, depth) + [_write(t) for t in outs]
+        if cwd is not None:
+            seg = [_relocate(c, t, cwd, escaped) for c, t in seg]
+        out += seg
+        moved = _cd_target(argv)
+        if moved is not None:
+            cwd = cwd or ""
+            if (_is_dynamic(moved) or moved in ("", "-") or moved.startswith(("/", "~"))
+                    or ".." in moved.split("/")):
+                escaped, cwd = True, moved or "~"
+            elif not escaped:
+                cwd = os.path.join(cwd, moved)
+    # never leak the internal placeholder (it holds a NUL) into targets/audit
+    return [(c, t.replace(_SUBST, "$(...)")) for c, t in out]
+
+
+def _cd_target(argv: List[str]) -> Optional[str]:
+    """The directory a cd/pushd/popd segment moves to ("" = home or unknown),
+    or None if the segment does not change directory."""
+    while argv and (argv[0] in _SHELL_KEYWORDS or _ASSIGN_RE.match(argv[0])):
+        argv = argv[1:]
+    if not argv or argv[0] not in ("cd", "pushd", "popd", "chdir"):
+        return None
+    if argv[0] == "popd":
+        return ""
+    pos = [a for a in argv[1:] if not a.startswith("-") or a == "-"]
+    return pos[0] if pos else ""
+
+
+def _relocate(cls: ActionClass, target: str, cwd: str, escaped: bool) -> tuple:
+    """Re-anchor a relative sandbox write after a cd. Once the chain may have
+    left the sandbox, a relative write is a write outside it."""
+    if (cls is not ActionClass.WRITE_SANDBOX or os.path.isabs(target)
+            or target.startswith("~") or _is_dynamic(target)):
+        return (cls, target)
+    if escaped:
+        return (ActionClass.WRITE_OUTSIDE, f"{cwd}/{target}")
+    return (cls, os.path.normpath(os.path.join(cwd, target)))
 
 
 def classify_command(cmd: str) -> List[tuple]:

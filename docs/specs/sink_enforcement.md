@@ -28,6 +28,33 @@ decided, but no executor asked it.
   input, nesting > 6. OPAQUE is irreversible and always-ask: agent/owner -> ask
   (a grant cannot silence it), untrusted initiator -> deny.
 
+### Review fixes (hardening follow-up)
+
+- Write targets the classifier cannot resolve (`$VAR`, `${VAR}`, `$(...)`,
+  backticks) are WRITE_OUTSIDE, never sandbox writes, so R2 cannot allow them
+  and R3 denies them for an untrusted initiator. `_inside()` also fails closed
+  on such text. The internal `$(...)` placeholder never reaches a target or the
+  audit log (it is normalised to the literal `$(...)`).
+- `cd`/`pushd`/`popd` are tracked within one chain: a move to an absolute
+  path, `~`, `..`, `-`, a dynamic path or home makes every later relative
+  write WRITE_OUTSIDE; a move to a plain relative subdirectory re-anchors the
+  targets under it.
+- Code runners that were not modelled: `git -c` keys that name a command
+  (`core.sshCommand`, `core.pager`, `alias.*=!...`, `*.helper`, ...),
+  `git --config-env`, `--upload-pack/--receive-pack/--exec`, env assignments
+  such as `GIT_SSH_COMMAND`/`PAGER`/`LD_PRELOAD`, `source`/`.` (except a
+  relative `*/bin/activate`), and sed's `e` command / `s///e` -> OPAQUE.
+  `trap HANDLER`, `watch CMD` and `busybox`/`toybox APPLET` recurse into the
+  command. `sed -i`, `perl -pi`, `ruby -i` count as writes to each edited file.
+- `git push`: `--repo` is the destination. Force, delete, mirror, prune,
+  `--all`, `+ref` and `:ref` pushes add a DELETE (`git:<remote> <flags>`), so a
+  GIT_PUSH grant alone never allows a history rewrite (default deny).
+- Grant globs are matched as written (intended): `origin*` also matches
+  `originevil main`. Owners should grant `origin` and `origin *` (with the
+  space) rather than `origin*`.
+- Local timeout: worst case with the default 2 retries is 3 x 900 s = 45 min
+  per hung local call (documented in `providers.default_model_timeout_s`).
+
 ## Enforcement (scaffold/agent/desktop/enforce.py)
 
 `Enforcer.check_command / check_action / run_command / run_action`:
@@ -59,8 +86,9 @@ takes the same lines. Wiring is a separate step with its own live proof.
 ## Live proof
 
 `python -m scaffold.agent.desktop.enforce --demo` prints 20 tricky commands
-with agent/untrusted verdicts, runs six through the Enforcer with a dry-run
-executor, and prints the audit log. `--classify "<cmd>"` shows one command's
+with agent/untrusted verdicts, runs seven through the Enforcer with a dry-run
+executor (covering allowed, approved, ask-refused and denied), and prints the
+audit log. `--classify "<cmd>"` shows one command's
 (class, target) pairs.
 
 ## Known gaps
