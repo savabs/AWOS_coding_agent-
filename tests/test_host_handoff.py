@@ -209,3 +209,98 @@ def test_scan_and_redact_helpers():
     assert names == {"aws_access_key", "private_key_block"}
     assert "AKIA" not in redact_secrets(txt, {})
     assert scan_secrets("API_KEY=short", {"API_KEY": "short"}) == []  # < min len ignored
+
+
+# --------------------------------------------------------------------------- #
+# Regression tests for review findings (host-handoff fix pass)
+# --------------------------------------------------------------------------- #
+def _blob_sha(repo, data: bytes) -> str:
+    return subprocess.run(["git", "hash-object", "--stdin"], cwd=repo, input=data,
+                          capture_output=True, check=True).stdout.decode().strip()
+
+
+def _has_object(repo, sha) -> bool:
+    return subprocess.run(["git", "cat-file", "-e", sha], cwd=repo,
+                          capture_output=True).returncode == 0
+
+
+def test_excluded_file_blob_not_written_to_user_repo(setup):
+    repo, ws, job, _ = setup
+    env_body = b"OPENROUTER_API_KEY=excluded-blob-probe-123\n"
+    (ws / ".env").write_bytes(env_body)
+    (ws / "server.key").write_bytes(b"key-blob-probe-456\n")
+    (ws / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    res = finish(job, str(ws), {}, env=CLEAN_ENV)
+    assert res["status"] == "handed_off"
+    assert not _has_object(repo, _blob_sha(repo, env_body))
+    assert not _has_object(repo, _blob_sha(repo, b"key-blob-probe-456\n"))
+    # the handed-off content itself is present and the repo is consistent
+    assert _has_object(repo, _blob_sha(repo, b"def add(a, b):\n    return a + b\n"))
+    assert subprocess.run(["git", "fsck", "--no-dangling"], cwd=repo,
+                          capture_output=True).returncode == 0
+
+
+def test_blocked_secret_blob_not_written_to_user_repo(setup):
+    repo, ws, job, _ = setup
+    body = ("KEY = 'sk-or-v1-" + "c" * 40 + "'\n").encode()
+    (ws / "cfg.py").write_bytes(body)
+    res = finish(job, str(ws), {}, env=CLEAN_ENV)
+    assert res["status"] == "blocked_secret"
+    assert not _has_object(repo, _blob_sha(repo, body))
+
+
+def test_secret_in_binary_file_blocks(setup):
+    repo, ws, job, _ = setup
+    (ws / "blob.bin").write_bytes(b"\x00\x01\x02 sk-or-v1-" + b"d" * 40 + b"\x00\xff")
+    res = finish(job, str(ws), {}, env=CLEAN_ENV)
+    assert res["status"] == "blocked_secret" and res["branch"] is None
+    assert git(repo, "branch", "--list", "awos/*").strip() == ""
+
+
+def test_secret_in_minus_diff_attribute_file_blocks(setup):
+    repo, ws, job, _ = setup
+    (repo / ".git" / "info").mkdir(exist_ok=True)
+    (repo / ".git" / "info" / "attributes").write_text("*.dat -diff\n")
+    (ws / "data.dat").write_text("token ghp_" + "e" * 36 + "\n")
+    res = finish(job, str(ws), {}, env=CLEAN_ENV)
+    assert res["status"] == "blocked_secret"
+
+
+def test_clean_binary_file_still_handed_off(setup):
+    repo, ws, job, _ = setup
+    (ws / "img.bin").write_bytes(b"\x00\x01\x02\x03 harmless")
+    res = finish(job, str(ws), {}, env=CLEAN_ENV)
+    assert res["status"] == "handed_off" and "img.bin" in res["files"]
+
+
+@pytest.mark.parametrize("bad_id", ["../../escape-x", "a/b", "..", "x y", "id\n"])
+def test_job_id_path_traversal_rejected(setup, tmp_path, bad_id):
+    repo, ws, job, _ = setup
+    job["id"] = bad_id
+    (ws / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    with pytest.raises(handoff.HandoffError):
+        finish(job, str(ws), {}, env=CLEAN_ENV)
+    assert not list(tmp_path.parent.glob("escape-x"))
+    assert not list(tmp_path.rglob("report.md"))
+
+
+def test_dirty_files_parses_renames(setup):
+    repo, ws, job, _ = setup
+    git(repo, "mv", "calc.py", "calc2.py")
+    dirty = handoff._dirty_files(str(repo))
+    assert "calc2.py" in dirty and "calc.py" in dirty
+    assert ".py" not in dirty
+    (ws / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    res = finish(job, str(ws), {}, env=CLEAN_ENV)
+    assert any("uncommitted changes" in w and "calc.py" in w for w in res["warnings"])
+
+
+def test_handoff_json_redacts_json_escaped_env_secret(setup):
+    repo, ws, job, _ = setup
+    secret = 'tok"en\\value-123'
+    env = {"MY_SERVICE_TOKEN": secret}
+    job_dir = repo.parent / ("jd_" + secret)  # path carries the secret into handoff.json
+    res = finish(job, str(ws), {}, job_dir=str(job_dir), env=env)
+    raw = Path(res["handoff_path"]).read_text()
+    assert json.dumps(secret)[1:-1] not in raw
+    assert "[REDACTED:MY_SERVICE_TOKEN]" in raw

@@ -18,6 +18,7 @@ import fnmatch
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -44,6 +45,7 @@ SECRET_PATTERNS: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
 )
 SECRET_ENV_NAME = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL", re.I)
 MIN_ENV_SECRET_LEN = 8
+JOB_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
 
 _GIT_IDENTITY = {
     "GIT_AUTHOR_NAME": "AWOS host",
@@ -91,22 +93,47 @@ def redact_secrets(text: str, env: Optional[Dict[str, str]] = None) -> str:
     return text
 
 
+def _redact_obj(obj: Any, env: Optional[Dict[str, str]] = None) -> Any:
+    """Redact every string in a JSON-able structure *before* serialising, so
+    secret values containing quotes or backslashes match in their raw form."""
+    if isinstance(obj, str):
+        return redact_secrets(obj, env)
+    if isinstance(obj, dict):
+        return {k: _redact_obj(v, env) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_redact_obj(v, env) for v in obj]
+    return obj
+
+
 # --------------------------------------------------------------------------- #
 # git helpers
 # --------------------------------------------------------------------------- #
-def _git(args: List[str], *, cwd: Optional[str] = None, env: Optional[Dict[str, str]] = None,
-         check: bool = True, input_text: Optional[str] = None) -> str:
+def _git_env(env: Optional[Dict[str, str]]) -> Dict[str, str]:
     full_env = dict(os.environ)
-    full_env.pop("GIT_INDEX_FILE", None)
-    full_env.pop("GIT_DIR", None)
-    full_env.pop("GIT_WORK_TREE", None)
+    for k in ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE", "GIT_OBJECT_DIRECTORY",
+              "GIT_ALTERNATE_OBJECT_DIRECTORIES"):
+        full_env.pop(k, None)
     full_env["GIT_TERMINAL_PROMPT"] = "0"
     if env:
         full_env.update(env)
-    proc = subprocess.run(["git", *args], cwd=cwd, env=full_env, input=input_text,
+    return full_env
+
+
+def _git(args: List[str], *, cwd: Optional[str] = None, env: Optional[Dict[str, str]] = None,
+         check: bool = True, input_text: Optional[str] = None) -> str:
+    proc = subprocess.run(["git", *args], cwd=cwd, env=_git_env(env), input=input_text,
                           capture_output=True, text=True)
     if check and proc.returncode != 0:
         raise HandoffError(f"git {args[0]} failed: {proc.stderr.strip()[:400]}")
+    return proc.stdout
+
+
+def _git_bytes(args: List[str], *, cwd: Optional[str] = None,
+               env: Optional[Dict[str, str]] = None) -> bytes:
+    proc = subprocess.run(["git", *args], cwd=cwd, env=_git_env(env), capture_output=True)
+    if proc.returncode != 0:
+        raise HandoffError(f"git {args[0]} failed: "
+                           f"{proc.stderr.decode('utf-8', 'replace').strip()[:400]}")
     return proc.stdout
 
 
@@ -137,12 +164,67 @@ def _minutes(job: Dict[str, Any], outcome: Dict[str, Any]) -> Optional[float]:
         return None
 
 
-def _build_tree(git_dir: str, workspace: str, base: str) -> Tuple[str, List[str], List[str]]:
+def _staging_env(repo_objects: str, staging_objects: str) -> Dict[str, str]:
+    """Env that writes new objects to a private staging dir and reads the user's
+    repo objects as an alternate. Nothing lands in the user's repo until
+    ``_promote_objects`` copies the objects a created commit actually needs, so
+    excluded files and blocked (secret-bearing) content are never stored there."""
+    return {"GIT_OBJECT_DIRECTORY": staging_objects,
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES": repo_objects}
+
+
+def _promote_objects(repo: str, senv: Dict[str, str], commit: str, base: str) -> None:
+    """Copy the loose objects reachable from ``commit`` but not ``base`` out of
+    the staging dir into the user's repo object store."""
+    staging = Path(senv["GIT_OBJECT_DIRECTORY"])
+    target = Path(senv["GIT_ALTERNATE_OBJECT_DIRECTORIES"])
+    out = _git(["rev-list", "--objects", commit, "--not", base], cwd=repo, env=senv)
+    for line in out.splitlines():
+        sha = line.split(" ", 1)[0].strip()
+        if not sha:
+            continue
+        src = staging / sha[:2] / sha[2:]
+        if not src.exists():
+            continue  # already in the user's repo (read via the alternate)
+        dst = target / sha[:2] / sha[2:]
+        if dst.exists():
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dst.with_name(dst.name + f".awos-tmp-{os.getpid()}")
+        shutil.copyfile(src, tmp)
+        os.replace(tmp, dst)
+
+
+def _scan_binary_blobs(repo: str, senv: Dict[str, str], base_tree: str, tree: str,
+                       env: Optional[Dict[str, str]]) -> List[Dict[str, Any]]:
+    """Scan the full new content of files git treats as binary (NUL bytes or a
+    ``-diff`` attribute); their textual patch is only 'Binary files differ'."""
+    numstat = _git(["diff-tree", "-r", "--numstat", "-z", "--no-renames", base_tree, tree],
+                   cwd=repo, env=senv)
+    binary = []
+    for rec in numstat.split("\0"):
+        parts = rec.split("\t", 2)
+        if len(parts) == 3 and parts[0] == "-" and parts[1] == "-":
+            binary.append(parts[2])
+    findings: List[Dict[str, Any]] = []
+    for path in binary:
+        ls = _git(["ls-tree", "-z", tree, "--", path], cwd=repo, env=senv)
+        for ent in ls.split("\0"):
+            meta = ent.split("\t", 1)[0].split()
+            if len(meta) == 3 and meta[1] == "blob":
+                data = _git_bytes(["cat-file", "blob", meta[2]], cwd=repo, env=senv)
+                for f in scan_secrets(data.decode("utf-8", "replace"), env):
+                    findings.append(dict(f, path=path))
+    return findings
+
+
+def _build_tree(git_dir: str, workspace: str, base: str,
+                extra_env: Optional[Dict[str, str]] = None) -> Tuple[str, List[str], List[str]]:
     """Return (tree_sha, changed_files, excluded_files) using a temp index."""
     fd, idx = tempfile.mkstemp(prefix="awos-handoff-index-")
     os.close(fd)
     os.unlink(idx)  # git wants to create it itself
-    env = {"GIT_INDEX_FILE": idx}
+    env = dict(extra_env or {}, GIT_INDEX_FILE=idx)
     base_args = [f"--git-dir={git_dir}", f"--work-tree={workspace}"]
     try:
         _git([*base_args, "read-tree", base], env=env)
@@ -166,9 +248,18 @@ def _build_tree(git_dir: str, workspace: str, base: str) -> Tuple[str, List[str]
 def _dirty_files(repo: str) -> List[str]:
     out = _git(["status", "--porcelain", "-z", "--untracked-files=all"], cwd=repo, check=False)
     files = []
-    for entry in out.split("\0"):
+    entries = out.split("\0")
+    i = 0
+    while i < len(entries):
+        entry = entries[i]
+        i += 1
         if len(entry) > 3:
             files.append(entry[3:])
+            # rename/copy: the original path follows as its own unprefixed entry
+            if entry[0] in "RC" and i < len(entries):
+                if entries[i]:
+                    files.append(entries[i])
+                i += 1
     return files
 
 
@@ -254,6 +345,8 @@ def finish(job: Dict[str, Any], workspace: str, outcome: Dict[str, Any], *,
     job_id = str(job.get("id") or "")
     if not job_id:
         raise HandoffError("job has no id")
+    if not JOB_ID_RE.fullmatch(job_id):
+        raise HandoffError("job id must match [A-Za-z0-9_-]+")
     id8 = job_id.replace("-", "")[:8]
     branch = f"{BRANCH_PREFIX}{id8}"
     jdir = Path(job_dir) if job_dir else host_root() / "jobs" / job_id
@@ -272,6 +365,7 @@ def finish(job: Dict[str, Any], workspace: str, outcome: Dict[str, Any], *,
     }
     diffstat = ""
     review_base = "main"
+    staging_dir: Optional[str] = None
     try:
         git_dir = _git(["rev-parse", "--absolute-git-dir"], cwd=repo).strip()
         base_ref = job.get("base_commit") or outcome.get("base_commit")
@@ -284,16 +378,22 @@ def finish(job: Dict[str, Any], workspace: str, outcome: Dict[str, Any], *,
         review_base = cur or base[:12]
         base_tree = _git(["rev-parse", f"{base}^{{tree}}"], cwd=repo).strip()
 
-        tree, files, excluded = _build_tree(git_dir, workspace, base)
+        repo_objects = _git(["rev-parse", "--git-path", "objects"], cwd=repo).strip()
+        repo_objects = str((Path(repo) / repo_objects).resolve())
+        staging_dir = tempfile.mkdtemp(prefix="awos-handoff-objects-")
+        senv = _staging_env(repo_objects, staging_dir)
+
+        tree, files, excluded = _build_tree(git_dir, workspace, base, senv)
         info["files"], info["excluded"] = files, excluded
 
         if tree == base_tree:
             info["status"] = "no_changes"
         else:
-            patch = _git(["diff-tree", "-p", "--no-color", base_tree, tree], cwd=repo)
+            patch = _git(["diff-tree", "-p", "--no-color", base_tree, tree], cwd=repo, env=senv)
             added = "\n".join(l[1:] for l in patch.splitlines()
                               if l.startswith("+") and not l.startswith("+++"))
             hits = scan_secrets(added, env)
+            hits += _scan_binary_blobs(repo, senv, base_tree, tree, env)
             info["secret_scan"]["diff"] = hits
             if hits:
                 info["status"] = "blocked_secret"
@@ -302,7 +402,8 @@ def finish(job: Dict[str, Any], workspace: str, outcome: Dict[str, Any], *,
                     "credential guard: diff contains secret-like content ("
                     + ", ".join(names) + "); branch NOT created")
             else:
-                diffstat = _git(["diff-tree", "--stat", "--no-color", base_tree, tree], cwd=repo)
+                diffstat = _git(["diff-tree", "--stat", "--no-color", base_tree, tree],
+                                cwd=repo, env=senv)
                 msg = (f"awos: {str(job.get('goal', '')).strip().splitlines()[0][:72] if str(job.get('goal', '')).strip() else 'job'}"
                        f"\n\nAWOS-Job: {job_id}\n")
                 msg = redact_secrets(msg, env)
@@ -319,7 +420,8 @@ def finish(job: Dict[str, Any], workspace: str, outcome: Dict[str, Any], *,
                                            "refusing to overwrite")
                 else:
                     commit = _git(["commit-tree", tree, "-p", base], cwd=repo,
-                                  env=_GIT_IDENTITY, input_text=msg).strip()
+                                  env=dict(senv, **_GIT_IDENTITY), input_text=msg).strip()
+                    _promote_objects(repo, senv, commit, base)
                     _git(["update-ref", "-m", "awos handoff", ref, commit, ""], cwd=repo)
                 info.update(status="handed_off", branch=branch, commit=commit)
                 overlap = sorted(set(_dirty_files(repo)) & set(files))
@@ -330,6 +432,9 @@ def finish(job: Dict[str, Any], workspace: str, outcome: Dict[str, Any], *,
     except HandoffError as exc:
         info["status"] = "error"
         info["warnings"].append(str(exc))
+    finally:
+        if staging_dir:
+            shutil.rmtree(staging_dir, ignore_errors=True)
 
     report = _render_report(job, outcome, info, diffstat, review_base)
     rep_hits = scan_secrets(report, env)
@@ -347,7 +452,7 @@ def finish(job: Dict[str, Any], workspace: str, outcome: Dict[str, Any], *,
         info["summary"] = "hand-off blocked by credential guard"
     else:
         info["summary"] = "hand-off failed: " + (info["warnings"][-1] if info["warnings"] else "unknown")
-    payload = json.dumps(info, indent=2, sort_keys=True)
+    payload = json.dumps(_redact_obj(info, env), indent=2, sort_keys=True)
     payload = redact_secrets(payload, env)  # belt and braces
     handoff_path.write_text(payload + "\n", encoding="utf-8")
     return info
@@ -357,7 +462,6 @@ def finish(job: Dict[str, Any], workspace: str, outcome: Dict[str, Any], *,
 # live-proof demo
 # --------------------------------------------------------------------------- #
 def _demo() -> int:
-    import shutil
     import uuid
 
     tmp = Path(tempfile.mkdtemp(prefix="awos-handoff-demo-"))

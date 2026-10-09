@@ -52,13 +52,27 @@ working tree:
 
    The workspace's `.gitignore` applies.
 3. If the tree equals the base tree, return `no_changes`.
-4. Scan the added lines of `diff-tree -p base new` for secrets. If one is
-   found, return `blocked_secret` and create no ref. The loose objects that
-   were written stay unreferenced, and `git gc` removes them.
+4. Scan the added lines of `diff-tree -p base new` for secrets, plus the full
+   new content of every file git treats as binary (NUL bytes or a `-diff`
+   attribute; `--numstat` reports `-`), because the patch shows those only as
+   "Binary files differ". If a secret is found, return `blocked_secret` and
+   create no ref.
 5. Run `commit-tree` with a fixed AWOS identity, so no user git config is
    needed.
-6. Run `update-ref refs/heads/awos/<id8> <commit> ""`. The empty
-   old-value makes this create-only.
+6. Copy into the user's repo only the objects reachable from the new commit
+   and not from the base, then run `update-ref refs/heads/awos/<id8> <commit> ""`.
+   The empty old-value makes this create-only.
+
+**Object staging.** Steps 2-5 run with `GIT_OBJECT_DIRECTORY` pointed at a
+private temp dir and the repo's object store as
+`GIT_ALTERNATE_OBJECT_DIRECTORIES`. Excluded files (`.env`, keys) and
+blocked secret-bearing content are therefore never written into the user's
+`.git/objects`, not even as unreferenced loose blobs. The temp dir is removed
+when `finish` returns.
+
+**Job id.** `job.id` must match `[A-Za-z0-9_-]+`; anything else raises
+`HandoffError` before any file is written, because the id forms both a path
+(`jobs/<id>/`) and a ref name.
 
 **Idempotency.** If `awos/<id8>` already exists with the same tree and parent,
 it is reused. This covers a re-run after a crash. If it exists with a
@@ -97,7 +111,13 @@ report. They look for:
 A hit in the diff blocks the branch. A hit in the report text is redacted to
 `[REDACTED:<pattern>]` before the report is written, and is recorded as a
 warning. Findings name only the pattern or the variable name, never the
-value.
+value. `handoff.json` is redacted field by field before serialising, so a
+secret containing `"` or `\` is still caught (redacting the JSON text would
+miss its escaped form).
+
+Renames in the dirty-checkout check: `status --porcelain -z` emits the
+original path of a rename/copy as its own unprefixed entry; both paths count
+as dirty.
 
 ## Report (`report.md`)
 
