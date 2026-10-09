@@ -203,13 +203,46 @@ def _price_for(model: str) -> Optional[tuple[float, float]]:
     return None
 
 
-def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    """Cost in USD for a token count, 0.0 for an unpriced or free model."""
+def estimate_cost(model: str, input_tokens: int, output_tokens: int,
+                  cached_tokens: int = 0, cache_write_tokens: int = 0) -> float:
+    """Cost in USD for a token count, 0.0 for an unpriced or free model.
+
+    `input_tokens` is the whole prompt; `cached_tokens` / `cache_write_tokens`
+    are the parts of it the provider served from / wrote to its prompt cache
+    (providers.usage_tokens). Cached input is priced at the cache-read rate
+    (providers.price_table, docs/specs/prompt_caching.md). With no cache
+    counts — a provider that reports none — every input token is priced at
+    the full rate, as before: a cap then over- rather than under-counts.
+    """
     prices = _price_for(model)
     if prices is None:
         return 0.0
+    if cached_tokens or cache_write_tokens:
+        try:
+            try:
+                from .providers import estimate_cost_cached
+            except ImportError:
+                from providers import estimate_cost_cached
+            return estimate_cost_cached(model, input_tokens, output_tokens,
+                                        cached_tokens, cache_write_tokens)
+        except Exception:  # pricing must never break a run
+            logger.debug("cache-aware pricing failed, using full rate", exc_info=True)
     price_in, price_out = prices
     return (input_tokens * price_in + output_tokens * price_out) / 1_000_000
+
+
+def _usage_counts(usage: Any) -> dict:
+    """providers.usage_tokens(usage), or {} when it cannot be had."""
+    if usage is None:
+        return {}
+    try:
+        try:
+            from .providers import usage_tokens
+        except ImportError:
+            from providers import usage_tokens
+        return usage_tokens(usage)
+    except Exception:
+        return {}
 
 
 SYSTEM_PROMPT = """You are a coding agent working in a real repository.
@@ -261,6 +294,10 @@ class ModelReply:
     input_tokens: int = 0
     output_tokens: int = 0
     raw: Any = None
+    #: Parts of input_tokens read from / written to the provider's prompt
+    #: cache (0 when the provider reports none).
+    cached_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 class ModelClient(Protocol):
@@ -302,12 +339,17 @@ class AnthropicToolClient:
             elif getattr(block, "type", None) == "tool_use":
                 calls.append(ToolCall(id=block.id, name=block.name, arguments=dict(block.input)))
         usage = getattr(response, "usage", None)
+        counts = _usage_counts(usage)
+        # Anthropic's input_tokens excludes cache reads/writes; usage_tokens
+        # adds them back so input_tokens is the whole prompt, as elsewhere.
         return ModelReply(
             text="\n".join(text_parts),
             tool_calls=calls,
-            input_tokens=getattr(usage, "input_tokens", 0) or 0,
+            input_tokens=counts.get("input") or getattr(usage, "input_tokens", 0) or 0,
             output_tokens=getattr(usage, "output_tokens", 0) or 0,
             raw=response,
+            cached_tokens=counts.get("cached", 0),
+            cache_write_tokens=counts.get("cache_write", 0),
         )
 
     def format_assistant_turn(self, reply: ModelReply) -> dict[str, Any]:
@@ -389,12 +431,15 @@ class OpenAIToolClient:
                 arguments = {"__malformed__": raw_call.function.arguments}
             calls.append(ToolCall(id=raw_call.id, name=raw_call.function.name, arguments=arguments))
         usage = getattr(response, "usage", None)
+        counts = _usage_counts(usage)
         return ModelReply(
             text=getattr(message, "content", "") or "",
             tool_calls=calls,
             input_tokens=getattr(usage, "prompt_tokens", 0) or 0,
             output_tokens=getattr(usage, "completion_tokens", 0) or 0,
             raw=response,
+            cached_tokens=counts.get("cached", 0),
+            cache_write_tokens=counts.get("cache_write", 0),
         )
 
     def format_assistant_turn(self, reply: ModelReply) -> dict[str, Any]:
@@ -553,6 +598,9 @@ class LoopOutcome:
     failed_tool_calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    #: Parts of input_tokens served from / written to the prompt cache.
+    cached_tokens: int = 0
+    cache_write_tokens: int = 0
     cost_usd: float = 0.0
     final_message: str = ""
     files_touched: list[str] = field(default_factory=list)
@@ -577,6 +625,7 @@ class LoopOutcome:
             "failed_tool_calls": self.failed_tool_calls,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
+            "cached_tokens": self.cached_tokens,
             "cost_usd": round(self.cost_usd, 6),
             "final_message": self.final_message,
             "files_touched": self.files_touched,
@@ -756,13 +805,18 @@ class AgentLoop:
             record_response(
                 "agent", self.model_name, reply.raw, visible_chars=len(reply.text or ""),
                 input_tokens=reply.input_tokens, output_tokens=reply.output_tokens,
-                cost_usd=estimate_cost(self.model_name, reply.input_tokens, reply.output_tokens),
+                cost_usd=estimate_cost(self.model_name, reply.input_tokens, reply.output_tokens,
+                                       _int0(reply, "cached_tokens"),
+                                       _int0(reply, "cache_write_tokens")),
                 finish_reason=_finish_reason(reply.raw).strip("?") or None,
                 tool_calls=len(reply.tool_calls), turn=turn)
             outcome.input_tokens += reply.input_tokens
             outcome.output_tokens += reply.output_tokens
+            outcome.cached_tokens += _int0(reply, "cached_tokens")
+            outcome.cache_write_tokens += _int0(reply, "cache_write_tokens")
             outcome.cost_usd = estimate_cost(
-                self.model_name, outcome.input_tokens, outcome.output_tokens
+                self.model_name, outcome.input_tokens, outcome.output_tokens,
+                outcome.cached_tokens, outcome.cache_write_tokens,
             )
             self._emit("turn", turn=turn, text=reply.text, calls=len(reply.tool_calls))
             if reply.text and reply.text.strip():
@@ -853,9 +907,19 @@ class AgentLoop:
                     _trace_call(turn, call, results[-1], None)
                     continue
 
+                # The span this read asked for, recorded after it runs as the
+                # lines actually served (_served_span), not the lines asked for.
+                asked_span = None
+                read_version = state_version
                 if call.name == "read_file":
                     span = _read_span(call.arguments, root)
-                    if span is not None:
+                    # A symbol= read asks for one body, not the span its
+                    # (absent) range implies; it is never answered "already
+                    # read" up front, only recorded once served.
+                    if span is not None and _symbol_arg(call.arguments):
+                        asked_span, span = span, None
+                    elif span is not None:
+                        asked_span = span
                         path, start, end = span
                         prior = [r for r in reads.get(path, ())
                                  if r[3] == state_version and r[0] <= start and end <= r[1]]
@@ -872,7 +936,6 @@ class AgentLoop:
                             results.append(result)
                             self._emit("tool", name=call.name, ok=True)
                             continue
-                        reads.setdefault(path, []).append((start, end, turn, state_version))
 
                 is_command = call.name in COMMAND_TOOLS
                 version_before = state_version
@@ -881,6 +944,11 @@ class AgentLoop:
                 call_started = time.monotonic()
                 result = self.registry.execute(call.name, call.arguments)
                 _trace_call(turn, call, result, time.monotonic() - call_started)
+                if call.name in _READ_TOOLS:
+                    served = _served_span(call, result, asked_span, root)
+                    if served is not None:
+                        path, start, end = served
+                        reads.setdefault(path, []).append((start, end, turn, read_version))
                 outcome.tool_calls += 1
                 if not result.success:
                     outcome.failed_tool_calls += 1
@@ -1173,6 +1241,71 @@ def _read_span(args: Any, root: Optional[str]) -> Optional[tuple[str, int, int]]
     return os.path.normpath(full), start, end
 
 
+def _int0(obj: Any, name: str) -> int:
+    """obj.name as a non-negative int; 0 when absent (stub replies, cassettes)."""
+    try:
+        return max(0, int(getattr(obj, name, 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+#: Tools whose result is a window of one file the reread guard tracks.
+_READ_TOOLS = ("read_file", "show_symbol")
+
+
+def _symbol_arg(args: Any) -> bool:
+    """True for a read_file call naming a symbol= while AWOS_SKELETON_VIEW is
+    on (read_file ignores symbol= with the flag off, and so does the guard)."""
+    return (isinstance(args, dict) and isinstance(args.get("symbol"), str)
+            and bool(args["symbol"].strip()) and _skeleton_view())
+
+
+def _served_span(call: ToolCall, result: Any, asked: Optional[tuple[str, int, int]],
+                 root: Optional[str]) -> Optional[tuple[str, int, int]]:
+    """(path, first, last) of the lines a read actually sent, or None.
+
+    With AWOS_SKELETON_VIEW the read tools report the lines served in
+    result.data start_line/end_line: a capped range is recorded as served, not
+    as asked, and a skeleton (0/0) records nothing, so a later read of lines
+    never shown is not answered "already read" (docs/specs/skeleton_viewer.md,
+    Risks). A symbol read records the symbol's own lines, capped like the tool
+    caps a giant body. Without those fields (flag off, or a small file read
+    whole) the asked-for span is recorded, as before — except for a symbol
+    read, which records nothing it cannot place.
+    """
+    data = getattr(result, "data", None)
+    data = data if isinstance(data, dict) else {}
+    first, last = data.get("start_line"), data.get("end_line")
+    symbol = call.name == "show_symbol" or _symbol_arg(call.arguments)
+    if not (isinstance(first, int) and isinstance(last, int)
+            and not isinstance(first, bool) and not isinstance(last, bool)):
+        return None if symbol or asked is None else asked
+    if not getattr(result, "success", False) or first < 1 or last < first:
+        return None  # a skeleton (0/0) or a failure sent no lines
+    if symbol and data.get("symbol"):
+        try:
+            try:
+                from .tools.filesystem import skeleton_max_lines
+            except ImportError:
+                from tools.filesystem import skeleton_max_lines
+            cap = skeleton_max_lines()
+            if last - first + 1 > 3 * cap:  # _show_symbol cuts giants to one window
+                last = first + cap - 1
+        except Exception:
+            pass
+    total = data.get("total_lines")
+    if isinstance(total, int) and total > 0 and last >= total:
+        last = _EOF_LINE  # served through the end, like a whole-file read
+    path = asked[0] if asked is not None else None
+    if path is None:
+        raw = data.get("path") or (call.arguments or {}).get("path")
+        if not isinstance(raw, str) or not raw.strip():
+            return None
+        path = os.path.normpath(raw if os.path.isabs(raw) or not root
+                                else os.path.join(root, raw))
+    return path, first, last
+
+
 def _test_score(data: dict) -> Optional[tuple[int, int]]:
     """Sortable run_tests result, lower is better: (failed, -passed)."""
     failed, passed = data.get("failed"), data.get("passed")
@@ -1375,6 +1508,15 @@ def build_client_from_env(model: Optional[str] = None) -> ModelClient:
     )
 
 
+def _skeleton_view() -> bool:
+    """tools.filesystem.skeleton_view_enabled(): AWOS_SKELETON_VIEW=1."""
+    try:
+        from .tools.filesystem import skeleton_view_enabled
+    except ImportError:
+        from tools.filesystem import skeleton_view_enabled
+    return skeleton_view_enabled()
+
+
 def build_coding_registry(
     project_root: str = ".", allow_shell: bool = False, sandbox: Any = None
 ) -> Any:
@@ -1429,6 +1571,14 @@ def build_coding_registry(
         RunTestsTool(project_root=project_root, sandbox=sandbox),
     ):
         registry.register(tool)
+
+    if _skeleton_view():
+        # One body by name; only with the bounded views it is named in.
+        try:
+            from .tools.filesystem import ShowSymbolTool
+        except ImportError:
+            from tools.filesystem import ShowSymbolTool
+        registry.register(ShowSymbolTool(project_root=project_root, confine=True))
 
     if allow_shell:
         try:
