@@ -89,7 +89,9 @@ ROUTING_ENV = ("AWOS_OPENROUTER_PROVIDER", "AWOS_OPENROUTER_ALLOW_FALLBACKS",
                # T2 loop breaker (docs/specs/loop_breaker.md)
                "AWOS_LOOP_BREAKER",
                # trick T3: static gate at edit-apply time (docs/specs/static_gate.md)
-               "AWOS_STATIC_GATE", "AWOS_STATIC_GATE_TESTS")
+               "AWOS_STATIC_GATE", "AWOS_STATIC_GATE_TESTS",
+               # trick T7b: stable prompt prefix (docs/specs/prompt_caching.md)
+               "AWOS_STABLE_PREFIX", "AWOS_STABLE_PREFIX_BLOCK")
 
 
 def routing_env() -> dict:

@@ -1,6 +1,6 @@
 # Spec — T7 prompt caching: cache-aware cost + cache telemetry (T7a), prefix plan (T7b)
 
-Status: T7a implemented 2026-10-09 · T7b planned (no prompt changes yet).
+Status: T7a implemented 2026-10-09 · T7b implemented 2026-10-09 behind AWOS_STABLE_PREFIX (default off; §7).
 Source: `docs/research/trick_book_2026-10.md` §1 #7, §2.7. VISION stage 1 (one excellent worker): this lowers $ per unit of useful work without touching how the work is verified.
 
 ## 1. Research (2026-10-09)
@@ -143,7 +143,7 @@ No timestamps, uuids, token budgets or unsorted directory listings appear in pro
 5. **Resumes and repairs** rebuild messages[0] with appended dynamic feedback.
 6. **Arbiter**: test output (timings, tmp paths) and the diff are inherently dynamic. They are fine as a suffix.
 
-## 5. T7b plan — minimal reorder (next step; not implemented)
+## 5. T7b plan — minimal reorder (implemented, see §7)
 
 Target order for every call: **system → tools → repo card → files → goal → feedback**. Stable content comes first, and the most volatile content comes last.
 
@@ -171,3 +171,40 @@ Risk: reordering a prompt can change model behaviour, which affects the solve ra
 - PRICES base rates are OpenRouter list rates (V4 Flash 0.089). The cheapest pinned provider is 0.09, so the estimate runs about 1–2% low on the billed cost.
 - DeepSeek direct off-peak pricing is documented here but not modelled. It is not reachable through OpenRouter.
 - Agent-loop budget caps still use the cache-blind `agent_loop.estimate_cost` (§2, follow-up).
+
+## 7. T7b implemented (2026-10-09) — `AWOS_STABLE_PREFIX=1` (default off)
+
+Code: `scaffold/agent/stable_prefix.py`. Tests: `tests/test_stable_prefix.py`. With the flag off, every prompt is byte-identical to before; the tests check this for one_shot, acceptance and the agent loop.
+
+- **one_shot + acceptance generator:**
+  - Both use `stable_prefix.repository_context`. It ranks on the verbatim goal and uses one_shot's budget, so acceptance moves from 6000 to 24000 tokens. The repo map carries no `(shown below)` marks.
+  - Both send `SHARED_SYSTEM`, then a user message ordered `# Repository` → `# Instructions` (the role's old system prompt, verbatim) → task/issue.
+  - The role prompt moves after the repository. Two different system prompts would otherwise end the shared prefix at byte 0; §5's plan missed this.
+- **one_shot repair:** the repair continues the conversation as first request + reply + a new user message, instead of a fresh REPAIR_PROMPT call.
+- **Agent loop:**
+  - `_agent_loop_prompt_stable` orders the first message as exploration notes → notebook → task (goal first) → files → previous task → experience.
+  - Feedback becomes new trailing user messages. This covers the one-shot note, the resume reason and the acceptance repair; the prompt is a list, built with `append_feedback`.
+  - `condense_blocks` masks results older than `keep_turns` in blocks of `AWOS_STABLE_PREFIX_BLOCK` (4) turns.
+  - Two results stay pinned: the last read of a file that is later edited, and the last failing `run_tests`.
+
+**Prefix stability.** Measured offline on recorded tasks (more-itertools_1304 and parse_249; `common_prefix_fraction` on serialized requests):
+
+| | off | on |
+|---|---|---|
+| acceptance → one_shot shared prefix | 0.1% | 93–94% |
+| one_shot → repair shared prefix | 1.4% | 90–91% |
+| agent loop, 24 turns: calls that break the previous prefix | 16 | 4 (turns 13/17/21/25) |
+| agent loop: byte-weighted prefix reuse | 38–40% | 77% |
+
+**Live run (Flash, pinned providers, 1 run each).** Cache hit rates compared with the same series' earlier runs:
+
+- **more-itertools_1304:** solved in one shot. one_shot hit 80%, acceptance 90%, 85% in total, $0.0013. Earlier runs ranged from 87% (r1) to 69.5% (r2).
+- **parse_249:** solved through the agent loop (28 turns, $0.045).
+  - one_shot hit 82%; the cold earlier runs scored 0%.
+  - acceptance hit 0%. It ran cold at 25k tokens, $0.0023 against $0.0005 before.
+  - The agent turns hit 77.5%; earlier runs ranged from 40.6% to 80.1%.
+  - Total hit rate was 73.5%.
+
+**Risks:**
+- Acceptance now pays for a 4× larger repository section on a miss. Per task, the shared-section effect on cost is roughly neutral, unless one_shot or best-of-N reuse it.
+- Moving the role instructions into the user message, and ranking on the goal rather than the planner's text, may change solve rate. A/B this before flipping the default.

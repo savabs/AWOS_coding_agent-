@@ -81,6 +81,15 @@ def _asks_for_tests(task: dict) -> bool:
     return False
 
 
+def _stable_prefix():
+    """The stable_prefix module (T7b, AWOS_STABLE_PREFIX)."""
+    try:
+        from . import stable_prefix
+    except ImportError:
+        import stable_prefix
+    return stable_prefix
+
+
 def _session_goal(ctx: Optional[dict]) -> str:
     """The user's goal, verbatim (ReasoningSession.goal); '' when unknown."""
     goal = getattr((ctx or {}).get("session"), "goal", "")
@@ -2269,7 +2278,10 @@ class Orchestrator:
         # wrote (a conftest.py, say) must never execute on the host.
         sandbox = getattr(registry, "sandbox", None)
         retries_left = _agent_retries()
-        prompt = self._agent_loop_prompt(task, ctx)
+        # AWOS_STABLE_PREFIX: a list prompt — the stable first message, then
+        # each piece of feedback as its own trailing message.
+        prompt = ([self._agent_loop_prompt_stable(task, ctx)] if _stable_prefix().enabled()
+                  else self._agent_loop_prompt(task, ctx))
         files_changed: list = []
         outcomes = []
 
@@ -2355,7 +2367,7 @@ class Orchestrator:
                     _task_ts=_task_ts, _live_t=_live_t, _task_usage=_task_usage,
                 )
             if shot["note"]:
-                prompt = prompt + "\n\n" + shot["note"]
+                prompt = _stable_prefix().append_feedback(prompt, shot["note"])
         base_prompt = prompt
 
         try:
@@ -2444,9 +2456,9 @@ class Orchestrator:
                 # (no rollback between attempts) and the next attempt resumes.
                 retries_left -= 1
                 print(f"[TASK {task_id}] AgentLoop resuming after: {reason}")
-                prompt = (
-                    base_prompt
-                    + f"\n\nA previous attempt stopped: {reason}. "
+                prompt = _stable_prefix().append_feedback(
+                    base_prompt,
+                    f"A previous attempt stopped: {reason}. "
                     + f"It changed these files: {', '.join(files_changed) or 'none'}. "
                     + f"Test status: {verdict['test_status']}. "
                     + "Continue from the current state of the files; do not start over."
@@ -2553,6 +2565,10 @@ class Orchestrator:
         except ImportError:
             import best_of_n as bon_mod
         n_shots = bon_mod.best_of_n()
+        # AWOS_STABLE_PREFIX: rank the shared repository section on the same
+        # verbatim goal the acceptance generator uses (its call runs first).
+        stable_kw = ({"goal": _session_goal(ctx) or str(task.get("action", ""))}
+                     if _stable_prefix().enabled() else {})
         bon_verdict = None  # AWOS_BEST_OF_N > 1: the winner's verdict, already run
         try:
             if n_shots > 1:
@@ -2575,13 +2591,13 @@ class Orchestrator:
                     task_text=task_text, exploration=ctx.get("exploration"),
                     tracker=getattr(self, "tracker", None),
                     allow_test_edits=_asks_for_tests(task), judge=_bon_judge,
-                    acceptance_passed=_bon_acceptance)
+                    acceptance_passed=_bon_acceptance, **stable_kw)
                 shot, bon_verdict = bon.shot, bon.verdict
             else:
                 shot = one_shot_mod.run_one_shot(
                     client, model, codebase_root, task_text, ctx.get("exploration"),
                     tracker=getattr(self, "tracker", None),
-                    allow_test_edits=_asks_for_tests(task),
+                    allow_test_edits=_asks_for_tests(task), **stable_kw,
                 )
         except Exception as exc:  # noqa: BLE001 — run_one_shot should not raise
             shot = one_shot_mod.OneShotResult(error=f"{type(exc).__name__}: {exc}", calls=1)
@@ -2860,8 +2876,8 @@ class Orchestrator:
         turns = acc_mod.repair_turns()
         print(f"[TASK {task_id}] [ACCEPTANCE] bounded repair: {len(incomplete)} "
               f"code_incomplete test(s), at most {turns} turns")
-        prompt = (base_prompt + "\n\n"
-                  + acc_mod.repair_feedback(suite, {n: failing[n] for n in incomplete}))
+        prompt = _stable_prefix().append_feedback(
+            base_prompt, acc_mod.repair_feedback(suite, {n: failing[n] for n in incomplete}))
         outcome = None
         repaired_green = False
         rfiles = list(files_changed)
@@ -3057,6 +3073,42 @@ class Orchestrator:
             except ImportError:
                 from project_notebook import prompt_section
             parts.append(prompt_section(ctx["notebook"]))
+        if ctx.get("experience"):
+            parts.append(str(ctx["experience"]))
+        parts.append(
+            "Read what you need, make the change with edit_file, and run the "
+            "tests to check your work."
+        )
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def _agent_loop_prompt_stable(task: dict, ctx: dict) -> str:
+        """
+        AWOS_STABLE_PREFIX: the same parts as _agent_loop_prompt, most stable
+        first — exploration notes and notebook (shared by every task of the
+        goal), then the task (goal verbatim first), files, previous task,
+        experience. Feedback never goes here: it follows as new messages.
+        """
+        parts = []
+        exploration = (ctx.get("exploration") or {}).get("exploration_summary", "")
+        if exploration:
+            parts.append("Exploration notes:\n" + str(exploration)[:3000])
+        if ctx.get("notebook"):
+            try:
+                from .project_notebook import prompt_section
+            except ImportError:
+                from project_notebook import prompt_section
+            parts.append(prompt_section(ctx["notebook"]))
+        parts.append("# Task\n\n" + worker_task_text(task, ctx))
+        files = task_files(task)
+        if files:
+            parts.append("Files to change: " + ", ".join(files))
+        if task.get("prev_task_context"):
+            parts.append(
+                "The previous task changed:\n" + str(task["prev_task_context"])[:2000]
+                + "\n\nIf earlier tasks already did what this task asks, confirm it "
+                "with run_tests and finish without editing."
+            )
         if ctx.get("experience"):
             parts.append(str(ctx["experience"]))
         parts.append(

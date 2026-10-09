@@ -312,11 +312,14 @@ def file_sections(rel: str, content: str, task: str, hit_lines: list,
     return (outline_text + "\n" if outline_text else "") + sections
 
 
-def _repo_map(root: Path, files: list[str], whole: set[str], cap_tokens: int) -> str:
-    """File list + signatures for Python files not already included whole."""
+def _repo_map(root: Path, files: list[str], whole: set[str], cap_tokens: int,
+             marks: bool = True) -> str:
+    """File list + signatures for Python files not already included whole.
+    marks=False (AWOS_STABLE_PREFIX): no "(shown below)" marks and signatures
+    for every file, so the map does not depend on which files were chosen."""
     lines = []
     for rel in files:
-        if rel in whole:
+        if marks and rel in whole:
             lines.append(f"{rel}  (shown below)")
             continue
         lines.append(rel)
@@ -399,7 +402,8 @@ class OneShotContext:
 
 def build_context(project_root: str, task: str, exploration: Optional[dict] = None,
                   budget: Optional[int] = None,
-                  extra_context: Optional[str] = None) -> OneShotContext:
+                  extra_context: Optional[str] = None,
+                  stable_map: bool = False) -> OneShotContext:
     """
     A compact repo map plus whole candidate files, ranked (rank_files):
     exploration grep hits first (most hits first), then files the task
@@ -489,7 +493,7 @@ def build_context(project_root: str, task: str, exploration: Optional[dict] = No
         used += cost
 
     repo_map = _repo_map(root, all_files, set(chosen) | set(sectioned),
-                         min(MAP_BUDGET_TOKENS, budget // 4))
+                         min(MAP_BUDGET_TOKENS, budget // 4), marks=not stable_map)
     text = "## Repository map\n" + repo_map + "\n\n## Files\n\n" + "\n".join(blocks)
     return OneShotContext(
         text=text,
@@ -1060,6 +1064,28 @@ def build_repair_messages(task: str, project_root: str, failed: list[tuple[EditB
     return [{"role": "system", "content": REPAIR_PROMPT}, {"role": "user", "content": user}]
 
 
+def build_repair_followup(first_messages: list, reply_text: str, project_root: str,
+                          failed: list[tuple[EditBlock, str]],
+                          budget: Optional[int] = None) -> list:
+    """AWOS_STABLE_PREFIX: the repair as a new user message after the first
+    call and its reply, so the whole first request is a cached prefix."""
+    try:
+        from . import stable_prefix
+    except ImportError:
+        import stable_prefix
+    shown = []
+    for k, (b, why) in enumerate(failed, 1):
+        shown.append(f"## Failed block {k} ({b.path})\nWhy: {why[:300]}\n\n{_block_text(b)}\n")
+    current = repair_context(project_root, [b for b, _ in failed], budget)
+    user = (
+        f"# Repair instructions\n\n{REPAIR_PROMPT}\n\n"
+        "# Blocks that failed to apply\n\n" + "\n".join(shown)
+        + f"\n# Current text of the files\n\n{current}\n\n"
+        "Reply with corrected SEARCH/REPLACE blocks for just these changes."
+    )
+    return stable_prefix.repair_followup(first_messages, reply_text, user)
+
+
 # ── T4 copy-constrained SEARCH (AWOS_EDIT_GRAMMAR, local only) ──────────────
 
 def _edit_grammar_body(client: Any, project_root: str, ctx: OneShotContext,
@@ -1095,7 +1121,8 @@ def run_one_shot(client: Any, model: str, project_root: str, task: str,
                  allow_test_edits: bool = False, budget: Optional[int] = None,
                  max_tokens: Optional[int] = None, temperature: float = 0,
                  context: Optional[OneShotContext] = None,
-                 extra_context: Optional[str] = None) -> OneShotResult:
+                 extra_context: Optional[str] = None,
+                 goal: Optional[str] = None) -> OneShotResult:
     """
     One call, then apply; if blocks failed to apply, one repair call for just
     those. A cut-off reply is not retried: its complete blocks are applied
@@ -1105,7 +1132,15 @@ def run_one_shot(client: Any, model: str, project_root: str, task: str,
     `context` (best-of-N): a context already built from the real workspace,
     so a candidate run in a scratch copy sees exactly the same prompt;
     `temperature` is that candidate's sampling temperature (0 by default).
+
+    `goal` (AWOS_STABLE_PREFIX): the verbatim goal the shared repository
+    section is ranked on, so it matches the acceptance generator's.
     """
+    try:
+        from . import stable_prefix
+    except ImportError:
+        import stable_prefix
+    stable = stable_prefix.enabled()
     start = time.time()
     result = OneShotResult()
     if context is not None:
@@ -1117,8 +1152,13 @@ def run_one_shot(client: Any, model: str, project_root: str, task: str,
             ctx = dataclasses.replace(ctx, extra=extra_context)
     else:
         try:
-            ctx = build_context(project_root, task, exploration, budget,
-                                extra_context=extra_context)
+            if stable:
+                ctx = stable_prefix.repository_context(project_root, goal or task,
+                                                       exploration, budget,
+                                                       extra_context=extra_context)
+            else:
+                ctx = build_context(project_root, task, exploration, budget,
+                                    extra_context=extra_context)
         except Exception as exc:  # noqa: BLE001
             result.error = f"context build failed: {exc}"
             return result
@@ -1130,7 +1170,9 @@ def run_one_shot(client: Any, model: str, project_root: str, task: str,
     cap = max(int(max_tokens or 0), max_reply_tokens())
     send_reasoning = _sends_reasoning(client)
     grammar_body = _edit_grammar_body(client, project_root, ctx, allow_test_edits)
-    reply = _call(tap, model, build_messages(task, ctx), max_tokens=cap, tracker=tracker,
+    first_messages = (stable_prefix.one_shot_messages(task, ctx, SYSTEM_PROMPT) if stable
+                      else build_messages(task, ctx))
+    reply = _call(tap, model, first_messages, max_tokens=cap, tracker=tracker,
                   request_type="one_shot", send_reasoning=send_reasoning,
                   temperature=temperature, extra_body=grammar_body)
     if grammar_body and reply.error:
@@ -1139,7 +1181,7 @@ def run_one_shot(client: Any, model: str, project_root: str, task: str,
         print(f"[EDIT-GRAMMAR] call failed with grammar ({reply.error[:160]}); "
               "retrying without it")
         first_cost, first_calls = reply.cost_usd, reply.calls
-        reply = _call(tap, model, build_messages(task, ctx), max_tokens=cap, tracker=tracker,
+        reply = _call(tap, model, first_messages, max_tokens=cap, tracker=tracker,
                       request_type="one_shot", send_reasoning=send_reasoning,
                       temperature=temperature)
         reply.cost_usd += first_cost
@@ -1171,7 +1213,11 @@ def run_one_shot(client: Any, model: str, project_root: str, task: str,
 
     if repairable and not reply.truncated:
         others = [f for f in failed if not ("index" in f and blocks[f["index"]].search.strip())]
-        messages = build_repair_messages(task, project_root, repairable, budget)
+        if stable:
+            messages = build_repair_followup(first_messages, reply.text, project_root,
+                                             repairable, budget)
+        else:
+            messages = build_repair_messages(task, project_root, repairable, budget)
         fix = _call(tap, model, messages, max_tokens=cap, tracker=tracker,
                     request_type="one_shot_repair", send_reasoning=send_reasoning,
                     temperature=temperature, extra_body=grammar_body)

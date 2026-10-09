@@ -187,6 +187,7 @@ def run_best_of_n(
     exploration: Optional[dict], tracker: Any, allow_test_edits: bool,
     judge: Callable[[list], dict],
     acceptance_passed: Optional[Callable[[], Optional[int]]] = None,
+    goal: Optional[str] = None,
 ) -> BestOfNResult:
     """
     Sample n candidates, score them on the visible suite in the real workspace,
@@ -198,7 +199,17 @@ def run_best_of_n(
     start = time.time()
     root = Path(codebase_root).resolve()
     try:
-        ctx = one_shot_mod.build_context(codebase_root, task_text, exploration)
+        try:
+            from . import stable_prefix
+        except ImportError:
+            import stable_prefix
+        if stable_prefix.enabled():
+            # The shared repository section (AWOS_STABLE_PREFIX): ranked on
+            # the verbatim goal, as the acceptance generator builds it.
+            ctx = stable_prefix.repository_context(codebase_root, goal or task_text,
+                                                   exploration)
+        else:
+            ctx = one_shot_mod.build_context(codebase_root, task_text, exploration)
     except Exception as exc:  # noqa: BLE001
         shot = one_shot_mod.OneShotResult(error=f"context build failed: {exc}")
         return BestOfNResult(shot=shot, verdict=None, chosen=1)

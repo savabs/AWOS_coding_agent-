@@ -177,17 +177,29 @@ def generate_acceptance_tests(goal_text: str, project_root: str,
     except ImportError:
         import one_shot
         from providers import REASONING_OFF, utility_chat
+    try:
+        from . import stable_prefix
+    except ImportError:
+        import stable_prefix
+    stable = stable_prefix.enabled()
     out = {"source": "", "cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0, "error": ""}
     try:
-        ctx = one_shot.build_context(project_root, goal_text, exploration,
-                                     budget=CONTEXT_BUDGET_TOKENS)
+        if stable:
+            # One repository section with one_shot (same ranking, same budget),
+            # so the one_shot call after this one reads it from cache.
+            ctx = stable_prefix.repository_context(project_root, goal_text, exploration)
+        else:
+            ctx = one_shot.build_context(project_root, goal_text, exploration,
+                                         budget=CONTEXT_BUDGET_TOKENS)
     except Exception as exc:  # noqa: BLE001
         out["error"] = f"context build failed: {exc}"
         return out
+    messages = (stable_prefix.acceptance_messages(goal_text, ctx.text, SYSTEM_PROMPT)
+                if stable else build_messages(goal_text, ctx.text))
     tap = one_shot._UsageTap(client)
     try:
         text, info = utility_chat(
-            tap, "acceptance", model, build_messages(goal_text, ctx.text),
+            tap, "acceptance", model, messages,
             max_tokens=MAX_REPLY_TOKENS, tracker=tracker, request_type="acceptance",
             temperature=0, send_reasoning=one_shot._sends_reasoning(client),
             reasoning=dict(REASONING_OFF), retry=False,

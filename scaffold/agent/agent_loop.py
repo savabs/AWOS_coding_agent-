@@ -736,8 +736,25 @@ class AgentLoop:
     def run(self, task: str, extra_context: str = "") -> LoopOutcome:
         """Work `task` to completion, or until a stop condition trips."""
         started = time.monotonic()
-        prompt = f"{task}\n\n{extra_context}".strip()
-        messages: list[dict[str, Any]] = [{"role": "user", "content": prompt}]
+        try:
+            from . import stable_prefix
+        except ImportError:
+            import stable_prefix
+        # AWOS_STABLE_PREFIX: mask old results in blocks (byte-stable history
+        # between condensation points), keeping pinned results.
+        stable = stable_prefix.enabled()
+        block = stable_prefix.block_turns()
+        pin_events: list[tuple] = []  # (call id, kind, path, failing)
+        if isinstance(task, (list, tuple)):
+            # A list prompt (stable prefix): the first message stays as built;
+            # each later item is feedback, a message of its own after it.
+            first, *followups = [str(t) for t in task] or [""]
+            prompt = f"{first}\n\n{extra_context}".strip()
+            messages: list[dict[str, Any]] = [{"role": "user", "content": prompt}]
+            messages.extend({"role": "user", "content": f} for f in followups if f.strip())
+        else:
+            prompt = f"{task}\n\n{extra_context}".strip()
+            messages = [{"role": "user", "content": prompt}]
 
         outcome = LoopOutcome(success=False, stop_reason="max_turns")
         truncations = 0  # consecutive replies cut off by the output limit
@@ -791,7 +808,11 @@ class AgentLoop:
                 self._emit("budget_blocked", reason=reason)
                 break
 
-            outcome.elided_results += _condense_history(messages, self.keep_turns)
+            if stable:
+                outcome.elided_results += stable_prefix.condense_blocks(
+                    messages, self.keep_turns, block, stable_prefix.pinned_ids(pin_events))
+            else:
+                outcome.elided_results += _condense_history(messages, self.keep_turns)
 
             try:
                 reply = self.client.complete(self.system_prompt, messages, self.registry)
@@ -972,6 +993,21 @@ class AgentLoop:
                     path = result.data.get("path")
                     if path and path not in touched:
                         touched.append(path)
+                if stable:
+                    args = call.arguments if isinstance(call.arguments, dict) else {}
+                    if call.name in _READ_TOOLS:
+                        pin_events.append((call.id, "read",
+                                           stable_prefix.norm_path(args.get("path"), root),
+                                           False))
+                    elif call.name in ("edit_file", "write_file") and result.success:
+                        pin_events.append((call.id, "edit",
+                                           stable_prefix.norm_path(args.get("path"), root),
+                                           False))
+                    elif call.name == "run_tests":
+                        data = getattr(result, "data", None) or {}
+                        failing = (not result.success or bool(data.get("failed"))
+                                   or bool(data.get("errors")))
+                        pin_events.append((call.id, "test", None, failing))
                 # Any state change ends green: it must be re-earned by a new
                 # passing run_tests. Only a real edit arms the reminder.
                 if state_version != version_before:
