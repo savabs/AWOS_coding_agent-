@@ -440,11 +440,25 @@ def test_sigterm_on_serve_requeues_and_exits(root, repo):
 # ── subprocess runner, with a fake child script in place of job_host.py ──────
 
 FAKE_CHILD = """
-import json, os, sys, time
+import json, os, signal, sys, time
 job = json.load(open(sys.argv[2]))
+caps = os.environ.get("FAKE_CHILD_CAPS")
+if caps:
+    with open(caps, "a") as fh:
+        fh.write(json.dumps([os.environ.get("AWOS_MAX_RUN_COST"),
+                             os.environ.get("AWOS_GOAL_BUDGET_USD")]) + "\\n")
+spend = float(os.environ.get("FAKE_CHILD_SPEND", "0"))
+if spend:
+    ledger = os.environ["FAKE_CHILD_LEDGER"]
+    entries = json.load(open(ledger)) if os.path.exists(ledger) else []
+    entries.append({"cost": spend, "pid": os.getpid()})
+    json.dump(entries, open(ledger, "w"))
 time.sleep(float(os.environ.get("FAKE_CHILD_SLEEP", "0")))
+if job["attempts"] <= int(os.environ.get("FAKE_CHILD_SIGKILL_UNTIL", "0")):
+    os.kill(os.getpid(), signal.SIGKILL)
 json.dump({"success": True, "goal": job["goal"], "root": job["root"],
-           "cap": os.environ.get("AWOS_MAX_RUN_COST")}, open(sys.argv[3], "w"))
+           "cap": os.environ.get("AWOS_MAX_RUN_COST"),
+           "goal_cap": os.environ.get("AWOS_GOAL_BUDGET_USD")}, open(sys.argv[3], "w"))
 """
 
 
@@ -454,7 +468,17 @@ def fake_child(tmp_path, monkeypatch):
     script = tmp_path / "fake_child.py"
     script.write_text(FAKE_CHILD)
     monkeypatch.setattr(job_host, "__file__", str(script))
+    # Keep the real repo's spend ledger and legacy host lock out of tests.
+    monkeypatch.setattr(host_worker, "LEDGER_PATH", tmp_path / "budget.json", raising=False)
+    monkeypatch.setattr(host_worker, "LEGACY_HOST_LOCK", tmp_path / "legacy" / "host.lock",
+                        raising=False)
+    monkeypatch.setenv("FAKE_CHILD_LEDGER", str(tmp_path / "budget.json"))
+    monkeypatch.setenv("FAKE_CHILD_CAPS", str(tmp_path / "caps.jsonl"))
     return script
+
+
+def _caps(tmp_path):
+    return [json.loads(line) for line in (tmp_path / "caps.jsonl").read_text().splitlines()]
 
 
 def test_subprocess_runner_runs_child_and_records_pid(queue, repo, fake_child):
@@ -489,3 +513,129 @@ def test_subprocess_runner_stop_terminates_child_and_requeues(queue, repo, fake_
     assert time.time() - t0 < 15
     got = queue.get(job.id)
     assert (got.state, got.attempts) == ("queued", 0)
+
+
+# ── review fixes (regressions) ────────────────────────────────────────────────
+
+
+def test_child_env_budget_bounds_the_whole_goal(repo, monkeypatch):
+    """budget_usd sets the goal cap too, not only the per-task cap; 0 = no cap."""
+    monkeypatch.setenv("AWOS_GOAL_BUDGET_USD", "2.0")
+    monkeypatch.setenv("AWOS_MAX_RUN_COST", "9")
+    env = child_env(JobSpec.new("g", repo, budget_usd=0.1))
+    assert (env["AWOS_GOAL_BUDGET_USD"], env["AWOS_MAX_RUN_COST"]) == ("0.1", "0.1")
+    env = child_env(JobSpec.new("g", repo, budget_usd=0))
+    assert env["AWOS_GOAL_BUDGET_USD"] == "0" and "AWOS_MAX_RUN_COST" not in env
+
+
+def test_retry_after_signal_kill_gets_only_the_budget_left(queue, repo, fake_child, tmp_path,
+                                                           monkeypatch):
+    """An OOM-style kill is retried, and the retry's caps exclude attempt 1's spend."""
+    monkeypatch.setenv("FAKE_CHILD_SPEND", "0.4")
+    monkeypatch.setenv("FAKE_CHILD_SIGKILL_UNTIL", "1")
+    job = queue.submit("g", repo, budget_usd=1.0)
+    _worker(queue, host_worker.subprocess_runner).serve(poll_sec=0, once=True)
+    got = queue.get(job.id)
+    assert (got.state, got.attempts) == ("done", 2), got.error
+    assert _caps(tmp_path) == [["1", "1"], ["0.6", "0.6"]]
+    spent = json.loads((queue.job_dir(job.id) / "spend.json").read_text())
+    assert spent["prior_usd"] == pytest.approx(0.8) and spent["open"] is None
+
+
+def test_retry_fails_when_earlier_attempts_used_the_budget(queue, repo, fake_child, tmp_path,
+                                                           monkeypatch):
+    monkeypatch.setenv("FAKE_CHILD_SPEND", "1.0")
+    monkeypatch.setenv("FAKE_CHILD_SIGKILL_UNTIL", "1")
+    job = queue.submit("g", repo, budget_usd=1.0)
+    _worker(queue, host_worker.subprocess_runner).serve(poll_sec=0, once=True)
+    got = queue.get(job.id)
+    assert (got.state, got.attempts) == ("failed", 2), got.error
+    assert "used up by earlier attempts" in got.error
+    assert len(_caps(tmp_path)) == 1  # no second child was started
+
+
+def test_signal_killed_child_is_retried_then_fails_after_max_attempts(queue, repo, fake_child,
+                                                                      monkeypatch):
+    monkeypatch.setenv("FAKE_CHILD_SIGKILL_UNTIL", "99")
+    monkeypatch.setenv("AWOS_HOST_MAX_ATTEMPTS", "2")
+    job = queue.submit("g", repo, budget_usd=0)
+    _worker(queue, host_worker.subprocess_runner).serve(poll_sec=0, once=True)
+    got = queue.get(job.id)
+    assert (got.state, got.attempts) == ("failed", 2)
+    assert "killed by signal 9" in got.error
+
+
+def test_interrupted_attempt_spend_counts_from_its_last_snapshot(tmp_path, monkeypatch):
+    ledger = tmp_path / "budget.json"
+    monkeypatch.setattr(host_worker, "LEDGER_PATH", ledger, raising=False)
+    ledger.write_text(json.dumps([{"cost": 5.0}]))
+    t = host_worker.SpendTracker(tmp_path / "job")
+    t.start(1)
+    ledger.write_text(json.dumps([{"cost": 5.0}, {"cost": 0.25}]))
+    assert t.snapshot() == pytest.approx(0.25)
+    # the worker is killed here; spend after the snapshot is not this attempt's
+    ledger.write_text(json.dumps([{"cost": 5.0}, {"cost": 0.25}, {"cost": 3.0}]))
+    assert host_worker.SpendTracker(tmp_path / "job").prior() == pytest.approx(0.25)
+
+
+def test_local_only_blanks_every_cloud_api_key(repo, monkeypatch, tmp_path):
+    keys = ("TAVILY_API_KEY", "SERP_API_KEY", "LLM_API_KEY", "SOMENEWPROVIDER_API_KEY")
+    for k in keys:
+        monkeypatch.setenv(k, "secret-not-printed")
+    monkeypatch.setenv("AWOS_LOCAL_API_KEY", "local-key")
+    env = child_env(JobSpec.new("g", repo, privacy="local_only"))
+    assert all(env[k] == "" for k in keys)
+    assert env["AWOS_LOCAL_API_KEY"] == "local-key"
+    assert child_env(JobSpec.new("g", repo))["TAVILY_API_KEY"] == "secret-not-printed"
+    # a key only in the repo .env would be refilled by dotenv: it is blanked too
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("# x\nexport DOTENV_ONLY_API_KEY=abc\nLOCAL_API_KEY=keep\n")
+    names = host_worker.local_only_blanked_keys({}, dotenv_path=dotenv)
+    assert "DOTENV_ONLY_API_KEY" in names and "LOCAL_API_KEY" not in names
+
+
+def test_default_runner_excludes_the_legacy_host(queue, repo, fake_child, monkeypatch):
+    """Legacy `awos host` and the default runner share the spend ledger: never both."""
+    import fcntl
+    lock_path = host_worker.LEGACY_HOST_LOCK
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    job = queue.submit("g", repo)
+    with open(lock_path, "a+") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(RuntimeError, match="legacy"):
+            _worker(queue, host_worker.subprocess_runner).serve(poll_sec=0, once=True)
+        assert queue.get(job.id).state == "queued"
+        HostWorker(queue, log=_quiet)._lock().close()  # the worker lock was released
+    seen = {}
+
+    def probe(job, ctx, *rest):
+        with open(lock_path, "a+") as fh:
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                seen["legacy_could_start"] = True
+            except OSError:
+                seen["legacy_could_start"] = False
+        return {"success": True}
+
+    monkeypatch.setattr(host_worker, "_run_child", probe)
+    _worker(queue, host_worker.subprocess_runner).serve(poll_sec=0, once=True)
+    assert seen == {"legacy_could_start": False}
+    assert queue.get(job.id).state == "done"
+
+
+def test_losing_worker_does_not_wipe_live_worker_pid(queue):
+    w1, w2 = HostWorker(queue, log=_quiet), HostWorker(queue, log=_quiet)
+    h = w1._lock()
+    try:
+        with pytest.raises(RuntimeError):
+            w2._lock()
+        assert (queue.root / "worker.lock").read_text() == str(os.getpid())
+    finally:
+        h.close()
+
+
+def test_get_prefix_treats_like_wildcards_literally(queue, repo):
+    job = queue.submit("g", repo)
+    assert queue.get("%%%%") is None
+    assert queue.get("______") is None
+    assert queue.get(job.id[:6]).id == job.id

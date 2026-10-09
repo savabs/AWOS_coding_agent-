@@ -33,7 +33,7 @@ step/stop context.
 - `<root>/jobs/<id>/worker.log` — worker lines + child output.
 - `<root>/jobs/<id>/journal.jsonl`, `report.md`, `handoff.json` — owned by the
   journal / handoff builders; the worker only calls their APIs.
-- `<root>/worker.lock` — flock, released by the OS even on `kill -9`.
+- `<root>/worker.lock` — flock, released by the OS even on `kill -9`; holds the live worker's pid (a worker that loses the race does not truncate it).
 
 ## JobSpec (`scaffold/agent/host/models.py`)
 
@@ -50,7 +50,7 @@ times).
   `WHERE state IN (...)` guard; it returns whether it happened. Two processes can
   never both claim a job or both finish it.
 - `submit`, `get`, `list`, `claim_next` (oldest queued → running, attempts+1),
-  `finish(id, state, result, error)`, `requeue`, `request_cancel`, `recover`.
+  `finish(id, state, result, error)`, `requeue`, `request_cancel`, `recover`. `get` also takes a unique id prefix of 4+ chars, matched literally (`%`/`_` are not wildcards).
 - `cancel`: queued/paused → cancelled at once; running → `cancel_requested=1`,
   the worker stops the job at its next step boundary and marks it cancelled.
 - `recover()` (worker start, lock held so no other worker is alive): every
@@ -68,8 +68,33 @@ Loop: recover → claim → run via runner → handoff → finish. Single worker
   journal's `replay_plan()` on a resumed attempt, else None).
 - Default runner (`subprocess_runner`): writes a job_host-compatible Job file in
   the job dir and runs `job_host.py _child` (the orchestrator, planner path).
-  `budget_usd` → `AWOS_MAX_RUN_COST`. `privacy=local_only` blanks the cloud API
-  keys in the child env (fail closed: cloud calls cannot authenticate).
+- Budget: `budget_usd` bounds the whole job, across attempts. The child gets
+  `AWOS_GOAL_BUDGET_USD` (the orchestrator's whole-goal cap) and
+  `AWOS_MAX_RUN_COST` (its per-task cap), both set to what is left:
+  `budget_usd` minus the spend of earlier attempts. That spend is kept in
+  `<job_dir>/spend.json`: ledger entries (`.awos/budget.json`) added since the
+  attempt started, snapshotted every 5 s while the child runs, so an attempt
+  killed together with the worker counts its last snapshot (up to ~5 s of spend
+  can go uncounted). Once earlier attempts have used the budget, the next one
+  fails without starting a child. `budget_usd = 0` means **no cap**: it sets
+  `AWOS_GOAL_BUDGET_USD=0` (the orchestrator's "cap off") and unsets
+  `AWOS_MAX_RUN_COST`. The ledger is shared by every AWOS process, so any other
+  process spending while the job runs counts against the job's budget
+  (conservative).
+- One ledger reader at a time: the default runner also holds the legacy
+  `awos host` lock (`.awos/jobs/host.lock`) while `awos serve --worker` runs, so
+  the two hosts never run jobs at once and mix their per-job `cost_usd`. The
+  worker refuses to start while the legacy host runs, and the other way round.
+- Privacy: `privacy=local_only` blanks, in the child env, every `*_API_KEY` found
+  in the env or in the repo `.env` (dotenv would refill a missing one), plus a
+  fixed list (`CLOUD_KEYS`), except `AWOS_LOCAL_API_KEY` / `LOCAL_API_KEY`. It
+  fails closed: a provider added later cannot authenticate either.
+- Failure vs retry: a child killed by a signal before it wrote a result (e.g. an
+  OOM kill) raises `RetryableError` and the job is re-queued while attempts
+  remain (`AWOS_HOST_MAX_ATTEMPTS`), then fails. A timeout, a non-zero exit with
+  no result, any other runner exception, or `success: false` fails the job at
+  once: retrying something that will probably fail the same way again only
+  spends budget.
 - `sleep_runner`: demo/test runner, `AWOS_HOST_FAKE_STEPS` steps of
   `AWOS_HOST_FAKE_STEP_SEC` seconds; skips steps the journal says are done.
 - Journal: `from .journal import Journal` if importable, else a no-op shim.

@@ -124,7 +124,9 @@ class JobQueue:
         try:
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
             if row is None and len(job_id) >= 4:  # accept an unambiguous prefix
-                rows = conn.execute("SELECT * FROM jobs WHERE id LIKE ?", (job_id + "%",)).fetchall()
+                # substr, not LIKE: '%' and '_' in the input are not wildcards.
+                rows = conn.execute("SELECT * FROM jobs WHERE substr(id, 1, ?) = ?",
+                                    (len(job_id), job_id)).fetchall()
                 row = rows[0] if len(rows) == 1 else None
         finally:
             conn.close()
