@@ -94,4 +94,4 @@ def test_demo_runs(capsys, tmp_path):
     assert E.main(["--demo", "--audit", str(tmp_path / "d.jsonl")]) == 0
     out = capsys.readouterr().out
     assert out.count("\n") > 30 and "BLOCKED (R3-untrusted-trigger)" in out
-    assert len(AuditLog(tmp_path / "d.jsonl").read()) == 7
+    assert len(AuditLog(tmp_path / "d.jsonl").read()) == 9

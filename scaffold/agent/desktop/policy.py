@@ -30,6 +30,10 @@ Decision order (first match wins):
   6. no grant:
        irreversible class        -> deny (default deny)
        WRITE_OUTSIDE             -> ask
+  7. shell commands only (decide_command): when the command's provenance is
+     UNTRUSTED (initiator or any argument), an ALLOW from 1-6 also needs the
+     read-only allowlist (untrusted_shell_violation); otherwise -> ask.
+     A DENY from 1-6 always stands.
 
 Every decision is appended to an audit log (JSONL) when one is attached.
 """
@@ -319,6 +323,15 @@ _CODE_ENV = {"GIT_SSH_COMMAND", "GIT_SSH", "GIT_EXTERNAL_DIFF", "GIT_PAGER", "GI
              "GIT_ASKPASS", "GIT_PROXY_COMMAND", "SSH_ASKPASS", "PAGER", "EDITOR", "VISUAL",
              "LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "BASH_ENV", "ENV", "PROMPT_COMMAND",
              "PERL5OPT", "NODE_OPTIONS", "PYTHONSTARTUP"}
+_GIT_CODE_ENV = {"GIT_EXEC_PATH", "GIT_TEMPLATE_DIR"}
+#: env vars that make `git push` talk to a different repository's remotes
+_GIT_REDIRECT_ENV = {"GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_NAMESPACE"}
+#: git config keys (lower-case) that change where a push goes
+_GIT_REDIRECT_KEY_RE = re.compile(
+    r"^(remote\..*\.(url|pushurl|receivepack|uploadpack|mirror)|url\..*\.(insteadof|pushinsteadof)"
+    r"|remote\.pushdefault|branch\..*\.(pushremote|remote)|push\.default)$")
+#: target prefix for a git push whose destination the command may have changed
+REDIRECTED = "redirected:"
 #: git push options that rewrite or remove remote history
 _PUSH_DESTRUCTIVE = {"-f", "--force", "--force-with-lease", "--force-if-includes",
                      "-d", "--delete", "--mirror", "--prune", "--all"}
@@ -350,14 +363,24 @@ def _write(target: str) -> tuple:
 
 
 def _code_assign(word: str) -> bool:
-    return bool(_ASSIGN_RE.match(word)) and word.split("=", 1)[0] in _CODE_ENV
+    if not _ASSIGN_RE.match(word):
+        return False
+    name = word.split("=", 1)[0]
+    # GIT_CONFIG_COUNT/KEY_n/VALUE_n/PARAMETERS/GLOBAL/SYSTEM can set any git
+    # config key, including the ones that name a command
+    return name in _CODE_ENV or name.startswith("GIT_CONFIG") or name in _GIT_CODE_ENV
 
 
 def _git_code_config(kv: str) -> bool:
     key, _, val = kv.partition("=")
     key = key.lower()
     return (val.lstrip().startswith("!") or key in _GIT_CODE_KEYS
-            or key.startswith("pager.") or key.endswith(_GIT_CODE_SUFFIXES))
+            or key.startswith(("pager.", "include.", "includeif."))   # include pulls in any key
+            or key.endswith(_GIT_CODE_SUFFIXES))
+
+
+def _git_redirect_key(key: str) -> bool:
+    return bool(_GIT_REDIRECT_KEY_RE.match(key.split("=", 1)[0].lower()))
 
 
 def _sed_targets(args: List[str]) -> Optional[List[str]]:
@@ -382,12 +405,162 @@ def _sed_targets(args: List[str]) -> Optional[List[str]]:
     return pos if script_given else pos[1:]
 
 
-_SED_EXEC_RE = re.compile(r"(^|[;\n{])\s*e(\s|$|;)|^s(.).*\3.*\3[gpIiMm0-9w]*e")
+def _sed_scripts(args: List[str]) -> Optional[List[str]]:
+    """The sed script texts in argv, or None when a script comes from a file
+    (-f) the classifier cannot read. Without -e the first operand is the
+    script; an ambiguous `-i<suffix>` cluster scans both readings."""
+    scripts: List[str] = []
+    operands: List[str] = []
+    explicit = ambiguous = False
+    k = 0
+    while k < len(args):
+        a = args[k]
+        if a == "--":
+            operands += args[k + 1:]
+            break
+        if a in ("-f", "--file") or a.startswith("--file="):
+            return None
+        if a in ("-e", "--expression"):
+            explicit = True
+            if k + 1 < len(args):
+                scripts.append(args[k + 1])
+            k += 2
+            continue
+        if a.startswith("--expression="):
+            explicit = True
+            scripts.append(a.split("=", 1)[1])
+        elif a in ("-l", "--line-length"):
+            k += 2
+            continue
+        elif a.startswith("-") and not a.startswith("--") and len(a) > 1:
+            cl = a[1:]
+            if "i" in cl and cl.index("i") < len(cl) - 1:
+                ambiguous = True                 # GNU -iSUFFIX vs BSD -i -e...
+            for j, ch in enumerate(cl):
+                if ch == "f":
+                    return None
+                if ch == "e":
+                    explicit = True
+                    rest = cl[j + 1:]
+                    if rest:
+                        scripts.append(rest)
+                    elif k + 1 < len(args):
+                        scripts.append(args[k + 1])
+                        k += 1
+                    break
+        elif not a.startswith("-") or a == "-":
+            operands.append(a)
+        k += 1
+    if (not explicit or ambiguous) and operands:
+        scripts.append(operands[0])
+    return scripts
 
 
-def _sed_runs_code(args: List[str]) -> bool:
-    """GNU sed's `e` command and s///e flag run shell commands."""
-    return any(_SED_EXEC_RE.search(a) for a in args if not a.startswith("-"))
+def _sed_scan(script: str):
+    """(runs_code, write_targets) for one sed script. GNU sed runs commands
+    with `e` and the s///e flag and writes files with `w`/`W` and the s///w
+    flag. Anything the scanner does not understand counts as running code."""
+    n, i = len(script), 0
+    writes: List[str] = []
+
+    def to_eol(j: int) -> int:
+        while j < n and script[j] != "\n":
+            j += 1
+        return j
+
+    def delimited(j: int, d: str) -> int:      # index after the closing delimiter
+        while j < n and script[j] != d:
+            j += 2 if script[j] == "\\" else 1
+        if j >= n:
+            raise ValueError("unterminated")
+        return j + 1
+
+    try:
+        while i < n:
+            ch = script[i]
+            if ch in " \t\n;{}":
+                i += 1
+                continue
+            # address: numbers, $, /re/, \cREc, ranges, steps, negation
+            while i < n:
+                ch = script[i]
+                if ch.isdigit() or ch in "$,~+! \t":
+                    i += 1
+                elif ch == "/":
+                    i = delimited(i + 1, "/")
+                    while i < n and script[i] in "IM":
+                        i += 1
+                elif ch == "\\" and i + 1 < n:
+                    i = delimited(i + 2, script[i + 1])
+                    while i < n and script[i] in "IM":
+                        i += 1
+                else:
+                    break
+            if i >= n:
+                break
+            ch = script[i]
+            if ch in "{};\n":
+                i += 1
+                continue
+            if ch == "e":
+                return True, writes
+            if ch in "wW":
+                end = to_eol(i + 1)
+                writes.append(script[i + 1:end].strip())
+                i = end
+            elif ch in "sy":
+                d = script[i + 1]
+                if d in "\n\\":
+                    return True, writes
+                i = delimited(delimited(i + 2, d), d)
+                if ch == "s":
+                    while i < n and script[i] not in ";\n}":
+                        f = script[i]
+                        if f == "e":
+                            return True, writes
+                        if f == "w":
+                            end = to_eol(i + 1)
+                            writes.append(script[i + 1:end].strip())
+                            i = end
+                            break
+                        if not (f.isalnum() or f in " \t"):
+                            return True, writes
+                        i += 1
+            elif ch in "aic":
+                i = to_eol(i + 1)               # GNU one-line text
+            elif ch in "rRbtT:":
+                stops = "\n" if ch in "rR:" else ";\n}"
+                j = i + 1
+                while j < n and script[j] not in stops:
+                    j += 1
+                i = j
+            elif ch in "qQlL":
+                i += 1
+                while i < n and (script[i].isdigit() or script[i] in " \t"):
+                    i += 1
+            elif ch == "#":
+                i = to_eol(i)
+            elif ch in "pdnNgGhHxz=FDP":
+                i += 1
+            else:
+                return True, writes             # not understood: fail closed
+    except (ValueError, IndexError):
+        return True, writes
+    return False, writes
+
+
+def _sed_effects(args: List[str]):
+    """(runs_code, write_targets) over every script in a sed argv."""
+    scripts = _sed_scripts(args)
+    if scripts is None:
+        return True, []
+    writes: List[str] = []
+    for sc in scripts:
+        code, w = _sed_scan(sc)
+        if code:
+            return True, writes
+        writes += [t for t in w if t not in _HARMLESS_SINKS]
+    return False, writes
 
 
 def _interp_key(prog: str) -> Optional[str]:
@@ -543,12 +716,14 @@ def _short_flag_has(arg: str, letter: str) -> bool:
     return arg.startswith("-") and not arg.startswith("--") and letter in arg[1:]
 
 
-def _classify_argv(argv: List[str], depth: int) -> List[tuple]:
+def _classify_argv(argv: List[str], depth: int, env: frozenset = frozenset()) -> List[tuple]:
     if depth > _MAX_DEPTH:
         return [_opaque("nesting too deep")]
     while argv and (argv[0] in _SHELL_KEYWORDS or _ASSIGN_RE.match(argv[0])):
         if _code_assign(argv[0]):
             return [_opaque(f"{argv[0].split('=', 1)[0]} names a command to run")]
+        if _ASSIGN_RE.match(argv[0]):
+            env = env | {argv[0].split("=", 1)[0]}
         argv = argv[1:]
     if not argv:
         return []
@@ -562,6 +737,7 @@ def _classify_argv(argv: List[str], depth: int) -> List[tuple]:
         if prog == "env":
             if any(_code_assign(a) for a in args):
                 return [_opaque("env sets a variable that names a command")]
+            env = env | {a.split("=", 1)[0] for a in args if _ASSIGN_RE.match(a)}
             for k, a in enumerate(args):                # env -S "cmd args" re-splits
                 if a in ("-S", "--split-string") and k + 1 < len(args):
                     return _classify(" ".join(args[k + 1:]), depth + 1)
@@ -574,7 +750,7 @@ def _classify_argv(argv: List[str], depth: int) -> List[tuple]:
             if prog in ("xargs", "env"):
                 out.append((ActionClass.READ, "."))     # xargs echo / env listing
             return out
-        return out + _classify_argv(inner, depth + 1)
+        return out + _classify_argv(inner, depth + 1, env)
 
     if prog in ("source", "."):
         script = args[0] if args else ""
@@ -605,12 +781,14 @@ def _classify_argv(argv: List[str], depth: int) -> List[tuple]:
         return _classify(" ".join(inner), depth + 1)
 
     if prog == "sed":
-        if _sed_runs_code(args):
-            return [_opaque("sed script runs commands")]
+        code, writes = _sed_effects(args)
+        if code:
+            return [_opaque("sed script runs commands (or cannot be read)")]
+        out = [_write(t) if t else (ActionClass.WRITE_OUTSIDE, "sed w ?") for t in writes]
         targets = _sed_targets(args)
         if targets is not None:
-            return [_write(t) for t in targets] or [(ActionClass.WRITE_SANDBOX, ".")]
-        return [(ActionClass.WRITE_SANDBOX, ".")]
+            out += [_write(t) for t in targets]
+        return out or [(ActionClass.WRITE_SANDBOX, ".")]
 
     if prog == "eval":
         if any(_SUBST in a for a in args):
@@ -671,13 +849,24 @@ def _classify_argv(argv: List[str], depth: int) -> List[tuple]:
         return out
 
     if prog == "git":
+        redirected = bool(env & _GIT_REDIRECT_ENV)
         k = 0
         while k < len(args):                            # git's global options
             a = args[k]
-            if a == "-c" and k + 1 < len(args) and _git_code_config(args[k + 1]):
-                return [_opaque(f"git -c {args[k + 1].split('=', 1)[0]} runs a command")]
+            if a == "-c" and k + 1 < len(args):
+                if _git_code_config(args[k + 1]):
+                    return [_opaque(f"git -c {args[k + 1].split('=', 1)[0]} runs a command")]
+                redirected = redirected or _git_redirect_key(args[k + 1])
             if a.startswith("--config-env"):
                 return [_opaque("git --config-env sets config from the environment")]
+            if a.startswith("--exec-path="):
+                return [_opaque("git --exec-path runs git commands from another directory")]
+            if a.split("=", 1)[0] in ("--git-dir", "--work-tree", "--namespace"):
+                redirected = True                   # another repository's remotes
+            if a == "-C" and k + 1 < len(args):
+                d = args[k + 1]
+                if _is_dynamic(d) or d.startswith(("/", "~")) or ".." in d.split("/"):
+                    redirected = True
             if a in ("-C", "-c", "--git-dir", "--work-tree", "--namespace"):
                 k += 2
                 continue
@@ -689,7 +878,16 @@ def _classify_argv(argv: List[str], depth: int) -> List[tuple]:
                 sub in ("clone", "fetch", "pull", "ls-remote", "archive") and "-u" in sargs):
             return [_opaque(f"git {sub} with a custom remote command")]
         if sub == "push":
-            return _git_push(sargs)
+            pushes = _git_push(sargs)
+            if redirected:
+                pushes = [(c, REDIRECTED + t) if c is ActionClass.GIT_PUSH else (c, t)
+                          for c, t in pushes]
+            return pushes
+        if sub == "config":
+            return _git_config(sargs)
+        if sub == "remote" and sargs and sargs[0] in (
+                "add", "set-url", "rename", "set-head", "set-branches"):
+            return [(ActionClass.WRITE_OUTSIDE, f"git-config:remote {sargs[0]}")]
         return [(ActionClass.WRITE_SANDBOX, ".")]
 
     pos = [x for x in args if not x.startswith("-")]
@@ -713,6 +911,50 @@ def _classify_argv(argv: List[str], depth: int) -> List[tuple]:
     else:
         out.append((ActionClass.WRITE_SANDBOX, "."))
     return out
+
+
+_GIT_CONFIG_VALUE_OPTS = {"-f", "--file", "--blob", "--type", "--default", "--comment",
+                          "--value", "--url"}
+
+
+def _git_config(args: List[str]) -> List[tuple]:
+    """`git config` writes. A key that names a command is OPAQUE; a key that
+    changes where pushes go, or a write to a config outside the repo, is
+    WRITE_OUTSIDE `git-config:<key>` (asks; a later push in the same chain is
+    treated as redirected)."""
+    pos: List[str] = []
+    scope_outside = reading = False
+    k = 0
+    while k < len(args):
+        a = args[k]
+        name = a.split("=", 1)[0]
+        if a in ("-e", "--edit"):
+            return [_opaque("git config --edit opens an editor")]
+        if name in ("--global", "--system", "-f", "--file"):
+            scope_outside = True
+        if name.startswith("--get") or a in ("-l", "--list"):
+            reading = True
+        if a in _GIT_CONFIG_VALUE_OPTS:
+            k += 2
+            continue
+        if not a.startswith("-"):
+            pos.append(a)
+        k += 1
+    if pos and pos[0] in ("get", "list"):
+        reading = True
+    if pos and pos[0] in ("set", "unset", "get", "list", "edit", "rename-section",
+                          "remove-section"):
+        if pos[0] == "edit":
+            return [_opaque("git config edit opens an editor")]
+        pos = pos[1:]
+    if reading or not pos:
+        return [(ActionClass.READ, "git-config")]
+    key, val = pos[0], (pos[1] if len(pos) > 1 else "")
+    if _git_code_config(f"{key}={val}"):
+        return [_opaque(f"git config {key} names a command")]
+    if scope_outside or _git_redirect_key(key):
+        return [(ActionClass.WRITE_OUTSIDE, f"git-config:{key}")]
+    return [(ActionClass.WRITE_SANDBOX, ".git/config")]
 
 
 def _git_push(args: List[str]) -> List[tuple]:
@@ -767,16 +1009,22 @@ def _classify(cmd: str, depth: int) -> List[tuple]:
         out += _classify(inner, depth + 1)
     cwd: Optional[str] = None      # set by cd/pushd; "" = the sandbox root
     escaped = False                # a cd/pushd left (or may have left) the sandbox
+    remote_changed = False         # an earlier segment rewrote git remote config
     for argv, outs in _segments(tokens):
         seg = _classify_argv(argv, depth) + [_write(t) for t in outs]
         if cwd is not None:
             seg = [_relocate(c, t, cwd, escaped) for c, t in seg]
+        if remote_changed:
+            seg = [(c, REDIRECTED + t) if c is ActionClass.GIT_PUSH
+                   and not t.startswith(REDIRECTED) else (c, t) for c, t in seg]
         out += seg
+        if any(t.startswith("git-config:") for _, t in seg):
+            remote_changed = True
         moved = _cd_target(argv)
         if moved is not None:
             cwd = cwd or ""
-            if (_is_dynamic(moved) or moved in ("", "-") or moved.startswith(("/", "~"))
-                    or ".." in moved.split("/")):
+            if (_is_dynamic(moved) or moved in ("", "-") or moved.startswith(("/", "~", "+"))
+                    or ".." in moved.split("/") or re.fullmatch(r"-\d+", moved)):
                 escaped, cwd = True, moved or "~"
             elif not escaped:
                 cwd = os.path.join(cwd, moved)
@@ -787,19 +1035,30 @@ def _classify(cmd: str, depth: int) -> List[tuple]:
 def _cd_target(argv: List[str]) -> Optional[str]:
     """The directory a cd/pushd/popd segment moves to ("" = home or unknown),
     or None if the segment does not change directory."""
-    while argv and (argv[0] in _SHELL_KEYWORDS or _ASSIGN_RE.match(argv[0])):
-        argv = argv[1:]
+    while argv:                    # keywords, assignments and wrappers
+        if argv[0] in _SHELL_KEYWORDS or _ASSIGN_RE.match(argv[0]):
+            if argv[0].startswith("CDPATH="):
+                return ""                       # cd may resolve anywhere
+            argv = argv[1:]
+        elif os.path.basename(argv[0]) in _WRAPPERS:
+            argv = _skip_wrapper_opts(os.path.basename(argv[0]), argv[1:])
+        elif argv[0] == "eval":
+            argv = argv[1:]
+        else:
+            break
     if not argv or argv[0] not in ("cd", "pushd", "popd", "chdir"):
         return None
     if argv[0] == "popd":
         return ""
-    pos = [a for a in argv[1:] if not a.startswith("-") or a == "-"]
+    pos = [a for a in argv[1:] if not a.startswith("-") or a == "-" or re.fullmatch(r"-\d+", a)]
     return pos[0] if pos else ""
 
 
 def _relocate(cls: ActionClass, target: str, cwd: str, escaped: bool) -> tuple:
     """Re-anchor a relative sandbox write after a cd. Once the chain may have
     left the sandbox, a relative write is a write outside it."""
+    if cls is ActionClass.GIT_PUSH and escaped and not target.startswith(REDIRECTED):
+        return (cls, REDIRECTED + target)      # "origin" of some other repository
     if (cls is not ActionClass.WRITE_SANDBOX or os.path.isabs(target)
             or target.startswith("~") or _is_dynamic(target)):
         return (cls, target)
@@ -815,7 +1074,331 @@ def classify_command(cmd: str) -> List[tuple]:
     Unknown programs are WRITE_SANDBOX on the cwd ("."), so the policy still
     sees them; code it cannot see into is OPAQUE. Conservative by design:
     the caller takes the worst verdict over all pairs."""
-    return _classify(cmd, 0)
+    out = _classify(cmd, 0)
+    if re.search(r"\bCDPATH\b", cmd) and re.search(r"\b(cd|pushd|chdir)\b", cmd):
+        # CDPATH (possibly exported earlier) lets `cd name` land anywhere
+        out = [(ActionClass.WRITE_OUTSIDE, f"CDPATH:{t}")
+               if c is ActionClass.WRITE_SANDBOX and t != "." else
+               ((c, REDIRECTED + t) if c is ActionClass.GIT_PUSH
+                and not t.startswith(REDIRECTED) else (c, t)) for c, t in out]
+    return out
+
+
+# ---------------------------------------------------------------------------
+# untrusted provenance: an ALLOWLIST, not a classifier
+# ---------------------------------------------------------------------------
+#
+# The classifier above is a deny-list: it finds the sinks it knows about. Two
+# review rounds showed that a deny-list keeps leaking (wrapped cd, sed `e`
+# after an address, GIT_CONFIG_* env, `source` of a file written earlier in
+# the chain, pushd +N, ...). So a command whose provenance is UNTRUSTED (the
+# initiator, or any argument) must ALSO pass this allowlist before it can be
+# allowed. Anything not on it is ASK (rule R7); the classifier's DENY for the
+# irreversible classes still wins. Every simple command (split on ; && || |
+# and newlines) must be one of:
+#   ls, cat, head, tail, wc        every operand (and --opt=value) is a path
+#                                  that resolves inside the sandbox
+#   echo, pwd, true                no constraints (they only print)
+#   grep, egrep, fgrep, rg         every operand, including the pattern unless
+#                                  it is given with -e/--regexp=, is a path inside
+#                                  the sandbox (so no -r over outside paths);
+#                                  rg --pre (runs a command) is refused
+#   pytest / py.test / python[3[.N]] -m pytest
+#                                  a small set of options (-q -v -x -s -l -r..,
+#                                  -k/-m/-n EXPR, --tb= --lf --ff ...); test
+#                                  paths (before ::) inside the sandbox;
+#                                  -p/-c/-o/--rootdir/--basetemp/... are refused
+#   git status|diff|log|show       no global options at all (no -c, -C,
+#                                  --git-dir, --exec-path), no --output,
+#                                  --ext-diff, --no-index, -O (abbreviations of
+#                                  those count), no absolute/~/.. operands
+# and the whole command has:
+#   * no expansion of any kind: $, `, \ outside single quotes; no (, ), {, },
+#     #, !, ^ outside quotes (subshells, process/brace/zsh expansion, comments)
+#   * no program given by path, no VAR=value prefix, no `&`, heredoc or `<&`
+#   * redirections only to /dev/null or to files inside the sandbox that are
+#     not dotfiles/dot-dirs (.git/, .venv/, .zshrc ...) or test/build config
+#     (conftest.py, pyproject.toml, setup.cfg, ...); `<` only from inside
+#   * no shell builtins that change state (cd, pushd, source, ., exec, eval,
+#     trap, alias, export, set, ...): they are simply not on the list
+# Any parse error or surprise is a violation (fail closed).
+
+_UNTRUSTED_PATH_PROGS = {"ls", "cat", "head", "tail", "wc"}
+_UNTRUSTED_FREE_PROGS = {"echo", "pwd", "true"}
+_UNTRUSTED_GREP = {"grep", "egrep", "fgrep", "rg"}
+_UNTRUSTED_PYTHON_RE = re.compile(r"python(3(\.\d+)?)?")
+_UNTRUSTED_GIT_SUBS = {"status", "diff", "log", "show"}
+#: git options refused for untrusted (a unique prefix of one counts too)
+_UNTRUSTED_GIT_BAD = ("--output", "--ext-diff", "--no-index", "--orderfile", "--exec",
+                      "--upload-pack", "--receive-pack", "--git-dir", "--work-tree",
+                      "--config-env", "--textconv", "--open-files-in-pager", "--paginate")
+_UNTRUSTED_PYTEST_LONG = {
+    "--tb", "--maxfail", "--durations", "--durations-min", "--color", "--lf",
+    "--last-failed", "--ff", "--failed-first", "--nf", "--new-first", "--co",
+    "--collect-only", "--no-header", "--no-summary", "--disable-warnings", "--exitfirst",
+    "--verbose", "--quiet", "--showlocals", "--strict-markers", "--runxfail",
+    "--setup-show", "--sw", "--stepwise", "--deselect", "--ignore", "--ignore-glob",
+}
+#: files whose content a later allowed command would execute or obey
+_UNTRUSTED_NO_WRITE = {
+    "conftest.py", "pytest.ini", "tox.ini", "setup.cfg", "setup.py", "pyproject.toml",
+    "sitecustomize.py", "usercustomize.py", "makefile", "gnumakefile", "package.json",
+}
+#: extensions of files something may later run or import (pytest collects .py)
+_UNTRUSTED_CODE_EXT = (".py", ".pyc", ".pth", ".sh", ".bash", ".zsh", ".command", ".so",
+                       ".dylib", ".js", ".mjs", ".cjs", ".ts", ".rb", ".pl", ".php",
+                       ".ini", ".cfg", ".toml", ".scpt", ".applescript", ".plist")
+
+
+def _resolves_inside(path: str, root: Path) -> bool:
+    try:
+        p = Path(os.path.realpath(path if os.path.isabs(path) else root / path))
+        return p == root or root in p.parents
+    except (OSError, ValueError):
+        return False
+
+
+def _untrusted_path_ok(arg: str, root: Path) -> bool:
+    """A word the shell may treat as a path, judged as one: it must resolve
+    inside the sandbox, with no tilde/brace/bracket expansion and no glob
+    that could match `..`."""
+    if arg in ("", "-"):
+        return True
+    if arg.startswith(("~", "=")) or any(c in arg for c in "{}[]"):
+        return False
+    segs = arg.split("/")
+    if ".." in segs:
+        return False
+    if any(sg.startswith(".") and any(c in sg for c in "*?") for sg in segs):
+        return False
+    return _resolves_inside(arg, root)
+
+
+def _untrusted_write_ok(target: str, root: Path) -> bool:
+    if target == "/dev/null":
+        return True
+    if not _untrusted_path_ok(target, root) or any(c in target for c in "*?"):
+        return False
+    segs = [sg for sg in target.split("/") if sg not in ("", ".")]
+    if not segs or any(sg.startswith(".") for sg in segs):
+        return False
+    base = segs[-1].lower()
+    return base not in _UNTRUSTED_NO_WRITE and not base.endswith(_UNTRUSTED_CODE_EXT)
+
+
+def _untrusted_prescan(cmd: str) -> Optional[str]:
+    in_s = in_d = False
+    for ch in cmd:
+        if (ord(ch) < 32 and ch not in "\n\t") or ch == "\x7f":
+            return "control character"
+        if in_s:
+            in_s = ch != "'"
+            continue
+        if ch == "\\":
+            return "backslash escape"
+        if in_d:
+            if ch == '"':
+                in_d = False
+            elif ch in "$`":
+                return "expansion inside double quotes"
+            continue
+        if ch == "'":
+            in_s = True
+        elif ch == '"':
+            in_d = True
+        elif ch in "$`":
+            return "variable or command substitution"
+        elif ch in "(){}#!^":
+            return f"shell syntax {ch!r}"
+    if in_s or in_d:
+        return "unbalanced quotes"
+    return None
+
+
+def _untrusted_plain(prog: str, args: List[str], root: Path) -> Optional[str]:
+    end = False
+    for a in args:
+        if not end and a == "--":
+            end = True
+            continue
+        if not end and a.startswith("-") and a != "-":
+            if a.startswith("--") and "=" in a and not _untrusted_path_ok(a.split("=", 1)[1], root):
+                return f"{prog} option value {a!r} is not inside the sandbox"
+            continue
+        if not _untrusted_path_ok(a, root):
+            return f"{prog} operand {a!r} is not a path inside the sandbox"
+    return None
+
+
+def _untrusted_grep(prog: str, args: List[str], root: Path) -> Optional[str]:
+    end, k = False, 0
+    while k < len(args):
+        a = args[k]
+        if not end and a == "--":
+            end = True
+        elif not end and a.startswith("--"):
+            name, eq, val = a.partition("=")
+            if name.startswith("--pre") or name in ("--", "--search-zip"):
+                return f"{prog} {name} runs other programs"
+            if name == "--regexp":
+                if not eq:
+                    k += 1                       # the pattern; not a path
+            elif eq and not _untrusted_path_ok(val, root):
+                return f"{prog} option value {a!r} is not inside the sandbox"
+        elif not end and a.startswith("-") and a != "-":
+            cl = a[1:]
+            if prog == "rg" and "z" in cl:
+                return "rg -z runs decompression programs"
+            for j, ch in enumerate(cl):
+                if ch in "ef":
+                    rest = cl[j + 1:]
+                    if not rest:
+                        k += 1
+                        rest = args[k] if k < len(args) else ""
+                    if ch == "f" and not _untrusted_path_ok(rest, root):
+                        return f"{prog} -f {rest!r} is not inside the sandbox"
+                    break
+        elif not _untrusted_path_ok(a, root):
+            return f"{prog} operand {a!r} is not a path inside the sandbox"
+        k += 1
+    return None
+
+
+def _untrusted_pytest(args: List[str], root: Path) -> Optional[str]:
+    end, k = False, 0
+    while k < len(args):
+        a = args[k]
+        if not end and a == "--":
+            end = True
+        elif not end and a in ("-k", "-m", "-n"):
+            k += 1                               # an expression / worker count
+        elif not end and a.startswith("--"):
+            name, eq, val = a.partition("=")
+            if name not in _UNTRUSTED_PYTEST_LONG:
+                return f"pytest option {name} is not on the allowlist"
+            if eq and not _untrusted_path_ok(val.split("::", 1)[0], root):
+                return f"pytest option value {a!r} is not inside the sandbox"
+        elif not end and a.startswith("-") and a != "-":
+            cl = a[1:]
+            if not (set(cl) <= set("qvxsl") or (cl[0] == "r" and cl[1:].isalpha())
+                    or (cl[0] in "kmn" and len(cl) > 1)):
+                return f"pytest option {a} is not on the allowlist"
+        elif not _untrusted_path_ok(a.split("::", 1)[0], root):
+            return f"pytest path {a!r} is not inside the sandbox"
+        k += 1
+    return None
+
+
+def _untrusted_git(args: List[str], root: Path) -> Optional[str]:
+    if not args or args[0] not in _UNTRUSTED_GIT_SUBS:
+        return f"git {args[0] if args else ''} is not on the allowlist (only " \
+               "status/diff/log/show, without global options)"
+    end = False
+    for a in args[1:]:
+        if not end and a == "--":
+            end = True
+            continue
+        if not end and a.startswith("--"):
+            name = a.split("=", 1)[0]
+            if any(bad.startswith(name) for bad in _UNTRUSTED_GIT_BAD):
+                return f"git option {name} is not allowed"
+            continue
+        if not end and a.startswith("-") and len(a) > 1:
+            if a.startswith(("-O", "-c")):
+                return f"git option {a} is not allowed"
+            continue
+        if a.startswith(("/", "~")) or ".." in a.split("/"):
+            if not (end and _untrusted_path_ok(a, root)):
+                return f"git operand {a!r} is outside the sandbox"
+        elif end and not _untrusted_path_ok(a, root):
+            return f"git path {a!r} is not inside the sandbox"
+    return None
+
+
+def _untrusted_simple(argv: List[str], root: Path) -> Optional[str]:
+    prog, args = argv[0], argv[1:]
+    if _ASSIGN_RE.match(prog):
+        return "environment variable prefix"
+    if "/" in prog:
+        return f"program given by path {prog!r}"
+    if prog in _UNTRUSTED_FREE_PROGS:
+        return None
+    if prog in _UNTRUSTED_PATH_PROGS:
+        return _untrusted_plain(prog, args, root)
+    if prog in _UNTRUSTED_GREP:
+        return _untrusted_grep(prog, args, root)
+    if prog in ("pytest", "py.test"):
+        return _untrusted_pytest(args, root)
+    if _UNTRUSTED_PYTHON_RE.fullmatch(prog):
+        if args[:2] == ["-m", "pytest"]:
+            return _untrusted_pytest(args[2:], root)
+        return f"{prog} other than `-m pytest`"
+    if prog == "git":
+        return _untrusted_git(args, root)
+    return f"{prog!r} is not on the untrusted allowlist"
+
+
+def _untrusted_violation(cmd: str, root: Path) -> Optional[str]:
+    why = _untrusted_prescan(cmd)
+    if why:
+        return why
+    tokens = _tokens(cmd)
+    segments: List[List[str]] = []
+    argv: List[str] = []
+    wrote = False                                # a redirection wrote a file
+    k = 0
+    while k < len(tokens):
+        tok = tokens[k]
+        if not _is_op(tok):
+            argv.append(tok)
+            k += 1
+            continue
+        core = tok.replace("\n", "")
+        if core in ("", ";", "&&", "||", "|"):
+            if core and not argv:
+                return f"empty command before {core!r}"
+            if argv:
+                segments.append(argv)
+            argv = []
+            k += 1
+            continue
+        nxt = tokens[k + 1] if k + 1 < len(tokens) else ""
+        if argv and argv[-1].isdigit():
+            argv.pop()                           # the fd in 2>file
+        if core == ">&" and nxt.isdigit():
+            k += 2                               # 2>&1
+            continue
+        if core not in (">", ">>", ">|", "&>", "&>>", ">&", "<"):
+            return f"shell operator {core!r}"
+        if not nxt or _is_op(nxt):
+            return "redirection without a target"
+        if core == "<":
+            if not _untrusted_path_ok(nxt, root):
+                return f"input redirection from {nxt!r} (outside the sandbox)"
+        elif not _untrusted_write_ok(nxt, root):
+            return f"redirection to {nxt!r} (outside the sandbox or a protected file)"
+        elif nxt != "/dev/null":
+            wrote = True
+        k += 2
+    if argv:
+        segments.append(argv)
+    if wrote and any(sg[0] in ("pytest", "py.test") or _UNTRUSTED_PYTHON_RE.fullmatch(sg[0])
+                     for sg in segments):
+        return "a chain that writes a file must not also run tests"
+    for seg in segments:
+        why = _untrusted_simple(seg, root)
+        if why:
+            return why
+    return None
+
+
+def untrusted_shell_violation(cmd: str, sandbox: Path | str) -> Optional[str]:
+    """Why `cmd` is NOT on the untrusted-provenance allowlist, or None when
+    every simple command in it is. Fails closed on any parse surprise."""
+    try:
+        return _untrusted_violation(cmd, Path(os.path.realpath(sandbox)))
+    except Exception as e:                       # noqa: BLE001 - fail closed
+        return f"cannot parse ({type(e).__name__})"
 
 
 _ORDER = {Verdict.ALLOW: 0, Verdict.ASK: 1, Verdict.DENY: 2}
@@ -823,10 +1406,25 @@ _ORDER = {Verdict.ALLOW: 0, Verdict.ASK: 1, Verdict.DENY: 2}
 
 def decide_command(policy: SinkPolicy, cmd: str, initiator: Provenance,
                    arg_sources: Sequence[Provenance] = ()) -> Decision:
-    """Worst verdict over every (class, target) the command implies."""
+    """Worst verdict over every (class, target) the command implies. When the
+    command's provenance is untrusted (initiator or any argument), an ALLOW
+    additionally requires the allowlist above; otherwise it becomes ASK (R7)."""
     decisions = [policy.decide(Action(c, t, initiator, list(arg_sources), cmd))
                  for c, t in classify_command(cmd)]
     if not decisions:
-        return Decision(Verdict.ALLOW, "empty command", "R0-empty",
+        base = Decision(Verdict.ALLOW, "empty command", "R0-empty",
                         Action(ActionClass.READ, "", initiator))
-    return max(decisions, key=lambda d: _ORDER[d.verdict])
+    else:
+        base = max(decisions, key=lambda d: _ORDER[d.verdict])
+    if (base.verdict is Verdict.ALLOW
+            and least_trusted([initiator, *arg_sources]) is Provenance.UNTRUSTED):
+        why = untrusted_shell_violation(cmd, policy.sandbox)
+        if why is not None:
+            d = Decision(Verdict.ASK, f"untrusted shell command is not on the read-only "
+                         f"allowlist: {why}", "R7-untrusted-allowlist",
+                         Action(ActionClass.OPAQUE, why[:120], initiator,
+                                list(arg_sources), cmd))
+            if policy.audit is not None:
+                policy.audit.append(d)
+            return d
+    return base

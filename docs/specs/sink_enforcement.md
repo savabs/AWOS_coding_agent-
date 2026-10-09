@@ -55,6 +55,15 @@ decided, but no executor asked it.
 - Local timeout: worst case with the default 2 retries is 3 x 900 s = 45 min
   per hung local call (documented in `providers.default_model_timeout_s`).
 
+### Round 2: untrusted shell is an allowlist (R7)
+
+The deny-list kept leaking, so untrusted provenance no longer relies on it.
+`decide_command` turns an ALLOW into ASK (`R7-untrusted-allowlist`) unless
+every simple command is on the read-only allowlist
+(`untrusted_shell_violation`; table and rules in
+`docs/specs/computer_use_foundations.md` §4). Owner/agent keep the
+classifier, plus the push-destination fix (`redirected:<remote>` targets).
+
 ## Enforcement (scaffold/agent/desktop/enforce.py)
 
 `Enforcer.check_command / check_action / run_command / run_action`:

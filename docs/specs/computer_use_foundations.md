@@ -92,6 +92,49 @@ Decision order (first match wins; every decision is audited):
 | R4 | payment / credential | **ask** (critical-point stop), even with a grant |
 | R5 | owner grant matches (class + target glob): all args trusted → allow; any untrusted arg → ask | allow / ask |
 | R6 | no grant: irreversible → deny (default deny); write outside → ask | deny / ask |
+| R7 | shell commands only: provenance untrusted (initiator or any argument) and R1–R6 said allow, but the command is not on the read-only **allowlist** | **ask** |
+
+**Untrusted shell = allowlist, not classifier (R7).** The classifier is a
+deny-list and two review rounds kept finding sinks it missed (wrapped `cd`,
+sed `e`/`w` after an address, `GIT_CONFIG_*` env, `source` of a file written
+earlier in the chain, `pushd +N`, ...). So for untrusted provenance a shell
+command is allowed only if every simple command in it (split on `; && || |`
+and newlines) is on `untrusted_shell_violation`'s list:
+
+| Program | Constraint |
+|---|---|
+| `ls`, `cat`, `head`, `tail`, `wc` | every operand and `--opt=value` resolves (realpath) inside the sandbox |
+| `echo`, `pwd`, `true` | none (print only) |
+| `grep`, `egrep`, `fgrep`, `rg` | every operand, the pattern included unless given by `-e`/`--regexp=`, is a path inside the sandbox; `-f FILE` inside; `rg --pre`/`-z` refused |
+| `pytest`, `py.test`, `python[3[.N]] -m pytest` | options from a short list (`-q -v -x -s -l -rX -k -m -n --tb= --lf --ff --co ...`); test paths (before `::`) inside; `-p -c -o --rootdir --basetemp` etc. refused; not in a chain that also writes a file |
+| `git status/diff/log/show` | no global options (`-c`, `-C`, `--git-dir`, `--exec-path`), no env prefix, no `--output`, `--ext-diff`, `--no-index`, `-O`, `--textconv` (or an abbreviation of one); no absolute, `~` or `..` operands |
+
+The whole command must also have no expansion of any kind (`$`, backticks or
+`\` outside single quotes; `( ) { } # ! ^` outside quotes), no `VAR=value`
+prefix, no program given by path, no `&`, heredoc or fd tricks, and
+redirections only to `/dev/null` or to sandbox files that are not dotfiles or
+dot-dirs, not test/build config (`conftest.py`, `pyproject.toml`, ...) and not
+code (`.py`, `.sh`, `.pth`, ...). State-changing builtins (`cd`, `pushd`,
+`source`, `.`, `exec`, `eval`, `trap`, `alias`, `export`) are simply not on
+the list. Anything else is ask; a deny from R3/R6 (send, delete, egress,
+push, credential, payment, opaque code) still stands. Any parse surprise is
+a violation (fail closed). `tests/test_desktop_policy_allowlist.py` holds the
+table of every bypass from both reviews (all ask/deny) and of ordinary
+read-only commands (all allow).
+
+**Owner/agent provenance** keeps the classifier and R1–R6, with the
+push-destination fix: a `git push` whose destination the command may have
+changed (`git -c remote.*.url/pushurl`, `url.*.insteadOf/pushInsteadOf`,
+`--git-dir`, `--work-tree`, `-C` outside, `GIT_DIR`/`GIT_WORK_TREE`, an
+earlier `git remote set-url/add` or `git config remote.*` in the chain, a
+`cd` out of the sandbox, `CDPATH`) has target `redirected:<remote>`, which an
+`origin*` grant does not match, so R6 denies it. `git remote add/set-url` and
+`git config` of a remote/url key or of `--global/--system/--file` are
+`write_outside` (ask) on their own. `GIT_CONFIG_*`, `GIT_EXEC_PATH`,
+`git config <command key>`, `git -c include.path`, `git --exec-path=`, sed
+`e`/`s///e` (with any address) and `sed -f` are opaque; sed `w`/`W`/`s///w`
+are writes to their file. `cd` behind `builtin`/`command`/`exec`/`nice`/`eval`,
+`CDPATH`, and `pushd +N`/`-N` count as leaving the sandbox.
 
 Grants can only carry `owner` provenance; building one from untrusted text
 raises an error. `classify_command` maps shell commands (rung 1) to
@@ -153,10 +196,16 @@ None of the C10 probes uses a live-desktop getter.
   author as the reference solutions, so they are not an independent oracle.
   E9 needs chores written by someone else, plus human labels, before any
   claim about probe precision.
-- **Policy coverage.** `classify_command` is static and best-effort. Pipes,
-  `bash -c`, eval and interpreters (`python -c`) fall through to
-  `write_sandbox` on the cwd. Real enforcement must sit at the tool boundary
-  (the action the agent emits), not on shell parsing alone.
+- **Policy coverage.** `classify_command` is static and best-effort (a
+  deny-list); for owner/agent provenance unknown programs and scripts run
+  from files are still `write_sandbox`. Untrusted provenance does not rely
+  on it: R7 allows only the read-only allowlist. Remaining gaps there: a
+  malicious `.git/config` or `conftest.py` already in the sandbox still runs
+  under `git status/diff` or `pytest`; a file written by one untrusted call
+  (or another tool) and executed by a later call is not linked across calls;
+  `PATH` entries inside the sandbox could shadow an allowlisted program; glob
+  operands are checked as written, so a symlink inside the sandbox that a
+  glob expands to can point outside (reads only).
 - **Provenance tagging is the caller's job.** The policy is only as good as
   the initiator and argument tags it is given. Wiring them into the
   orchestrator is the next step, and it needs a live proof (per
