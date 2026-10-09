@@ -82,7 +82,10 @@ ROUTING_ENV = ("AWOS_OPENROUTER_PROVIDER", "AWOS_OPENROUTER_ALLOW_FALLBACKS",
                "AWOS_ONE_SHOT", "AWOS_ONE_SHOT_BUDGET_TOKENS", "AWOS_PLANNER",
                "AWOS_PLANNER_MAX_FILES", "AWOS_INTEGRATION_REVIEW",
                "AWOS_ONE_SHOT_WHOLE_SOURCE_FRACTION", "AWOS_ACCEPTANCE",
-               "AWOS_ACCEPTANCE_REPAIR_TURNS", "AWOS_BEST_OF_N", "AWOS_EXPERIENCE")
+               "AWOS_ACCEPTANCE_REPAIR_TURNS", "AWOS_BEST_OF_N", "AWOS_EXPERIENCE",
+               # AWOS_PROVIDER=local: every call served by the local model
+               # (docs/specs/local_provider_spec.md); eval_health allows its id.
+               "AWOS_PROVIDER", "AWOS_LOCAL_MODEL", "AWOS_LOCAL_BASE_URL")
 
 
 def routing_env() -> dict:
@@ -1410,6 +1413,10 @@ def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
           f"retries={retries} repeat={repeat}")
     print(f"[job_series] model pinned: {PINNED_MODEL} (ladder blocks {list(BLOCKED_LADDER_IDS)}; "
           f"env {sorted(PIN_ENV)})")
+    if os.environ.get("AWOS_PROVIDER", "").strip().lower() == "local":
+        print("[job_series] AWOS_PROVIDER=local: every call goes to the local server "
+              f"(model {os.environ.get('AWOS_LOCAL_MODEL') or 'default'}, $0); "
+              "the pin above names the cloud id it stands in for")
     print(f"[job_series] .env copied from: {env_src if env_src else 'none found'}")
     sys.stdout.flush()
 

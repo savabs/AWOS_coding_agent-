@@ -89,7 +89,12 @@ def _env_int(name: str, default: int) -> int:
 
 
 def budget_tokens() -> int:
-    return max(1000, _env_int(BUDGET_ENV, DEFAULT_BUDGET_TOKENS))
+    default = DEFAULT_BUDGET_TOKENS
+    if os.getenv("AWOS_PROVIDER", "").strip().lower() == "local":
+        # The local server's whole window is AWOS_LOCAL_CONTEXT (default
+        # 24576, scripts/local_model.sh); half of it leaves room for the reply.
+        default = min(default, max(1000, _env_int("AWOS_LOCAL_CONTEXT", 24576) // 2))
+    return max(1000, _env_int(BUDGET_ENV, default))
 
 
 def max_reply_tokens() -> int:
@@ -796,7 +801,8 @@ class _UsageTap:
 
 
 def one_shot_client() -> Any:
-    """OpenAI-shaped client for the call (OpenRouter when keyed; else AWOS_BASE_URL)."""
+    """OpenAI-shaped client for the call (the local server under
+    AWOS_PROVIDER=local; OpenRouter when keyed; else AWOS_BASE_URL)."""
     try:
         from .providers import chat_client, client_options
     except ImportError:

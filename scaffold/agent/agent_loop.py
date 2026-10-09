@@ -164,6 +164,15 @@ PRICES: dict[str, tuple[float, float]] = {
 }
 
 
+def _local_mode() -> bool:
+    """providers.local_mode(): AWOS_PROVIDER=local (or AWOS_AGENT_MODEL=local/...)."""
+    try:
+        from .providers import local_mode
+    except ImportError:
+        from providers import local_mode
+    return local_mode()
+
+
 def _price_for(model: str) -> Optional[tuple[float, float]]:
     """
     Look up a model's prices, tolerating the ways ids are written.
@@ -177,6 +186,9 @@ def _price_for(model: str) -> Optional[tuple[float, float]]:
     A gateway's own margin is not modelled, so a routed price is an
     approximation of the underlying model's direct price.
     """
+    if _local_mode():
+        # Every call is served by the local model, whatever id a caller named.
+        return PRICES["local"]
     candidates = [model, model.rsplit("/", 1)[-1]]
     candidates += [c.replace(".", "-") for c in list(candidates)]
 
@@ -1239,6 +1251,21 @@ def _build_openrouter(api_key: str, model: Optional[str]) -> ModelClient:
     )
 
 
+def _build_local(model: Optional[str]) -> ModelClient:
+    """
+    The local OpenAI-compatible server (scripts/local_model.sh: llama-server).
+
+    No key, $0. `model` (or a cloud id the escalation ladder chose) maps to
+    "local/<AWOS_LOCAL_MODEL>": that id prices at zero, and the wire request
+    carries the bare served name.
+    """
+    try:
+        from .providers import local_chat_client, local_model_id
+    except ImportError:
+        from providers import local_chat_client, local_model_id
+    return OpenAIToolClient(local_chat_client(), local_model_id(model))
+
+
 def build_client_from_env(model: Optional[str] = None) -> ModelClient:
     """
     Construct a ModelClient from whatever credentials the environment carries.
@@ -1252,12 +1279,19 @@ def build_client_from_env(model: Optional[str] = None) -> ModelClient:
 
     AWOS_PROVIDER pins one explicitly (local, openrouter, anthropic, deepseek,
     openai) for an environment holding several keys, so which backend runs is
-    never a matter of guessing the precedence.
+    never a matter of guessing the precedence. AWOS_PROVIDER=local needs no
+    AWOS_BASE_URL: it uses AWOS_LOCAL_BASE_URL (default
+    http://127.0.0.1:8080/v1) and AWOS_LOCAL_MODEL (providers.local_*).
 
     Raises RuntimeError when nothing usable is configured, so a caller can
     report that plainly rather than failing deep inside a turn.
     """
     provider = os.getenv("AWOS_PROVIDER", "").strip().lower()
+
+    # AWOS_PROVIDER=local (or AWOS_AGENT_MODEL=local/<name>): the local server
+    # at AWOS_LOCAL_BASE_URL, whatever keys .env also holds.
+    if _local_mode():
+        return _build_local(model)
 
     def _want(name: str) -> bool:
         """True when this backend should be tried: pinned, or nothing pinned."""

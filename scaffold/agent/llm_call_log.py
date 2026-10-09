@@ -74,6 +74,13 @@ def _provider(response: Any) -> Optional[str]:
     return value if isinstance(value, str) and value else None
 
 
+def _local_mode() -> bool:
+    """AWOS_PROVIDER=local or AWOS_AGENT_MODEL=local/... (providers.local_mode)."""
+    if os.environ.get("AWOS_PROVIDER", "").strip().lower() == "local":
+        return True
+    return os.environ.get("AWOS_AGENT_MODEL", "").strip().lower().startswith("local/")
+
+
 def requested_provider() -> Optional[str]:
     """AWOS_OPENROUTER_PROVIDER as the run asked for it, or None (no pin)."""
     value = os.environ.get("AWOS_OPENROUTER_PROVIDER", "").strip()
@@ -164,6 +171,8 @@ def record_call(component: str, requested_model: Optional[str], response_model: 
             line["fallbacks_allowed"] = os.environ.get(
                 "AWOS_OPENROUTER_ALLOW_FALLBACKS", "0").strip().lower() in ("1", "true", "yes")
         line.update(extra)
+        if not line.get("provider") and _local_mode():
+            line["provider"] = "local"
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(line, default=str) + "\n")
