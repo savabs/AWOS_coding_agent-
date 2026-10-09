@@ -1,0 +1,55 @@
+{
+  "id": "c09_defaults_write",
+  "title": "Set an app default with the defaults CLI",
+  "instruction": "Using macOS `defaults`, set AutoSaveInterval to 30 (integer) in the scratch domain Prefs/com.example.editor (a plist file in the scratch dir, not the real user domain).",
+  "rung": "applescript",
+  "start": {
+    "plists": {
+      "Prefs/com.example.editor.plist": {
+        "AutoSaveInterval": 300,
+        "FontSize": 13
+      }
+    }
+  },
+  "probes": [
+    {
+      "id": "autosave_30",
+      "getter": {
+        "type": "defaults_read",
+        "domain": "Prefs/com.example.editor.plist",
+        "key": "AutoSaveInterval"
+      },
+      "comparator": {
+        "op": "equals",
+        "expected": "30"
+      }
+    },
+    {
+      "id": "autosave_plist_int",
+      "getter": {
+        "type": "plist_value",
+        "path": "Prefs/com.example.editor.plist",
+        "key": "AutoSaveInterval"
+      },
+      "comparator": {
+        "op": "equals",
+        "expected": 30
+      }
+    }
+  ],
+  "invariants": [
+    {
+      "id": "font_kept",
+      "getter": {
+        "type": "defaults_read",
+        "domain": "Prefs/com.example.editor.plist",
+        "key": "FontSize"
+      },
+      "comparator": {
+        "op": "equals",
+        "expected": "13"
+      }
+    }
+  ],
+  "platform": "darwin"
+}

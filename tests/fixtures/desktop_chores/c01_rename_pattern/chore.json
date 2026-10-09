@@ -1,0 +1,54 @@
+{
+  "id": "c01_rename_pattern",
+  "title": "Rename screenshots by pattern",
+  "instruction": "In shots/, rename every 'Screen Shot <date> at <HH.MM.SS>.png' to 'shot_<date>_<HH-MM-SS>.png'. Leave other files alone.",
+  "rung": "shell",
+  "start": {
+    "files": {
+      "shots/Screen Shot 2026-10-01 at 09.15.02.png": "png1",
+      "shots/Screen Shot 2026-10-02 at 18.40.11.png": "png2",
+      "shots/notes.txt": "keep me"
+    }
+  },
+  "probes": [
+    {
+      "id": "renamed_set",
+      "getter": {
+        "type": "glob",
+        "pattern": "shots/*"
+      },
+      "comparator": {
+        "op": "set_equals",
+        "expected": [
+          "shots/shot_2026-10-01_09-15-02.png",
+          "shots/shot_2026-10-02_18-40-11.png",
+          "shots/notes.txt"
+        ]
+      }
+    },
+    {
+      "id": "content_kept",
+      "getter": {
+        "type": "file_content",
+        "path": "shots/shot_2026-10-02_18-40-11.png"
+      },
+      "comparator": {
+        "op": "equals",
+        "expected": "png2"
+      }
+    }
+  ],
+  "invariants": [
+    {
+      "id": "notes_untouched",
+      "getter": {
+        "type": "file_content",
+        "path": "shots/notes.txt"
+      },
+      "comparator": {
+        "op": "equals",
+        "expected": "keep me"
+      }
+    }
+  ]
+}

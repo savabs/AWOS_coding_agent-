@@ -1,0 +1,54 @@
+{
+  "id": "c04_ini_port",
+  "title": "Change server port in INI",
+  "instruction": "In config/settings.ini set [server] port to 9090. Keep every other setting.",
+  "rung": "shell",
+  "start": {
+    "files": {
+      "config/settings.ini": "[server]\nhost = 127.0.0.1\nport = 8080\n\n[log]\nlevel = info\n"
+    }
+  },
+  "probes": [
+    {
+      "id": "port_9090",
+      "getter": {
+        "type": "ini_value",
+        "path": "config/settings.ini",
+        "section": "server",
+        "key": "port"
+      },
+      "comparator": {
+        "op": "equals",
+        "expected": "9090"
+      }
+    }
+  ],
+  "invariants": [
+    {
+      "id": "host_kept",
+      "getter": {
+        "type": "ini_value",
+        "path": "config/settings.ini",
+        "section": "server",
+        "key": "host"
+      },
+      "comparator": {
+        "op": "equals",
+        "expected": "127.0.0.1"
+      }
+    },
+    {
+      "id": "log_kept",
+      "getter": {
+        "type": "ini_value",
+        "path": "config/settings.ini",
+        "section": "log",
+        "key": "level"
+      },
+      "comparator": {
+        "op": "equals",
+        "expected": "info"
+      }
+    }
+  ]
+}

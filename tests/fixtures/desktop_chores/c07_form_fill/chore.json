@@ -1,0 +1,86 @@
+{
+  "id": "c07_form_fill",
+  "title": "Fill a local HTML form (saved DOM)",
+  "instruction": "Fill form.html: full_name 'Ada Lovelace', email 'ada@example.org', plan 'pro', tick newsletter, notes 'Call after 5pm'. Save the filled DOM; do NOT submit.",
+  "rung": "ax",
+  "start": {
+    "files": {
+      "form.html": "<!doctype html>\n<html><body>\n<form id=\"signup\" action=\"/submit\">\n  <input id=\"full_name\" name=\"full_name\" type=\"text\" value=\"\">\n  <input id=\"email\" name=\"email\" type=\"email\" value=\"\">\n  <select id=\"plan\" name=\"plan\">\n    <option value=\"free\" selected>Free</option>\n    <option value=\"pro\">Pro</option>\n  </select>\n  <input id=\"newsletter\" name=\"newsletter\" type=\"checkbox\">\n  <textarea id=\"notes\" name=\"notes\"></textarea>\n</form>\n</body></html>\n"
+    }
+  },
+  "probes": [
+    {
+      "id": "name",
+      "getter": {
+        "type": "html_field",
+        "path": "form.html",
+        "field": "full_name"
+      },
+      "comparator": {
+        "op": "equals",
+        "expected": "Ada Lovelace"
+      }
+    },
+    {
+      "id": "email",
+      "getter": {
+        "type": "html_field",
+        "path": "form.html",
+        "field": "email"
+      },
+      "comparator": {
+        "op": "equals",
+        "expected": "ada@example.org"
+      }
+    },
+    {
+      "id": "plan",
+      "getter": {
+        "type": "html_field",
+        "path": "form.html",
+        "field": "plan"
+      },
+      "comparator": {
+        "op": "equals",
+        "expected": "pro"
+      }
+    },
+    {
+      "id": "newsletter",
+      "getter": {
+        "type": "html_field",
+        "path": "form.html",
+        "field": "newsletter"
+      },
+      "comparator": {
+        "op": "equals",
+        "expected": true
+      }
+    },
+    {
+      "id": "notes",
+      "getter": {
+        "type": "html_field",
+        "path": "form.html",
+        "field": "notes"
+      },
+      "comparator": {
+        "op": "equals",
+        "expected": "Call after 5pm"
+      }
+    }
+  ],
+  "invariants": [
+    {
+      "id": "form_action_kept",
+      "getter": {
+        "type": "file_content",
+        "path": "form.html"
+      },
+      "comparator": {
+        "op": "contains",
+        "expected": "action=\"/submit\""
+      }
+    }
+  ]
+}
