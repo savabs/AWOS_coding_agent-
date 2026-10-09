@@ -85,7 +85,9 @@ ROUTING_ENV = ("AWOS_OPENROUTER_PROVIDER", "AWOS_OPENROUTER_ALLOW_FALLBACKS",
                "AWOS_ACCEPTANCE_REPAIR_TURNS", "AWOS_BEST_OF_N", "AWOS_EXPERIENCE",
                # AWOS_PROVIDER=local: every call served by the local model
                # (docs/specs/local_provider_spec.md); eval_health allows its id.
-               "AWOS_PROVIDER", "AWOS_LOCAL_MODEL", "AWOS_LOCAL_BASE_URL")
+               "AWOS_PROVIDER", "AWOS_LOCAL_MODEL", "AWOS_LOCAL_BASE_URL",
+               # trick T3: static gate at edit-apply time (docs/specs/static_gate.md)
+               "AWOS_STATIC_GATE", "AWOS_STATIC_GATE_TESTS")
 
 
 def routing_env() -> dict:

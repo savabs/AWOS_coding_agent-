@@ -651,6 +651,19 @@ def _edit_tool(root: Path):
     return EditFileTool(str(root))
 
 
+def _static_gate_reject(target: Path, new_text: str, old_text: str) -> Optional[str]:
+    """AWOS_STATIC_GATE for a write made outside EditFileTool: the model-facing
+    rejection text, or None to proceed (gate off, or the text passes)."""
+    try:
+        from . import static_gate
+    except ImportError:
+        import static_gate
+    if not static_gate.enabled():
+        return None
+    ok, msgs = static_gate.check(str(target), new_text, old_text)
+    return None if ok else static_gate.rejection_message(str(target), msgs)
+
+
 def apply_blocks(project_root: str, blocks: list[EditBlock], *,
                  allow_test_edits: bool = True,
                  read_only: Optional[set] = None) -> tuple[list[str], list[dict]]:
@@ -692,8 +705,14 @@ def apply_blocks(project_root: str, blocks: list[EditBlock], *,
             try:
                 existing = target.read_text(encoding="utf-8")
                 sep = "" if existing.endswith("\n") else "\n"
-                target.write_text(existing + sep + b.replace.rstrip("\n") + "\n", encoding="utf-8")
-                ok, why = True, ""
+                appended = existing + sep + b.replace.rstrip("\n") + "\n"
+                # Appends bypass EditFileTool, so AWOS_STATIC_GATE runs here too.
+                gate_msgs = _static_gate_reject(target, appended, existing)
+                if gate_msgs is not None:
+                    ok, why = False, gate_msgs
+                else:
+                    target.write_text(appended, encoding="utf-8")
+                    ok, why = True, ""
             except OSError as exc:
                 ok, why = False, f"append failed: {exc}"
         else:
