@@ -1,0 +1,48 @@
+{
+  "id": "c10_log_errors",
+  "title": "Extract ERROR lines from a log",
+  "instruction": "Write every ERROR line of logs/app.log, in order and unchanged, to reports/errors.txt (one per line, trailing newline).",
+  "rung": "shell",
+  "start": {
+    "files": {
+      "logs/app.log": "2026-10-08 10:00:01 INFO  service started\n2026-10-08 10:00:05 ERROR db timeout after 30s\n2026-10-08 10:01:00 WARN  slow request /api/items\n2026-10-08 10:02:13 ERROR upstream 502 from billing\n2026-10-08 10:03:00 INFO  healthcheck ok\n2026-10-08 10:04:44 ERROR db timeout after 30s\n"
+    }
+  },
+  "probes": [
+    {
+      "id": "errors_exact",
+      "getter": {
+        "type": "file_hash",
+        "path": "reports/errors.txt"
+      },
+      "comparator": {
+        "op": "equals",
+        "expected": "fe523156e592992d754cf9ce37e535badf7ae6236b0b14e51791a4fc1aeaeed8"
+      }
+    },
+    {
+      "id": "errors_three",
+      "getter": {
+        "type": "file_content",
+        "path": "reports/errors.txt"
+      },
+      "comparator": {
+        "op": "regex",
+        "expected": "\\A(?:.*ERROR.*\\n){2}.*ERROR.*\\Z"
+      }
+    }
+  ],
+  "invariants": [
+    {
+      "id": "log_untouched",
+      "getter": {
+        "type": "file_hash",
+        "path": "logs/app.log"
+      },
+      "comparator": {
+        "op": "equals",
+        "expected": "a4ad0b0ef8bcfaad7ea6a03d59ade77e03d910a45c624e1c1cc0fad4ae0a925b"
+      }
+    }
+  ]
+}
