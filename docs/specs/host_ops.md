@@ -15,8 +15,36 @@ The long runs this week died for reasons that had nothing to do with the model:
 | DNS / network outage | jobs failed instead of waiting | DNS resolve of the backend host fails, or error class `network` (gaierror, "nodename nor servname", "Connection error", timeouts) | exponential backoff 30 s → 30 min cap in `<root>/network_backoff.json`; `network_ready()` false inside the window; never pauses; reset on first success |
 | Battery | the Mac slept or died off AC | `pmset -g batt` → source + percent | on battery: WARN; ≤ 15 %: pause (`kind=battery`) + notify |
 
-Key material is redacted (`sk-xxxxxx…`) before anything is written to
+Key material is redacted (`sk-xxxxxx…`, `Bearer …`, JWTs, `AIza…`, `hf_…`,
+`gh?_…`, `gsk_…`/`xai-…`, `api_key=…`/`token=…`) before anything is written to
 `PAUSED` or notifications.
+
+### Review fixes (2026-10-10)
+
+* **Pauses accumulate.** `pause_queue` never overwrites an earlier reason. The
+  most severe cause (auth/billing > manual > battery; ties keep the first) is the
+  primary `kind`/`reason`; every distinct kind is kept in `PAUSED.reasons`, shown
+  by `check`, the morning report and `resume`. A repeated battery check neither
+  re-pauses nor re-notifies.
+* **Moderation 403 is not auth.** A 403 (or any error) whose text mentions
+  moderation / flagged / content policy is class `content`: a job-level failure,
+  no pause. A bare 403 without such text is still `auth`.
+* **Morning report time filter** parses `created_at` stored as epoch seconds or
+  ms (number or numeric text) as well as ISO, and sorts chronologically.
+* **Backoff ownership.** `network_backoff.json` records `source` (`api` from the
+  worker's real connect/timeout failures, `dns` from the watchdog probe). The
+  watchdog's DNS success only clears a `dns` backoff. The read-modify-write is
+  under an `fcntl` lock shared by watchdog and worker.
+* **Notification dedupe.** `check --notify` notifies once per distinct set of
+  failing `(check, status)` and repeats it at most every 6 h
+  (`NOTIFY_REPEAT_S`); state in `<root>/notify_state.json`, cleared on an
+  all-ok run or `resume`.
+* **Installer** refuses `--apply` while `scaffold/agent/host/worker` does not
+  exist (KeepAlive would restart a failing process every 30 s forever), unless
+  `--allow-missing-worker` is given with `AWOS_HOST_CMD` set in the env file.
+* `pmset_advice.sh` prints a caffeinate line that handles a non-running worker,
+  and states that `pmset restoredefaults` is global (no per-source variant).
+* `run_host.sh` tries GNU `stat -c` before BSD `stat -f` (GNU `-f` exits 0).
 
 ## Contract with the other M1 pieces
 
@@ -24,7 +52,8 @@ Key material is redacted (`sk-xxxxxx…`) before anything is written to
 * The **worker** (queue builder) should: call `watchdog.write_heartbeat(note=...)`
   every loop tick and between job steps; skip starting jobs while
   `watchdog.is_paused()` is truthy or `watchdog.network_ready()` is false; pass
-  backend exceptions to `watchdog.handle_backend_error(err, job_id=...)`.
+  backend exceptions to `watchdog.handle_backend_error(err, job_id=...)`, and
+  call `watchdog.record_network_ok()` (no `source`) after a successful API call.
   Entry point expected by launchd: `python -m scaffold.agent.host.worker`
   (override with `AWOS_HOST_CMD`).
 * The **morning report** reads `queue.sqlite` read-only (`mode=ro`). The jobs

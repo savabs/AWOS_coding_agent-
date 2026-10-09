@@ -308,3 +308,169 @@ def test_pmset_advice_prints_without_applying():
     r = subprocess.run(["/bin/bash", str(REPO / "scripts/host/pmset_advice.sh")],
                        capture_output=True, text=True, timeout=10)
     assert r.returncode == 0 and "sudo pmset -c sleep 0" in r.stdout
+
+
+# ----------------------------------------------------------------- review fixes (regressions)
+
+def test_battery_pause_does_not_erase_auth_pause(root):
+    wd.handle_backend_error("Error code: 401 key revoked", root=root, job_id="j1", now=1.0)
+    wd.check_power(BATT_LOW, root=root)
+    p = wd.is_paused(root)
+    assert p["kind"] == "auth" and p["job_id"] == "j1"          # primary kept
+    assert [r["kind"] for r in p["reasons"]] == ["auth", "battery"]
+    assert "battery" in wd.describe_pause(p) and "auth" in wd.describe_pause(p)
+
+
+def test_auth_pause_after_battery_becomes_primary(root):
+    wd.check_power(BATT_LOW, root=root)
+    wd.handle_backend_error("Error code: 402 insufficient credits", root=root)
+    p = wd.is_paused(root)
+    assert p["kind"] == "billing"
+    assert {r["kind"] for r in p["reasons"]} == {"battery", "billing"}
+
+
+def test_repeated_battery_check_pauses_and_notifies_once(root):
+    for _ in range(3):
+        wd.check_power(BATT_LOW, root=root)
+    assert len(wd.is_paused(root)["reasons"]) == 1
+    assert len((root / "notifications.jsonl").read_text().splitlines()) == 1
+
+
+MODERATION_403 = ("Error code: 403 - {'error': {'message': 'Your chosen model requires "
+                  "moderation and your input was flagged for \"harassment\"', 'code': 403, "
+                  "'metadata': {'reasons': ['harassment'], 'flagged_input': '...'}}}")
+
+
+@pytest.mark.parametrize("status", [None, 403])
+def test_moderation_403_is_job_level_not_auth(root, status):
+    assert wd.classify_backend_error(MODERATION_403, status) == "content"
+    f = wd.handle_backend_error(MODERATION_403, root=root, status=status, job_id="j9")
+    assert f.status == "error" and f.data["class"] == "content"
+    assert wd.is_paused(root) is None
+    assert not (root / "notifications.jsonl").exists()
+
+
+def test_numeric_created_at_is_filtered_by_since_hours(root):
+    root.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(root / "queue.sqlite")
+    con.execute("CREATE TABLE jobs (id TEXT, goal TEXT, state TEXT, created_at REAL, "
+                "result TEXT)")
+    old = NOW.timestamp() - 30 * 86400
+    con.executemany("INSERT INTO jobs VALUES (?,?,?,?,?)", [
+        ("old", "thirty days old", "done", old, json.dumps({"cost_usd": 9.0})),
+        ("new", "two hours old", "done", NOW.timestamp() - 7200, None),
+        ("iso", "iso one hour old", "done", None, None),
+        ("ms", "epoch ms half hour old", "done", int((NOW.timestamp() - 1800) * 1000), None),
+    ])
+    con.execute("UPDATE jobs SET created_at='2026-10-10T07:00:00+00:00' WHERE id='iso'")
+    con.commit()
+    con.close()
+    jobs, _ = mr.load_jobs(root, since_hours=24, now=NOW)
+    assert [j.id for j in jobs] == ["new", "iso", "ms"]           # chronological, old gone
+    jobs, _ = mr.load_jobs(root, since_hours=None)
+    assert [j.id for j in jobs] == ["old", "new", "iso", "ms"]
+
+
+def test_dns_success_does_not_clear_api_backoff(root):
+    wd.handle_backend_error("Connection error.", root=root, now=0)   # worker: real API fail
+    f = wd.check_network(root, resolver=lambda h, p: [("ok",)], now=1)
+    assert f.status == "backoff"
+    assert not wd.network_ready(root, now=1)
+    assert (root / "network_backoff.json").exists()
+
+    def down(h, p):
+        raise OSError("dns down")
+    wd.record_network_ok(root)                 # API success clears it
+    wd.check_network(root, resolver=down, now=0)   # DNS-only backoff ...
+    assert wd.check_network(root, resolver=lambda h, p: [("ok",)], now=0).ok  # ... cleared
+
+
+def test_record_network_failure_is_locked_across_processes(root):
+    code = ("import sys; sys.path.insert(0, %r)\n"
+            "from scaffold.agent.host import watchdog as wd\n"
+            "for _ in range(40): wd.record_network_failure(%r, now=0)\n") % (str(REPO), str(root))
+    procs = [subprocess.Popen([sys.executable, "-c", code]) for _ in range(4)]
+    assert all(p.wait(timeout=60) == 0 for p in procs)
+    st = json.loads((root / "network_backoff.json").read_text())
+    assert st["failures"] == 160
+
+
+def test_check_notify_is_deduped(root):
+    args = ["check", "--skip", "network", "--skip", "power", "--notify"]
+    for _ in range(5):                       # 5 watchdog runs, heartbeat missing
+        assert wd.main(args) == 1
+    assert len((root / "notifications.jsonl").read_text().splitlines()) == 1
+    wd.pause_queue(root, reason="manual stop", kind="manual")   # new condition -> notify
+    wd.main(args)
+    assert len((root / "notifications.jsonl").read_text().splitlines()) == 2
+    st = json.loads((root / "notify_state.json").read_text())   # rate limit expires
+    st["ts"] -= wd.NOTIFY_REPEAT_S + 1
+    (root / "notify_state.json").write_text(json.dumps(st))
+    wd.main(args)
+    assert len((root / "notifications.jsonl").read_text().splitlines()) == 3
+
+
+@pytest.mark.parametrize("secret,leak", [
+    ("Authorization: Bearer abcDEF1234567890ghijKLMN", "abcDEF1234567890ghijKLMN"),
+    ("jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fwpM",
+     "SflKxwRJSMeKKF2QT4fwpM"),
+    ("key AIzaSyA1234567890abcdefghijklmnopqrs", "1234567890abcdefghijklmnopqrs"),
+    ("token hf_AbCdEfGhIjKlMnOpQrStUvWx", "AbCdEfGhIjKlMnOpQrStUvWx"),
+    ("api_key: 'zz9Secret0123456789'", "zz9Secret0123456789"),
+    ("sk-or-v1-abcdef1234567890SECRET", "SECRET"),
+])
+def test_redact_covers_common_token_shapes(root, secret, leak):
+    assert leak not in wd._redact(secret)
+    wd.handle_backend_error(f"Error code: 401 {secret}", root=root)
+    assert leak not in (root / "PAUSED").read_text()
+    assert leak not in (root / "notifications.jsonl").read_text()
+
+
+def test_install_apply_refuses_when_worker_module_missing(root, tmp_path, monkeypatch, capsys):
+    fake_repo = tmp_path / "repo"
+    fake_repo.mkdir()
+    agents = tmp_path / "LaunchAgents"
+    calls = []
+    monkeypatch.setattr(il.subprocess, "run", lambda *a, **k: calls.append(a))
+    assert not il.worker_available(fake_repo)
+    rc = il.main(["--root", str(root), "--repo", str(fake_repo),
+                  "--agents-dir", str(agents), "--apply"])
+    assert rc == 2 and calls == []
+    assert "does not exist" in capsys.readouterr().out
+    rc = il.main(["--root", str(root), "--repo", str(fake_repo),   # explicit override
+                  "--agents-dir", str(agents), "--apply", "--allow-missing-worker"])
+    assert rc == 0 and calls
+    (fake_repo / "scaffold/agent/host").mkdir(parents=True)
+    (fake_repo / "scaffold/agent/host/worker.py").write_text("")
+    assert il.worker_available(fake_repo)
+
+
+def test_pmset_advice_text_is_correct():
+    r = subprocess.run(["/bin/bash", str(REPO / "scripts/host/pmset_advice.sh")],
+                       capture_output=True, text=True, timeout=10)
+    out = r.stdout
+    assert "pmset -c restoredefaults" not in out
+    assert "restoredefaults" in out and "GLOBAL" in out
+    assert 'caffeinate -dimsu -w "$(pgrep' not in out
+    assert 'if [ -n "$pid" ]' in out
+
+
+def test_run_host_mode_check_with_gnu_stat(root, tmp_path):
+    """GNU stat: `-f` is filesystem status and exits 0; only `-c` gives the mode."""
+    fakebin = tmp_path / "bin"
+    fakebin.mkdir()
+    (fakebin / "stat").write_text(
+        "#!/bin/bash\n"
+        "if [ \"$1\" = -f ]; then echo '  File: \"x\" Namelen: 255 Type: ext2/ext3'; exit 0; fi\n"
+        "if [ \"$1\" = -c ]; then echo 600; exit 0; fi\n"
+        "exit 1\n")
+    (fakebin / "stat").chmod(0o755)
+    env = tmp_path / "host.env"
+    env.write_text("X=1\n")
+    env.chmod(0o600)
+    r = subprocess.run(["/bin/bash", str(REPO / "scripts/host/run_host.sh")],
+                       env={**os.environ, "PATH": f"{fakebin}:{os.environ['PATH']}",
+                            "AWOS_HOST_ENV_FILE": str(env), "AWOS_HOST_DIR": str(root),
+                            "AWOS_HOST_CMD": "echo ran X=$X"},
+                       capture_output=True, text=True, timeout=5)
+    assert r.returncode == 0 and "ran X=1" in r.stdout, r.stderr

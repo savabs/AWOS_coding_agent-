@@ -86,6 +86,20 @@ def watchdog_plist(root: Path, repo: Path, python: str) -> dict:
     }
 
 
+WORKER_MODULE = "scaffold.agent.host.worker"
+
+
+def worker_available(repo: Path) -> bool:
+    """True when the default worker entry point exists in `repo`.
+
+    The worker plist has KeepAlive (SuccessfulExit=false): installing it while
+    `python -m scaffold.agent.host.worker` does not exist makes launchd restart
+    a failing process every ThrottleInterval seconds, forever.
+    """
+    base = repo / Path(*WORKER_MODULE.split("."))
+    return base.with_suffix(".py").is_file() or (base / "__main__.py").is_file()
+
+
 def install_commands(agents_dir: Path, staged: list[Path]) -> list[str]:
     uid = os.getuid()
     cmds = [f"mkdir -p {shlex.quote(str(agents_dir))}"]
@@ -120,6 +134,9 @@ def main(argv=None) -> int:
     ap.add_argument("--uninstall", action="store_true")
     ap.add_argument("--apply", action="store_true",
                     help="really copy into ~/Library/LaunchAgents and launchctl bootstrap")
+    ap.add_argument("--allow-missing-worker", action="store_true",
+                    help="install even though scaffold/agent/host/worker is absent "
+                         "(only when host.env sets AWOS_HOST_CMD)")
     a = ap.parse_args(argv)
 
     root = host_root(a.root)
@@ -160,7 +177,17 @@ def main(argv=None) -> int:
         print(f"\nNOTE: env file {env_file} does not exist. Create it (chmod 600) with e.g.\n"
               f"  OPENROUTER_API_KEY=...\n  AWOS_HOST_NOTIFY=osascript")
 
+    missing_worker = not worker_available(repo)
+    if missing_worker:
+        print(f"\nWARNING: {WORKER_MODULE} does not exist in {repo}. With KeepAlive, "
+              "launchd would restart the failing worker every 30s forever. Set "
+              "AWOS_HOST_CMD in the env file and pass --allow-missing-worker, or "
+              "wait for the worker module.")
     cmds = install_commands(agents_dir, staged)
+    if a.apply and missing_worker and not a.allow_missing_worker:
+        print("refusing --apply: worker entry point missing (see WARNING above)",
+              file=sys.stderr)
+        return 2
     if a.apply:
         for c in cmds:
             print(f"$ {c}")

@@ -10,7 +10,9 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 mkdir -p "$ROOT/logs"
 
 if [ -f "$ENV_FILE" ]; then
-  perms=$(stat -f '%Lp' "$ENV_FILE" 2>/dev/null || stat -c '%a' "$ENV_FILE")
+  # GNU first: on GNU `stat -f` means filesystem status and exits 0, so trying
+  # BSD syntax first would never fall back. BSD/macOS stat rejects `-c`.
+  perms=$(stat -c '%a' "$ENV_FILE" 2>/dev/null) || perms=$(stat -f '%Lp' "$ENV_FILE" 2>/dev/null)
   case "$perms" in
     600|400) ;;
     *) echo "run_host: refusing $ENV_FILE with mode $perms (want 600)" >&2; exit 78 ;;

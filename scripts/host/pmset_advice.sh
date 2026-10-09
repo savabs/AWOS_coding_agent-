@@ -26,9 +26,12 @@ sudo pmset -c womp 1           # wake on network access
 # Lid closed: macOS sleeps a closed laptop unless an external display is attached
 # (clamshell). Keep the lid open, or use an external display + AC.
 
-# Per-session alternative without changing settings (stops when the shell exits):
-caffeinate -dimsu -w "$(pgrep -f scaffold.agent.host.worker | head -1)"
+# Per-session alternative without changing settings (holds while the worker runs):
+pid=$(pgrep -f scaffold.agent.host.worker | head -1); if [ -n "$pid" ]; then caffeinate -dimsu -w "$pid"; else echo "worker not running"; fi
 
-# To revert to defaults:
-sudo pmset -c restoredefaults
+# To revert: first save your current settings (before applying the above):
+pmset -g custom > ~/pmset_before_awos.txt
+# then re-set each changed AC value from that file, e.g.  sudo pmset -c sleep 1
+# NOTE: `sudo pmset restoredefaults` is GLOBAL (resets AC *and* battery settings);
+# there is no per-source restoredefaults.
 EOF

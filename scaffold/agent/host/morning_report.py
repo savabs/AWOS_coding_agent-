@@ -83,16 +83,41 @@ def _first(d: dict, *keys, default=None):
     return default
 
 
+def _epoch(x: float) -> Optional[datetime]:
+    if x > 1e11:          # epoch milliseconds
+        x /= 1000.0
+    try:
+        return datetime.fromtimestamp(x, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 def _parse_ts(v: Any) -> Optional[datetime]:
-    if v in (None, ""):
+    """ISO-8601 text, or epoch seconds/ms as a number *or* numeric text
+    (SQLite REAL/INTEGER columns, or a str() of one)."""
+    if v in (None, "") or isinstance(v, bool):
         return None
     if isinstance(v, (int, float)):
-        return datetime.fromtimestamp(float(v), tz=timezone.utc)
+        return _epoch(float(v))
+    t = str(v).strip()
     try:
-        dt = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        return _epoch(float(t))
+    except ValueError:
+        pass
+    try:
+        dt = datetime.fromisoformat(t.replace("Z", "+00:00"))
     except ValueError:
         return None
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+_MIN_TS = datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _sort_key(j: "JobRow") -> tuple:
+    """Chronological across mixed ISO / epoch created_at; undated jobs last."""
+    ts = _parse_ts(j.created_at)
+    return (ts is None, ts or _MIN_TS, j.created_at)
 
 
 def _tests_status(d: dict) -> str:
@@ -216,7 +241,7 @@ def load_jobs(root=None, since_hours: Optional[float] = None,
             if ts is None or ts >= cut or j.state in ("queued", "running", "paused"):
                 kept.append(j)
         jobs = kept
-    jobs.sort(key=lambda j: j.created_at)
+    jobs.sort(key=_sort_key)
     return jobs, warnings
 
 
@@ -292,7 +317,7 @@ def build(root=None, since_hours: Optional[float] = 24.0, write: bool = True,
         p = _wd.is_paused(r)
         if p:
             health.append(_wd.Finding("pause", "paused",
-                                      f"{p.get('kind')}: {p.get('reason')}",
+                                      _wd.describe_pause(p),
                                       action="python -m scaffold.agent.host.watchdog resume"))
     text = render(jobs, warnings, r, now=now, health=health)
     path = r / "morning_report.md"
