@@ -19,6 +19,12 @@ Job host (always-on; jobs survive crashes and restarts):
     awos jobs [--all]                 List jobs
     awos job <id>                     Show a job's record and report path
 
+Host queue (M1; SQLite under AWOS_HOST_DIR, default ~/.awos/host):
+    awos submit "<goal>" --repo PATH [--budget USD] [--privacy local_only|cloud_ok]
+    awos serve --worker [--once] [--runner sleep|module:func]   Run the host worker
+    awos status [id]                  List host jobs, or show one
+    awos cancel <id>                  Cancel a host job
+
 Advanced commands:
     awos run <goal>              Execute via orchestrator directly (power users)
     awos stats                   Self-learning observability report
@@ -1075,6 +1081,10 @@ def _age(iso: str) -> str:
 
 def cmd_submit(args):
     """Queue a job for the host; print its id."""
+    if getattr(args, "repo", None) is not None:
+        return _host_submit(args)
+    if getattr(args, "budget", None) is not None or getattr(args, "privacy", None) is not None:
+        sys.exit("--budget/--privacy need --repo (the host queue); see `awos submit -h`")
     from scaffold.agent.job_host import JobStore
 
     root = Path(args.root).resolve()
@@ -1125,6 +1135,87 @@ def cmd_job(args):
     print(json.dumps(asdict(job), indent=2))
     report = store.report_path(job.id)
     print(f"\nReport: {report}" if report.exists() else "\nReport: (written when the job finishes)")
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Host queue commands (M1 contract; see scaffold/agent/host/, docs/specs/host_queue.md)
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _host_age(iso) -> str:
+    from datetime import timezone
+    try:
+        then = datetime.fromisoformat(iso)
+        now = datetime.now(timezone.utc) if then.tzinfo else datetime.now()
+        secs = (now - then).total_seconds()
+    except (TypeError, ValueError):
+        return "-"
+    for unit, size in (("d", 86400), ("h", 3600), ("m", 60)):
+        if secs >= size:
+            return f"{secs / size:.0f}{unit}"
+    return f"{secs:.0f}s"
+
+
+def _host_submit(args):
+    from scaffold.agent.host.queue import JobQueue
+
+    try:
+        job = JobQueue().submit(
+            args.goal, args.repo, kind=args.ability,
+            budget_usd=1.0 if args.budget is None else args.budget,
+            privacy=args.privacy or "cloud_ok")
+    except ValueError as exc:
+        sys.exit(f"Error: {exc}")
+    print(job.id)
+
+
+def _host_serve(args):
+    from scaffold.agent.host.queue import JobQueue
+    from scaffold.agent.host.worker import HostWorker, resolve_runner
+
+    try:
+        runner = resolve_runner(args.runner)
+        HostWorker(JobQueue(), runner=runner,
+                   log=lambda m: print(m, flush=True)).serve(poll_sec=args.poll, once=args.once)
+    except (RuntimeError, ValueError, ImportError, AttributeError) as exc:
+        sys.exit(f"Error: {exc}")
+
+
+def cmd_status(args):
+    """List host-queue jobs, or show one."""
+    from scaffold.agent.host.queue import JobQueue
+
+    queue = JobQueue()
+    if args.job_id:
+        job = queue.get(args.job_id)
+        if job is None:
+            sys.exit(f"No such job: {args.job_id}")
+        print(json.dumps(job.to_dict(), indent=2))
+        print(f"\nJob dir: {queue.job_dir(job.id)}")
+        return
+    jobs = queue.list()
+    if not jobs:
+        print(f"No jobs in {queue.root}.")
+        return
+    print(f"  {'id':<12} {'state':<10} {'att':>3} {'age':>5} {'budget':>7}  goal")
+    for j in jobs:
+        goal = j.goal.replace("\n", " ")
+        goal = goal if len(goal) <= 56 else goal[:53] + "..."
+        print(f"  {j.id[:12]:<12} {j.state:<10} {j.attempts:>3} {_host_age(j.created_at):>5} "
+              f"{j.budget_usd:>7.2f}  {goal}")
+
+
+def cmd_cancel(args):
+    """Cancel a host-queue job (queued: now; running: at its next step)."""
+    from scaffold.agent.host.queue import JobQueue
+
+    outcome = JobQueue().cancel(args.job_id)
+    messages = {
+        "cancelled": "cancelled",
+        "requested": "cancel requested; the worker stops it at its next step",
+        "final": "already finished; nothing to cancel",
+    }
+    if outcome == "missing":
+        sys.exit(f"No such job: {args.job_id}")
+    print(messages[outcome])
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1349,7 +1440,9 @@ def cmd_worker_cancel(args):
 # ═════════════════════════════════════════════════════════════════════════════
 
 def cmd_serve(args):
-    """Start the AWOS web dashboard server."""
+    """Start the AWOS web dashboard server (or, with --worker, the host worker)."""
+    if getattr(args, "worker", False):
+        return _host_serve(args)
     import subprocess
     port = getattr(args, "port", 8765)
     host = getattr(args, "host", "127.0.0.1")
@@ -1621,6 +1714,12 @@ def build_parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve", help="Start the AWOS web dashboard")
     serve.add_argument("--port", type=int, default=8765, help="Port to run on (default: 8765)")
     serve.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
+    serve.add_argument("--worker", action="store_true",
+                       help="Run the host queue worker instead of the dashboard (M1)")
+    serve.add_argument("--once", action="store_true", help="With --worker: exit when the queue is empty")
+    serve.add_argument("--poll", type=float, default=2.0, help="With --worker: seconds between queue checks")
+    serve.add_argument("--runner", default=None,
+                       help="With --worker: 'default', 'sleep' or module:callable (or AWOS_HOST_RUNNER)")
 
     # fix-ci (optional coding-agent workload adapter)
     fix_ci = sub.add_parser("fix-ci", help="Optional CI repair workload for any Python repo")
@@ -1815,6 +1914,15 @@ def build_parser() -> argparse.ArgumentParser:
     submit.add_argument("goal", help="What to get done (quote if multi-word)")
     submit.add_argument("--root", default=".", help="Workspace directory the job works in (default: .)")
     submit.add_argument("--ability", default="coding", help="Which ability runs the job (default: coding)")
+    submit.add_argument("--repo", default=None,
+                        help="Queue in the host queue (AWOS_HOST_DIR) for this repo; see `awos serve --worker`")
+    submit.add_argument("--budget", type=float, default=None, help="With --repo: USD cap for the job (default 1.0)")
+    submit.add_argument("--privacy", choices=["local_only", "cloud_ok"], default=None,
+                        help="With --repo: local_only blanks cloud API keys for the job (default cloud_ok)")
+    status = sub.add_parser("status", help="List host-queue jobs, or show one")
+    status.add_argument("job_id", nargs="?", default=None, metavar="JOB_ID")
+    cancel = sub.add_parser("cancel", help="Cancel a host-queue job")
+    cancel.add_argument("job_id", metavar="JOB_ID")
     host = sub.add_parser("host", help="Run the job host: take queued jobs until stopped")
     host.add_argument("--once", action="store_true", help="Exit when the queue is empty")
     host.add_argument("--poll", type=float, default=2.0, help="Seconds between queue checks (default: 2)")
