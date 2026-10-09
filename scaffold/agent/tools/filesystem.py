@@ -249,7 +249,8 @@ class ReadFileTool(_RootedTool):
                             f"above (at most {cap} lines per call), or symbol=\"Class.method\" "
                             "for one whole body.")
                     return ToolResult.ok(text=text, data={"path": str(path), "content": skel,
-                                                          "total_lines": total, "skeleton": True})
+                                                          "total_lines": total, "skeleton": True,
+                                                          "start_line": 0, "end_line": 0})
             start, end = 1, min(total, cap)
         else:
             start = max(1, start_nums[0] if start_nums else 1)
@@ -269,7 +270,10 @@ class ReadFileTool(_RootedTool):
             _skeleton_log(path, total, f"window {start}-{end}", len(excerpt))
         return ToolResult.ok(
             text=f"File: {path} (lines {start}–{end} of {total})\n\n{excerpt}{note}",
-            data={"path": str(path), "content": excerpt, "total_lines": total},
+            # The lines actually served: a reread guard must track these, not
+            # the range asked for (see docs/specs/skeleton_viewer.md, Risks).
+            data={"path": str(path), "content": excerpt, "total_lines": total,
+                  "start_line": start, "end_line": end},
         )
 
 
