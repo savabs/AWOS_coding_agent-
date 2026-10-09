@@ -458,20 +458,201 @@ def without_sdk_retries(client: Any) -> Any:
     return client
 
 
-def _record_utility_spend(request_type: str, model: str, response: Any, tracker: Any) -> float:
-    """One call's tokens into TokenTracker + BudgetLedger; returns its USD cost."""
+# ── Cache-aware cost (docs/specs/prompt_caching.md) ──────────────────────────
+
+#: Cached-input prices as a fraction of the model's input price (agent_loop
+#: PRICES), per model family: (cache_read_factor, cache_write_factor).
+#: deepseek-v4-flash: every pinned OpenRouter endpoint (deepinfra, gmicloud,
+#: novita, siliconflow) bills a cache read at ~0.2x input (OpenRouter
+#: /models/.../endpoints, 2026-10-09). A model priced in PRICES but missing
+#: here gets no discount (1.0, 1.0): a cost cap should over- not under-count.
+CACHE_PRICE_FACTORS: dict[str, tuple[float, float]] = {
+    "deepseek-v4-flash": (0.2, 1.0),
+    "deepseek-v4-pro": (0.2, 1.0),
+    "deepseek-chat": (0.1, 1.0),
+    "deepseek-reasoner": (0.1, 1.0),
+    "qwen3.7-plus": (0.2, 1.0),
+    "gemini-2.0-flash": (0.25, 1.0),
+    "gpt-4o-mini": (0.5, 1.0),
+    "claude-haiku-4-5": (0.1, 1.25),
+    "claude-sonnet-4-6": (0.1, 1.25),
+}
+#: JSON file overriding prices per model id, in USD per million tokens:
+#: {"deepseek-v4-flash": {"input": 0.09, "output": 0.18, "cache_read": 0.018,
+#:  "cache_write": 0.09}} — any key may be omitted.
+PRICE_TABLE_ENV = "AWOS_PRICE_TABLE"
+
+
+def _price_overrides() -> dict:
+    path = os.getenv(PRICE_TABLE_ENV, "").strip()
+    if not path:
+        return {}
     try:
-        from . import usage_record
-    except ImportError:
-        import usage_record
+        import json
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _model_keys(model: str) -> list[str]:
+    keys = [model, model.rsplit("/", 1)[-1]]
+    return keys + [k.replace(".", "-") for k in keys]
+
+
+def price_table(model: str) -> dict:
+    """USD per million tokens for `model`: input, output, cache_read, cache_write.
+
+    Base prices come from agent_loop.PRICES (0 for an unpriced or local model);
+    cache prices from CACHE_PRICE_FACTORS; AWOS_PRICE_TABLE overrides any of them.
+    """
     try:
         from .agent_loop import _price_for
     except ImportError:
         from agent_loop import _price_for
-    usage = getattr(response, "usage", None)
-    input_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
-    output_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
-    price_in, price_out = _price_for(model) or (0.0, 0.0)
+    price_in, price_out = (_price_for(model or "") or (0.0, 0.0)) if model else (0.0, 0.0)
+    read_f, write_f = 1.0, 1.0
+    keys = _model_keys(model or "")
+    match = next((k for k in keys if k in CACHE_PRICE_FACTORS), None) or next(
+        (name for k in keys for name in CACHE_PRICE_FACTORS if k.startswith(name)), None)
+    if match:
+        read_f, write_f = CACHE_PRICE_FACTORS[match]
+    table = {"input": price_in, "output": price_out,
+             "cache_read": price_in * read_f, "cache_write": price_in * write_f}
+    if not local_mode():
+        overrides = _price_overrides()
+        for key in keys:
+            entry = overrides.get(key)
+            if isinstance(entry, dict):
+                for name in table:
+                    value = entry.get(name)
+                    if isinstance(value, (int, float)) and not isinstance(value, bool):
+                        table[name] = float(value)
+                if "input" in entry and "cache_read" not in entry:
+                    table["cache_read"] = table["input"] * read_f
+                if "input" in entry and "cache_write" not in entry:
+                    table["cache_write"] = table["input"] * write_f
+                break
+    return table
+
+
+def _uget(obj: Any, name: str) -> Any:
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        return obj.get(name)
+    value = getattr(obj, name, None)
+    if value is None:
+        extra = getattr(obj, "model_extra", None)
+        if isinstance(extra, dict):
+            value = extra.get(name)
+    return value
+
+
+def _uint(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def usage_tokens(usage: Any, timings: Any = None) -> dict:
+    """Token counts from any usage shape we meet, normalised.
+
+    Returns {"input", "cached", "cache_write", "output"} where `input` is the
+    *whole* prompt (cached and written tokens included) and `cached` /
+    `cache_write` are subsets of it. Shapes:
+      - OpenAI / OpenRouter: prompt_tokens, prompt_tokens_details.cached_tokens
+        and .cache_write_tokens (OpenRouter);
+      - DeepSeek direct: prompt_cache_hit_tokens;
+      - Anthropic: input_tokens excludes cache_read_input_tokens and
+        cache_creation_input_tokens, so they are added back;
+      - llama-server: `timings.cache_n` when usage carries no cached count.
+    Missing fields count as 0; never raises.
+    """
+    out = {"input": 0, "cached": 0, "cache_write": 0, "output": 0}
+    try:
+        if _uget(usage, "prompt_tokens") is not None or _uget(usage, "completion_tokens") is not None:
+            out["input"] = _uint(_uget(usage, "prompt_tokens"))
+            out["output"] = _uint(_uget(usage, "completion_tokens"))
+            details = _uget(usage, "prompt_tokens_details")
+            out["cached"] = _uint(_uget(details, "cached_tokens")) or _uint(
+                _uget(usage, "prompt_cache_hit_tokens"))
+            out["cache_write"] = _uint(_uget(details, "cache_write_tokens"))
+        elif usage is not None:  # Anthropic Messages shape
+            read = _uint(_uget(usage, "cache_read_input_tokens"))
+            write = _uint(_uget(usage, "cache_creation_input_tokens"))
+            out["input"] = _uint(_uget(usage, "input_tokens")) + read + write
+            out["output"] = _uint(_uget(usage, "output_tokens"))
+            out["cached"], out["cache_write"] = read, write
+        if not out["cached"] and timings is not None:
+            out["cached"] = _uint(_uget(timings, "cache_n"))
+        # A provider never caches more than it was sent.
+        out["cached"] = min(out["cached"], out["input"])
+        out["cache_write"] = min(out["cache_write"], out["input"] - out["cached"])
+    except Exception:
+        pass
+    return out
+
+
+def cache_hit_ratio(input_tokens: Any, cached_tokens: Any) -> Optional[float]:
+    """cached / input, or None when either is unknown or input is 0."""
+    try:
+        if input_tokens is None or cached_tokens is None or int(input_tokens) <= 0:
+            return None
+        return round(min(1.0, max(0.0, int(cached_tokens) / int(input_tokens))), 4)
+    except (TypeError, ValueError):
+        return None
+
+
+def estimate_cost_cached(model: str, input_tokens: int, output_tokens: int,
+                         cached_tokens: int = 0, cache_write_tokens: int = 0) -> float:
+    """USD cost with cached input priced at the cache-read rate.
+
+    `input_tokens` is the whole prompt; `cached_tokens` and
+    `cache_write_tokens` are the parts of it read from / written to cache.
+    With no cache counts this equals agent_loop.estimate_cost.
+    """
+    table = price_table(model)
+    total = _uint(input_tokens)
+    cached = min(_uint(cached_tokens), total)
+    written = min(_uint(cache_write_tokens), total - cached)
+    fresh = total - cached - written
+    return (fresh * table["input"] + cached * table["cache_read"]
+            + written * table["cache_write"] + _uint(output_tokens) * table["output"]) / 1_000_000
+
+
+def response_cost(model: str, response: Any) -> tuple[float, str]:
+    """(USD, source) for one response: the provider's own `usage.cost` when it
+    reports one (OpenRouter always does; it already prices cache reads), else
+    estimate_cost_cached from the usage counts. source is "provider" or "estimate"."""
+    usage = _uget(response, "usage")
+    reported = _uget(usage, "cost")
+    if isinstance(reported, (int, float)) and not isinstance(reported, bool):
+        return float(reported), "provider"
+    tok = usage_tokens(usage, _uget(response, "timings"))
+    return estimate_cost_cached(model, tok["input"], tok["output"], tok["cached"],
+                                tok["cache_write"]), "estimate"
+
+
+def _record_utility_spend(request_type: str, model: str, response: Any, tracker: Any) -> float:
+    """One call's tokens into TokenTracker + BudgetLedger; returns its USD cost.
+
+    Cache-aware: cached input is priced at the cache-read rate. The ledger gets
+    the call's blended input price so its USD matches the returned cost."""
+    try:
+        from . import usage_record
+    except ImportError:
+        import usage_record
+    tok = usage_tokens(getattr(response, "usage", None), _uget(response, "timings"))
+    input_tokens, output_tokens = tok["input"], tok["output"]
+    table = price_table(model)
+    cost = estimate_cost_cached(model, input_tokens, output_tokens, tok["cached"],
+                                tok["cache_write"])
+    price_out = table["output"]
+    input_cost = cost - output_tokens * price_out / 1_000_000
+    price_in = (input_cost * 1_000_000 / input_tokens) if input_tokens else table["input"]
     try:
         usage_record.record_api_usage(
             request_type=request_type,
@@ -484,7 +665,7 @@ def _record_utility_spend(request_type: str, model: str, response: Any, tracker:
         )
     except Exception:
         pass
-    return usage_record.cost_from_tokens(input_tokens, output_tokens, price_in, price_out)
+    return cost
 
 
 def utility_chat(
@@ -560,7 +741,8 @@ def utility_chat(
         info["finish_reason"] = finish
         good = bool(text.strip()) and finish != "length"
         record_response(role, model, response, cost_usd=call_cost, visible_chars=len(text),
-                        attempt=attempt, final=good or attempt == len(attempts))
+                        attempt=attempt, final=good or attempt == len(attempts),
+                        request_type=request_type)
         if good:
             return text, info
     common = dict(model=model, role=role, finish_reason=finish, text=text,
