@@ -363,3 +363,165 @@ def test_utf16_odd_offset_secret_blocks(setup):
     (ws / "u16o.bin").write_bytes(b"\x00\x01\x02" + ("AKIA" + "Q" * 16 + " ").encode("utf-16-le"))
     res = finish(job, str(ws), {}, env=CLEAN_ENV)
     assert res["status"] == "blocked_secret"
+
+
+# --------------------------------------------------------------------------- #
+# Regression tests for review r3 findings
+# --------------------------------------------------------------------------- #
+SK = "sk-A1b2C3d4E5f6G7h8I9j0K1l2M3n4"
+
+
+def _no_awos_branch(repo):
+    return git(repo, "branch", "--list", "awos/*").strip() == ""
+
+
+def test_secret_in_file_name_blocks(setup):
+    repo, ws, job, _ = setup
+    (ws / f"{SK}.txt").write_text("")
+    res = finish(job, str(ws), {}, env=CLEAN_ENV)
+    assert res["status"] == "blocked_secret" and _no_awos_branch(repo)
+    assert SK not in Path(res["report_path"]).read_text()
+    assert SK not in Path(res["handoff_path"]).read_text()
+
+
+def test_secret_in_directory_name_blocks(setup):
+    repo, ws, job, _ = setup
+    d = ws / ("ghp_" + "abcdefghijklmnopqrstuvwxyz0123456789")
+    d.mkdir()
+    (d / "x.txt").write_text("hi\n")
+    res = finish(job, str(ws), {}, env=CLEAN_ENV)
+    assert res["status"] == "blocked_secret" and _no_awos_branch(repo)
+
+
+def test_utf16_secret_after_8000_bytes_blocks(setup):
+    repo, ws, job, _ = setup
+    (ws / "t.txt").write_bytes(b"x" * 9000 + b"\n\x00" + SK.encode("utf-16-le") + b"\n")
+    res = finish(job, str(ws), {}, env=CLEAN_ENV)
+    assert res["status"] == "blocked_secret" and _no_awos_branch(repo)
+
+
+@pytest.mark.parametrize("enc", ["utf-32", "utf-32-le", "utf-32-be"])
+def test_utf32_secret_blocks(setup, enc):
+    repo, ws, job, _ = setup
+    (ws / "f.bin").write_bytes(SK.encode(enc))
+    res = finish(job, str(ws), {}, env=CLEAN_ENV)
+    assert res["status"] == "blocked_secret" and _no_awos_branch(repo)
+
+
+@pytest.mark.parametrize("enc", ["utf-16", "utf-16-be", "utf-32", "utf-32-be"])
+def test_non_ascii_env_secret_in_wide_encoding_blocks(setup, enc):
+    repo, ws, job, _ = setup
+    env = {"API_SECRET": "Pässwörd-Geheim99"}
+    (ws / "f.bin").write_bytes(("v=" + env["API_SECRET"]).encode(enc))
+    res = finish(job, str(ws), {}, env=env)
+    assert res["status"] == "blocked_secret" and _no_awos_branch(repo)
+    assert res["secret_scan"]["diff"][0]["name"] == "API_SECRET"
+
+
+def test_clean_filter_and_hooks_never_run(setup, tmp_path):
+    repo, ws, job, _ = setup
+    marker = tmp_path / "ran"
+    clean = tmp_path / "fake-lfs-clean.sh"
+    clean.write_text('#!/bin/sh\nmkdir -p "$GIT_DIR/lfs/objects"\n'
+                     'cat > "$GIT_DIR/lfs/objects/blob"\n'
+                     f'echo clean >> "{marker}"\n'
+                     'echo "version https://git-lfs.github.com/spec/v1"\n')
+    clean.chmod(0o755)
+    git(repo, "config", "filter.lfs.clean", str(clean))
+    git(repo, "config", "filter.lfs.required", "true")
+    fsm = tmp_path / "fsmonitor.sh"
+    fsm.write_text(f'#!/bin/sh\necho fsmonitor >> "{marker}"\n')
+    fsm.chmod(0o755)
+    git(repo, "config", "core.fsmonitor", str(fsm))
+    hook = repo / ".git" / "hooks" / "reference-transaction"
+    hook.write_text(f'#!/bin/sh\necho hook >> "{marker}"\n')
+    hook.chmod(0o755)
+    (ws / ".gitattributes").write_text("*.bin filter=lfs\n")
+    (ws / "s.bin").write_text(f"token={SK}\n")
+    res = finish(job, str(ws), {}, env=CLEAN_ENV)
+    assert res["status"] == "blocked_secret" and _no_awos_branch(repo)
+    assert not (repo / ".git" / "lfs").exists()
+    # the same config on a clean run: the raw (unfiltered) blob is handed off
+    (ws / "s.bin").write_text("harmless\n")
+    res = finish(job, str(ws), {}, env=CLEAN_ENV)
+    assert res["status"] == "handed_off"
+    assert git(repo, "show", f"{res['branch']}:s.bin") == "harmless\n"
+    assert not (repo / ".git" / "lfs").exists()
+    assert not marker.exists()
+
+
+def test_multiline_env_secret_redacted_in_report_and_blocks_diff(setup):
+    repo, ws, job, _ = setup
+    env = {"MY_TOKEN": "Zq9vXw8uYt7s\nRr6qPp5oNn4m"}
+    job["goal"] = "use " + env["MY_TOKEN"] + " now"
+    res = finish(job, str(ws), {}, env=env)
+    report = Path(res["report_path"]).read_text()
+    assert "Zq9vXw8uYt7s" not in report and "Rr6qPp5oNn4m" not in report
+    (ws / "calc.py").write_text("t = '''" + env["MY_TOKEN"] + "'''\n")
+    res = finish(job, str(ws), {}, env=env)
+    assert res["status"] == "blocked_secret"
+
+
+def test_overlapping_env_secrets_redacted_longest_first(setup):
+    repo, ws, job, _ = setup
+    env = {"A_TOKEN": "Qwertyuiop12", "B_TOKEN": "Qwertyuiop12ZZsuffixLEAK99"}
+    job["goal"] = "goal " + env["B_TOKEN"]
+    res = finish(job, str(ws), {}, env=env)
+    report = Path(res["report_path"]).read_text()
+    assert "ZZsuffixLEAK99" not in report and "[REDACTED:B_TOKEN]" in report
+
+
+def test_latin1_text_file_handed_off_not_crash(setup):
+    repo, ws, job, _ = setup
+    (ws / "l.txt").write_bytes(b"caf\xe9\n")
+    res = finish(job, str(ws), {}, env=CLEAN_ENV)
+    assert res["status"] == "handed_off" and Path(res["report_path"]).exists()
+
+
+def test_git_config_parameters_in_env_ignored(setup, monkeypatch):
+    repo, ws, job, _ = setup
+    monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'core.bigfilethreshold'='1k'")
+    (ws / "big.txt").write_bytes(b"y" * 5000)
+    res = finish(job, str(ws), {}, env=CLEAN_ENV)
+    assert res["status"] == "handed_off"
+
+
+@pytest.mark.parametrize("bad_id", ["-", "--------", "a" * 300])
+def test_degenerate_job_ids_rejected_up_front(setup, bad_id):
+    repo, ws, job, _ = setup
+    job["id"] = bad_id
+    (ws / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    with pytest.raises(handoff.HandoffError):
+        finish(job, str(ws), {}, env=CLEAN_ENV)
+    assert not _has_object(repo, _blob_sha(repo, b"def add(a, b):\n    return a + b\n"))
+
+
+def test_split_index_config_writes_nothing_to_git_dir(setup):
+    repo, ws, job, _ = setup
+    git(repo, "config", "core.splitIndex", "true")
+    before = sorted(p.name for p in (repo / ".git").iterdir())
+    (ws / "calc.py").write_text(f"k = '{SK}'\n")
+    res = finish(job, str(ws), {}, env=CLEAN_ENV)
+    assert res["status"] == "blocked_secret"
+    assert sorted(p.name for p in (repo / ".git").iterdir()) == before
+
+
+def test_preexisting_secret_in_base_file_does_not_block(setup):
+    repo, ws, job, _ = setup
+    (repo / "legacy.py").write_text(f"OLD = '{SK}'\n")
+    git(repo, "add", "legacy.py")
+    git(repo, "commit", "-q", "-m", "legacy")
+    job["base_commit"] = git(repo, "rev-parse", "HEAD").strip()
+    (ws / "legacy.py").write_text(f"OLD = '{SK}'\nNEW = 1\n")
+    res = finish(job, str(ws), {}, env=CLEAN_ENV)
+    assert res["status"] == "handed_off"
+
+
+def test_symlink_stored_as_target_not_followed(setup, tmp_path):
+    repo, ws, job, _ = setup
+    outside = tmp_path / "outside.txt"
+    outside.write_text(f"secret {SK}\n")
+    (ws / "link").symlink_to(outside)
+    res = finish(job, str(ws), {}, env=CLEAN_ENV)
+    assert res["status"] == "handed_off"
+    assert git(repo, "show", f"{res['branch']}:link") == str(outside)

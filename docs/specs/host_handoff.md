@@ -45,18 +45,23 @@ working tree:
    then the repo's `HEAD`. When it falls back to `HEAD`, it adds a warning.
 2. Set `GIT_INDEX_FILE` to a temporary file and run
    `git --git-dir=<repo> --work-tree=<workspace>`:
-   - `read-tree <base>`
-   - `add -A`
-   - `rm --cached` on the excluded paths
-   - `write-tree`
+   - `read-tree <base>`, then `ls-files --cached --others --exclude-standard`
+     to list paths (the workspace's `.gitignore` applies);
+   - `hash-object -w --no-filters` on every listed file (symlinks are hashed
+     as their target string, never followed). There is **no `git add`**, so
+     no clean filter (e.g. `filter=lfs`), attribute or hook ever sees
+     workspace content, and nothing lands in the user's `.git` (such as
+     `.git/lfs/objects`) before the scan;
+   - excluded paths are reverted to their base entry (or dropped);
+   - a fresh temp index is built with `update-index --index-info`, then
+     `write-tree`.
 
-   The workspace's `.gitignore` applies.
+   Nested repositories (untracked dirs with their own `.git`) are skipped
+   with a warning; base gitlinks are kept as-is.
 3. If the tree equals the base tree, return `no_changes`.
-4. Scan the added lines of `diff-tree -p base new` for secrets, plus the full
-   new content of every file git treats as binary (NUL bytes or a `-diff`
-   attribute; `--numstat` reports `-`), because the patch shows those only as
-   "Binary files differ". If a secret is found, return `blocked_secret` and
-   create no ref.
+4. Scan (see Credential guard) every changed path's **name** (when new) and
+   its **full new blob**, whatever git would call the file. If a secret is
+   found, return `blocked_secret` and create no ref.
 5. Run `commit-tree` with a fixed AWOS identity, so no user git config is
    needed.
 6. Copy into the user's repo only the objects reachable from the new commit
@@ -70,9 +75,21 @@ blocked secret-bearing content are therefore never written into the user's
 `.git/objects`, not even as unreferenced loose blobs. The temp dir is removed
 when `finish` returns.
 
-**Job id.** `job.id` must match `[A-Za-z0-9_-]+`; anything else raises
-`HandoffError` before any file is written, because the id forms both a path
-(`jobs/<id>/`) and a ref name.
+**Hardened git environment.** Every git call scrubs `GIT_CONFIG_PARAMETERS`,
+`GIT_CONFIG_COUNT/KEY_*/VALUE_*`, `GIT_EXTERNAL_DIFF` and `GIT_ATTR_SOURCE`
+from the caller's env, sets `GIT_ATTR_NOSYSTEM=1`, and forces (via
+`GIT_CONFIG_*`, which beats repo/global config) `core.bigFileThreshold=1024g`,
+`core.attributesFile=/dev/null`, `core.hooksPath=/dev/null`,
+`core.fsmonitor=false`, `core.splitIndex=false`, `core.untrackedCache=false`.
+`diff-tree --stat` runs with `--no-ext-diff --no-textconv`; git output is
+decoded with `errors="replace"`, and any unexpected exception still produces
+`status: error` plus a report. The dirty-checkout check uses
+`git --no-optional-locks status`.
+
+**Job id.** `job.id` must match `[A-Za-z0-9_-]+`, be at most 128 characters,
+and contain a character other than `-` (so `awos/<id8>` is never `awos/`);
+anything else raises `HandoffError` before any file or object is written,
+because the id forms both a path (`jobs/<id>/`) and a ref name.
 
 **Idempotency.** If `awos/<id8>` already exists with the same tree and parent,
 it is reused. This covers a re-run after a crash. If it exists with a
@@ -98,19 +115,28 @@ report as a merge-conflict warning.
 
 ## Credential guard
 
-Two scans run: one over the diff's added lines and one over the rendered
-report. They look for:
+Two scans run: one over the change (new path names plus full new blobs) and
+one over the rendered report. They look for:
 
 - **Known token shapes:** `sk-…` (OpenAI, Anthropic, OpenRouter),
   `ghp_`/`github_pat_`, `AKIA…`, `xox[abpr]-`, `AIza…`, and
   `-----BEGIN … PRIVATE KEY-----`.
 - **Literal environment values:** the values of variables whose names
   contain `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD` or `CREDENTIAL`,
-  where the value is at least 8 characters.
+  where the value is at least 8 characters. Matched against the whole text,
+  so multi-line values are found.
 
-A hit in the diff blocks the branch. A hit in the report text is redacted to
-`[REDACTED:<pattern>]` before the report is written, and is recorded as a
-warning. Findings name only the pattern or the variable name, never the
+Blob scanning: patterns run on a UTF-8 view, UTF-16 views at both byte
+offsets and UTF-32 views at all four (non-ASCII code units become spaces);
+env values are matched as their encoded bytes in UTF-8, UTF-16 LE/BE and
+UTF-32 LE/BE, so non-ASCII values match too. This runs on **every** changed
+blob, not only ones git's 8000-byte heuristic calls binary. A content finding
+counts only if the new blob has more occurrences than the base blob at the
+same path, so already-committed text never blocks.
+
+A hit in the change blocks the branch. The report is **always** redacted
+(env values longest-first, so overlapping values leave no suffix, then
+patterns) before it is written; a report hit is also recorded as a warning. Findings name only the pattern or the variable name, never the
 value. `handoff.json` is redacted field by field before serialising, so a
 secret containing `"` or `\` is still caught (redacting the JSON text would
 miss its escaped form).
