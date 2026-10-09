@@ -538,6 +538,27 @@ def _filename(line: str) -> Optional[str]:
     return None
 
 
+_TRAILING_PATH = re.compile(r"([\w\-./\\]+\.\w{1,8})\s*$")
+
+
+def _trailing_filename(line: str) -> Optional[str]:
+    """AWOS_FUZZY_APPLY: a path glued to the end of a prose line, e.g.
+    "...block for `pkg/mod.py`.pkg/mod.py" -> "pkg/mod.py". None when off."""
+    try:
+        from . import fuzzy_apply
+    except ImportError:
+        import fuzzy_apply
+    if not fuzzy_apply.enabled() or _FENCE.match(line):
+        return None
+    m = _TRAILING_PATH.search(line.rstrip().rstrip("`*:").rstrip())
+    if not m:
+        return None
+    path = m.group(1)
+    if path.startswith(".") and not path.startswith(("./", "../")):
+        path = path[1:]
+    return path
+
+
 def parse_blocks(reply: str) -> tuple[list[EditBlock], list[dict]]:
     """
     Aider-format blocks: a path line (optionally followed by a ``` fence), then
@@ -558,7 +579,7 @@ def parse_blocks(reply: str) -> tuple[list[EditBlock], list[dict]]:
         j, looked = i - 1, 0
         while j >= 0 and looked < 3:
             if lines[j].strip() and not _FENCE.match(lines[j]):
-                path = _filename(lines[j])
+                path = _filename(lines[j]) or _trailing_filename(lines[j])
                 break
             if lines[j].strip():
                 looked += 1
@@ -635,6 +656,8 @@ def _snapshot(root: Path, blocks: list[EditBlock], snap: dict) -> None:
     """Record each block's file bytes (None when absent) the first time it is seen."""
     for b in blocks:
         rel = _resolve_rel(root, b.path)
+        if rel is not None and b.search.strip() and not (root / rel).exists():
+            rel = _fuzzy_path(root, b.path.strip().strip("`")) or rel
         if rel is None or rel in snap:
             continue
         try:
@@ -664,6 +687,30 @@ def _static_gate_reject(target: Path, new_text: str, old_text: str) -> Optional[
     return None if ok else static_gate.rejection_message(str(target), msgs)
 
 
+def _fuzzy_path(root: Path, raw: str) -> Optional[str]:
+    """AWOS_FUZZY_APPLY: a missing relative path whose trailing components name
+    exactly one existing file (e.g. the prompt's "path/to/" prefix copied in
+    front of "pkg/mod.py") -> that file's relative path; else None."""
+    try:
+        from . import fuzzy_apply
+    except ImportError:
+        import fuzzy_apply
+    if not fuzzy_apply.enabled() or os.path.isabs(raw):
+        return None
+    parts = [p for p in raw.replace("\\", "/").split("/") if p not in ("", ".")]
+    for k in range(1, len(parts)):
+        cand = "/".join(parts[k:])
+        if (root / cand).is_file():
+            return cand
+    # Unique basename match anywhere in the project (outside .git/.awos).
+    if parts:
+        hits = [p for p in root.rglob(parts[-1])
+                if p.is_file() and not (PROTECTED_PARTS & set(p.relative_to(root).parts))]
+        if len(hits) == 1:
+            return hits[0].relative_to(root).as_posix()
+    return None
+
+
 def apply_blocks(project_root: str, blocks: list[EditBlock], *,
                  allow_test_edits: bool = True,
                  read_only: Optional[set] = None) -> tuple[list[str], list[dict]]:
@@ -682,6 +729,13 @@ def apply_blocks(project_root: str, blocks: list[EditBlock], *,
     for idx, b in enumerate(blocks):
         raw = b.path.strip().strip("`")
         target = (root / raw) if not os.path.isabs(raw) else Path(raw)
+        if b.search.strip() and not target.exists():
+            fixed = _fuzzy_path(root, raw)
+            if fixed is not None:
+                print(f"[FUZZY-APPLY] path {raw} -> {fixed}")
+                b = EditBlock(fixed, b.search, b.replace)
+                blocks[idx] = b
+                raw, target = fixed, root / fixed
         try:
             target = target.resolve()
             rel = target.relative_to(root).as_posix()
@@ -876,7 +930,7 @@ class _Reply:
 
 def _call(tap: _UsageTap, model: str, messages: list, *, max_tokens: int,
           tracker: Any, request_type: str, send_reasoning: bool,
-          temperature: float = 0) -> _Reply:
+          temperature: float = 0, extra_body: Optional[dict] = None) -> _Reply:
     """
     One call, never retried: reasoning per one_shot_reasoning(); a cut-off
     reply comes back with truncated=True and whatever text it had.
@@ -891,6 +945,7 @@ def _call(tap: _UsageTap, model: str, messages: list, *, max_tokens: int,
             max_tokens=max_tokens, tracker=tracker, request_type=request_type,
             temperature=temperature, send_reasoning=send_reasoning,
             reasoning=one_shot_reasoning(), retry=False,
+            **({"extra_body": extra_body} if extra_body else {}),
         )
         return _Reply(text=text, cost_usd=float(info.get("cost_usd") or 0.0),
                       calls=int(info.get("calls") or 1))
@@ -1005,6 +1060,34 @@ def build_repair_messages(task: str, project_root: str, failed: list[tuple[EditB
     return [{"role": "system", "content": REPAIR_PROMPT}, {"role": "user", "content": user}]
 
 
+# ── T4 copy-constrained SEARCH (AWOS_EDIT_GRAMMAR, local only) ──────────────
+
+def _edit_grammar_body(client: Any, project_root: str, ctx: OneShotContext,
+                       allow_test_edits: bool) -> Optional[dict]:
+    """{"grammar": GBNF} for llama-server when AWOS_EDIT_GRAMMAR=1 and the
+    client is local; None otherwise (cloud APIs take no grammar)."""
+    try:
+        from . import edit_grammar
+        from .providers import is_local_client
+    except ImportError:
+        import edit_grammar
+        from providers import is_local_client
+    if not edit_grammar.enabled():
+        return None
+    if not is_local_client(client):
+        print("[EDIT-GRAMMAR] skipped: client is not the local server")
+        return None
+    read_only = set(ctx.read_only)
+    targets = [r for r in list(ctx.files) + list(ctx.sections)
+               if allow_test_edits or r not in read_only]
+    grammar, note = edit_grammar.grammar_for_files(project_root, targets)
+    if grammar is None:
+        print(f"[EDIT-GRAMMAR] skipped: {note}")
+        return None
+    print(f"[EDIT-GRAMMAR] sending grammar: {note}")
+    return {"grammar": grammar}
+
+
 # ── One shot ─────────────────────────────────────────────────────────────────
 
 def run_one_shot(client: Any, model: str, project_root: str, task: str,
@@ -1046,9 +1129,22 @@ def run_one_shot(client: Any, model: str, project_root: str, task: str,
     tap = _UsageTap(client)
     cap = max(int(max_tokens or 0), max_reply_tokens())
     send_reasoning = _sends_reasoning(client)
+    grammar_body = _edit_grammar_body(client, project_root, ctx, allow_test_edits)
     reply = _call(tap, model, build_messages(task, ctx), max_tokens=cap, tracker=tracker,
                   request_type="one_shot", send_reasoning=send_reasoning,
-                  temperature=temperature)
+                  temperature=temperature, extra_body=grammar_body)
+    if grammar_body and reply.error:
+        # llama-server rejected the grammar (or the call failed): ask once more
+        # unconstrained rather than lose the one-shot.
+        print(f"[EDIT-GRAMMAR] call failed with grammar ({reply.error[:160]}); "
+              "retrying without it")
+        first_cost, first_calls = reply.cost_usd, reply.calls
+        reply = _call(tap, model, build_messages(task, ctx), max_tokens=cap, tracker=tracker,
+                      request_type="one_shot", send_reasoning=send_reasoning,
+                      temperature=temperature)
+        reply.cost_usd += first_cost
+        reply.calls += first_calls
+        grammar_body = None   # not for the repair call either
     result.cost_usd, result.calls = reply.cost_usd, reply.calls
     result.reply, result.reply_chars = reply.text, len(reply.text)
     result.truncated = reply.truncated
@@ -1078,7 +1174,7 @@ def run_one_shot(client: Any, model: str, project_root: str, task: str,
         messages = build_repair_messages(task, project_root, repairable, budget)
         fix = _call(tap, model, messages, max_tokens=cap, tracker=tracker,
                     request_type="one_shot_repair", send_reasoning=send_reasoning,
-                    temperature=temperature)
+                    temperature=temperature, extra_body=grammar_body)
         result.repair_calls = 1
         result.calls += fix.calls
         result.cost_usd += fix.cost_usd
