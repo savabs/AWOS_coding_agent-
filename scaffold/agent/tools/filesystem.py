@@ -7,6 +7,11 @@ Tools provided:
   - ListDirTool     list directory contents
   - FindFilesTool   find files matching a glob pattern
   - GrepTool        search for a pattern across files
+  - ShowSymbolTool  one class/function body by name (AWOS_SKELETON_VIEW)
+
+AWOS_SKELETON_VIEW=1 (default 0) bounds read_file: a large .py file read
+without a range comes back as a skeleton, ranges are capped at ~100 lines,
+and `symbol=` shows one body. See docs/specs/skeleton_viewer.md.
 """
 
 from __future__ import annotations
@@ -19,8 +24,70 @@ from typing import Any, Optional
 
 from .base import Tool, ToolResult
 
+try:
+    from .. import skeleton as _skel
+except ImportError:  # tools/ imported as a top-level package
+    import skeleton as _skel  # type: ignore[no-redef]
+
 #: .env and .env.<anything>: the same names the sandbox denies.
 _DOTENV = re.compile(r"^\.env(\.[^/]*)?$")
+
+
+def skeleton_view_enabled() -> bool:
+    """AWOS_SKELETON_VIEW: bounded file views (trick T5). Default off."""
+    return os.getenv("AWOS_SKELETON_VIEW", "0").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.getenv(name, "") or default))
+    except ValueError:
+        return default
+
+
+def skeleton_min_lines() -> int:
+    """Files at least this long open as a skeleton/window when read whole."""
+    return _env_int("AWOS_SKELETON_MIN_LINES", 300)
+
+
+def skeleton_max_lines() -> int:
+    """Most lines one read_file call returns while the view is on."""
+    return _env_int("AWOS_SKELETON_MAX_LINES", _skel.WINDOW_LINES)
+
+
+def _skeleton_log(path: Path, total: int, what: str, chars: int) -> None:
+    try:
+        print(f"[SKELETON] {path.name} {total} lines -> {what} {chars} chars", flush=True)
+    except Exception:
+        pass
+
+
+def _show_symbol(path: Path, content: str, query: str) -> ToolResult:
+    """One symbol's body from `content`, capped like a range read."""
+    if path.suffix != ".py":
+        return ToolResult.fail(f"symbol= works on Python files only; use start_line/end_line for {path.name}")
+    try:
+        match, _ = _skel.find_symbol(content, query)
+        body = _skel.show_symbol(content, query)
+    except SyntaxError as e:
+        return ToolResult.fail(f"Cannot parse {path.name} ({e}); use start_line/end_line")
+    except KeyError as e:
+        return ToolResult.fail(f"{e.args[0]} in {path.name}. read_file without a range lists them.")
+    cap = 3 * skeleton_max_lines()  # a whole body is one unit; only giants are cut
+    span = match.last - match.first + 1
+    if span > cap:
+        lines = content.splitlines(keepends=True)
+        end = match.first + skeleton_max_lines() - 1
+        body = (f"{match.kind} {match.qualname}: lines {match.first}-{match.last} "
+                f"({span} lines; showing {match.first}-{end}). Read a method by name, "
+                f"or continue with start_line={end + 1}.\n"
+                + _skel.numbered(lines[match.first - 1:end], match.first))
+    _skeleton_log(path, len(content.splitlines()), f"symbol {query}", len(body))
+    return ToolResult.ok(
+        text=f"File: {path}\n\n{body}",
+        data={"path": str(path), "content": body, "symbol": match.qualname,
+              "start_line": match.first, "end_line": match.last},
+    )
 
 
 def _line_numbers(value: Any) -> list[int]:
@@ -86,15 +153,24 @@ class ReadFileTool(_RootedTool):
 
     @property
     def description(self) -> str:
+        if skeleton_view_enabled():
+            return (
+                "Read a file. Large Python files read without a range return a skeleton "
+                "(class/def signatures with line ranges); then read a body with symbol= "
+                f"or a start_line/end_line range (at most {skeleton_max_lines()} lines per call)."
+            )
         return "Read the contents of a file on the local filesystem. Supports optional start/end line numbers."
 
     @property
     def parameters(self) -> dict[str, str]:
-        return {
+        params = {
             "path": "Absolute or relative path to the file",
             "start_line": "First line to read, 1-indexed (optional)",
             "end_line": "Last line to read, inclusive (optional)",
         }
+        if skeleton_view_enabled():
+            params["symbol"] = "Class, function or Class.method whose body to show (optional, Python)"
+        return params
 
     def validate(self, args: dict[str, Any]) -> list[str]:
         if "path" not in args or not args["path"].strip():
@@ -119,6 +195,11 @@ class ReadFileTool(_RootedTool):
         lines = content.splitlines(keepends=True)
         total = len(lines)
 
+        if skeleton_view_enabled():
+            bounded = self._bounded(path, content, lines, args)
+            if bounded is not None:
+                return bounded
+
         start_nums = _line_numbers(args.get("start_line"))
         end_nums = _line_numbers(args.get("end_line"))
         # A range packed into start_line ("[20, 55]") supplies the end too.
@@ -136,6 +217,97 @@ class ReadFileTool(_RootedTool):
             text=f"File: {path} (lines {start+1}–{end} of {total})\n\n{excerpt}",
             data={"path": str(path), "content": excerpt, "total_lines": total},
         )
+
+    def _bounded(self, path: Path, content: str, lines: list[str],
+                 args: dict[str, Any]) -> Optional[ToolResult]:
+        """
+        The AWOS_SKELETON_VIEW answer, or None for the unbounded path (a small
+        file read whole). symbol= shows one body; a range is capped at
+        skeleton_max_lines(); a large file read whole opens as a skeleton
+        (.py) or its first window (anything else).
+        """
+        total = len(lines)
+        query = args.get("symbol")
+        if isinstance(query, str) and query.strip():
+            return _show_symbol(path, content, query)
+
+        start_nums = _line_numbers(args.get("start_line"))
+        end_nums = _line_numbers(args.get("end_line"))
+        cap = skeleton_max_lines()
+        if not start_nums and not end_nums:
+            if total < skeleton_min_lines():
+                return None
+            if path.suffix == ".py":
+                try:
+                    skel = _skel.skeleton(content, path.name)
+                except (SyntaxError, ValueError):
+                    skel = None
+                if skel is not None:
+                    _skeleton_log(path, total, "skeleton", len(skel))
+                    text = (f"File: {path} ({total} lines, too long to show whole)\n\n{skel}\n"
+                            f"Next: read_file with start_line/end_line from the L<a>-<b> ranges "
+                            f"above (at most {cap} lines per call), or symbol=\"Class.method\" "
+                            "for one whole body.")
+                    return ToolResult.ok(text=text, data={"path": str(path), "content": skel,
+                                                          "total_lines": total, "skeleton": True})
+            start, end = 1, min(total, cap)
+        else:
+            start = max(1, start_nums[0] if start_nums else 1)
+            end = end_nums[0] if end_nums else (start_nums[1] if len(start_nums) > 1 else total)
+            if end < 1:
+                end = total
+            end = min(total, max(end, start))
+            start = min(start, max(1, total))
+        asked_end = end
+        end = min(end, start + cap - 1)
+        excerpt = _skel.numbered(lines[start - 1:end], start)
+        note = ""
+        if end < asked_end or (not start_nums and not end_nums and end < total):
+            note = (f"\n[showing {end - start + 1} of {total} lines; at most {cap} per call. "
+                    f"Continue with start_line={end + 1}"
+                    + (", or use symbol= for one body" if path.suffix == ".py" else "") + ".]")
+            _skeleton_log(path, total, f"window {start}-{end}", len(excerpt))
+        return ToolResult.ok(
+            text=f"File: {path} (lines {start}–{end} of {total})\n\n{excerpt}{note}",
+            data={"path": str(path), "content": excerpt, "total_lines": total},
+        )
+
+
+class ShowSymbolTool(_RootedTool):
+    """Show one class or function from a Python file, by (dotted) name."""
+
+    @property
+    def name(self) -> str:
+        return "show_symbol"
+
+    @property
+    def description(self) -> str:
+        return ("Show the full source of one class or function in a Python file, with line "
+                "numbers. Name it as in the read_file skeleton: Class, function or Class.method.")
+
+    @property
+    def parameters(self) -> dict[str, str]:
+        return {
+            "path": "Absolute or relative path to the Python file",
+            "symbol": "Class, function or Class.method",
+        }
+
+    def validate(self, args: dict[str, Any]) -> list[str]:
+        missing = [k for k in ("path", "symbol") if not str(args.get(k) or "").strip()]
+        return [f"Missing required parameter: '{k}'" for k in missing]
+
+    def execute(self, args: dict[str, Any]) -> ToolResult:
+        path = self._resolve(args["path"])
+        refusal = self._refusal(path)
+        if refusal:
+            return ToolResult.fail(refusal)
+        if not path.is_file():
+            return ToolResult.fail(f"File not found: {path}")
+        try:
+            content = path.read_text(encoding="utf-8", errors="replace")
+        except Exception as e:
+            return ToolResult.fail(f"Cannot read file: {e}")
+        return _show_symbol(path, content, str(args["symbol"]))
 
 
 class WriteFileTool(_RootedTool):
