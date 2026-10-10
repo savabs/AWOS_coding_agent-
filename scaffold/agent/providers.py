@@ -52,16 +52,34 @@ _VENDORS = (
 #: agent-loop call hang 12+ minutes. A timed-out call raises, which AgentLoop
 #: turns into a clean `model_error` stop.
 DEFAULT_MODEL_TIMEOUT_S = 120.0
+#: Local default: a local server (AWOS_PROVIDER=local) on laptop hardware can
+#: legitimately take minutes per long-context call; 120 s cut off live T4 runs
+#: on the M5. Cloud keeps DEFAULT_MODEL_TIMEOUT_S.
+DEFAULT_LOCAL_MODEL_TIMEOUT_S = 900.0
 DEFAULT_MODEL_MAX_RETRIES = 2
 
 
+def default_model_timeout_s() -> float:
+    """900 s in local mode (AWOS_PROVIDER=local or a local/ agent model), else 120 s.
+
+    Worst case: with the default 2 SDK retries a hung local call blocks for
+    up to 3 x 900 s = 45 minutes (cloud: 3 x 120 s = 6 minutes). Lower
+    AWOS_MODEL_TIMEOUT_S or AWOS_MODEL_MAX_RETRIES to bound it."""
+    return DEFAULT_LOCAL_MODEL_TIMEOUT_S if local_mode() else DEFAULT_MODEL_TIMEOUT_S
+
+
 def model_timeout_s() -> float:
-    """AWOS_MODEL_TIMEOUT_S, default 120; a bad or non-positive value falls back."""
+    """AWOS_MODEL_TIMEOUT_S, else the mode default (120 cloud / 900 local);
+    a bad or non-positive value falls back to the mode default."""
+    default = default_model_timeout_s()
+    raw = os.getenv("AWOS_MODEL_TIMEOUT_S", "").strip()
+    if not raw:
+        return default
     try:
-        value = float(os.getenv("AWOS_MODEL_TIMEOUT_S", DEFAULT_MODEL_TIMEOUT_S))
+        value = float(raw)
     except ValueError:
-        return DEFAULT_MODEL_TIMEOUT_S
-    return value if value > 0 else DEFAULT_MODEL_TIMEOUT_S
+        return default
+    return value if value > 0 else default
 
 
 def model_max_retries() -> int:
