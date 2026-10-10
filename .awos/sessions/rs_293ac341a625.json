@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "session_id": "rs_293ac341a625",
+  "goal": "G7 verify-fail replan proof",
+  "goal_hash": "b1059cc2ec",
+  "status": "completed",
+  "created_at": "2026-06-21T06:25:50Z",
+  "updated_at": "2026-06-21T06:25:51Z",
+  "paused_at": null,
+  "codebase_root": "/tmp/tmpaak4u2ft",
+  "reasoning_session_id": null,
+  "goal_graph_id": null,
+  "progress": {
+    "completed_task_ids": [
+      "1_r1"
+    ],
+    "failed_task_ids": [
+      1
+    ],
+    "current_task_id": null,
+    "total_tasks": 1,
+    "decomposition_depth": 0
+  },
+  "budget": {
+    "spent_usd": 0.0
+  },
+  "sandbox": {
+    "enabled": false,
+    "feature_id": null,
+    "worktree_path": null,
+    "branch": null
+  },
+  "parent_session_id": null,
+  "cancel_requested": false
+}

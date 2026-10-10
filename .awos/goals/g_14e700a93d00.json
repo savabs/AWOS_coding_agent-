@@ -1,0 +1,124 @@
+{
+  "root_id": "g_14e700a93d00",
+  "nodes": {
+    "g_14e700a93d00": {
+      "goal_id": "g_14e700a93d00",
+      "description": "Risky Stage 1 gauntlet — three tasks, one file each: (1) In awos.py add function _sandbox_summary(session) returning a one-line string with feature_id, worktree_path, branch, and whether the worktree directory exists when session.sandbox.enabled else empty string. (2) In cmd_sessions_show call _sandbox_summary and print Sandbox line when non-empty. (3) Add tests/test_awos_sessions_sandbox.py with two pytest tests for enabled and disabled sandbox on a mock RuntimeSession.",
+      "parent_ids": [],
+      "child_ids": [
+        "g_726c019b3e5d",
+        "g_6afbc2d34cdd",
+        "g_8c9971820d4a"
+      ],
+      "tasks": [],
+      "status": "in_progress",
+      "created_at": "2026-06-18T07:39:48Z",
+      "updated_at": "2026-06-18T07:40:22Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_9686b703"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_726c019b3e5d": {
+      "goal_id": "g_726c019b3e5d",
+      "description": "Add _sandbox_summary function to awos.py.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "awos.py",
+          "action": "Add _sandbox_summary function to awos.py.",
+          "function_signature": "def _sandbox_summary(session) -> str:",
+          "constraints": [
+            "Import `os` module if not already present.",
+            "If `session.sandbox.enabled` is False, return an empty string.",
+            "If `session.sandbox.enabled` is True, construct a one-line string including `feature_id`, `worktree_path`, `branch`, and a boolean indicating if `worktree_path` exists using `os.path.exists`.",
+            "The format of the string must be consistent, e.g., 'Sandbox: feature_id=..., path=..., branch=..., exists=...'"
+          ],
+          "complexity": "medium",
+          "file": "awos.py"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-18T07:40:22Z",
+      "updated_at": "2026-06-18T07:40:30Z",
+      "completed_at": "2026-06-18T07:40:30Z",
+      "session_ids": [
+        "orch_9686b703"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_6afbc2d34cdd": {
+      "goal_id": "g_6afbc2d34cdd",
+      "description": "Call _sandbox_summary in cmd_sessions_show and print the output.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "task_type": "edit_file",
+          "path": "src/cli/main.py",
+          "action": "Call _sandbox_summary in cmd_sessions_show and print the output.",
+          "function_signature": "def cmd_sessions_show(session_obj, *args, **kwargs):",
+          "constraints": [
+            "Import `_sandbox_summary` from `awos`.",
+            "Within the `cmd_sessions_show` function, call `_sandbox_summary` with the appropriate `session_obj`.",
+            "If the returned string is not empty, print it to the console."
+          ],
+          "complexity": "low",
+          "file": "src/cli/main.py"
+        }
+      ],
+      "status": "pending",
+      "created_at": "2026-06-18T07:40:22Z",
+      "updated_at": "2026-06-18T07:40:22Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_9686b703"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_8c9971820d4a": {
+      "goal_id": "g_8c9971820d4a",
+      "description": "Add pytest tests for the _sandbox_summary function.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 3,
+          "task_type": "create_file",
+          "path": "tests/test_awos_sessions_sandbox.py",
+          "action": "Add pytest tests for the _sandbox_summary function.",
+          "content_hint": "Create a `pytest` file. Include necessary imports like `pytest`, `unittest.mock`, and `awos`. Define a mock `RuntimeSession` class or use `MagicMock`. Write two tests: one for when the sandbox is enabled (asserting the correct summary string is returned, mocking `os.path.exists`), and one for when the sandbox is disabled (asserting an empty string is returned).",
+          "complexity": "medium",
+          "file": "tests/test_awos_sessions_sandbox.py",
+          "_placement_validation": {
+            "ok": true,
+            "path": "tests/test_awos_sessions_sandbox.py",
+            "artifact_kind": "test",
+            "expected_folder": "tests",
+            "issues": [],
+            "score": 1.0
+          },
+          "artifact_kind": "test",
+          "placement_ok": true
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-18T07:40:22Z",
+      "updated_at": "2026-06-18T07:40:36Z",
+      "completed_at": "2026-06-18T07:40:36Z",
+      "session_ids": [
+        "orch_9686b703"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

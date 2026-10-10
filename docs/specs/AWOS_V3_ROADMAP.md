@@ -1,3 +1,9 @@
+---
+title: "AWOS v3 Roadmap — Closing All Gaps"
+tags:
+  - doc/spec
+---
+
 # AWOS v3 Roadmap — Closing All Gaps
 
 **Full plan:** [AWOS_V3_ROADMAP.html](AWOS_V3_ROADMAP.html)
@@ -50,3 +56,8 @@
 ---
 
 **22 hours total. Say "implement week 1" to start.**
+
+## Related
+
+- _(add links to related documents here)_
+

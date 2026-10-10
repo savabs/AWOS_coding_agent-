@@ -1,0 +1,31 @@
+{
+  "ok": true,
+  "checked_at": "2026-10-03T08:37:28Z",
+  "health_check": true,
+  "violations": [
+    {
+      "severity": "warn",
+      "check": "state_write_retry",
+      "arm": "on",
+      "job": 5,
+      "repeat": 1,
+      "detail": "notebook reply truncated (finish_reason=length), retried"
+    },
+    {
+      "severity": "warn",
+      "check": "state_write_retry",
+      "arm": "on",
+      "job": 6,
+      "repeat": 1,
+      "detail": "notebook reply truncated (finish_reason=length), retried"
+    },
+    {
+      "severity": "warn",
+      "check": "state_write_retry",
+      "arm": "on",
+      "job": 10,
+      "repeat": 1,
+      "detail": "notebook reply truncated (finish_reason=length), retried"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "name": "orders_export_filters",
+  "kind": "feature",
+  "goal": "Add filtering by date range and order status to the orders CSV export (`python -m ordertool export`), and expose it on the CLI as --from, --to and --status. Dates are YYYY-MM-DD and both ends of the range are inclusive (an order placed late on the --to day is included). The filters combine and also apply when writing with --output. Invalid dates or an unknown status should give a clear error message and a non-zero exit, not a traceback. Running export with no filters must produce exactly the same output as before.",
+  "max_turns": 150,
+  "max_cost_usd": 1.0,
+  "timeout_min": 30
+}

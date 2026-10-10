@@ -1,0 +1,7 @@
+{
+  "action": "resolve() mishandles paths. The project already has a helper that does this correctly.",
+  "file": "buggy.py",
+  "task_id": 1,
+  "complexity": "medium",
+  "notes": "pathutils.normalize_path already implements the required behaviour."
+}

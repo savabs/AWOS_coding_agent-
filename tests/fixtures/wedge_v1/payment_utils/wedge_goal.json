@@ -1,0 +1,12 @@
+{
+  "goal_assertions": {
+    "must_pass": [
+      "tests/test_payment.py::test_discount_ten_percent",
+      "tests/test_payment.py::test_tax_rounds_half_up",
+      "tests/test_payment.py::test_no_refund_opened"
+    ],
+    "must_still_pass": "python3 -m pytest tests/ -q --tb=no",
+    "forbidden_paths": ["tests/", "conftest.py"],
+    "max_wall_minutes": 90
+  }
+}

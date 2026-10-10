@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "session_id": "rs_7923f30bab12",
+  "goal": "Gauntlet G2 pause-mid-plan proof",
+  "goal_hash": "afc32f80af",
+  "status": "completed",
+  "created_at": "2026-06-18T08:57:05Z",
+  "updated_at": "2026-06-18T08:57:11Z",
+  "paused_at": null,
+  "codebase_root": "/home/becmachlean/2024/projects/AWOS_coding_agent",
+  "reasoning_session_id": null,
+  "goal_graph_id": null,
+  "progress": {
+    "completed_task_ids": [
+      1,
+      2,
+      3
+    ],
+    "failed_task_ids": [],
+    "current_task_id": null,
+    "total_tasks": 3,
+    "decomposition_depth": 0
+  },
+  "budget": {
+    "spent_usd": 0.0
+  },
+  "sandbox": {
+    "enabled": false,
+    "feature_id": null,
+    "worktree_path": null,
+    "branch": null
+  },
+  "parent_session_id": null,
+  "cancel_requested": false
+}

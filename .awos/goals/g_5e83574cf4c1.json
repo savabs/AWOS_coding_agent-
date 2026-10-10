@@ -1,0 +1,249 @@
+{
+  "root_id": "g_5e83574cf4c1",
+  "nodes": {
+    "g_5e83574cf4c1": {
+      "goal_id": "g_5e83574cf4c1",
+      "description": "Stage 1 long workload mission: eight docstring/comment edits in worktree sandbox (one file per task). Uses fixed plan — planner skipped.",
+      "parent_ids": [],
+      "child_ids": [
+        "g_e3db6f2c88de",
+        "g_60352f94d6d7",
+        "g_02ccf888781a",
+        "g_2d496f366242",
+        "g_4084adddd769",
+        "g_7fde7c45ef74",
+        "g_93a867498a5c",
+        "g_1e6888ebb9da"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-23T06:17:14Z",
+      "updated_at": "2026-06-24T15:13:39Z",
+      "completed_at": "2026-06-24T15:13:39Z",
+      "session_ids": [
+        "orch_96c2bcd2",
+        "orch_fd2482cc"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_e3db6f2c88de": {
+      "goal_id": "g_e3db6f2c88de",
+      "description": "Add a one-line docstring to RuntimeSessionStore.checkpoint() stating it persists progress for pause and resume",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "scaffold/agent/runtime_session.py",
+          "file": "scaffold/agent/runtime_session.py",
+          "action": "Add a one-line docstring to RuntimeSessionStore.checkpoint() stating it persists progress for pause and resume",
+          "complexity": "low",
+          "test_result": {
+            "passed": 0,
+            "failed": 0,
+            "errors": 0,
+            "pass_rate": 0.0,
+            "raw_output": "Tests skipped — set AWOS_SAFE_TO_RUN_TESTS=1 to enable.",
+            "timed_out": false,
+            "test_command": [],
+            "no_tests_found": true
+          }
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-23T06:17:20Z",
+      "updated_at": "2026-06-24T15:13:09Z",
+      "completed_at": "2026-06-24T15:13:09Z",
+      "session_ids": [
+        "orch_96c2bcd2",
+        "orch_fd2482cc"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_60352f94d6d7": {
+      "goal_id": "g_60352f94d6d7",
+      "description": "Add a one-line docstring to replan_task_after_verify_fail() explaining it runs after verifier rejection",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "task_type": "edit_file",
+          "path": "scaffold/agent/plan_actions.py",
+          "file": "scaffold/agent/plan_actions.py",
+          "action": "Add a one-line docstring to replan_task_after_verify_fail() explaining it runs after verifier rejection",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-23T06:17:20Z",
+      "updated_at": "2026-06-24T15:13:12Z",
+      "completed_at": "2026-06-24T15:13:12Z",
+      "session_ids": [
+        "orch_96c2bcd2",
+        "orch_fd2482cc"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_02ccf888781a": {
+      "goal_id": "g_02ccf888781a",
+      "description": "Add a one-line docstring to finalize() noting pause keeps worktree while completed may commit",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 3,
+          "task_type": "edit_file",
+          "path": "scaffold/agent/virtual_execution_runtime.py",
+          "file": "scaffold/agent/virtual_execution_runtime.py",
+          "action": "Add a one-line docstring to finalize() noting pause keeps worktree while completed may commit",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-23T06:17:20Z",
+      "updated_at": "2026-06-24T15:13:15Z",
+      "completed_at": "2026-06-24T15:13:15Z",
+      "session_ids": [
+        "orch_96c2bcd2",
+        "orch_fd2482cc"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_2d496f366242": {
+      "goal_id": "g_2d496f366242",
+      "description": "Add a one-line comment immediately above _check_edit_fidelity explaining the fidelity gate for comment-above vs docstring edits",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 4,
+          "task_type": "edit_file",
+          "path": "scaffold/agent/verifier.py",
+          "file": "scaffold/agent/verifier.py",
+          "action": "Add a one-line comment immediately above _check_edit_fidelity explaining the fidelity gate for comment-above vs docstring edits",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-23T06:17:20Z",
+      "updated_at": "2026-06-24T15:13:25Z",
+      "completed_at": "2026-06-24T15:13:25Z",
+      "session_ids": [
+        "orch_96c2bcd2",
+        "orch_fd2482cc"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_4084adddd769": {
+      "goal_id": "g_4084adddd769",
+      "description": "Add a one-line module comment at the top: G1 gauntlet — SymbolIndex must index worktree paths",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 5,
+          "task_type": "edit_file",
+          "path": "tests/test_symbol_index_worktree.py",
+          "file": "tests/test_symbol_index_worktree.py",
+          "action": "Add a one-line module comment at the top: G1 gauntlet — SymbolIndex must index worktree paths",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-23T06:17:20Z",
+      "updated_at": "2026-06-24T15:13:27Z",
+      "completed_at": "2026-06-24T15:13:27Z",
+      "session_ids": [
+        "orch_96c2bcd2",
+        "orch_fd2482cc"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_7fde7c45ef74": {
+      "goal_id": "g_7fde7c45ef74",
+      "description": "Add one line to the module docstring: proves G2-style pause mid-plan and resume",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 6,
+          "task_type": "edit_file",
+          "path": "tests/test_pause_resume_orchestrator.py",
+          "file": "tests/test_pause_resume_orchestrator.py",
+          "action": "Add one line to the module docstring: proves G2-style pause mid-plan and resume",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-23T06:17:20Z",
+      "updated_at": "2026-06-24T15:13:31Z",
+      "completed_at": "2026-06-24T15:13:31Z",
+      "session_ids": [
+        "orch_96c2bcd2",
+        "orch_fd2482cc"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_93a867498a5c": {
+      "goal_id": "g_93a867498a5c",
+      "description": "Add G7 to the module docstring usage examples (verify-fail replan gauntlet)",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 7,
+          "task_type": "edit_file",
+          "path": "scripts/stage1_gauntlet_runner.py",
+          "file": "scripts/stage1_gauntlet_runner.py",
+          "action": "Add G7 to the module docstring usage examples (verify-fail replan gauntlet)",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-23T06:17:20Z",
+      "updated_at": "2026-06-24T15:13:34Z",
+      "completed_at": "2026-06-24T15:13:34Z",
+      "session_ids": [
+        "orch_96c2bcd2",
+        "orch_fd2482cc"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_1e6888ebb9da": {
+      "goal_id": "g_1e6888ebb9da",
+      "description": "Add a short Long mission paragraph mentioning awos mission start --long uses a fixed 8-task plan",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 8,
+          "task_type": "edit_file",
+          "path": "docs/missions/README.md",
+          "file": "docs/missions/README.md",
+          "action": "Add a short Long mission paragraph mentioning awos mission start --long uses a fixed 8-task plan",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-23T06:17:20Z",
+      "updated_at": "2026-06-24T15:13:39Z",
+      "completed_at": "2026-06-24T15:13:39Z",
+      "session_ids": [
+        "orch_96c2bcd2",
+        "orch_fd2482cc"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

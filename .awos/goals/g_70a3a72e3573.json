@@ -1,0 +1,50 @@
+{
+  "root_id": "g_70a3a72e3573",
+  "nodes": {
+    "g_70a3a72e3573": {
+      "goal_id": "g_70a3a72e3573",
+      "description": "In scaffold/agent/learning_policy.py add a one-line docstring to apply_kernel_defaults explaining it enables runtime sessions, learning, and MCTS unless opted out",
+      "parent_ids": [],
+      "child_ids": [
+        "g_e814e52e8e76"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-18T04:16:42Z",
+      "updated_at": "2026-06-18T04:16:51Z",
+      "completed_at": "2026-06-18T04:16:51Z",
+      "session_ids": [
+        "orch_77622ad5"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_e814e52e8e76": {
+      "goal_id": "g_e814e52e8e76",
+      "description": "Add a one-line docstring to the `apply_kernel_defaults` function.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "scaffold/agent/learning_policy.py",
+          "action": "Add a one-line docstring to the `apply_kernel_defaults` function.",
+          "function_signature": "apply_kernel_defaults",
+          "constraints": "The docstring must be exactly: 'Enables runtime sessions, learning, and MCTS unless opted out.'",
+          "complexity": "low",
+          "file": "scaffold/agent/learning_policy.py"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-18T04:16:47Z",
+      "updated_at": "2026-06-18T04:16:51Z",
+      "completed_at": "2026-06-18T04:16:51Z",
+      "session_ids": [
+        "orch_77622ad5"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

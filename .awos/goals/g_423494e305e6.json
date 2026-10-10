@@ -1,0 +1,48 @@
+{
+  "root_id": "g_423494e305e6",
+  "nodes": {
+    "g_423494e305e6": {
+      "goal_id": "g_423494e305e6",
+      "description": "Fix off-by-one bugs: find_max loop should include the last index; sum_range should use range(start, end + 1).",
+      "parent_ids": [],
+      "child_ids": [
+        "g_ed76a30454f2"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-23T06:17:26Z",
+      "updated_at": "2026-06-23T06:17:30Z",
+      "completed_at": "2026-06-23T06:17:30Z",
+      "session_ids": [
+        "orch_58141a08"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_ed76a30454f2": {
+      "goal_id": "g_ed76a30454f2",
+      "description": "Fix off-by-one bugs: find_max loop should include the last index; sum_range should use range(start, end + 1).",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "file": "buggy.py",
+          "path": "buggy.py",
+          "action": "Fix off-by-one bugs: find_max loop should include the last index; sum_range should use range(start, end + 1).",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-23T06:17:26Z",
+      "updated_at": "2026-06-23T06:17:30Z",
+      "completed_at": "2026-06-23T06:17:30Z",
+      "session_ids": [
+        "orch_58141a08"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

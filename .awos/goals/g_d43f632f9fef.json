@@ -1,0 +1,50 @@
+{
+  "root_id": "g_d43f632f9fef",
+  "nodes": {
+    "g_d43f632f9fef": {
+      "goal_id": "g_d43f632f9fef",
+      "description": "In scaffold/agent/worktree.py add a one-line docstring to register_worktree explaining it reattaches a persisted worktree path for session resume",
+      "parent_ids": [],
+      "child_ids": [
+        "g_1a3fac4c27a0"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-18T04:17:10Z",
+      "updated_at": "2026-06-18T04:17:20Z",
+      "completed_at": "2026-06-18T04:17:20Z",
+      "session_ids": [
+        "orch_e4bb6849"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_1a3fac4c27a0": {
+      "goal_id": "g_1a3fac4c27a0",
+      "description": "Add a one-line docstring to the `register_worktree` function.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "scaffold/agent/worktree.py",
+          "action": "Add a one-line docstring to the `register_worktree` function.",
+          "function_signature": "def register_worktree(path: Path):",
+          "constraints": "The docstring should explain it reattaches a persisted worktree path for session resume.",
+          "complexity": "low",
+          "file": "scaffold/agent/worktree.py"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-18T04:17:16Z",
+      "updated_at": "2026-06-18T04:17:20Z",
+      "completed_at": "2026-06-18T04:17:20Z",
+      "session_ids": [
+        "orch_e4bb6849"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

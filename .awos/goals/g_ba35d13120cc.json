@@ -1,0 +1,59 @@
+{
+  "root_id": "g_ba35d13120cc",
+  "nodes": {
+    "g_ba35d13120cc": {
+      "goal_id": "g_ba35d13120cc",
+      "description": "create docs/e2e_via_http_guide.md about deliverable routing",
+      "parent_ids": [],
+      "child_ids": [
+        "g_e161b83e2d3f"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-15T12:52:04Z",
+      "updated_at": "2026-06-15T12:52:04Z",
+      "completed_at": "2026-06-15T12:52:04Z",
+      "session_ids": [
+        "orch_3a446fb1"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_e161b83e2d3f": {
+      "goal_id": "g_e161b83e2d3f",
+      "description": "create docs/e2e_via_http_guide.md about deliverable routing",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "create_file",
+          "path": "docs/e2e_via_http_guide.md",
+          "file": "docs/e2e_via_http_guide.md",
+          "action": "create docs/e2e_via_http_guide.md about deliverable routing",
+          "content_hint": "create docs/e2e_via_http_guide.md about deliverable routing",
+          "complexity": "low",
+          "_placement_validation": {
+            "ok": true,
+            "path": "docs/e2e_via_http_guide.md",
+            "artifact_kind": "general",
+            "expected_folder": null,
+            "issues": [],
+            "score": 1.0
+          },
+          "artifact_kind": "general",
+          "placement_ok": true
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-15T12:52:04Z",
+      "updated_at": "2026-06-15T12:52:04Z",
+      "completed_at": "2026-06-15T12:52:04Z",
+      "session_ids": [
+        "orch_3a446fb1"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

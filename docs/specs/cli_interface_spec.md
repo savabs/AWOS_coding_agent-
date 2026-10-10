@@ -1,3 +1,9 @@
+---
+title: "CLI Interface Spec"
+tags:
+  - doc/spec
+---
+
 # CLI Interface Spec
 
 ## Interface
@@ -29,3 +35,8 @@ Commands:
 - `traces list`: tabular (session_id, goal, trace_count, timestamp)
 - `traces show`: formatted Thought→Action→Observation chain
 - `budget`: visual progress bar + numbers
+
+## Related
+
+- _(add links to related documents here)_
+

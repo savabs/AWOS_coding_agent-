@@ -1,0 +1,16 @@
+# .aiderignore — excluded from Aider repo map to save tokens
+# Add back with --read when you need them for context
+docs/
+wiki/
+*.html
+*.md
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.aider*
+node_modules/
+dist/
+build/
+*.log
+scaffold/tests/

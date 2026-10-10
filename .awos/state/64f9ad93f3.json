@@ -1,0 +1,15 @@
+{
+  "goal": "can you write me this rather than just giving me back in chat",
+  "goal_hash": "64f9ad93f3",
+  "started_at": "2026-06-13T03:34:53",
+  "last_updated": "2026-06-13T03:35:05",
+  "completed_task_ids": [
+    1,
+    2
+  ],
+  "failed_task_ids": [],
+  "session_ids": [
+    "orch_4c1b7f98"
+  ],
+  "status": "complete"
+}

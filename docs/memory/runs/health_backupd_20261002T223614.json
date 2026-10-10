@@ -1,0 +1,99 @@
+{
+  "ok": true,
+  "violations": [
+    {
+      "severity": "warn",
+      "check": "state_write_retry",
+      "arm": "on",
+      "job": 7,
+      "repeat": 1,
+      "detail": "notebook reply truncated (finish_reason=length), retried"
+    }
+  ],
+  "stats": {
+    "rows": 36,
+    "allowed_models": [
+      "deepseek/deepseek-v4-flash"
+    ],
+    "arms": {
+      "r1/off": {
+        "jobs": 12,
+        "invalid": 0,
+        "invalid_share": 0.0,
+        "invalid_reasons": {},
+        "billed_usd": 0.356625,
+        "call_log": ".awos/job_series/20261002T223614/off/state/.awos/llm_calls.jsonl",
+        "calls": 318,
+        "calls_by_component": {
+          "planner": 13,
+          "agent": 294,
+          "review": 11
+        },
+        "call_errors": 0,
+        "agent_replies": 294,
+        "agent_truncated": 0,
+        "agent_empty_replies": 0,
+        "agent_truncation_rate": 0.0,
+        "models_seen": {
+          "deepseek/deepseek-v4-flash": 636
+        },
+        "logged_cost_usd": 0.348111
+      },
+      "r1/on": {
+        "jobs": 12,
+        "invalid": 0,
+        "invalid_share": 0.0,
+        "invalid_reasons": {},
+        "billed_usd": 0.435775,
+        "notebook_chars": [
+          903,
+          1629,
+          2120,
+          2995,
+          3358,
+          3499,
+          3359,
+          3359,
+          3342,
+          3342,
+          3342,
+          3342
+        ],
+        "call_log": ".awos/job_series/20261002T223614/on/state/.awos/llm_calls.jsonl",
+        "calls": 339,
+        "calls_by_component": {
+          "planner": 12,
+          "agent": 299,
+          "notebook": 13,
+          "review": 15
+        },
+        "call_errors": 0,
+        "agent_replies": 299,
+        "agent_truncated": 1,
+        "agent_empty_replies": 2,
+        "agent_truncation_rate": 0.0033,
+        "models_seen": {
+          "deepseek/deepseek-v4-flash": 678
+        },
+        "logged_cost_usd": 0.440769
+      },
+      "r1/aider": {
+        "jobs": 12,
+        "invalid": 0,
+        "invalid_share": 0.0,
+        "invalid_reasons": {},
+        "billed_usd": 0.014553,
+        "aider_no_edit": {
+          "no_edits": 1,
+          "asked_for_files_it_had": 1
+        },
+        "aider_no_edit_invalid": 0
+      }
+    },
+    "jobs_dropped_any_arm": 0,
+    "jobs_total": 12,
+    "dropped_share": 0.0,
+    "fatal": 0,
+    "warn": 1
+  }
+}

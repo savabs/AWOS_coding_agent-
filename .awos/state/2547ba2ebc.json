@@ -1,0 +1,19 @@
+{
+  "goal": "Gauntlet G6 SIGINT: add a one-line comment to each of tests/fixtures/gauntlet_marker_a.py, tests/fixtures/gauntlet_marker_b.py, and tests/fixtures/gauntlet_marker_c.py",
+  "goal_hash": "2547ba2ebc",
+  "started_at": "2026-06-18T21:35:33",
+  "last_updated": "2026-06-20T13:57:35",
+  "completed_task_ids": [
+    1,
+    2,
+    3
+  ],
+  "failed_task_ids": [],
+  "session_ids": [
+    "orch_b94ddfcc",
+    "orch_4dcc2fa2",
+    "orch_bcd85f7c",
+    "orch_b39f989f"
+  ],
+  "status": "complete"
+}

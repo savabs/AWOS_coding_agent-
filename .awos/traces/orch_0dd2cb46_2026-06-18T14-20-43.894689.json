@@ -1,0 +1,8 @@
+{
+  "session_id": "orch_0dd2cb46",
+  "goal": "G3 failure hunt \u2014 force MCTS after worker fail",
+  "start_time": "2026-06-18T14:20:43.894689",
+  "total_cost": 0.0,
+  "final_success": false,
+  "traces": []
+}

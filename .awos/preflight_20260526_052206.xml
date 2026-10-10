@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='utf-8'?>
+<preflight-manifest timestamp="2026-05-26T05:22:06.148155">
+  <task>Add error handling</task>
+  <complexity score="5" interpretation="moderate" />
+  <model-tier tier-name="DeepSeek-Reasoner ($0.55/MTok, cost-safe)" provider="deepseek" model="deepseek-reasoner" max-tokens="8000" temperature="0.5" />
+  <cost-estimate usd="0.001650" input-tokens="2000" output-tokens="1000" />
+  <repository path="/test/repo" />
+  <files-involved>
+    <file>src/main.py</file>
+    <file>src/utils.py</file>
+  </files-involved>
+  <consent-status>pending</consent-status>
+</preflight-manifest>

@@ -16,7 +16,9 @@ import json
 import logging
 import os
 import re
+import shlex
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
@@ -25,7 +27,17 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ────────────────────────────────────────────────────────────
 _DEFAULT_TIMEOUT_SEC = 60
+#: The whole visible suite is slower than a few mapped files; a real project's
+#: suite (sqlparse, more-itertools) runs in seconds, so this is headroom.
+_FULL_SUITE_TIMEOUT_SEC = 180
 _SAFETY_ENV_VAR = "AWOS_SAFE_TO_RUN_TESTS"
+
+#: Directories never searched for tests (vendored code, envs, build output).
+_SKIP_DIRS = {
+    "node_modules", "venv", "env", "build", "dist", "__pycache__",
+    "site-packages", "htmlcov",
+}
+_MAX_WALK_FILES = 20000
 
 
 @dataclass
@@ -51,15 +63,52 @@ class TestResult:
     timed_out: bool = False
     test_command: List[str] = field(default_factory=list)
     no_tests_found: bool = False
+    #: "mapped" — only tests matched to the changed files ran; "full" — the
+    #: project's whole visible suite ran; "" — nothing was run.
+    mode: str = ""
+    #: pytest itself crashed before counting anything (internal error, usage
+    #: error, a config-discovery traceback): the tests could not run, which is
+    #: not "0 passed, 0 failed". no_tests_found is set too, so every consumer
+    #: treats it as no evidence rather than a red suite.
+    infra_error: bool = False
+    infra_reason: str = ""
+
+
+#: Through the running interpreter, not a bare `pytest` on PATH: without an
+#: activated venv the bare command is "not found", and verification silently
+#: ran nothing.
+_PYTEST_CMD = [sys.executable, "-m", "pytest", "--tb=short", "-q"]
+
+#: For a project with no pytest config: stop pytest's upward search. Without
+#: these, rootdir/inifile discovery stats pytest.ini, pyproject.toml, tox.ini
+#: and setup.cfg in every parent dir, and conftest.py lookup does the same; in
+#: the seatbelt sandbox a parent under /Users that holds one of those files
+#: (the AWOS checkout around a job workspace) answers EPERM and pytest dies
+#: before collecting. /dev/null as the ini adds nothing to the project tree
+#: (no file in the agent's diff) and exists in a container too; the paths are
+#: relative because the sandbox's cwd is the workspace in both backends.
+_NO_CONFIG_ARGS = ["-c", os.devnull, "--rootdir=.", "--confcutdir=."]
+
+#: pytest exit codes meaning it never got to run tests: interrupted (also
+#: collection errors), internal error, usage error.
+_PYTEST_CRASH_CODES = {2, 3, 4}
 
 
 class TestRunner:
     """Language-agnostic test executor with auto-detection."""
     __test__ = False  # suppress pytest collection warning
 
-    def __init__(self, project_root: str = ".", timeout_sec: int = _DEFAULT_TIMEOUT_SEC):
+    def __init__(
+        self,
+        project_root: str = ".",
+        timeout_sec: int = _DEFAULT_TIMEOUT_SEC,
+        sandbox=None,
+    ):
         self.project_root = Path(project_root)
         self.timeout_sec = timeout_sec
+        # When set, tests run inside it: pytest imports project code (and any
+        # conftest.py), which may have been written by the model.
+        self.sandbox = sandbox
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -97,7 +146,147 @@ class TestRunner:
             logger.info("[test_runner] No test framework detected")
             return TestResult(raw_output="No test framework detected.", no_tests_found=True)
 
-        return self._execute(cfg)
+        if cfg.runner != "pytest":
+            result = self._execute(cfg)
+            result.mode = "full"
+            return result
+        return self._run_pytest(cfg, changed_files or [])
+
+    # ── pytest: mapped tests first, else the whole visible suite ─────────
+
+    def _run_pytest(self, cfg: TestConfig, changed_files: List[str]) -> TestResult:
+        """
+        Run the tests mapped to changed_files; when the mapping finds none, or
+        they collect nothing, run the whole visible suite instead. Source and
+        test files are often named differently (sqlparse/sql.py is covered by
+        tests/test_tokenize.py), so an empty mapping is not "no tests".
+        """
+        # No cache plugin: nothing written to .pytest_cache, inside a sandbox
+        # or not. No color: ANSI codes would sit inside the summary line.
+        base = list(cfg.command) + ["-p", "no:cacheprovider", "--color=no"]
+        if not self._has_pytest_config():
+            base += _NO_CONFIG_ARGS
+        mapped = self.map_tests(changed_files)
+        if mapped:
+            result = self._execute(TestConfig("pytest", base + mapped, self.timeout_sec))
+            if not result.no_tests_found:
+                result.mode = "mapped"
+                logger.info("[test_runner] mode=mapped (%d test file(s))", len(mapped))
+                return result
+            logger.info("[test_runner] mapped tests collected nothing; running the full suite")
+
+        targets = self._full_suite_targets()
+        timeout = max(self.timeout_sec, _FULL_SUITE_TIMEOUT_SEC)
+        result = self._execute(TestConfig("pytest", base + targets, timeout))
+        result.mode = "full"
+        logger.info("[test_runner] mode=full targets=%s", targets or "(pytest config)")
+        return result
+
+    def find_test_files(self) -> List[str]:
+        """Visible pytest-style test files, relative to project_root, sorted."""
+        found: List[str] = []
+        seen = 0
+        root = str(self.project_root)
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [
+                d for d in dirnames
+                if not d.startswith(".") and d not in _SKIP_DIRS and not d.endswith(".egg-info")
+            ]
+            for name in filenames:
+                seen += 1
+                if name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py")):
+                    found.append(os.path.relpath(os.path.join(dirpath, name), root))
+            if seen > _MAX_WALK_FILES:
+                break
+        return sorted(found)
+
+    def map_tests(self, changed_files: List[str]) -> List[str]:
+        """
+        Test files matched to changed_files by name: a changed test file
+        itself, or test_<stem>.py / test_<stem>_*.py / <stem>_test.py for a
+        changed source file. Empty when nothing matches.
+        """
+        if not changed_files:
+            return []
+        tests = self.find_test_files()
+        mapped: List[str] = []
+        for changed in changed_files:
+            path = Path(changed)
+            if path.is_absolute():
+                try:
+                    path = path.relative_to(self.project_root.resolve())
+                except ValueError:
+                    continue
+            if path.suffix != ".py":
+                continue
+            name = path.name
+            if name.startswith("test_") or name.endswith("_test.py"):
+                if (self.project_root / path).is_file():
+                    mapped.append(str(path))
+                continue
+            stem = path.parent.name if path.stem == "__init__" else path.stem
+            stem = stem.lstrip("_")
+            if not stem:
+                continue
+            for test in tests:
+                tstem = Path(test).stem
+                if tstem in (f"test_{stem}", f"{stem}_test") or tstem.startswith(f"test_{stem}_"):
+                    mapped.append(test)
+        return list(dict.fromkeys(mapped))
+
+    def _full_suite_targets(self) -> List[str]:
+        """
+        Paths for a whole-suite run. With `testpaths` in the pytest config,
+        none: pytest uses it. Otherwise tests/ (or test/) when it holds tests,
+        else none and pytest discovers from the root.
+        """
+        if self._configured_testpaths():
+            return []
+        tests = self.find_test_files()
+        for d in ("tests", "test"):
+            if any(t.startswith(d + os.sep) for t in tests):
+                return [d]
+        return []
+
+    def _has_pytest_config(self) -> bool:
+        """
+        True when project_root holds a file pytest takes as its config, which
+        ends the upward search there. A pyproject.toml or setup.cfg without a
+        pytest section does not: pytest keeps walking up past it.
+        """
+        root = self.project_root
+        for name in ("pytest.ini", ".pytest.ini", "pytest.toml", ".pytest.toml"):
+            if (root / name).is_file():
+                return True
+        return (
+            "[tool.pytest" in self._read(root / "pyproject.toml")
+            or "[pytest]" in self._read(root / "tox.ini")
+            or "[tool:pytest]" in self._read(root / "setup.cfg")
+        )
+
+    def _configured_testpaths(self) -> bool:
+        root = self.project_root
+        for name, section in (
+            ("pytest.ini", "[pytest]"),
+            ("pyproject.toml", "[tool.pytest.ini_options]"),
+            ("tox.ini", "[pytest]"),
+            ("setup.cfg", "[tool:pytest]"),
+        ):
+            content = self._read(root / name)
+            if section not in content:
+                continue
+            body = content.split(section, 1)[1]
+            body = re.split(r"^\[", body, maxsplit=1, flags=re.MULTILINE)[0]
+            if re.search(r"^\s*testpaths\s*=", body, re.MULTILINE):
+                return True
+        return False
+
+    @staticmethod
+    def _read(path: Path) -> str:
+        try:
+            return path.read_text(encoding="utf-8") if path.is_file() else ""
+        except (OSError, UnicodeDecodeError):
+            return ""
 
     # ── Detection helpers ───────────────────────────────────────────────
 
@@ -105,19 +294,27 @@ class TestRunner:
         """Detect pytest via pytest.ini, pyproject.toml, or setup.cfg."""
         root = self.project_root
         if (root / "pytest.ini").exists():
-            return TestConfig("pytest", ["pytest", "--tb=short", "-q"])
+            return TestConfig("pytest", _PYTEST_CMD)
 
         pyproject = root / "pyproject.toml"
         if pyproject.exists():
             content = pyproject.read_text(encoding="utf-8")
             if "[tool.pytest" in content:
-                return TestConfig("pytest", ["pytest", "--tb=short", "-q"])
+                return TestConfig("pytest", _PYTEST_CMD)
 
         setup_cfg = root / "setup.cfg"
         if setup_cfg.exists():
             content = setup_cfg.read_text(encoding="utf-8")
             if "[tool:pytest]" in content:
-                return TestConfig("pytest", ["pytest", "--tb=short", "-q"])
+                return TestConfig("pytest", _PYTEST_CMD)
+
+        if "[pytest]" in self._read(root / "tox.ini"):
+            return TestConfig("pytest", _PYTEST_CMD)
+
+        # No pytest config: most real projects (sqlparse, more-itertools) have
+        # none, yet pytest runs their tests/ (unittest-style included).
+        if (root / "conftest.py").exists() or self.find_test_files():
+            return TestConfig("pytest", _PYTEST_CMD)
 
         return None
 
@@ -177,6 +374,8 @@ class TestRunner:
     def _execute(self, cfg: TestConfig) -> TestResult:
         """Run the configured test command and parse output."""
         logger.info("[test_runner] Running: %s (timeout=%ds)", " ".join(cfg.command), cfg.timeout_sec)
+        if self.sandbox is not None:
+            return self._execute_in_sandbox(cfg)
         try:
             result = subprocess.run(
                 cfg.command,
@@ -194,18 +393,40 @@ class TestRunner:
             )
         except FileNotFoundError as e:
             logger.error("[test_runner] Command not found: %s", e)
+            # Nothing ran: that is no evidence, not a run with zero results.
             return TestResult(
                 raw_output=f"Command not found: {e}",
                 test_command=cfg.command,
+                no_tests_found=True,
             )
 
-        stdout = result.stdout or ""
-        stderr = result.stderr or ""
-        combined = f"{stdout}\n{stderr}".strip()
+        return self._parse(cfg, result.stdout or "", result.stderr or "", getattr(result, "returncode", None))
 
+    def _execute_in_sandbox(self, cfg: TestConfig) -> TestResult:
+        """Run the test command inside the sandbox; same parsing as on the host."""
+        # The host interpreter's path means nothing in a container; "python" is
+        # first on the sandbox's PATH in both backends.
+        command = ["python" if part == sys.executable else part for part in cfg.command]
+        result = self.sandbox.run(shlex.join(command), timeout_sec=cfg.timeout_sec)
+        if result.timed_out:
+            return TestResult(
+                timed_out=True,
+                raw_output=f"Test execution timed out after {cfg.timeout_sec}s.",
+                test_command=command,
+            )
+        if "No module named pytest" in result.stderr:
+            # Nothing ran (e.g. a container image without pytest): no evidence.
+            return TestResult(
+                raw_output=result.stderr[-2000:], test_command=command, no_tests_found=True
+            )
+        return self._parse(cfg, result.stdout, result.stderr, getattr(result, "exit_code", None))
+
+    def _parse(
+        self, cfg: TestConfig, stdout: str, stderr: str, exit_code: Optional[int] = None
+    ) -> TestResult:
         # Dispatch to parser
         if cfg.runner == "pytest":
-            return self._parse_pytest(stdout, stderr, cfg.command)
+            return self._parse_pytest(stdout, stderr, cfg.command, exit_code=exit_code)
         elif cfg.runner == "jest":
             return self._parse_jest(stdout, stderr, cfg.command)
         elif cfg.runner == "vitest":
@@ -215,9 +436,79 @@ class TestRunner:
 
     # ── Parsers ─────────────────────────────────────────────────────────
 
-    def _parse_pytest(self, stdout: str, stderr: str, command: List[str]) -> TestResult:
+    @staticmethod
+    def _crash_reason(text: str) -> str:
+        """The line that says why pytest died, for the log and the agent."""
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        for ln in reversed(lines):
+            if re.search(r"(Error|Exception)\b|^ERROR:|INTERNALERROR", ln):
+                return ln[:300]
+        return lines[-1][:300] if lines else "pytest produced no output"
+
+    def _crash_result(self, combined: str, command: List[str], exit_code: Optional[int]) -> TestResult:
+        """
+        pytest died before counting anything. When the traceback points into
+        the project (its conftest, its package import), the code under test is
+        broken — an edit that breaks the import must fail, so it counts as one
+        error. Otherwise the environment stopped pytest: no evidence.
+        """
+        # The sandbox denying a file is environmental even when project code
+        # (a conftest reading it) is where the error surfaced.
+        denied = re.search(r"PermissionError|Operation not permitted|\bEPERM\b", combined)
+        if not denied and self._crash_in_project(combined):
+            reason = self._crash_reason(combined)
+            logger.info("[test_runner] pytest crashed in project code — %s", reason)
+            return TestResult(
+                errors=1,
+                pass_rate=0.0,
+                raw_output=f"pytest crashed loading project code: {reason}\n\n{combined}",
+                test_command=command,
+            )
+        return self._infra_result(combined, command, exit_code)
+
+    def _project_roots(self) -> List[str]:
+        roots = {str(self.project_root.resolve()), os.path.realpath(self.project_root)}
+        mount = getattr(self.sandbox, "MOUNT", None)  # Docker: the container's path
+        if isinstance(mount, str) and mount:
+            roots.add(mount)
+        return [r.rstrip(os.sep) + os.sep for r in roots]
+
+    def _crash_in_project(self, text: str) -> bool:
+        """True when a traceback frame or conftest path names a project file."""
+        paths = re.findall(r'File "([^"]+)"', text)
+        paths += re.findall(r"conftest '([^']+)'", text)
+        paths += re.findall(r"^(?:INTERNALERROR> )?\s*([^\s:\"']+\.py):\d+: in ", text, re.MULTILINE)
+        roots = self._project_roots()
+        for path in paths:
+            if "site-packages" in path or path.startswith("<"):
+                continue
+            if os.path.isabs(path):
+                if any(path.startswith(r) for r in roots):
+                    return True
+            elif (self.project_root / path).is_file():
+                return True
+        return False
+
+    def _infra_result(self, combined: str, command: List[str], exit_code: Optional[int]) -> TestResult:
+        reason = self._crash_reason(combined)
+        if exit_code is not None:
+            reason = f"pytest exit code {exit_code}: {reason}"
+        logger.warning("[test_runner] tests could not run — %s", reason)
+        return TestResult(
+            raw_output=combined,
+            test_command=command,
+            no_tests_found=True,
+            infra_error=True,
+            infra_reason=reason,
+        )
+
+    def _parse_pytest(
+        self, stdout: str, stderr: str, command: List[str], exit_code: Optional[int] = None
+    ) -> TestResult:
         """Parse pytest --tb=short -q output."""
         combined = f"{stdout}\n{stderr}"
+        if "\x1b[" in combined:
+            combined = re.sub(r"\x1b\[[0-9;]*m", "", combined)
 
         # pytest outputs summary lines like:
         #   "3 passed, 1 failed, 2 errors in 0.12s"
@@ -242,6 +533,11 @@ class TestRunner:
                     test_command=command,
                     no_tests_found=True,
                 )
+            if total == 0 and (
+                exit_code in _PYTEST_CRASH_CODES or self._looks_crashed(combined)
+            ):
+                # A crash whose traceback happens to contain "in 1.0s".
+                return self._crash_result(combined, command, exit_code)
 
             pass_rate = passed / total if total > 0 else 0.0
             return TestResult(
@@ -253,15 +549,25 @@ class TestRunner:
                 test_command=command,
             )
 
-        # Collection errors or other pytest errors
-        if "error" in combined.lower():
-            return TestResult(
-                raw_output=combined,
-                test_command=command,
-            )
+        # No summary line: pytest died before reporting (config discovery,
+        # plugin load, internal or usage error). Nothing was counted.
+        if (
+            exit_code in _PYTEST_CRASH_CODES
+            or self._looks_crashed(combined)
+            or "error" in combined.lower()
+        ):
+            return self._crash_result(combined, command, exit_code)
 
         # Fallback: generic regex
         return self._parse_generic(stdout, stderr, command)
+
+    @staticmethod
+    def _looks_crashed(text: str) -> bool:
+        return (
+            "INTERNALERROR" in text
+            or "ERROR: usage" in text
+            or "Traceback (most recent call last)" in text
+        )
 
     def _parse_jest(self, stdout: str, stderr: str, command: List[str]) -> TestResult:
         """Parse jest output."""

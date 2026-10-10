@@ -1,0 +1,25 @@
+{
+  "goal": "Add a docstring to run_tests in scaffold/agent/verifier.py and add type hints to nonexistent_helper in scaffold/agent/worker.py",
+  "goal_hash": "423b25442f",
+  "started_at": "2026-05-27T13:56:23",
+  "last_updated": "2026-05-27T13:58:40",
+  "completed_task_ids": [
+    1,
+    "2_1_1",
+    "2_2_2",
+    "2_3_1",
+    "2_3_2"
+  ],
+  "failed_task_ids": [
+    2,
+    "2_1",
+    "2_2",
+    "2_3",
+    "2_1_2",
+    "2_2_1"
+  ],
+  "session_ids": [
+    "orch_97ff36b5"
+  ],
+  "status": "failed"
+}

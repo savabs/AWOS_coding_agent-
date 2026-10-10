@@ -1,0 +1,25 @@
+{
+  "goal": "Remove the duplicate SkillLibrary import on line 40 of scaffold/agent/orchestrator.py and add return type annotations to the _critic_refine, _pick_best_candidate, _compute_confidence, and _maybe_train_prm methods",
+  "goal_hash": "ce627a7fe8",
+  "started_at": "2026-05-24T14:39:34",
+  "last_updated": "2026-05-24T15:11:12",
+  "completed_task_ids": [
+    1,
+    "2_2",
+    "2_3_2"
+  ],
+  "failed_task_ids": [
+    2,
+    "2_1",
+    "2_3",
+    "2_1_1",
+    "2_1_2",
+    "2_3_1",
+    "2_3_2"
+  ],
+  "session_ids": [
+    "orch_760b02cc",
+    "orch_8a4b8871"
+  ],
+  "status": "failed"
+}

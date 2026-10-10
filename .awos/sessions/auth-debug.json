@@ -1,0 +1,39 @@
+{
+  "session_id": "auth-debug",
+  "strategy": "hybrid",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Message 1: Debugging authentication token expiry issue",
+      "tokens": 100,
+      "timestamp": "2026-05-16T01:06:35.389661"
+    },
+    {
+      "role": "assistant",
+      "content": "Message 2: Debugging authentication token expiry issue",
+      "tokens": 110,
+      "timestamp": "2026-05-16T01:06:35.389917"
+    },
+    {
+      "role": "user",
+      "content": "Message 3: Debugging authentication token expiry issue",
+      "tokens": 120,
+      "timestamp": "2026-05-16T01:06:35.389922"
+    },
+    {
+      "role": "assistant",
+      "content": "Message 4: Debugging authentication token expiry issue",
+      "tokens": 130,
+      "timestamp": "2026-05-16T01:06:35.389925"
+    },
+    {
+      "role": "user",
+      "content": "Message 5: Debugging authentication token expiry issue",
+      "tokens": 140,
+      "timestamp": "2026-05-16T01:06:35.389928"
+    }
+  ],
+  "summary": "Key discussion points about Debugging authentication token expiry issue",
+  "total_tokens": 600,
+  "message_count": 5
+}

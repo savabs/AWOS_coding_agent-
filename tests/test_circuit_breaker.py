@@ -67,6 +67,18 @@ class TestIsPermanentFailure:
         from scaffold.agent.worker import Worker
         assert not Worker._is_permanent_failure("Internal server error 500")
 
+    def test_deepseek_insufficient_balance(self):
+        from scaffold.agent.worker import Worker
+        assert Worker._is_permanent_failure(
+            "Error code: 402 - {'error': {'message': 'Insufficient Balance'}}"
+        )
+
+    def test_rejected_key(self):
+        from scaffold.agent.worker import Worker
+        assert Worker._is_permanent_failure(
+            "Error code: 401 - {'error': {'message': 'Incorrect API key provided: sk-or-v1***'}}"
+        )
+
 
 # ── Dead-provider gating in Worker.execute_task ───────────────────────────────
 

@@ -1,3 +1,10 @@
+---
+title: "AWOS v3 Phase 4 — Feature Roadmap"
+tags:
+  - doc/task
+  - status/active
+---
+
 # AWOS v3 Phase 4 — Feature Roadmap
 
 **Date:** 2026-05-17  
@@ -53,3 +60,8 @@ try:
 except ImportError:
     from module import Class
 ```
+
+## Related
+
+- _(add links to related documents here)_
+

@@ -1,0 +1,7 @@
+{
+  "id": "01_list_date_filter",
+  "goal": "The `list` command should take the same --from / --to date filters (YYYY-MM-DD) that `export` already has, so I can quickly see e.g. everything that came in last week. They should behave exactly like export's (same date rules, and they combine with --status and --customer), and a bad date or a backwards range should be reported the way export reports it, not crash. The output lines of `list` must not change.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

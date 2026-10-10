@@ -1,0 +1,102 @@
+[
+  {
+    "name": "config_env_migration",
+    "kind": "migration",
+    "solved": false,
+    "hidden": {
+      "passed": 18,
+      "failed": 4,
+      "errors": 0,
+      "ok": false,
+      "summary": "4 failed, 18 passed in 0.13s"
+    },
+    "visible_tests_ok": true,
+    "orchestrator_success": true,
+    "tasks_completed": 3,
+    "tasks_failed": 0,
+    "files_changed": 13,
+    "cost_usd": 0.1727,
+    "minutes": 17.5,
+    "timed_out": false
+  },
+  {
+    "name": "invoice_data_report",
+    "kind": "data",
+    "solved": true,
+    "hidden": {
+      "passed": 9,
+      "failed": 0,
+      "errors": 0,
+      "ok": true,
+      "summary": "9 passed in 0.01s"
+    },
+    "visible_tests_ok": true,
+    "orchestrator_success": true,
+    "tasks_completed": 2,
+    "tasks_failed": 0,
+    "files_changed": 2,
+    "cost_usd": 0.1217,
+    "minutes": 11.0,
+    "timed_out": false
+  },
+  {
+    "name": "monthly_summary_perf",
+    "kind": "performance",
+    "solved": false,
+    "hidden": {
+      "passed": 19,
+      "failed": 1,
+      "errors": 0,
+      "ok": false,
+      "summary": "1 failed, 19 passed in 42.58s"
+    },
+    "visible_tests_ok": true,
+    "orchestrator_success": false,
+    "tasks_completed": 0,
+    "tasks_failed": 1,
+    "files_changed": 0,
+    "cost_usd": 0.018,
+    "minutes": 11.1,
+    "timed_out": false
+  },
+  {
+    "name": "orders_export_filters",
+    "kind": "feature",
+    "solved": false,
+    "hidden": {
+      "passed": 11,
+      "failed": 3,
+      "errors": 0,
+      "ok": false,
+      "summary": "3 failed, 11 passed in 0.95s"
+    },
+    "visible_tests_ok": true,
+    "orchestrator_success": true,
+    "tasks_completed": 2,
+    "tasks_failed": 0,
+    "files_changed": 2,
+    "cost_usd": 0.0497,
+    "minutes": 14.0,
+    "timed_out": false
+  },
+  {
+    "name": "timezone_report_bug",
+    "kind": "debugging",
+    "solved": true,
+    "hidden": {
+      "passed": 10,
+      "failed": 0,
+      "errors": 0,
+      "ok": true,
+      "summary": "10 passed in 0.04s"
+    },
+    "visible_tests_ok": true,
+    "orchestrator_success": true,
+    "tasks_completed": 4,
+    "tasks_failed": 0,
+    "files_changed": 4,
+    "cost_usd": 0.1168,
+    "minutes": 22.3,
+    "timed_out": false
+  }
+]

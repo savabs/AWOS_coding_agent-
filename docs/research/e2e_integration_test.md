@@ -1,3 +1,9 @@
+---
+title: "End-to-End Integration Test — Research"
+tags:
+  - doc/research
+---
+
 # End-to-End Integration Test — Research
 
 ## Problem
@@ -50,3 +56,8 @@ Worker must return a valid SEARCH/REPLACE dict:
 ## No API key needed
 Mocking Planner (or using pre_planned_tasks) + mocking Worker + real Verifier = zero API calls.
 This test can run in CI without any secrets.
+
+## Related
+
+- _(add links to related documents here)_
+

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "session_id": "rs_cf31b5c7a44e",
+  "goal": "In scaffold/agent/runtime_session.py add a one-line docstring to RuntimeSessionStore.list_sessions explaining it returns durable sessions sorted by updated time",
+  "goal_hash": "fa16e842a2",
+  "status": "completed",
+  "created_at": "2026-06-18T04:16:22Z",
+  "updated_at": "2026-06-18T04:16:41Z",
+  "paused_at": null,
+  "codebase_root": ".",
+  "reasoning_session_id": "orch_d0a28cd8",
+  "goal_graph_id": "g_c63699026a84",
+  "progress": {
+    "completed_task_ids": [
+      1
+    ],
+    "failed_task_ids": [],
+    "current_task_id": null,
+    "total_tasks": 1,
+    "decomposition_depth": 0
+  },
+  "budget": {
+    "spent_usd": 0.0014591
+  },
+  "sandbox": {
+    "enabled": false,
+    "feature_id": null,
+    "worktree_path": null,
+    "branch": null
+  },
+  "parent_session_id": null,
+  "cancel_requested": false
+}

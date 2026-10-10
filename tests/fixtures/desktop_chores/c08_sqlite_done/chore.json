@@ -1,0 +1,64 @@
+{
+  "id": "c08_sqlite_done",
+  "title": "Mark a task done in a SQLite app DB",
+  "instruction": "In data/tasks.db mark the task titled 'File taxes' as done (done=1). Do not add or remove rows.",
+  "rung": "shell",
+  "start": {
+    "sqlite": {
+      "data/tasks.db": [
+        "CREATE TABLE tasks (id INTEGER PRIMARY KEY, title TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0)",
+        "INSERT INTO tasks (title, done) VALUES ('Buy milk', 1)",
+        "INSERT INTO tasks (title, done) VALUES ('File taxes', 0)",
+        "INSERT INTO tasks (title, done) VALUES ('Call mom', 0)"
+      ]
+    }
+  },
+  "probes": [
+    {
+      "id": "taxes_done",
+      "getter": {
+        "type": "sqlite_query",
+        "path": "data/tasks.db",
+        "sql": "SELECT done FROM tasks WHERE title = ?",
+        "params": [
+          "File taxes"
+        ]
+      },
+      "comparator": {
+        "op": "equals",
+        "expected": 1
+      }
+    },
+    {
+      "id": "open_tasks",
+      "getter": {
+        "type": "sqlite_query",
+        "path": "data/tasks.db",
+        "sql": "SELECT title FROM tasks WHERE done = 0 ORDER BY id",
+        "mode": "rows"
+      },
+      "comparator": {
+        "op": "equals",
+        "expected": [
+          [
+            "Call mom"
+          ]
+        ]
+      }
+    }
+  ],
+  "invariants": [
+    {
+      "id": "row_count",
+      "getter": {
+        "type": "sqlite_query",
+        "path": "data/tasks.db",
+        "sql": "SELECT COUNT(*) FROM tasks"
+      },
+      "comparator": {
+        "op": "equals",
+        "expected": 3
+      }
+    }
+  ]
+}

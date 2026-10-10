@@ -1,0 +1,7 @@
+{
+  "action": "slugify() produces bad slugs for some inputs. Find where the defect actually is.",
+  "file": "buggy.py",
+  "task_id": 1,
+  "complexity": "medium",
+  "notes": "Repeated spaces and underscores both need handling; the underscore case belongs in the helper."
+}

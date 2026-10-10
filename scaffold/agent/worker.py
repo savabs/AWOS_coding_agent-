@@ -9,19 +9,19 @@ import difflib
 import json
 import os
 import re
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import List, Optional
-from openai import OpenAI  # For DeepSeek API access
-from anthropic import Anthropic  # For Haiku/Sonnet/Opus
+
 try:
     from .budget_ledger import get_ledger
-    from .usage_record import record_api_usage, empty_usage, merge_usage
     from .escalation_engine import is_cheap_only
+    from .providers import chat_client, messages_client
+    from .usage_record import empty_usage, merge_usage, record_api_usage
 except ImportError:
     from budget_ledger import get_ledger
-    from usage_record import record_api_usage, empty_usage, merge_usage
     from escalation_engine import is_cheap_only
+    from providers import chat_client, messages_client
+    from usage_record import empty_usage, merge_usage, record_api_usage
 
 _MONTHLY_BUDGET = float(os.getenv("AWOS_MONTHLY_BUDGET", "20.0"))
 
@@ -40,7 +40,7 @@ class _PatchCandidate:
 
 class Worker:
     """Uses DeepSeek Coder to generate SEARCH/REPLACE code changes."""
-    
+
     MAX_CONTEXT_TOKENS_BLOCK_B: int = 2000
 
     def __init__(self, api_key: Optional[str] = None, model: str = "deepseek-chat"):
@@ -48,32 +48,22 @@ class Worker:
         deepseek_key = api_key or os.getenv("DEEPSEEK_API_KEY")
         anthropic_key = os.getenv("ANTHROPIC_API_KEY")
         openai_key = os.getenv("OPENAI_API_KEY")
+        opencode_key = os.getenv("OPENCODE_GO_API_KEY")
 
-        # DeepSeek (direct API)
-        if deepseek_key:
-            self.client = OpenAI(api_key=deepseek_key, base_url="https://api.deepseek.com")
-        else:
-            self.client = None
+        # With OPENROUTER_API_KEY set, every client below routes through
+        # OpenRouter and the direct keys are ignored — see providers.py.
+        self.opencode_client = chat_client(opencode_key, "https://opencode.ai/zen/go/v1")
+        self.client = chat_client(deepseek_key, "https://api.deepseek.com")
+        self.anthropic_client = messages_client(anthropic_key)
+        self.openai_client = chat_client(openai_key, "https://api.openai.com/v1")
 
-        # Anthropic (Haiku / Sonnet)
-        if anthropic_key:
-            self.anthropic_client = Anthropic(api_key=anthropic_key)
-        else:
-            self.anthropic_client = None
-
-        # OpenAI direct (GPT-4o-mini etc.)
-        if openai_key:
-            self.openai_client = OpenAI(api_key=openai_key, base_url="https://api.openai.com/v1")
-        else:
-            self.openai_client = None
-
-        if not any([self.client, self.anthropic_client, self.openai_client]):
-            raise ValueError("Set at least one of: DEEPSEEK_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY")
+        if not any([self.opencode_client, self.client, self.anthropic_client, self.openai_client]):
+            raise ValueError("Set OPENROUTER_API_KEY (or one of: OPENCODE_GO_API_KEY, DEEPSEEK_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY)")
 
         self.model = model
         self.fallback_model = "claude-haiku-4-5"
         self._dead_providers: set = set()
-    
+
     @staticmethod
     def _is_permanent_failure(error: str) -> bool:
         """Return True if the error is a non-retryable provider failure (e.g. depleted credits)."""
@@ -82,8 +72,16 @@ class Worker:
             "credit balance is too low",
             "your credit balance",
             "insufficient_quota",
+            "insufficient balance",  # DeepSeek's 402
             "payment required",
             "billing",
+            # A rejected key stays rejected for the life of this process;
+            # retrying it just adds a failed round-trip to every task.
+            "error code: 401",
+            "error code: 402",
+            "incorrect api key",
+            "invalid api key",
+            "invalid x-api-key",
         ))
 
     def _try_cheap_fallback(
@@ -192,19 +190,19 @@ class Worker:
                 "model_used": "deepseek|haiku"
             }
         """
-        
+
         task_id = task.get("task_id")
         action = task.get("action")
         file_path = task.get("file")
         complexity = task.get("complexity", "medium")
         error_context = task.get("error_context", "")  # Set on retry by orchestrator
-        
+
         # Build micro-context: show only relevant lines (full file on retry)
         if attempt > 1 and len(file_content) < 60000:
             context_snippet = file_content
         else:
             context_snippet = self._extract_context(file_content, action)
-        
+
         # Cross-file symbol awareness (Phase 3)
         symbol_section = ""
         if symbol_index is not None:
@@ -214,7 +212,7 @@ class Worker:
                     symbol_section = f"\nCROSS-FILE SYMBOL MAP:\n{cross_file_ctx}\n"
             except Exception:
                 pass
-        
+
         # Few-shot examples from ExampleStore (intelligence amplifier)
         examples_section = ""
         if example_store is not None:
@@ -224,7 +222,7 @@ class Worker:
                     examples_section = f"\n{examples_section}\n"
             except Exception:
                 pass
-        
+
         # On retry, tell the model exactly what failed
         retry_section = ""
         if error_context and attempt > 1:
@@ -246,7 +244,7 @@ Do NOT repeat the same approach. Use a different strategy.
             skill_library=skill_library,
             vector_chunks=vector_chunks,
         )
-        
+
         # Improvement 3: inject context from previous task (Ralph Loop chaining)
         previous_result = task.get("previous_task_result")
         if previous_result:
@@ -356,7 +354,38 @@ Do NOT repeat the same approach. Use a different strategy.
         if _tool_out:
             _tool_output_block = f"[TOOL OUTPUT]\n{_tool_out}\n\n"
 
-        prompt = f"""You are a senior software engineer executing a precise code change.
+        # NEW FILE: Different prompt for file creation
+        if task.get("_is_new_file", False):
+            prompt = f"""You are a senior software engineer creating a new file.
+{_evolved_block}{_tool_output_block}{vector_section}{strategy_preamble}
+TASK: {action}
+FILE: {file_path} (NEW FILE - will be created)
+COMPLEXITY: {complexity}
+ATTEMPT: {attempt}{retry_section}{contract_section}
+
+This is a NEW FILE. Generate the COMPLETE file content from scratch.
+{symbol_section}{examples_section}
+{skill_section}PROJECT CONTEXT: {codebase_context.get('modules', 'standard Python project')}
+
+INSTRUCTIONS:
+1. Generate the COMPLETE file content
+2. Include all necessary imports, docstrings, and code structure
+3. Make it production-ready and well-documented
+
+OUTPUT FORMAT:
+
+CONTENT:
+```
+<full file content here - include everything from imports to the end>
+```
+
+REASONING:
+<one sentence explaining what you created and why>
+
+Do NOT use SEARCH/REPLACE format. Just provide the complete file content.{strategy_suffix}"""
+        else:
+            # EXISTING FILE: Standard SEARCH/REPLACE prompt
+            prompt = f"""You are a senior software engineer executing a precise code change.
 {_evolved_block}{_tool_output_block}{vector_section}{critique_block}{strategy_preamble}{prev_context_section}{cross_file_section}
 TASK: {action}
 FILE: {file_path}
@@ -414,7 +443,7 @@ FORMAT B (JSON — use for multi-location changes or when exact line matching is
 Each old_string must be an exact substring of the file. You can include multiple edits in the array.
 
 Do not add markdown backticks inside the code blocks. The SEARCH text must be copy-pasteable from the file.{strategy_suffix}"""
-        
+
         response_text = ""
         model_used = "unknown"
         if _usage_accum is None:
@@ -432,7 +461,7 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
             use_model    = self.model
             inp_price, out_price = 0.14, 0.28
             model_label  = "DeepSeek"
-        
+
         # Call the right provider
         if use_provider == "deepseek" and self.client and "deepseek" not in self._dead_providers:
             _allowed, _reason = get_ledger().check_budget(model_spec.cost_per_req if model_spec else 0.001, _MONTHLY_BUDGET)
@@ -458,6 +487,21 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                     output_price=out_price,
                     tracker=tracker,
                 ))
+
+                # Cache telemetry (DeepSeek/OpenAI compatible)
+                try:
+                    from .cache_telemetry import CacheTelemetryStore, extract_cache_stats_openai
+                    cache_store = CacheTelemetryStore()
+                    cache_event = extract_cache_stats_openai(
+                        response=response.model_dump(),
+                        component="worker",
+                        model=use_model,
+                        price_per_m_tokens=inp_price,
+                    )
+                    cache_store.record(cache_event)
+                except Exception:
+                    pass  # Don't fail task if telemetry breaks
+
             except Exception as e:
                 err_str = str(e)
                 if self._is_permanent_failure(err_str):
@@ -490,6 +534,21 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                     output_price=out_price,
                     tracker=tracker,
                 ))
+
+                # Cache telemetry (OpenAI)
+                try:
+                    from .cache_telemetry import CacheTelemetryStore, extract_cache_stats_openai
+                    cache_store = CacheTelemetryStore()
+                    cache_event = extract_cache_stats_openai(
+                        response=response.model_dump(),
+                        component="worker",
+                        model=use_model,
+                        price_per_m_tokens=inp_price,
+                    )
+                    cache_store.record(cache_event)
+                except Exception:
+                    pass  # Don't fail task if telemetry breaks
+
             except Exception as e:
                 err_str = str(e)
                 if self._is_permanent_failure(err_str):
@@ -526,6 +585,21 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                     output_price=out_price,
                     tracker=tracker,
                 ))
+
+                # Cache telemetry
+                try:
+                    from .cache_telemetry import CacheTelemetryStore, extract_cache_stats_anthropic
+                    cache_store = CacheTelemetryStore()
+                    cache_event = extract_cache_stats_anthropic(
+                        response=response.model_dump(),
+                        component="worker",
+                        model=use_model,
+                        price_per_m_tokens=inp_price,
+                    )
+                    cache_store.record(cache_event)
+                except Exception:
+                    pass  # Don't fail task if telemetry breaks
+
             except RuntimeError:
                 raise
             except Exception as e:
@@ -547,28 +621,37 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
 
         if not response_text:
             raise RuntimeError("No API key available or all providers failed")
-        
-        # Parse SEARCH/REPLACE from response
-        result = self._parse_search_replace(response_text)
-        
+
+        # Parse response based on file type
+        if task.get("_is_new_file", False):
+            # For new files, parse CONTENT block
+            result = self._parse_new_file_content(response_text, task.get('file', 'unknown'))
+        else:
+            # For existing files, parse SEARCH/REPLACE
+            result = self._parse_search_replace(response_text)
+
         # ── Phase 7: Self-Verification ─────────────────────────────────────
         if result["success"]:
-            try:
-                from .self_verification import SelfVerificationEngine
-            except ImportError:
-                from self_verification import SelfVerificationEngine
-            sv = SelfVerificationEngine()
-            sv_result = sv.verify(
-                original_content=file_content,
-                search_replace=result,
-                file_path=file_path,
-                task_spec=task,
-            )
-            if not sv_result.passed:
-                print(f"[WORKER] Self-verify FAILED at stage={sv_result.stage}. Retrying.")
-                result = {"success": False, "search": "", "replace": "",
-                          "reasoning": sv_result.error_context}
-        
+            # Skip verification for new files (nothing to verify)
+            if task.get("_is_new_file", False):
+                print("[WORKER] New file - skipping self-verification")
+            else:
+                try:
+                    from .self_verification import SelfVerificationEngine
+                except ImportError:
+                    from self_verification import SelfVerificationEngine
+                sv = SelfVerificationEngine()
+                sv_result = sv.verify(
+                    original_content=file_content,
+                    search_replace=result,
+                    file_path=file_path,
+                    task_spec=task,
+                )
+                if not sv_result.passed:
+                    print(f"[WORKER] Self-verify FAILED at stage={sv_result.stage}. Retrying.")
+                    result = {"success": False, "search": "", "replace": "",
+                              "reasoning": sv_result.error_context}
+
         if not result["success"]:
             # ── Fallback: try JSON structured edit format ──────────────
             json_req = self._parse_json_edits(response_text)
@@ -613,7 +696,7 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                     "error": f"Failed to parse SEARCH/REPLACE: {response_text[:200]}",
                     "model_used": model_used
                 }
-        
+
         result["model_used"] = model_used
         result["input_tokens"] = int(_usage_accum.get("input_tokens", 0))
         result["output_tokens"] = int(_usage_accum.get("output_tokens", 0))
@@ -626,10 +709,10 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
         Returns an EditRequest if a valid JSON edit block is found, else None.
         """
         try:
-            from .edit_models import EditRequest, EditInstruction
+            from .edit_models import EditInstruction, EditRequest
         except ImportError:
-            from edit_models import EditRequest, EditInstruction
-        import json, re
+            from edit_models import EditInstruction, EditRequest
+        import re
         # Try fenced block first, then bare JSON object
         candidates = []
         for m in re.finditer(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL):
@@ -698,9 +781,9 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
         Returns a SingleEditResult.
         """
         try:
-            from .edit_models import SingleEditResult, EditStatus, EditInstruction
+            from .edit_models import EditInstruction, EditStatus, SingleEditResult
         except ImportError:
-            from edit_models import SingleEditResult, EditStatus, EditInstruction
+            from edit_models import EditInstruction, EditStatus, SingleEditResult
         instruction = EditInstruction(old_string=old_string, new_string=new_string)
         # Empty old_string: append new_string
         if not old_string:
@@ -741,7 +824,7 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
             status=EditStatus.NOT_FOUND,
             new_content="",
             match_count=0,
-            error=f"old_string not found in file",
+            error="old_string not found in file",
         )
 
     def _apply_all_edits(self, file_content: str, edit_request) -> "EditResult":
@@ -860,15 +943,80 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
         """
         action = task.get("action", "")
         context = self._extract_context(file_content, action)
-        
-        prompt = (
-            f"File: {task.get('file', 'unknown')}\n"
-            f"Task: {action}\n"
-            f"Complexity: {task.get('complexity', 'medium')}\n\n"
-            f"Context:\n{context}\n\n"
-            f"Generate SEARCH/REPLACE blocks to complete this task."
-        )
+
+        # Handle new file creation differently
+        if task.get("_is_new_file", False):
+            prompt = (
+                f"File: {task.get('file', 'unknown')} (NEW FILE)\n"
+                f"Task: {action}\n"
+                f"Complexity: {task.get('complexity', 'medium')}\n\n"
+                f"This is a NEW file. Generate the COMPLETE file content.\n\n"
+                f"Format:\n"
+                f"CONTENT:\n"
+                f"```\n"
+                f"<full file content here>\n"
+                f"```\n\n"
+                f"REASONING:\n"
+                f"<brief explanation>\n"
+            )
+        else:
+            prompt = (
+                f"File: {task.get('file', 'unknown')}\n"
+                f"Task: {action}\n"
+                f"Complexity: {task.get('complexity', 'medium')}\n\n"
+                f"Context:\n{context}\n\n"
+                f"Generate SEARCH/REPLACE blocks to complete this task."
+            )
         return prompt
+
+    def _parse_new_file_content(self, response_text: str, file_path: str) -> dict:
+        """Parse CONTENT block for new file creation."""
+        try:
+            # Extract CONTENT block
+            content_match = re.search(
+                r'CONTENT:\s*\n```[^\n]*\n(.*?)\n```',
+                response_text, re.DOTALL | re.IGNORECASE
+            )
+
+            if not content_match:
+                # Try without fences
+                content_match = re.search(
+                    r'CONTENT:\s*\n(.*?)(?=\nREASONING:|\Z)',
+                    response_text, re.DOTALL | re.IGNORECASE
+                )
+
+            if content_match:
+                content = content_match.group(1).strip()
+
+                # Extract reasoning if present
+                reasoning_match = re.search(
+                    r'REASONING:\s*\n(.+?)(?:\n\n|\Z)',
+                    response_text, re.DOTALL | re.IGNORECASE
+                )
+                reasoning = reasoning_match.group(1).strip() if reasoning_match else "Create new file"
+
+                # For new files, we use empty SEARCH and full content as REPLACE
+                return {
+                    "success": True,
+                    "search": "",  # Empty for new files
+                    "replace": content,
+                    "reasoning": reasoning,
+                    "_is_new_file": True
+                }
+            else:
+                return {
+                    "success": False,
+                    "search": "",
+                    "replace": "",
+                    "reasoning": "Failed to parse CONTENT block from response"
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "search": "",
+                "replace": "",
+                "reasoning": f"Parse error for new file: {str(e)}"
+            }
 
     def _parse_search_replace(self, response_text: str) -> dict:
         """Parse SEARCH/REPLACE blocks — handles fenced and unfenced formats."""
@@ -882,10 +1030,10 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                     if result:
                         results.append(result)
                 return {"success": True, "blocks": results}
-            
+
             # Single block parsing
             return self._parse_single_search_replace(response_text)
-        
+
         except Exception as e:
             return {
                 "success": False,

@@ -1,3 +1,10 @@
+---
+title: "AWOS MCP Server Task"
+tags:
+  - doc/task
+  - status/active
+---
+
 # AWOS MCP Server Task
 
 ## Status: PENDING
@@ -32,3 +39,8 @@
 
 ## Estimated effort
 4–6 hours (mostly understanding the mcp SDK, actual code is ~120 lines)
+
+## Related
+
+- _(add links to related documents here)_
+

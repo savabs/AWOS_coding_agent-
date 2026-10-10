@@ -1,3 +1,9 @@
+---
+title: "E2E Integration Test — Spec"
+tags:
+  - doc/spec
+---
+
 # E2E Integration Test — Spec
 
 ## Output: `test_e2e_pipeline.py` (new file at project root)
@@ -196,3 +202,8 @@ else:
 - The Verifier runs for real — if `MOCK_WORKER_RESULT.search` is not in the file, Verifier will fail
 - Make sure each test resets the file content before running (`test_file.write_text("# placeholder\n")`)
 - `side_effect` on a mock accepts a callable that receives the same args as the real function
+
+## Related
+
+- _(add links to related documents here)_
+

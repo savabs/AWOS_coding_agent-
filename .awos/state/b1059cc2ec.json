@@ -1,0 +1,16 @@
+{
+  "goal": "G7 verify-fail replan proof",
+  "goal_hash": "b1059cc2ec",
+  "started_at": "2026-06-21T11:55:50",
+  "last_updated": "2026-06-21T11:55:51",
+  "completed_task_ids": [
+    "1_r1"
+  ],
+  "failed_task_ids": [
+    1
+  ],
+  "session_ids": [
+    "orch_18cc19fe"
+  ],
+  "status": "complete"
+}

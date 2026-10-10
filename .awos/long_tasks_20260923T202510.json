@@ -1,0 +1,22 @@
+[
+  {
+    "name": "monthly_summary_perf",
+    "kind": "performance",
+    "solved": false,
+    "hidden": {
+      "passed": 19,
+      "failed": 1,
+      "errors": 0,
+      "ok": false,
+      "summary": "1 failed, 19 passed in 44.44s"
+    },
+    "visible_tests_ok": true,
+    "orchestrator_success": true,
+    "tasks_completed": 1,
+    "tasks_failed": 0,
+    "files_changed": 2,
+    "cost_usd": 0.005,
+    "minutes": 2.0,
+    "timed_out": false
+  }
+]

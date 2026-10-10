@@ -1,0 +1,20 @@
+{
+  "goal": "create docs/example_uncensored_agent_guide.md about building uncensored local LLM agents with Ollama and open weights",
+  "goal_hash": "211e0d6f3b",
+  "started_at": "2026-06-14T17:48:36",
+  "last_updated": "2026-06-14T17:49:58",
+  "completed_task_ids": [
+    1,
+    "1_1",
+    "1_2",
+    "1_3"
+  ],
+  "failed_task_ids": [
+    1
+  ],
+  "session_ids": [
+    "orch_e24cdb3d",
+    "orch_d3c31d61"
+  ],
+  "status": "complete"
+}

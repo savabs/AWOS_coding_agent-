@@ -152,22 +152,18 @@ OUTPUT: JSON only, no prose outside the JSON.
         self._init_clients()
 
     def _init_clients(self) -> None:
-        if self._deepseek_key:
-            try:
-                from openai import OpenAI
-                self._client = OpenAI(
-                    api_key=self._deepseek_key,
-                    base_url="https://api.deepseek.com",
-                )
-            except Exception as e:
-                logger.debug("[critic] DeepSeek client init failed: %s", e)
-
-        if self._anthropic_key:
-            try:
-                from anthropic import Anthropic
-                self._anthropic = Anthropic(api_key=self._anthropic_key)
-            except Exception as e:
-                logger.debug("[critic] Anthropic client init failed: %s", e)
+        try:
+            from .providers import chat_client, messages_client
+        except ImportError:
+            from providers import chat_client, messages_client
+        try:
+            self._client = chat_client(self._deepseek_key, "https://api.deepseek.com")
+        except Exception as e:
+            logger.debug("[critic] DeepSeek client init failed: %s", e)
+        try:
+            self._anthropic = messages_client(self._anthropic_key)
+        except Exception as e:
+            logger.debug("[critic] Anthropic client init failed: %s", e)
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -307,6 +303,20 @@ OUTPUT: JSON only, no prose outside the JSON.
         cost = (inp / 1_000_000) * 1.00 + (out / 1_000_000) * 5.00
         if tracker:
             tracker.record("critic", "Haiku Critic", inp, out, cost)
+        
+        # Cache telemetry
+        try:
+            from .cache_telemetry import CacheTelemetryStore, extract_cache_stats_anthropic
+            cache_store = CacheTelemetryStore()
+            cache_event = extract_cache_stats_anthropic(
+                response=resp.model_dump(),
+                component="critic",
+                model=model,
+            )
+            cache_store.record(cache_event)
+        except Exception:
+            pass  # Don't fail critique if telemetry breaks
+        
         return text, f"Haiku({model})", cost
 
     # ── Private: Response parsing ─────────────────────────────────────────────

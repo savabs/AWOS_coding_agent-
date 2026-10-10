@@ -1,0 +1,7 @@
+{
+  "action": "check_age() raises a bare ValueError. It must use the project's error type.",
+  "file": "buggy.py",
+  "task_id": 1,
+  "complexity": "medium",
+  "notes": "errors.py defines ValidationError, which carries a `field`."
+}

@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "session_id": "rs_5dd3f53405a5",
+  "goal": "Add comment above _try_cheap_fallback in worker.py",
+  "goal_hash": "158ee1f824",
+  "status": "completed",
+  "created_at": "2026-06-21T07:01:50Z",
+  "updated_at": "2026-06-21T07:01:55Z",
+  "paused_at": null,
+  "codebase_root": "/tmp/pytest-of-becmachlean/pytest-4/test_orchestrator_replan_after0",
+  "reasoning_session_id": null,
+  "goal_graph_id": null,
+  "progress": {
+    "completed_task_ids": [
+      "1_r1"
+    ],
+    "failed_task_ids": [
+      1
+    ],
+    "current_task_id": null,
+    "total_tasks": 1,
+    "decomposition_depth": 0
+  },
+  "budget": {
+    "spent_usd": 0.0
+  },
+  "sandbox": {
+    "enabled": false,
+    "feature_id": null,
+    "worktree_path": null,
+    "branch": null
+  },
+  "parent_session_id": null,
+  "cancel_requested": false
+}

@@ -1,0 +1,31 @@
+{
+  "goal": "G3 failure hunt \u2014 force MCTS after worker fail",
+  "goal_hash": "ad170e4515",
+  "started_at": "2026-06-18T14:04:34",
+  "last_updated": "2026-06-20T14:03:34",
+  "completed_task_ids": [
+    1
+  ],
+  "failed_task_ids": [
+    "1_1",
+    "1_2",
+    "1_1_1",
+    "1_1_2",
+    "1_2_1",
+    "1_2_2"
+  ],
+  "session_ids": [
+    "orch_63ed8359",
+    "orch_3639b8c2",
+    "orch_6bb2fb4e",
+    "orch_5b04cb04",
+    "orch_4962858c",
+    "orch_bcf10188",
+    "orch_0dd2cb46",
+    "orch_ecc802e7",
+    "orch_c79e9330",
+    "orch_342cb3d5",
+    "orch_5ef501df"
+  ],
+  "status": "complete"
+}

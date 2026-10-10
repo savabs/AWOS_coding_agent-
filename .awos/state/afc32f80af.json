@@ -1,0 +1,22 @@
+{
+  "goal": "Gauntlet G2 pause-mid-plan proof",
+  "goal_hash": "afc32f80af",
+  "started_at": "2026-06-18T14:01:06",
+  "last_updated": "2026-06-18T14:27:37",
+  "completed_task_ids": [
+    1,
+    2,
+    3
+  ],
+  "failed_task_ids": [],
+  "session_ids": [
+    "orch_eea94556",
+    "orch_be63d41a",
+    "orch_9c9d0c78",
+    "orch_341be952",
+    "orch_91b5b8fc",
+    "orch_5b6a2d21",
+    "orch_2a512610"
+  ],
+  "status": "complete"
+}

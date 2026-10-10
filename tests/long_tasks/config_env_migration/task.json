@@ -1,0 +1,8 @@
+{
+  "name": "config_env_migration",
+  "kind": "migration",
+  "goal": "We're deploying backupd to containers, so move our settings from the settings.ini file to environment variables with the prefix APP_ (each setting becomes APP_ plus its key name in upper case, e.g. interval_minutes -> APP_INTERVAL_MINUTES). Every setting must be configurable from the environment with the same types as today (numbers stay ints, compress stays a bool accepting true/1/yes, exclude stays a comma-separated list, optional values stay optional). Old installs that still have settings.ini must keep working, and if a setting is in both places the environment variable wins. A missing required setting must give a clear ConfigError naming the setting. Make sure every part of the app picks up the new variables, not just the config module. Document the new variables in the README.",
+  "max_turns": 150,
+  "max_cost_usd": 1.0,
+  "timeout_min": 30
+}

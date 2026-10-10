@@ -1,0 +1,7 @@
+{
+  "id": "03_output_path_errors",
+  "goal": "Bug: when I pass --output to `export` or `customers` with a path in a folder that doesn't exist (or a path that is itself a folder), I get a Python traceback. It should fail like the tool's other errors do: a one-line error that mentions the path, exit status 1. Also, last week a disk-full error in the middle of an export left me with a half-written file that had overwritten my previous good export. If writing the output fails for any reason, the existing file must be left untouched and no partial or temporary file should be left behind.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

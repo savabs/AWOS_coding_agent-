@@ -1,0 +1,50 @@
+{
+  "root_id": "g_f223410a310c",
+  "nodes": {
+    "g_f223410a310c": {
+      "goal_id": "g_f223410a310c",
+      "description": "In scaffold/agent/verifier.py add a one-line docstring to _check_edit_fidelity explaining it rejects edits that miss comment-above or symbol-placement goals",
+      "parent_ids": [],
+      "child_ids": [
+        "g_bf8908dce676"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-16T08:17:08Z",
+      "updated_at": "2026-06-16T08:17:22Z",
+      "completed_at": "2026-06-16T08:17:22Z",
+      "session_ids": [
+        "orch_f1f1a1c0"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_bf8908dce676": {
+      "goal_id": "g_bf8908dce676",
+      "description": "Add a one-line docstring to the `_check_edit_fidelity` function.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "scaffold/agent/verifier.py",
+          "action": "Add a one-line docstring to the `_check_edit_fidelity` function.",
+          "function_signature": "def _check_edit_fidelity(...):",
+          "constraints": "The docstring must be exactly one line and explain that the function rejects edits missing comment-above or symbol-placement goals.",
+          "complexity": "low",
+          "file": "scaffold/agent/verifier.py"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-16T08:17:13Z",
+      "updated_at": "2026-06-16T08:17:22Z",
+      "completed_at": "2026-06-16T08:17:22Z",
+      "session_ids": [
+        "orch_f1f1a1c0"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

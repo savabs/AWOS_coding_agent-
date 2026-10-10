@@ -1,3 +1,9 @@
+---
+title: "AWOS Effectiveness Analysis"
+tags:
+  - doc/memory
+---
+
 # AWOS Effectiveness Analysis
 
 > **Canonical metric:** Project Efficiency Index (PEI) = (Quality × Speed) / Cost

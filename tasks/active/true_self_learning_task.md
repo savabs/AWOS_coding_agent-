@@ -1,3 +1,10 @@
+---
+title: "True Self-Learning for AWOS — Spec & Implementation Plan"
+tags:
+  - doc/task
+  - status/active
+---
+
 # True Self-Learning for AWOS — Spec & Implementation Plan
 
 **Status:** Spec (ready to implement)
@@ -449,3 +456,8 @@ Session N+1 starts
 - **Tier 2 (LoRA fine-tuning)** is specced separately when we have ≥ 500 task outcomes
   in SkillLibrary. Currently ~0. Come back to this when data exists.
 - None of these replace the LLM. They make AWOS smarter about **how** it uses the LLM.
+
+## Related
+
+- _(add links to related documents here)_
+

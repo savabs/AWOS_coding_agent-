@@ -30,3 +30,8 @@ retrieve by (file_path, error_type), inject into retry prompts to prevent repeat
 - JSONL (not SQLite) — consistent with RewardStore, crash-safe
 - Exact match retrieval (not vector search) — sufficient until 500+ critiques
 - Critique stored after failure, injected on next attempt (not same attempt)
+
+## Related
+
+- _(add links to related documents here)_
+

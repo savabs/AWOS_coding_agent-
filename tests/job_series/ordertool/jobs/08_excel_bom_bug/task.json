@@ -1,0 +1,7 @@
+{
+  "id": "08_excel_bom_bug",
+  "goal": "Bug report: I opened our orders file in Excel, fixed a typo in a customer name and saved it again as \"CSV UTF-8\". Since then every ordertool command fails with an 'unexpected columns' error. As far as I can tell Excel puts an invisible byte-order mark at the very start of the file (and uses Windows line endings). ordertool should read files like that normally, and when it next writes the orders file it should write it the usual way (no byte-order mark). A file whose columns really are wrong must still be rejected with the same error as before.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

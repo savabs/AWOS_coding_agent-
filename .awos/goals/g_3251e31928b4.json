@@ -1,0 +1,80 @@
+{
+  "root_id": "g_3251e31928b4",
+  "nodes": {
+    "g_3251e31928b4": {
+      "goal_id": "g_3251e31928b4",
+      "description": "Add a one-line docstring to PromptEvolver.should_evolve explaining what it checks",
+      "parent_ids": [],
+      "child_ids": [
+        "g_ba8cbbb27262",
+        "g_1ccd7dfd68ea"
+      ],
+      "tasks": [],
+      "status": "in_progress",
+      "created_at": "2026-05-26T20:14:36Z",
+      "updated_at": "2026-05-26T20:14:57Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_6ba6875e"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_ba8cbbb27262": {
+      "goal_id": "g_ba8cbbb27262",
+      "description": "Locate the `should_evolve` method within the `PromptEvolver` class and insert an empty one-line docstring placeholder `\"\"\"\"\"\"` directly below its signature.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "scaffold/agent/prompt_evolver.py",
+          "action": "Locate the `should_evolve` method within the `PromptEvolver` class and insert an empty one-line docstring placeholder `\"\"\"\"\"\"` directly below its signature.",
+          "complexity": "low",
+          "test_result": {
+            "passed": 0,
+            "failed": 0,
+            "errors": 0,
+            "pass_rate": 0.0,
+            "raw_output": "Tests skipped — set AWOS_SAFE_TO_RUN_TESTS=1 to enable.",
+            "timed_out": false,
+            "test_command": [],
+            "no_tests_found": true
+          }
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-05-26T20:14:57Z",
+      "updated_at": "2026-05-26T20:15:00Z",
+      "completed_at": "2026-05-26T20:15:00Z",
+      "session_ids": [
+        "orch_6ba6875e"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_1ccd7dfd68ea": {
+      "goal_id": "g_1ccd7dfd68ea",
+      "description": "Replace the empty docstring placeholder in `PromptEvolver.should_evolve` with a concise one-line explanation of what the method checks.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "file": "scaffold/agent/prompt_evolver.py",
+          "action": "Replace the empty docstring placeholder in `PromptEvolver.should_evolve` with a concise one-line explanation of what the method checks.",
+          "complexity": "low"
+        }
+      ],
+      "status": "failed",
+      "created_at": "2026-05-26T20:14:57Z",
+      "updated_at": "2026-05-26T20:15:07Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_6ba6875e"
+      ],
+      "failure_count": 1,
+      "critique_ids": []
+    }
+  }
+}

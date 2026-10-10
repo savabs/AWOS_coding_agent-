@@ -1,0 +1,60 @@
+{
+  "url": "http://127.0.0.1:8765",
+  "passed": [
+    {
+      "name": "page_load",
+      "detail": "status=200"
+    },
+    {
+      "name": "brand_visible",
+      "detail": "AWOS"
+    },
+    {
+      "name": "chat_tab",
+      "detail": ""
+    },
+    {
+      "name": "runs_tab",
+      "detail": ""
+    },
+    {
+      "name": "modes_rendered",
+      "detail": "picker=3 cards=3"
+    },
+    {
+      "name": "chat_input",
+      "detail": ""
+    },
+    {
+      "name": "send_button",
+      "detail": ""
+    },
+    {
+      "name": "chat_stream_reply",
+      "detail": "messages=2"
+    },
+    {
+      "name": "runs_view_active",
+      "detail": ""
+    },
+    {
+      "name": "runs_list",
+      "detail": "sessions=2"
+    },
+    {
+      "name": "file_list",
+      "detail": "files=1"
+    },
+    {
+      "name": "diff_panel",
+      "detail": "diff_lines=4"
+    }
+  ],
+  "failed": [],
+  "console_errors": [],
+  "network_failures": [],
+  "screenshots": {
+    "chat": "/home/becmachlean/2024/projects/AWOS_coding_agent/.awos/gui_test/chat.png",
+    "runs": "/home/becmachlean/2024/projects/AWOS_coding_agent/.awos/gui_test/runs.png"
+  }
+}

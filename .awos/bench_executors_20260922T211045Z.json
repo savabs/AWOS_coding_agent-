@@ -1,0 +1,325 @@
+{
+  "timestamp": "2026-09-22T21:10:45.940673+00:00",
+  "total_cases": 12,
+  "cases": [
+    {
+      "case": "a1_off_by_one_page",
+      "tier": "A",
+      "multi_file": false,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": "no usable patch returned"
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 0.01,
+        "llm_calls": 3,
+        "tool_calls": 2,
+        "input_tokens": 1600,
+        "output_tokens": 280,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "a2_mutable_default",
+      "tier": "A",
+      "multi_file": false,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": "no usable patch returned"
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 0.0,
+        "llm_calls": 3,
+        "tool_calls": 2,
+        "input_tokens": 1600,
+        "output_tokens": 280,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "a3_integer_midpoint",
+      "tier": "A",
+      "multi_file": false,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": "no usable patch returned"
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 0.0,
+        "llm_calls": 3,
+        "tool_calls": 2,
+        "input_tokens": 1600,
+        "output_tokens": 280,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "a4_empty_input_crash",
+      "tier": "A",
+      "multi_file": false,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": "no usable patch returned"
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 0.0,
+        "llm_calls": 3,
+        "tool_calls": 2,
+        "input_tokens": 1600,
+        "output_tokens": 280,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "b1_constant_mismatch",
+      "tier": "B",
+      "multi_file": true,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": "no usable patch returned"
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 0.0,
+        "llm_calls": 3,
+        "tool_calls": 2,
+        "input_tokens": 1600,
+        "output_tokens": 280,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "b2_schema_drift",
+      "tier": "B",
+      "multi_file": true,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": "no usable patch returned"
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 0.0,
+        "llm_calls": 3,
+        "tool_calls": 2,
+        "input_tokens": 1600,
+        "output_tokens": 280,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "b3_caller_contract",
+      "tier": "B",
+      "multi_file": true,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": "no usable patch returned"
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 0.0,
+        "llm_calls": 3,
+        "tool_calls": 2,
+        "input_tokens": 1600,
+        "output_tokens": 280,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "b4_enum_extension",
+      "tier": "B",
+      "multi_file": true,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": "no usable patch returned"
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 0.0,
+        "llm_calls": 3,
+        "tool_calls": 2,
+        "input_tokens": 1600,
+        "output_tokens": 280,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "c1_reuse_existing_helper",
+      "tier": "C",
+      "multi_file": true,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": "no usable patch returned"
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 0.0,
+        "llm_calls": 3,
+        "tool_calls": 2,
+        "input_tokens": 1600,
+        "output_tokens": 280,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "c2_use_project_error_type",
+      "tier": "C",
+      "multi_file": true,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": "no usable patch returned"
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 0.0,
+        "llm_calls": 3,
+        "tool_calls": 2,
+        "input_tokens": 1600,
+        "output_tokens": 280,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "d1_contract_only_in_tests",
+      "tier": "D",
+      "multi_file": false,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": "no usable patch returned"
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 0.0,
+        "llm_calls": 3,
+        "tool_calls": 2,
+        "input_tokens": 1600,
+        "output_tokens": 280,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    },
+    {
+      "case": "d2_fix_belongs_in_the_helper",
+      "tier": "D",
+      "multi_file": false,
+      "single_shot": {
+        "solved": false,
+        "latency_sec": 0.0,
+        "llm_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+        "detail": "no usable patch returned"
+      },
+      "agent_loop": {
+        "solved": true,
+        "latency_sec": 0.0,
+        "llm_calls": 3,
+        "tool_calls": 2,
+        "input_tokens": 1600,
+        "output_tokens": 280,
+        "cost_usd": 0.0,
+        "detail": ""
+      }
+    }
+  ],
+  "single_shot": {
+    "solved": 0,
+    "pass_rate": 0.0,
+    "self_contained_solved": 0,
+    "self_contained_total": 6,
+    "multi_file_solved": 0,
+    "multi_file_total": 6,
+    "cost_usd": 0.0
+  },
+  "agent_loop": {
+    "solved": 12,
+    "pass_rate": 1.0,
+    "self_contained_solved": 6,
+    "self_contained_total": 6,
+    "multi_file_solved": 6,
+    "multi_file_total": 6,
+    "cost_usd": 0.0
+  },
+  "delta_pass_rate": 1.0
+}

@@ -1,0 +1,48 @@
+{
+  "root_id": "g_d1fb8f26a5ba",
+  "nodes": {
+    "g_d1fb8f26a5ba": {
+      "goal_id": "g_d1fb8f26a5ba",
+      "description": "G3 failure hunt — force MCTS after worker fail",
+      "parent_ids": [],
+      "child_ids": [
+        "g_8cec1e042a55"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-20T08:32:59Z",
+      "updated_at": "2026-06-20T08:33:13Z",
+      "completed_at": "2026-06-20T08:33:13Z",
+      "session_ids": [
+        "orch_5ef501df"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_8cec1e042a55": {
+      "goal_id": "g_8cec1e042a55",
+      "description": "Fix broken_add to return a+b not a-b",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "tests/fixtures/gauntlet_broken_module.py",
+          "file": "tests/fixtures/gauntlet_broken_module.py",
+          "action": "Fix broken_add to return a+b not a-b",
+          "complexity": "medium"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-20T08:33:09Z",
+      "updated_at": "2026-06-20T08:33:13Z",
+      "completed_at": "2026-06-20T08:33:13Z",
+      "session_ids": [
+        "orch_5ef501df"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

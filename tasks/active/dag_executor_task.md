@@ -1,3 +1,10 @@
+---
+title: "DAG-Based Parallel Executor Task"
+tags:
+  - doc/task
+  - status/active
+---
+
 # DAG-Based Parallel Executor Task
 
 ## Status: COMPLETE — 2026-05-17
@@ -17,3 +24,8 @@
 - `scaffold/agent/dag_executor.py` — DAGExecutor class (wave building + ThreadPoolExecutor)
 - `scaffold/agent/orchestrator.py` — _execute_single_task, _run_task_batch, use_parallel flag
 - `test_dag_executor.py` — 28-assertion smoke test
+
+## Related
+
+- _(add links to related documents here)_
+

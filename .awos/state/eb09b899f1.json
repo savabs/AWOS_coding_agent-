@@ -1,0 +1,25 @@
+{
+  "goal": "Stage 1 long workload mission: eight docstring/comment edits in worktree sandbox (one file per task). Uses fixed plan \u2014 planner skipped.",
+  "goal_hash": "eb09b899f1",
+  "started_at": "2026-06-23T11:47:20",
+  "last_updated": "2026-06-24T20:48:23",
+  "completed_task_ids": [
+    1,
+    2,
+    3,
+    5,
+    6,
+    7,
+    8,
+    "4_1",
+    "4_2",
+    4
+  ],
+  "failed_task_ids": [],
+  "session_ids": [
+    "orch_96c2bcd2",
+    "orch_fd2482cc",
+    "orch_109f9a61"
+  ],
+  "status": "complete"
+}

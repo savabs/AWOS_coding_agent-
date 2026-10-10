@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "session_id": "rs_0d18e88f39f2",
+  "goal": "In scaffold/agent/mcts_policy.py add a one-line docstring to mcts_enabled explaining it controls whether MCTS fallback runs after worker failure",
+  "goal_hash": "b3b1afc703",
+  "status": "completed",
+  "created_at": "2026-06-18T04:16:55Z",
+  "updated_at": "2026-06-18T04:17:10Z",
+  "paused_at": null,
+  "codebase_root": ".",
+  "reasoning_session_id": "orch_28218063",
+  "goal_graph_id": "g_fa68f7e5336b",
+  "progress": {
+    "completed_task_ids": [
+      1
+    ],
+    "failed_task_ids": [],
+    "current_task_id": null,
+    "total_tasks": 1,
+    "decomposition_depth": 0
+  },
+  "budget": {
+    "spent_usd": 0.0009708000000000001
+  },
+  "sandbox": {
+    "enabled": false,
+    "feature_id": null,
+    "worktree_path": null,
+    "branch": null
+  },
+  "parent_session_id": null,
+  "cancel_requested": false
+}
