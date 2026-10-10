@@ -55,3 +55,25 @@ as one package, matching Trick Book E1.
 
 Report the components separately where the logs allow it (fuzzy tiers,
 loop trips). A package verdict does not prove which part did the work.
+
+## Result (interim, 2026-10-10): INCONCLUSIVE. Flags stay off.
+
+68 of the 73 issues have a complete pair. The last 9 runs (toolz_634 treat, toolz_635, validators_411, wrapt_356, wrapt_357) were cut off when the OpenRouter key was revoked. Scored with `scripts/stats_audit.py --cost-budget 0.2` on `.awos/job_series_E1_combined.json`.
+
+| | control | treatment (fuzzy apply + loop breaker) |
+|---|---|---|
+| solved (paired tasks) | 55/68 | 56/68 |
+| billed $/run | $0.0093 | $0.0086 (×0.93) |
+| minutes/run | 2.88 | 2.88 |
+
+- **Paired stats:** P(Δ>0) = 0.542. Posterior Δ is +0.7 pp, with a 95% credible interval of [-12.3, +13.6]. Task-level exact McNemar: b = 7, c = 6, p = 1.0. MDE ≈ 15 pp.
+- **The missing runs cannot produce KEEP.** Even if the treatment won all 5 remaining tasks, McNemar gives b = 12, c = 6, p ≈ 0.24 > 0.05. If control won all 5, P(Δ>0) could move toward the REJECT threshold. Finishing those pairs is optional.
+- **Secondary metrics:**
+  - The fuzzy ladder fired only at tier 4: 34 times, with 30 refusals. Tiers 1–3 never fired. Most failed edits are not near-misses that a fuzzy matcher can recover. That points at the model writing wrong content, not at matching.
+  - The loop guard tripped 11 times. 34 one-shot replies were cut off at the output cap.
+  - The treatment is about 7% cheaper per run with no solve-rate change. That is consistent with fewer runaway repetitions, but it is too small to clear the rule.
+- **Decision:** INCONCLUSIVE under the pre-registered rule. Both flags stay off by default.
+- **Takeaway:**
+  - The edit-application path is not the bottleneck at this solve rate (81%).
+  - The 34 output-cap cut-offs are a larger, separate failure mode worth its own ablation.
+  - Per the atlas, single-run noise of 2–6 pp means K = 1 designs can only detect large effects.
