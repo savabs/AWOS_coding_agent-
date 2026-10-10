@@ -118,3 +118,44 @@ How to read the table:
 - AgentRR: Get Experience from Practice. https://arxiv.org/abs/2505.17716
 - Samsi et al. From Words to Watts. https://arxiv.org/html/2310.03003
 - Local: `.awos/reward_store.jsonl`, `.awos/spans.jsonl` (eval above); `docs/research/trick_book_2026-10.md`; `docs/expedition/06_local-computing.md`
+
+## Freshness update (2026-10-10, via arXiv/GitHub/HN/HF APIs)
+
+*Method: arXiv API (newest first, several queries before it started rate-limiting), Hugging Face paper search, GitHub repo search, HN Algolia. Every abstract below was read from its arXiv abs page. GitHub and HN turned up nothing material: one small curated list (wmmthu/awesome-llm-agent-skills-papers) and no HN discussion of trace-to-routine compilation.*
+
+### New since the chart (dated, with URLs; most important first)
+
+1. **SpeedRunner, "Better, Faster, Stronger: Programmatic Skill Learning Best Reduces Agent Cost"** (2026-08-11). https://arxiv.org/abs/2608.11338. Argues directly that skills written as programs give the largest *cost* reduction, because they run action sequences deterministically. SpeedRunner is a coding agent that analyses trajectories and refactors skills. The paper also claims skills can be learned "even without replay or validation". *For AWOS:* this is the closest published match to the routine rung's cost goal. Its no-validation stance conflicts with ASI and with our gate, so keep the gate. Tested only in embodied environments.
+2. **CODESKILL** (2026-05-25). https://arxiv.org/abs/2605.25430. The first skill-extraction result on **SWE-Bench Verified and Terminal-Bench 2** that this chart has seen: +11.03 pass rate over no-skill and +5.10 over the best memory baseline. *For AWOS:* the skills are procedural text that guides an agent, not replayable programs. So coding issues gain from the routine-guided L1 tier, not from zero-inference replay. This supports the chart's view that replay has near-zero expected value on SWE-style issues. The manager is trained with RL (deferred per VISION), but extraction alone can be copied.
+3. **SKILL-DISCO** (2026-06-25). https://arxiv.org/abs/2606.26669. Distils parameterised control-flow subgraphs (PFSMs) from successful traces and compiles them into "callable, executable, and verifiable" skills. Gains on ALFWorld and WebArena, with fewer turns. *For AWOS:* the most direct "compile traces into routines" design so far. A PFSM is a stronger replay format than a flat diff when the routine has branches.
+4. **Break It Down, Pass It On** (2026-08-20). https://arxiv.org/abs/2608.20274. In a controlled study, **task-level skills mostly *lower* performance below the no-memory baseline**, while subtask-level skills raise it. **Text skills transfer better than code skills.** It also proposes a skill-utility score that needs no execution. *For AWOS:* this qualifies §3 ("programs beat text"). Code wins when it is verified and reused in the same environment (ASI). For transfer across tasks, text does better. Routines should be induced at subtask granularity.
+5. **ContinualSkillBench** (2026-08-04). https://arxiv.org/abs/2608.03874. Plain in-context learning "performs comparably to explicit skill maintenance on average". Weaker models build larger, more fragmented libraries. *For AWOS:* this backs "small verified library beats large". It also warns that most apparent skill gains may be context adaptation, not reuse.
+6. **SkillGen** (2026-05-09). https://arxiv.org/abs/2605.10999. Treats a skill as an intervention. It compares the same instances with and without the skill and counts both repairs and regressions. *For AWOS:* this is the right promotion test for step 6 of the compiler. It is the paired A/B the bench already runs (T1), applied per routine.
+7. **SkillCommit** (2026-08-15). https://arxiv.org/abs/2608.15165. Merges skills only after cross-instance replay plus a mechanism check, and commits an abstraction only if it "preserves the validated behavior of all constituent skills". *For AWOS:* the same rule as anti-unify-then-verify-on-all-k-members in compiler steps 3 and 6.
+8. **SCAFFOLD** (2026-08-31). https://arxiv.org/abs/2609.05511. Parametric executable skills under a multi-instance abstraction constraint, compacted by MDL plus behavioural-equivalence checks. +11.1 to 17.2 points over the best skill baseline on WebArena, VisualWebArena and Online-Mind2Web. *For AWOS:* the chart's LILO/Stitch pattern now works for agents. Its distillation into weights is deferred.
+9. **Code-based skills in NetHack ("Up and Down the Abstraction Ladder")** (2026-09-25). https://arxiv.org/abs/2609.31076. Skills "nearly triple game progression" and **cut inference cost per episode by 86%**. Keeping primitives alongside skills preserves a fallback. *For AWOS:* the first large measured cost cut from code skills. It also supports "always fall through to the model".
+10. **Task Model Induction from computer-use traces** (2026-08-20, https://arxiv.org/abs/2608.20319) and **TeleTune** (2026-10-04, https://arxiv.org/abs/2610.05437). TMI separates interleaved tasks in raw screen and keyboard traces and reconstructs 74.9% of steps, with +30% held-out accuracy. TeleTune learns from logs that have no goals and cannot be replayed. *For AWOS:* these speak to the open question on owner-recurrence logs. Raw owner traces can be segmented into tasks before clustering.
+11. **Runaway Reaction / CRIME** (2026-10-05). https://arxiv.org/abs/2610.05943. Skills that each pass vetting on their own can be combined into malicious behaviour. *For AWOS:* routines need composition-level sink policy (T10), not only checks on each routine.
+12. **Smaller items:** Trace2Skill (2026-03-26, https://arxiv.org/abs/2603.25158) and SkillReducer (2026-03-31, https://arxiv.org/abs/2603.29919). SkillReducer found that over 60% of the body text in 55,315 public skills is non-actionable, and that trimming skills improves quality.
+
+### Corrections
+
+- "It is 3–4 orders of magnitude faster and uses about 100x less memory than DreamCoder's compressor" → the abstract says "2 orders of magnitude less memory" (https://arxiv.org/abs/2211.16605). These match. No correction.
+- "ASI … gains 23.5 points over the baseline and 11.3 points" → the abstract says "by 23.5% and 11.3% in success rate" (https://arxiv.org/abs/2504.06821). It does not say whether these are absolute points or relative gains. Treat "points" as unconfirmed.
+- §3 "Programs beat text, but only because they are verified" → not wrong, but too strong for transfer. https://arxiv.org/abs/2608.20274 finds text skills transfer across tasks better than code skills. Scope the claim to verified reuse in the same environment.
+
+### Confirmed claims (briefly)
+
+- AWM: 24.6% and 51.1% relative gain on Mind2Web and WebArena (abstract).
+- SkillWeaver: +31.8% and +39.8% relative, and up to 54.3% when transferred from a strong agent to a weak one (abstract).
+- ASI: 15.6% verification pass rate against AWM's 31.4% (HTML v2 text). The `sort_by_listings()` dropdown-versus-sidebar drift example is quoted correctly. Step reduction is 10.7–15.3%.
+- Local ledger: re-counted `.awos/reward_store.jsonl` at 3,152 episodes and 1,667 successes, which matches the table.
+
+### Still unverified
+
+- Routine drift rate (half-life) against commit rate in code repos. No 2026 paper measures it.
+- Owner-task recurrence on an always-on box. TMI and TeleTune give tools to segment traces, but no recurrence rates.
+- Joules per verified task for replay plus gate on the M5. The 30 ms launch and 3–4 J/token figures were not re-measured here.
+- Whether ASI's 15.6% acceptance rate carries over to coding diffs. CODESKILL reports pass rates, not acceptance or false-replay rates.
+- SpeedRunner's claim that skills work "without replay or validation" for coding repos. It was tested only in embodied environments.
+- arXiv rate limits blocked queries on anti-unification and SWE-specific record and replay, so recent PL-side work (Stitch/babble successors) was not checked.
