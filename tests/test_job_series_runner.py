@@ -167,7 +167,7 @@ def test_dry_run_end_to_end(tmp_path, capsys):
     run_dir = Path(data["run_dir"])
     for arm, flag in (("off", "0"), ("on", "1")):
         state = run_dir / arm / "state"
-        assert (state / ".env").read_text() == env_file.read_text()
+        assert not (state / ".env").exists()   # the key is read from the source, never copied
         log = (run_dir / arm / "run.log").read_text()
         assert f"notebook={flag}" in log and "goal_check=0" in log
         assert f"cwd={state}" in log or f"cwd={state.resolve()}" in log
@@ -205,7 +205,9 @@ def test_resume_keeps_earlier_jobs_and_state(tmp_path, capsys):
         ("off", 1), ("on", 1), ("off", 2), ("on", 2)]
     assert data["resumed"] is True and data["jobs"] == [1, 2]
     assert marker.read_text() == "notebook stand-in"
-    assert (out_root / "job_series" / ts / "off" / "state" / ".env").read_text() == "FAKE_KEY=new\n"
+    state = out_root / "job_series" / ts / "off" / "state"
+    assert not (state / ".env").exists()                      # never copied
+    assert js.job_dotenv(state).read_text() == "FAKE_KEY=new\n"   # the resume reads the fresh source
     assert js.main(base + ["--resume", "19990101T000000"]) == 1
 
 

@@ -6,7 +6,8 @@ Same calling convention as `scripts/job_series.py _child`:
 
     python scripts/harness_aider.py <job_dir> <project_dir> --model <openrouter id>
 
-cwd must be the arm's state dir (it holds a copy of .env with OPENROUTER_API_KEY).
+cwd must be the arm's state dir. The key comes from AWOS_JOB_DOTENV (the source
+.env, set by job_series) or, for old run dirs, the state dir's .env.
 Reads <job_dir>/task.json, runs Aider once, non-interactively (`--message`), in
 <project_dir> on the goal, streams Aider's output to stdout, and writes
 ./report.json:
@@ -733,7 +734,9 @@ def main(argv: list[str] | None = None) -> int:
     max_cost = float(spec.get("max_cost_usd", 1.0))
     timeout_s = max(60.0, float(spec.get("timeout_min", 30)) * 60 - TIMEOUT_MARGIN_S)
 
-    env = child_env(os.environ, read_env_file(state / ".env"))
+    # job_series points AWOS_JOB_DOTENV at the source .env (no per-arm copy).
+    dotenv = Path(os.environ.get("AWOS_JOB_DOTENV") or state / ".env")
+    env = child_env(os.environ, read_env_file(dotenv))
 
     prefix = aider_prefix(args.max_reflections)
     version = aider_version(prefix)

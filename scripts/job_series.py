@@ -91,7 +91,9 @@ ROUTING_ENV = ("AWOS_OPENROUTER_PROVIDER", "AWOS_OPENROUTER_ALLOW_FALLBACKS",
                # trick T3: static gate at edit-apply time (docs/specs/static_gate.md)
                "AWOS_STATIC_GATE", "AWOS_STATIC_GATE_TESTS",
                # trick T7b: stable prompt prefix (docs/specs/prompt_caching.md)
-               "AWOS_STABLE_PREFIX", "AWOS_STABLE_PREFIX_BLOCK")
+               "AWOS_STABLE_PREFIX", "AWOS_STABLE_PREFIX_BLOCK",
+               # trick T4: fuzzy apply + edit grammar (docs/specs/edit_robustness.md)
+               "AWOS_FUZZY_APPLY", "AWOS_EDIT_GRAMMAR")
 
 
 def routing_env() -> dict:
@@ -118,6 +120,17 @@ ARM_CHILDREN: dict[str, dict] = {
                                "--max-reflections", "10"],
                        "env": {}},
 }
+
+# The run sets this to the source .env; jobs read the key from there instead of
+# a per-arm copy. Old run dirs (pre-2026-10-10) still hold state/.env.
+JOB_DOTENV = "AWOS_JOB_DOTENV"
+_RUN_DOTENV: Path | None = None   # set by run(); passed to children via JOB_DOTENV
+
+
+def job_dotenv(state: Path) -> Path:
+    p = os.environ.get(JOB_DOTENV) or _RUN_DOTENV
+    return Path(p) if p else state / ".env"
+
 
 # report.json may carry {"usage": {...}} with these keys; it then replaces the
 # ledger/spans metrics for that job (for harnesses that don't write .awos/).
@@ -611,7 +624,7 @@ def run_child(job_dir: Path, project: Path) -> None:
     sys.path[:0] = [str(REPO), str(REPO / "scaffold"), str(REPO / "scaffold" / "agent")]
     from dotenv import load_dotenv
 
-    load_dotenv(Path.cwd() / ".env")   # the arm's copy; never overrides the pins
+    load_dotenv(job_dotenv(Path.cwd()))   # never overrides the pins
     spec = load(job_dir)
     os.environ.update({
         "AWOS_EXECUTOR": "agent_loop",
@@ -952,7 +965,7 @@ def key_usage(state: Path) -> float | None:
     import urllib.request
     try:
         key = next((ln.split("=", 1)[1].strip().strip('"').strip("'")
-                    for ln in (state / ".env").read_text(encoding="utf-8").splitlines()
+                    for ln in job_dotenv(state).read_text(encoding="utf-8").splitlines()
                     if ln.startswith("OPENROUTER_API_KEY=")), "")
         if not key:
             return None
@@ -1017,7 +1030,9 @@ def run_job(arm: str, number: int, job_dir: Path, sdir: Path, jobs: list, arm_di
     import hashlib
     env["AWOS_SESSION_ID"] = hashlib.sha256(f"{arm_dir}:{number}".encode()).hexdigest()[:24]
     env.update(experience_env(arm_dir, sdir))
-    fill = {"{runner}": str(Path(__file__).resolve()), "{job_dir}": str(job_dir),
+    if _RUN_DOTENV:
+        env[JOB_DOTENV] = str(_RUN_DOTENV)
+    fill ={"{runner}": str(Path(__file__).resolve()), "{job_dir}": str(job_dir),
             "{project}": str(project)}
     cmd = ([PY, "{runner}", "_dry_child", "{job_dir}", "{project}"] if dry_run
            else list(child["cmd"]))
@@ -1319,8 +1334,6 @@ def _setup_arm_dirs(run_root: Path, arms: list[str], env_src: Path | None) -> di
         arm_dir = run_root / arm
         (arm_dir / "state").mkdir(parents=True, exist_ok=True)
         (arm_dir / "project").mkdir(parents=True, exist_ok=True)
-        if env_src:
-            shutil.copy2(env_src, arm_dir / "state" / ".env")
         git(arm_dir / "project", "init", "-q")
         (arm_dir / "run.log").touch()
         arm_dirs[arm] = arm_dir
@@ -1385,6 +1398,10 @@ def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
 
     retries = int(os.environ.get("AWOS_SERIES_RETRIES", 2))
     env_src = find_env_file(env_file)
+    # Children and key_usage read the key from this one file; no copy is left
+    # in any arm dir (99 stale copies had piled up under .awos/job_series).
+    global _RUN_DOTENV
+    _RUN_DOTENV = env_src.resolve() if env_src else None
     provenance = {"git": git_provenance(), "config": config_hash(series, sdir, arms, numbers, repeat),
                   "started_at": started_at}
     out_root.mkdir(parents=True, exist_ok=True)
@@ -1423,7 +1440,7 @@ def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
         print("[job_series] AWOS_PROVIDER=local: every call goes to the local server "
               f"(model {os.environ.get('AWOS_LOCAL_MODEL') or 'default'}, $0); "
               "the pin above names the cloud id it stands in for")
-    print(f"[job_series] .env copied from: {env_src if env_src else 'none found'}")
+    print(f"[job_series] .env read from: {env_src if env_src else 'none found'} (not copied)")
     sys.stdout.flush()
 
     results: list[dict] = list(kept)
@@ -1621,7 +1638,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out-root", default=None, help="where results/state go (default .awos/)")
     parser.add_argument("--data-root", default=None,
                         help="revalidate: where the run's results/logs are (default --out-root)")
-    parser.add_argument("--env-file", default=None, help=".env to copy into each arm (default: repo's)")
+    parser.add_argument("--env-file", default=None, help=".env the jobs read the key from (default: repo's)")
     parser.add_argument("--resume", default=None, metavar="TS",
                         help="continue run TS (e.g. 20260926T170601) with its notebooks; pair with --jobs")
     args = parser.parse_args(argv)
