@@ -256,3 +256,46 @@ TDP/FLOP estimates, carbon/water framing, cluster DVFS, accuracy per watt as a h
 - https://arxiv.org/abs/2410.12032
 - https://arxiv.org/abs/2502.15964
 - https://support.apple.com/103253
+
+---
+
+## Freshness update (2026-10-10, via arXiv/GitHub/HN/HF APIs)
+
+Method note: WebSearch was not used. arXiv search was rate-limited (HTTP 429) after the first two queries, so most discovery went through the Hugging Face papers search, Hacker News, and GitHub. Abstracts were read via HF paper metadata or arXiv abs pages. Full texts were not read except IPW.
+
+### New since the chart (dated, with URLs; most important first)
+
+1. **AgentStop (2026-05-01, ACM CAIS '26).** Measures time, token and energy overhead of locally deployed coding and web agents on consumer hardware. A supervisor uses token log-probs to kill trajectories unlikely to succeed. It cuts *wasted* energy 15-20% with under 5% utility drop. This is the first agent-trajectory energy paper found, which was open question 10. It supports charging failed attempts to the task, and a cheap early-abort gate is a Stage-1 candidate. https://arxiv.org/abs/2605.15206
+2. **SiliconBench (2026-09-12).** Benchmarks nine Apple Silicon serving engines at concurrency 1-16 on chat and agent workloads. Only vllm-metal "more than doubles throughput" from concurrency 1 to 16, and that is on Qwen3-0.6B. CUDA vLLM and SGLang scale better. Some stacks complete every request while memory approaches physical capacity and throughput *falls*. It reports no energy. This is the first public Apple-Silicon concurrency curve (open question 1). It qualifies the chart's "3-5x J/token from batching" for a Mac: the gain is engine-dependent and memory-limited. Run the concurrency sweep on the owner's engine rather than assuming it. https://arxiv.org/abs/2609.19169
+3. **SWEnergy (2025-12-10; missed by the chart).** Four agent frameworks with 1.7-4B SLMs on SWE-bench Verified Mini, 150 runs per configuration. Framework architecture drives energy (9.4x spread), yet resolution rates were near zero. Small models in heavy scaffolds waste energy. https://arxiv.org/abs/2512.09543
+4. **Scaffold Effect (2026-06-08).** The harness alone changes tokens per solved task by up to 40x, while paired pass-rate differences are 0-8 pp. For AWOS, the tokens-per-resolved-task term depends on the harness at least as much as on the model. https://arxiv.org/abs/2607.22585
+5. **Offline LLM energy/cost blog on HN (2026-05-17, 355 points).** Reports an M5 Max at about 50-100 W and 10-40 tok/s on Gemma 4 31B. Amortized hardware plus electricity comes to about $0.40-4.79 per million tokens, against about $0.38-0.50 on OpenRouter. Hardware cost dominates electricity. This is a single blogger's measurement, but it supports the chart's point that local's lasting advantages are privacy, latency and offline use, not cost or energy. https://www.williamangel.net/blog/2026/05/17/offline-llm-energy-use.html
+6. **On Randomness in Agentic Evals (2026-02-06).** 60,000 SWE-bench Verified trajectories. Single-run pass@1 varies 2.2-6.0 pp depending on which run is picked, and the standard deviation exceeds 1.5 pp even at temperature 0. This backs the chart's pass^k recommendation and means the 64% vs 61% result (single run) is within noise. https://arxiv.org/abs/2602.07150
+7. **SERA (2026-01-28).** SFT-only repository-specialized coding agents, claimed 26x cheaper than RL and 57x cheaper than earlier synthetic-data methods *(self-reported)*. It adds weight to "distill or SFT before RL" for private-codebase specialization. https://arxiv.org/abs/2601.20789
+8. **On-policy distillation for multi-turn agents is now an active line.** Examples: TCOD (2026-04-27), Multi-Turn OPD with Prefix Replay (2026-07-16), RetireOPD (2026-09-17), ActFirst-OPD (2026-09-29, 1.8-4.9x faster training on 0.6-4B Qwen3 students). All are small-model, ALFWorld/WebShop-style evaluations, not coding. The method is maturing, but evidence on repo-level coding is still thin. https://arxiv.org/abs/2609.36608
+9. **Where Do the Joules Go? (2026-01-29).** This is the paper form of ML.ENERGY v3. It covers 46 models and 1,858 configs on H100 and B200. It says LLM task type gives up to 25x energy differences and GPU utilization differences give 3-5x. https://arxiv.org/abs/2601.22076
+10. **Calibrated routing/caching.** UCCI (2026-05-11): isotonic-calibrated per-query error with a cost-minimizing threshold, 31% cost cut at fixed F1 on NER. Not coding. Closing the Calibration Gap in Semantic Caching (2026-06-18): offline-best cache scorers are often the worst at deployment. Both back the chart's calibrated-threshold advice. https://arxiv.org/abs/2605.18796 · https://arxiv.org/abs/2606.19719
+11. **TraceLab (2026-06-30) and CacheWise (2026-06-15).** Real coding-agent traces. Workloads have long contexts, short outputs, and high but imperfect prefix-cache hit rates. CacheWise cuts KV evictions 2-2.6x. This supports the chart's prefix-caching point and gives data to model KV pressure for the concurrency sweep. https://arxiv.org/abs/2606.30560 · https://arxiv.org/abs/2606.16824
+12. **Tooling.** Zeus v0.16.0 (2026-07-07) and macmon v0.9.0 (2026-10-07) are both actively released, so the instrumentation plan has maintained tools. https://github.com/ml-energy/zeus · https://github.com/vladkens/macmon
+13. **JustFit (2026-09-15).** MLX runtime serving 213k-token context on a 24 GiB M4 Pro (6.93x the mlx-vlm baseline). Long-context memory on a Mac is improving, which affects the KV ceiling. https://arxiv.org/abs/2609.17475
+
+### Corrections
+
+- Chart: "Intelligence per Watt ... Third, local ... " is not claimed in the chart, but note the **IPW abstract** says local accelerators have "at least 1.4x lower IPW than cloud accelerators running identical models", and IPW "improved 5.3x" from 2023 to 2025 with local query coverage rising 23.2% to 71.3% (https://arxiv.org/abs/2511.07885). The chart's framing (cloud wins per joule, local wins per watt) is consistent with this. No numeric contradiction.
+- Chart: GreenBench "30-40x" and "0.47 W CPU+GPU vs 8-12 W system". The arXiv page (https://arxiv.org/abs/2608.28667, submitted 2026-08-24) does state both numbers, so the chart's description of the internal inconsistency is accurate. It was not updated or retracted. Corrections: none found.
+- Other corrections: none found.
+
+### Confirmed claims (briefly)
+
+- IPW routing simulation: oracle 80.4% energy savings, 80%-accuracy router 64.3%, 60% 48.4% (https://arxiv.org/html/2511.07885).
+- IPW agentic appendix E.12: cloud 2.4-3.0x higher per-joule, local M4 Max 3.7-3.8x higher per-watt, about 2.2 pp accuracy loss locally. Matches the chart.
+- ML.ENERGY v3 headline: 25x task-type spread and 3-5x from utilization (https://arxiv.org/abs/2601.22076).
+- Science of Agent Reliability: capability gains yield only small reliability gains (https://arxiv.org/abs/2602.16666). The abstract says 14 models; the chart says 15 models, a minor discrepancy that probably reflects a version difference.
+
+### Still unverified
+
+- The AI Energy Score v2 multipliers (154x/514x/697x), the 3.56x MoE figure, the FP8 "56% more energy" claim, and Thinking Machines' IF-eval numbers were not re-checked.
+- HAL's "higher reasoning effort lowered accuracy" and MAKER's details were not re-read. Ares (https://arxiv.org/abs/2603.07915) suggests static low-effort modes degrade agent performance, which may cut against a blanket "reasoning off" default for agents. Test per step type.
+- The Epoch Wh figures and the cloud price decline rate were not rechecked.
+- No primary study was found on speculative decoding energy at batch 1 on Apple Silicon, nor on bitwise determinism of MLX.
+- The 2026 papers above were read from abstracts only, and several are single-lab and not yet replicated.

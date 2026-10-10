@@ -206,3 +206,42 @@ All URLs listed under Key resources, plus:
 - Process mining overview (van der Aalst, alpha/heuristic/inductive miners): https://en.wikipedia.org/wiki/Process_mining
 - Celonis history and valuation: https://en.wikipedia.org/wiki/Celonis
 - CoScripter: https://en.wikipedia.org/wiki/CoScripter
+
+## Freshness update (2026-10-10, via arXiv/GitHub/HN/HF APIs)
+
+*Method note: arXiv's own API returned HTTP 429 for the whole pass (shared IP), so discovery ran through the Hugging Face papers search and HN/GitHub APIs. Abstracts were confirmed with WebFetch on arxiv.org/abs pages where noted. Items marked "HF abstract only" were read from the Hugging Face papers API, not the arXiv page. HF search is semantic, so this is a sample, not an exhaustive sweep.*
+
+### New since the chart
+
+1. **Task Model Induction (TMI)**, Jiang, Wang, Chen, Yang, 2026-08-20, https://arxiv.org/abs/2608.20319 (confirmed on abs page). It takes passively recorded screenshots and mouse/keyboard traces, discovers the latent tasks in an unsegmented, interleaved trace, and induces a task model (hierarchical goals plus control flow) for each. Reported: 0.974 agreement with ground-truth task groupings, 74.9% of execution steps reconstructed, and +30.0% held-out accuracy for skills derived from the models, against the strongest baseline. Why it matters: this is the segmentation sub-problem the chart's Open Questions say has no published benchmark, and it targets interleaved work. The evidence is on controlled human and agent trajectories, not a real owner's desktop. The abs page does not say whether code or data are released.
+2. **Screenpipe went from capture tool to workflow-mining product.** The repo (https://github.com/mediar-ai/screenpipe, about 21.9k stars, pushed 2026-10-10, app-v2.7.104 released 2026-10-09) is now described as "YC (S26) | Open Computer History | Continuously record your company computer work, map your workflows, help you find work worth automating". The Launch HN is dated 2026-07-23 (88 points): https://news.ycombinator.com/item?id=49024620. Why it matters: the chart treats screenpipe as a capture substrate with 5–20% CPU. It is now a direct competitor for "find work worth automating", which strengthens the premise and narrows the room for novelty.
+3. **GUIDE**, 2026-03-26, https://arxiv.org/abs/2603.25864 (HF abstract only): 67.5 hours of screen recordings from 120 users across 10 applications, with think-aloud narration. Eight multimodal models reach only 44.6% on behavior-state detection and 55.0% on help prediction. Adding user context raised help prediction by up to 50.2 points. Why it matters: it is the first benchmark close to "understand what the owner is doing". It supports the chart's rule that intent must come from a user sentence, and it gives a measuring stick for the segment-labelling step.
+4. **PIRA-Bench**, 2026-03-09, https://arxiv.org/abs/2603.08013 (HF abstract only): proactive intent recommendation from continuous screen input with interleaved intents and noisy segments. Why it matters: it frames the chart's "Ask once" step as a benchmarkable task.
+5. **Demo2Tutorial**, 2026-06-02, https://arxiv.org/abs/2606.03951 (HF abstract only): screen recordings and interaction logs become hierarchical task graphs and multimodal tutorials, and the paper reports improved GUI-agent planning. Why it matters: it is a second recent instance of the "model documents, human or probe verifies" split.
+6. **Record-and-replay skills for coding agents**, https://github.com/ugarchance/record-and-replay-skill (42 stars, pushed 2026-08-08): watches a demonstration (Playwright for browser, OpenAdapt for desktop) and emits a reusable agent skill. Why it matters: the demonstration-to-skill path is becoming a community pattern, but at tiny adoption.
+7. **MacAgentBench**, 2026-06-21, https://arxiv.org/abs/2606.22557 (HF abstract only): 676 macOS tasks across 25 apps with deterministic rule-based checks. Best result is Claude Opus 4.6 on OpenClaw at 73.7% Pass@1, with the gain attributed mainly to the skill library. Why it matters: AWOS's owner machine is macOS, the checks are state-based (like the chart's probes), and it shows skill libraries beat framework design on this platform.
+8. **Workflow-GYM**, 2026-06-09, https://arxiv.org/abs/2606.11042 (HF abstract only): the strongest models reach only slightly above 30% on long-horizon professional GUI workflows. Why it matters: it warns that routines which chain many steps are far from reliable, so shadow mode and probes matter.
+9. **Personal GUI assistants with self-evolving memory and skill**: KnowAct-GUIClaw, 2026-07-15, https://arxiv.org/abs/2607.12625 (HF abstract only); COLLEAGUE.SKILL, 2026-05-29, https://arxiv.org/abs/2605.31264 (HF abstract only). Both distil user traces into reusable skills. The first builds on OpenClaw. Why it matters: the "learn from the owner" idea is now mainstream, and any AWOS claim has to rest on its verification and conformance gates, not on the idea.
+10. **Automated Event Log Generation from Unstructured Text Using Finetuned LLMs**, 2026-09-01, https://arxiv.org/abs/2609.01320 (HF abstract only). Fine-tuning beats few-shot prompting for turning text into process-mining event logs. Why it matters: it is weak evidence that a small fine-tuned local model can handle the redaction/event-abstraction step.
+
+### Corrections
+
+none found. Every numeric claim checked below matched its source.
+
+### Confirmed claims
+
+All five checked against arxiv.org/abs pages fetched today:
+- WONDERBREAD (https://arxiv.org/abs/2406.13264): 88% step recall, F1 < 0.3 on validation, 2,928 demonstrations, 6 BPM tasks.
+- Synatra (https://arxiv.org/abs/2409.15637): $0.031 per demonstration, 3% of human cost, 100k demonstrations, beats GPT-3.5 on WebArena and Mind2Web.
+- ECLAIR (https://arxiv.org/abs/2405.03710): RPA setup 12–18 months, 60% initial accuracy; ECLAIR 93% on workflow understanding, 40% end-to-end.
+- WORKBank (https://arxiv.org/abs/2506.06576): 1,500 workers, 844 tasks, 104 occupations. The percentages (46.1%, 45.2% H3, 69.4%) are not in the abstract, so see Still unverified.
+- The chart's claim that no personal-desktop segmentation benchmark exists is now only partly true: TMI, GUIDE and PIRA-Bench exist, though none is a real single-owner macOS AX stream.
+
+### Still unverified
+
+- WORKBank percentages (46.1%, 69.4%, 45.2%, 17.1%, 41% YC mappings, desire scores) were not re-read in the full paper.
+- UiPath FY2025 10-K figures, EY's 30–50% failure rate, Celonis valuation, and screenpipe's 5–20% CPU / 0.5–3 GB RAM figure were not re-checked this pass. The screenpipe resource claim may be stale given the repo's product pivot and version 2.7.x.
+- Microsoft Recall and Power Automate task-mining details were not re-checked. Any change since September 2024 is unknown.
+- Leno et al. 2020 and the BISE 2021 pipeline were not re-read.
+- TMI's code, data and real-desktop performance are unknown. The new items marked "HF abstract only" are summaries, not full-paper reads.
+- The chart's open questions on promotion thresholds, redaction loss and the recurrence rate of desktop work remain unanswered by anything found.

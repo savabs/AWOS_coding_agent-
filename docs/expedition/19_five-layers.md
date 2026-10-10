@@ -208,3 +208,50 @@
 - http://osworld-v1.xlang.ai/
 - https://code.claude.com/docs/en/workflows
 - https://code.claude.com/docs/en/env-vars
+
+---
+
+## Freshness update (2026-10-10, via arXiv/GitHub/HN/HF APIs)
+
+Method note: arXiv's API returned HTTP 429 for most queries after the first batch, and the HF papers search returned unrelated results. So the paper search is thin. Most items below come from HN-indexed primary links, GitHub releases and fetched pages. Everything here was fetched on 2026-10-10.
+
+### New since the chart (dated, with URLs; most important first)
+
+1. **Epoch now measures the open-vs-closed lag at 4 months, shorter than the chart's 6-12 months (2026-05-29).** "Since January 2026, the most capable open-weight models have lagged frontier closed models by an average of four months" on the Epoch Capabilities Index, about 8 ECI points. This is the best open models, not consumer-GPU models, so it is a different population from the chart's 6-12 month figure. It still shifts the planning constant for the local tier. https://epoch.ai/data-insights/open-closed-eci-gap (found via HN https://news.ycombinator.com/item?id=48342927). *AWOS: a faster-moving open frontier favors waiting over distilling (open question 3).*
+2. **NVIDIA Q2 FY2027 (reported 2026-08-26): revenue $96.2B, data center $89.0B, GAAP gross margin 75.0%.** Margin is up 2.6 points from the chart's 72.4% quarter, and data-center revenue is up 117% year over year. Layer-2 profit concentration got stronger, not weaker. https://nvidianews.nvidia.com/news/nvidia-announces-financial-results-for-second-quarter-fiscal-2027 *AWOS: supports the chart's "value sits at layer 2" claim and the case for squeezing tokens per verified task.*
+3. **NVIDIA ships a router and local-agent models (2026-08).** Nemotron 3.5 Lightning (30B MoE, "always-on agents") and **NeMo Switchyard**, an open-source routing library. NVIDIA's internal benchmarks claim frontier performance at "roughly one-third of Opus 4.8 alone" (vendor self-report). Qwen3.8-27B reached 131 tok/s on an RTX 5090. Perplexity launched a local agent app tuned for DGX Spark (2026-08-25). https://blogs.nvidia.com/blog/local-ai-open-source-models-agents-nemotron/ and Switchyard-based repos on GitHub (e.g. https://github.com/reona5/switchyard-bundle). *AWOS: confirms the chart's "watch NVIDIA owning the runtime" item and gives a baseline router to beat in the learned-router ablation.*
+4. **Apple WWDC26 (2026-06): Foundation Models framework is open source and developer-facing.** It adds a `PrivateCloudComputeLanguageModel` (32k context, reasoning levels, no API key, free under 2M first-time downloads), a `LanguageModel` protocol with Anthropic and Google packages and an MLX implementation, Dynamic Profiles for agentic apps, an Evaluations framework, and an `fm` CLI with a Python SDK. The rebuilt on-device model has `contextSize` 8192. https://developer.apple.com/videos/play/wwdc2026/241/ (via HN https://news.ycombinator.com/item?id=48470772). *AWOS: the "OS vendors ship the plumbing" claim is now stronger. Apple also ships escalation and model-swap primitives, plus an eval framework.*
+5. **A2A joined the Agentic AI Foundation (2026-08-17).** AAIF now hosts MCP, AGENTS.md, goose, agentgateway and A2A. A2A v1.0 shipped 2026-03-12 and v1.0.1 on 2026-05-28. https://aaif.io/blog/a2a-joins-aaif and `gh api repos/a2aproject/A2A/releases`. *AWOS: the chart said "most of them under AAIF". Now A2A is under it too. Still ignore A2A until the box accepts outside work.*
+6. **MCP 2026-07-28 shipped as final (2026-07-28)**, after a release candidate on 2026-05-29. Details match the chart (see Confirmed). The twelve-month deprecation window for Sampling, Roots and Logging means they keep working until at least mid-2027. https://blog.modelcontextprotocol.io/posts/2026-07-28/ (HN https://news.ycombinator.com/item?id=49088058, 127 points). *AWOS: "do not build on Sampling" still holds, but nothing breaks soon.*
+7. **Intelligence-per-Watt paper reached v7 (2026-10-01), and a Stanford site reports a March 2026 follow-up.** The follow-up says local models "rank within the top 3 overall" against frontier cloud models on single-turn tasks, with 135 s vs 13.5 s average latency (local is about 10x slower end to end). Agentic multi-step tasks are still not covered. https://arxiv.org/abs/2511.07885, https://www.intelligence-per-watt.ai/ (HN https://news.ycombinator.com/item?id=49694035, 169 points). *AWOS: the local latency penalty matters for the always-on host. Open question 1 stays open.*
+8. **OpenTelemetry semantic-conventions keeps releasing (v1.44.0 on 2026-08-04)**, but I did not confirm whether GenAI agent spans left "development" status. https://github.com/open-telemetry/semantic-conventions/releases *AWOS: keep pinning a version.*
+9. **Agent skills ecosystem is huge on GitHub (2026-10-10).** obra/superpowers (about 297k stars), mattpocock/skills (about 284k), affaan-m/ECC (about 276k), NousResearch/hermes-agent (about 252k), anomalyco/opencode (about 212k). Source: GitHub search API. *AWOS: SKILL.md export for verified routines is the de facto portable format. Competition for "memory and skills" is crowded, so evidence-gating and verification are the differentiators.*
+
+### Corrections (chart claim -> what the source says)
+
+- "Agentic requests use up to 10x more tokens each" (section 2, item 2, attributed to https://openrouter.ai/state-of-ai). The report, as fetched, does not state 10x. It shows average prompt tokens up about 4x (1.5K to over 6K) and completion tokens up nearly 3x (about 150 to 400). Treat 10x as unsupported by this source. The report is dated December 2025.
+- "Open models that fit a consumer GPU trail the frontier by about 6-12 months" (summary). Still correct for the Epoch consumer-GPU page (last updated 2025-11-18), but that data is stale. Epoch's newer ECI analysis (item 1) puts the best open models 4 months behind. Both can be true, but the chart should not present 6-12 months as current.
+- "NVIDIA posted a 72.4% GAAP gross margin" (summary). Correct for Q2 FY2026, but not current. Q2 FY2027 is 75.0%.
+- Epoch price-trends page: the chart cites "9x to 900x per year" as a current figure. The page is dated 2025-03-12 and covers roughly 2022-2025. It warns that "the fastest price drops ... occurred in the past year, so it's less clear that those will persist." Use it as a historical range.
+
+### Confirmed claims (briefly)
+
+- Gundlach et al. (https://arxiv.org/abs/2511.23455): 5-10x per year price drop per benchmark level and a 3-18x per year rise in frontier price. Revised 2026-03-23, numbers unchanged.
+- ToolOrchestra (https://arxiv.org/abs/2511.21689): 37.1% on HLE vs GPT-5's 35.1%, 2.5x more efficient, about 30% of cost on tau2-Bench and FRAMES. Still self-reported.
+- Minions (https://arxiv.org/abs/2502.15964): naive 30.4x cost cut at 87%, MinionS 5.7x at 97.9%.
+- IPW (https://arxiv.org/abs/2511.07885): 88.7% answered locally, serviceable share 23.2% to 71.3%, 5.3x IPW gain, local accelerators at least 1.4x lower IPW.
+- Epoch consumer-GPU lags: 6.3 (AA), 7.3 (MMLU-Pro), 7.4 (GPQA), 12.4 (LM Arena) months; RTX 4090 and 5090 under $2,500.
+- OpenRouter: 10% price cut gives 0.5-0.7% more usage; programming share from about 11% to over 50%.
+- Menlo (https://menlovc.com/perspective/2025-the-state-of-generative-ai-in-the-enterprise/): $37B, apps $19B vs infra $18B, coding $4.0B, Anthropic 40%, open source 11%.
+- MCP 2026-07-28: stateless, no sessions or initialize, optional `server/discover`, Tasks as a polled extension (`io.modelcontextprotocol/tasks`), Sampling/Roots/Logging deprecated, deterministic tools/list order with cache hints.
+- A2A v1.0 (March 2026) exists and is stable.
+
+### Still unverified
+
+- OSWorld-Verified current top scores: the fetched page is stale (launch numbers only).
+- Whether OTel GenAI agent spans are still "development" status.
+- Any pre-December-2025 use of the "five-layer cake" phrase; HN search for it returned nothing since April 2026.
+- Karpathy's June 2025 claims, IEA data-center figures, 2026 margin split across layers.
+- The Windsurf access cut (link still not fetched).
+- Agentic local-servable share: no 2026 paper found, though arXiv coverage was limited by rate limiting.
+- NVIDIA's "one-third of Opus 4.8" Switchyard claim and Bessemer, Cursor, Microsoft figures were not re-checked.

@@ -248,3 +248,46 @@ Buy on GB/s per dollar and GB of RAM. Going from 16 GB to 48-64 GB mainly buys c
 - https://arxiv.org/abs/2505.09598
 - https://arxiv.org/abs/2410.12032
 - Local repo: tasks/active/AGENTIC_AMPLIFICATION_TASK.md and scaffold/agent/dag_executor.py (ThreadPoolExecutor wave sizes)
+
+---
+
+## Freshness update (2026-10-10, via arXiv/GitHub/HN/HF APIs)
+
+Method: arXiv (one query batch worked, then rate-limited with HTTP 429), GitHub releases, Hacker News Algolia, and page fetches. Page summaries came from a fetch tool that summarises, so exact wording is paraphrased. No WebSearch was used.
+
+### New since the chart (dated, with URLs; most important first)
+
+1. **KV-cache offloading for concurrent coding agents, 2026-09-27.** EfficientAgent reports a 93% cut in recomputed prompt tokens and 39% lower end-to-end time on SWE-bench Verified agents. It argues the metric that matters is the "reuse working set" of all agents in the pool, and that offload pays off when the GPU has little compute per byte of host bandwidth. https://arxiv.org/abs/2609.33762. Why it matters: it supports chart 2.2 (KV memory is the concurrency budget) and gives a sizing model for the 8-agent question. On unified memory there is no separate host tier, so the finding only transfers partly.
+2. **HEAR protocol, 2026-10-05.** A bidirectional harness-to-engine protocol. The authors report 1.61x batch speedup, 2.23x lower median TTFT on SCBench, and 1.23x / 2.45x end-to-end speedups on BrowseComp-Plus and DeepResearchBench, with no quality loss, under concurrent memory-constrained serving. https://arxiv.org/abs/2610.06597. Why it matters: AWOS owns both the harness and the local server, so it can pass workflow hints (stable prefix, wave boundaries) to mlx-lm. Self-reported.
+3. **Nvidia Groq 3 LPX in full production, 2026-08-24.** The Register reports 3,400 tok/s on Gemma 4 31B at 100k input, with Cerebras at 882 tok/s under the same conditions (Nvidia's claim, favourable case). Racks hold up to 256 LPUs with 128 GB of SRAM, and Nebius is a first operator. https://www.theregister.com/systems/2026/08/24/what-nvidias-first-groq-3-lpu-benchmarks-do-and-dont-tell-us-about-its-20b-gamble/5291880 and https://nvidianews.nvidia.com/news/nvidia-groq-3-lpx-now-in-full-production-with-world-class-speed-for-agentic-ai. Why it matters: it answers the chart's "Watch" item. SRAM inference is now a Nvidia product line and will likely appear as cloud API tiers, strengthening the "seconds" argument in 2.7. Dollar price per token is not yet known.
+4. **Nvidia-Groq deal is a $20B purchase under regulatory and legal pressure.** Reported as a stockholder lawsuit (2026-10-05, https://www.cnbc.com/2026/10/05/nvidia-groq-deal-stockholder-lawsuit.html; page returned 403 to the fetcher, headline only) and a DOJ look (https://www.theregister.com/systems/2026/09/12/nvidias-groq-acquihire-is-on-the-dojs-radar-but-its-already-too-late/5295986, headline only). Why it matters: Groq's independent API pricing and roadmap (chart 2.7 uses $0.15/$0.60 per M) may change; do not hard-code it.
+5. **Cerebras listings changed.** The models page now lists Qwen 3.8 27B at about 1850 tok/s alongside gpt-oss-120b at about 3000. A Cerebras and AMD inference tie-up was announced 2026-07-24, and Cerebras listed publicly (S-1 April 2026, IPO priced mid-May). https://inference-docs.cerebras.ai/models/overview, https://www.cerebras.ai/press-release/amd-and-cerebras-announce-industry-leading-ultra-low-latency-and-high-throughput-ai-inference. Why it matters: the fast tier now includes a small dense model suited to coding loops; AWOS should price-test it.
+6. **Apple Foundation Models third generation, 2026-06-08.** AFM 3 Core is a 3B dense model, and "Core Advanced" is a 20B sparse model activating 1-4B parameters. Server models run on PCC, extended to Nvidia GPUs in Google Cloud. https://machinelearning.apple.com/research/introducing-third-generation-of-apple-foundation-models. HN also lists WWDC26 session "Foundation Models can use third-party LLMs (Claude, Gemini)" (https://developer.apple.com/videos/play/wwdc2026/241/, headline only, not fetched). Why it matters: the chart's 2.9 describes the 2024/2025 generation (3B, rank-16 LoRA); the macOS 26+ zero-download rung is now a bigger, sparser model, so benchmark it fresh before admitting it through the gate.
+7. **Local M5 Max results on practical tasks, 2026-08-12.** On a 128 GB M5 Max, a 132-run suite scored Opus 5 94%, Muse Glimmer 30B 93%, GPT-OSS-120B 92%, DeepSeek V4 Flash 2-bit 92%, Qwen3.5-35B 89%, Qwen3-Coder-30B 86%. https://blog.gitbutler.com/local-llm-gauntlet. Why it matters: independent evidence that large-RAM local MoE models are near cloud accuracy on small tasks. It is a 128 GB machine, not the owner's 16 GB host, and the tasks are not repo-level.
+8. **DGX Spark 64GB variant, 2026-10-02.** $4,999 from partner OEMs; two clustered units gave up to 1.7x on Qwen 3.8 27B (Nvidia's claim). https://blogs.nvidia.com/blog/local-ai-dgx-spark-64gb-sync/. Why it matters: the Spark is now sold explicitly for "multiple agents working at once". It does not change the bandwidth argument (273 GB/s).
+9. **Windows Phi Silica to Aion Instruct dates re-confirmed on the live page (updated 2026-10-02).** Early October 2026 sideload package, November 2026 Insider rollout, January 2027 retail and removal of Phi Silica. LAF tokens are no longer needed for Aion. https://learn.microsoft.com/en-us/windows/ai/apis/phi-silica. Why it matters: the "weights are disposable" lesson stands; the sideload package already exists.
+10. **Agent-KV engineering is crowded.** See Yandex "The KV cache as an agent runtime" (2026-09-05, https://research.yandex.com/blog/the-kv-cache-as-an-agent-runtime, fetch failed, headline only), KVCMAS for shared-context multi-agent correction (https://arxiv.org/abs/2609.34060) and PReCache for multi-LoRA agents (https://arxiv.org/abs/2609.34054), both titles only. Why it matters: prefix reuse across agents (T7b) is now a mainstream technique, not a differentiator.
+11. **Strix Halo and MTP.** HN reports Strix Halo MTP (multi-token prediction) tuning that moves with context length (https://thefrontierlab.ai/full-context-vulkan-only-strix-halo/, headline only). Why it matters: partly fills the chart's gap on independent Strix Halo numbers, but nothing was verified here.
+
+### Corrections (chart claim -> source)
+
+- Chart 1 / 2.4 "M5 gets 3.3-4.1x faster TTFT than M4 ... 1.19-1.27x faster generation" -> Apple's page text as fetched says "up to 4x" TTFT and a "19-27%" generation gain, with 153 vs 120 GB/s. The generation range and bandwidth match; the 3.3x lower bound was not visible in the fetched text. https://machinelearning.apple.com/research/exploring-llms-mlx-m5
+- Chart 2.7 / Watch "Nvidia licensing deal (2025-12-24) ... terms unverified" -> press now describes a $20B purchase/acquihire in late December 2025 (The Register, CNBC headlines). "Licensing" understates it. Terms beyond the $20B figure remain unconfirmed.
+- Chart 2.9 describes Apple's 3B on-device model as current -> AFM 3 (June 2026) adds a 20B sparse on-device-class option. Not a contradiction of the 2025 numbers, but the section is dated.
+- Others: none found.
+
+### Confirmed claims
+
+- DGX Spark Llama-3.1-8B FP8: 20.5 tok/s at batch 1, 368 tok/s at batch 32, prefill about 7,991 vs 7,949 tok/s (flat); Llama-3.1-70B FP8 decode 2.7 tok/s. https://lmsys.org/blog/2025-10-13-nvidia-dgx-spark/
+- Cerebras gpt-oss-120b "~3000" tok/s on its docs page (vendor-stated).
+- Apple M5 bandwidth 153 GB/s vs M4 120 GB/s (28%) and the prefill/decode split.
+- Phi Silica/Aion timeline, GPU path lacking speculative decoding and prompt compression, and the consent-before-download pattern.
+- mlx-lm latest release is v0.31.3 (2026-04-22); no newer release found, so the "check flag names against installed version" advice stands. exo latest is v1.0.71 (2026-04-23).
+
+### Still unverified
+
+- The 3.3x lower TTFT bound, the Sarathi/KIVI figures, Google 0.24 Wh and the 2.4x boundary effect, and the ML.ENERGY thermal-bias magnitude were not re-checked.
+- arXiv rate-limited after the first query batch, so searches on Apple Silicon inference, energy per agent task, and KV quantization on agents were not completed. A joules-per-verified-task benchmark may now exist.
+- Whether HEAR, EfficientAgent, or mlx-lm continuous batching actually help on a 16 GB unified-memory Mac is untested.
+- Groq 3 LPX API pricing, Snapdragon X2 Hexagon, Etched, and Strix Halo vs Spark vs M5 Max at 32k+ remain open.
+- Where the "8 agent" cap comes from is still not answered by any source.

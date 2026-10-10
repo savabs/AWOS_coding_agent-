@@ -237,3 +237,50 @@ Raise the workflow cap, the size guideline and the search quota together. Give e
 - https://langfuse.com/blog/joining-clickhouse
 - https://github.com/Arize-ai/phoenix
 - https://gorilla.cs.berkeley.edu/leaderboard.html
+
+---
+
+## Freshness update (2026-10-10, via arXiv/GitHub/HN/HF APIs)
+
+Method: arXiv abs pages, HF papers API, GitHub releases/search, HN Algolia, MCP and Anthropic pages. The arXiv listing API began returning empty bodies (rate limit) partway through, so paper discovery leaned on the HF papers API. Coverage of 2026 papers is therefore partial.
+
+### New since the chart (dated, with URLs; most important first)
+
+1. **Component-level harness ablation on SWE-Bench Verified and Terminal-Bench 2.1 (2026-09-17).** 176 matched settings, four models. Findings: context management matters most when the window is tight, and mostly by preventing overflow failures. Rule-based elision before LLM summarisation is the most efficient. Making elided content recoverable adds machinery models rarely use and gives no accuracy gain. Predefined tools help models with weak bash skill, while bash-capable models do fine with bash only and at much lower cost. Planning is a cost saver for strong models. https://arxiv.org/abs/2609.20804. *AWOS:* this is the minimal-loop ablation the chart lists under "Test", and it already suggests the answer is tier-dependent. It is also a template for the per-component A/B on the 73 issues. HN discussion: https://harnesstax.github.io/ (HN, 2026-09-16, 233 points; the page is a JS shell, so its numbers were not read).
+2. **Automated harness optimisation became its own subfield (Apr-Oct 2026).** AutoSaddler (2026-08-24) treats the harness as code and uses failure-trace diagnosis, structured patches and validation-based selection. It reports +9.0, +9.6 and +10.0pp on GAIA2, SWE-Bench Pro and Terminal-Bench 2.0 (authors' numbers). Its ablation credits deep debugging, targeted edits and generalisation-aware selection. https://huggingface.co/papers/2608.23041. Benchmarks for the skill itself: Evo-Bench https://huggingface.co/papers/2608.09096 and HarnessOpt-Bench https://huggingface.co/papers/2608.06301. Also HARBOR https://huggingface.co/papers/2604.20938 and ActiveSaddler (2026-10-01) https://huggingface.co/papers/2610.00906. *AWOS:* backs the regression-gated self-improvement item. "Generalisation-aware selection" is the same idea as the frozen held-out slice.
+3. **Microsoft Agent Framework reached 1.0 GA on 2026-04-02 (Python and .NET).** Releases have continued weekly (python-1.21.0 on 2026-10-08). Source: https://github.com/microsoft/agent-framework/releases. The chart's "Watch: reaching 1.0" is therefore stale for Microsoft. *AWOS:* AutoGen's successor is now stable. This does not change the keep-the-kernel verdict, but the "ignore AutoGen" row should read "use MAF if a framework is ever wanted".
+4. **LangGraph is at 1.2.x (1.2.14 on 2026-10-06) and has 43.0K stars.** https://github.com/langchain-ai/langgraph/releases. The chart's "~34K stars" is out of date. Also CrewAI ~59.5K and Mastra ~28.7K (GitHub search, 2026-10-10). The star-versus-download point still holds, but the numbers moved.
+5. **OpenAI Agents SDK is still pre-1.0 (v0.23.1 on 2026-10-02), with about 29.9K stars.** https://github.com/openai/openai-agents-python/releases. Confirms the chart's "pre-1.0" framing.
+6. **MCP roadmap update (2026-08-22) confirms the stateless direction.** Sessions and the init handshake are gone (SEP-2575, SEP-2567). `server/discover` was added, list results are cacheable (SEP-2549), Tasks moved to an official extension (SEP-2663), and Multi Round-Trip Requests replaced server-initiated requests. https://blog.modelcontextprotocol.io/posts/mcp-roadmap/. *AWOS:* Tasks are now an extension rather than core, which sharpens "MCP Sampling and the old Tasks API: ignore".
+7. **MCP sentiment turned sceptical on HN, but the protocol is still moving.** "You said no MCP" (686 points, 2026-09-30) https://earendil.com/posts/you-said-no-mcp/. "Ask HN: Who is using MCP in production?" (2026-09-03). Simon Willison on stateless MCP (2026-08-01): https://simonwillison.net/2026/Jul/31/stateless-mcp/. *AWOS:* supports keeping MCP as an optional, untrusted adapter rather than the tool substrate.
+8. **Failure-as-process study of CLI coding agents (2026-07-10).** 1,794 valid trajectories from 7 frontier models over OpenHands, MiniSWE and Terminus2 on Terminal-Bench, analysed by failure onset, evolution and recovery. https://huggingface.co/papers/2607.09510. *AWOS:* a better stress set for the loop breaker than MAST, because it covers single-agent coding failures.
+9. **"Why Software Factories Fail" (HumanLayer, 2026-07-23, 394 points).** Argues that harness engineering alone is not enough and that loops should not be written without human review. The author declares a commercial bias. https://github.com/humanlayer/advanced-context-engineering-for-coding-agents/blob/main/wsff.md. Opinion only.
+10. **OTel GenAI conventions now live in a separate repo that covers MCP.** The repo describes spans, metrics and events for GenAI clients, MCP and provider-specific conventions. It was pushed 2026-10-10, but the README schema URL is still "TODO". https://github.com/open-telemetry/semantic-conventions-genai. Consistent with "keep JSONL as the source of truth".
+11. **A2A is at v1.0.1 (2026-05-28; v1.0.0 on 2026-03-12).** https://github.com/a2aproject/A2A/releases. This is independent confirmation of the chart's A2A v1.0 claim, nothing more.
+12. **AutoGen's last push was 2026-04-15, with 61.3K stars and the repo not archived.** https://github.com/microsoft/autogen. This is consistent with maintenance mode.
+
+### Corrections
+
+- Chart: "LangGraph has ~34K stars" -> GitHub API shows 43,011 stars on 2026-10-10 (https://github.com/langchain-ai/langgraph). The download figure was not rechecked.
+- Chart: "Microsoft Agent Framework and OpenAI Agents SDK reaching 1.0" (Watch) -> Microsoft Agent Framework hit 1.0 on 2026-04-02 (https://github.com/microsoft/agent-framework/releases). Only the OpenAI SDK is still pre-1.0.
+- Chart: "GEPA: +6pp on average over GRPO, up to +20pp" -> the abstract says "6% on average and by up to 20%", with no stated unit. Treat these as relative or unspecified, not percentage points (https://arxiv.org/abs/2507.19457).
+- Chart: "MAST ... 1,642 traces" -> the abstract says "1600+ annotated traces" (https://arxiv.org/abs/2503.13657). The exact count and the "60-87% failure" range are not in the abstract and were not rechecked.
+- Chart: "the default `workflowSizeGuideline` is 'medium' ... fewer than 10 agents" -> the docs describe the size guideline as advice and not a cap, and say the built-in default leaves the 25-agent warning threshold in place (https://code.claude.com/docs/en/workflows.md). The 10-agent figure was not found in the lines checked.
+
+### Confirmed claims (briefly)
+
+- 2607.14004: lifelong average pass rates of 76.4% (RELAI-VCL), 66.0% (GEPA), 64.6% (Meta Harness) and 58.7% (baseline); GEPA transfers below the baseline. The authors are from RELAI, so the headline is self-reported. https://arxiv.org/abs/2607.14004
+- Workflow runtime: up to 16 concurrent agents by default, fewer with fewer CPUs, and `CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS` accepts 1-256 from v2.1.269. https://code.claude.com/docs/en/workflows.md
+- MCP 2026-07-28: stateless change, cacheable list results (`CacheableResult`, `ttlMs`) and server-initiated requests replaced. https://modelcontextprotocol.io/specification/2026-07-28/changelog
+- Anthropic research system: +90.2% over single-agent Opus 4, token usage explains 80% of variance, multi-agent about 15x chat tokens. https://www.anthropic.com/engineering/multi-agent-research-system
+- MCPMark: best model 52.56% pass@1 and 33.86% pass^4, with 127 tasks and a verifier script per task. https://arxiv.org/abs/2509.24002
+- GEPA: outperforms GRPO with up to 35x fewer rollouts and beats MIPROv2 by over 10%. https://arxiv.org/abs/2507.19457
+- MAST: 14 modes in 3 categories, 7 frameworks. https://arxiv.org/abs/2503.13657
+
+### Still unverified
+
+- Download counts (34.5M for LangGraph, 856K for AutoGen), which come from one secondary roundup.
+- gskill's 24% to 93% and 55% to 82%, Manus's cache claims, OpenHands V1's -61% failures, the MCPTox 72.8% figure, the Combee 87.0% to 72.5% drop, and the CodeAct, smolagents and Anthropic programmatic-tool-calling numbers. None was rechecked.
+- HarnessTax's own results (JS-rendered page).
+- Whether the harness-optimisation gains in AutoSaddler and similar papers hold for 4-9B local models or on real AWOS issues. All evidence is on frontier models and public benchmarks.
+- Per-model BFCL V4 scores for small open models and independent A2A adoption data (still unchecked).
