@@ -256,3 +256,48 @@ Pure end-to-end pixel agents as the main path, deep agent hierarchies, prompt-ba
 - https://github.com/apple/container
 - https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks
 - https://agentdojo.spylab.ai/results/
+
+---
+
+## Freshness update (2026-10-10, via arXiv/GitHub/HN/HF APIs)
+
+*Method note: WebSearch was not used. arXiv's API returned HTTP 429 after the first two queries, so only the "OSWorld agent" and "computer use agent" arXiv listings succeeded. Coverage of grounding, macOS and safety papers from March to October 2026 is therefore thin. HN, GitHub, Hugging Face and direct page fetches worked.*
+
+### New since the chart (dated, with URLs; most important first)
+
+1. **OSWorld 2.0 is real, and it is a different benchmark.** Simular's post (2026-08-28, updated 2026-10-02) describes OSWorld 2.0 as 108 long professional tasks in a controlled Linux environment that skilled humans need over an hour to finish. It says the XLANG Lab released it in June 2026. Simular reports Sai at 73%, Claude Opus 5 at 70.57% and GPT-5.6 Sol at 62.57%. Cost per task is about $15.70 for Sai against $23.70 (Opus) and $26.62 (GPT), and Sai's OSWorld 2.1 trajectories are said to be on Hugging Face. This is vendor-run. [Simular](https://www.simular.ai/articles/sai-tops-osworld-2-0), [HN](https://news.ycombinator.com/item?id=49471349). *Why it matters:* it resolves the chart's open question on who maintains OSWorld 2.0 and its task set. It also supplies the per-task dollar figures that bBoN never published. The chart's "OSWorld is solved" framing applies to v1 only.
+2. **A skeptical counter-datapoint on OSWorld 2.0.** Steelman Labs (2026-07-30) says the best model reaches only 20.6% on "OSWorld-V2" and 26.2% on Agents' Last Exam. It also says frontier models avoid the UI by injecting JavaScript or POSTing to APIs directly. [Steelman](https://steelmanlabs.com/blog/computer-use-is-far-from-solved). *Why it matters:* it conflicts with Simular's 73%, so the 2.0 numbers depend on harness and version and should not be trusted without an independent leaderboard. Its "models bypass the UI" observation supports the chart's structured-first ladder.
+3. **H Company Holo4 (2026-09-28).** Holo4-27B (dense) and Holo4-35B-A3B (MoE), pitched at "GUIs, code, MCP and APIs". The blog gives 61.7% (27B) and 30.9% (35B-A3B) on OSWorld 2.0, with Opus 5.5 at 81.8% in the same table. The Hugging Face model card says **cc-by-nc-4.0**. [blog](https://huggingface.co/blog/Hcompany/holo4), [HF](https://huggingface.co/Hcompany/Holo4-27B). *Why it matters:* the chart lists Holo2 as an Apache-2.0 grounder. Holo4 is non-commercial and 27B or larger, so it is not a drop-in successor for the always-on local tier. Holo2-8B stays the licence-safe choice.
+4. **HybridCUA (2026-09-29).** SFT then RL with CLI-aware rewards on 5K hybrid trajectories and 3K verified RLVR tasks. It reports 53.6% on OSWorld (+14.8pp over its base) and +4.0pp on WindowsAgentArena. [arXiv 2609.38008](https://arxiv.org/abs/2609.38008). *Why it matters:* independent evidence for the chart's #1 ranking (code and CLI before GUI), and it is trained rather than harness-enforced.
+5. **Neuro-Symbolic Computer Use (2026-09-29).** A recurring workflow is run by a learned code policy instead of being re-derived on each run. It reports 3.6-15.8 points higher Pass^3 than baselines, 15-217x lower per-run cost, 3.4-5.1x lower latency, and a pre-action verifier on state-changing steps. [arXiv 2609.36927](https://arxiv.org/abs/2609.36927). *Why it matters:* this is close to AWOS's verified-routine replay with a postcondition gate. It undercuts the chart's claim that no prior tool gates replay on a check, because a pre-action verifier is the same idea. It also gives published cost and latency ratios to benchmark against.
+6. **Branch steering attacks (2026-10-02).** Standard CUAs showed 94.4% attack success and a Dual-LLM pattern still failed 89.5%. The COBRA defense (trusted branching plans plus capability constraints per branch) reached 0% ASR with 97% utility, on a new 101-task STEER-Bench. [arXiv 2610.03089](https://arxiv.org/abs/2610.03089). *Why it matters:* it argues that Plan-Then-Execute is not enough for GUI agents because plans must branch on page content. The chart calls replay "the most injection-safe tier", and that holds only if branches are pre-declared and constrained.
+7. **Control OSWorld (2026-10-02).** 318 tasks with 81 harmful side tasks. Trajectory monitors reached 97% recall at 3% false positives, but accuracy fell sharply when judging actions before execution, and text visibility mattered more than screenshots. [arXiv 2610.03818](https://arxiv.org/abs/2610.03818). *Why it matters:* a ready safety eval for the CU pilot, and a warning that a pre-action monitor is much weaker than a post-hoc one.
+8. **OSWorld-Pro (2026-09-21).** Over 300 tasks and 2,800 subgoals with process-based scoring. It reports about 75.7% for Claude Opus 5 against 83.4% on the original OSWorld. [arXiv 2609.24890](https://arxiv.org/abs/2609.24890). *Why it matters:* frontier OSWorld v1 is now above 83%, and the step-level view supports the chart's advice to measure process and efficiency.
+9. **Mano-P, on-device GUI agent (HN 2026-04-09/13).** Mano-CUA-4B, Apache-2.0, claims 58.2% on OSWorld for specialized models and says it runs on M4 Macs with 32GB or more. Its own README concedes Claude scores 72.1%. [repo](https://github.com/Mininglamp-AI/Mano-P). *Why it matters:* a self-reported local macOS-capable 4B agent that was not in the chart and needs the owner-screen eval. It is a candidate for the "test next" grounding bake-off, with an unverified score.
+10. **Cua / CUA-S1 and Cua Driver.** The `trycua/cua` repo now has about 29k stars and shipped releases on 2026-10-09 and 2026-10-10. CUA-S1 (HN 2026-09-19) is a small "System 1" form-filling decision model, MIT code, weights on HF with their own licences. Cua Driver drives native macOS apps in the background (HN 2026-04-28). [repo](https://github.com/trycua/cua), [HN CUA-S1](https://news.ycombinator.com/item?id=49767564). *Why it matters:* a maintained macOS background-control rung for the structured ladder. The chart lists Cua only as a sandbox.
+11. **Claude computer-use guidance (2026-05-16).** Start at 1280x720, text before image, enable zoom for dense UIs, use cache-aware pruning. Opus 4.7 at low effort is said to match Sonnet 4.6 at max effort on OSWorld-Verified with about 1/10 the tokens. [Anthropic](https://claude.com/blog/best-practices-for-computer-and-browser-use-with-claude). *Why it matters:* it confirms the chart's cloud-hygiene bullet.
+12. **Smaller items.** UI-Venus-2 is an arXiv technical report dated 2026-08-27 ([arXiv 2609.00028](https://arxiv.org/abs/2609.00028)); I did not extract its scores or licence. UFO is at v3.0.10 (2026-09-22) and v3.0.9 mentions fixed security issues ([releases](https://github.com/microsoft/UFO)). OpenComputerUse, a background computer-use MCP server (2026-10-07), is listed on [HN](https://news.ycombinator.com/item?id=49995664).
+
+### Corrections
+
+- Chart: "Simular's unverified claim of 73% against 62.57% for 'GPT-5.6 Sol'" -> the numbers match Simular's own post, so the claim is now sourced but remains vendor-run. The post also lists Opus 5 at 70.57%. [Simular](https://www.simular.ai/articles/sai-tops-osworld-2-0)
+- Chart: "Raw success on OSWorld is solved at the frontier" (72.6% vs 72.36% human) -> outdated for v1. OSWorld-Pro cites 83.4% for Claude Opus 5 on the original OSWorld. [arXiv 2609.24890](https://arxiv.org/abs/2609.24890)
+- Chart: "UI-Venus-2: licence and verified numbers" listed as unknown -> the abstract page confirms only a 2026-08-27 submission under the standard arXiv distribution licence. The model licence and scores are still unconfirmed.
+- Chart: "None of these tools gates a replay on a postcondition" -> Neuro-Symbolic Computer Use describes a pre-action verifier on state-changing steps, so this should be softened. [arXiv 2609.36927](https://arxiv.org/abs/2609.36927)
+- Chart: replay is "the most injection-safe tier" -> arXiv 2610.03089 argues this fails for GUI tasks that must branch on page content unless the branches and their capabilities are fixed in advance.
+
+### Confirmed claims (briefly)
+
+- Agent S3 bBoN 72.6% against a 72.36% human baseline (abstract page, 2510.02250). The abstract does not state N, cost or the single-run score.
+- OSWorld-MCP: best tool-invocation rate 36.3%, and o3 from 8.3% to 20.4% at 15 steps ([arXiv 2510.24563](https://arxiv.org/abs/2510.24563)).
+- Agent-S repo is active (pushed 2026-10-08) but its latest release is v0.3.2 from 2025-12-16. MAI-UI's last push was 2026-08-19.
+- UFO is actively maintained; the chart's note on UFO2/UFO3 stands.
+
+### Still unverified
+
+- Which of N=3 or N=10 Agent S3 used, its single-run score (62.6% or 66%), and any cost per task.
+- Whether Apple has shipped MCP or App Intents integration on macOS. I found no HN story or primary source either way.
+- Current OpenAI CUA / Atlas numbers (not searched; openai.com was blocked for the original scouts).
+- Holo4's and Mano-P's benchmark claims, and Mano-P's behavior on the owner's Mac.
+- UI-Venus-2 scores and licence; the Opus 5.5 81.8% figure in the Holo4 table (it came from a summarised page fetch).
+- The chart's 2-VM macOS cap, MAI-UI's +33% / 40% routing figures, macOSWorld's under-5% result and the Fara1.5 numbers were not rechecked, because of the arXiv rate limit. Any 2026 papers on macOS agents, small grounders or injection defenses beyond those above are likely missed.

@@ -242,3 +242,48 @@ Running the main model on NPUs or the ANE; device sharding for concurrency; Peta
 - https://arxiv.org/abs/2505.06371
 - https://www.eia.gov/electricity/monthly/epm_table_grapher.php?t=epmt_5_6_a
 - Repo (local read): `scaffold/agent/dag_executor.py`, `scaffold/agent/swebench_lite.py`, `scaffold/agent/best_of_n.py`, `scripts/local_model.sh`
+
+---
+
+## Freshness update (2026-10-10, via arXiv/GitHub/HN/HF APIs)
+
+Method: arXiv, GitHub, HN and Hugging Face APIs plus direct fetches of primary pages. arXiv returned HTTP 429 after the first few queries, so arXiv coverage is thin (one search worked; other papers were fetched by ID). WebSearch was not used.
+
+### New since the chart (most important first)
+
+1. **vllm-metal is now the official vLLM plugin for Apple Silicon (v0.28.0, blog 2026-09-22).** vLLM scheduler, paged KV, chunked prefill, OpenAI-compatible server, tool-call parsing, and automatic M5 NAX (GPU tensor unit) prefill kernels. Repo `vllm-project/vllm-metal`: 1,832 stars, pushed 2026-10-10. This is the concurrent local server the chart called "vllm-mlx, no benchmarks yet". https://vllm.ai/blog/2026-09-22-vllm-metal-v0-28-0 , https://github.com/vllm-project/vllm-metal . For AWOS: replaces "evaluate vllm-mlx" in section 5 with "evaluate vllm-metal"; it answers open question 2 in part.
+2. **SiliconBench (arXiv 2609.19169, 2026-09-12) is the first public concurrency benchmark of nine Apple Silicon serving engines** (speed, memory, fidelity; chat and agent splits; Qwen3, Qwen3.5, Gemma 4). Findings: vllm-metal alone more than doubles throughput from concurrency 1 to 16 on Qwen3-0.6B; two stacks completed every request while memory approached physical capacity and throughput fell; only three stacks pass the completion, fidelity and model-coverage gates. Its vendor-side companion run used 100 multi-turn prompts of about 4.6K tokens on an M5 Pro 64 GB. https://arxiv.org/abs/2609.19169 . For AWOS: this is the benchmark and workload shape to copy for `AWOS_LOCAL_SLOTS` sizing, and it contradicts the chart's "No public Apple Silicon concurrency-scaling numbers were found".
+3. **Same blog: `mlx_lm.server` completed only a minority of requests under concurrent agent load** (Qwen3.6-35B-A3B at concurrency 4); llama.cpp with its default 4 slots was the baseline; oMLX (SSD prefix cache) led at concurrency 1, vllm-metal at 2 and 4. Gemma 4 MTP speculative decoding gave +20% tok/s at concurrency 1 and -15% wall time, but gains vanish by concurrency 8 (vllm-metal's own table). Prefix caching for hybrid (GDN) Qwen3.5-style models is experimental (PR #634). Source: the vLLM blog above. For AWOS: T0's MLX server should not be the multi-agent endpoint.
+4. **Mac Studio with M5 Max / M5 Ultra announced 2026-08 (HN 823 points).** Apple says up to 512 GB unified memory and 1.2 TB/s bandwidth (50% higher than before), Neural Accelerators in every GPU core, up to 4.3x peak AI compute vs M3 Ultra; M5 Max up to 128 GB. HN comments quote $2,499 (M5 Max) and $5,499 (M5 Ultra) starting prices, and 512 GB shipping "in October" (commenter claims, not checked against Apple's price page). https://www.apple.com/newsroom/2026/08/apple-introduces-new-mac-studio-with-m5-max-and-m5-ultra/ . For AWOS: the chart's "second box (64-128 GB) as replica" question (open Q11) now has a concrete SKU; 1.2 TB/s is about 8x base-M5 bandwidth, so MoE decode and 8+ local slots become plausible on one box.
+5. **Fara1.5 (4B, 9B, 27B; built on Qwen3.5) released 2026-07-22**, superseding the chart's Fara-7B. Microsoft's README reports Fara1.5-9B at 63.4% Online-Mind2Web and 86.6% WebVoyager, and 27B at 72.3% Online-Mind2Web (vs 34.1% for Fara-7B). Self-reported; weights on HF; paper arXiv 2606.20785. https://github.com/microsoft/fara . For AWOS: the pixel-rung test in section 5 should use Fara1.5-9B (4-bit fits 16 GB tightly) or 4B, not Fara-7B. The chart's "well behind cloud models on live web" claim is stale.
+6. **Qwen3.5 (0.8B-35B-A3B) and Qwen3.6/3.8 are the default open families** on HF (Qwen3.5-9B: 8.3M downloads; Qwen3.5-35B-A3B: 1.47M). vllm-metal lists Qwen3.8-27B and Qwen3.6-35B-A3B support. https://huggingface.co/Qwen/Qwen3.5-9B . For AWOS: the "Qwen3-30B-A3B class MoE" advice should read Qwen3.5/3.6-35B-A3B; hybrid GDN attention changes KV-per-token estimates (smaller KV), which weakens the chart's "about 2 agents at 32k on 16 GB" estimate.
+7. **mlx-lm still documents the `--kv-bits` serialization.** SERVER.md says a quantized KV cache does not support batching and requests are processed one at a time. Latest release found: v0.31.3 (2026-04-22). Confirms the chart. https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/SERVER.md
+8. **Large-model-on-laptop streaming:** HN "Deep Seek v4.1 M5 Max at 17 tokens/s" (2026-09-16) streams a 518 GB 4-bit DeepSeek-V4.1-Flash from NVMe on a 128 GB M5 Max (author claims 1.73x prompt processing over upstream). Single-source HN post, unverified. https://github.com/argonautlabsai/argodrive . For AWOS: frontier-class local weights are no longer fully out of reach, but at 17 tok/s decode it is a micro-benchmark, not an agent tier.
+9. **DGX Spark threads (2026-06/07):** "Nvidia DGX Spark as a daily driver" (102 pts) and "Two Qwen3 models on one DGX Spark: the residency math" (95 pts); an April post titled "Don't Buy the DGX Spark: NVFP4 Still Missing After 6 Months". Anecdotal. https://news.ycombinator.com/item?id=48971128 , https://news.ycombinator.com/item?id=47645925 . For AWOS: supports "do not buy for cost"; no evidence it beats M5 Max for agent prefill.
+10. **exo** repo is active (pushed 2026-10-06, 47.8k stars) but the newest release found is v1.0.71 (2026-04-23); README still highlights Thunderbolt 5 RDMA. SiliconBench reports tensor parallelism over Thunderbolt RDMA scales while pipeline parallelism over TCP regresses. https://github.com/exo-explore/exo . For AWOS: confirms the chart's "RDMA yes, TCP sharding no" line; "exo 1.x stability" is still unresolved by any release evidence.
+
+### Corrections
+
+- Chart: "underutilization penalty of 17.5-36.3x at 1 req/s and about 1.18x at 50 req/s" and "$7.60/M vs $0.31, a 17-36x penalty". The abstract of arXiv 2606.11690 says: effective cost spans $0.21 to $15.25 per M output tokens; penalty "2.5-24x across low-to-moderate enterprise loads (1-10 rps) and up to 36.3x near idle". The 17.5x-at-1-rps and 1.18x-at-50-rps figures were not visible in the abstract (the paper body was not fetched). Treat 2.5-36x as the verified range. https://arxiv.org/abs/2606.11690
+- Chart: Pegatron "local model" framing. The paper's on-prem arm is GLM-5.1/5.2 quantized to NVFP4 on NVIDIA Blackwell, versus Claude Opus 4.7/4.8 through Claude Code; it is a large open model on server GPUs, not a small laptop model. Its effective API cost was $0.57/M against a $2.83/M amortized shared on-prem slice, so API was cheaper per token; the 40.1% saving is a TCO figure under Taiwan-market labor assumptions. The chart's "local model had 2.6-4.9x higher defect-repair odds" is right, but it should not be read as evidence about 9B-class local models. https://arxiv.org/abs/2607.13080
+- Chart: mlx_lm.server docs "call it not production-grade". The current SERVER.md says "not recommended for production as it only implements basic security checks" (a security caveat, not a performance one). The one-at-a-time behavior with `--kv-bits` is documented separately and matches the chart.
+- Chart (summary): Fara-7B "still well behind cloud models on live-web benchmarks". True for Fara-7B (34.1 vs 42.9 on Online-Mind2Web, confirmed), but superseded by Fara1.5 (item 5).
+
+### Confirmed claims
+
+- M5 vs M4 bandwidth 153 vs 120 GB/s and 19-27% decode gain: Apple MLX page says exactly this. https://machinelearning.apple.com/research/exploring-llms-mlx-m5
+- Fara-7B table: WebVoyager 73.5 vs UI-TARS-1.5-7B 66.4; Online-Mind2Web 34.1 vs OpenAI computer-use-preview 42.9. https://www.microsoft.com/en-us/research/blog/fara-7b-an-efficient-agentic-model-for-computer-use/
+- DeepSeek flash pricing: cache hit $0.003 off-peak / $0.006 peak; miss $0.15 / $0.30; output $0.60 / $1.20 per M tokens. https://api-docs.deepseek.com/quick_start/pricing
+- Pegatron: 99.3% cache hit, $0.57/M effective, 88.6% cost cut, 40.1% shared TCO saving, 43.8% dedicated premium, odds ratio 2.6-4.9. https://arxiv.org/abs/2607.13080
+- mlx-lm `--kv-bits` serializes requests (see item 7).
+
+### Still unverified
+
+- The Intelligence per Watt figures (88.7%, 71.3%, 80.4% oracle savings) and the M5 TTFT multipliers (3.3-4.1x): the arXiv search was rate limited and the TTFT table was not located in the fetched text; no newer replication found.
+- The M4 Max vs B200 efficiency ratio, CaMeL, PrivacyLens, PAPILLON and Secure Minions numbers; no newer private-agent paper was found because arXiv queries on privacy and confidential inference hit 429.
+- Where the "8 agents" cap is set (harness vs AWOS constants): not checkable from public sources.
+- Qualcomm/Intel/AMD NPU 2026 context limits (open Q10): not searched successfully.
+- Whether vllm-metal's M5 NAX prefill reproduces the 3-4x TTFT gain on a 50k-token prompt: the blog shows a chart on Qwen3-0.6B only, with no text numbers extracted.
+- Mac Studio prices and 512 GB availability date: from HN comments only.
+
+Net: the main recommendations survive; the local-serving recommendation should switch to vllm-metal and SiliconBench, and the computer-use rung to Fara1.5.

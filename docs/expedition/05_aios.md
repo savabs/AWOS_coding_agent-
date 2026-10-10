@@ -250,3 +250,49 @@ The platforms supply tool registries, containment and small models. They all rou
 - https://docs.openclaw.ai/gateway/security
 - https://github.com/mediar-ai/screenpipe
 - Local: scaffold/agent/dag_executor.py:23 (`MAX_WORKERS = 4`, verified in repo)
+
+---
+
+## Freshness update (2026-10-10, via arXiv/GitHub/HN/HF APIs)
+
+*Method note: arXiv's API and Semantic Scholar returned HTTP 429 on every call in this pass, so paper discovery went through the Hugging Face papers search and API (arXiv ids and abstracts). Abstract-level confirmation only. Results are self-reported by the authors unless stated.*
+
+### New since the chart (dated, with URLs; most important first)
+
+1. **MCP spec revision 2026-07-28 is now "latest" and removes Tasks from the core protocol.** Tasks moved to an official extension (`io.modelcontextprotocol/tasks`): blocking `tasks/result` is replaced by polling via `tasks/get` plus a new `tasks/update`, and `tasks/list` is removed. The same revision makes MCP stateless (no `initialize` handshake, no `Mcp-Session-Id`), adds `server/discover`, and says servers SHOULD return `tools/list` in a deterministic order to improve LLM prompt-cache hit rates. Why it matters: chart section 2 item 10 and the Watch list target the 2025-11-25 Tasks design; a job interface should target the extension, and deterministic tool ordering matches the stable-prefix work (T7/T7b). https://modelcontextprotocol.io/specification/2026-07-28/changelog
+2. **oMLX (jundot/omlx): continuous-batching MLX server with hot-RAM plus cold-SSD KV cache, about 22.7k stars, v0.7.1.dev1 on 2026-10-09.** It uses mlx-lm's BatchGenerator, persists KV blocks across requests and restarts, and targets Claude Code-style agent use. vllm-mlx (about 1.6k stars, pushed 2026-10-09) also offers OpenAI- and Anthropic-compatible batching. Why it matters: ready candidates for "Adopt now" item 3 and for the Continuum-style cache-persistence test. https://github.com/jundot/omlx · https://github.com/waybarrios/vllm-mlx
+3. **SiliconBench (2026-09-12) benchmarks nine Apple Silicon serving engines on speed, memory and fidelity.** Reported: on Qwen3-0.6B only vllm-metal more than doubles throughput from concurrency 1 to 16; "explicit memory budgets do not guarantee memory headroom" (two stacks finish every request while memory nears physical capacity and throughput falls); only three stacks pass its completion, fidelity and model-coverage gates. Why it matters: the closest public data to open question 1, and a warning that admission control needs a live memory check, not a configured budget. https://arxiv.org/abs/2609.19169
+4. **More agent-serving papers, all on GPU stacks.** ThunderAgent (2026-02-14): program-aware scheduler, 1.5-3.6x serving throughput. CacheWise (2026-06-15): eviction guided by tool-call metadata, 2-2.6x fewer evictions, up to 3.5x session completion time on real coding-agent traces. TraceLab (2026-06-30): about 4,300 Claude Code and Codex sessions released; long contexts with short outputs, "high but imperfect" prefix-cache hit rates. PackServe (2026-09-27): 16.8-24.6% fewer GPU-hours on 64 H20 GPUs. Why it matters: supports the Continuum/Autellix direction; TraceLab is a trace source for AWOS's workload model. https://arxiv.org/abs/2602.13692 · https://arxiv.org/abs/2606.16824 · https://arxiv.org/abs/2606.30560 · https://arxiv.org/abs/2609.33224
+5. **Filesystem-based agent memory got its first systematic study (2026-07-29).** Organized stores "roughly halve retrieval cost where material is large", but organization erodes for all but the strongest management agent, and no agent turns organization into better answers; the tool set reshapes the store as much as the model does. Why it matters: qualifies "plain files are enough". Write discipline (AWOS's evidence gate) decides store health. https://arxiv.org/abs/2607.26637
+6. **Agent libOS (2026-06-02) and Rivet agent-os (about 4.7k stars, pushed 2026-10-09).** Agent libOS defines an AgentProcess with lineage, capabilities, human-approval queues, checkpoints and audit records, with authority checked at primitive boundaries. Rivet describes an "operating system as a library" on WebAssembly and V8 isolates. Why it matters: it matches the chart's "Gatekeeper host is the kernel" framing; neither claims verification-gated routing. https://arxiv.org/abs/2606.03895 · https://github.com/rivet-dev/agent-os
+7. **WebMCP momentum.** Chrome's page still says origin trial from Chrome 149. OpenAI ran a "WebMCP Challenge" (HN, 2026-08-26) and a public tool registry appeared. Why it matters: more support for typed tools before pixels. https://developer.chrome.com/docs/ai/webmcp · https://openai.com/webmcp-challenge/
+8. **Phi Silica to Aion Instruct is now dated, and LAF tokens are dropped.** Microsoft's page (updated 2026-10-02): sideloadable package in early October 2026, Insider rollout from November 2026, "LAF tokens are no longer needed with Aion Instruct". Why it matters: weakens the "locked down" reason to ignore OS-bundled models; still not a worker candidate. https://learn.microsoft.com/en-us/windows/ai/apis/phi-silica
+9. **OpenClaw risk signals.** A privilege-escalation CVE (HN, 2026-04-03) and a dispute with Anthropic over subscription use (HN, 2026-04-03; "allowed again" 2026-04-21). Why it matters: tempers the "interoperate with OpenClaw" Watch item. https://nvd.nist.gov/vuln/detail/CVE-2026-33579 · https://docs.openclaw.ai/providers/anthropic
+10. **Cheap macOS microVM sandboxes appeared** (superhq-ai/shuru about 863 stars, pushed 2026-09-21; vmette; pi-tin on Apple's container CLI). Apple `container` is at 1.5.0 (2026-09-29), srt at v0.0.79 (2026-10-07). Why it matters: Tier 2 isolation now has off-the-shelf options to test. https://github.com/superhq-ai/shuru · https://github.com/apple/container/releases · https://github.com/anthropic-experimental/sandbox-runtime
+11. **A routing-evaluation literature exists** (TwinRouterBench 2026-05-14, TRACE-ROUTER 2026-07-27, "The Routing Plateau" 2026-05-27). Titles only; not read. Why it matters: check these before claiming verification-gated escalation is "unoccupied". https://arxiv.org/abs/2605.18859 · https://arxiv.org/abs/2607.22465 · https://arxiv.org/abs/2606.07587
+
+### Corrections
+
+- Chart: "MCP Tasks ... Introduced in the 2025-11-25 spec, still experimental" -> the 2026-07-28 revision moved Tasks out of core into an extension with a different design (polling, `tasks/update`, no `tasks/list`). https://modelcontextprotocol.io/specification/2026-07-28/changelog
+- Chart: "Phi Silica needs an access token" -> true for Phi Silica, but its replacement Aion Instruct needs no LAF token. https://learn.microsoft.com/en-us/windows/ai/apis/phi-silica
+- Chart: "mlx_lm.server handles requests one at a time when the KV cache is quantized" -> still accurate (current SERVER.md says so), but incomplete: mlx-lm now has a BatchGenerator and oMLX builds continuous batching on it. https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/SERVER.md
+- Chart (Windows containment, ODR/unpackaged watch item) -> the containment doc is still "public preview", last updated 2025-11-18, and says unpackaged apps including `.mcpb` bundles cannot run in containment by default. https://learn.microsoft.com/en-us/windows/ai/mcp/servers/mcp-containment
+
+### Confirmed claims (briefly)
+
+- Autellix "4-15x program throughput over vLLM at the same latency": abstract matches. https://arxiv.org/abs/2502.13965
+- Continuum "over 8x average job completion time" on SWE-Bench, BFCL, OpenHands: matches. https://arxiv.org/abs/2511.02230
+- Ferret-UI Lite 53.3% ScreenSpot-Pro, 19.8% OSWorld, 28.0% AndroidWorld: matches. https://arxiv.org/abs/2509.26539
+- Letta 74.0% LoCoMo vs Mem0's reported 68.5%: matches the post (gpt-4o-mini; Mem0's figure is its own report). https://www.letta.com/blog/benchmarking-ai-agent-memory
+- Claude Code workflows: up to 16 concurrent agents, fewer on fewer CPUs, `CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS` 1-256 (v2.1.269 or later). New detail: fan-out agents sharing the first agent's prompt-cache prefix start up to 5 seconds after it by default. https://code.claude.com/docs/en/workflows
+- OpenClaw "~392k stars": GitHub API shows 391,577 on 2026-10-10. https://github.com/openclaw/openclaw
+- Chrome WebMCP "origin trial from Chrome 149": matches.
+
+### Still unverified
+
+- "Agents spend 71-98% of runtime waiting on inference" (Vercel, citing arXiv 2605.26297): the abstract says only that agentic serving is decode-dominated and KV-state dependent; the figure was not found and the Vercel page was not re-fetched. https://arxiv.org/abs/2605.26297
+- DGX Spark 20.5 vs 368 tok/s, E2B prices, Chrome "User Alignment Critic" details: not re-fetched.
+- Apple App Intents/WWDC 2026 changes, Android AppFunctions status, any macOS MCP support: HN searches returned nothing relevant; no primary page fetched.
+- 2026 AgentOS papers (open question 8): only surfaced via HF search (Agent libOS, Qualixar OS 2604.06392, AgentOS 2603.08938), abstracts only. HarmonyOS HMAF unchecked.
+- Whether AIOS changed: repo shows about 6.5k stars, v0.3.0 (2026-01-22), last push 2026-07-20; no new speedup claims found (absence of evidence only). https://github.com/agiresearch/AIOS
+- Whether oMLX or vllm-metal batch correctly with AWOS's local model on the 16 GB host: untested.

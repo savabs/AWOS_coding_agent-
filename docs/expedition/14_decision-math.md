@@ -259,3 +259,47 @@ This territory bears on it in two ways. (a) **The expedition's own binding const
 - https://arxiv.org/abs/2504.15895
 - https://arxiv.org/abs/2503.16419
 - https://pmc.ncbi.nlm.nih.gov/articles/PMC7702215
+
+---
+
+## Freshness update (2026-10-10, via arXiv/GitHub/HN/HF APIs)
+
+Method: Hugging Face papers search plus arXiv abstract pages (the arXiv query API was rate-limited at 429 for most of the run; GitHub and HN were not needed). Abstract-level reading only; no numbers were reproduced. The chart flagged "2026 work is under-sampled" and "coverage gap: agent abstention, ask-vs-act benchmarks, bandit routers"; this pass addresses the first two directly and the third only partly.
+
+### New since the chart (most important first)
+
+1. **HiL-Bench (2026-04-29)**: https://arxiv.org/abs/2604.09408. Measures "knowing when to ask for help" on SWE and text-to-SQL tasks with blockers that surface only during exploration; metric Ask-F1 (question precision x blocker recall). Reports "a large universal judgment gap": no frontier model recovers more than a fraction of its full-information performance. Why it matters: it is the ask-vs-act benchmark the chart said was missing, and it supports "structural triggers, not self-judged" for the ask-owner arm.
+2. **Ask or Assume? (2026-03-27)**: https://arxiv.org/abs/2603.26233. On underspecified SWE-bench Verified, a scaffold that decouples underspecification detection from code execution (OpenHands + Claude Sonnet 4.5) reaches 69.40% resolve vs 61.20% for a single agent, with queries concentrated on harder tasks. Why it matters: a concrete design (separate detector, then executor) matching the chart's adoption item 6; it also softens the Ambig-SWE finding that models "can't tell" when a task is underspecified.
+3. **Agentic Abstention (2026-06-27)**: https://arxiv.org/abs/2606.28733 and **AgentAbstain (2026-07-11)**: https://arxiv.org/abs/2607.10059. Abstention as a sequential decision across 13 agents and more than 28,000 tasks; some agents never abstain when they should, others only after many wasted interactions. AgentAbstain adds 263 paired should-act/should-abstain tasks over 42 sandboxes. Why it matters: the missing piece is abstaining mid-episode, which feeds the retry-vs-escalate stopping rule and irreversible-sink policy.
+4. **Doomed from the Start (2026-07-16)**: https://arxiv.org/abs/2607.06503. Linear hidden-state probes predict agent-episode failure from the first interaction round; a distribution-free, recall-controlled abort cascade saves 1.5-8.8x more compute than the best single gate at a 90% recall target, with an exact post-selection recall guarantee. Evaluated on TextCraft and WebShop with 1.7B-7B models, not coding. Why it matters: it is the first fusion of the chart's two top items (local hidden-state probe + conformal threshold) and supports the "test next" probe experiment; the guarantee is on recall of successes, a framing AWOS could adopt for pre-attempt skip.
+5. **EarlyEval (2026-09-02)**: https://arxiv.org/abs/2609.02783. LightGBM success/failure classifiers halt agent runs at a calibrated threshold on SWE-bench Verified, TerminalBench and Toolathlon: 13-26% of steps removed, up to 44.1% input tokens saved, resolve rate perturbed 1-2 points. Why it matters: a small learned deferrer on behavioral features already works on SWE tasks, and it is the cheapest way to cut AWOS benchmark cost.
+6. **UCCI (2026-05-11)**: https://arxiv.org/abs/2605.18796. Isotonic-calibrated token-margin uncertainty plus constrained cost minimization for 4B-to-12B cascades: 31% cost cut (CI 27-35%) at equal micro-F1 on a 75,000-query NER workload, beating split-conformal routing and a FrugalGPT-style threshold. Why it matters: calibrated threshold policies beat conformal here, but on NER, not coding; test both.
+7. **TwinRouterBench (2026-05-14)**: https://arxiv.org/abs/2605.18859. Step-level routing benchmark (970 prefixes, 520 instances incl. SWE-bench; dynamic track on 100 held-out SWE-bench Verified cases). Why it matters: it tests per-step routing, which the chart dismisses as "poor mid-trajectory AUROC" from prior AWOS work; it is a way to re-check that claim externally.
+8. **The Routing Plateau (2026-05-27)**: https://arxiv.org/abs/2606.07587. 21 routers over 5 benchmarks converge to similar accuracy far below the oracle, because routers learn global trends, not query-specific signals. Why it matters: warns that a learned deferrer over coarse features may plateau; per-class posteriors need instance-level features (probe, edit size).
+9. **Knowing When to Quit (2026-06-12)**: https://arxiv.org/abs/2604.18419. Formal result: abstaining when the value function falls below an abstention reward beats natural baselines. Why it matters: gives the chart's VOC stopping rule a theorem (math/toxicity tasks only).
+10. **Knowing but Not Showing (2026-05-24)**: https://arxiv.org/abs/2605.25284. Models recognize ambiguity when asked but default to direct answers, and retrieved context widens the gap. Why it matters: another reason to trigger asks structurally, and a caution for repo-context-heavy prompts.
+11. **Stop Guessing When to Stop Testing (2026-07-09)**: https://arxiv.org/abs/2607.08522. Sequential-testing framework; reports 80% evaluation-cost reduction at a 2.5-point CI allowance on the Open VLM Leaderboard. Why it matters: second independent source for sequential stopping of AWOS A/Bs (chart item 12).
+
+### Corrections
+
+- Chart: "Verbalized confidence predicts failure at AUROC ~0.52-0.61 (Xiong et al.)" -> the abstract (https://arxiv.org/abs/2306.13063) says white-box methods perform better "the gap is narrow, e.g., 0.522 to 0.605 in AUROC", i.e. the 0.52-0.61 range is a black-box vs white-box comparison, not a range for verbalized confidence alone. The abstract also says calibration and failure prediction improve with model capability, and that none of the techniques consistently wins. The chart's conclusion (do not gate on raw verbalized confidence) is unaffected, but the number should not be cited as verbalized-only.
+- Chart: "Cost-of-Pass ... finds light models win on basic tasks and reasoning models on complex ones" -> true, but the source (https://arxiv.org/abs/2504.13359) evaluates quantitative and knowledge-intensive tasks, not agentic coding; the Pandora tier ordering is borrowed, not tested there.
+- Chart: "optstop ... removed 57-97% of planned trials ... across 9 settings" -> the abstract (https://arxiv.org/abs/2608.14425, Pilditch, 2026-08-14) calls this "an illustrative 200-item, 10-epoch evaluation" and says savings depend on evaluation design. Treat as best case.
+- Chart: "models can't tell when a task is underspecified (Ambig-SWE)" -> still what the 2025 abstract says, but Ask or Assume? (above) shows an explicit detector scaffold closing most of the gap with Claude Sonnet 4.5. The claim is model- and scaffold-dependent.
+
+### Confirmed claims (from abstracts)
+
+- Large Language Monkeys: 15.9% -> 56% on SWE-bench Lite from 1 to 250 samples (https://arxiv.org/abs/2407.21787).
+- Ambig-SWE: interaction lifts performance "up to 74%" (https://arxiv.org/abs/2502.13069).
+- AbstentionBench: reasoning fine-tuning degrades abstention by 24% on average; scaling is "of little use" (https://arxiv.org/abs/2506.09038).
+- Kapoor et al.: a thousand graded examples suffice to beat baselines, with LoRA (https://arxiv.org/abs/2406.08391).
+- CoBBLEr: biased in an average of 40% of comparisons (https://arxiv.org/abs/2309.17012).
+- Cuadron et al.: lower-overthinking selection gives almost +30% performance and -43% cost on SWE-bench Verified (https://arxiv.org/abs/2502.08235).
+
+### Still unverified
+
+- Hidden-state probes on a 4-bit quantized local MoE for patch pass/fail: Doomed from the Start uses small dense models on non-coding agent environments only.
+- Conformal sample size under about 11% flaky labels for coding gates: no source found.
+- Risk-sensitive (CVaR) gating for irreversible computer-use sinks: not searched successfully (API limits).
+- Thompson-sampling or contextual-bandit routers for agent tiers at tens of tasks per week: the HF queries for this were rate-limited and did not return results; open.
+- The "not re-fetched" classical references (Weitzman, Bogacz, Daw, Shenhav, Thompson tutorial) were not re-checked, and the chart's remaining numeric claims (DEER 19-80%, Adaptive-Consistency 7.9x, DeepConf 84.7%, SAUP +20%) were not re-verified.

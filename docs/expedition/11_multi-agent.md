@@ -175,3 +175,46 @@ The evidence **supports the Gatekeeper shape as it stands**: one writer worker b
 - https://agentskills.io/
 - https://agentclientprotocol.com/overview/introduction
 - https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/
+
+---
+
+## Freshness update (2026-10-10, via arXiv/GitHub/HN/HF APIs)
+
+Method: arXiv's API returned HTTP 429 (shared rate limit), so abstracts were read through the Hugging Face papers API (`huggingface.co/api/papers/<id>`, which mirrors arXiv abstracts). Specs and releases came from GitHub. Findings below are abstract-level; none of the PDFs were read, so effect sizes are as the authors report them.
+
+### New since the chart (dated, with URLs; most important first)
+
+1. **MCP spec revision 2026-07-28 (released after the chart's 2025-11-25 baseline).** The changelog makes MCP stateless (no `initialize` handshake, no `Mcp-Session-Id`), moves Tasks out of core into an official extension (`io.modelcontextprotocol/tasks`, poll via `tasks/get`, new `tasks/update`, `tasks/list` removed), and **deprecates Roots, Sampling and Logging**. Source: https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/specification/2026-07-28/changelog.mdx (tag `2026-07-28` exists). Why it matters: the chart's "Watch" items (MCP Tasks leaving experimental; sampling-with-tools as the local/cloud routing seam) are overtaken. See Corrections.
+2. **The Illusion of Multi-Agent Advantage (2026-06-13).** Automatically generated multi-agent systems consistently underperform CoT with self-consistency (CoT-SC) on reasoning and BrowseComp-Plus, at up to 10x the cost. https://arxiv.org/abs/2606.13003 Why it matters: independent support for the chart's "debate is voting" and "ignore swarms" rows, using a cost-matched single-agent baseline.
+3. **Scaling Test-Time Compute for Agentic Coding (2026-04-16).** Summarizing each rollout, then Recursive Tournament Voting (parallel) plus Parallel-Distill-Refine (sequential): Claude-4.5-Opus 70.9% to 77.6% on SWE-bench Verified (mini-SWE-agent) and 46.9% to 59.1% on Terminal-Bench v2.0. https://arxiv.org/abs/2604.16529 Why it matters: direct evidence for AWOS test 1 and 6 (independent attempts plus a selector); the selector works on compact trajectory summaries, which is the precision bottleneck the chart flags.
+4. **Effective Strategies for Asynchronous SWE Agents / CAID (2026-03-23).** Central manager, isolated git worktrees, branch-and-merge with executable test verification: +26.7 points on PaperBench and +14.3 on Commit0 versus a single agent. https://arxiv.org/abs/2603.21489 Why it matters: a coding-side counterexample to "multi-agent loses on coding", but only for long-horizon, decomposable tasks, and it has the same shape as AWOS's "central gate, isolated writers" rule. It does not cover issue-sized SWE-bench work.
+5. **Multi-Agent Computer Use (2026-06-01).** Manager decomposes into a DAG and dispatches parallel computer-use subagents: +3.4 to 25.5% over single-agent baselines on OSWorld and three web benchmarks, about 1.5x faster wall-clock on Odysseys. https://arxiv.org/abs/2606.01533 Why it matters: it challenges the chart's claim that computer use is the regime where multi-agent degrades most. Self-reported by the authors, and the gain is largest on long-horizon tasks; T10 postconditions still apply.
+6. **Multi-agent Scaling Across Disjunctive and Compensatory Tasks (2026-09-25).** With up to 30 agents and 13 open-weight models, the chance that at least one agent is right grows 5 to 20 points, yet plurality voting realises almost none of it. https://arxiv.org/abs/2609.31563 Why it matters: this is the selector-precision ceiling for best-of-N, measured with open-weight models like AWOS's local tier.
+7. **When Does Multi-Agent Collaboration Help? An Entropy Perspective (2026-06-04).** A single agent beats multi-agent systems in about 43.3% of cases. https://arxiv.org/abs/2602.04234 Rethinking Scale (2026-04-21): for models under 10B, a single agent with tools gives the best performance/cost balance and multi-agent adds overhead for limited gain. https://arxiv.org/abs/2604.19299 Why it matters: answers open question 1 in part for small local models.
+8. **Claim Plane (2026-07-24) and AgentRoom (2026-08-24).** Pre-write admission control for parallel coding agents (declared ChangeIntents, deterministic control plane): https://arxiv.org/abs/2607.21909. CRDT-backed shared workspace with file claims over MCP; 2 agents abandon fewer tasks than solo for CLI-stable models: https://arxiv.org/abs/2608.23740 Why it matters: a candidate design for a "parallel writers" rung if AWOS ever needs one, instead of one writer.
+9. **When Agents Coordinate (2026-08-17).** 1,902 coding runs: naming a coordinator creates no communication hub and gives no reliable gain; shared files cut output tokens about 42% at 8 agents on message-heavy work; agents sought hidden grading material in about 4/5 of sealed re-runs. https://arxiv.org/abs/2608.16801 Why it matters: supports "gate over role"; the grader-peeking result is a benchmark-hygiene warning for AWOS's 73-issue set.
+10. **Who&When Pro (2026-07-10).** 12,326 failed trajectories with golden labels across 26 benchmarks, for automated failure attribution. https://arxiv.org/abs/2607.09996 Why it matters: a better testbed than the original Who&When for the chart's "do not learn from LLM blame" rule; the abstract does not state accuracy, so recheck before reversing it.
+11. **Drop the Hierarchy and Roles (2026-03-30).** 25,000 tasks, 4 to 256 agents: a sequential self-organizing protocol beats centralized coordination by 14%, but models below a capability threshold still benefit from rigid structure. https://arxiv.org/abs/2603.28990 Why it matters: a counter-signal to "central orchestrator"; it points the other way for weak local models, which is AWOS's case.
+12. **Ecosystem.** A2A v1.0.0 (2026-03-12) and v1.0.1 (2026-05-28): https://github.com/a2aproject/A2A/releases. Claude Code is at v2.1.296 (2026-10-09): https://github.com/anthropics/claude-code/releases. HN has many "agent team" wrappers (e.g. https://news.ycombinator.com/item?id=47602986, 77 points) but no controlled evidence.
+
+### Corrections
+
+- Chart: "MCP Tasks leaving experimental status" as a Watch item. Source: Tasks left the core protocol and became the `io.modelcontextprotocol/tasks` extension with a redesigned API (`tasks/result` replaced by polling, `tasks/list` removed). The chart's "working / input_required / completed, TTL, cancel" description of the old API may no longer hold. https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/specification/2026-07-28/changelog.mdx
+- Chart: "MCP sampling-with-tools as the routing seam between local and cloud models." Source: Sampling is deprecated in 2026-07-28 ("integrate directly with LLM provider APIs instead"). Drop this Watch item; route in AWOS's own provider layer.
+- Chart: Kim et al. "interaction β = −0.236, p = 0.004", "+80.8%", and R² "0.37–0.41 or 0.524", "180 vs 260 configurations". The current abstract says 180 configurations, cross-validated R²=0.513, β=−0.408 (p<0.001), and +80.9% on parallelizable tasks. Sequential degradation of 39 to 70% and 17.2x/4.4x match. https://arxiv.org/abs/2512.08296 (the numbers may differ between paper versions; I read the HF-mirrored abstract only).
+- Chart: "A2A reached v1.0". Confirmed, but the date is now fixed: v1.0.0 on 2026-03-12.
+
+### Confirmed claims (briefly)
+
+- Workflow concurrency: "up to 16 agents at once, fewer when Claude Code has fewer CPUs", range 1 to 256, v2.1.269+, memory grows with each agent's transcript. https://code.claude.com/docs/en/env-vars
+- `CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION`: default 200, no upper bound, cannot be turned off, v2.1.212+.
+- Kim et al.: ~45% capability saturation, 17.2x vs 4.4x error amplification, 87% of held-out configurations predicted, sequential tasks degraded 39 to 70%.
+- mini-swe-agent README still says ">74%" on SWE-bench Verified (self-reported); latest release v2.4.6 (2026-07-23). https://github.com/SWE-agent/mini-swe-agent
+
+### Still unverified
+
+- Chart numbers not re-checked this pass: MAST failure rates (41 to 86.7%), Large Language Monkeys 15.9% to 56%, CodeMonkeys 66.2%, PoLL 7x cost, Anthropic's +90.2% and 15x tokens, the 5.5% tool-poisoning and 43.7% GPT-5 MCP figures.
+- The exact CPU-to-cap formula (the docs say only "fewer CPUs").
+- Whether the 2026-07-28 MCP revision is widely adopted by the SDKs and servers AWOS would use.
+- All 2026 papers above are read at abstract level only; CAID, MACU and the test-time-compute gains are unreplicated and mostly use frontier cloud models, not 7 to 30B local ones.
+- No Cognition, OpenAI or Anthropic 2026 posts on parallel coding agents were found through these APIs; the engineering-blog coverage gap remains.

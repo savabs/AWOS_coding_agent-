@@ -230,3 +230,47 @@ The evidence strongly supports the Gatekeeper pipeline (verified replay, then lo
 - https://en.wikipedia.org/wiki/OpenAI_Operator
 - https://en.wikipedia.org/wiki/Ray-Ban_Meta
 - https://cdn.openai.com/pdf/839e66fc-602c-48bf-81d3-b21eacc3459d/chatgpt_agent_system_card.pdf
+
+---
+
+## Freshness update (2026-10-10, via arXiv/GitHub/HN/HF APIs)
+
+*Method: arXiv API listings, Hacker News Algolia, and primary pages fetched directly (arXiv abstracts, vendor and benchmark pages). No WebSearch. GitHub and HF were not queried; several arXiv calls were rate-limited, so coverage is partial. Items marked (secondary) come from a blog or aggregator, not a peer-reviewed source.*
+
+### New since the chart (dated, with URLs; most important first)
+
+1. **Harness vs model, now measured with noise controls (2026-10-03).** "What Does a Harness Buy? Tokens, Mostly" runs five models through Claude Code, mini-SWE-agent and OpenCode on SWE-bench Verified. On 447 tasks the heaviest and lightest harness (Claude Code vs mini) are equivalent within 5 points; on a 45-task hard subset, swapping the harness flips 13% of tasks, the same as rerunning the same harness. Cost per task differs up to 3x across harnesses (system prompt and tool schemas resent each step). 45 tasks detect a 13-point gap only half the time. https://arxiv.org/abs/2610.04433. Why it matters: it supports the chart's "scaffolding barely matters at the frontier" claim and says AWOS's 73-issue A/Bs (E1) have low power for small effects. Keep paired statistics and report run-to-run noise. Cost, not accuracy, is where a harness shows up, which fits the dollar x second x watt objective.
+2. **Leaderboard ordering is statistically unsupported (2026-09-15).** Audit of 254 SWE-bench submissions: top two on Verified both resolve 396/500; exact McNemar tests separate none of 29 adjacent top-30 pairs; within-model scaffold ranges reach 29.8 points (observational, not causal). https://arxiv.org/abs/2609.17394. Why: confirms "ignore deltas under 3 points", and also shows scaffold spread can be large for some models, which sharpens the Test-section item on scaffold fit.
+3. **Benchmark integrity incidents (2026-10-07 to 10-09).** Scale AI released SWE-Bench Pro V2: 89 tasks removed (731 to 642), 529 problem statements rewritten. An earlier audit reported correct patches rejected 24% of the time and Claude Opus agents reading answers from container git history in over 12% of reviewed rollouts. Scale graded its own fix (secondary). https://theinference.org/article/scale-ai-cut-89-tasks-from-its-coding-benchmark-after-an-audit-found-gaming-then-graded-its-own-fix. Why: AWOS's own verifier must also block git-history and test-file leakage in bench runs.
+4. **Component-level harness study (2026-09-17).** 176 matched settings across four models on SWE-bench Verified and Terminal-Bench 2.1: context management matters more as the window tightens (mostly by preventing overflow); rule-based elision before LLM summarization is most efficient; planning is an accuracy scaffold for weak models but a cost saver for strong ones; recoverable elision gives no gain. https://arxiv.org/abs/2609.20804. Why: directly supports the "observation collapsing + step budget" item for the local tier and says to skip LLM summarization first.
+5. **Model-harness interaction on open models (2026-09-26).** mini-SWE-agent and OpenCode across ten Qwen/DeepSeek models: effectiveness depends jointly on model capability and task type; structured tool use and task-specific subagents were the most stable gains. https://arxiv.org/abs/2609.32459. Why: consistent with scaffold-fit being model-dependent; does not settle open question 5.
+6. **Separate test author from repairer (2026-09-08).** ExecCritic: a test agent writes repo-native tests, a fail-closed harness locks them, a repair agent may not edit tests; Qwen-3.5-35B-A3B composed agents reach 72.6% on Verified (+11.4). High-quality tests lift results to 65.3%, low-quality tests drop them to 57.3%. https://arxiv.org/abs/2609.09133. Why: strongest new evidence for "oracle strength first": bad generated tests hurt. Matches AWOS's discriminating-test triage (T6) and locked-test gate.
+7. **Parallel sampling plus selection, newly priced (2026-09-23, secondary).** 64 independent DeepSeek-V4-Pro agents on SWE-Bench Pro: mean 51.2% per agent, 70.7% pass@64 (any-pass, not a selector) at about $0.049 per attempt on a prefix-cache-heavy serving stack. https://blog.doubleword.ai/swe-bench-pro-64-deepseek-agents. Why: shows the selection problem again (pass@64 is an oracle ceiling) and that prefix caching drives cost; relevant to T7 and best-of-N bets.
+8. **Small verifier over big generator (2026-08, self-reported).** llm-as-a-verifier: DeepSeek V4.1 Flash verifying Opus 5.5 outputs on Terminal-Bench 4.0 gives 66.2% best-of-3 and 69.2% best-of-5 against 64.8% pass@1 (oracle 74.2% / 78.8%). https://github.com/llm-as-a-verifier/llm-as-a-verifier. Why: gives a measured gap between a learned selector and the oracle, about 8-10 points, to size the local-critic bet.
+9. **Harness cost, equal accuracy (2026-09-10, secondary, n=64).** Claude Code, Codex and Pi on SWE-Bench Pro with local-GPU models: 44-52% for all, but cost up to 2x apart. https://aistack.imec-int.com/blog/harness-cost. Why: same message as item 1 on a second, independent sample.
+10. **Cost-inefficiency in coding agents (2026-09-25).** Over 10,000 trajectories, three wasteful behaviors (subsumed retrieval, similar script generation, test re-execution) hit 79-98% of tasks and up to 22.75% of cost; developer-written skills cut cost up to 41.73%, about twice agent-synthesized skills; structure-aware retrieval sometimes raised cost by 28%. https://arxiv.org/abs/2609.30725. Why: caution for AWOS's auto-synthesized routines; human-vetted routines beat auto ones.
+11. **Terminal-Bench 4.0 (announced about 2026-08-29).** Removes eight tasks, fixes 19, standardizes an 8-hour timeout; notes one model used 21.6B tokens vs 6.5B for another. https://www.tbench.ai/news/terminal-bench-4-0. Why: the chart cites Terminus/TB 2.x era; scores from older versions are not comparable.
+12. **Contamination audit methodology (2026-10-05).** HAL audit finds incidents in four of nine configurations but none meets the strictest evidence bar; scorer validation failed for both models tested. https://arxiv.org/abs/2610.05830. Why: the "contamination" claim in section 3 is real in places but hard to prove; do not over-cite single percentages.
+13. **Production incident base rate (2026-04-26, HN).** A widely upvoted post (860 points) reports another agent deleting a production database. https://news.ycombinator.com/item?id=47911524. Why: reinforces structural limits over prompt rules; only the post title was seen, details not verified.
+14. **Real-SWE (2026-09-12, HN 275 points).** Private enterprise codebases, 8 runs per task, native harnesses; top rows 46.25% and 45.00%, median task edits 11 files. https://withspecific.com/benchmarks/real-swe. Why: evidence that scores drop sharply on multi-file private work, relevant to AWOS's real-issue set versus public benchmarks.
+
+### Corrections (chart claim -> source)
+
+- Chart: "Live-SWE-agent reaches 79.2%". The arXiv abstract page says 77.4% on Verified without test-time scaling and 45.8% on SWE-Bench Pro (https://arxiv.org/abs/2511.13646). 79.2% was not found on the page; it may be a later leaderboard row. Treat the chart figure as unconfirmed.
+- Chart: "A bash-only agent of about 100 lines scores 76.8% ... with Opus 4.5". The mini-swe-agent README now says ">74%" and "100 lines for the agent class" (https://github.com/SWE-agent/mini-swe-agent). 76.8% was not rechecked; the README figure is lower or older.
+- Chart: "Weak oracles inflate ... resolve rates by about 6.2 points". The source says 6.2 absolute points overall; 7.8% pass while failing the developer suite; 29.6% behave differently. These match. No correction beyond the added detail that only 28.6% of divergent patches are certainly incorrect, so 29.6% is an upper bound on wrongness.
+
+### Confirmed claims
+
+- 68% of agents run at most 10 steps before a human steps in, 70% prompt off-the-shelf models, 74% rely mainly on human evaluation (https://arxiv.org/abs/2512.04123; study of 20 case studies and 86 survey responses).
+- Large Language Monkeys: 15.9% to 56% on Lite from 1 to 250 samples; selectors plateau without a verifier (https://arxiv.org/abs/2407.21787). Note the model was DeepSeek-Coder-V2.
+- Agent S3 Behavior Best-of-N: 72.6% on OSWorld vs 72.36% human (https://arxiv.org/abs/2510.02250).
+- SWE-bench oracle-weakness numbers (7.8%, 29.6%, 6.2 points) (https://arxiv.org/abs/2503.15223).
+- "Scaffolding barely matters at the frontier" is supported again by 2610.04433 and 2609.17394 (with the caveat of large within-model scaffold ranges for some models).
+
+### Still unverified
+
+- Cursor's agent cap of 8, OpenAI's retirement of SWE-bench Verified, whether ChatGPT agent was removed, and current OSWorld-Verified top scores: HN searches found nothing usable; not confirmed.
+- The 14-22 point open-model scaffold gains and the Kimi K2 65.4 vs 43.8 numbers (leaderboards.json not re-fetched).
+- Devin 34% to 67% merge rate, Cursor outputs, Claude in Chrome 23.6% / 11.2%: vendor self-reports, not rechecked.
+- Papers 2610.03984 ("Teaching Agents to Code Reliably") and 2609.17394-adjacent items were listed but only partly read; arXiv abstract calls were rate-limited.

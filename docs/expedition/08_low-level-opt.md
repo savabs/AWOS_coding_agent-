@@ -248,3 +248,42 @@ Computer use is prefill-heavy (screenshots, accessibility trees) and pauses on e
 - https://raw.githubusercontent.com/ml-explore/mlx-lm/main/mlx_lm/generate.py
 - https://arxiv.org/abs/2309.17453
 - https://arxiv.org/abs/2405.16444
+
+---
+
+## Freshness update (2026-10-10, via arXiv/GitHub/HN/HF APIs)
+
+Method: GitHub, Hacker News and Hugging Face papers-search APIs, plus abstract pages and issue threads fetched directly. The arXiv listing API returned empty results this session, so arXiv coverage comes through HF search. Nothing here was measured on AWOS hardware.
+
+### New since the chart
+1. **SiliconBench, 2026-09-12** (https://arxiv.org/abs/2609.19169). It benchmarks nine Apple Silicon serving engines at concurrency 1-16 on chat and agent workloads, with quality checks. vllm-metal "more than doubled" throughput on Qwen3-0.6B. Two stacks "complete every request while memory use approaches physical capacity and throughput declines". This is the independent concurrency sweep the chart's Watch list and open question 1 asked for (up to 16, small model only). It also warns that a memory budget is not headroom, which matters for the per-agent KV sizing and the wired-limit risk.
+2. **llama.cpp PR 29869, closed 2026-10-02** (https://github.com/ggml-org/llama.cpp/pull/29869). It adds Metal mat-mul kernels for 2-16 rows. The PR text says that on M1-M4 "DFlash2 decoding of Qwen3.8-27B is slower than serial decoding on master" because small batches fall back to mat-vec. A maintainer comment says the MMA path also helps M5. This bears on the batching and speculation claims. Multi-slot batched decode (2-16 rows) on Metal was under-optimised, so the chart's batched-bench numbers may improve once this lands in your build. It also partly explains the "serial verification" penalty on Metal.
+3. **llama.cpp issue 27148, open, 2026-08-15** (https://github.com/ggml-org/llama.cpp/issues/27148). The RAM prompt cache (`--cache-ram` / `--cache-idle-slots`) can restore an unrelated conversation into a fresh slot under concurrent load. It reports `cached_tokens: 0`, so it looks like hallucination. The reporter's mitigation is `--no-cache-idle-slots --cache-ram 0`. This is a correctness risk for the chart's "adopt now" multi-slot advice. Disable these flags and check for cross-slot contamination in the concurrency sweep.
+4. **TraceLab, 2026-06-29** (https://arxiv.org/abs/2606.30560). It releases about 4,300 real coding-agent sessions (about 350k LLM steps, 430k tool calls). Contexts are long and outputs short, and prefix-cache hit rates are "high but incomplete". It gives real-trace evidence for prefill-heavy, prefix-shared agents, and AWOS can replay it before building its own traces.
+5. **AgentSpec, 2026-08-25, EMNLP 2026** (https://arxiv.org/abs/2608.24004). It states that existing speculative decoding methods "exhibit substantial speed degradation under large batch sizes", and proposes agent-aware drafting. This supports the chart's speculation-vs-batching claim. It is validated on vLLM, so it is not yet usable locally.
+6. **HYPIC, 2026-07-01** (https://arxiv.org/abs/2607.01299). It adds position-independent caching for hybrid-attention (linear + full) models: 3.25x average TTFT, 1.66x QPS over prefix caching. It speaks to open question 3 (prefix reuse on Gated DeltaNet models). It is a server-side system and not in llama.cpp or MLX.
+7. **PolyKV, 2026-04-27** (https://arxiv.org/abs/2604.24971). It shares one compressed KV pool across concurrent agents: 15 agents on Llama-3-8B at 4K context, 19.8 GB down to 0.45 GB, +0.57% perplexity. It was tested only on small models and short contexts. SAW-INT4 (https://arxiv.org/abs/2604.19157, 2026-04-21) reports that 4-bit KV with block-Hadamard rotation recovers nearly all accuracy lost to naive INT4. Both weaken the chart's "4-bit KV is a dead end" row. The dead-end verdict holds for plain q4_0 KV, but rotated 4-bit KV is now a credible arm. Several llama.cpp TurboQuant forks exist (for example https://github.com/AmesianX/TurboQuant, 93 stars), none upstream.
+8. **Mix-Quant, 2026-05-19** (https://arxiv.org/abs/2605.20315). It quantizes prefill to FP4 and keeps decode in BF16, for up to 3x faster prefill on agentic workloads. This is GPU/FP4 oriented and not applicable on Apple hardware, but it indicates that quant damage differs by phase.
+9. **DFlash and DSpark, 2026-06.** The SGLang blog (https://www.lmsys.org/blog/2026-06-15-next-generation-speculative-decoding-dflash-v2/) claims more than 4.3x on Qwen 3.5 397B at concurrency 1 and 1.5x over MTP, with gains kept through concurrency 32 (datacenter B200 scale, vendor claim). DSpark (https://github.com/deepseek-ai/DeepSpec/blob/main/DSpark_paper.pdf, HN 2026-06-27, 797 points) is a DeepSeek speculative decoding paper, and llama.cpp now has `draft-dspark`/`draft-dflash` modes. An open issue (https://github.com/ggml-org/llama.cpp/issues/25618) reports greedy output diverging from vanilla on quantized targets. Chart test 6 requires byte-identical output at temperature 0, so this is a direct risk.
+10. **BaseRT, 2026-07-01** (https://arxiv.org/abs/2607.00501). A native Metal runtime claiming up to 1.56x decode over llama.cpp and 1.35x over MLX, on M3/M4 Pro with models up to 30B. It is a single-group claim. Treat as a watch item only.
+11. **Release cadence.** vllm-metal is now at v0.30.0 (2026-09-23) (https://github.com/vllm-project/vllm-metal/releases). llama.cpp is at b11541 (2026-10-10). mlx-lm's last release is v0.31.3 (2026-04-22), which suggests MLX server development is slower than the llama.cpp and vllm-metal paths.
+
+### Corrections
+- Chart: "vllm-metal (v0.2.0)". The repo README still says v0.2.0 (2026/04), but GitHub releases list v0.29.0 (2026-09-11) and v0.30.0 (2026-09-23). The version is stale and the project is moving fast. Source: https://github.com/vllm-project/vllm-metal/releases
+- Chart: "neither publishes concurrency sweeps" (vllm-metal / vllm-mlx). SiliconBench (https://arxiv.org/abs/2609.19169) now covers both-class engines at concurrency 1-16, but on a small model.
+- Chart: llama.cpp MTP-on-Metal issue "closed as 'not a bug'". The issue (https://github.com/ggml-org/llama.cpp/issues/23752) was closed as completed on 2026-05-27. The "not a bug" framing is a maintainer comment, who also said multiple users, including Georgi, report sizeable Mac speed-ups and that MTP is optional. Another user reported slowdowns on M1 Max with Gemma 4 26B on 2026-06-11. The evidence is mixed and not a settled negative.
+- Chart: "3 of 5 configs ran slower" and Lossless but Not Free. Confirmed, but the abstract also reports a best case of 1.61x at K=6 (https://arxiv.org/abs/2607.17283). The chart mentions only the negative side.
+
+### Confirmed claims
+- Apple MLX-on-M5: 153 GB/s, decode 19-27% faster than M4 (chart: 1.19-1.27x), prefill/TTFT 3.33-4.06x (chart: 3.3-4.1x). Source: https://machinelearning.apple.com/research/exploring-llms-mlx-m5
+- ACBench: 4-bit costs 1-3% on workflow/tool use and 10-15% on real-world application accuracy (https://arxiv.org/abs/2505.19433).
+- Long-context quantization: 8-bit about 0.8% drop, 4-bit drops "of up to 59%" at 64K+, strongly dependent on model and method (https://arxiv.org/abs/2505.20276).
+- Hydragen: up to 32x on CodeLlama-13b; 1K to 16K prefix costs under 15% versus over 90% for baselines (https://arxiv.org/abs/2402.05099).
+- Continuum: more than 8x average job completion time (https://arxiv.org/abs/2511.02230). KVFlow: 1.83x single, 2.19x concurrent workflows, measured against SGLang's hierarchical radix cache (https://arxiv.org/abs/2507.07400).
+
+### Still unverified
+- Whether llama-server's unified pool shares prefix KV across slots (open question 2). Issue 27148 shows the cache layer is still buggy under concurrency, so test it before relying on it.
+- Throughput saturation above B=4 on a 16 GB M5 for the 9B tier. SiliconBench stops at 16 and uses small models.
+- Per-slot memory for hybrid models in llama.cpp or MLX, and the SWA/recurrent-state cost.
+- Qwen3-8B KV dimensions, Gemma 3's local:global ratio, exo figures, the `CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION` name, and AWOS's own `-np`, `MAX_WORKERS` code facts (not rechecked here).
+- Unsloth, oMLX and MTPLX figures remain self-reported. The DFlash and DSpark gains are datacenter-GPU vendor claims and not Metal numbers.

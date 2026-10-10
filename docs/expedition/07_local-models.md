@@ -276,3 +276,41 @@ Vendor Verified scores, Llama, sub-5B coding workers, long-CoT distills for agen
 - https://arxiv.org/abs/2501.19393
 - https://arxiv.org/abs/2506.06105
 - https://arxiv.org/abs/2502.08606
+
+---
+
+## Freshness update (2026-10-10, via arXiv/GitHub/HN/HF APIs)
+
+Method: HF model API and raw model cards, GitHub search and READMEs, HN Algolia, arXiv abs pages, and one WebFetch of swe-rebench.com. The arXiv query API returned HTTP 429 for every search call, so no new arXiv papers were discovered; arXiv was used only to re-read cited abs pages. Everything below is vendor-, author- or community-reported unless stated.
+
+### New since the chart
+1. **Qwen3.8-27B card now reports SWE-bench Pro, not Verified.** It lists SWE-bench Pro 61.7 (Qwen3.6-27B: 53.5), Terminal Bench 2.1 73.0 (63.4), DeepSWE 1.1 42.2 (13.3), and OSWorld-Verified 84.3 (63.9). The card lists Opus 4.6 Max at 72.7 on OSWorld-Verified. Apache-2.0, 6.8M downloads. The chart's saturated-Verified argument has moved on: vendors changed benchmarks. Still no independent number. [card](https://huggingface.co/Qwen/Qwen3.8-27B). Why it matters: AWOS cannot rank Qwen3.8 versus 3.6 except on its own 73 issues.
+2. **The Qwen3.8-27B community ecosystem has appeared within weeks.** An llama.cpp MTP recipe claims +33-39% decode on consumer GPUs ([sudoingX/qwen38-mtp](https://github.com/sudoingX/qwen38-mtp)). Pulsar reports 153 tok/s writing code and 344 tok/s editing on an M5 Max with 128 GB, greedy, thinking off, single request ([README](https://github.com/loopai-hq/pulsar), [HN](https://github.com/loopai-hq/pulsar), 2026-10-09). A 27B at 150+ tok/s on a 128 GB M5 Max changes the dense-versus-MoE speed gap in the chart (3-8x), but 128 GB is not the owner's 16 GB host, and the numbers are self-reported.
+3. **Qwen3.8-27B squeezed under 8 GB with tool calling "intact"** ([HF: ConwayResearch/Underdog-Saluki-27B-1.0](https://huggingface.co/ConwayResearch/Underdog-Saluki-27B-1.0), HN 2026-10-09). Directly relevant to open question 4 (16 GB host), but it is a single-author claim and the quantization paper below says headline tool scores hide damage. Test with per-channel error counts.
+4. **Oversized MoE on small Macs.** ExpertCache runs the 63 GB gpt-oss-120b MXFP4 GGUF on a 16 GiB M1 Pro: 0.72 decode tok/s, 14/16 functional points (11/16 raw before an evaluator correction), warm qualification run 8,249 s. Its own README calls this feasibility, not usable speed ([repo](https://github.com/amos-labs/expertcache)). Confirms the chart's "SSD expert streaming is research-grade" and adds a data point: it works but is about 100x too slow for agent loops.
+5. **Qwen3.8-Flash-Next is about 180B parameters** (HF safetensors total 179,999,981,459, `license:other`, 1.8M downloads, last modified 2026-08-27). HN projects run it at 11-15 tok/s on a 12 GB GPU with 32 GB RAM, and at 75-80 tok/s on one 32 GB RTX 5090 (community repos: [kekzl/imp](https://github.com/kekzl/imp)). The chart's licence worry applies to this model; its size puts it in the 128 GB-box class, not the 16 GB host.
+6. **Licence text is narrower than the chart implies.** The Flash-Next LICENSE defines "AI Work Assistant" as an independent product "primarily designed for AI-assisted coding or office productivity" and exempts internal use that does not make the model, outputs or capabilities available to third parties. So a self-hosted personal agent is likely exempt, but a shipped AWOS coding product is the exact category named. Resolves part of open question 7 for Flash-Next only; Qwen3.8-27B is Apache-2.0 and not affected. [LICENSE](https://huggingface.co/Qwen/Qwen3.8-Flash-Next/raw/main/LICENSE).
+7. **2610.03984 re-fetched and confirmed** (submitted 2 Oct 2026): weighted SFT lifts pass@1 31.9 to 35.2 and pass@8 46.7 to 51.1 on 270 held-out issues; the RL verifier objective then reaches pass@1 43.0, pass@8 60.7, verifier precision 26.8 to 41.7, with gains at 7B, 14B and 30B. It also resolves 52.8% of Verified with 48.1% of the steps of an eight-sample baseline. Supports the Gatekeeper design and the "train the verifier" step. [abs](https://arxiv.org/abs/2610.03984).
+8. **Small-model tooling for AWOS-style loops.** A distillation thread from a Qwen3.7-Flash teacher into Qwen3-4B/8B students exists on HF (`nics-efc/Qwen3-8B-AOPD-Qwen3.7-Flash`, 2026-09-29, no downloads), and a "Slowave" local memory tool for coding agents was shown on HN (2026-09-14). Both are unvetted leads, not evidence.
+9. **llama.cpp is shipping many builds per day** (b11541 on 2026-10-10), while mlx-lm's latest release is v0.31.3 (2026-04-22). Hybrid-attention support on Metal is therefore still best read from release notes per model, not assumed.
+
+### Corrections
+- Chart: "Qwen3.6-35B-A3B claims 73.4 on SWE-bench Verified ... Qwen3.6-27B claims 77.2" -> confirmed on the cards; but the Qwen3.6-35B-A3B card's own table shows other columns (e.g. 52.0, 70.0) that are for other models, so quote only the 73.4 and 77.2 figures. [27B card](https://huggingface.co/Qwen/Qwen3.6-27B), [35B card](https://huggingface.co/Qwen/Qwen3.6-35B-A3B).
+- Chart: "An Oct-2026 preprint ... reported by the scout, not re-fetched" -> now re-fetched and accurate; the 43.0% pass@1 is after the RL stage, not after SFT (35.2%).
+- Chart: "Qwen3.8-27B OSWorld-Verified 84.3 exceeds ... human baseline ... almost certainly a different protocol" -> the card itself lists Opus 4.6 Max at 72.7 on the same row, so the vendor compares under its own harness; the wording "almost certainly a different protocol" remains an inference, not something the card states.
+- Otherwise none found.
+
+### Confirmed claims
+- SWE-rebench window and rows: GLM-5.2 62.9%/81.1%, Qwen3.6-27B 31.2%/57.7% at $0.62 and 3.08M tokens, Qwen3.6-35B-A3B 24.7%/43.2% at $0.27 and 3.73M tokens, 111 problems from 65 repos ([swe-rebench.com](https://swe-rebench.com/)). The window still ends 1 July 2026, and gpt-oss-20b, Gemma 4 and Devstral still have no results. Qwen3.8 is not listed.
+- 2607.02577: 92 of 496 tasks (18.5%) disagree; LiveMCPBench 23 runs span 57.9-76.8%.
+- 2607.27275: up to 2.5x error amplification, +17.6 points per task, flat headline score.
+- 2605.04107: Phi-4 14B 0% to 84.4% at 20 tools, 52-57% token savings.
+- 2609.24161: 4-tool interface +16.4% over primitives, +33.6% over one tool; 3.2B beats 20.9B at mismatched granularity.
+- Flash-Next licence terms (100M MAU / $20M monthly revenue attribution, Model-as-a-Service and AI Work Assistant clause).
+
+### Still unverified
+- Any independent (non-vendor) result for Qwen3.8-27B or Flash-Next on fresh coding tasks; SWE-rebench has none.
+- Throughput of 27B/MoE models on the owner's 16 GB M5 (all fast numbers above come from 128 GB M5 Max or CUDA cards).
+- The Saluki sub-8 GB quantization quality, MTP gains on Metal, and prefix caching with DeltaNet layers.
+- The ai-muninn failure taxonomy, the Fara-7B, SERA and Tensor Economics figures were not re-checked in this pass.
+- No new arXiv discovery was possible (query API rate limited), so recent papers on small coding agents may still be missing.

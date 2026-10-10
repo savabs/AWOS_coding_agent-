@@ -244,3 +244,47 @@ Apple, Google and Microsoft now ship local-then-cloud fallback as the default de
 - https://learn.microsoft.com/en-us/windows/ai/apis/phi-silica
 - https://blogs.windows.com/windowsexperience/2025/06/23/introducing-mu-language-model-and-how-it-enabled-the-agent-in-windows-settings/
 - https://blogs.windows.com/msedgedev/2026/06/02/expanding-on-device-ai-in-microsoft-edge-new-models-and-apis-for-the-web/
+
+---
+
+## Freshness update (2026-10-10, via arXiv/GitHub/HN/HF APIs)
+
+*Method note: the arXiv API returned HTTP 429 for most queries, so paper discovery went mainly through the Hugging Face papers search, Hacker News (Algolia) and one GitHub query. Abstract pages were fetched to confirm. Coverage of arXiv is therefore thinner than planned. Model-card and vendor claims below remain self-reported unless stated.*
+
+### New since the chart (dated, with URLs; most important first)
+
+1. **Apple's third-generation foundation models (WWDC, 2026-06-08).** Apple describes AFM 3 Core (3B, on-device, quantization-aware training) and AFM 3 Core Advanced (20B total, "activating just 1 to 4 billion parameters at a time"). The tech note reports preference wins only (45.6% vs 23.3% against the 2025 baseline); no agentic or tool-call numbers. Why it matters: Tier 0 in section 5 is no longer a fixed "~3B" target, and the Core Advanced MoE may be reachable through the same API on OS 27. The A/B must name the exact model ID. https://machinelearning.apple.com/research/introducing-third-generation-of-apple-foundation-models
+2. **Apple's `LanguageModel` protocol now takes server-side and third-party models (OS 27 betas).** Anthropic's docs describe a Swift package that plugs Claude into `LanguageModelSession`. Apps choose per session between the on-device model and Claude; the recommended pattern is to catch `.rateLimited` and fall back to `SystemLanguageModel`. Why it matters: it confirms the chart's strategic note (vendor routing is capability, timeout and overflow based, not verification based). It also gives AWOS a uniform Tier 0/Tier 2 session API on macOS 27. https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/apple-foundation-models
+3. **Manifest deprecated its production LLM router (HN, 2026-07-31).** After four months and about 7,000 cloud users, Manifest reported that task difficulty cannot be read from the prompt alone, that cache reads are "between 75% and 90% cheaper", and that model switching hurts consistency. Vendor blog, anecdotal, no controlled data. Why it matters: it independently supports "simple routing wins" and the cache-loss open question 8. Escalate at attempt boundaries only. https://manifest.build/blog/why-we-deprecated-our-llm-router/
+4. **SWE-Router (2026-06-30) and Agent-as-a-Router / ACRouter (2026-06-22).** SWE-Router argues that task-description-only routing has a Bayes-error floor and that reading the partial cheap trajectory before escalating never hurts, in theory. ACRouter reports a 15.3% relative gain from adding per-dimension performance statistics to a vanilla LLM router, on a 10,000-instance coding benchmark across 8 frontier models. Both are unreplicated. Why it matters: they partly contradict the chart's "ignore mid-trajectory escalation for coding" and support its kNN-over-verified-outcomes default (ACRouter's gain comes from outcome statistics). They are worth adding to the routing A/B. https://arxiv.org/abs/2607.00053 · https://arxiv.org/abs/2606.22902
+5. **Gemma 4 (2026-04-02) and Gemma 4 12B (2026-06-03).** Google lists E2B, E4B, 12B, 26B and 31B variants with native function calling. The 31B reports 86.4% on tau2-bench retail (self-reported). Why it matters: the open 4-9B Tier 1 candidate list needs Gemma 4 E4B and 12B. The chart's own 87.2% E2B actuation failure (item 8 below) shows the danger of trusting the headline. https://deepmind.google/models/gemma/gemma-4/ · HN thread https://blog.google/innovation-and-ai/technology/developers-tools/introducing-gemma-4-12b/
+6. **Qwen3.6 family (HN, April 2026): 35B-A3B (04-16), 27B dense (04-22).** Vendor blogs claim agentic-coding strength. A hands-on report ran the 35B-A3B at Q4_K_S (20.9 GB GGUF) on an M5 MacBook Pro via LM Studio, and its author warns the demo does not show general usefulness. Why it matters: these are the realistic "30B-A3B MoE under MLX" Tier 1 candidates for a 16 GB-class Mac, though a 21 GB quant exceeds 16 GB RAM. Memory fit must be tested. https://qwen.ai/blog?id=qwen3.6-35b-a3b · https://simonwillison.net/2026/Apr/16/qwen-beats-opus/
+7. **Microsoft Aion Instruct timeline firmed up (docs updated 2026-10-02).** "Early October 2026" sideloadable package for testing and LoRA re-training; November 2026 Insider rollout; January 2027 retail rollout and Phi Silica removed. LAF tokens no longer needed. Why it matters: it confirms the chart's dates. The LoRA re-training requirement is a second vendor data point for "keep learned behavior model-independent". https://learn.microsoft.com/en-us/windows/ai/apis/phi-silica
+8. **Per-call-site SLM study published 2026-10-06 (arXiv 2610.09021).** The abstract states that Gemma4 E2B "actuates on 87.2% of requests for devices the site does not own" and evaluates nine models. Why it matters: this is the chart's key safety number and it checks out against the primary source. https://arxiv.org/abs/2610.09021
+9. **Cactus Needle 3 (HN, 2026-09-18, 236 points).** Vendor claims 8-29 MB multi-depth models with 2-bit quantization that, after fine-tuning on their platform, pass DeepSeek V4 Flash on tool-calling and extraction datasets (including BFCL v4 subsets). Self-reported, vendor-chosen evaluation. Why it matters: it is a second data point for the Mu-style "tiny specialist for a closed action space" path in section 2 item 10, with the usual fine-tune-on-your-own-distribution caveat. https://cactuscompute.com/needle
+10. **"Rethinking Scale" (2026-04-21).** For sub-10B models, single-agent plus tools gives the best performance/cost balance; multi-agent setups add overhead with limited gains. Why it matters: it supports staying single-worker at Stage 1. https://arxiv.org/abs/2604.19299
+11. **Single-prompt audit (2026-05-03).** Ten instruction-tuned models; parameter count correlated only weakly (-0.24 to 0.47) with prompt-perturbation spread, and verbal confidence overstated accuracy. Why it matters: it adds support to pass^k over pass@1, and a caution on verbal-confidence escalation signals. https://arxiv.org/abs/2605.02038
+12. **python-apple-fm-sdk is active:** v0.2.0 (2026-06-08, image attachments) and v0.2.1 (2026-06-29), 1,326 stars, last push 2026-10-07. Why it matters: Tier 0 plumbing is maintained; pin the version. https://github.com/apple/python-apple-fm-sdk
+
+### Corrections
+
+- Chart: "Aion Instruct (open release announced)". The Microsoft docs describe a sideloadable package and rollout through Windows, and say nothing about open weights. Treat "open" as unverified. https://learn.microsoft.com/en-us/windows/ai/apis/phi-silica
+- Chart: "Three OS vendors converged on about 3B ... always-resident model". Still true for Apple's AFM 3 Core, but Apple now also ships a 20B-total MoE with 1-4B active parameters on-device, so "about 3B" understates the range. https://machinelearning.apple.com/research/introducing-third-generation-of-apple-foundation-models
+- Chart: "Apple in 26.4 and again in 27" swapped system models. I could not confirm the 26.4 step from a primary source; the AFM 3 announcement (June 2026) is the confirmed change.
+- Otherwise none found among the numbers I re-checked.
+
+### Confirmed claims
+
+- BFCL V4 CSV (https://gorilla.cs.berkeley.edu/data_overall.csv, fetched today) matches the chart: multi-turn Qwen3-8B FC 41.75, Qwen3-1.7B FC 11.00, Qwen3-0.6B FC 3.62, Gemma-3-4b (Prompt) 0.38, xLAM-2-8b 70.00, Opus 4.5 FC 68.38, Haiku 4.5 FC 53.62, Hammer2.1-1.5b 15.62.
+- Irrelevance: Llama-3.1-8B 42.70, xLAM-2-8b 63.28 match. Latency means: Qwen3-32B FC 169.87 s, xLAM-2-8b 22.65 s, Haiku 4.5 FC 1.68 s match.
+- Apple adapters: the toolkit page says 26.0.0 "is the last release ... not compatible with ... 27 and later". https://developer.apple.com/apple-intelligence/foundation-models-adapter/
+- Phi Silica removal in January 2027 and replacement by Aion Instruct: confirmed in the Microsoft docs above.
+- The 87.2% Gemma4 E2B actuation figure: confirmed in the abstract of 2610.09021.
+
+### Still unverified
+
+- The CSV I fetched contains no Qwen3.5, Qwen3.6 or Gemma 4 rows (it does include Qwen3-4B/14B/30B-A3B-2507), so the BFCL picture is stale for the newest small models. Any claim about them rests on vendor cards.
+- Qwen3.5-4B/9B TAU2 and OSWorld numbers, Fara-7B and macOSWorld figures, MAKER, LLMRouterBench and the router "self-audit" 23.9% to 4.3% were not re-fetched this pass.
+- The Qwen3.6 blog page returned no usable content through the fetcher, so its benchmark figures are not checked.
+- No independent measurement yet of AFM 3 Core Advanced on tool use, or of Aion Instruct quality.
+- No user study of perceived quality of local small-model assistants was found (open question 9 stays open).

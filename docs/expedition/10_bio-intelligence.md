@@ -214,3 +214,49 @@ Two pieces of evidence from this territory are relevant:
 - https://arxiv.org/abs/2407.20292
 - https://github.com/infer-actively/pymdp
 - https://github.com/ReactiveBayes/RxInfer.jl
+
+---
+
+## Freshness update (2026-10-10, via arXiv/GitHub/HN/HF APIs)
+
+*Method: arXiv search pages and abs pages, Hacker News Algolia, GitHub API, Hugging Face API. The arXiv export API and Semantic Scholar returned HTTP 429, so arXiv coverage comes from arxiv.org/search result pages (newest first) plus abs-page abstracts. Paywalled and vendor pages were not read in full. arXiv IDs below are as returned by those pages.*
+
+### New since the chart (dated, with URLs; most important first)
+
+1. **Hidden-state probes for early agent abort, with a recall guarantee (2026-07).** "Doomed from the Start" trains linear probes on internal activations that predict agent-episode failure from the first interaction round, then builds a calibrated abort cascade. It saves 1.5-8.8x more compute than the best single-gate baseline at a 90% recall target, on TextCraft and WebShop with 3B/7B/1.7B models. https://arxiv.org/abs/2607.06503. *Why it matters:* this is direct support for the chart's "semantic-entropy-probe escalation gate" test, but for agent episodes rather than single answers. It supplies a method (recall-controlled cascade) for the "never abort a run that would have passed" constraint. Read it before designing the probe experiment.
+2. **Negative result for semantic entropy probes on code (2026-07-31).** Of five uncertainty methods on three small code LLMs, multi-sample P(True) correlated best with correctness and semantic entropy probes gave only weak correlation. Uncertainty-driven self-correction lowered Pass@1 in 5 of 6 configurations (-3 to -10 pp); only verification-based correction reliably helped (+6 to +26 pp on HumanEval). https://arxiv.org/abs/2608.14659. *Why it matters:* this weakens the chart's "clearest local-only advantage" framing for SEP on coding. The probe should be trained on pass/fail of the AWOS verification gate (as the chart proposes), not assumed to transfer from NL semantic entropy. The result also backs AWOS's verify-first design.
+3. **Agent inference energy is far worse than per-prompt figures (2026-08-31).** Profiling on 2x RTX PRO 6000 Blackwell: GPU-only telemetry misses 41-45% of system energy, and a sequential agent workload uses 63x more system energy per output token than saturated serving (no batching, context growth, tool idle time). https://arxiv.org/abs/2609.29707. HN also carries a Bloomberg item, "Open-weight AI agents can use 10k x more energy than simple queries" (2026-09-04, paywalled, not read): https://news.ycombinator.com/item?id=49561361. *Why it matters:* the chart's "tens of Wh per 30-step episode" is an unmeasured extrapolation from per-prompt numbers. Measure at the wall (not GPU or SoC counters alone) and treat batching and idle time as first-class terms.
+4. **Multi-agent energy cost in software-engineering tasks (2026-10-02).** Multi-agent designs used on average 6.36x the energy and 6.07x the time of non-agentic baselines; single-agent or non-agentic setups made up 59 of 66 Pareto-optimal configurations. https://arxiv.org/abs/2610.03010. *Why it matters:* supports one excellent worker (Stage 1) and a joules-per-verified-task metric.
+5. **Measured-energy routing (2026-09-19).** A learned router trained on per-query measured latency, power and GPU energy across a model pool improves the accuracy-energy tradeoff, with a sharp "phase transition" among routers. https://arxiv.org/abs/2609.23085. *Why it matters:* a published recipe for energy-aware routing in the Gatekeeper cascade, using measured joules as training signal.
+6. **"Sparsity Ceiling" for spiking nets (2026-07-29).** Event-driven sparsity pays off by task: feed-forward perception sparsifies to 5% firing, but a recurrent LM cannot go below about 50%; attention sparsifies but pays with a KV-cache memory wall. https://arxiv.org/abs/2607.26648. *Why it matters:* independent support for the chart's "spiking LLM energy claims do not transfer" row.
+7. **Spiking and neuromorphic LLM papers keep arriving, still with proxy energy (2026-08/09).** TTFS spiking LLM at 1.5B explicitly reports a "spike-count proxy ... rather than a measurement on neuromorphic hardware" (https://arxiv.org/abs/2609.05151). An event-driven sparse linear-attention model *projects* 37x throughput and 16x lower power vs an edge GPU (https://arxiv.org/abs/2608.30439). SymbolicLight V2 gives FPGA numbers (0.044 J/token estimated, 82.8% of gross card energy is loaded idle; https://arxiv.org/abs/2609.09772). *Why it matters:* the chart's "estimated, not measured" caution holds. Idle-power dominance echoes the chart's energy-proportional host point.
+8. **NorthPole scale-out paper (2025-11-19, after the chart's cited blog).** 288 cards in 18 servers, 30 kW, 115 peta-ops int4, runs 3 instances of an 8B model with 28 users at 2.8 ms inter-token latency. https://arxiv.org/abs/2511.15950. *Why it matters:* the chart's "NorthPole serves 3B at under 1 ms/token on 16 cards" is the small configuration; the scale-out is a 30 kW research prototype, so the "not buyable, not for the box" verdict stands.
+9. **Active inference as context acquisition for agents (2026-08-23 on HN).** Frames clarifying questions and tool calls as expected-information-gain decisions under token cost; benchmarks frontier models on optimal question asking. https://arxiv.org/abs/2608.19202 (HN: https://news.ycombinator.com/item?id=49405247). *Why it matters:* same family as UoT and BED-LLM and consistent with the chart's "information gain, not a free-energy controller" stance. No coding-agent evidence.
+10. **Cortical Labs productised access.** "Cortical Cloud" page (HN 2026-05-13) advertises deploying code to CL1 units from Jupyter via a Python SDK: https://corticallabs.com/cloud, with an open `cl-sdk` repo (last push 2026-06-11): https://github.com/Cortical-Labs/cl-sdk. A 2026-04-30 survey of "synthetic biological intelligence" notes the lack of commercial platforms until cloud-integrated BNNs: https://arxiv.org/abs/2604.27933. *Why it matters:* cheaper experimentation, but the page makes qualitative claims only, so the "ignore wetware" call stands.
+11. **Lava still stale.** Latest release v0.10.0 (2024-08-08); repo last pushed 2026-05-13. Source: `gh api repos/lava-nc/lava`. *Why it matters:* confirms the chart's "no Loihi software momentum" point.
+
+### Corrections (chart claim -> source)
+
+- Chart: Loihi 2 result is "370M model at 405 mJ/token ... about 2-3x better than a Jetson Orin Nano." -> The arXiv abstract (https://arxiv.org/abs/2503.18002) states "up to 3x higher throughput with 2x less energy" based on "preliminary results". The 405 mJ/token figure is not in the abstract and was not re-checked in the body. Treat it as unverified.
+- Chart: UoT's "+38%" -> source says "average performance improvement of 38.1% in the rate of successful task completion" on medical diagnosis, troubleshooting and 20 Questions (https://arxiv.org/abs/2402.03271). The chart's mapping to coding-repair is an extrapolation; none of those tasks involve code.
+- Chart: Google "0.24 Wh median Gemini prompt" is right, but omits the paper's year-over-year claim of a 33x energy reduction (https://arxiv.org/abs/2508.15734). The figure is a moving first-party median and not a stable benchmark.
+- Chart: SEP described as the "clearest local-only advantage" -> see item 2; independent code-generation evidence is negative for SEPs specifically.
+- Other corrections: none found.
+
+### Confirmed claims (briefly)
+
+- UoT 38.1% average completion gain: confirmed (abstract).
+- Google 0.24 Wh median text prompt: confirmed (abstract).
+- WebDreamer: "competitive, while being 4-5 times more efficient, with tree search" on VisualWebArena and works on real sites: confirmed (https://arxiv.org/abs/2411.06559). Follow-on world-model web agent work (https://arxiv.org/abs/2602.15384) reports only small absolute gains (+1.8% VisualWebArena), so treat predict-then-verify gains as modest.
+- SpikingBrain is a linear/hybrid-linear model with spiking neurons, trained on MetaX GPUs, not a neuromorphic-hardware result: confirmed (https://arxiv.org/abs/2509.05276).
+- Lava's last release v0.10.0 in Aug 2024: confirmed via GitHub API.
+- The PNAS Levy and Calvert "35x" claim: the Crossref abstract was retrieved but its text did not state the ratio, so this was not independently re-checked here; its Significance statement says a neuron's computation cost is off the best possible bits per joule by about 10^8.
+
+### Still unverified
+
+- NorthPole "72.7x" and the "under 1 ms/token on 16 cards" figures (IBM blog not re-fetched), Hala Point 15 TOPS/W, SpiNNcloud 18x/78x.
+- The "45-minute" organoid forgetting replication, the Cell Reports 2026 paper, CL1 price and 30 W figures, and the Singapore deployment (no primary source re-read).
+- EM-LLM, BED-LLM, MoD and LayerSkip numbers; the SpikingBrain MMLU gap of 8-10 points.
+- Bloomberg's "10k x" agent-energy claim (paywalled; only HN title seen).
+- Whether any 2026 paper replicates AXIOM or VERSES results. No arXiv hit appeared in the searches run, but searches were few and the export API was rate limited.
+- No new purchasable compute-near-memory accelerator was found for 7B+ models.
