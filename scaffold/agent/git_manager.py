@@ -68,6 +68,11 @@ class GitManager:
         """
         if not self.is_git_repo:
             return ""
+        # The M1 host runs jobs in a throwaway worktree and builds the review
+        # branch itself; branching here would create or delete refs in the
+        # user's repo. File backups still guard rollbacks.
+        if os.getenv("AWOS_GIT_BRANCH", "1").strip().lower() in ("0", "false", "no"):
+            return ""
 
         self.original_branch = self._current_branch()
 

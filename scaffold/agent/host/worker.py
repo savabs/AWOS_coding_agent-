@@ -25,6 +25,7 @@ import importlib
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -55,6 +56,8 @@ LEDGER_PATH = REPO / ".awos" / "budget.json"
 #: The legacy `awos host` lock. The default runner holds it too, so the two
 #: hosts never run jobs at once and mix their spend in the shared ledger.
 LEGACY_HOST_LOCK = REPO / ".awos" / "jobs" / "host.lock"
+#: Journal kind for the worker's own lifecycle steps (attempt start, child pid, spend).
+WORKER_STEP = "worker_step"
 #: How often (seconds) the default runner snapshots a running attempt's spend.
 SPEND_SNAPSHOT_SEC = 5.0
 
@@ -159,8 +162,11 @@ class RunContext:
 
     def step(self, name: str, **data) -> None:
         """Journal one finished step; a journal failure never fails the job."""
-        entry = {"step": name, "idempotency_key": name, "attempt": self.job.attempts,
-                 "at": now_iso(), **data}
+        # The journal keys records by (key, kind); "step"/"idempotency_key" stay
+        # for done_steps() and older journals.
+        entry = {"kind": WORKER_STEP, "key": name, "status": "done",
+                 "step": name, "idempotency_key": name, "attempt": self.job.attempts,
+                 "at": now_iso(), "payload": data}
         try:
             self.journal.append(entry)
         except Exception as exc:
@@ -252,7 +258,9 @@ def child_env(job: JobSpec, budget_left: Optional[float] = None) -> dict:
     budget_usd == 0 means no cap, as AWOS_GOAL_BUDGET_USD=0 does.
     """
     env = {**os.environ, "PYTHONUNBUFFERED": "1",
-           "AWOS_JOB_PRIVACY": job.privacy, "AWOS_HOST_JOB_ID": job.id}
+           "AWOS_JOB_PRIVACY": job.privacy, "AWOS_HOST_JOB_ID": job.id,
+           # the job's workspace is a throwaway worktree; hand-off makes the branch
+           "AWOS_GIT_BRANCH": "0"}
     if job.budget_usd > 0:
         left = job.budget_usd if budget_left is None else max(0.0, budget_left)
         cap = f"{round(left, 6):g}"
@@ -380,11 +388,52 @@ def subprocess_runner(job: JobSpec, ctx: RunContext) -> dict:
         ctx.step("spend", total_usd=round(total, 6))
 
 
+WORKSPACE_DIR = "workspace"
+BASE_COMMIT_FILE = "base_commit"
+
+
+def prepare_workspace(job: JobSpec, job_dir: Path) -> tuple[str, Optional[str]]:
+    """
+    The job's own checkout: a detached git worktree of job.repo_path at its HEAD
+    (the base commit), under <job_dir>/workspace, reused by later attempts. The
+    user's checkout is never edited; hand-off diffs this workspace instead.
+    Returns (workspace, base_commit). A non-git root runs in place (base None).
+    """
+    ws, base_file = job_dir / WORKSPACE_DIR, job_dir / BASE_COMMIT_FILE
+    if ws.is_dir() and base_file.exists():
+        return str(ws), base_file.read_text(encoding="utf-8").strip()
+    head = subprocess.run(["git", "-C", job.repo_path, "rev-parse", "--verify", "HEAD"],
+                          capture_output=True, text=True)
+    if head.returncode != 0:
+        return job.repo_path, None
+    base = head.stdout.strip()
+    add = subprocess.run(["git", "-C", job.repo_path, "worktree", "add", "--detach", str(ws), base],
+                         capture_output=True, text=True)
+    if add.returncode != 0:
+        raise RuntimeError(f"could not create the job workspace: {add.stderr.strip()}")
+    base_file.write_text(base + "\n", encoding="utf-8")
+    return str(ws), base
+
+
+def remove_workspace(job: JobSpec, job_dir: Path) -> None:
+    """Drop the job's worktree once the job is final; the review branch holds the result."""
+    ws = job_dir / WORKSPACE_DIR
+    if not ws.exists():
+        return
+    rm = subprocess.run(["git", "-C", job.repo_path, "worktree", "remove", "--force", str(ws)],
+                        capture_output=True, text=True)
+    if rm.returncode != 0:
+        shutil.rmtree(ws, ignore_errors=True)
+        subprocess.run(["git", "-C", job.repo_path, "worktree", "prune"], capture_output=True)
+
+
 def _run_child(job: JobSpec, ctx: RunContext, job_path: Path, result_path: Path,
                left: float, spend: "SpendTracker") -> dict:
     from scaffold.agent import job_host
 
-    job_host.write_json_atomic(job_path, {"id": job.id, "goal": job.goal, "root": job.repo_path,
+    workspace, base = prepare_workspace(job, ctx.job_dir)
+    ctx.step("workspace", path=workspace, base_commit=base)
+    job_host.write_json_atomic(job_path, {"id": job.id, "goal": job.goal, "root": workspace,
                                           "ability": job.kind, "attempts": job.attempts})
     timeout = job_host._timeout_sec()
     with open(ctx.job_dir / "worker.log", "a", encoding="utf-8") as log:
@@ -425,7 +474,12 @@ def _run_child(job: JobSpec, ctx: RunContext, job_path: Path, result_path: Path,
                                  f"a result; see {ctx.job_dir / 'worker.log'}")
         raise RuntimeError(f"child exited with code {proc.returncode} and no result; "
                            f"see {ctx.job_dir / 'worker.log'}")
-    return json.loads(result_path.read_text(encoding="utf-8"))
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    if isinstance(result, dict):
+        result.setdefault("workspace", workspace)
+        if base:
+            result.setdefault("base_commit", base)
+    return result
 
 
 RUNNERS = {"default": subprocess_runner, "subprocess": subprocess_runner, "sleep": sleep_runner}
@@ -508,7 +562,15 @@ class HostWorker:
         job_dir = self.queue.job_dir(job.id)
         try:
             if self._handoff is not None:
-                return self._handoff(job.to_dict(), job.repo_path, outcome)
+                # Diff the job's own workspace, never the user's checkout (which
+                # may hold the user's uncommitted work).
+                ws = job_dir / WORKSPACE_DIR
+                workspace = str(ws) if ws.is_dir() else job.repo_path
+                spec = job.to_dict()
+                base_file = job_dir / BASE_COMMIT_FILE
+                if base_file.exists() and not spec.get("base_commit"):
+                    spec["base_commit"] = base_file.read_text(encoding="utf-8").strip()
+                return self._handoff(spec, workspace, outcome)
             return write_minimal_report(job, job_dir, outcome)
         except Exception as exc:  # the job's outcome stands either way
             self.log(f"[worker] {job.id[:8]} handoff failed: {exc}", job.id)
@@ -547,6 +609,10 @@ class HostWorker:
         handoff = self._hand_off(job, {"state": state, "result": result, "error": error})
         if handoff is not None:
             result = {**result, "handoff": handoff}
+        try:
+            remove_workspace(job, self.queue.job_dir(job.id))
+        except Exception as exc:  # cleanup never changes the outcome
+            self.log(f"[worker] {job.id[:8]} workspace cleanup failed: {exc}", job.id)
         self.queue.finish(job.id, state, result=result, error=error)
         self.log(f"[worker] {job.id[:8]} {state}" + (f": {error}" if error else ""), job.id)
         return self.queue.get(job.id)
