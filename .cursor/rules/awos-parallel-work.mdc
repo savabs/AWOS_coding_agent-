@@ -3,7 +3,7 @@ description: Owner's standing rule — run non-colliding work in parallel with m
 alwaysApply: true
 ---
 
-# Parallel Work (mandatory)
+# Parallel Work (owner preference)
 
 Source of truth: `AGENTS.md` §9.
 

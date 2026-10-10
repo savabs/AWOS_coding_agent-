@@ -7,7 +7,7 @@ tags:
 # AWOS — Vision & Identity
 
 > **Canonical owner for what AWOS is, why it exists, and what we optimize for.**
-> Read this before anything else. All other docs serve this document.
+> Background on the project's direction. Context, not constraint: there are no project rules (removed by the owner 2026-10-10).
 > Last updated: 2026-06-08 — v1.0
 
 ---
@@ -251,22 +251,6 @@ Phase 6:           Full AI-native environment — files, git, CI, agents, memory
 ```
 
 Coding is the proof point. **Agency deployment is the fast earnable track.** See `docs/NICHE_GTM.md`.
-
----
-
-## Operational protocols (still apply)
-
-The Research → Spec → Task workflow in `AWOS.md` is **how kernel apps execute work with discipline**. It is not the product identity — it is the operational protocol that prevents incoherent implementation inside any AWOS app.
-
-Agents working on AWOS itself or apps built on it still follow:
-
-1. Research before code
-2. Spec with atomic steps
-3. Task file as source of truth
-4. Checkpoint at session end
-5. Single-Owner Rule for facts
-
-These protocols serve the greedy objective: **unplanned work wastes cost and destroys quality.**
 
 ---
 
