@@ -114,6 +114,11 @@ ARM_CHILDREN: dict[str, dict] = {
             "env": {"AWOS_NOTEBOOK": "0", **PIN_ENV}},
     "on": {"cmd": [PY, "{runner}", "_child", "{job_dir}", "{project}"],
            "env": {"AWOS_NOTEBOOK": "1", **PIN_ENV}},
+    # Every cross-job learning store the agent_loop path reads, on: the project
+    # notebook and the experience store (docs/specs/ablation_learning_over_use.md).
+    # Pair with "off" (both off). Don't also set AWOS_EXPERIENCE in the shell.
+    "learn": {"cmd": [PY, "{runner}", "_child", "{job_dir}", "{project}"],
+              "env": {"AWOS_NOTEBOOK": "1", "AWOS_EXPERIENCE": "1", **PIN_ENV}},
     # Head-to-head: a market harness (Aider) with no project memory. Stock Aider
     # stops after 3 follow-up rounds per message; 10 is generous to it, so a
     # win for AWOS is not a win against a handicapped competitor.
