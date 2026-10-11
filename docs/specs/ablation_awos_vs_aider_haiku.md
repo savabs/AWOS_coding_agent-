@@ -1,6 +1,6 @@
 # Pre-registration: AWOS vs Aider on the same model (Experiment 1, track B2)
 
-Status: **pre-registered 2026-10-11, not yet run.** Committed before any model call.
+Status: **pre-registered 2026-10-11 (d50c2b9); run 2026-10-11, repeat 1 on 38 tasks: INCONCLUSIVE** (AWOS 37/38 vs Aider 26/38, McNemar 12-1 p=0.0034, P(Δ>0)=0.946 < 0.95). Result: `docs/memory/runs/awos_vs_aider_haiku_2026-10.md`. Committed before any model call.
 The run is gated on two inputs from other tracks. Both were missing when this was written (see "Gate status").
 
 ## Question
