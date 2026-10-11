@@ -157,7 +157,9 @@ _APPLIED = re.compile(r"^Applied edit to (\S+)")
 NO_EDIT_TAG = "aider_no_edit"
 # Reasons that say the harness left Aider without the code, not that the
 # model failed: job_series treats these as an invalid run.
-NO_EDIT_SETUP_REASONS = ("no_files_in_chat", "asked_to_add_files", "no_model_response")
+# harness_crashed is set by job_series when the harness died before its no-edit line.
+NO_EDIT_SETUP_REASONS = ("no_files_in_chat", "asked_to_add_files", "no_model_response",
+                         "harness_crashed")
 
 
 def asked_to_add_files(text: str) -> bool:

@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "checked_at": "2026-10-11T09:58:18Z",
+  "health_check": true,
+  "violations": [
+    {
+      "severity": "warn",
+      "check": "missing_billing",
+      "arm": "aider",
+      "job": 1,
+      "repeat": 1,
+      "detail": "billed_usd is None: real spend unknown for this job"
+    }
+  ]
+}
