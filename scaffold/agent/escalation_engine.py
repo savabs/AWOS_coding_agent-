@@ -98,6 +98,37 @@ LADDER: list[ModelSpec] = [
     ),
 ]
 
+#: $/MTok (input, output) for ids AWOS_LADDER may put on the ladder.
+_LADDER_PRICES = {
+    "claude-haiku-5-5": (0.10, 0.50),
+    "claude-sonnet-5-5": (2.00, 10.00),
+    "claude-haiku-4-5": (1.00, 5.00),
+    "claude-sonnet-4-6": (3.00, 15.00),
+}
+
+
+def _apply_ladder_env() -> None:
+    """
+    AWOS_LADDER="model0[,model1]" puts these ids on the ladder's rungs (L0 the
+    default worker, L1 the escalation); one id fills both. E.g.
+    AWOS_LADDER=claude-haiku-5-5 runs every routed call on Haiku 5.5 through
+    the direct Anthropic client (OPENROUTER_API_KEY unset). Levels and arm
+    indices are unchanged, so routing and learned weights keep working.
+    """
+    from dataclasses import replace
+
+    ids = [m.strip() for m in os.getenv("AWOS_LADDER", "").split(",") if m.strip()]
+    if not ids:
+        return
+    ids = (ids + [ids[-1]] * len(LADDER))[:len(LADDER)]
+    for i, (spec, mid) in enumerate(zip(LADDER, ids)):
+        price_in, price_out = _LADDER_PRICES.get(mid, (spec.input_price, spec.output_price))
+        provider = "anthropic" if mid.startswith("claude-") else spec.provider
+        LADDER[i] = replace(spec, name=mid, model_id=mid, provider=provider,
+                            input_price=price_in, output_price=price_out)
+
+
+_apply_ladder_env()
 LEVEL_MAP: dict[EscalationLevel, ModelSpec] = {m.level: m for m in LADDER}
 
 

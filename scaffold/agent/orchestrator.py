@@ -561,6 +561,10 @@ class Orchestrator:
             if client is not None:
                 return client, getattr(self, "_last_agent_model", None) or pinned, {}
         worker = getattr(self, "worker", None)
+        # A pinned Claude model without OpenRouter goes to Anthropic directly,
+        # never to whichever other vendor key happens to be configured.
+        if pinned.startswith("claude-") and getattr(worker, "anthropic_client", None) is not None:
+            return "anthropic", pinned, {}
         if getattr(worker, "opencode_client", None) is not None:
             return worker.opencode_client, "qwen3.7-plus", {}
         if getattr(worker, "client", None) is not None:
@@ -613,6 +617,12 @@ class Orchestrator:
                         max_tokens=1024,
                         messages=messages,
                     )
+                    try:  # spend into the ledger, like utility_chat does
+                        from .providers import _record_utility_spend
+                    except ImportError:
+                        from providers import _record_utility_spend
+                    _record_utility_spend(f"cheap_{role}", model, response,
+                                          getattr(self, "tracker", None))
                     return response.content[0].text or ""
                 text, _info = utility_chat(
                     client, role, model, messages,

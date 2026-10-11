@@ -494,6 +494,8 @@ CACHE_PRICE_FACTORS: dict[str, tuple[float, float]] = {
     "gpt-4o-mini": (0.5, 1.0),
     "claude-haiku-4-5": (0.1, 1.25),
     "claude-sonnet-4-6": (0.1, 1.25),
+    "claude-haiku-5-5": (0.1, 1.25),     # $0.01 read / $0.125 5-min write per M
+    "claude-sonnet-5-5": (0.05, 1.25),   # $0.10 read / $2.50 write per M
 }
 #: JSON file overriding prices per model id, in USD per million tokens:
 #: {"deepseek-v4-flash": {"input": 0.09, "output": 0.18, "cache_read": 0.018,

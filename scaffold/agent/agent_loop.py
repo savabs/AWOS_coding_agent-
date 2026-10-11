@@ -161,6 +161,9 @@ PRICES: dict[str, tuple[float, float]] = {
     "gpt-4o-mini": (0.15, 0.60),
     "claude-haiku-4-5": (1.00, 5.00),
     "claude-sonnet-4-6": (3.00, 15.00),
+    # Anthropic direct, list prices 2026-10-11 (Haiku 5.5: prompts up to 100k tokens).
+    "claude-haiku-5-5": (0.10, 0.50),
+    "claude-sonnet-5-5": (2.00, 10.00),
 }
 
 

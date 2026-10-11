@@ -60,7 +60,9 @@ REPO = Path(__file__).resolve().parent.parent
 SERIES_ROOT = REPO / "tests" / "job_series"
 PY = sys.executable
 
-PINNED_MODEL = "deepseek/deepseek-v4-flash"
+# AWOS_SERIES_MODEL overrides the pin, e.g. claude-haiku-4-5 for a direct
+# Anthropic run (OPENROUTER_API_KEY unset). Results record the model either way.
+PINNED_MODEL = os.environ.get("AWOS_SERIES_MODEL", "").strip() or "deepseek/deepseek-v4-flash"
 FRONTIER_MODEL = "anthropic/claude-sonnet-5.5"   # the aider-frontier arm only
 # Escalation ladder ids hidden from the router inside the child, so every
 # decision (heuristic, retry escalation, LinUCB, performance veto) lands on
@@ -69,6 +71,9 @@ BLOCKED_LADDER_IDS = ("deepseek-v4-pro",)
 
 # Both arms get exactly these. AWOS_NOTEBOOK is the only per-arm variable.
 PIN_ENV = {
+    # The series owns the ladder: every rung is the pinned model, whatever the
+    # user's .env sets AWOS_LADDER to (escalation_engine reads it at import).
+    "AWOS_LADDER": PINNED_MODEL.rsplit("/", 1)[-1],
     "AWOS_AGENT_MODEL": PINNED_MODEL,       # fallback id for build_client_from_env / check_backend
     "AWOS_NOTEBOOK_MODEL": PINNED_MODEL,    # the notebook's update call
     "AWOS_PLANNER_MODEL": PINNED_MODEL,     # every planner call (primary and fallback)
@@ -607,6 +612,7 @@ def _pin_model() -> list[str]:
     """Block every ladder rung but Flash in whichever copies of the module load."""
     import importlib
 
+    os.environ["AWOS_LADDER"] = PIN_ENV["AWOS_LADDER"]   # before the ladder module loads
     allowed: list[str] = []
     for name in ("scaffold.agent.escalation_engine", "escalation_engine"):
         try:

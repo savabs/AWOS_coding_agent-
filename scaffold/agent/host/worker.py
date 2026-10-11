@@ -506,7 +506,8 @@ def verify_tests(workspace: str) -> Optional[dict]:
     shown = "python -m pytest -q"
     timeout = float(os.getenv("AWOS_HOST_VERIFY_TIMEOUT_SEC", VERIFY_TIMEOUT_SEC))
     try:
-        proc = subprocess.run(cmd, cwd=ws, capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(cmd, cwd=ws, capture_output=True, text=True, timeout=timeout,
+                              env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
     except subprocess.TimeoutExpired:
         return {"status": "timeout", "passed": 0, "failed": 0, "command": shown}
     lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]

@@ -33,6 +33,10 @@ EXCLUDE_GLOBS: Tuple[str, ...] = (
     ".env", ".env.*", "*/.env", "*/.env.*",
     ".awos/*", "*/.awos/*",
     "*.pem", "*.key", "id_rsa*", "*/id_rsa*",
+    # Build and test caches: running tests in the workspace must not put
+    # bytecode on the review branch.
+    "__pycache__/*", "*/__pycache__/*", "*.pyc", "*.pyo",
+    ".pytest_cache/*", "*/.pytest_cache/*",
 )
 
 SECRET_PATTERNS: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (

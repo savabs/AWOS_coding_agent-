@@ -236,7 +236,8 @@ def test_pin_model_leaves_only_flash(tmp_path):
     proc = subprocess.run([sys.executable, "-c", code], cwd=tmp_path, capture_output=True,
                           text=True, timeout=120)
     assert proc.returncode == 0, proc.stderr[-2000:]
-    assert "ALLOWED ['deepseek-v4-flash']" in proc.stdout
+    allowed = eval(proc.stdout.split("ALLOWED ", 1)[1].splitlines()[0])   # the pin owns every rung
+    assert allowed and set(allowed) == {"deepseek-v4-flash"}
     assert "CHOSEN deepseek-v4-flash" in proc.stdout
 
 

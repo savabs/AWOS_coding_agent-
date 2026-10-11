@@ -93,6 +93,21 @@ def test_verify_tests_reports_counts(tmp_path):
     assert worker.verify_tests(str(tmp_path))["status"] == "passed"
 
 
+def test_handoff_never_ships_caches():
+    from scaffold.agent.host.handoff import _is_excluded
+    for p in ("__pycache__/a.cpython-312.pyc", "pkg/__pycache__/b.pyc", "x.pyc",
+              ".pytest_cache/v/cache/nodeids", "sub/.pytest_cache/README.md"):
+        assert _is_excluded(p), p
+    assert not _is_excluded("textutil.py")
+
+
+def test_verify_tests_writes_no_bytecode(tmp_path):
+    (tmp_path / "mod.py").write_text("X = 1\n")
+    (tmp_path / "test_mod.py").write_text("from mod import X\n\ndef test_x():\n    assert X == 1\n")
+    assert worker.verify_tests(str(tmp_path))["status"] == "passed"
+    assert not list(tmp_path.rglob("*.pyc"))
+
+
 def test_verify_tests_none_without_tests(tmp_path, monkeypatch):
     assert worker.verify_tests(str(tmp_path)) is None
     (tmp_path / "test_x.py").write_text("def test_ok():\n    pass\n")
