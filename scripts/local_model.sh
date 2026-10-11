@@ -19,6 +19,7 @@
 #   AWOS_LOCAL_PORT        port               (default 8080)
 #   AWOS_LOCAL_SLOTS       parallel slots     (default 1)
 #   AWOS_MODELS_DIR        download dir       (default ~/.cache/awos-models)
+#   AWOS_LOCAL_EXTRA_ARGS  extra llama-server flags appended verbatim (e.g. --kv-unified)
 #   LLAMA_SERVER           binary             (default: llama-server on PATH)
 set -euo pipefail
 
@@ -29,6 +30,7 @@ CTX="${AWOS_LOCAL_CONTEXT:-24576}"
 PORT="${AWOS_LOCAL_PORT:-8080}"
 SLOTS="${AWOS_LOCAL_SLOTS:-1}"
 MODELS_DIR="${AWOS_MODELS_DIR:-$HOME/.cache/awos-models}"
+EXTRA_ARGS="${AWOS_LOCAL_EXTRA_ARGS:-}"
 SERVER_BIN="${LLAMA_SERVER:-$(command -v llama-server || echo /opt/homebrew/bin/llama-server)}"
 HOST="127.0.0.1"   # never bind outside the machine
 MODEL_PATH="$MODELS_DIR/$GGUF_FILE"
@@ -48,7 +50,7 @@ server_cmd() {
   echo "$SERVER_BIN -m $MODEL_PATH --alias $ALIAS --host $HOST --port $PORT" \
        "-ngl 99 -c $CTX -np $SLOTS -fa on --jinja --reasoning off" \
        "--cache-prompt --cache-reuse 256" \
-       "--temp 0.7 --top-p 0.8 --top-k 20 --min-p 0 --metrics"
+       "--temp 0.7 --top-p 0.8 --top-k 20 --min-p 0 --metrics" $EXTRA_ARGS
 }
 
 download() {
