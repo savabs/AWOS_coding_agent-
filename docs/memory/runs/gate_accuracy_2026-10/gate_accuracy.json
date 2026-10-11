@@ -1,0 +1,4786 @@
+{
+  "files": [
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_E1_combined.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T124044.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T124147.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T124221.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T124255.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T124331.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T124403.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T124452.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T124545.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T124628.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T124715.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T124806.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T124928.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T125045.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T125223.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T125310.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T125340.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T125405.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T125433.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T125505.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T125526.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T125706.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T125759.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T125821.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T125844.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T125910.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T125953.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T130233.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T130302.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T130358.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T130431.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T130518.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T130552.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T130628.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T130701.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T130733.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T130817.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T130942.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T131129.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T131301.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T131332.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T131407.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T131440.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T131649.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T131741.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T131829.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T131903.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T132030.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T132115.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T132155.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T132920.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T133510.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T134024.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T134049.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T134110.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T134149.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T134231.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T134304.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T134334.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T134357.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T134427.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T134444.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T134509.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T134529.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T134558.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T134614.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T134636.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T134701.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T134758.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T134843.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T134952.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T135009.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T135102.json",
+    "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series_20261011T135230.json"
+  ],
+  "rows": 210,
+  "report": {
+    "overall": {
+      "declared": {
+        "runs": 210,
+        "hidden_fail": 25,
+        "accepted": 198,
+        "fa_rate": {
+          "k": 13,
+          "n": 25,
+          "rate": 0.52,
+          "ci95": [
+            0.3349851695035678,
+            0.6996871404588704
+          ]
+        },
+        "fdr": {
+          "k": 13,
+          "n": 198,
+          "rate": 0.06565656565656566,
+          "ci95": [
+            0.03876806184820926,
+            0.10907797035473767
+          ]
+        },
+        "fr_rate": {
+          "k": 0,
+          "n": 185,
+          "rate": 0.0,
+          "ci95": [
+            0.0,
+            0.020342242877617298
+          ]
+        },
+        "false_omission": {
+          "k": 0,
+          "n": 12,
+          "rate": 0.0,
+          "ci95": [
+            2.7755575615628914e-17,
+            0.24249400665524085
+          ]
+        },
+        "fa_tasks": [
+          "real_click_3677",
+          "real_click_3884",
+          "real_humanize_329",
+          "real_markdown_1515",
+          "real_markdown_1652",
+          "real_marshmallow_2901",
+          "real_marshmallow_2909",
+          "real_parse_159",
+          "real_pydash_266",
+          "real_rich_4076",
+          "real_sqlparse_601"
+        ],
+        "fr_tasks": [],
+        "fa_modes": {
+          "repair_failed_restored": 4,
+          "arbiter_overrode": 4,
+          "acceptance_passed_weak": 3,
+          "acceptance_none_kept": 1,
+          "acceptance_inactive": 1
+        },
+        "fr_modes": {}
+      },
+      "visible": {
+        "runs": 210,
+        "hidden_fail": 25,
+        "accepted": 209,
+        "fa_rate": {
+          "k": 25,
+          "n": 25,
+          "rate": 1.0,
+          "ci95": [
+            0.8668077490609515,
+            0.9999999999999999
+          ]
+        },
+        "fdr": {
+          "k": 25,
+          "n": 209,
+          "rate": 0.11961722488038277,
+          "ci95": [
+            0.08234870281163167,
+            0.17061638734992493
+          ]
+        },
+        "fr_rate": {
+          "k": 1,
+          "n": 185,
+          "rate": 0.005405405405405406,
+          "ci95": [
+            0.0009548249094924379,
+            0.029978312639718188
+          ]
+        },
+        "false_omission": {
+          "k": 1,
+          "n": 1,
+          "rate": 1.0,
+          "ci95": [
+            0.20654931437723745,
+            1.0
+          ]
+        },
+        "fa_tasks": [
+          "real_click_3677",
+          "real_click_3860",
+          "real_click_3884",
+          "real_humanize_329",
+          "real_idna_230",
+          "real_markdown_1515",
+          "real_markdown_1652",
+          "real_marshmallow_2797",
+          "real_marshmallow_2901",
+          "real_marshmallow_2909",
+          "real_mistune_460",
+          "real_parse_159",
+          "real_pathspec_147",
+          "real_pydash_266",
+          "real_pyparsing_332",
+          "real_pyparsing_560",
+          "real_rich_4076",
+          "real_sqlparse_601"
+        ],
+        "fr_tasks": [
+          "real_more-itertools_1284"
+        ],
+        "fa_modes": {
+          "repair_failed_restored": 4,
+          "other": 12,
+          "arbiter_overrode": 4,
+          "acceptance_passed_weak": 3,
+          "acceptance_none_kept": 1,
+          "acceptance_inactive": 1
+        },
+        "fr_modes": {
+          "visible_red": 1
+        }
+      },
+      "own_tests": {
+        "runs": 210,
+        "hidden_fail": 25,
+        "accepted": 199,
+        "fa_rate": {
+          "k": 21,
+          "n": 25,
+          "rate": 0.84,
+          "ci95": [
+            0.6534637839282114,
+            0.9359654854332355
+          ]
+        },
+        "fdr": {
+          "k": 21,
+          "n": 199,
+          "rate": 0.10552763819095477,
+          "ci95": [
+            0.0700631887478877,
+            0.15593330667870367
+          ]
+        },
+        "fr_rate": {
+          "k": 7,
+          "n": 185,
+          "rate": 0.03783783783783784,
+          "ci95": [
+            0.01844742997274769,
+            0.07603107560602292
+          ]
+        },
+        "false_omission": {
+          "k": 7,
+          "n": 11,
+          "rate": 0.6363636363636364,
+          "ci95": [
+            0.35380117450784887,
+            0.8483352890463243
+          ]
+        },
+        "fa_tasks": [
+          "real_click_3860",
+          "real_click_3884",
+          "real_humanize_329",
+          "real_idna_230",
+          "real_markdown_1515",
+          "real_marshmallow_2797",
+          "real_marshmallow_2901",
+          "real_marshmallow_2909",
+          "real_mistune_460",
+          "real_parse_159",
+          "real_pathspec_147",
+          "real_pyparsing_332",
+          "real_pyparsing_560",
+          "real_rich_4076",
+          "real_sqlparse_601"
+        ],
+        "fr_tasks": [
+          "real_more-itertools_1284",
+          "real_pathspec_147",
+          "real_python-semver_479",
+          "real_sqlparse_601",
+          "real_sqlparse_867",
+          "real_toolz_634"
+        ],
+        "fa_modes": {
+          "other": 12,
+          "arbiter_overrode": 4,
+          "acceptance_passed_weak": 3,
+          "acceptance_none_kept": 1,
+          "acceptance_inactive": 1
+        },
+        "fr_modes": {
+          "visible_red": 1,
+          "acceptance_red": 6
+        }
+      },
+      "strict_acceptance": {
+        "runs": 210,
+        "hidden_fail": 25,
+        "accepted": 173,
+        "fa_rate": {
+          "k": 17,
+          "n": 25,
+          "rate": 0.68,
+          "ci95": [
+            0.48410269273102247,
+            0.8279480969309202
+          ]
+        },
+        "fdr": {
+          "k": 17,
+          "n": 173,
+          "rate": 0.09826589595375723,
+          "ci95": [
+            0.06226018303746737,
+            0.15172503894072797
+          ]
+        },
+        "fr_rate": {
+          "k": 29,
+          "n": 185,
+          "rate": 0.15675675675675677,
+          "ci95": [
+            0.11141631124499478,
+            0.21606187710882901
+          ]
+        },
+        "false_omission": {
+          "k": 29,
+          "n": 37,
+          "rate": 0.7837837837837838,
+          "ci95": [
+            0.6280485160803084,
+            0.8861348800661442
+          ]
+        },
+        "fa_tasks": [
+          "real_click_3860",
+          "real_humanize_329",
+          "real_idna_230",
+          "real_markdown_1515",
+          "real_marshmallow_2797",
+          "real_marshmallow_2901",
+          "real_marshmallow_2909",
+          "real_mistune_460",
+          "real_pathspec_147",
+          "real_pyparsing_332",
+          "real_pyparsing_560",
+          "real_rich_4076"
+        ],
+        "fr_tasks": [
+          "real_cachetools_423",
+          "real_funcy_190",
+          "real_idna_230",
+          "real_markdown_1513",
+          "real_mistune_460",
+          "real_mistune_471",
+          "real_more-itertools_1250",
+          "real_more-itertools_1284",
+          "real_parse_137",
+          "real_pathspec_147",
+          "real_pathspec_149",
+          "real_python-semver_479",
+          "real_rich_3718",
+          "real_rich_4076",
+          "real_sqlparse_601",
+          "real_sqlparse_867",
+          "real_tabulate_256",
+          "real_tabulate_53",
+          "real_toolz_634"
+        ],
+        "fa_modes": {
+          "other": 12,
+          "acceptance_passed_weak": 3,
+          "acceptance_none_kept": 1,
+          "acceptance_inactive": 1
+        },
+        "fr_modes": {
+          "acceptance_red": 28,
+          "visible_red": 1
+        }
+      },
+      "verified_tier": {
+        "runs": 210,
+        "hidden_fail": 25,
+        "accepted": 82,
+        "fa_rate": {
+          "k": 3,
+          "n": 25,
+          "rate": 0.12,
+          "ci95": [
+            0.04166817150440358,
+            0.2995579392092732
+          ]
+        },
+        "fdr": {
+          "k": 3,
+          "n": 82,
+          "rate": 0.036585365853658534,
+          "ci95": [
+            0.012519573081569195,
+            0.10212734643608476
+          ]
+        },
+        "fr_rate": {
+          "k": 106,
+          "n": 185,
+          "rate": 0.572972972972973,
+          "ci95": [
+            0.5009233868279171,
+            0.6420536912385929
+          ]
+        },
+        "false_omission": {
+          "k": 106,
+          "n": 128,
+          "rate": 0.828125,
+          "ci95": [
+            0.7534600319269827,
+            0.8836688405185272
+          ]
+        },
+        "fa_tasks": [
+          "real_humanize_329",
+          "real_rich_4076"
+        ],
+        "fr_tasks": [
+          "real_attrs_1513",
+          "real_attrs_1593",
+          "real_boltons_428",
+          "real_boltons_458",
+          "real_boltons_474",
+          "real_cachetools_405",
+          "real_cachetools_423",
+          "real_click_3208",
+          "real_click_3434",
+          "real_click_3677",
+          "real_click_3860",
+          "real_click_3865",
+          "real_click_3884",
+          "real_funcy_177",
+          "real_funcy_190",
+          "real_funcy_191",
+          "real_humanize_329",
+          "real_humanize_346",
+          "real_humanize_381",
+          "real_idna_230",
+          "real_idna_261",
+          "real_jsonpointer_64",
+          "real_jsonpointer_70",
+          "real_jsonpointer_83",
+          "real_markdown_1513",
+          "real_markdown_1606",
+          "real_markdown_1652",
+          "real_marshmallow_2797",
+          "real_marshmallow_2901",
+          "real_marshmallow_2903",
+          "real_marshmallow_2909",
+          "real_mistune_460",
+          "real_mistune_469",
+          "real_mistune_471",
+          "real_more-itertools_1250",
+          "real_more-itertools_1284",
+          "real_more-itertools_1304",
+          "real_parse_137",
+          "real_parse_159",
+          "real_parse_249",
+          "real_pathspec_128",
+          "real_pathspec_142",
+          "real_pathspec_147",
+          "real_pathspec_149",
+          "real_pydash_266",
+          "real_pydash_282",
+          "real_pydash_283",
+          "real_pyparsing_332",
+          "real_pyparsing_560",
+          "real_pyparsing_647",
+          "real_python-semver_478",
+          "real_python-semver_479",
+          "real_rich_3718",
+          "real_rich_4076",
+          "real_sqlparse_332",
+          "real_sqlparse_601",
+          "real_sqlparse_867",
+          "real_tabulate_176",
+          "real_tabulate_256",
+          "real_tabulate_53",
+          "real_termcolor_135",
+          "real_tinydb_633",
+          "real_tinydb_640",
+          "real_tinydb_642",
+          "real_tomlkit_542",
+          "real_tomlkit_591",
+          "real_tomlkit_619",
+          "real_toolz_634",
+          "real_toolz_635",
+          "real_validators_411",
+          "real_wrapt_356",
+          "real_wrapt_357"
+        ],
+        "fa_modes": {
+          "acceptance_passed_weak": 3
+        },
+        "fr_modes": {
+          "acceptance_red": 28,
+          "stop_completed": 75,
+          "other": 2,
+          "visible_red": 1
+        }
+      }
+    },
+    "model=claude-haiku-5-5": {
+      "declared": {
+        "runs": 73,
+        "hidden_fail": 1,
+        "accepted": 73,
+        "fa_rate": {
+          "k": 1,
+          "n": 1,
+          "rate": 1.0,
+          "ci95": [
+            0.20654931437723745,
+            1.0
+          ]
+        },
+        "fdr": {
+          "k": 1,
+          "n": 73,
+          "rate": 0.0136986301369863,
+          "ci95": [
+            0.0024222514664838588,
+            0.07359737270963818
+          ]
+        },
+        "fr_rate": {
+          "k": 0,
+          "n": 72,
+          "rate": 0.0,
+          "ci95": [
+            0.0,
+            0.05065117259645781
+          ]
+        },
+        "false_omission": {
+          "k": 0,
+          "n": 0,
+          "rate": null,
+          "ci95": [
+            0.0,
+            1.0
+          ]
+        },
+        "fa_tasks": [
+          "real_markdown_1515"
+        ],
+        "fr_tasks": [],
+        "fa_modes": {
+          "acceptance_inactive": 1
+        },
+        "fr_modes": {}
+      },
+      "visible": {
+        "runs": 73,
+        "hidden_fail": 1,
+        "accepted": 73,
+        "fa_rate": {
+          "k": 1,
+          "n": 1,
+          "rate": 1.0,
+          "ci95": [
+            0.20654931437723745,
+            1.0
+          ]
+        },
+        "fdr": {
+          "k": 1,
+          "n": 73,
+          "rate": 0.0136986301369863,
+          "ci95": [
+            0.0024222514664838588,
+            0.07359737270963818
+          ]
+        },
+        "fr_rate": {
+          "k": 0,
+          "n": 72,
+          "rate": 0.0,
+          "ci95": [
+            0.0,
+            0.05065117259645781
+          ]
+        },
+        "false_omission": {
+          "k": 0,
+          "n": 0,
+          "rate": null,
+          "ci95": [
+            0.0,
+            1.0
+          ]
+        },
+        "fa_tasks": [
+          "real_markdown_1515"
+        ],
+        "fr_tasks": [],
+        "fa_modes": {
+          "acceptance_inactive": 1
+        },
+        "fr_modes": {}
+      },
+      "own_tests": {
+        "runs": 73,
+        "hidden_fail": 1,
+        "accepted": 73,
+        "fa_rate": {
+          "k": 1,
+          "n": 1,
+          "rate": 1.0,
+          "ci95": [
+            0.20654931437723745,
+            1.0
+          ]
+        },
+        "fdr": {
+          "k": 1,
+          "n": 73,
+          "rate": 0.0136986301369863,
+          "ci95": [
+            0.0024222514664838588,
+            0.07359737270963818
+          ]
+        },
+        "fr_rate": {
+          "k": 0,
+          "n": 72,
+          "rate": 0.0,
+          "ci95": [
+            0.0,
+            0.05065117259645781
+          ]
+        },
+        "false_omission": {
+          "k": 0,
+          "n": 0,
+          "rate": null,
+          "ci95": [
+            0.0,
+            1.0
+          ]
+        },
+        "fa_tasks": [
+          "real_markdown_1515"
+        ],
+        "fr_tasks": [],
+        "fa_modes": {
+          "acceptance_inactive": 1
+        },
+        "fr_modes": {}
+      },
+      "strict_acceptance": {
+        "runs": 73,
+        "hidden_fail": 1,
+        "accepted": 73,
+        "fa_rate": {
+          "k": 1,
+          "n": 1,
+          "rate": 1.0,
+          "ci95": [
+            0.20654931437723745,
+            1.0
+          ]
+        },
+        "fdr": {
+          "k": 1,
+          "n": 73,
+          "rate": 0.0136986301369863,
+          "ci95": [
+            0.0024222514664838588,
+            0.07359737270963818
+          ]
+        },
+        "fr_rate": {
+          "k": 0,
+          "n": 72,
+          "rate": 0.0,
+          "ci95": [
+            0.0,
+            0.05065117259645781
+          ]
+        },
+        "false_omission": {
+          "k": 0,
+          "n": 0,
+          "rate": null,
+          "ci95": [
+            0.0,
+            1.0
+          ]
+        },
+        "fa_tasks": [
+          "real_markdown_1515"
+        ],
+        "fr_tasks": [],
+        "fa_modes": {
+          "acceptance_inactive": 1
+        },
+        "fr_modes": {}
+      },
+      "verified_tier": {
+        "runs": 73,
+        "hidden_fail": 1,
+        "accepted": 0,
+        "fa_rate": {
+          "k": 0,
+          "n": 1,
+          "rate": 0.0,
+          "ci95": [
+            0.0,
+            0.7934506856227626
+          ]
+        },
+        "fdr": {
+          "k": 0,
+          "n": 0,
+          "rate": null,
+          "ci95": [
+            0.0,
+            1.0
+          ]
+        },
+        "fr_rate": {
+          "k": 72,
+          "n": 72,
+          "rate": 1.0,
+          "ci95": [
+            0.9493488274035422,
+            1.0
+          ]
+        },
+        "false_omission": {
+          "k": 72,
+          "n": 73,
+          "rate": 0.9863013698630136,
+          "ci95": [
+            0.9264026272903616,
+            0.997577748533516
+          ]
+        },
+        "fa_tasks": [],
+        "fr_tasks": [
+          "real_attrs_1513",
+          "real_attrs_1593",
+          "real_boltons_428",
+          "real_boltons_458",
+          "real_boltons_474",
+          "real_cachetools_405",
+          "real_cachetools_423",
+          "real_click_3208",
+          "real_click_3434",
+          "real_click_3677",
+          "real_click_3860",
+          "real_click_3865",
+          "real_click_3884",
+          "real_funcy_177",
+          "real_funcy_190",
+          "real_funcy_191",
+          "real_humanize_329",
+          "real_humanize_346",
+          "real_humanize_381",
+          "real_idna_230",
+          "real_idna_261",
+          "real_jsonpointer_64",
+          "real_jsonpointer_70",
+          "real_jsonpointer_83",
+          "real_markdown_1513",
+          "real_markdown_1606",
+          "real_markdown_1652",
+          "real_marshmallow_2797",
+          "real_marshmallow_2901",
+          "real_marshmallow_2903",
+          "real_marshmallow_2909",
+          "real_mistune_460",
+          "real_mistune_469",
+          "real_mistune_471",
+          "real_more-itertools_1250",
+          "real_more-itertools_1284",
+          "real_more-itertools_1304",
+          "real_parse_137",
+          "real_parse_159",
+          "real_parse_249",
+          "real_pathspec_128",
+          "real_pathspec_142",
+          "real_pathspec_147",
+          "real_pathspec_149",
+          "real_pydash_266",
+          "real_pydash_282",
+          "real_pydash_283",
+          "real_pyparsing_332",
+          "real_pyparsing_560",
+          "real_pyparsing_647",
+          "real_python-semver_478",
+          "real_python-semver_479",
+          "real_rich_3718",
+          "real_rich_4076",
+          "real_sqlparse_332",
+          "real_sqlparse_601",
+          "real_sqlparse_867",
+          "real_tabulate_176",
+          "real_tabulate_256",
+          "real_tabulate_53",
+          "real_termcolor_135",
+          "real_tinydb_633",
+          "real_tinydb_640",
+          "real_tinydb_642",
+          "real_tomlkit_542",
+          "real_tomlkit_591",
+          "real_tomlkit_619",
+          "real_toolz_634",
+          "real_toolz_635",
+          "real_validators_411",
+          "real_wrapt_356",
+          "real_wrapt_357"
+        ],
+        "fa_modes": {},
+        "fr_modes": {
+          "stop_completed": 72
+        }
+      }
+    },
+    "model=deepseek/deepseek-v4-flash": {
+      "declared": {
+        "runs": 137,
+        "hidden_fail": 24,
+        "accepted": 125,
+        "fa_rate": {
+          "k": 12,
+          "n": 24,
+          "rate": 0.5,
+          "ci95": [
+            0.3142742581957335,
+            0.6857257418042665
+          ]
+        },
+        "fdr": {
+          "k": 12,
+          "n": 125,
+          "rate": 0.096,
+          "ci95": [
+            0.05577122611489426,
+            0.16031961200143352
+          ]
+        },
+        "fr_rate": {
+          "k": 0,
+          "n": 113,
+          "rate": 0.0,
+          "ci95": [
+            0.0,
+            0.03287753216595198
+          ]
+        },
+        "false_omission": {
+          "k": 0,
+          "n": 12,
+          "rate": 0.0,
+          "ci95": [
+            2.7755575615628914e-17,
+            0.24249400665524085
+          ]
+        },
+        "fa_tasks": [
+          "real_click_3677",
+          "real_click_3884",
+          "real_humanize_329",
+          "real_markdown_1652",
+          "real_marshmallow_2901",
+          "real_marshmallow_2909",
+          "real_parse_159",
+          "real_pydash_266",
+          "real_rich_4076",
+          "real_sqlparse_601"
+        ],
+        "fr_tasks": [],
+        "fa_modes": {
+          "repair_failed_restored": 4,
+          "arbiter_overrode": 4,
+          "acceptance_passed_weak": 3,
+          "acceptance_none_kept": 1
+        },
+        "fr_modes": {}
+      },
+      "visible": {
+        "runs": 137,
+        "hidden_fail": 24,
+        "accepted": 136,
+        "fa_rate": {
+          "k": 24,
+          "n": 24,
+          "rate": 1.0,
+          "ci95": [
+            0.8620237953250198,
+            1.0
+          ]
+        },
+        "fdr": {
+          "k": 24,
+          "n": 136,
+          "rate": 0.17647058823529413,
+          "ci95": [
+            0.12155217401413998,
+            0.24916377287229574
+          ]
+        },
+        "fr_rate": {
+          "k": 1,
+          "n": 113,
+          "rate": 0.008849557522123894,
+          "ci95": [
+            0.0015638760684392287,
+            0.0484308679175844
+          ]
+        },
+        "false_omission": {
+          "k": 1,
+          "n": 1,
+          "rate": 1.0,
+          "ci95": [
+            0.20654931437723745,
+            1.0
+          ]
+        },
+        "fa_tasks": [
+          "real_click_3677",
+          "real_click_3860",
+          "real_click_3884",
+          "real_humanize_329",
+          "real_idna_230",
+          "real_markdown_1515",
+          "real_markdown_1652",
+          "real_marshmallow_2797",
+          "real_marshmallow_2901",
+          "real_marshmallow_2909",
+          "real_mistune_460",
+          "real_parse_159",
+          "real_pathspec_147",
+          "real_pydash_266",
+          "real_pyparsing_332",
+          "real_pyparsing_560",
+          "real_rich_4076",
+          "real_sqlparse_601"
+        ],
+        "fr_tasks": [
+          "real_more-itertools_1284"
+        ],
+        "fa_modes": {
+          "repair_failed_restored": 4,
+          "other": 12,
+          "arbiter_overrode": 4,
+          "acceptance_passed_weak": 3,
+          "acceptance_none_kept": 1
+        },
+        "fr_modes": {
+          "visible_red": 1
+        }
+      },
+      "own_tests": {
+        "runs": 137,
+        "hidden_fail": 24,
+        "accepted": 126,
+        "fa_rate": {
+          "k": 20,
+          "n": 24,
+          "rate": 0.8333333333333334,
+          "ci95": [
+            0.6414692935030095,
+            0.9332132367136705
+          ]
+        },
+        "fdr": {
+          "k": 20,
+          "n": 126,
+          "rate": 0.15873015873015872,
+          "ci95": [
+            0.10516625713947375,
+            0.2324875186182172
+          ]
+        },
+        "fr_rate": {
+          "k": 7,
+          "n": 113,
+          "rate": 0.061946902654867256,
+          "ci95": [
+            0.030328174682617857,
+            0.12236984022383562
+          ]
+        },
+        "false_omission": {
+          "k": 7,
+          "n": 11,
+          "rate": 0.6363636363636364,
+          "ci95": [
+            0.35380117450784887,
+            0.8483352890463243
+          ]
+        },
+        "fa_tasks": [
+          "real_click_3860",
+          "real_click_3884",
+          "real_humanize_329",
+          "real_idna_230",
+          "real_markdown_1515",
+          "real_marshmallow_2797",
+          "real_marshmallow_2901",
+          "real_marshmallow_2909",
+          "real_mistune_460",
+          "real_parse_159",
+          "real_pathspec_147",
+          "real_pyparsing_332",
+          "real_pyparsing_560",
+          "real_rich_4076",
+          "real_sqlparse_601"
+        ],
+        "fr_tasks": [
+          "real_more-itertools_1284",
+          "real_pathspec_147",
+          "real_python-semver_479",
+          "real_sqlparse_601",
+          "real_sqlparse_867",
+          "real_toolz_634"
+        ],
+        "fa_modes": {
+          "other": 12,
+          "arbiter_overrode": 4,
+          "acceptance_passed_weak": 3,
+          "acceptance_none_kept": 1
+        },
+        "fr_modes": {
+          "visible_red": 1,
+          "acceptance_red": 6
+        }
+      },
+      "strict_acceptance": {
+        "runs": 137,
+        "hidden_fail": 24,
+        "accepted": 100,
+        "fa_rate": {
+          "k": 16,
+          "n": 24,
+          "rate": 0.6666666666666666,
+          "ci95": [
+            0.4670631683813174,
+            0.8202780967270225
+          ]
+        },
+        "fdr": {
+          "k": 16,
+          "n": 100,
+          "rate": 0.16,
+          "ci95": [
+            0.10095288488804782,
+            0.24420269389270244
+          ]
+        },
+        "fr_rate": {
+          "k": 29,
+          "n": 113,
+          "rate": 0.25663716814159293,
+          "ci95": [
+            0.18503799497941728,
+            0.34423867996861246
+          ]
+        },
+        "false_omission": {
+          "k": 29,
+          "n": 37,
+          "rate": 0.7837837837837838,
+          "ci95": [
+            0.6280485160803084,
+            0.8861348800661442
+          ]
+        },
+        "fa_tasks": [
+          "real_click_3860",
+          "real_humanize_329",
+          "real_idna_230",
+          "real_markdown_1515",
+          "real_marshmallow_2797",
+          "real_marshmallow_2901",
+          "real_marshmallow_2909",
+          "real_mistune_460",
+          "real_pathspec_147",
+          "real_pyparsing_332",
+          "real_pyparsing_560",
+          "real_rich_4076"
+        ],
+        "fr_tasks": [
+          "real_cachetools_423",
+          "real_funcy_190",
+          "real_idna_230",
+          "real_markdown_1513",
+          "real_mistune_460",
+          "real_mistune_471",
+          "real_more-itertools_1250",
+          "real_more-itertools_1284",
+          "real_parse_137",
+          "real_pathspec_147",
+          "real_pathspec_149",
+          "real_python-semver_479",
+          "real_rich_3718",
+          "real_rich_4076",
+          "real_sqlparse_601",
+          "real_sqlparse_867",
+          "real_tabulate_256",
+          "real_tabulate_53",
+          "real_toolz_634"
+        ],
+        "fa_modes": {
+          "other": 12,
+          "acceptance_passed_weak": 3,
+          "acceptance_none_kept": 1
+        },
+        "fr_modes": {
+          "acceptance_red": 28,
+          "visible_red": 1
+        }
+      },
+      "verified_tier": {
+        "runs": 137,
+        "hidden_fail": 24,
+        "accepted": 82,
+        "fa_rate": {
+          "k": 3,
+          "n": 24,
+          "rate": 0.125,
+          "ci95": [
+            0.04344334080123444,
+            0.31003881270500067
+          ]
+        },
+        "fdr": {
+          "k": 3,
+          "n": 82,
+          "rate": 0.036585365853658534,
+          "ci95": [
+            0.012519573081569195,
+            0.10212734643608476
+          ]
+        },
+        "fr_rate": {
+          "k": 34,
+          "n": 113,
+          "rate": 0.3008849557522124,
+          "ci95": [
+            0.22401224708191042,
+            0.39085048696647756
+          ]
+        },
+        "false_omission": {
+          "k": 34,
+          "n": 55,
+          "rate": 0.6181818181818182,
+          "ci95": [
+            0.4860922023248993,
+            0.7348404574110621
+          ]
+        },
+        "fa_tasks": [
+          "real_humanize_329",
+          "real_rich_4076"
+        ],
+        "fr_tasks": [
+          "real_cachetools_423",
+          "real_click_3208",
+          "real_click_3434",
+          "real_funcy_190",
+          "real_idna_230",
+          "real_jsonpointer_83",
+          "real_markdown_1513",
+          "real_mistune_460",
+          "real_mistune_471",
+          "real_more-itertools_1250",
+          "real_more-itertools_1284",
+          "real_parse_137",
+          "real_pathspec_147",
+          "real_pathspec_149",
+          "real_python-semver_479",
+          "real_rich_3718",
+          "real_rich_4076",
+          "real_sqlparse_332",
+          "real_sqlparse_601",
+          "real_sqlparse_867",
+          "real_tabulate_256",
+          "real_tabulate_53",
+          "real_toolz_634"
+        ],
+        "fa_modes": {
+          "acceptance_passed_weak": 3
+        },
+        "fr_modes": {
+          "acceptance_red": 28,
+          "stop_completed": 3,
+          "other": 2,
+          "visible_red": 1
+        }
+      }
+    },
+    "model=deepseek/deepseek-v4-flash arm=ctrl": {
+      "declared": {
+        "runs": 69,
+        "hidden_fail": 12,
+        "accepted": 62,
+        "fa_rate": {
+          "k": 5,
+          "n": 12,
+          "rate": 0.4166666666666667,
+          "ci95": [
+            0.19326031365875665,
+            0.6804886874504503
+          ]
+        },
+        "fdr": {
+          "k": 5,
+          "n": 62,
+          "rate": 0.08064516129032258,
+          "ci95": [
+            0.03493834698599271,
+            0.17528571348612612
+          ]
+        },
+        "fr_rate": {
+          "k": 0,
+          "n": 57,
+          "rate": 0.0,
+          "ci95": [
+            0.0,
+            0.06313883485297894
+          ]
+        },
+        "false_omission": {
+          "k": 0,
+          "n": 7,
+          "rate": 0.0,
+          "ci95": [
+            5.551115123125783e-17,
+            0.35433043506668743
+          ]
+        },
+        "fa_tasks": [
+          "real_click_3677",
+          "real_click_3884",
+          "real_humanize_329",
+          "real_markdown_1652",
+          "real_marshmallow_2909"
+        ],
+        "fr_tasks": [],
+        "fa_modes": {
+          "repair_failed_restored": 2,
+          "arbiter_overrode": 1,
+          "acceptance_passed_weak": 1,
+          "acceptance_none_kept": 1
+        },
+        "fr_modes": {}
+      },
+      "visible": {
+        "runs": 69,
+        "hidden_fail": 12,
+        "accepted": 68,
+        "fa_rate": {
+          "k": 12,
+          "n": 12,
+          "rate": 1.0,
+          "ci95": [
+            0.7575059933447592,
+            1.0
+          ]
+        },
+        "fdr": {
+          "k": 12,
+          "n": 68,
+          "rate": 0.17647058823529413,
+          "ci95": [
+            0.10393587249437691,
+            0.2836044040774335
+          ]
+        },
+        "fr_rate": {
+          "k": 1,
+          "n": 57,
+          "rate": 0.017543859649122806,
+          "ci95": [
+            0.003103664651408093,
+            0.09290749178567684
+          ]
+        },
+        "false_omission": {
+          "k": 1,
+          "n": 1,
+          "rate": 1.0,
+          "ci95": [
+            0.20654931437723745,
+            1.0
+          ]
+        },
+        "fa_tasks": [
+          "real_click_3677",
+          "real_click_3860",
+          "real_click_3884",
+          "real_humanize_329",
+          "real_idna_230",
+          "real_markdown_1515",
+          "real_markdown_1652",
+          "real_marshmallow_2797",
+          "real_marshmallow_2901",
+          "real_marshmallow_2909",
+          "real_mistune_460",
+          "real_pyparsing_332"
+        ],
+        "fr_tasks": [
+          "real_more-itertools_1284"
+        ],
+        "fa_modes": {
+          "repair_failed_restored": 2,
+          "other": 7,
+          "arbiter_overrode": 1,
+          "acceptance_passed_weak": 1,
+          "acceptance_none_kept": 1
+        },
+        "fr_modes": {
+          "visible_red": 1
+        }
+      },
+      "own_tests": {
+        "runs": 69,
+        "hidden_fail": 12,
+        "accepted": 63,
+        "fa_rate": {
+          "k": 10,
+          "n": 12,
+          "rate": 0.8333333333333334,
+          "ci95": [
+            0.5519691377470266,
+            0.9530348578161463
+          ]
+        },
+        "fdr": {
+          "k": 10,
+          "n": 63,
+          "rate": 0.15873015873015872,
+          "ci95": [
+            0.08857092396514156,
+            0.2681157678177255
+          ]
+        },
+        "fr_rate": {
+          "k": 4,
+          "n": 57,
+          "rate": 0.07017543859649122,
+          "ci95": [
+            0.027626420229066015,
+            0.1670017009603369
+          ]
+        },
+        "false_omission": {
+          "k": 4,
+          "n": 6,
+          "rate": 0.6666666666666666,
+          "ci95": [
+            0.299993315138392,
+            0.9032285888942195
+          ]
+        },
+        "fa_tasks": [
+          "real_click_3860",
+          "real_click_3884",
+          "real_humanize_329",
+          "real_idna_230",
+          "real_markdown_1515",
+          "real_marshmallow_2797",
+          "real_marshmallow_2901",
+          "real_marshmallow_2909",
+          "real_mistune_460",
+          "real_pyparsing_332"
+        ],
+        "fr_tasks": [
+          "real_more-itertools_1284",
+          "real_pathspec_147",
+          "real_sqlparse_601",
+          "real_toolz_634"
+        ],
+        "fa_modes": {
+          "other": 7,
+          "arbiter_overrode": 1,
+          "acceptance_passed_weak": 1,
+          "acceptance_none_kept": 1
+        },
+        "fr_modes": {
+          "visible_red": 1,
+          "acceptance_red": 3
+        }
+      },
+      "strict_acceptance": {
+        "runs": 69,
+        "hidden_fail": 12,
+        "accepted": 51,
+        "fa_rate": {
+          "k": 9,
+          "n": 12,
+          "rate": 0.75,
+          "ci95": [
+            0.46769466506643426,
+            0.9110583316059453
+          ]
+        },
+        "fdr": {
+          "k": 9,
+          "n": 51,
+          "rate": 0.17647058823529413,
+          "ci95": [
+            0.09572403469126317,
+            0.3025414252430807
+          ]
+        },
+        "fr_rate": {
+          "k": 15,
+          "n": 57,
+          "rate": 0.2631578947368421,
+          "ci95": [
+            0.16645786597973072,
+            0.3897657926348382
+          ]
+        },
+        "false_omission": {
+          "k": 15,
+          "n": 18,
+          "rate": 0.8333333333333334,
+          "ci95": [
+            0.6077796189608428,
+            0.9416342319413856
+          ]
+        },
+        "fa_tasks": [
+          "real_click_3860",
+          "real_humanize_329",
+          "real_idna_230",
+          "real_markdown_1515",
+          "real_marshmallow_2797",
+          "real_marshmallow_2901",
+          "real_marshmallow_2909",
+          "real_mistune_460",
+          "real_pyparsing_332"
+        ],
+        "fr_tasks": [
+          "real_cachetools_423",
+          "real_funcy_190",
+          "real_markdown_1513",
+          "real_mistune_471",
+          "real_more-itertools_1250",
+          "real_more-itertools_1284",
+          "real_parse_137",
+          "real_pathspec_147",
+          "real_pathspec_149",
+          "real_rich_3718",
+          "real_rich_4076",
+          "real_sqlparse_601",
+          "real_tabulate_256",
+          "real_tabulate_53",
+          "real_toolz_634"
+        ],
+        "fa_modes": {
+          "other": 7,
+          "acceptance_passed_weak": 1,
+          "acceptance_none_kept": 1
+        },
+        "fr_modes": {
+          "acceptance_red": 14,
+          "visible_red": 1
+        }
+      },
+      "verified_tier": {
+        "runs": 69,
+        "hidden_fail": 12,
+        "accepted": 39,
+        "fa_rate": {
+          "k": 1,
+          "n": 12,
+          "rate": 0.08333333333333333,
+          "ci95": [
+            0.014865094404917095,
+            0.35387991114111694
+          ]
+        },
+        "fdr": {
+          "k": 1,
+          "n": 39,
+          "rate": 0.02564102564102564,
+          "ci95": [
+            0.004540703100990098,
+            0.13180990169850076
+          ]
+        },
+        "fr_rate": {
+          "k": 19,
+          "n": 57,
+          "rate": 0.3333333333333333,
+          "ci95": [
+            0.2249380607515073,
+            0.4627748841994856
+          ]
+        },
+        "false_omission": {
+          "k": 19,
+          "n": 30,
+          "rate": 0.6333333333333333,
+          "ci95": [
+            0.4551356365479487,
+            0.7812607919389929
+          ]
+        },
+        "fa_tasks": [
+          "real_humanize_329"
+        ],
+        "fr_tasks": [
+          "real_cachetools_423",
+          "real_click_3208",
+          "real_click_3434",
+          "real_funcy_190",
+          "real_markdown_1513",
+          "real_mistune_471",
+          "real_more-itertools_1250",
+          "real_more-itertools_1284",
+          "real_parse_137",
+          "real_pathspec_147",
+          "real_pathspec_149",
+          "real_rich_3718",
+          "real_rich_4076",
+          "real_sqlparse_332",
+          "real_sqlparse_601",
+          "real_sqlparse_867",
+          "real_tabulate_256",
+          "real_tabulate_53",
+          "real_toolz_634"
+        ],
+        "fa_modes": {
+          "acceptance_passed_weak": 1
+        },
+        "fr_modes": {
+          "acceptance_red": 14,
+          "stop_completed": 3,
+          "visible_red": 1,
+          "other": 1
+        }
+      }
+    },
+    "model=deepseek/deepseek-v4-flash arm=treat": {
+      "declared": {
+        "runs": 68,
+        "hidden_fail": 12,
+        "accepted": 63,
+        "fa_rate": {
+          "k": 7,
+          "n": 12,
+          "rate": 0.5833333333333334,
+          "ci95": [
+            0.31951131254954973,
+            0.8067396863412435
+          ]
+        },
+        "fdr": {
+          "k": 7,
+          "n": 63,
+          "rate": 0.1111111111111111,
+          "ci95": [
+            0.05487548662383722,
+            0.21204655750082524
+          ]
+        },
+        "fr_rate": {
+          "k": 0,
+          "n": 56,
+          "rate": 0.0,
+          "ci95": [
+            6.938893903907228e-18,
+            0.06419393671876342
+          ]
+        },
+        "false_omission": {
+          "k": 0,
+          "n": 5,
+          "rate": 0.0,
+          "ci95": [
+            0.0,
+            0.43448246478317476
+          ]
+        },
+        "fa_tasks": [
+          "real_click_3884",
+          "real_humanize_329",
+          "real_marshmallow_2901",
+          "real_parse_159",
+          "real_pydash_266",
+          "real_rich_4076",
+          "real_sqlparse_601"
+        ],
+        "fr_tasks": [],
+        "fa_modes": {
+          "arbiter_overrode": 3,
+          "acceptance_passed_weak": 2,
+          "repair_failed_restored": 2
+        },
+        "fr_modes": {}
+      },
+      "visible": {
+        "runs": 68,
+        "hidden_fail": 12,
+        "accepted": 68,
+        "fa_rate": {
+          "k": 12,
+          "n": 12,
+          "rate": 1.0,
+          "ci95": [
+            0.7575059933447592,
+            1.0
+          ]
+        },
+        "fdr": {
+          "k": 12,
+          "n": 68,
+          "rate": 0.17647058823529413,
+          "ci95": [
+            0.10393587249437691,
+            0.2836044040774335
+          ]
+        },
+        "fr_rate": {
+          "k": 0,
+          "n": 56,
+          "rate": 0.0,
+          "ci95": [
+            6.938893903907228e-18,
+            0.06419393671876342
+          ]
+        },
+        "false_omission": {
+          "k": 0,
+          "n": 0,
+          "rate": null,
+          "ci95": [
+            0.0,
+            1.0
+          ]
+        },
+        "fa_tasks": [
+          "real_click_3884",
+          "real_humanize_329",
+          "real_markdown_1515",
+          "real_marshmallow_2797",
+          "real_marshmallow_2901",
+          "real_parse_159",
+          "real_pathspec_147",
+          "real_pydash_266",
+          "real_pyparsing_332",
+          "real_pyparsing_560",
+          "real_rich_4076",
+          "real_sqlparse_601"
+        ],
+        "fr_tasks": [],
+        "fa_modes": {
+          "arbiter_overrode": 3,
+          "acceptance_passed_weak": 2,
+          "other": 5,
+          "repair_failed_restored": 2
+        },
+        "fr_modes": {}
+      },
+      "own_tests": {
+        "runs": 68,
+        "hidden_fail": 12,
+        "accepted": 63,
+        "fa_rate": {
+          "k": 10,
+          "n": 12,
+          "rate": 0.8333333333333334,
+          "ci95": [
+            0.5519691377470266,
+            0.9530348578161463
+          ]
+        },
+        "fdr": {
+          "k": 10,
+          "n": 63,
+          "rate": 0.15873015873015872,
+          "ci95": [
+            0.08857092396514156,
+            0.2681157678177255
+          ]
+        },
+        "fr_rate": {
+          "k": 3,
+          "n": 56,
+          "rate": 0.05357142857142857,
+          "ci95": [
+            0.018385781382109126,
+            0.14607309068821533
+          ]
+        },
+        "false_omission": {
+          "k": 3,
+          "n": 5,
+          "rate": 0.6,
+          "ci95": [
+            0.2307242812760128,
+            0.882379225767352
+          ]
+        },
+        "fa_tasks": [
+          "real_click_3884",
+          "real_humanize_329",
+          "real_markdown_1515",
+          "real_marshmallow_2797",
+          "real_parse_159",
+          "real_pathspec_147",
+          "real_pyparsing_332",
+          "real_pyparsing_560",
+          "real_rich_4076",
+          "real_sqlparse_601"
+        ],
+        "fr_tasks": [
+          "real_more-itertools_1284",
+          "real_python-semver_479",
+          "real_sqlparse_867"
+        ],
+        "fa_modes": {
+          "arbiter_overrode": 3,
+          "acceptance_passed_weak": 2,
+          "other": 5
+        },
+        "fr_modes": {
+          "acceptance_red": 3
+        }
+      },
+      "strict_acceptance": {
+        "runs": 68,
+        "hidden_fail": 12,
+        "accepted": 49,
+        "fa_rate": {
+          "k": 7,
+          "n": 12,
+          "rate": 0.5833333333333334,
+          "ci95": [
+            0.31951131254954973,
+            0.8067396863412435
+          ]
+        },
+        "fdr": {
+          "k": 7,
+          "n": 49,
+          "rate": 0.14285714285714285,
+          "ci95": [
+            0.0709642372040676,
+            0.26667706223914406
+          ]
+        },
+        "fr_rate": {
+          "k": 14,
+          "n": 56,
+          "rate": 0.25,
+          "ci95": [
+            0.15517054688270684,
+            0.376926421476675
+          ]
+        },
+        "false_omission": {
+          "k": 14,
+          "n": 19,
+          "rate": 0.7368421052631579,
+          "ci95": [
+            0.5120844910218489,
+            0.8819358765321748
+          ]
+        },
+        "fa_tasks": [
+          "real_humanize_329",
+          "real_markdown_1515",
+          "real_marshmallow_2797",
+          "real_pathspec_147",
+          "real_pyparsing_332",
+          "real_pyparsing_560",
+          "real_rich_4076"
+        ],
+        "fr_tasks": [
+          "real_cachetools_423",
+          "real_funcy_190",
+          "real_idna_230",
+          "real_markdown_1513",
+          "real_mistune_460",
+          "real_mistune_471",
+          "real_more-itertools_1284",
+          "real_parse_137",
+          "real_pathspec_149",
+          "real_python-semver_479",
+          "real_rich_3718",
+          "real_sqlparse_867",
+          "real_tabulate_256",
+          "real_tabulate_53"
+        ],
+        "fa_modes": {
+          "acceptance_passed_weak": 2,
+          "other": 5
+        },
+        "fr_modes": {
+          "acceptance_red": 14
+        }
+      },
+      "verified_tier": {
+        "runs": 68,
+        "hidden_fail": 12,
+        "accepted": 43,
+        "fa_rate": {
+          "k": 2,
+          "n": 12,
+          "rate": 0.16666666666666666,
+          "ci95": [
+            0.04696514218385378,
+            0.4480308622529734
+          ]
+        },
+        "fdr": {
+          "k": 2,
+          "n": 43,
+          "rate": 0.046511627906976744,
+          "ci95": [
+            0.012849260094380227,
+            0.15455498004063967
+          ]
+        },
+        "fr_rate": {
+          "k": 15,
+          "n": 56,
+          "rate": 0.26785714285714285,
+          "ci95": [
+            0.16957305418501728,
+            0.39594555929155156
+          ]
+        },
+        "false_omission": {
+          "k": 15,
+          "n": 25,
+          "rate": 0.6,
+          "ci95": [
+            0.40739457358967,
+            0.7659669762225203
+          ]
+        },
+        "fa_tasks": [
+          "real_humanize_329",
+          "real_rich_4076"
+        ],
+        "fr_tasks": [
+          "real_cachetools_423",
+          "real_funcy_190",
+          "real_idna_230",
+          "real_jsonpointer_83",
+          "real_markdown_1513",
+          "real_mistune_460",
+          "real_mistune_471",
+          "real_more-itertools_1284",
+          "real_parse_137",
+          "real_pathspec_149",
+          "real_python-semver_479",
+          "real_rich_3718",
+          "real_sqlparse_867",
+          "real_tabulate_256",
+          "real_tabulate_53"
+        ],
+        "fa_modes": {
+          "acceptance_passed_weak": 2
+        },
+        "fr_modes": {
+          "acceptance_red": 14,
+          "other": 1
+        }
+      }
+    }
+  },
+  "errors_declared": [
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_click_3677",
+      "mode": "repair_failed_restored",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": false,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          3,
+          2
+        ],
+        [
+          3,
+          2
+        ]
+      ],
+      "arbitration": [
+        1,
+        0,
+        1
+      ],
+      "resolution": "repair_failed_restored",
+      "stops": [
+        "max_turns"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261009T195421/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_click_3884",
+      "mode": "arbiter_overrode",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          4,
+          2
+        ]
+      ],
+      "arbitration": [
+        2,
+        2,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [
+        "completed"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261009T201221/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_click_3884",
+      "mode": "arbiter_overrode",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          4,
+          2
+        ]
+      ],
+      "arbitration": [
+        2,
+        2,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [
+        "completed"
+      ],
+      "post_green_stop": true,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261009T201810/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_humanize_329",
+      "mode": "acceptance_passed_weak",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": true
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          3,
+          3
+        ]
+      ],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261009T203836/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_humanize_329",
+      "mode": "acceptance_passed_weak",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": true
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          6,
+          6
+        ]
+      ],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261009T204024/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_markdown_1652",
+      "mode": "repair_failed_restored",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": false,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          5,
+          3
+        ],
+        [
+          5,
+          3
+        ]
+      ],
+      "arbitration": [
+        2,
+        0,
+        2
+      ],
+      "resolution": "repair_failed_restored",
+      "stops": [
+        "max_turns"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T003704/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_marshmallow_2901",
+      "mode": "repair_failed_restored",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": false,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          4,
+          3
+        ],
+        [
+          4,
+          3
+        ]
+      ],
+      "arbitration": [
+        1,
+        0,
+        1
+      ],
+      "resolution": "repair_failed_restored",
+      "stops": [
+        "max_turns"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T005944/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_marshmallow_2909",
+      "mode": "acceptance_none_kept",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "none_kept",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T010610/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_parse_159",
+      "mode": "arbiter_overrode",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          5,
+          4
+        ]
+      ],
+      "arbitration": [
+        1,
+        1,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T015526/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_pydash_266",
+      "mode": "repair_failed_restored",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": false,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          2,
+          0
+        ],
+        [
+          2,
+          0
+        ]
+      ],
+      "arbitration": [
+        2,
+        0,
+        2
+      ],
+      "resolution": "repair_failed_restored",
+      "stops": [
+        "max_turns"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": true,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T121437/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_rich_4076",
+      "mode": "acceptance_passed_weak",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": true
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          5,
+          5
+        ]
+      ],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T141429/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_sqlparse_601",
+      "mode": "arbiter_overrode",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          2,
+          0
+        ]
+      ],
+      "arbitration": [
+        2,
+        2,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T143659/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "claude-haiku-5-5",
+      "arm": "off",
+      "task": "real_markdown_1515",
+      "mode": "acceptance_inactive",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "inactive",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "completed"
+      ],
+      "post_green_stop": true,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261011T125953/off/run.log"
+    }
+  ],
+  "errors_own_tests": [
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_click_3860",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261009T195940/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_click_3884",
+      "mode": "arbiter_overrode",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          4,
+          2
+        ]
+      ],
+      "arbitration": [
+        2,
+        2,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [
+        "completed"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261009T201221/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_click_3884",
+      "mode": "arbiter_overrode",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          4,
+          2
+        ]
+      ],
+      "arbitration": [
+        2,
+        2,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [
+        "completed"
+      ],
+      "post_green_stop": true,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261009T201810/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_humanize_329",
+      "mode": "acceptance_passed_weak",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": true
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          3,
+          3
+        ]
+      ],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261009T203836/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_humanize_329",
+      "mode": "acceptance_passed_weak",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": true
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          6,
+          6
+        ]
+      ],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261009T204024/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_idna_230",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261009T211518/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_markdown_1515",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T001447/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_markdown_1515",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T001937/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_marshmallow_2797",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T004311/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_marshmallow_2797",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": true,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T004813/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_marshmallow_2901",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T005440/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_marshmallow_2909",
+      "mode": "acceptance_none_kept",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "none_kept",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T010610/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_mistune_460",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T011007/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_more-itertools_1284",
+      "mode": "visible_red",
+      "gates": {
+        "declared": true,
+        "visible": false,
+        "own_tests": false,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          5,
+          2
+        ],
+        [
+          5,
+          2
+        ]
+      ],
+      "arbitration": [
+        3,
+        0,
+        3
+      ],
+      "resolution": "repair_failed_restored",
+      "stops": [
+        "completed",
+        "completed"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T013538/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_more-itertools_1284",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": false,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          5,
+          2
+        ]
+      ],
+      "arbitration": [
+        3,
+        0,
+        3
+      ],
+      "resolution": "repair_failed_restored",
+      "stops": [
+        "max_turns"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T014122/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_parse_159",
+      "mode": "arbiter_overrode",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          5,
+          4
+        ]
+      ],
+      "arbitration": [
+        1,
+        1,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T015526/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_pathspec_147",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": false,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          5,
+          1
+        ],
+        [
+          2,
+          1
+        ]
+      ],
+      "arbitration": [
+        4,
+        3,
+        1
+      ],
+      "resolution": "repair_failed_restored",
+      "stops": [
+        "max_turns"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T024024/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_pathspec_147",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": true,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T115927/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_pyparsing_332",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T124056/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_pyparsing_332",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T125516/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_pyparsing_560",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": true,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T131220/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_python-semver_479",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": false,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          6,
+          0
+        ],
+        [
+          6,
+          2
+        ]
+      ],
+      "arbitration": [
+        6,
+        0,
+        6
+      ],
+      "resolution": "repair_failed_restored",
+      "stops": [
+        "completed",
+        "max_turns"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T135747/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_rich_4076",
+      "mode": "acceptance_passed_weak",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": true
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          5,
+          5
+        ]
+      ],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T141429/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_sqlparse_601",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": false,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          6,
+          2
+        ],
+        [
+          3,
+          2
+        ]
+      ],
+      "arbitration": [
+        4,
+        3,
+        1
+      ],
+      "resolution": "repair_failed_restored",
+      "stops": [
+        "completed",
+        "max_turns"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T142505/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_sqlparse_601",
+      "mode": "arbiter_overrode",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          2,
+          0
+        ]
+      ],
+      "arbitration": [
+        2,
+        2,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T143659/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_sqlparse_867",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": false,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          4,
+          0
+        ],
+        [
+          2,
+          0
+        ]
+      ],
+      "arbitration": [
+        4,
+        2,
+        2
+      ],
+      "resolution": "repair_failed_restored",
+      "stops": [
+        "max_turns"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T144522/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_toolz_634",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": false,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          6,
+          5
+        ],
+        [
+          6,
+          5
+        ]
+      ],
+      "arbitration": [
+        1,
+        0,
+        1
+      ],
+      "resolution": "repair_failed_restored",
+      "stops": [
+        "completed",
+        "max_turns"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T155133/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "claude-haiku-5-5",
+      "arm": "off",
+      "task": "real_markdown_1515",
+      "mode": "acceptance_inactive",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "inactive",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "completed"
+      ],
+      "post_green_stop": true,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261011T125953/off/run.log"
+    }
+  ],
+  "errors_strict": [
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_cachetools_423",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          4,
+          3
+        ]
+      ],
+      "arbitration": [
+        1,
+        1,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [
+        "completed"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261009T192630/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_cachetools_423",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          4,
+          3
+        ]
+      ],
+      "arbitration": [
+        1,
+        1,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [
+        "completed"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261009T192913/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_click_3860",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261009T195940/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_funcy_190",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          4,
+          2
+        ]
+      ],
+      "arbitration": [
+        2,
+        2,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261009T203156/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_funcy_190",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          3,
+          2
+        ]
+      ],
+      "arbitration": [
+        1,
+        1,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261009T203327/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_humanize_329",
+      "mode": "acceptance_passed_weak",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": true
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          3,
+          3
+        ]
+      ],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261009T203836/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_humanize_329",
+      "mode": "acceptance_passed_weak",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": true
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          6,
+          6
+        ]
+      ],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261009T204024/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_idna_230",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261009T211518/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_idna_230",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          5,
+          3
+        ]
+      ],
+      "arbitration": [
+        2,
+        2,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [
+        "completed"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261009T214941/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_markdown_1513",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          4,
+          3
+        ]
+      ],
+      "arbitration": [
+        1,
+        1,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [
+        "completed"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261009T232311/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_markdown_1513",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          4,
+          3
+        ]
+      ],
+      "arbitration": [
+        1,
+        1,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T001041/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_markdown_1515",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T001447/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_markdown_1515",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T001937/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_marshmallow_2797",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T004311/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_marshmallow_2797",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": true,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T004813/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_marshmallow_2901",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T005440/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_marshmallow_2909",
+      "mode": "acceptance_none_kept",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "none_kept",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T010610/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_mistune_460",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T011007/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_mistune_460",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          6,
+          5
+        ]
+      ],
+      "arbitration": [
+        1,
+        1,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [
+        "completed"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T011445/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_mistune_471",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          6,
+          0
+        ]
+      ],
+      "arbitration": [
+        6,
+        6,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T012545/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_mistune_471",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          6,
+          0
+        ]
+      ],
+      "arbitration": [
+        6,
+        6,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [
+        "completed"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T012742/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_more-itertools_1250",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          4,
+          3
+        ]
+      ],
+      "arbitration": [
+        1,
+        1,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [
+        "completed"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T013044/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_more-itertools_1284",
+      "mode": "visible_red",
+      "gates": {
+        "declared": true,
+        "visible": false,
+        "own_tests": false,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          5,
+          2
+        ],
+        [
+          5,
+          2
+        ]
+      ],
+      "arbitration": [
+        3,
+        0,
+        3
+      ],
+      "resolution": "repair_failed_restored",
+      "stops": [
+        "completed",
+        "completed"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T013538/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_more-itertools_1284",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": false,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          5,
+          2
+        ]
+      ],
+      "arbitration": [
+        3,
+        0,
+        3
+      ],
+      "resolution": "repair_failed_restored",
+      "stops": [
+        "max_turns"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T014122/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_parse_137",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          6,
+          5
+        ]
+      ],
+      "arbitration": [
+        1,
+        1,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T015058/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_parse_137",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          6,
+          5
+        ]
+      ],
+      "arbitration": [
+        1,
+        1,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [
+        "completed"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T015220/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_pathspec_147",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": false,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          5,
+          1
+        ],
+        [
+          2,
+          1
+        ]
+      ],
+      "arbitration": [
+        4,
+        3,
+        1
+      ],
+      "resolution": "repair_failed_restored",
+      "stops": [
+        "max_turns"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T024024/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_pathspec_147",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": true,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T115927/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_pathspec_149",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          6,
+          4
+        ]
+      ],
+      "arbitration": [
+        2,
+        2,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [
+        "completed"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T120559/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_pathspec_149",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          6,
+          5
+        ]
+      ],
+      "arbitration": [
+        1,
+        1,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [
+        "completed"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T120956/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_pyparsing_332",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T124056/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_pyparsing_332",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T125516/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_pyparsing_560",
+      "mode": "other",
+      "gates": {
+        "declared": false,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "no_progress"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": true,
+      "loop_guard": true,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T131220/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_python-semver_479",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": false,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          6,
+          0
+        ],
+        [
+          6,
+          2
+        ]
+      ],
+      "arbitration": [
+        6,
+        0,
+        6
+      ],
+      "resolution": "repair_failed_restored",
+      "stops": [
+        "completed",
+        "max_turns"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T135747/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_rich_3718",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          3,
+          2
+        ]
+      ],
+      "arbitration": [
+        1,
+        1,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T140552/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_rich_3718",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          2,
+          1
+        ]
+      ],
+      "arbitration": [
+        1,
+        1,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T140828/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_rich_4076",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          6,
+          5
+        ]
+      ],
+      "arbitration": [
+        1,
+        1,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T141124/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_rich_4076",
+      "mode": "acceptance_passed_weak",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": true
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          5,
+          5
+        ]
+      ],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T141429/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_sqlparse_601",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": false,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          6,
+          2
+        ],
+        [
+          3,
+          2
+        ]
+      ],
+      "arbitration": [
+        4,
+        3,
+        1
+      ],
+      "resolution": "repair_failed_restored",
+      "stops": [
+        "completed",
+        "max_turns"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T142505/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_sqlparse_867",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": false,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          4,
+          0
+        ],
+        [
+          2,
+          0
+        ]
+      ],
+      "arbitration": [
+        4,
+        2,
+        2
+      ],
+      "resolution": "repair_failed_restored",
+      "stops": [
+        "max_turns"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T144522/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_tabulate_256",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          5,
+          1
+        ]
+      ],
+      "arbitration": [
+        4,
+        4,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [
+        "completed"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T145406/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_tabulate_256",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          5,
+          4
+        ]
+      ],
+      "arbitration": [
+        1,
+        1,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T145631/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_tabulate_53",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          5,
+          4
+        ]
+      ],
+      "arbitration": [
+        1,
+        1,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [],
+      "post_green_stop": false,
+      "one_shot_solved": true,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T145756/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "treat",
+      "task": "real_tabulate_53",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          5,
+          4
+        ]
+      ],
+      "arbitration": [
+        1,
+        1,
+        0
+      ],
+      "resolution": "arbiter_overrode",
+      "stops": [
+        "completed"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T145956/off/run.log"
+    },
+    {
+      "kind": "FR",
+      "model": "deepseek/deepseek-v4-flash",
+      "arm": "ctrl",
+      "task": "real_toolz_634",
+      "mode": "acceptance_red",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": false,
+        "strict_acceptance": false,
+        "verified_tier": false
+      },
+      "acceptance": "active",
+      "checks": [
+        [
+          6,
+          5
+        ],
+        [
+          6,
+          5
+        ]
+      ],
+      "arbitration": [
+        1,
+        0,
+        1
+      ],
+      "resolution": "repair_failed_restored",
+      "stops": [
+        "completed",
+        "max_turns"
+      ],
+      "post_green_stop": false,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261010T155133/off/run.log"
+    },
+    {
+      "kind": "FA",
+      "model": "claude-haiku-5-5",
+      "arm": "off",
+      "task": "real_markdown_1515",
+      "mode": "acceptance_inactive",
+      "gates": {
+        "declared": true,
+        "visible": true,
+        "own_tests": true,
+        "strict_acceptance": true,
+        "verified_tier": false
+      },
+      "acceptance": "inactive",
+      "checks": [],
+      "arbitration": null,
+      "resolution": "",
+      "stops": [
+        "completed"
+      ],
+      "post_green_stop": true,
+      "one_shot_solved": false,
+      "rollback": false,
+      "loop_guard": false,
+      "log": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261011T125953/off/run.log"
+    }
+  ],
+  "arbiter": {
+    "overrides": {
+      "n": 26,
+      "hidden_pass": 22,
+      "hidden_fail": 4,
+      "fail_tasks": [
+        "real_click_3884",
+        "real_click_3884",
+        "real_parse_159",
+        "real_sqlparse_601"
+      ]
+    },
+    "no_kept_test_passed": {
+      "n": 3,
+      "hidden_pass": 2,
+      "hidden_fail": 1,
+      "fail_tasks": [
+        "real_sqlparse_601"
+      ]
+    },
+    "some_kept_test_passed": {
+      "n": 23,
+      "hidden_pass": 20,
+      "hidden_fail": 3,
+      "fail_tasks": [
+        "real_click_3884",
+        "real_click_3884",
+        "real_parse_159"
+      ]
+    }
+  },
+  "signals_declared": {
+    "post_green_stop": {
+      "n": 5,
+      "hidden_pass": 3,
+      "hidden_fail": 2,
+      "fail_tasks": [
+        "real_click_3884",
+        "real_markdown_1515"
+      ]
+    },
+    "one_shot_solved": {
+      "n": 75,
+      "hidden_pass": 65,
+      "hidden_fail": 10,
+      "fail_tasks": [
+        "real_click_3677",
+        "real_humanize_329",
+        "real_humanize_329",
+        "real_markdown_1652",
+        "real_marshmallow_2901",
+        "real_marshmallow_2909",
+        "real_parse_159",
+        "real_pydash_266",
+        "real_rich_4076",
+        "real_sqlparse_601"
+      ]
+    },
+    "loop_guard": {
+      "n": 5,
+      "hidden_pass": 4,
+      "hidden_fail": 1,
+      "fail_tasks": [
+        "real_pydash_266"
+      ]
+    },
+    "acceptance_inactive": {
+      "n": 73,
+      "hidden_pass": 72,
+      "hidden_fail": 1,
+      "fail_tasks": [
+        "real_markdown_1515"
+      ]
+    },
+    "acceptance_none_kept": {
+      "n": 3,
+      "hidden_pass": 2,
+      "hidden_fail": 1,
+      "fail_tasks": [
+        "real_marshmallow_2909"
+      ]
+    },
+    "arbiter_overrode": {
+      "n": 26,
+      "hidden_pass": 22,
+      "hidden_fail": 4,
+      "fail_tasks": [
+        "real_click_3884",
+        "real_click_3884",
+        "real_parse_159",
+        "real_sqlparse_601"
+      ]
+    },
+    "repair_passed": {
+      "n": 7,
+      "hidden_pass": 7,
+      "hidden_fail": 0,
+      "fail_tasks": []
+    },
+    "repair_failed_restored": {
+      "n": 11,
+      "hidden_pass": 7,
+      "hidden_fail": 4,
+      "fail_tasks": [
+        "real_click_3677",
+        "real_markdown_1652",
+        "real_marshmallow_2901",
+        "real_pydash_266"
+      ]
+    },
+    "acceptance_clean_pass": {
+      "n": 78,
+      "hidden_pass": 75,
+      "hidden_fail": 3,
+      "fail_tasks": [
+        "real_humanize_329",
+        "real_humanize_329",
+        "real_rich_4076"
+      ]
+    },
+    "stop_max_turns": {
+      "n": 13,
+      "hidden_pass": 9,
+      "hidden_fail": 4,
+      "fail_tasks": [
+        "real_click_3677",
+        "real_markdown_1652",
+        "real_marshmallow_2901",
+        "real_pydash_266"
+      ]
+    }
+  },
+  "acceptance_states": {
+    "deepseek/deepseek-v4-flash:active": 134,
+    "deepseek/deepseek-v4-flash:none_kept": 3,
+    "claude-haiku-5-5:inactive": 73
+  }
+}
