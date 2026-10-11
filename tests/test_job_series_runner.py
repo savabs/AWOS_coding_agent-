@@ -412,7 +412,7 @@ def test_report_usage_overrides_ledger(tmp_path, monkeypatch):
 
 
 def test_arms_mapping_drives_cli_and_child(tmp_path, monkeypatch):
-    assert set(js.ARM_CHILDREN) == {"off", "on", "aider", "aider-frontier"}
+    assert set(js.ARM_CHILDREN) == {"off", "on", "learn", "aider", "aider-frontier"}
     for arm, child in js.ARM_CHILDREN.items():
         assert "{job_dir}" in child["cmd"] and "{project}" in child["cmd"]
         if arm.startswith("aider"):
@@ -420,7 +420,8 @@ def test_arms_mapping_drives_cli_and_child(tmp_path, monkeypatch):
             model = js.FRONTIER_MODEL if arm == "aider-frontier" else js.PINNED_MODEL
             assert child["cmd"][child["cmd"].index("--model") + 1] == model
             continue
-        assert child["env"]["AWOS_NOTEBOOK"] == ("1" if arm == "on" else "0")
+        assert child["env"]["AWOS_NOTEBOOK"] == ("1" if arm in ("on", "learn") else "0")
+        assert child["env"].get("AWOS_EXPERIENCE", "0") == ("1" if arm == "learn" else "0")
         assert child["env"]["AWOS_AGENT_MODEL"] == js.PINNED_MODEL
     with pytest.raises(SystemExit):
         js.main(["run", "--arms", "nope", "--dry-run"])
