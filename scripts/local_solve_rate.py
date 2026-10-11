@@ -49,7 +49,9 @@ def main() -> int:
     ap.add_argument("--env-file", required=True)
     ap.add_argument("--series", default=None, help="comma list (default: all under root, sorted)")
     a = ap.parse_args()
-    root, out_root = Path(a.series_root), Path(a.out_root)
+    # absolute: job_series children run with cwd=REPO, so relative paths break
+    root, out_root = Path(a.series_root).resolve(), Path(a.out_root).resolve()
+    a.env_file = str(Path(a.env_file).resolve())
     out_root.mkdir(parents=True, exist_ok=True)
     names = a.series.split(",") if a.series else sorted(p.name for p in root.iterdir() if p.is_dir())
     env = {k: v for k, v in os.environ.items() if not any(s in k.upper() for s in STRIP)}
