@@ -85,6 +85,17 @@ def test_child_env_turns_off_orchestrator_branching(tmp_path):
     assert worker.child_env(job)["AWOS_GIT_BRANCH"] == "0"
 
 
+def test_goal_check_skipped_only_when_tests_exist(tmp_path, monkeypatch):
+    monkeypatch.delenv("AWOS_GOAL_CHECK", raising=False)
+    job = JobSpec(id="j5", goal="g", repo_path=str(tmp_path))
+    assert not worker.has_tests(str(tmp_path))
+    assert "AWOS_GOAL_CHECK" not in worker.child_env(job, skip_goal_check=False)
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "test_a.py").write_text("def test_a():\n    pass\n")
+    assert worker.has_tests(str(tmp_path))
+    assert worker.child_env(job, skip_goal_check=True)["AWOS_GOAL_CHECK"] == "0"
+
+
 def test_verify_tests_reports_counts(tmp_path):
     (tmp_path / "test_x.py").write_text("def test_ok():\n    pass\n\ndef test_bad():\n    assert 0\n")
     res = worker.verify_tests(str(tmp_path))

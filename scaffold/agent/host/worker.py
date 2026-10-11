@@ -250,7 +250,20 @@ def local_only_blanked_keys(env: dict, dotenv_path: Optional[Path] = None) -> se
     return names - set(LOCAL_KEYS)
 
 
-def child_env(job: JobSpec, budget_left: Optional[float] = None) -> dict:
+def verify_enabled() -> bool:
+    """AWOS_HOST_VERIFY_TESTS (default on): the host runs the repo's tests itself."""
+    return os.getenv("AWOS_HOST_VERIFY_TESTS", "1").strip().lower() not in ("0", "false", "no")
+
+
+def has_tests(workspace: str) -> bool:
+    """A pytest-style test file anywhere in the workspace."""
+    ws = Path(workspace)
+    return (next(ws.rglob("test_*.py"), None) is not None
+            or next(ws.rglob("*_test.py"), None) is not None)
+
+
+def child_env(job: JobSpec, budget_left: Optional[float] = None,
+              skip_goal_check: bool = False) -> dict:
     """
     The orchestrator child's env. budget_usd bounds the whole job: it sets the
     goal cap (AWOS_GOAL_BUDGET_USD) and the per-task cap (AWOS_MAX_RUN_COST)
@@ -269,6 +282,10 @@ def child_env(job: JobSpec, budget_left: Optional[float] = None) -> dict:
     else:
         env["AWOS_GOAL_BUDGET_USD"] = "0"
         env.pop("AWOS_MAX_RUN_COST", None)
+    if skip_goal_check:
+        # The host's own test run (verify_tests) is the evidence; the LLM goal
+        # check was ~40% of a small job's cost (live run 2026-10-11).
+        env["AWOS_GOAL_CHECK"] = "0"
     if job.privacy == "local_only":
         # Present-but-empty: dotenv will not refill them, cloud calls cannot authenticate.
         for key in local_only_blanked_keys(env):
@@ -455,7 +472,9 @@ def _run_child(job: JobSpec, ctx: RunContext, job_path: Path, result_path: Path,
             [sys.executable, str(Path(job_host.__file__).resolve()), "_child",
              str(job_path), str(result_path), str(os.getpid())],
             cwd=str(REPO), stdout=log, stderr=subprocess.STDOUT,
-            env=child_env(job, budget_left=left), start_new_session=True)
+            env=child_env(job, budget_left=left,
+                          skip_goal_check=bool(base) and verify_enabled() and has_tests(workspace)),
+            start_new_session=True)
     ctx.on_child(proc.pid)
     spend.set_pid(proc.pid)
     ctx.step("child_started", pid=proc.pid)
@@ -510,11 +529,9 @@ def verify_tests(workspace: str) -> Optional[dict]:
     the morning report carries the host's own test evidence, not the agent's
     claim. None when there are no tests or AWOS_HOST_VERIFY_TESTS=0.
     """
-    if os.getenv("AWOS_HOST_VERIFY_TESTS", "1").strip().lower() in ("0", "false", "no"):
+    if not verify_enabled() or not has_tests(workspace):
         return None
     ws = Path(workspace)
-    if next(ws.rglob("test_*.py"), None) is None and next(ws.rglob("*_test.py"), None) is None:
-        return None
     cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
     shown = "python -m pytest -q"
     timeout = float(os.getenv("AWOS_HOST_VERIFY_TIMEOUT_SEC", VERIFY_TIMEOUT_SEC))
