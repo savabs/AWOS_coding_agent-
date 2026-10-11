@@ -41,7 +41,18 @@ Before submitting, the demo checkout was given an uncommitted `NOTES.md` to stan
 - **The user's checkout was untouched:** still on `main`, `NOTES.md` still the only untracked change, no stray branches, and the job worktree was removed.
 - **The handed-off fix** passes 3/3 when run from the branch's files.
 
-## Still open
+## Run 3 (2026-10-11): report carries real evidence
 
-- The report says "Tests: not reported" and "Cost: not reported". The child result does not yet carry the `tests` and `cost_usd` keys the handoff can render.
+The worker now:
+- passes the child result's top-level keys (`cost_usd`, `tests`, `summary`) to the handoff;
+- runs the repo's own pytest in the isolated workspace (`verify_tests`; turned off by `AWOS_HOST_VERIFY_TESTS=0`, time limit `AWOS_HOST_VERIFY_TIMEOUT_SEC`).
+
+The report on `awos/b5c02391` reads:
+- **Tests:** passed, 3 passed, 0 failed (`python -m pytest -q`)
+- **Cost:** $0.0000 of $0.50
+- **Minutes:** 2.2
+
+The user's checkout was untouched again. Host tests: 164 pass.
+
+## Still open
 - The always-on launchd install (`awos` ops) was generated but has not been applied on this machine.

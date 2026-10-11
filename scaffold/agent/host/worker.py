@@ -479,7 +479,44 @@ def _run_child(job: JobSpec, ctx: RunContext, job_path: Path, result_path: Path,
         result.setdefault("workspace", workspace)
         if base:
             result.setdefault("base_commit", base)
+        if "tests" not in result and base:   # only an isolated workspace, never the user's checkout
+            tests = verify_tests(workspace)
+            if tests:
+                result["tests"] = tests
+                ctx.step("verify_tests", **tests)
     return result
+
+
+#: Wall-clock cap for the worker's own test run (AWOS_HOST_VERIFY_TIMEOUT_SEC).
+VERIFY_TIMEOUT_SEC = 300.0
+
+
+def verify_tests(workspace: str) -> Optional[dict]:
+    """
+    Run the repo's pytest suite in the job's workspace after the child exits, so
+    the morning report carries the host's own test evidence, not the agent's
+    claim. None when there are no tests or AWOS_HOST_VERIFY_TESTS=0.
+    """
+    if os.getenv("AWOS_HOST_VERIFY_TESTS", "1").strip().lower() in ("0", "false", "no"):
+        return None
+    ws = Path(workspace)
+    if next(ws.rglob("test_*.py"), None) is None and next(ws.rglob("*_test.py"), None) is None:
+        return None
+    cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+    shown = "python -m pytest -q"
+    timeout = float(os.getenv("AWOS_HOST_VERIFY_TIMEOUT_SEC", VERIFY_TIMEOUT_SEC))
+    try:
+        proc = subprocess.run(cmd, cwd=ws, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return {"status": "timeout", "passed": 0, "failed": 0, "command": shown}
+    lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
+    summary = lines[-1] if lines else ""   # pytest's "N passed, M failed in Xs" line
+
+    def count(word: str) -> int:
+        return sum(int(n) for n in re.findall(rf"(\d+) {word}\b", summary))
+    passed, failed = count("passed"), count("failed") + count("errors?")
+    status = "passed" if proc.returncode == 0 else ("failed" if failed else "error")
+    return {"status": status, "passed": passed, "failed": failed, "command": shown}
 
 
 RUNNERS = {"default": subprocess_runner, "subprocess": subprocess_runner, "sleep": sleep_runner}
@@ -606,7 +643,12 @@ class HostWorker:
         return self._finish(job, FAILED, result, result.get("error") or "the runner reported failure")
 
     def _finish(self, job: JobSpec, state: str, result: dict, error: Optional[str]) -> JobSpec:
-        handoff = self._hand_off(job, {"state": state, "result": result, "error": error})
+        # hand-off reads tests/cost_usd/minutes/summary at the top level.
+        outcome = {**{k: v for k, v in result.items() if k != "handoff"},
+                   "state": state, "result": result, "error": error}
+        if error and not outcome.get("summary"):
+            outcome["summary"] = error
+        handoff = self._hand_off(job, outcome)
         if handoff is not None:
             result = {**result, "handoff": handoff}
         try:

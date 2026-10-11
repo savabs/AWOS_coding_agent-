@@ -83,3 +83,18 @@ def test_non_git_root_runs_in_place(tmp_path):
 def test_child_env_turns_off_orchestrator_branching(tmp_path):
     job = JobSpec(id="j4", goal="g", repo_path=str(tmp_path))
     assert worker.child_env(job)["AWOS_GIT_BRANCH"] == "0"
+
+
+def test_verify_tests_reports_counts(tmp_path):
+    (tmp_path / "test_x.py").write_text("def test_ok():\n    pass\n\ndef test_bad():\n    assert 0\n")
+    res = worker.verify_tests(str(tmp_path))
+    assert res == {"status": "failed", "passed": 1, "failed": 1, "command": "python -m pytest -q"}
+    (tmp_path / "test_x.py").write_text("def test_ok():\n    pass\n")
+    assert worker.verify_tests(str(tmp_path))["status"] == "passed"
+
+
+def test_verify_tests_none_without_tests(tmp_path, monkeypatch):
+    assert worker.verify_tests(str(tmp_path)) is None
+    (tmp_path / "test_x.py").write_text("def test_ok():\n    pass\n")
+    monkeypatch.setenv("AWOS_HOST_VERIFY_TESTS", "0")
+    assert worker.verify_tests(str(tmp_path)) is None
