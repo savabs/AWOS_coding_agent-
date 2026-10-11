@@ -1160,7 +1160,15 @@ _UNTRUSTED_NO_WRITE = {
     # instructions a later agent session loads and obeys (prompt persistence)
     "claude.md", "claude.local.md", "agents.md", "agent.md", "gemini.md",
     "copilot-instructions.md", "codex.md",
+    # dependency manifests and lock files: a later install pulls in whatever
+    # they name (supply-chain persistence; skeptic finding, wave 2026-10-11)
+    "pipfile", "pipfile.lock", "poetry.lock", "uv.lock", "pdm.lock", "package-lock.json",
+    "yarn.lock", "pnpm-lock.yaml", "npm-shrinkwrap.json", "gemfile.lock", "cargo.lock",
+    "go.mod", "go.sum", "composer.json", "composer.lock", ".npmrc", ".yarnrc", ".pypirc",
+    "pip.conf", "environment.yml", "conda-lock.yml",
 }
+#: requirements*.txt / constraints*.in and similar pip input files
+_UNTRUSTED_DEP_FILE = re.compile(r"^(requirements|constraints|dev-requirements|test-requirements)[\w.-]*\.(txt|in)$")
 #: extensions of files something may later run or import (pytest collects .py)
 _UNTRUSTED_CODE_EXT = (".py", ".pyc", ".pth", ".sh", ".bash", ".zsh", ".command", ".so",
                        ".dylib", ".js", ".mjs", ".cjs", ".ts", ".rb", ".pl", ".php",
@@ -1197,7 +1205,8 @@ def _untrusted_name_ok(segs: Sequence[str]) -> bool:
     if not segs or any(sg.startswith((".", "-")) for sg in segs):
         return False
     base = segs[-1].lower()
-    return base not in _UNTRUSTED_NO_WRITE and not base.endswith(_UNTRUSTED_CODE_EXT)
+    return (base not in _UNTRUSTED_NO_WRITE and not base.endswith(_UNTRUSTED_CODE_EXT)
+            and not _UNTRUSTED_DEP_FILE.match(base))
 
 
 def _untrusted_write_ok(target: str, root: Path) -> bool:

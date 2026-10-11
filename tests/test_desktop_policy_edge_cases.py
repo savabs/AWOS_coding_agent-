@@ -290,3 +290,21 @@ def test_symlinked_write_target_is_refused_but_still_readable(sandbox):
     # cannot vouch for what a link will point at when the command runs
     assert_not_allowed(sandbox, "echo hi > alias.txt")
     assert_allowed(sandbox, "cat alias.txt")
+
+
+# Skeptic finding (wave 2026-10-11): dependency manifests and lock files are
+# persistence vectors — a later `pip install -r` / `npm ci` obeys them.
+DEP_FILES = ["requirements.txt", "requirements-dev.txt", "constraints.txt", "dev-requirements.in",
+             "Pipfile", "Pipfile.lock", "poetry.lock", "uv.lock", "package-lock.json",
+             "yarn.lock", "go.mod", ".npmrc", ".pypirc", "pip.conf"]
+
+
+@pytest.mark.parametrize("name", DEP_FILES)
+def test_untrusted_cannot_write_dependency_manifests(sandbox, name):
+    assert_not_allowed(sandbox, f"echo hi > {name}")
+    assert_not_allowed(sandbox, f"echo hi >> {name}")
+
+
+def test_reading_requirements_stays_allowed(sandbox):
+    (sandbox / "requirements.txt").write_text("requests\n")
+    assert_allowed(sandbox, "cat requirements.txt")
