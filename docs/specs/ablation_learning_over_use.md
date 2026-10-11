@@ -101,4 +101,17 @@ spec, before running).
 
 ## Result
 
-(filled in after the run)
+Run 2026-10-11, full design (3 repeats, 156 rows, 0 invalid), ~$0.53 total.
+Details: `docs/memory/runs/learning_over_use_2026-10.md`.
+
+- Solve rate pos 2–4: **INCONCLUSIVE** (54/54 vs 54/54, ceiling).
+- Cost pos 2–4: **LEARNING HURTS** (dearer on 18/18 tasks, geo ratio 1.79
+  [1.62, 1.98]). Turns: **INCONCLUSIVE** (ratio 1.035).
+- Curve: cost ratio 1.21 at position 1, 1.54 / 1.76 / 2.18 at 2 / 3 / 4.
+- Harm check: none at the rule's bar; near-miss `learn_f09` job 5 off 3/3 vs
+  learn 1/3, the notebook rule "do not modify the function under test" misled.
+- "AWOS gets better with use": **not shown** (opposite on cost).
+- Deviation: notebook fix for the Anthropic path (no client without
+  OpenRouter; Haiku 5.5 rejects `temperature`), commit 219f1b4; per-(series,
+  repeat) launches via `scripts/routines/run_track_c.py`; one external SIGTERM
+  resumed.
