@@ -4,7 +4,13 @@ harness_aider.py — run Aider (a market coding harness) on one job-series job.
 
 Same calling convention as `scripts/job_series.py _child`:
 
-    python scripts/harness_aider.py <job_dir> <project_dir> --model <openrouter id>
+    python scripts/harness_aider.py <job_dir> <project_dir> --model <model id> [--provider auto|openrouter|anthropic]
+
+Provider (--provider, default auto): a bare Anthropic id (claude-haiku-5-5, no
+"/") runs on Anthropic directly as litellm's anthropic/<id> with
+ANTHROPIC_API_KEY and Aider's prompt caching on (--cache-prompts), priced from
+ANTHROPIC_PRICES; any id with a "/" (deepseek/deepseek-v4-flash,
+anthropic/claude-sonnet-5.5) runs through OpenRouter with OPENROUTER_API_KEY.
 
 cwd must be the arm's state dir. The key comes from AWOS_JOB_DOTENV (the source
 .env, set by job_series) or, for old run dirs, the state dir's .env.
@@ -64,6 +70,21 @@ DEFAULT_VENV = Path.home() / ".awos-harness" / "aider-venv"
 # before the runner's own wall-clock kill.
 TIMEOUT_MARGIN_S = 30
 KEY_ENV = "OPENROUTER_API_KEY"
+ANTHROPIC_KEY_ENV = "ANTHROPIC_API_KEY"
+# provider -> (litellm model prefix, key env var)
+PROVIDERS = {
+    "openrouter": ("openrouter/", KEY_ENV),
+    "anthropic": ("anthropic/", ANTHROPIC_KEY_ENV),
+}
+# Anthropic direct prices, USD per million tokens, flat (no long-context tier):
+# the same figures AWOS bills itself (scaffold/agent/agent_loop.py PRICES and
+# providers.py CACHE_PRICE_FACTORS: read 0.1x, 5-min write 1.25x of input).
+# litellm's own table adds a 5x tier above 100k prompt tokens, so the harness
+# computes the cost from exact token counts instead of trusting Aider's figure.
+ANTHROPIC_PRICES: dict[str, dict[str, float]] = {
+    "claude-haiku-5-5": {"input": 0.10, "output": 0.50, "cache_read": 0.01, "cache_write": 0.125},
+    "claude-haiku-4-5": {"input": 1.00, "output": 5.00, "cache_read": 0.10, "cache_write": 1.25},
+}
 ENV_FILE_NAME = "aider.env"          # written per run in the state dir, removed after
 USAGE_TAG = "[aider-usage] "
 FINAL_TAG = "[aider-final] "
@@ -89,6 +110,7 @@ def calc(self, messages, completion=None):
         "prompt_tokens": int(getattr(u, "prompt_tokens", 0) or 0) if u else None,
         "completion_tokens": int(getattr(u, "completion_tokens", 0) or 0) if u else None,
         "cache_hit_tokens": int(hit),
+        "cache_write_tokens": int(getattr(u, "cache_creation_input_tokens", 0) or 0) if u else 0,
         "cost": float(self.total_cost - before),
         "session_cost": float(self.total_cost),
         "openrouter_cost": float(or_cost) if isinstance(or_cost, (int, float)) else None,
@@ -177,7 +199,10 @@ class UsageTracker:
     Exact lines win when present; the human lines are the fallback.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, prices: dict | None = None) -> None:
+        # USD per million tokens (ANTHROPIC_PRICES entry): when set, the cost is
+        # computed from the exact token counts at these prices.
+        self.prices = prices
         self.exact: list[dict] = []
         self.text_turns = 0
         self.text_in = 0
@@ -261,7 +286,21 @@ class UsageTracker:
 
     def cost(self) -> tuple[float, str]:
         """(cost_usd, source). OpenRouter's billed cost if it came back on every
-        response, else Aider's own computation from the price table."""
+        response, else (with prices) the exact tokens at those prices, else
+        Aider's own computation from the price table.
+
+        With prices, litellm's prompt_tokens for Anthropic already include the
+        cache reads and writes, so uncached input = prompt - read - write."""
+        if self.exact and self.prices:
+            p, total = self.prices, 0.0
+            for r in self.exact:
+                prompt = int(r.get("prompt_tokens") or 0)
+                read = int(r.get("cache_hit_tokens") or 0)
+                write = int(r.get("cache_write_tokens") or 0)
+                total += (max(0, prompt - read - write) * p["input"] + read * p["cache_read"]
+                          + write * p["cache_write"]
+                          + int(r.get("completion_tokens") or 0) * p["output"]) / 1e6
+            return total, "token_price_table"
         if self.exact:
             billed = [r.get("openrouter_cost") for r in self.exact]
             if all(isinstance(b, (int, float)) for b in billed):
@@ -308,15 +347,17 @@ def read_env_file(path: Path) -> dict:
 _PROVIDER_VAR = re.compile(r"_(API_KEY|API_BASE|BASE_URL|API_VERSION|API_TYPE)$|^OR_API_KEY$")
 
 
-def child_env(parent: dict, dotenv: dict) -> dict:
+def child_env(parent: dict, dotenv: dict, key_env: str = KEY_ENV) -> dict:
     """Aider's environment: the parent's, minus Aider's own switches (AIDER_*) and
     every other provider's key/base URL (litellm and Aider pick those up, e.g. an
     OPENAI_BASE_URL pointing at OpenRouter with another key), plus the OpenRouter
-    key (the environment's if set, else the state dir's .env, as job_series does)."""
+    key (the environment's if set, else the source .env, as job_series does).
+    key_env names the provider's key (OPENROUTER_API_KEY or ANTHROPIC_API_KEY);
+    every other provider variable is dropped."""
     env = {k: v for k, v in parent.items()
-           if not k.startswith("AIDER_") and (k == KEY_ENV or not _PROVIDER_VAR.search(k))}
-    if not env.get(KEY_ENV) and dotenv.get(KEY_ENV):
-        env[KEY_ENV] = dotenv[KEY_ENV]
+           if not k.startswith("AIDER_") and (k == key_env or not _PROVIDER_VAR.search(k))}
+    if not env.get(key_env) and dotenv.get(key_env):
+        env[key_env] = dotenv[key_env]
     env["PYTHONUNBUFFERED"] = "1"
     return env
 
@@ -332,13 +373,13 @@ def model_timeout_s() -> float:
     return value if value > 0 else 120.0
 
 
-def write_key_file(state: Path, key: str | None) -> Path:
-    """The --env-file Aider loads last: only the OpenRouter key, owner-only."""
+def write_key_file(state: Path, key: str | None, key_env: str = KEY_ENV) -> Path:
+    """The --env-file Aider loads last: only the arm's provider key, owner-only."""
     path = state / ENV_FILE_NAME
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         if key:
-            f.write(f"{KEY_ENV}={key}\n")
+            f.write(f"{key_env}={key}\n")
     return path
 
 
@@ -365,6 +406,39 @@ def model_metadata(model: str, models_list: list[dict]) -> dict | None:
     return {f"openrouter/{model}": meta}
 
 
+def resolve_provider(model: str, requested: str = "auto") -> str:
+    """auto: a bare claude-* id (no "/") is Anthropic direct; anything else OpenRouter."""
+    if requested != "auto":
+        return requested
+    return "anthropic" if "/" not in model and model.startswith("claude-") else "openrouter"
+
+
+def aider_model_name(model: str, provider: str = "openrouter") -> str:
+    """The id Aider/litellm takes: openrouter/<id> or anthropic/<id>."""
+    prefix = PROVIDERS[provider][0]
+    return model if model.startswith(prefix) else prefix + model
+
+
+def anthropic_prices(model: str) -> dict | None:
+    bare = model.rsplit("/", 1)[-1]
+    return ANTHROPIC_PRICES.get(bare) or ANTHROPIC_PRICES.get(bare.replace(".", "-"))
+
+
+def anthropic_metadata(model: str) -> dict | None:
+    """litellm metadata for anthropic/<model> at ANTHROPIC_PRICES (flat), so Aider
+    knows the model is priced and prints a cost; None if the price is unknown."""
+    p = anthropic_prices(model)
+    if not p:
+        return None
+    return {aider_model_name(model, "anthropic"): {
+        "max_input_tokens": 200000, "max_tokens": 128000, "max_output_tokens": 128000,
+        "input_cost_per_token": p["input"] / 1e6, "output_cost_per_token": p["output"] / 1e6,
+        "cache_read_input_token_cost": p["cache_read"] / 1e6,
+        "cache_creation_input_token_cost": p["cache_write"] / 1e6,
+        "litellm_provider": "anthropic", "mode": "chat", "supports_prompt_caching": True,
+    }}
+
+
 def fetch_openrouter_models(timeout: float = 20.0) -> list[dict]:
     try:
         with urllib.request.urlopen("https://openrouter.ai/api/v1/models", timeout=timeout) as r:
@@ -374,7 +448,7 @@ def fetch_openrouter_models(timeout: float = 20.0) -> list[dict]:
         return []
 
 
-def model_settings(model: str) -> list[dict]:
+def model_settings(model: str, provider: str = "openrouter") -> list[dict]:
     """Aider model settings for openrouter/<model>, copied from what Aider 0.86
     ships for the nearest sibling it knows; weak and editor model = the same model,
     so every call goes to the model under test.
@@ -383,7 +457,7 @@ def model_settings(model: str) -> list[dict]:
     default 16384) instead of the sibling's 64k: in a live run a non-streamed
     DeepSeek V4 Flash reply ran 10+ minutes with the 64k cap, and OpenRouter's
     keep-alives mean the per-request timeout never fires on it."""
-    name = f"openrouter/{model}"
+    name = aider_model_name(model, provider)
     s: dict = {"name": name, "edit_format": "diff", "use_repo_map": True,
                "weak_model_name": name, "editor_model_name": name,
                "editor_edit_format": "editor-diff",
@@ -430,11 +504,11 @@ def build_command(prefix: list[str], model: str, goal: str, state: Path, test_cm
                   settings_file: Path | None = None, metadata_file: Path | None = None,
                   edit_format: str | None = None, map_tokens: int | None = None,
                   files: list[str] | None = None, request_timeout: float | None = None,
-                  read_files: list[str] | None = None) -> list[str]:
+                  read_files: list[str] | None = None, provider: str = "openrouter") -> list[str]:
     """Aider argv. The API key is never in it (it goes through the environment)."""
     cmd = [
         *prefix,
-        "--model", f"openrouter/{model}",
+        "--model", aider_model_name(model, provider),
         "--message", goal,
         "--yes-always",                 # accept "add file to chat?", "fix test errors?"
         "--no-auto-commits",            # the runner judges the working tree
@@ -461,6 +535,10 @@ def build_command(prefix: list[str], model: str, goal: str, state: Path, test_cm
         "--env-file", str(state / ENV_FILE_NAME),
         "--encoding", "utf-8",
     ]
+    if provider == "anthropic":
+        # AWOS caches its stable prefix on Anthropic too (docs/specs/prompt_caching.md);
+        # stock Aider does the same with this flag.
+        cmd += ["--cache-prompts"]
     if settings_file is not None:
         cmd += ["--model-settings-file", str(settings_file)]
     if metadata_file is not None:
@@ -703,7 +781,12 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("job_dir")
     ap.add_argument("project_dir")
-    ap.add_argument("--model", required=True, help="OpenRouter model id, e.g. deepseek/deepseek-v4-flash")
+    ap.add_argument("--model", required=True,
+                    help="model id: OpenRouter (deepseek/deepseek-v4-flash) or Anthropic direct "
+                         "(claude-haiku-5-5)")
+    ap.add_argument("--provider", choices=["auto", "openrouter", "anthropic"], default="auto",
+                    help="auto (default): bare claude-* ids go to Anthropic directly, ids with a "
+                         "'/' to OpenRouter")
     ap.add_argument("--max-reflections", type=int, default=3,
                     help="automatic follow-up rounds per message (stock Aider: 3)")
     ap.add_argument("--add-files", choices=["auto", "src", "none"], default="auto",
@@ -736,14 +819,21 @@ def main(argv: list[str] | None = None) -> int:
 
     # job_series points AWOS_JOB_DOTENV at the source .env (no per-arm copy).
     dotenv = Path(os.environ.get("AWOS_JOB_DOTENV") or state / ".env")
-    env = child_env(os.environ, read_env_file(dotenv))
+    provider = resolve_provider(args.model, args.provider)
+    key_env = PROVIDERS[provider][1]
+    model_name = aider_model_name(args.model, provider)
+    env = child_env(os.environ, read_env_file(dotenv), key_env)
 
     prefix = aider_prefix(args.max_reflections)
     version = aider_version(prefix)
     settings_file = state / "aider.model.settings.yml"
-    settings_file.write_text(_yaml(model_settings(args.model)), encoding="utf-8")
+    settings_file.write_text(_yaml(model_settings(args.model, provider)), encoding="utf-8")
     metadata_file = None
-    meta = None if args.no_price_lookup else model_metadata(args.model, fetch_openrouter_models())
+    prices = anthropic_prices(args.model) if provider == "anthropic" else None
+    if provider == "anthropic":
+        meta = anthropic_metadata(args.model)
+    else:
+        meta = None if args.no_price_lookup else model_metadata(args.model, fetch_openrouter_models())
     if meta:
         metadata_file = state / "aider.model.metadata.json"
         metadata_file.write_text(json.dumps(meta, indent=2), encoding="utf-8")
@@ -752,17 +842,18 @@ def main(argv: list[str] | None = None) -> int:
                                               goal, args.relevant_cap_tokens)
     request_timeout = args.request_timeout or model_timeout_s()
     cmd = build_command(prefix, args.model, goal, state, test_cmd, settings_file, metadata_file,
-                        args.edit_format, args.map_tokens, files, request_timeout, read_files)
+                        args.edit_format, args.map_tokens, files, request_timeout, read_files,
+                        provider)
 
-    print(f"[harness_aider] aider {version} model=openrouter/{args.model} "
-          f"key={'set' if env.get(KEY_ENV) else 'MISSING'} price={'known' if meta else 'unknown'} "
+    print(f"[harness_aider] aider {version} model={model_name} provider={provider} "
+          f"key={'set' if env.get(key_env) else 'MISSING'} price={'known' if meta else 'unknown'} "
           f"max_reflections={args.max_reflections} add_files={args.add_files}:{files_how}"
           f"({len(files)} edit, {len(read_files)} read-only, "
           f"~{estimate_tokens(project, files + read_files)} tokens) "
           f"cost_cap=${max_cost} timeout={timeout_s:.0f}s project={project}", flush=True)
-    tracker = UsageTracker()
+    tracker = UsageTracker(prices)
     started = time.monotonic()
-    env_file = write_key_file(state, env.get(KEY_ENV))
+    env_file = write_key_file(state, env.get(key_env), key_env)
     try:
         code, killed = run_aider(cmd, project, env, timeout_s, max_cost, tracker)
     finally:
@@ -787,6 +878,11 @@ def main(argv: list[str] | None = None) -> int:
         "usage": tracker.usage(args.model),
         "harness": "aider",
         "aider_version": version,
+        "provider": provider,
+        "model": model_name,
+        "prices_per_mtok": prices,
+        "cache_prompts": provider == "anthropic",
+        "cache_write_tokens": sum(int(r.get("cache_write_tokens") or 0) for r in tracker.exact),
         "killed": killed,
         "exit_code": code,
         "cost_source": cost_source,

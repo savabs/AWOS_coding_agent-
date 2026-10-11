@@ -117,6 +117,9 @@ ARM_CHILDREN: dict[str, dict] = {
     # Head-to-head: a market harness (Aider) with no project memory. Stock Aider
     # stops after 3 follow-up rounds per message; 10 is generous to it, so a
     # win for AWOS is not a win against a handicapped competitor.
+    # Same model as AWOS: AWOS_SERIES_MODEL=claude-haiku-5-5 runs Aider on
+    # Anthropic directly (harness_aider --provider auto: ANTHROPIC_API_KEY from
+    # the source .env, prompt caching on, cost at AWOS's Haiku 5.5 prices).
     "aider": {"cmd": [PY, str(REPO / "scripts" / "harness_aider.py"), "{job_dir}", "{project}",
                       "--model", PINNED_MODEL, "--max-reflections", "10"],
               "env": {}},
