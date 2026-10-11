@@ -578,6 +578,25 @@ def test_interrupted_attempt_spend_counts_from_its_last_snapshot(tmp_path, monke
     assert host_worker.SpendTracker(tmp_path / "job").prior() == pytest.approx(0.25)
 
 
+def test_spend_counts_only_the_childs_ledger_entries(tmp_path, monkeypatch):
+    """Another AWOS process writing the shared ledger must not bill the job."""
+    ledger = tmp_path / "budget.json"
+    monkeypatch.setattr(host_worker, "LEDGER_PATH", ledger, raising=False)
+    ledger.write_text(json.dumps([{"cost": 5.0, "pid": 1}]))
+    t = host_worker.SpendTracker(tmp_path / "job")
+    t.start(1)
+    t.set_pid(4242)
+    ledger.write_text(json.dumps([{"cost": 5.0, "pid": 1}, {"cost": 0.003, "pid": 4242},
+                                  {"cost": 0.02, "pid": 999}, {"cost": 0.001}]))
+    assert t.snapshot() == pytest.approx(0.004)   # child + pid-less, not pid 999
+
+
+def test_job_ledger_cost_filters_by_pid():
+    from scaffold.agent.job_host import job_ledger_cost
+    entries = [{"cost": 0.003, "pid": 7}, {"cost": 0.02, "pid": 8}, {"cost": 0.001}]
+    assert job_ledger_cost(entries, 7) == pytest.approx(0.004)
+
+
 def test_local_only_blanks_every_cloud_api_key(repo, monkeypatch, tmp_path):
     keys = ("TAVILY_API_KEY", "SERP_API_KEY", "LLM_API_KEY", "SOMENEWPROVIDER_API_KEY")
     for k in keys:

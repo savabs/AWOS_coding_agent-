@@ -317,6 +317,43 @@ class ModelClient(Protocol):
     def format_assistant_turn(self, reply: ModelReply) -> dict[str, Any]: ...
 
 
+_EPHEMERAL = {"type": "ephemeral"}
+
+
+def anthropic_cache_enabled() -> bool:
+    """AWOS_ANTHROPIC_CACHE (default on): prompt-cache breakpoints on direct Anthropic calls."""
+    return os.getenv("AWOS_ANTHROPIC_CACHE", "1").strip().lower() not in ("0", "false", "no")
+
+
+def with_cache_breakpoints(system: Any, messages: list, tools: list) -> tuple[Any, list, list]:
+    """
+    Anthropic prompt caching: breakpoints on the tool list, the system prompt
+    and the last message, so every turn re-reads the conversation so far at the
+    cache-read price (Haiku 5.5: $0.01 vs $0.10 per MTok; prompts under the
+    model's minimum are simply not cached). Works on copies; the caller's
+    messages are never mutated. 3 of Anthropic's 4 allowed breakpoints.
+    """
+    if not anthropic_cache_enabled():
+        return system, messages, tools
+    tools = [dict(t) for t in tools]
+    if tools:
+        tools[-1]["cache_control"] = _EPHEMERAL
+    if isinstance(system, str) and system:
+        system = [{"type": "text", "text": system, "cache_control": _EPHEMERAL}]
+    messages = list(messages)
+    if messages and isinstance(messages[-1], dict):
+        last = dict(messages[-1])
+        content = last.get("content")
+        if isinstance(content, str) and content:
+            content = [{"type": "text", "text": content}]
+        if isinstance(content, list) and content and isinstance(content[-1], dict):
+            content = [dict(b) if isinstance(b, dict) else b for b in content]
+            content[-1]["cache_control"] = _EPHEMERAL
+            last["content"] = content
+            messages[-1] = last
+    return system, messages, tools
+
+
 class AnthropicToolClient:
     """Adapter for the Anthropic Messages API (native tool use)."""
 
@@ -327,12 +364,14 @@ class AnthropicToolClient:
 
     def complete(self, system, messages, registry, tool_choice: Optional[str] = None) -> ModelReply:
         extra = {"tool_choice": {"type": "tool", "name": tool_choice}} if tool_choice else {}
+        system, messages, tools = with_cache_breakpoints(system, messages,
+                                                         registry.anthropic_schemas())
         response = self._client.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
             system=system,
             messages=messages,
-            tools=registry.anthropic_schemas(),
+            tools=tools,
             **extra,
         )
         text_parts, calls = [], []

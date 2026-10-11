@@ -279,7 +279,10 @@ def child_env(job: JobSpec, budget_left: Optional[float] = None) -> dict:
 # ── Spend across attempts (default runner) ───────────────────────────────────
 
 
-def _ledger_len_and_cost(start: int = 0) -> tuple[int, float]:
+def _ledger_len_and_cost(start: int = 0, pids: Optional[list] = None) -> tuple[int, float]:
+    """(ledger length, cost of entries from `start`). With `pids`, only entries
+    those processes wrote count (pid-less entries from older writers too):
+    the ledger is shared, so another AWOS process must not bill this job."""
     try:
         entries = json.loads(LEDGER_PATH.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -289,6 +292,8 @@ def _ledger_len_and_cost(start: int = 0) -> tuple[int, float]:
     cost = 0.0
     for e in entries[start:]:
         try:
+            if pids and e.get("pid") not in (None, *pids):
+                continue
             cost += float(e.get("cost", 0) or 0)
         except (AttributeError, TypeError, ValueError):
             pass
@@ -334,12 +339,19 @@ class SpendTracker:
         data["open"] = {"attempt": attempt, "ledger_start": start, "spent_usd": 0.0}
         self._save(data)
 
+    def set_pid(self, pid: int) -> None:
+        """Bill the running attempt only for ledger entries this child writes."""
+        data = self._load()
+        if data.get("open"):
+            data["open"]["pids"] = [pid]
+            self._save(data)
+
     def snapshot(self) -> float:
         data = self._load()
         open_ = data.get("open")
         if not open_:
             return 0.0
-        _, spent = _ledger_len_and_cost(int(open_.get("ledger_start", 0)))
+        _, spent = _ledger_len_and_cost(int(open_.get("ledger_start", 0)), open_.get("pids"))
         open_["spent_usd"] = max(spent, float(open_.get("spent_usd", 0) or 0))
         self._save(data)
         return open_["spent_usd"]
@@ -445,6 +457,7 @@ def _run_child(job: JobSpec, ctx: RunContext, job_path: Path, result_path: Path,
             cwd=str(REPO), stdout=log, stderr=subprocess.STDOUT,
             env=child_env(job, budget_left=left), start_new_session=True)
     ctx.on_child(proc.pid)
+    spend.set_pid(proc.pid)
     ctx.step("child_started", pid=proc.pid)
     started = last_snap = time.monotonic()
     while proc.poll() is None:

@@ -328,6 +328,13 @@ def _ledger() -> list:
         return []
 
 
+def job_ledger_cost(entries: list, pid: int) -> float:
+    """Sum of ledger entries written by `pid`. Entries without a pid (older
+    writers) still count, since they cannot be attributed elsewhere."""
+    return sum(float(e.get("cost", 0) or 0) for e in entries
+               if isinstance(e, dict) and e.get("pid") in (None, pid))
+
+
 def _run_coding(job: Job) -> dict:
     """App #1: hand the goal to a fresh Orchestrator, planner path."""
     from scaffold.agent.orchestrator import Orchestrator
@@ -345,10 +352,12 @@ def _run_coding(job: Job) -> dict:
         reasons = [str(e) for e in report.get("errors") or []] or [report.get("goal_check_reasoning") or ""]
         result["error"] = "; ".join(r for r in reasons if r)[:500] or None
     # execute_feature does not always report its cost; the spend ledger does.
-    # Jobs run one at a time, so the entries added meanwhile are this job's.
+    # Count only entries this process wrote: the ledger is shared, and any
+    # other AWOS process (a test run, a benchmark) appending meanwhile would
+    # otherwise be billed to this job (live run: $0.0227 reported vs $0.003).
     cost = report.get("total_cost")
     if not cost:
-        cost = sum(float(e.get("cost", 0)) for e in _ledger()[ledger_before:])
+        cost = job_ledger_cost(_ledger()[ledger_before:], os.getpid())
     result["cost_usd"] = round(float(cost or 0), 6)
     return result
 
