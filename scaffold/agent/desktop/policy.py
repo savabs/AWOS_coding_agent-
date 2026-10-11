@@ -40,6 +40,7 @@ Every decision is appended to an audit log (JSONL) when one is attached.
 from __future__ import annotations
 
 import fnmatch
+import glob
 import json
 import os
 import re
@@ -1117,8 +1118,19 @@ def classify_command(cmd: str) -> List[tuple]:
 #     #, !, ^ outside quotes (subshells, process/brace/zsh expansion, comments)
 #   * no program given by path, no VAR=value prefix, no `&`, heredoc or `<&`
 #   * redirections only to /dev/null or to files inside the sandbox that are
-#     not dotfiles/dot-dirs (.git/, .venv/, .zshrc ...) or test/build config
-#     (conftest.py, pyproject.toml, setup.cfg, ...); `<` only from inside
+#     not dotfiles/dot-dirs (.git/, .venv/, .zshrc ...), test/build config
+#     (conftest.py, pyproject.toml, setup.cfg, Makefile, ...), agent
+#     instruction files (CLAUDE.md, AGENTS.md, ...), code by extension, names
+#     starting with '-' (a later glob would turn them into options), or an
+#     existing symlink, hard-linked or executable file; `<` only from inside
+#   * a digit before a redirection is judged as an operand too (shlex loses
+#     the spacing that tells `cat 1 >x` from `cat 1>x`)
+#   * no glob operand that expands, in the sandbox, to a word starting with
+#     '-' (argument injection through option-named files, CWE-88)
+#   * no option that runs a program, follows symlinks out of the sandbox, or
+#     reads file names / arguments from elsewhere: rg --pre/-z/--hostname-bin/
+#     -L/--follow, grep -R/--dereference-recursive, ugrep-style --filter/
+#     --pager/--view/--config, --files0-from, ls -L, pytest @argsfile
 #   * no shell builtins that change state (cd, pushd, source, ., exec, eval,
 #     trap, alias, export, set, ...): they are simply not on the list
 # Any parse error or surprise is a violation (fail closed).
@@ -1143,11 +1155,17 @@ _UNTRUSTED_PYTEST_LONG = {
 _UNTRUSTED_NO_WRITE = {
     "conftest.py", "pytest.ini", "tox.ini", "setup.cfg", "setup.py", "pyproject.toml",
     "sitecustomize.py", "usercustomize.py", "makefile", "gnumakefile", "package.json",
+    "justfile", "dockerfile", "containerfile", "rakefile", "gemfile", "procfile",
+    "cmakelists.txt", "build.gradle", "pom.xml", "cargo.toml",
+    # instructions a later agent session loads and obeys (prompt persistence)
+    "claude.md", "claude.local.md", "agents.md", "agent.md", "gemini.md",
+    "copilot-instructions.md", "codex.md",
 }
 #: extensions of files something may later run or import (pytest collects .py)
 _UNTRUSTED_CODE_EXT = (".py", ".pyc", ".pth", ".sh", ".bash", ".zsh", ".command", ".so",
                        ".dylib", ".js", ".mjs", ".cjs", ".ts", ".rb", ".pl", ".php",
-                       ".ini", ".cfg", ".toml", ".scpt", ".applescript", ".plist")
+                       ".ini", ".cfg", ".toml", ".scpt", ".applescript", ".plist", ".mk",
+                       ".bat", ".cmd", ".ps1", ".yml", ".yaml")
 
 
 def _resolves_inside(path: str, root: Path) -> bool:
@@ -1174,16 +1192,45 @@ def _untrusted_path_ok(arg: str, root: Path) -> bool:
     return _resolves_inside(arg, root)
 
 
+def _untrusted_name_ok(segs: Sequence[str]) -> bool:
+    segs = [sg for sg in segs if sg not in ("", ".")]
+    if not segs or any(sg.startswith((".", "-")) for sg in segs):
+        return False
+    base = segs[-1].lower()
+    return base not in _UNTRUSTED_NO_WRITE and not base.endswith(_UNTRUSTED_CODE_EXT)
+
+
 def _untrusted_write_ok(target: str, root: Path) -> bool:
     if target == "/dev/null":
         return True
     if not _untrusted_path_ok(target, root) or any(c in target for c in "*?"):
         return False
-    segs = [sg for sg in target.split("/") if sg not in ("", ".")]
-    if not segs or any(sg.startswith(".") for sg in segs):
+    if not _untrusted_name_ok(target.split("/")):
         return False
-    base = segs[-1].lower()
-    return base not in _UNTRUSTED_NO_WRITE and not base.endswith(_UNTRUSTED_CODE_EXT)
+    path = Path(target) if os.path.isabs(target) else root / target
+    try:
+        if os.path.islink(path):
+            return False                    # a link's name says nothing about its target
+        if os.path.exists(path):
+            st = os.stat(path)
+            if st.st_nlink > 1 or st.st_mode & 0o111:
+                return False                # hard link (maybe to code) / executable
+        rel = Path(os.path.realpath(path)).relative_to(root)
+    except (OSError, ValueError):
+        return False
+    return _untrusted_name_ok(rel.parts)    # where it really lands, too
+
+
+def _untrusted_glob_injects(arg: str, root: Path) -> bool:
+    """True when `arg` is a relative glob that expands, in the sandbox, to a
+    word the program would read as an option (a file named `--pre=sh`).
+    An absolute glob expands to words starting with '/', never an option."""
+    if not any(c in arg for c in "*?[") or os.path.isabs(arg):
+        return False
+    try:
+        return any(m.startswith("-") for m in glob.glob(arg, root_dir=root, recursive=True))
+    except (OSError, ValueError, re.error):
+        return True                          # cannot tell: fail closed
 
 
 def _untrusted_prescan(cmd: str) -> Optional[str]:
@@ -1222,6 +1269,11 @@ def _untrusted_plain(prog: str, args: List[str], root: Path) -> Optional[str]:
             end = True
             continue
         if not end and a.startswith("-") and a != "-":
+            if a.startswith("--files0"):
+                return f"{prog} {a.split('=', 1)[0]} reads file names from elsewhere"
+            if a.startswith("--dereference") or (
+                    prog == "ls" and not a.startswith("--") and "L" in a[1:]):
+                return f"{prog} {a} follows symlinks out of the sandbox"
             if a.startswith("--") and "=" in a and not _untrusted_path_ok(a.split("=", 1)[1], root):
                 return f"{prog} option value {a!r} is not inside the sandbox"
             continue
@@ -1238,8 +1290,12 @@ def _untrusted_grep(prog: str, args: List[str], root: Path) -> Optional[str]:
             end = True
         elif not end and a.startswith("--"):
             name, eq, val = a.partition("=")
-            if name.startswith("--pre") or name in ("--", "--search-zip"):
-                return f"{prog} {name} runs other programs"
+            if (name.startswith(("--pre", "--hostname", "--filter", "--pager", "--view",
+                                 "--format-open", "--save-config", "--config"))
+                    or name in ("--", "--search-zip")):
+                return f"{prog} {name} runs other programs or reads their config"
+            if name.startswith("--dereference") or (prog == "rg" and name == "--follow"):
+                return f"{prog} {name} follows symlinks out of the sandbox"
             if name == "--regexp":
                 if not eq:
                     k += 1                       # the pattern; not a path
@@ -1249,6 +1305,10 @@ def _untrusted_grep(prog: str, args: List[str], root: Path) -> Optional[str]:
             cl = a[1:]
             if prog == "rg" and "z" in cl:
                 return "rg -z runs decompression programs"
+            follow = "L" if prog == "rg" else "R"
+            flags = re.split("[ef]", cl, 1)[0]      # letters before an -e/-f value
+            if follow in flags:
+                return f"{prog} -{follow} follows symlinks out of the sandbox"
             for j, ch in enumerate(cl):
                 if ch in "ef":
                     rest = cl[j + 1:]
@@ -1283,6 +1343,8 @@ def _untrusted_pytest(args: List[str], root: Path) -> Optional[str]:
             if not (set(cl) <= set("qvxsl") or (cl[0] == "r" and cl[1:].isalpha())
                     or (cl[0] in "kmn" and len(cl) > 1)):
                 return f"pytest option {a} is not on the allowlist"
+        elif a.startswith("@"):
+            return f"pytest {a!r} reads more arguments from a file"
         elif not _untrusted_path_ok(a.split("::", 1)[0], root):
             return f"pytest path {a!r} is not inside the sandbox"
         k += 1
@@ -1323,6 +1385,9 @@ def _untrusted_simple(argv: List[str], root: Path) -> Optional[str]:
         return f"program given by path {prog!r}"
     if prog in _UNTRUSTED_FREE_PROGS:
         return None
+    for a in args:
+        if _untrusted_glob_injects(a, root):
+            return f"{prog} glob {a!r} expands to an option-like file name"
     if prog in _UNTRUSTED_PATH_PROGS:
         return _untrusted_plain(prog, args, root)
     if prog in _UNTRUSTED_GREP:
@@ -1363,8 +1428,9 @@ def _untrusted_violation(cmd: str, root: Path) -> Optional[str]:
             k += 1
             continue
         nxt = tokens[k + 1] if k + 1 < len(tokens) else ""
-        if argv and argv[-1].isdigit():
-            argv.pop()                           # the fd in 2>file
+        # A digit before the operator is an fd (2>x) or an operand (cat 1 >x);
+        # shlex dropped the spacing that tells them apart, so it stays in argv
+        # and is judged as an operand as well (fails closed if `1` links out).
         if core == ">&" and nxt.isdigit():
             k += 2                               # 2>&1
             continue
