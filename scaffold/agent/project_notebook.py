@@ -228,13 +228,27 @@ def notebook_model() -> str:
     return os.getenv("AWOS_NOTEBOOK_MODEL", "").strip() or DEFAULT_NOTEBOOK_MODEL
 
 
+#: Anthropic's OpenAI-compatible endpoint (chat.completions), for a claude-*
+#: notebook model when OpenRouter is off.
+ANTHROPIC_OPENAI_BASE_URL = "https://api.anthropic.com/v1/"
+
+
 def _default_client() -> Any:
-    """OpenAI-shaped client through OpenRouter; None without its key."""
+    """
+    OpenAI-shaped client: through OpenRouter when its key is set; else, for a
+    claude-* notebook model, direct Anthropic via its OpenAI-compatible
+    endpoint (the direct-Haiku runtime, OpenRouter off); else None.
+    """
     try:
         from .providers import chat_client
     except ImportError:
         from providers import chat_client
-    return chat_client()
+    client = chat_client()
+    if client is None and notebook_model().startswith("claude-"):
+        key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+        if key:
+            client = chat_client(key, ANTHROPIC_OPENAI_BASE_URL)
+    return client
 
 
 def build_update_prompt(old: str, goal: str, outcome: dict, trace: str) -> str:
@@ -432,6 +446,9 @@ def update_notebook(
             max_tokens=MAX_OUTPUT_TOKENS,
             tracker=tracker,
             request_type="notebook",
+            # Anthropic rejects `temperature` for claude-haiku-5-5 (400
+            # "temperature is deprecated for this model"); send none there.
+            **({"temperature": None} if str(model).startswith("claude-") else {}),
         )
     except ModelReplyError as exc:
         what = "reply cut off" if isinstance(exc, TruncatedReplyError) else "empty reply"
