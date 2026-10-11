@@ -10,6 +10,7 @@ No new dependencies — uses stdlib concurrent.futures only.
 from __future__ import annotations
 
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable
 
@@ -20,7 +21,25 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-MAX_WORKERS = 4  # cap concurrent LLM API calls
+MAX_WORKERS = 4  # cap concurrent LLM API calls (cloud default)
+
+
+def max_workers() -> int:
+    """Concurrent tasks per wave.
+
+    AWOS_DAG_MAX_WORKERS wins when set. In local mode (AWOS_PROVIDER=local) the
+    cap follows AWOS_LOCAL_SLOTS (default 1): llama-server serves one request
+    per slot, so more workers only queue behind each other. Otherwise MAX_WORKERS.
+    Read at call time so a run's env applies without re-import.
+    """
+    raw = os.environ.get("AWOS_DAG_MAX_WORKERS", "").strip()
+    if not raw and os.environ.get("AWOS_PROVIDER", "").strip().lower() == "local":
+        raw = os.environ.get("AWOS_LOCAL_SLOTS", "1").strip()
+    try:
+        n = int(raw) if raw else MAX_WORKERS
+    except ValueError:
+        n = MAX_WORKERS
+    return max(1, n)
 
 
 class DAGExecutor:
@@ -67,7 +86,7 @@ class DAGExecutor:
             if len(wave) == 1:
                 all_results.append(task_fn(wave[0]))
             else:
-                workers = min(MAX_WORKERS, len(wave))
+                workers = min(max_workers(), len(wave))
                 with ThreadPoolExecutor(max_workers=workers) as pool:
                     futures = {pool.submit(task_fn, task): task for task in wave}
                     for fut in as_completed(futures):
