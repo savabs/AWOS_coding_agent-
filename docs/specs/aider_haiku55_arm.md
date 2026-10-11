@@ -38,3 +38,9 @@ solved all 4, at $0.0028, $0.0051, $0.0028 and $0.0035.
 5. Total spend is at most $0.50. Stop early if the cumulative cost passes $0.40.
 
 **Solved count.** Reported as is. With n = 4 and a single run, it supports no comparative claim about Aider versus AWOS. The stats rule (`docs/specs/stats_decision_rule.md`) does not apply, because this is not an A/B.
+
+## Result so far (2026-10-11, partial)
+
+- Run 1, `real_attrs_1513`: Anthropic returned a 400 ("`temperature` is deprecated for this model") and Aider got 0 responses. job_series nonetheless scored it a fair "not solved". Both problems are fixed in commit 3e352cc: the harness sends no temperature to Claude 5.x, and a run with a provider error and 0 responses is now `aider_no_edit=no_model_response`, which counts as invalid.
+- Run 2, `real_attrs_1513`: **solved**, hidden tests 163/163, 1 turn, $0.008396 (`token_price_table`). This matches litellm/Aider's own figure of $0.008396 exactly. That confirms `prompt_tokens` include the cache writes: 65,205 written, 0 read. AWOS reference on this issue: $0.0028.
+- `real_attrs_1593`, `real_boltons_428` and `real_boltons_458` were started but had not finished when this track had to report. Their logs are in `b1_runs/*.log`. Spend so far is about $0.0084. Not counted: whatever the three in-flight runs used before they were cut off; the arm's per-job cap is $1.
