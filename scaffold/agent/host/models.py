@@ -16,7 +16,10 @@ from typing import Any, Optional
 
 QUEUED, RUNNING, PAUSED = "queued", "running", "paused"
 DONE, FAILED, CANCELLED = "done", "failed", "cancelled"
-STATES = (QUEUED, RUNNING, PAUSED, DONE, FAILED, CANCELLED)
+#: Parked until the owner fixes something outside the job (e.g. credentials);
+#: not final, never retried in a loop. See docs/specs/supervision_autopilot.md.
+BLOCKED = "blocked"
+STATES = (QUEUED, RUNNING, PAUSED, BLOCKED, DONE, FAILED, CANCELLED)
 FINAL_STATES = (DONE, FAILED, CANCELLED)
 
 KINDS = ("coding",)

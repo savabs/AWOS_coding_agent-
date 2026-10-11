@@ -33,3 +33,6 @@ def _no_live_provider_keys(monkeypatch):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("AWOS_GOAL_CHECK", "0")
     monkeypatch.setenv("AWOS_NOTEBOOK", "0")
+    # Tests never pop real macOS notifications or probe providers over HTTP.
+    monkeypatch.setenv("AWOS_NOTIFY_MACOS", "0")
+    monkeypatch.setenv("AWOS_HOST_KEY_CHECK", "0")
