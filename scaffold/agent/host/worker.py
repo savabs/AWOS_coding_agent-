@@ -256,6 +256,14 @@ def verify_enabled() -> bool:
     return os.getenv("AWOS_HOST_VERIFY_TESTS", "1").strip().lower() not in ("0", "false", "no")
 
 
+def goal_check_skip_enabled() -> bool:
+    """AWOS_HOST_SKIP_GOAL_CHECK (default OFF): skip the LLM goal check when the
+    repo has tests. Off by default because existing tests rarely cover a new
+    multi-part goal: live proof9 (2026-10-11) came back `done` with only one of
+    its parts fixed. Turn on only for jobs whose tests define the goal."""
+    return os.getenv("AWOS_HOST_SKIP_GOAL_CHECK", "0").strip().lower() in ("1", "true", "yes")
+
+
 def has_tests(workspace: str) -> bool:
     """A pytest-style test file anywhere in the workspace."""
     ws = Path(workspace)
@@ -503,7 +511,8 @@ def _run_child(job: JobSpec, ctx: RunContext, job_path: Path, result_path: Path,
                                           "ability": job.kind, "attempts": job.attempts})
     timeout = job_host._timeout_sec()
     env = child_env(job, budget_left=left,
-                    skip_goal_check=bool(base) and verify_enabled() and has_tests(workspace))
+                    skip_goal_check=goal_check_skip_enabled() and bool(base)
+                    and verify_enabled() and has_tests(workspace))
     deferred = ctx.job_dir / DEFERRED_ROLLBACK
     deferred.unlink(missing_ok=True)
     if base and autopilot.continuations_used(ctx.job_dir) < autopilot.max_continuations():
