@@ -22,7 +22,9 @@ Job host (always-on; jobs survive crashes and restarts):
 Host queue (M1; SQLite under AWOS_HOST_DIR, default ~/.awos/host):
     awos submit "<goal>" --repo PATH [--budget USD] [--privacy local_only|cloud_ok]
     awos serve --worker [--once] [--runner sleep|module:func]   Run the host worker
-    awos status [id]                  List host jobs, or show one
+    awos status [id] [--digest]       List host jobs, show one, or print the digest
+    awos keys [--json]                Check provider keys without spending
+    awos unblock <id>                 Re-queue a blocked job
     awos cancel <id>                  Cancel a host job
 
 Advanced commands:
@@ -1184,6 +1186,10 @@ def cmd_status(args):
     from scaffold.agent.host.queue import JobQueue
 
     queue = JobQueue()
+    if getattr(args, "digest", False):
+        from scaffold.agent.host.autopilot import digest_for_owner
+        print(digest_for_owner(queue))
+        return
     if args.job_id:
         job = queue.get(args.job_id)
         if job is None:
@@ -1201,6 +1207,27 @@ def cmd_status(args):
         goal = goal if len(goal) <= 56 else goal[:53] + "..."
         print(f"  {j.id[:12]:<12} {j.state:<10} {j.attempts:>3} {_host_age(j.created_at):>5} "
               f"{j.budget_usd:>7.2f}  {goal}")
+
+
+def cmd_keys(args):
+    """Check each provider's credentials without spending (never prints keys)."""
+    from scaffold.agent.key_health import main as keys_main
+    sys.exit(keys_main(as_json=getattr(args, "json", False)))
+
+
+def cmd_unblock(args):
+    """Re-queue a blocked host-queue job (e.g. after fixing a key)."""
+    from scaffold.agent.host.queue import JobQueue
+
+    queue = JobQueue()
+    job = queue.get(args.job_id)
+    if job is None:
+        sys.exit(f"No such job: {args.job_id}")
+    if not queue.unblock(job.id):
+        sys.exit(f"Job {job.id[:12]} is {job.state}, not blocked")
+    from scaffold.agent.notify import forget
+    forget((job.result or {}).get("dedupe_key") or "", root=queue.root)
+    print(f"{job.id[:12]} re-queued")
 
 
 def cmd_cancel(args):
@@ -1921,6 +1948,13 @@ def build_parser() -> argparse.ArgumentParser:
                         help="With --repo: local_only blanks cloud API keys for the job (default cloud_ok)")
     status = sub.add_parser("status", help="List host-queue jobs, or show one")
     status.add_argument("job_id", nargs="?", default=None, metavar="JOB_ID")
+    status.add_argument("--digest", action="store_true",
+                        help="Short human digest: running, queued, finished since last digest, "
+                             "blocked (with the action to take), spend today")
+    keys = sub.add_parser("keys", help="Check provider credentials without spending (ok/unauthorized/...)")
+    keys.add_argument("--json", action="store_true", help="Output as JSON")
+    unblock = sub.add_parser("unblock", help="Re-queue a blocked host-queue job")
+    unblock.add_argument("job_id", metavar="JOB_ID")
     cancel = sub.add_parser("cancel", help="Cancel a host-queue job")
     cancel.add_argument("job_id", metavar="JOB_ID")
     host = sub.add_parser("host", help="Run the job host: take queued jobs until stopped")

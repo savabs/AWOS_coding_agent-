@@ -34,7 +34,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from .models import CANCELLED, DONE, FAILED, JobSpec, now_iso
+from . import autopilot
+from .models import BLOCKED, CANCELLED, DONE, FAILED, JobSpec, now_iso
 from .queue import JobQueue, max_attempts
 
 REPO = Path(__file__).resolve().parents[3]
@@ -307,9 +308,16 @@ def _ledger_len_and_cost(start: int = 0, pids: Optional[list] = None) -> tuple[i
     if not isinstance(entries, list):
         return 0, 0.0
     cost = 0.0
-    for e in entries[start:]:
+    for i, e in enumerate(entries):
         try:
-            if pids and e.get("pid") not in (None, *pids):
+            pid = e.get("pid")
+            if pids and pid in pids:
+                # Count by pid wherever it sits: the ledger drops last month's
+                # entries at month rollover, so an index taken before the child
+                # started can point past the end (live run 2026-10-11: $0.001
+                # spent, $0 reported).
+                pass
+            elif i < start or (pids and pid is not None):
                 continue
             cost += float(e.get("cost", 0) or 0)
         except (AttributeError, TypeError, ValueError):
@@ -411,14 +419,37 @@ def subprocess_runner(job: JobSpec, ctx: RunContext) -> dict:
                            f"(spent ${prior:.4f})")
     spend.start(job.attempts)
     try:
-        return _run_child(job, ctx, job_path, result_path, left, spend)
+        result = _run_child(job, ctx, job_path, result_path, left, spend)
     finally:
         total = spend.close()
         ctx.step("spend", total_usd=round(total, 6))
+    if isinstance(result, dict):
+        # The host's per-pid ledger count is the authority; the child's own
+        # figure misses spend when the ledger rotates mid-run.
+        try:
+            child = float(result.get("cost_usd") or 0)
+        except (TypeError, ValueError):
+            child = 0.0
+        result["cost_usd"] = round(max(child, total - prior), 6)
+    return result
 
 
 WORKSPACE_DIR = "workspace"
 BASE_COMMIT_FILE = "base_commit"
+#: Rollbacks the child recorded instead of applying (git_manager AWOS_DEFER_ROLLBACK).
+DEFERRED_ROLLBACK = "deferred_rollback.jsonl"
+
+
+def settle_rollback(job_dir: Path, keep: bool) -> int:
+    """Apply (keep=False) or drop (keep=True) the child's deferred rollback."""
+    path = job_dir / DEFERRED_ROLLBACK
+    if not path.exists():
+        return 0
+    if keep:
+        path.unlink(missing_ok=True)
+        return 0
+    from scaffold.agent.git_manager import apply_deferred
+    return apply_deferred(str(path))
 
 
 def prepare_workspace(job: JobSpec, job_dir: Path) -> tuple[str, Optional[str]]:
@@ -462,9 +493,23 @@ def _run_child(job: JobSpec, ctx: RunContext, job_path: Path, result_path: Path,
 
     workspace, base = prepare_workspace(job, ctx.job_dir)
     ctx.step("workspace", path=workspace, base_commit=base)
-    job_host.write_json_atomic(job_path, {"id": job.id, "goal": job.goal, "root": workspace,
+    autopilot.record_attempt_start(ctx.job_dir, workspace, base, job.attempts)
+    goal = job.goal
+    note = autopilot.take_continue_note(ctx.job_dir)
+    if note:   # an auto-continue attempt: same workspace, told where it stopped
+        goal = f"{job.goal}\n\nNOTE: {note}"
+        ctx.step("auto_continue_note", note=note)
+    job_host.write_json_atomic(job_path, {"id": job.id, "goal": goal, "root": workspace,
                                           "ability": job.kind, "attempts": job.attempts})
     timeout = job_host._timeout_sec()
+    env = child_env(job, budget_left=left,
+                    skip_goal_check=bool(base) and verify_enabled() and has_tests(workspace))
+    deferred = ctx.job_dir / DEFERRED_ROLLBACK
+    deferred.unlink(missing_ok=True)
+    if base and autopilot.continuations_used(ctx.job_dir) < autopilot.max_continuations():
+        # Keep a stopped attempt's edits until the worker decides whether to
+        # auto-continue; it applies the recorded rollback otherwise.
+        env["AWOS_DEFER_ROLLBACK"] = str(deferred)
     with open(ctx.job_dir / "worker.log", "a", encoding="utf-8") as log:
         log.write(f"\n===== child, attempt {job.attempts} at {now_iso()} =====\n")
         log.flush()
@@ -472,9 +517,7 @@ def _run_child(job: JobSpec, ctx: RunContext, job_path: Path, result_path: Path,
             [sys.executable, str(Path(job_host.__file__).resolve()), "_child",
              str(job_path), str(result_path), str(os.getpid())],
             cwd=str(REPO), stdout=log, stderr=subprocess.STDOUT,
-            env=child_env(job, budget_left=left,
-                          skip_goal_check=bool(base) and verify_enabled() and has_tests(workspace)),
-            start_new_session=True)
+            env=env, start_new_session=True)
     ctx.on_child(proc.pid)
     spend.set_pid(proc.pid)
     ctx.step("child_started", pid=proc.pid)
@@ -516,6 +559,7 @@ def _run_child(job: JobSpec, ctx: RunContext, job_path: Path, result_path: Path,
             if tests:
                 result["tests"] = tests
                 ctx.step("verify_tests", **tests)
+        autopilot.record_tests(ctx.job_dir, result.get("tests"))
     return result
 
 
@@ -550,6 +594,25 @@ def verify_tests(workspace: str) -> Optional[dict]:
     return {"status": status, "passed": passed, "failed": failed, "command": shown}
 
 
+def _final_summary(job: JobSpec, state: str, result: dict, error: Optional[str]) -> str:
+    """One line for the owner: state, goal, tests, cost, branch (or the error)."""
+    goal = job.goal.strip().splitlines()[0][:60] if job.goal.strip() else job.id[:8]
+    parts = [f"{state}: {goal}"]
+    tests = result.get("tests")
+    if isinstance(tests, dict):
+        parts.append(f"tests {tests.get('status')} {tests.get('passed', 0)}p/{tests.get('failed', 0)}f")
+    try:
+        parts.append(f"${float(result.get('cost_usd') or 0):.4f}")
+    except (TypeError, ValueError):
+        pass
+    branch = (result.get("handoff") or {}).get("branch")
+    if branch:
+        parts.append(f"branch {branch}")
+    if error:
+        parts.append(error[:120])
+    return " | ".join(parts)
+
+
 RUNNERS = {"default": subprocess_runner, "subprocess": subprocess_runner, "sleep": sleep_runner}
 
 
@@ -576,12 +639,26 @@ def _kill_orphan(pid: Optional[int], started: Optional[str]) -> None:
 class HostWorker:
     def __init__(self, queue: Optional[JobQueue] = None,
                  runner: Optional[Callable[[JobSpec, RunContext], dict]] = None,
-                 log: Callable[[str], None] = print):
+                 log: Callable[[str], None] = print,
+                 key_checker: Optional[Callable[[], list]] = None,
+                 notifier: Optional[Callable[..., Any]] = None):
         self.queue = queue or JobQueue()
         self.runner = runner or subprocess_runner
         self._print = log
         self._stop = False
         self._handoff = _load_handoff()
+        # Key checks hit the network (free endpoints): wired by default only for
+        # the real runner; tests inject a fake checker. AWOS_HOST_KEY_CHECK=0
+        # skips the check before each job; an auth error is still diagnosed.
+        if key_checker is None and self.runner is subprocess_runner:
+            from scaffold.agent.key_health import check_all
+            key_checker = check_all
+        self.key_checker = key_checker
+        self.precheck = os.getenv("AWOS_HOST_KEY_CHECK", "1").strip().lower() not in ("0", "false", "no")
+        if notifier is None:
+            from scaffold.agent.notify import notify as notifier
+        self.notifier = notifier
+        self._last_unblock_check = float("-inf")
 
     # logging: stdout + the job's worker.log
     def log(self, msg: str, job_id: Optional[str] = None) -> None:
@@ -651,6 +728,9 @@ class HostWorker:
         ctx = RunContext(job, self.queue, journal, lambda: self._stop,
                          lambda m: self.log(m, jid))
         ctx.step(f"attempt_{job.attempts}_start")
+        problem = self._credentials_problem(job) if self.precheck else None
+        if problem:
+            return self._block(job, problem, "before the run")
         try:
             result = self.runner(job, ctx)
         except StopRequested as exc:
@@ -667,11 +747,142 @@ class HostWorker:
             return self._finish(job, FAILED, {"success": False},
                                 f"{exc} (attempt {job.attempts} of {max_attempts()})")
         except Exception as exc:  # the job failed; the worker carries on
-            return self._finish(job, FAILED, {"success": False}, str(exc) or type(exc).__name__)
+            return self._after_failure(job, {"success": False}, str(exc) or type(exc).__name__)
         result = dict(result or {})
         if result.get("success"):
+            self._apply_rollback(job, result)
             return self._finish(job, DONE, result, None)
-        return self._finish(job, FAILED, result, result.get("error") or "the runner reported failure")
+        return self._after_failure(job, result, result.get("error") or "the runner reported failure")
+
+    def _apply_rollback(self, job: JobSpec, result: dict) -> None:
+        """Apply the child's deferred rollback (the pre-autopilot behaviour); the
+        host's test evidence is re-taken if it changed the workspace."""
+        jdir = self.queue.job_dir(job.id)
+        try:
+            touched = settle_rollback(jdir, keep=False)
+        except Exception as exc:
+            self.log(f"[worker] {job.id[:8]} deferred rollback failed: {exc}", job.id)
+            return
+        if touched:
+            self.log(f"[worker] {job.id[:8]} applied deferred rollback ({touched} file(s))", job.id)
+            ws = result.get("workspace")
+            if result.get("tests") and ws and result.get("base_commit"):
+                tests = verify_tests(ws)
+                if tests:
+                    result["tests"] = tests
+
+    # ── supervision autopilot (docs/specs/supervision_autopilot.md) ──────────
+
+    def _credentials_problem(self, job: JobSpec) -> Optional[dict]:
+        if self.key_checker is None:
+            return None
+        from scaffold.agent.key_health import credentials_problem
+        try:
+            checks = self.key_checker()
+        except Exception as exc:  # a broken check must not block work
+            self.log(f"[worker] {job.id[:8]} key check failed: {exc}", job.id or None)
+            return None
+        problem = credentials_problem(checks, job.privacy)
+        if problem:
+            problem["checks"] = [c.to_dict() if hasattr(c, "to_dict") else c for c in checks]
+        return problem
+
+    def _after_failure(self, job: JobSpec, result: dict, error: str) -> JobSpec:
+        """A failed attempt: credentials -> blocked; limit + progress -> one continuation; else failed."""
+        jdir = self.queue.job_dir(job.id)
+        kind = autopilot.classify_stop(error, result, autopilot.log_tail(jdir))
+        if kind == autopilot.CREDENTIALS:
+            problem = self._credentials_problem(job) or {
+                "provider": "unknown", "status": "auth_error",
+                "action": "check the provider API key in .env (run `awos keys`)",
+                "summary": f"the provider rejected the credentials: {error[:120]}"}
+            self._apply_rollback(job, result)
+            return self._block(job, problem, "after an auth error")
+        ws = result.get("workspace") or (str(jdir / WORKSPACE_DIR) if (jdir / WORKSPACE_DIR).is_dir() else "")
+        base = result.get("base_commit")
+        if not base and (jdir / BASE_COMMIT_FILE).exists():
+            base = (jdir / BASE_COMMIT_FILE).read_text(encoding="utf-8").strip()
+        go, why = autopilot.continuation_decision(job, jdir, kind, error, ws, base, result.get("tests"))
+        if go:
+            settle_rollback(jdir, keep=True)   # the next attempt builds on these edits
+            summary = autopilot.stop_summary(error, result, autopilot.log_tail(jdir), ws, base)
+            data = autopilot.queue_continuation(jdir, summary, why)
+            if self.queue.requeue(job.id, error=f"auto-continue {data['used']}: {error[:200]}"):
+                self.log(f"[worker] {job.id[:8]} {kind} stop with progress ({why}) -> "
+                         f"auto-continue {data['used']}/{autopilot.max_continuations()}", job.id)
+                self._notify("continued", job,
+                             f"auto-continue {data['used']}: {why}; stopped on: {error[:100]}",
+                             str(jdir / "worker.log"))
+                return self.queue.get(job.id)
+        self._apply_rollback(job, result)
+        result = {**result, "autocontinue": {"kind": kind, "continued": False, "reason": why}}
+        if kind == autopilot.LIMIT:
+            error = f"{error} (no auto-continue: {why})"
+        return self._finish(job, FAILED, result, error)
+
+    def _block(self, job: JobSpec, problem: dict, when: str) -> JobSpec:
+        jdir = self.queue.job_dir(job.id)
+        action = problem.get("action") or "run `awos keys`"
+        reason = f"blocked: credentials ({problem.get('provider')} {problem.get('status')})"
+        report = jdir / "blocked.md"
+        try:
+            report.write_text("\n".join([
+                f"# Job {job.id} — blocked: credentials", "",
+                f"- **Goal:** {job.goal}", f"- **When:** {when}",
+                f"- **Problem:** {problem.get('summary')}", f"- **Do:** {action}",
+                "", "The job keeps its workspace. Once `awos keys` shows ok, the worker",
+                f"re-queues it by itself (or run `awos unblock {job.id[:8]}`).", ""]),
+                encoding="utf-8")
+        except OSError:
+            pass
+        dedupe = f"blocked|credentials|{problem.get('provider')}|{problem.get('status')}"
+        result = {"success": False, "blocked": "credentials", "action": action,
+                  "problem": {k: v for k, v in problem.items() if k != "checks"},
+                  "keys": problem.get("checks"), "dedupe_key": dedupe}
+        self.queue.block(job.id, reason, result=result)
+        self.log(f"[worker] {job.id[:8]} {reason} {when} -> {action}", job.id)
+        # One notification per credential problem, however many jobs it parks.
+        self._notify("blocked", job, f"{reason}: {action}", str(report),
+                     dedupe_key=dedupe)
+        self._write_digest()
+        return self.queue.get(job.id)
+
+    def unblock_if_keys_ok(self, min_interval: float = 60.0) -> list[str]:
+        """Re-queue credential-blocked jobs once the keys check out again."""
+        if self.key_checker is None:
+            return []
+        blocked = [j for j in self.queue.list((BLOCKED,))
+                   if (j.result or {}).get("blocked") == "credentials"]
+        if not blocked or time.monotonic() - self._last_unblock_check < min_interval:
+            return []
+        self._last_unblock_check = time.monotonic()
+        freed = []
+        for job in blocked:
+            if self._credentials_problem(job) is None and self.queue.unblock(job.id):
+                freed.append(job.id)
+                self.log(f"[worker] {job.id[:8]} credentials ok again -> queued", job.id)
+                # resolved: the next credentials problem must notify again
+                from scaffold.agent.notify import forget
+                forget((job.result or {}).get("dedupe_key") or "", root=self.queue.root)
+        if freed:
+            self._notify("unblocked", JobSpec(id="", goal="", repo_path=""),
+                         f"credentials ok again; {len(freed)} job(s) re-queued", "",
+                         dedupe_key=f"unblocked|{now_iso()}")
+        return freed
+
+    def _notify(self, event: str, job: JobSpec, summary: str, report: str,
+                dedupe_key: Optional[str] = None) -> None:
+        try:
+            self.notifier(event, job.id, summary, report, root=self.queue.root,
+                          dedupe_key=dedupe_key)
+        except Exception as exc:
+            self.log(f"[worker] notify failed: {exc}")
+
+    def _write_digest(self) -> None:
+        try:
+            autopilot.write_digest(self.queue)
+        except Exception as exc:
+            self.log(f"[worker] digest failed: {exc}")
 
     def _finish(self, job: JobSpec, state: str, result: dict, error: Optional[str]) -> JobSpec:
         # hand-off reads tests/cost_usd/minutes/summary at the top level.
@@ -688,6 +899,15 @@ class HostWorker:
             self.log(f"[worker] {job.id[:8]} workspace cleanup failed: {exc}", job.id)
         self.queue.finish(job.id, state, result=result, error=error)
         self.log(f"[worker] {job.id[:8]} {state}" + (f": {error}" if error else ""), job.id)
+        spent = autopilot.spent_so_far(self.queue.job_dir(job.id))
+        try:
+            shown = {**result, "cost_usd": max(float(result.get("cost_usd") or 0), spent)}
+        except (TypeError, ValueError):
+            shown = result
+        self._notify(state, job, _final_summary(job, state, shown, error),
+                     (handoff or {}).get("report_path") or (handoff or {}).get("report")
+                     or str(self.queue.job_dir(job.id) / "report.md"))
+        self._write_digest()
         return self.queue.get(job.id)
 
     def serve(self, poll_sec: float = 2.0, once: bool = False) -> None:
@@ -719,6 +939,7 @@ class HostWorker:
                 self.log(f"[worker] {job.id[:8]} was interrupted -> {job.state} "
                          f"(attempts {job.attempts})", job.id)
             while not self._stop:
+                self.unblock_if_keys_ok()
                 job = self.queue.claim_next(me, me_started)
                 if job is None:
                     if once:

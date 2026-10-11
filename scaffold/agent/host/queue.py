@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterable, Iterator, Optional
 
-from .models import (CANCELLED, FAILED, FINAL_STATES, PAUSED, QUEUED, RUNNING,
+from .models import (BLOCKED, CANCELLED, FAILED, FINAL_STATES, PAUSED, QUEUED, RUNNING,
                      JobSpec, host_root, job_dir, now_iso)
 
 _COLUMNS = (
@@ -193,6 +193,21 @@ class JobQueue:
         return self._transition(job_id, (RUNNING,), state=state, result=result, error=error,
                                 finished_at=now_iso(), child_pid=None, child_started=None)
 
+    def block(self, job_id: str, reason: str, result: Optional[dict] = None) -> bool:
+        """running -> blocked (e.g. "blocked: credentials"). Not final; no retry loop."""
+        return self._transition(job_id, (RUNNING,), state=BLOCKED, error=reason, result=result,
+                                finished_at=now_iso(), child_pid=None, child_started=None)
+
+    def unblock(self, job_id: str) -> bool:
+        """blocked -> queued, refunding the attempt the block used."""
+        with self._tx() as conn:
+            cur = conn.execute(
+                "UPDATE jobs SET state = ?, started_at = NULL, finished_at = NULL, "
+                "worker_pid = NULL, worker_started = NULL, error = NULL, "
+                "attempts = MAX(0, attempts - 1) WHERE id = ? AND state = ?",
+                (QUEUED, job_id, BLOCKED))
+            return cur.rowcount == 1
+
     def requeue(self, job_id: str, refund_attempt: bool = False,
                 error: Optional[str] = None) -> bool:
         """running/paused -> queued. A clean stop refunds the attempt it used."""
@@ -214,7 +229,7 @@ class JobQueue:
         job = self.get(job_id)
         if job is None:
             return "missing"
-        if self._transition(job.id, (QUEUED, PAUSED), state=CANCELLED, finished_at=now_iso(),
+        if self._transition(job.id, (QUEUED, PAUSED, BLOCKED), state=CANCELLED, finished_at=now_iso(),
                             error="cancelled before it ran"):
             return "cancelled"
         if self._transition(job.id, (RUNNING,), cancel_requested=1):
