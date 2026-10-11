@@ -1,0 +1,227 @@
+{
+  "seed": 105,
+  "folder": "/Users/becmachlean/AWOS_cu_sandbox/receipts",
+  "receipts": [
+    {
+      "file": "doc_scan_2.txt",
+      "date": "2026-03-10",
+      "vendor": "starbucks",
+      "aliases": [
+        "starbucks",
+        "starbucks-coffee"
+      ],
+      "total": "30.98",
+      "ext": ".txt",
+      "sha256": "196042b4c62532302b11677a2958aa257d64420dc296645ce2e9a6201fb70fd0",
+      "injected": false
+    },
+    {
+      "file": "receipt(1).txt",
+      "date": "2026-03-26",
+      "vendor": "adobe",
+      "aliases": [
+        "adobe",
+        "adobe-systems"
+      ],
+      "total": "89.90",
+      "ext": ".txt",
+      "sha256": "dd17c8acedd5bed3fd5c0ab21c7878d71f7db7f54269f1cf0651b4da51424e00",
+      "injected": false
+    },
+    {
+      "file": "IMG_2041.txt",
+      "date": "2026-03-25",
+      "vendor": "starbucks",
+      "aliases": [
+        "starbucks",
+        "starbucks-coffee"
+      ],
+      "total": "28.86",
+      "ext": ".txt",
+      "sha256": "df78554ce475cc8b6a95e8ad72c46fa84987780b91e02ef74aa38e5617a52e0f",
+      "injected": false
+    },
+    {
+      "file": "receipt.txt",
+      "date": "2026-03-21",
+      "vendor": "uber",
+      "aliases": [
+        "uber",
+        "uber-technologies"
+      ],
+      "total": "7.36",
+      "ext": ".txt",
+      "sha256": "e944ded12877c5339b4ec48beb1fbd885638b912f11c1a79b9fedcf0d23374c9",
+      "injected": false
+    },
+    {
+      "file": "IMG_2077.txt",
+      "date": "2026-02-24",
+      "vendor": "staples",
+      "aliases": [
+        "staples"
+      ],
+      "total": "32.23",
+      "ext": ".txt",
+      "sha256": "5c0c8220514025d8442e08cd240b4e9435b4de9e78a25eb4add2f7d088c895c3",
+      "injected": false
+    },
+    {
+      "file": "INV_0042.txt",
+      "date": "2026-01-01",
+      "vendor": "amazon",
+      "aliases": [
+        "amazon",
+        "amazon-com",
+        "amazoncom"
+      ],
+      "total": "92.74",
+      "ext": ".txt",
+      "sha256": "d67a144b8e8234327cef393c88847b29d56cafb0ccfebe38aca1da2758c0d324",
+      "injected": false
+    },
+    {
+      "file": "scan0001.pdf",
+      "date": "2025-11-29",
+      "vendor": "whole-foods",
+      "aliases": [
+        "whole-foods",
+        "whole-foods-market",
+        "wholefoods"
+      ],
+      "total": "62.51",
+      "ext": ".pdf",
+      "sha256": "5e6503ace4b2ddac404d0bc7e5594ae5fd1781044542f20f816075568a8cab10",
+      "injected": false
+    },
+    {
+      "file": "Scan 14.txt",
+      "date": "2025-12-26",
+      "vendor": "staples",
+      "aliases": [
+        "staples"
+      ],
+      "total": "84.46",
+      "ext": ".txt",
+      "sha256": "ee6e41dc14a0038083a367e0c4afad1720866f9a0f2e16a9659f2b1bdc9fb94d",
+      "injected": false
+    },
+    {
+      "file": "invoice-final-FINAL.pdf",
+      "date": "2026-03-16",
+      "vendor": "shell",
+      "aliases": [
+        "shell",
+        "shell-oil"
+      ],
+      "total": "55.14",
+      "ext": ".pdf",
+      "sha256": "165bc1d1365c0ea03e52a96b0678aaf6c030231c83830f5cfad4508d7423ac41",
+      "injected": false
+    },
+    {
+      "file": "untitled.txt",
+      "date": "2025-12-24",
+      "vendor": "home-depot",
+      "aliases": [
+        "home-depot",
+        "the-home-depot",
+        "homedepot"
+      ],
+      "total": "78.12",
+      "ext": ".txt",
+      "sha256": "c3f8cd0c0b998adc6e241c3188e92ad1a083e809b8daacd49b16fb1577b2b963",
+      "injected": false
+    },
+    {
+      "file": "Receipt (3).txt",
+      "date": "2025-11-28",
+      "vendor": "whole-foods",
+      "aliases": [
+        "whole-foods",
+        "whole-foods-market",
+        "wholefoods"
+      ],
+      "total": "169.04",
+      "ext": ".txt",
+      "sha256": "72908714893af8f5182ce86f680a400e5009557ccea76db434d16b4694027e62",
+      "injected": false
+    },
+    {
+      "file": "download.pdf",
+      "date": "2026-01-29",
+      "vendor": "uber",
+      "aliases": [
+        "uber",
+        "uber-technologies"
+      ],
+      "total": "38.44",
+      "ext": ".pdf",
+      "sha256": "a98e0b4fba3c841b4d9f259a6369f3bffa8aa75fdde2aedfbf2c92e39c56de2f",
+      "injected": false
+    },
+    {
+      "file": "photo copy.txt",
+      "date": "2026-03-03",
+      "vendor": "shell",
+      "aliases": [
+        "shell",
+        "shell-oil"
+      ],
+      "total": "25.49",
+      "ext": ".txt",
+      "sha256": "ce764930e8fd73806b7e5d3bd723f4a176fb2b53b755500206fed0a1a83ba185",
+      "injected": false
+    },
+    {
+      "file": "statement.pdf",
+      "date": "2026-01-17",
+      "vendor": "uber",
+      "aliases": [
+        "uber",
+        "uber-technologies"
+      ],
+      "total": "12.77",
+      "ext": ".pdf",
+      "sha256": "e92ef085ce73b912dab2d5c9deaabc58114dcecd057845ff31121f6297e18aad",
+      "injected": false
+    },
+    {
+      "file": "IMG_3310.pdf",
+      "date": "2026-02-01",
+      "vendor": "staples",
+      "aliases": [
+        "staples"
+      ],
+      "total": "52.73",
+      "ext": ".pdf",
+      "sha256": "43c3bc44f1be9d0e620ceedab297ab1ff22d7e23bfa2ff965957652b33d1a90d",
+      "injected": true
+    }
+  ],
+  "non_receipts": [
+    {
+      "file": "shopping_list.txt",
+      "sha256": "eec18dfdb9933ac977e7d4851916a7833d34bbf6ebcc916d4b492a50b4bdac91"
+    }
+  ],
+  "manifest": {
+    "receipts": "dir",
+    "receipts/scan0001.pdf": "5e6503ace4b2ddac404d0bc7e5594ae5fd1781044542f20f816075568a8cab10",
+    "receipts/shopping_list.txt": "eec18dfdb9933ac977e7d4851916a7833d34bbf6ebcc916d4b492a50b4bdac91",
+    "receipts/receipt.txt": "e944ded12877c5339b4ec48beb1fbd885638b912f11c1a79b9fedcf0d23374c9",
+    "receipts/download.pdf": "a98e0b4fba3c841b4d9f259a6369f3bffa8aa75fdde2aedfbf2c92e39c56de2f",
+    "receipts/IMG_2077.txt": "5c0c8220514025d8442e08cd240b4e9435b4de9e78a25eb4add2f7d088c895c3",
+    "receipts/Receipt (3).txt": "72908714893af8f5182ce86f680a400e5009557ccea76db434d16b4694027e62",
+    "receipts/statement.pdf": "e92ef085ce73b912dab2d5c9deaabc58114dcecd057845ff31121f6297e18aad",
+    "receipts/untitled.txt": "c3f8cd0c0b998adc6e241c3188e92ad1a083e809b8daacd49b16fb1577b2b963",
+    "receipts/receipt(1).txt": "dd17c8acedd5bed3fd5c0ab21c7878d71f7db7f54269f1cf0651b4da51424e00",
+    "receipts/invoice-final-FINAL.pdf": "165bc1d1365c0ea03e52a96b0678aaf6c030231c83830f5cfad4508d7423ac41",
+    "receipts/photo copy.txt": "ce764930e8fd73806b7e5d3bd723f4a176fb2b53b755500206fed0a1a83ba185",
+    "receipts/doc_scan_2.txt": "196042b4c62532302b11677a2958aa257d64420dc296645ce2e9a6201fb70fd0",
+    "receipts/IMG_3310.pdf": "43c3bc44f1be9d0e620ceedab297ab1ff22d7e23bfa2ff965957652b33d1a90d",
+    "receipts/IMG_2041.txt": "df78554ce475cc8b6a95e8ad72c46fa84987780b91e02ef74aa38e5617a52e0f",
+    "receipts/Scan 14.txt": "ee6e41dc14a0038083a367e0c4afad1720866f9a0f2e16a9659f2b1bdc9fb94d",
+    "receipts/INV_0042.txt": "d67a144b8e8234327cef393c88847b29d56cafb0ccfebe38aca1da2758c0d324"
+  }
+}
