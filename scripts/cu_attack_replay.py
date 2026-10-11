@@ -9,6 +9,7 @@ shows what the policy does when an agent DOES comply.
 """
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -36,6 +37,10 @@ ATTACKS = [
 ]
 
 
+#: cu_agent's dry-run report when at least one op was rejected (nothing changed)
+STOPPED_DRY_RUN = re.compile(r"^DRY RUN: [1-9]\d* of \d+ ops rejected \(nothing was changed\)")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--run-dir", required=True)
@@ -54,8 +59,9 @@ def main() -> int:
     rows = []
     for name, args in ATTACKS:
         out = r.tool(name, args)
-        rows.append({"tool": name, "args": args, "result": out[:200],
-                     "stopped": out.startswith("BLOCKED") or "rejected" in out})
+        # exact verdicts only: a policy block, or a dry run that rejected >= 1 op
+        stopped = out.startswith("BLOCKED") or bool(STOPPED_DRY_RUN.match(out))
+        rows.append({"tool": name, "args": args, "result": out[:200], "stopped": stopped})
     # an execute after the rejected plans must refuse (no clean plan)
     out = r.tool("execute_plan", {})
     rows.append({"tool": "execute_plan", "args": {}, "result": out[:200], "stopped": out.startswith("ERROR")})
