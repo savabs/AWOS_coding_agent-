@@ -157,7 +157,7 @@ _APPLIED = re.compile(r"^Applied edit to (\S+)")
 NO_EDIT_TAG = "aider_no_edit"
 # Reasons that say the harness left Aider without the code, not that the
 # model failed: job_series treats these as an invalid run.
-NO_EDIT_SETUP_REASONS = ("no_files_in_chat", "asked_to_add_files")
+NO_EDIT_SETUP_REASONS = ("no_files_in_chat", "asked_to_add_files", "no_model_response")
 
 
 def asked_to_add_files(text: str) -> bool:
@@ -166,9 +166,13 @@ def asked_to_add_files(text: str) -> bool:
 
 
 def no_edit_reason(final: dict | None, applied: list[str], asked: bool,
-                   preloaded: bool = False) -> str | None:
+                   preloaded: bool = False, api_error: str | None = None,
+                   turns: int | None = None) -> str | None:
     """Why Aider ended without editing anything, or None if it edited.
 
+    no_model_response   - not one model response came back and Aider printed a
+                          provider error (e.g. a 400 for a request parameter the
+                          model rejects): the harness's setup, never the model's work
     no_files_in_chat    - Aider's final state had no file in the chat
     asked_to_add_files  - Aider started without the code (nothing pre-added) and
                           the model's answer was a request to add files
@@ -176,12 +180,14 @@ def no_edit_reason(final: dict | None, applied: list[str], asked: bool,
                           for files instead of editing: the model's failure
     no_edits            - the model had the files and did not edit
 
-    The first two are the harness's doing (NO_EDIT_SETUP_REASONS); the last two
-    are fair results for the model.
+    no_model_response and the next two are the harness's doing
+    (NO_EDIT_SETUP_REASONS); the last two are fair results for the model.
     """
     final = final or {}
     if final.get("edited") or applied:
         return None
+    if api_error and turns == 0:
+        return "no_model_response"
     if final and not final.get("in_chat"):
         return "no_files_in_chat"
     if asked:
@@ -467,6 +473,10 @@ def model_settings(model: str, provider: str = "openrouter") -> list[dict]:
     elif "claude" in model:        # as openrouter/anthropic/claude-sonnet-4.5
         s.update(examples_as_sys_msg=False, cache_control=True,
                  accepts_settings=["thinking_tokens"])
+        if provider == "anthropic" and re.search(r"claude-[a-z]+-5", model):
+            # The 5.x models reject `temperature` (live 400, 2026-10-11:
+            # "`temperature` is deprecated for this model"); Aider sends 0 by default.
+            s["use_temperature"] = False
     return [s]
 
 
@@ -864,7 +874,8 @@ def main(argv: list[str] | None = None) -> int:
     minutes = round((time.monotonic() - started) / 60, 2)
     cost, cost_source = tracker.cost()
     no_edit = no_edit_reason(tracker.final, tracker.applied, tracker.asked_to_add,
-                             preloaded=bool(files))
+                             preloaded=bool(files), api_error=tracker.api_error,
+                             turns=tracker.turns)
     if no_edit:
         # Loud and greppable: a run with no edits must never pass as a quiet failure.
         print(f"[harness_aider] {NO_EDIT_TAG} reason={no_edit} preloaded={len(files)} "

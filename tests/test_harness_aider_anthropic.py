@@ -131,3 +131,20 @@ def test_main_on_anthropic_direct(tmp_path, monkeypatch, capsys):
     assert r["usage"]["cost_usd"] == pytest.approx(expect, abs=1e-6)
     assert r["usage"]["models"] == ["claude-haiku-5-5"]
     assert r["cache_write_tokens"] == 15000 and r["cache_hit_tokens"] == 15000
+
+
+def test_claude_5x_on_anthropic_sends_no_temperature():
+    assert ha.model_settings("claude-haiku-5-5", "anthropic")[0]["use_temperature"] is False
+    assert "use_temperature" not in ha.model_settings("claude-haiku-4-5", "anthropic")[0]
+    assert "use_temperature" not in ha.model_settings("anthropic/claude-sonnet-5.5")[0]
+
+
+def test_provider_error_with_no_response_is_a_setup_failure():
+    final = {"edited": [], "in_chat": ["a.py"]}
+    err = "litellm.BadRequestError: AnthropicException - temperature is deprecated"
+    assert ha.no_edit_reason(final, [], False, preloaded=True, api_error=err,
+                             turns=0) == "no_model_response"
+    assert "no_model_response" in ha.NO_EDIT_SETUP_REASONS
+    # a response came back: the model's own no-edit, still a fair result
+    assert ha.no_edit_reason(final, [], False, preloaded=True, api_error=err, turns=1) == "no_edits"
+    assert ha.no_edit_reason(final, [], False, preloaded=True) == "no_edits"
