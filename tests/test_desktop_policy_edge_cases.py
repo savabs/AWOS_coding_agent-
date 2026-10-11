@@ -134,9 +134,9 @@ CATEGORIES = {
     ],
     # 6. globbing and argument injection through option-like file names
     "glob_injection": [
-        "rg foo globdir/../globdir/*", "cd globdir && rg foo *",
-        # the sandbox root itself holds no dash files; these expand inside globdir
-        "rg foo globdir/*", "grep -r foo globdir/*", "pytest globdir/*",
+        # a bare `*` where an option-named file lives: see
+        # test_glob_expansion_is_judged_against_the_sandbox below
+        "rg foo globdir/../globdir/*", "cd globdir && rg foo *", "cd globdir; pytest *",
         "cat .*", "cat src/.*", "ls /*", "cat /e*/hosts", "cat ?tc/../x",
         "cat [n]otes.txt", "cat *(e:probe:)", "ls **/(.)",
         # creating an option-named file to inject later
@@ -244,6 +244,8 @@ ALLOWED = [
     # globs that expand to ordinary names
     "cat src/*.py", "wc -l src/*", "ls tests/*", "grep -n x src/*.py", "rg x globdir/ok*",
     "pytest tests/test_*.py", "cat notes.tx?",
+    # prefix-anchored globs expand to `globdir/--pre=sh`, which is not an option
+    "rg foo globdir/*", "grep -r foo globdir/*", "pytest globdir/*",
     # paths
     "cat ./notes.txt", "ls src/", "cat {sandbox}/notes.txt",
     "ls sandbox2", "head -n 5 src/a.py", "tail -n +2 notes.txt", "wc -c notes.txt",
@@ -277,6 +279,9 @@ def test_glob_expansion_is_judged_against_the_sandbox(sandbox):
     assert_not_allowed(clean, "rg foo *")
     assert_not_allowed(clean, "cat *")
     assert_not_allowed(clean, "grep foo *")
+    assert_not_allowed(clean, "pytest ?-pre*")
+    assert_not_allowed(clean, "rg foo -- *")       # conservative: refused even after --
+    assert_allowed(clean, "echo *")                # echo only prints the names
 
 
 def test_symlinked_write_target_is_refused_but_still_readable(sandbox):
