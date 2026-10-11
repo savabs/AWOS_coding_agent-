@@ -1,0 +1,204 @@
+{
+  "series": "real_boltons_458",
+  "timestamp": "20261011T152856",
+  "arms": [
+    "aider"
+  ],
+  "jobs": [
+    1
+  ],
+  "dry_run": false,
+  "resumed": false,
+  "repeat": 1,
+  "model_pin": {
+    "model": "claude-haiku-5-5",
+    "blocked_ladder_ids": [
+      "deepseek-v4-pro"
+    ],
+    "env": {
+      "AWOS_LADDER": "claude-haiku-5-5",
+      "AWOS_AGENT_MODEL": "claude-haiku-5-5",
+      "AWOS_NOTEBOOK_MODEL": "claude-haiku-5-5",
+      "AWOS_PLANNER_MODEL": "claude-haiku-5-5",
+      "AWOS_GOAL_CHECK": "0"
+    },
+    "routing": {}
+  },
+  "provenance": {
+    "git": {
+      "sha": "241aeae0f0476b4b228e6e586400c14f5fc24d5e",
+      "branch": "worktree-wf_db6db965-455-2",
+      "dirty": true,
+      "dirty_paths": [
+        "cripts/harness_aider.py",
+        "scripts/job_series.py",
+        "tests/test_job_series_runner.py"
+      ]
+    },
+    "config": {
+      "sha256": "7b479211b52263cb0e58fa685b5730df9586e601b2340d42363c065bb471b4fd",
+      "series_sha256": "dc47866d67fdbfcc8431b70e399a469cfec678b78119d725a9b373baf56b5476"
+    },
+    "started_at": "2026-10-11T09:58:56Z",
+    "finished_at": "2026-10-11T09:59:32Z"
+  },
+  "preflight": {
+    "status": "ok",
+    "jobs": {
+      "1": []
+    },
+    "invalid_jobs": [],
+    "seconds": 10.3
+  },
+  "valid": true,
+  "violations": [
+    {
+      "severity": "warn",
+      "check": "missing_billing",
+      "arm": "aider",
+      "job": 1,
+      "repeat": 1,
+      "detail": "billed_usd is None: real spend unknown for this job"
+    }
+  ],
+  "run_dir": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/wf_db6db965-455-2/b1_runs/real_boltons_458/job_series/20261011T152856",
+  "stopped": null,
+  "results": [
+    {
+      "arm": "aider",
+      "job": 1,
+      "id": "01_addlist_one_shot_iter",
+      "dir": "01_addlist_one_shot_iter",
+      "solved": true,
+      "hidden_passed": 30,
+      "hidden_failed": 0,
+      "failing_tests": [],
+      "hidden_summary": "30 passed in 0.18s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": null,
+      "files_changed": 4,
+      "llm_calls": 0,
+      "input_tokens": 60473,
+      "output_tokens": 1001,
+      "cost_usd": 0.007786,
+      "notebook_cost_usd": 0.0,
+      "models": [
+        "claude-haiku-5-5"
+      ],
+      "turns": 1,
+      "usage_source": "report",
+      "billed_usd": null,
+      "minutes": 0.33,
+      "timed_out": false,
+      "notebook_chars": 0,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "12da028a77949eadba84ca06602a097cba3e059176a00a4b3f22d4124a20e17c",
+        "project_files": 69,
+        "task_sha256": "8da33dc74aa974eb1ff20b950f5cdc03e21c85416148bcf7c9affffc4199ee72",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/wf_db6db965-455-2/scripts/harness_aider.py",
+          "/Users/becmachlean/.awos-harness/real_series/real_boltons_458/jobs/01_addlist_one_shot_iter",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/wf_db6db965-455-2/b1_runs/real_boltons_458/job_series/20261011T152856/aider/project",
+          "--model",
+          "claude-haiku-5-5",
+          "--max-reflections",
+          "10"
+        ],
+        "env": {
+          "AWOS_ACCEPTANCE": null,
+          "AWOS_ACCEPTANCE_REPAIR_TURNS": null,
+          "AWOS_AGENT_MODEL": null,
+          "AWOS_BEST_OF_N": null,
+          "AWOS_EDIT_GRAMMAR": null,
+          "AWOS_EXPERIENCE": null,
+          "AWOS_FUZZY_APPLY": null,
+          "AWOS_GOAL_CHECK": null,
+          "AWOS_INTEGRATION_REVIEW": null,
+          "AWOS_LADDER": null,
+          "AWOS_LOCAL_BASE_URL": null,
+          "AWOS_LOCAL_MODEL": null,
+          "AWOS_LOOP_BREAKER": null,
+          "AWOS_NOTEBOOK_MODEL": null,
+          "AWOS_ONE_SHOT": null,
+          "AWOS_ONE_SHOT_BUDGET_TOKENS": null,
+          "AWOS_ONE_SHOT_WHOLE_SOURCE_FRACTION": null,
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": null,
+          "AWOS_OPENROUTER_PROVIDER": null,
+          "AWOS_PLANNER": null,
+          "AWOS_PLANNER_MAX_FILES": null,
+          "AWOS_PLANNER_MODEL": null,
+          "AWOS_PROVIDER": null,
+          "AWOS_SERIES_ARM": "aider",
+          "AWOS_SESSION_ID": "87f6a13dba6affe4e0ba761d",
+          "AWOS_STABLE_PREFIX": null,
+          "AWOS_STABLE_PREFIX_BLOCK": null,
+          "AWOS_STATIC_GATE": null,
+          "AWOS_STATIC_GATE_TESTS": null
+        },
+        "recorded_at": "2026-10-11T09:59:09Z",
+        "aider_files": {
+          "source": "report",
+          "selection": "relevant",
+          "added": [
+            "boltons/urlutils.py",
+            "boltons/dictutils.py"
+          ],
+          "read_only": [
+            "tests/test_dictutils.py",
+            "tests/test_urlutils.py"
+          ],
+          "in_chat_final": [
+            "boltons/dictutils.py",
+            "boltons/urlutils.py"
+          ]
+        }
+      },
+      "aider_no_edit": null,
+      "repeat": 1
+    }
+  ],
+  "summary": {
+    "aider": {
+      "all": {
+        "jobs": 1,
+        "solved": 1,
+        "solve_rate": 1.0,
+        "mean_cost_usd": 0.0078,
+        "mean_billed_usd": null,
+        "mean_turns": 1.0,
+        "mean_minutes": 0.33
+      },
+      "jobs_1_6": {
+        "jobs": 1,
+        "solved": 1,
+        "solve_rate": 1.0,
+        "mean_cost_usd": 0.0078,
+        "mean_billed_usd": null,
+        "mean_turns": 1.0,
+        "mean_minutes": 0.33
+      },
+      "jobs_7_12": {
+        "jobs": 0,
+        "solved": 0,
+        "solve_rate": null,
+        "mean_cost_usd": null,
+        "mean_billed_usd": null,
+        "mean_turns": null,
+        "mean_minutes": null
+      }
+    },
+    "dropped_jobs": {}
+  },
+  "health": {
+    "path": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/wf_db6db965-455-2/b1_runs/real_boltons_458/job_series/20261011T152856/health.json",
+    "fatal": 0,
+    "warn": 1
+  },
+  "report": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/wf_db6db965-455-2/b1_runs/real_boltons_458/job_series/20261011T152856/report.md"
+}

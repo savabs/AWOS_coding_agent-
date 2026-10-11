@@ -20,6 +20,11 @@ _spec = importlib.util.spec_from_file_location("job_series", REPO / "scripts" / 
 js = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(js)
 
+# End-to-end runs (staging, preflight pytest runs, child processes): ~8-25s on an idle
+# M5, past the suite's 10s default when parallel agents load the laptop (load avg ~10,
+# 2026-10-11). The logic is unchanged; only the wall-clock allowance.
+_E2E_TIMEOUT = pytest.mark.timeout(120)
+
 
 @pytest.fixture(autouse=True)
 def _no_billing_lookup(monkeypatch):
@@ -106,6 +111,7 @@ def test_judge_records_failing_test_names(tmp_path):
     assert hidden["ok"] and visible["ok"] and hidden["passed"] == 1 and hidden["failing"] == []
 
 
+@_E2E_TIMEOUT
 def test_validate_ok_and_invalid(tmp_path, capsys):
     make_series(tmp_path, "good")
     assert js.main(["validate", "--series", "good", "--series-root", str(tmp_path)]) == 0
@@ -141,6 +147,7 @@ def test_summarize_splits_early_and_late_jobs():
     assert s["off"]["all"]["mean_turns"] == 4.0
 
 
+@_E2E_TIMEOUT
 def test_dry_run_end_to_end(tmp_path, capsys):
     make_series(tmp_path, "mini")
     out_root = tmp_path / "out"
@@ -182,6 +189,7 @@ def test_dry_run_end_to_end(tmp_path, capsys):
         assert "def sub" in job2_calc and "def mul" not in job2_calc
 
 
+@_E2E_TIMEOUT
 def test_resume_keeps_earlier_jobs_and_state(tmp_path, capsys):
     # A key dying mid-run must not throw away the arms' notebooks: resume the
     # same run, rerun the selected jobs, keep the rest, pick up a fresh .env.
@@ -290,6 +298,7 @@ def test_aider_answer_without_edit_is_a_fair_failure_not_a_crash():
     assert "aider_no_edit" in js.detect_invalid(setup, turns=0, dry_run=False)
 
 
+@_E2E_TIMEOUT
 def test_results_are_saved_after_every_job_and_resume_keeps_them(tmp_path, monkeypatch):
     # A runner killed mid-run used to leave no results file, so --resume kept nothing.
     saved: list[int] = []
@@ -320,6 +329,7 @@ def _dry_run(tmp_path, *extra):
     return rc, json.loads(result_file.read_text())
 
 
+@_E2E_TIMEOUT
 def test_invalid_job_restores_notebook_and_retries(tmp_path, monkeypatch, capsys):
     # on j2 dies with a connection error once, after scribbling on the notebook.
     monkeypatch.setenv("AWOS_SERIES_DRY_FAIL", "on:2:1")
@@ -355,6 +365,7 @@ def test_notebook_restored_to_prior_content(tmp_path):
     assert not snap.parent.exists()
 
 
+@_E2E_TIMEOUT
 def test_still_invalid_is_recorded_and_dropped_pairwise(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("AWOS_SERIES_DRY_FAIL", "off:1:99")
     monkeypatch.setenv("AWOS_SERIES_RETRIES", "1")
@@ -422,6 +433,7 @@ def test_arms_mapping_drives_cli_and_child(tmp_path, monkeypatch):
     assert "notebook=extra-arm" in (Path(data["run_dir"]) / "extra" / "run.log").read_text()
 
 
+@_E2E_TIMEOUT
 def test_real_child_command_is_filled_from_mapping(tmp_path, monkeypatch):
     # Non-dry path: the arm's cmd template runs with placeholders filled; a child
     # that writes report.json usage gives a valid, non-zero-turn result.
@@ -460,6 +472,7 @@ def test_wait_for_backend_backs_off_then_gives_up(capsys):
     assert "waiting 15s for the backend" in capsys.readouterr().out
 
 
+@_E2E_TIMEOUT
 def test_backend_down_after_invalid_job_stops_cleanly(tmp_path, monkeypatch):
     # Real (non-dry) path with a child that always shows a dead key: after the
     # invalid attempt the backend never comes back, so the run stops, resumable.
@@ -587,6 +600,7 @@ def test_revalidate_missing_run(tmp_path, capsys):
     assert js.main(["revalidate", "NOPE", "--out-root", str(tmp_path)]) == 1
 
 
+@_E2E_TIMEOUT
 def test_repeat_dry_run_fresh_state_and_noise_summary(tmp_path, capsys):
     rc, data = _dry_run(tmp_path, "--repeat", "3", "--arms", "off,aider")
     assert rc == 0 and data["repeat"] == 3
@@ -640,3 +654,35 @@ def test_repeat_rejects_resume(tmp_path, capsys):
     make_series(tmp_path, "mini")
     assert js.main(["run", "--series", "mini", "--series-root", str(tmp_path), "--dry-run",
                     "--out-root", str(tmp_path / "o"), "--repeat", "2", "--resume", "X"]) == 1
+
+
+def test_aider_harness_crash_is_invalid_not_a_fair_failure():
+    # B1 run 2026-10-11: a relative --out-root gave Aider a missing project dir;
+    # the harness died in Popen before any model call and the job read as
+    # "not solved" (no_edits). A traceback with no [aider-final], no usage and no
+    # edit is the harness's failure.
+    crash = (NEW_BANNER + "+00:01 Traceback (most recent call last):\n"
+             "+00:01 FileNotFoundError: [Errno 2] No such file or directory: '/x/project'\n")
+    assert js.aider_no_edit(crash) == "harness_crashed"
+    assert "harness_crashed" in js.detect_invalid(crash, turns=0, dry_run=False)
+    # A traceback after Aider reported its final state is not a harness crash.
+    assert js.aider_no_edit(crash + _final([], ["a.py"])) == "no_edits"
+    # The harness's own no-edit line wins.
+    own = crash + "+00:02 [harness_aider] aider_no_edit reason=no_edits preloaded=3\n"
+    assert js.aider_no_edit(own) == "no_edits"
+
+
+def test_main_resolves_relative_roots(tmp_path, monkeypatch):
+    seen = {}
+
+    def fake_run(series, arms, jobs, dry_run, root, out_root, env_file, *rest):
+        seen.update(root=root, out_root=out_root, env_file=env_file)
+        return 0
+
+    monkeypatch.setattr(js, "run", fake_run)
+    monkeypatch.chdir(tmp_path)
+    assert js.main(["run", "--series", "s", "--series-root", "series", "--out-root", "out",
+                    "--env-file", "e/.env", "--arms", "aider"]) == 0
+    assert seen["root"] == tmp_path.resolve() / "series"
+    assert seen["out_root"] == tmp_path.resolve() / "out"
+    assert seen["env_file"] == str(tmp_path.resolve() / "e" / ".env")

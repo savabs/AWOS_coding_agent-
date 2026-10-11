@@ -117,6 +117,9 @@ ARM_CHILDREN: dict[str, dict] = {
     # Head-to-head: a market harness (Aider) with no project memory. Stock Aider
     # stops after 3 follow-up rounds per message; 10 is generous to it, so a
     # win for AWOS is not a win against a handicapped competitor.
+    # Same model as AWOS: AWOS_SERIES_MODEL=claude-haiku-5-5 runs Aider on
+    # Anthropic directly (harness_aider --provider auto: ANTHROPIC_API_KEY from
+    # the source .env, prompt caching on, cost at AWOS's Haiku 5.5 prices).
     "aider": {"cmd": [PY, str(REPO / "scripts" / "harness_aider.py"), "{job_dir}", "{project}",
                       "--model", PINNED_MODEL, "--max-reflections", "10"],
               "env": {}},
@@ -823,6 +826,7 @@ _TS_PREFIX = re.compile(r"^\+\d+:\d\d ", re.M)
 _NO_EDIT_LINE = re.compile(r"\[harness_aider\] aider_no_edit reason=(\w+)")
 _FINAL_LINE = re.compile(r"\[aider-final\] (\{.*\})")
 _APPLIED_LINE = re.compile(r"^Applied edit to (\S+)", re.M)
+_HARNESS_CRASH = "Traceback (most recent call last)"
 # The harness banner: "add_files=none(0) " (old) / "add_files=auto:src+tests(12 edit, ...".
 _PRELOADED = re.compile(r"\[harness_aider\] aider .*? add_files=\S*?\((\d+)")
 
@@ -841,6 +845,11 @@ def aider_no_edit(log_text: str) -> str | None:
     m = _NO_EDIT_LINE.search(text)
     if m:
         return m.group(1)
+    if (_HARNESS_CRASH in text and not _FINAL_LINE.search(text)
+            and "[aider-usage]" not in text and not _APPLIED_LINE.findall(text)):
+        # The harness died with a traceback before Aider reported anything (it
+        # prints its own no-edit line whenever it reaches the end): setup, not model.
+        return "harness_crashed"
     final: dict = {}
     for fm in _FINAL_LINE.finditer(text):
         try:
@@ -1648,8 +1657,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--resume", default=None, metavar="TS",
                         help="continue run TS (e.g. 20260926T170601) with its notebooks; pair with --jobs")
     args = parser.parse_args(argv)
-    root = Path(args.series_root) if args.series_root else None
-    out_root = Path(args.out_root) if args.out_root else None
+    # Absolute paths: the arms run with their state dir as cwd, so a relative
+    # --out-root once sent Aider a project path that existed nowhere (B1 run,
+    # 2026-10-11: FileNotFoundError before any model call, scored "not solved").
+    root = Path(args.series_root).resolve() if args.series_root else None
+    out_root = Path(args.out_root).resolve() if args.out_root else None
+    if args.env_file:
+        args.env_file = str(Path(args.env_file).resolve())
     if args.command == "validate":
         return validate(args.series, root)
     if args.command == "revalidate":
