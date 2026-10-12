@@ -169,7 +169,7 @@ class IntegrationReviewer:
             if _is_cheap_only():
                 reason = "cheap-only: no premium default reviewer; " + reason
             return _skipped(reason)
-        client = self.client if self.client is not None else chat_client()
+        client = self.client if self.client is not None else chat_client(model=model)
         if client is None:
             return _skipped("no model client (OPENROUTER_API_KEY not set)")
 

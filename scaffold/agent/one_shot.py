@@ -886,14 +886,16 @@ class _UsageTap:
         return response
 
 
-def one_shot_client() -> Any:
+def one_shot_client(model: Optional[str] = None) -> Any:
     """OpenAI-shaped client for the call (the local server under
-    AWOS_PROVIDER=local; OpenRouter when keyed; else AWOS_BASE_URL)."""
+    AWOS_PROVIDER=local; OpenRouter when keyed; the direct Anthropic adapter
+    for a Claude `model` (default: the run's AWOS_AGENT_MODEL) when
+    ANTHROPIC_API_KEY is set; else AWOS_BASE_URL)."""
     try:
         from .providers import chat_client, client_options
     except ImportError:
         from providers import chat_client, client_options
-    client = chat_client(max_retries=0)
+    client = chat_client(max_retries=0, model=model)
     if client is None and os.getenv("AWOS_BASE_URL"):
         from openai import OpenAI
         opts = client_options()
@@ -904,12 +906,13 @@ def one_shot_client() -> Any:
 
 
 def _sends_reasoning(client: Any) -> bool:
-    """Only OpenRouter takes the `reasoning` field."""
+    """OpenRouter takes the `reasoning` field; the direct Anthropic adapter
+    maps it to output_config.effort. Nothing else gets it."""
     try:
-        from .providers import _is_routed
+        from .providers import _is_routed, is_anthropic_chat_client
     except ImportError:
-        from providers import _is_routed
-    return _is_routed(client)
+        from providers import _is_routed, is_anthropic_chat_client
+    return _is_routed(client) or is_anthropic_chat_client(client)
 
 
 def build_messages(task: str, context: OneShotContext) -> list:

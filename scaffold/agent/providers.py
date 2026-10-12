@@ -26,6 +26,12 @@ try:  # one log line per model call, for scripts/eval_health.py
     from .llm_call_log import record_error, record_response
 except ImportError:
     from llm_call_log import record_error, record_response
+try:  # Claude 5.x param rules + the OpenAI-shaped direct-Anthropic client
+    from .claude_compat import (AnthropicChatClient, claude_rejects_sampling, is_claude,
+                                is_anthropic_chat_client, sampling_kwargs)
+except ImportError:
+    from claude_compat import (AnthropicChatClient, claude_rejects_sampling, is_claude,
+                               is_anthropic_chat_client, sampling_kwargs)
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 #: The Anthropic SDK appends /v1/messages itself.
@@ -374,16 +380,55 @@ def local_messages_client() -> Any:
     )
 
 
+def _wants_direct_anthropic(model: Optional[str], direct_key: Optional[str]) -> bool:
+    """
+    Should chat_client serve this caller with the direct Anthropic adapter?
+    Only without OpenRouter (checked by the caller) and with ANTHROPIC_API_KEY.
+      - a caller naming its model: yes for a claude-* model;
+      - a caller asking for "the default client" (no model, no direct key):
+        yes when the run's model (AWOS_AGENT_MODEL) is Claude or AWOS_PROVIDER
+        is pinned to anthropic, and no AWOS_BASE_URL endpoint is configured.
+    """
+    if not os.getenv("ANTHROPIC_API_KEY", "").strip():
+        return False
+    pin = provider_pin()
+    if pin not in ("", "anthropic"):
+        return False
+    if model:
+        return is_claude(model)
+    if direct_key or os.getenv("AWOS_BASE_URL", "").strip():
+        return False
+    return pin == "anthropic" or is_claude(os.getenv("AWOS_AGENT_MODEL", ""))
+
+
+def anthropic_chat_client(*, max_retries: Optional[int] = None) -> Any:
+    """OpenAI-shaped client over the direct Anthropic Messages API, or None
+    when ANTHROPIC_API_KEY is unset."""
+    key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    if not key:
+        return None
+    options = client_options()
+    if max_retries is not None:
+        options["max_retries"] = max(0, int(max_retries))
+    return AnthropicChatClient(Anthropic(api_key=key, **options))
+
+
 def chat_client(
     direct_key: Optional[str] = None,
     direct_base_url: Optional[str] = None,
     *,
     max_retries: Optional[int] = None,
+    model: Optional[str] = None,
 ) -> Any:
     """
     OpenAI-shaped client: OpenRouter when its key is set, else the direct
     provider. `max_retries` overrides the SDK retries (0 turns them off, for a
     caller that retries on its own terms).
+
+    Without OpenRouter, a Claude model goes to Anthropic directly through
+    claude_compat.AnthropicChatClient (same chat.completions surface): when the
+    caller names a claude-* `model`, or asks for the default client while the
+    run's model is Claude (see _wants_direct_anthropic).
     """
     if local_mode():
         return local_chat_client(max_retries=max_retries)
@@ -396,6 +441,8 @@ def chat_client(
             OpenAI(api_key=key, base_url=OPENROUTER_BASE_URL, **options),
             ("chat", "completions"),
         )
+    if _wants_direct_anthropic(model, direct_key):
+        return anthropic_chat_client(max_retries=max_retries)
     if direct_key:
         return OpenAI(api_key=direct_key, base_url=direct_base_url, **options)
     return None
@@ -707,6 +754,10 @@ def utility_chat(
     """
     One checked utility call through an OpenAI-shaped client.
 
+    - no sampling params for a model that rejects them (Claude 5.x,
+      claude_compat.claude_rejects_sampling), whatever `temperature` says;
+    - on the direct Anthropic adapter, `reasoning` becomes output_config.effort;
+
     - reasoning effort from reasoning_for(role), sent when the client routes
       through OpenRouter (or when `send_reasoning=True`);
     - max_tokens at least UTILITY_MIN_MAX_TOKENS;
@@ -726,7 +777,11 @@ def utility_chat(
     if sdk_retries == 0:
         client = without_sdk_retries(client)
     if send_reasoning is None:
-        send_reasoning = _is_routed(client)
+        send_reasoning = _is_routed(client) or is_anthropic_chat_client(client)
+    if claude_rejects_sampling(model):
+        temperature = None  # Claude 5.x: a non-default temperature is HTTP 400
+        for name in ("top_p", "top_k"):
+            extra.pop(name, None)
     tokens = max(int(max_tokens or 0), UTILITY_MIN_MAX_TOKENS)
     # The retry switches reasoning off where it can; elsewhere it asks again.
     first = reasoning_for(role) if reasoning == "role" else reasoning
