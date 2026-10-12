@@ -24,7 +24,7 @@ This module holds the shared fix:
 - `AnthropicChatClient`: the OpenAI chat-completions surface over the direct
   Anthropic Messages API. It converts system messages, maps `reasoning`
   effort to `output_config.effort`, adds prompt-cache breakpoints (system +
-  last message, AWOS_ANTHROPIC_CACHE), drops OpenRouter-only fields, and
+  last message) on multi-turn calls (AWOS_UTILITY_CACHE, AWOS_ANTHROPIC_CACHE), drops OpenRouter-only fields, and
   returns an OpenAI-shaped response whose usage carries cache counts, so the
   existing spend recording (providers._record_utility_spend) prices it
   cache-aware and writes it to the ledger.
@@ -175,12 +175,20 @@ def _usage_shape(usage: Any) -> SimpleNamespace:
         except (TypeError, ValueError):
             return 0
     read, write = _n("cache_read_input_tokens"), _n("cache_creation_input_tokens")
+    try:
+        thinking = int(getattr(getattr(usage, "output_tokens_details", None),
+                               "thinking_tokens", 0) or 0)
+    except (TypeError, ValueError):
+        thinking = 0
     prompt = _n("input_tokens") + read + write
     completion = _n("output_tokens")
     return SimpleNamespace(
         prompt_tokens=prompt, completion_tokens=completion,
         total_tokens=prompt + completion,
         prompt_tokens_details=SimpleNamespace(cached_tokens=read, cache_write_tokens=write),
+        # Thinking is part of completion_tokens (billed output), as OpenAI's
+        # reasoning_tokens is; llm_call_log records it per call.
+        completion_tokens_details=SimpleNamespace(reasoning_tokens=thinking),
     )
 
 
@@ -205,6 +213,27 @@ def to_openai_response(response: Any, model: str) -> SimpleNamespace:
         choices=[choice], usage=_usage_shape(getattr(response, "usage", None)),
         stop_reason=stop, provider="anthropic",
     )
+
+
+#: Prompt caching on utility calls: auto (default) | 1 | 0. A cache write costs
+#: 1.25x input and only pays off when the prefix is sent again. Live (pydash,
+#: 2026-10-12) the planner / acceptance / one-shot calls each wrote 2-45k
+#: tokens that nothing read. auto caches only a conversation that already has
+#: an assistant turn (a one-shot repair, a multi-turn utility call), whose
+#: next call re-sends the same prefix. AWOS_ANTHROPIC_CACHE=0 turns all off.
+UTILITY_CACHE_ENV = "AWOS_UTILITY_CACHE"
+
+
+def _cache_this(messages: list) -> bool:
+    import os
+    if os.getenv("AWOS_ANTHROPIC_CACHE", "1").strip().lower() in ("0", "false", "no"):
+        return False
+    mode = os.getenv(UTILITY_CACHE_ENV, "auto").strip().lower()
+    if mode in ("0", "false", "no", "off"):
+        return False
+    if mode in ("1", "true", "yes", "on"):
+        return True
+    return any(m.get("role") == "assistant" for m in messages)
 
 
 class AnthropicChatClient:
@@ -259,14 +288,15 @@ class AnthropicChatClient:
             req["extra_body"] = body
         # Everything else (response_format, n, seed, presence_penalty, ...) has no
         # Anthropic equivalent on this path and is dropped.
-        try:
-            from .agent_loop import with_cache_breakpoints
-        except ImportError:
-            from agent_loop import with_cache_breakpoints
-        sys_c, msgs_c, _ = with_cache_breakpoints(req.get("system"), req["messages"], [])
-        if sys_c:
-            req["system"] = sys_c
-        req["messages"] = msgs_c
+        if _cache_this(req["messages"]):
+            try:
+                from .agent_loop import with_cache_breakpoints
+            except ImportError:
+                from agent_loop import with_cache_breakpoints
+            sys_c, msgs_c, _ = with_cache_breakpoints(req.get("system"), req["messages"], [])
+            if sys_c:
+                req["system"] = sys_c
+            req["messages"] = msgs_c
         return req
 
     def create(self, *, model: str, messages: list, stream: bool = False, **kwargs: Any) -> Any:

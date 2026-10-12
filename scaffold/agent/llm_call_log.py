@@ -149,6 +149,10 @@ def fields_from_response(response: Any) -> dict:
             out["input_tokens"] = _int(_get(usage, "input_tokens"))
             out["output_tokens"] = _int(_get(usage, "output_tokens"))
             out["cached_tokens"] = _int(_get(usage, "cache_read_input_tokens"))
+            # Claude 5.x thinks by default; thinking is billed output and can
+            # use the whole max_tokens with no text (usage.output_tokens_details).
+            out["reasoning_tokens"] = _int(
+                _get(_get(usage, "output_tokens_details"), "thinking_tokens"))
         cost = _get(usage, "cost")
         if isinstance(cost, (int, float)) and not isinstance(cost, bool):
             out["cost_usd"] = float(cost)

@@ -89,13 +89,13 @@ class CheapPlanner:
             kwargs = with_openrouter_routing(kwargs)
         return kwargs
 
-    def _record(self, tracker, response, prompt: str, response_text: str) -> None:
+    def _record(self, tracker, response, prompt: str, response_text: str) -> Optional[float]:
         """The call's spend into TokenTracker + BudgetLedger at the planner
         model's own (cache-aware) prices. It used to be priced as DeepSeek V4
         Flash whatever the model, and only when a tracker was passed."""
         if not getattr(response, "usage", None):
-            return
-        _record_utility_spend("planning", self.model_name, response, tracker)
+            return None
+        return _record_utility_spend("planning", self.model_name, response, tracker)
 
     def _complete_plan(self, prompt: str, tracker=None) -> str:
         """The model's plan text; retries once without reasoning if cut short.
@@ -121,9 +121,10 @@ class CheapPlanner:
             choice = response.choices[0]
             text = choice.message.content or ""
             finish = getattr(choice, "finish_reason", None)
-            self._record(tracker, response, prompt, text)
+            cost = self._record(tracker, response, prompt, text)
             record_response(
-                "planner", self.model_name, response, visible_chars=len(text), attempt=attempt,
+                "planner", self.model_name, response, cost_usd=cost, visible_chars=len(text),
+                attempt=attempt,
                 final=(bool(text.strip()) and finish != "length") or attempt == len(attempts))
             if text.strip() and finish != "length":
                 return text

@@ -62,6 +62,7 @@ def _adapter(response=None):
 
 def test_request_drops_sampling_and_converts_system(monkeypatch):
     monkeypatch.setenv("AWOS_ANTHROPIC_CACHE", "1")
+    monkeypatch.setenv("AWOS_UTILITY_CACHE", "1")
     client, _ = _adapter()
     req = client.build_request(
         model="claude-haiku-5-5", max_tokens=50, temperature=0, top_p=0.9,
@@ -75,6 +76,24 @@ def test_request_drops_sampling_and_converts_system(monkeypatch):
     assert req["output_config"] == {"effort": "low"}
     assert "extra_body" not in req and "response_format" not in req
     assert req["max_tokens"] == 50
+
+
+def test_cache_auto_only_for_multi_turn(monkeypatch):
+    monkeypatch.delenv("AWOS_UTILITY_CACHE", raising=False)
+    monkeypatch.delenv("AWOS_ANTHROPIC_CACHE", raising=False)
+    client, _ = _adapter()
+    single = client.build_request(model="claude-haiku-5-5", messages=[
+        {"role": "system", "content": "S"}, {"role": "user", "content": "U"}])
+    assert single["system"] == "S" and single["messages"][0]["content"] == "U"
+    multi = client.build_request(model="claude-haiku-5-5", messages=[
+        {"role": "system", "content": "S"}, {"role": "user", "content": "U"},
+        {"role": "assistant", "content": "A"}, {"role": "user", "content": "fix"}])
+    assert multi["system"][0]["cache_control"] == {"type": "ephemeral"}
+    assert multi["messages"][-1]["content"][-1]["cache_control"] == {"type": "ephemeral"}
+    monkeypatch.setenv("AWOS_ANTHROPIC_CACHE", "0")
+    off = client.build_request(model="claude-haiku-5-5", messages=multi["messages"][:1] + [
+        {"role": "assistant", "content": "A"}, {"role": "user", "content": "x"}])
+    assert "system" not in off
 
 
 def test_request_keeps_temperature_on_older_claude():
@@ -270,3 +289,37 @@ def test_execute_feature_emits_components_line(monkeypatch, tmp_path, capsys):
     assert len(line) == 1
     assert json.loads(line[0][len("[COMPONENTS] "):])["planner"]["status"] == "ok"
     assert json.loads((tmp_path / "components.json").read_text())["goal_check"]["status"] == "ran"
+
+
+# ── Claude 5.x thinks by default ─────────────────────────────────────────────
+
+def _thinking_only(stop):
+    reply = _anthropic_reply("", stop=stop, output_tokens=4096)
+    reply.content = [SimpleNamespace(type="thinking", thinking="")]
+    reply.usage.output_tokens_details = SimpleNamespace(thinking_tokens=4096)
+    return reply
+
+
+def test_thinking_tokens_reach_usage_and_call_log():
+    from scaffold.agent import llm_call_log
+    client, _ = _adapter(_thinking_only("max_tokens"))
+    resp = client.chat.completions.create(model="claude-haiku-5-5",
+                                          messages=[{"role": "user", "content": "x"}])
+    assert resp.usage.completion_tokens_details.reasoning_tokens == 4096
+    assert llm_call_log.fields_from_response(resp)["reasoning_tokens"] == 4096
+    raw = llm_call_log.fields_from_response(_thinking_only("end_turn"))
+    assert raw["reasoning_tokens"] == 4096 and raw["visible_chars"] == 0
+
+
+@pytest.mark.parametrize("stop,error", [
+    ("max_tokens", providers.TruncatedReplyError),
+    ("end_turn", providers.EmptyReplyError),
+])
+def test_thinking_only_reply_is_retried_then_refused(monkeypatch, stop, error):
+    client, calls = _adapter(_thinking_only(stop))
+    monkeypatch.setattr(providers, "_record_utility_spend", lambda *a, **k: 0.0)
+    with pytest.raises(error):
+        providers.utility_chat(client, "review", "claude-haiku-5-5",
+                               [{"role": "user", "content": "x"}])
+    assert len(calls.calls) == 2  # the retry asks at low effort
+    assert calls.calls[1]["output_config"] == {"effort": "low"}
