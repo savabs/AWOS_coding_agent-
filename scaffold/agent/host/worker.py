@@ -38,7 +38,11 @@ from . import autopilot
 from .models import BLOCKED, CANCELLED, DONE, FAILED, JobSpec, now_iso
 from .queue import JobQueue, max_attempts
 
-REPO = Path(__file__).resolve().parents[3]
+from .. import paths as _paths
+
+#: State root: the repo in a checkout, ~/.awos/runtime when installed. The job
+#: child runs here, so the relative .awos/budget.json it writes is LEDGER_PATH.
+REPO = _paths.state_root()
 
 #: Cloud credentials blanked in the child env of a local_only job (fail closed).
 #: Not exhaustive on purpose: every *_API_KEY in the env or the repo .env is
@@ -243,7 +247,7 @@ def local_only_blanked_keys(env: dict, dotenv_path: Optional[Path] = None) -> se
     LOCAL_KEYS. Fails closed for providers added later.
     """
     names = set(CLOUD_KEYS) | {k for k in env if k.endswith("_API_KEY")}
-    path = dotenv_path or (REPO / ".env")
+    path = dotenv_path or _paths.dotenv_path()
     try:
         names |= set(_KEY_NAME.findall(path.read_text(encoding="utf-8")))
     except (OSError, UnicodeDecodeError):

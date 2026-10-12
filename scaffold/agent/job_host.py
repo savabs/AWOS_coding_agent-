@@ -56,7 +56,16 @@ try:
 except ImportError:  # run as a script: `python job_host.py _child ...`
     from sandbox import HOST_GIT_OPTS
 
-REPO = Path(__file__).resolve().parents[2]
+try:
+    from scaffold.agent import paths as _paths
+except ImportError:  # scaffold/agent on sys.path, not the repo root
+    import paths as _paths  # type: ignore
+
+#: Where the code lives (repo root, or site-packages when installed).
+CODE_ROOT = _paths.CODE_ROOT
+#: Where state lives: the repo root in a checkout, ~/.awos/runtime when installed
+#: (scaffold/agent/paths.py). The child runs here, so its relative .awos/ does too.
+REPO = _paths.state_root()
 DEFAULT_JOBS_DIR = REPO / ".awos" / "jobs"
 
 QUEUED, RUNNING, DONE, FAILED, CANCELLED = "queued", "running", "done", "failed", "cancelled"
@@ -390,10 +399,10 @@ def _die_with_parent(parent_pid: int) -> None:
 
 def child_main(job_path: str, result_path: str, parent_pid: int) -> int:
     _die_with_parent(parent_pid)
-    sys.path[:0] = [str(REPO), str(REPO / "scaffold"), str(REPO / "scaffold" / "agent")]
+    sys.path[:0] = [str(CODE_ROOT), str(CODE_ROOT / "scaffold"), str(CODE_ROOT / "scaffold" / "agent")]
     try:
         from dotenv import load_dotenv
-        load_dotenv(REPO / ".env")
+        load_dotenv(_paths.dotenv_path())
     except ImportError:
         pass
     os.environ.update(CHILD_ENV)
