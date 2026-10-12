@@ -1,0 +1,312 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="description" content="AWOS works through your small coding tickets in the background and hands you review branches with test results, for cents per ticket."><style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style></head><body><title>AWOS Background Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a workbench page — left-aligned editorial column, the hero is a real morning report, sections read like a runbook. */
+:root{
+  --bg:#f2f4f3; --surface:#ffffff; --ink:#15211d; --muted:#56635e; --line:#d5dcd9;
+  --accent:#1f6b52; --accent-ink:#ffffff; --cost:#9a5b00; --pass:#1f7a3d; --fail:#b23a2b; --code:#e8edeb;
+  --display:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0f1513; --surface:#161e1b; --ink:#e4ebe8; --muted:#9aa8a2; --line:#28332f;
+  --accent:#4fbf93; --accent-ink:#0b1310; --cost:#e3a64a; --pass:#5fcf86; --fail:#ef7d6e; --code:#1c2622; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f1513; --surface:#161e1b; --ink:#e4ebe8; --muted:#9aa8a2; --line:#28332f;
+  --accent:#4fbf93; --accent-ink:#0b1310; --cost:#e3a64a; --pass:#5fcf86; --fail:#ef7d6e; --code:#1c2622; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:16px/1.6 var(--body);padding-inline:20px;padding-block:0}
+a{color:var(--accent)}
+a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wrap{max-width:1080px;margin:0 auto}
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--line)}
+header.top .wrap{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-block:12px;flex-wrap:wrap}
+.brand{font:700 20px/1 var(--display);letter-spacing:.04em;color:var(--ink);text-decoration:none}
+.brand span{color:var(--accent)}
+nav.links{display:flex;gap:18px;flex-wrap:wrap;font-size:14px}
+nav.links a{color:var(--muted);text-decoration:none}
+nav.links a:hover{color:var(--ink)}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:10px 16px;border-radius:6px;font:600 15px var(--body);text-decoration:none;border:1px solid transparent;cursor:pointer}
+.btn.primary{background:var(--accent);color:var(--accent-ink)}
+.btn.ghost{border-color:var(--line);color:var(--ink);background:transparent}
+.hero{display:grid;grid-template-columns:1.05fr .95fr;gap:48px;align-items:center;padding-block:64px 56px}
+.hero>*{min-width:0}
+.eyebrow{font:500 12px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+h1{font:700 clamp(38px,6vw,64px)/1.02 var(--display);letter-spacing:-.01em;margin:14px 0 18px;text-wrap:balance}
+h1 em{font-style:normal;color:var(--accent)}
+.lede{font-size:18px;color:var(--muted);max-width:56ch;margin:0 0 26px}
+.cta{display:flex;gap:12px;flex-wrap:wrap}
+.report{background:var(--surface);border:1px solid var(--line);border-radius:10px;font:13px/1.55 var(--mono);overflow:hidden}
+.report .bar{display:flex;justify-content:space-between;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);color:var(--muted);font-size:12px}
+.report .body{padding:14px 16px;display:grid;gap:10px}
+.job{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:baseline;padding-bottom:10px;border-bottom:1px dashed var(--line)}
+.job:last-child{border-bottom:0;padding-bottom:0}
+.pill{font:600 11px var(--mono);padding:2px 7px;border-radius:999px;border:1px solid currentColor;white-space:nowrap}
+.pill.pass{color:var(--pass)} .pill.wait{color:var(--cost)}
+.job .what{color:var(--ink);overflow-wrap:anywhere} .job .meta{color:var(--muted);font-size:12px}
+.job .cost{color:var(--cost);font-variant-numeric:tabular-nums;white-space:nowrap}
+.report .foot{padding:10px 16px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+section{padding-block:56px;border-top:1px solid var(--line)}
+h2{font:700 clamp(28px,3.6vw,40px)/1.1 var(--display);margin:8px 0 14px;text-wrap:balance}
+.sub{color:var(--muted);max-width:62ch;margin:0 0 28px}
+.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;counter-reset:s}
+.steps>div{min-width:0;padding-top:14px;border-top:3px solid var(--accent)}
+.steps h3{font:600 18px var(--display);margin:6px 0 6px}
+.steps p{margin:0;color:var(--muted);font-size:15px}
+.steps .n{font:500 12px var(--mono);color:var(--muted)}
+.results{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.result{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:20px;min-width:0}
+.result .big{font:700 44px/1 var(--display);font-variant-numeric:tabular-nums}
+.result .big small{font:500 16px var(--body);color:var(--muted)}
+.result h3{font:600 16px var(--body);margin:10px 0 6px}
+.result p{margin:0;color:var(--muted);font-size:14px}
+.result .src{display:block;margin-top:10px;font:12px var(--mono);color:var(--muted)}
+.note{font-size:13px;color:var(--muted);margin-top:16px;max-width:80ch}
+.docs{display:grid;grid-template-columns:220px 1fr;gap:32px}
+.docs>*{min-width:0}
+.docnav{display:flex;flex-direction:column;gap:6px;position:sticky;top:80px;align-self:start}
+.docnav button{all:unset;cursor:pointer;padding:7px 10px;border-radius:6px;color:var(--muted);font-size:15px}
+.docnav button[aria-selected="true"]{background:var(--code);color:var(--ink);font-weight:600}
+.doc h3{font:600 22px var(--display);margin:0 0 10px}
+.doc p,.doc li{color:var(--ink);max-width:68ch}
+.doc ul{padding-left:20px}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;font:13.5px/1.6 var(--mono);margin:12px 0}
+code{font-family:var(--mono);font-size:.92em;background:var(--code);padding:1px 5px;border-radius:4px}
+pre code{background:none;padding:0}
+.c{color:var(--muted)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:28px}
+.two>*{min-width:0}
+.facts{list-style:none;padding:0;margin:0;display:grid;gap:14px}
+.facts li{padding-left:18px;position:relative}
+.facts li::before{content:"";position:absolute;left:0;top:.65em;width:8px;height:8px;border-radius:2px;background:var(--accent)}
+.facts b{display:block}
+.facts span{color:var(--muted);font-size:15px}
+.price{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:24px}
+.price .tag{font:700 34px var(--display)}
+.price ul{padding-left:18px;color:var(--muted)}
+form{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:24px;display:grid;gap:16px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.row>*{min-width:0}
+label{display:grid;gap:6px;font-size:14px;font-weight:500}
+input,select,textarea{font:15px var(--body);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px 12px;width:100%}
+textarea{min-height:96px;resize:vertical}
+.formnote{font-size:13px;color:var(--muted);margin:0}
+.status{font-size:14px;margin:0;min-height:1.4em}
+.status.ok{color:var(--pass)} .status.err{color:var(--fail)}
+footer{padding-block:32px 48px;border-top:1px solid var(--line);color:var(--muted);font-size:14px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+@media (max-width:860px){
+  .hero{grid-template-columns:1fr;gap:32px;padding-block:40px}
+  .steps{grid-template-columns:1fr 1fr}
+  .results{grid-template-columns:1fr}
+  .docs{grid-template-columns:1fr}
+  .docnav{position:static;flex-direction:row;flex-wrap:wrap}
+  .two{grid-template-columns:1fr}
+}
+@media (max-width:520px){.steps{grid-template-columns:1fr}.row{grid-template-columns:1fr}nav.links{display:none}}
+@media (prefers-reduced-motion:no-preference){.job{animation:rise .5s both}.job:nth-child(2){animation-delay:.08s}.job:nth-child(3){animation-delay:.16s}.job:nth-child(4){animation-delay:.24s}
+@keyframes rise{from{transform:translateY(4px)}to{transform:none}}}
+</style>
+
+<header class="top"><div class="wrap">
+  <a class="brand" href="#top">AWOS<span>.</span></a>
+  <nav class="links" aria-label="Sections">
+    <a href="#how">How it works</a><a href="#results">Results</a><a href="#docs">Docs</a><a href="#security">Security</a><a href="#pricing">Pricing</a>
+  </nav>
+  <a class="btn primary" href="#access">Request access</a>
+</div></header>
+
+<main class="wrap" id="top">
+  <div class="hero">
+    <div>
+      <div class="eyebrow">Background coding agent · early access</div>
+      <h1>Queue your small tickets tonight. Review <em>finished branches</em> in the morning.</h1>
+      <p class="lede">AWOS works through your backlog while you are away. Every ticket runs in its own copy of your repo, gets checked against your tests, and comes back as a review branch with the results attached. It costs cents per ticket, and nothing is ever pushed without you.</p>
+      <div class="cta"><a class="btn primary" href="#access">Request early access</a><a class="btn ghost" href="#docs">Read the docs</a></div>
+    </div>
+    <div class="report" aria-label="Example morning report">
+      <div class="bar"><span>awos status --digest</span><span>08:02</span></div>
+      <div class="body">
+        <div class="job"><span class="pill pass">done</span><span class="what">Fix slugify so punctuation and extra spaces are handled<div class="meta">awos/b94e04a0 · tests 3 passed, 0 failed · 0.4 min</div></span><span class="cost">$0.003</span></div>
+        <div class="job"><span class="pill pass">done</span><span class="what">Add --from/--to/--status filters to orders export<div class="meta">awos/2f1c77d0 · tests 14 passed, 0 failed · 1.5 min</div></span><span class="cost">$0.019</span></div>
+        <div class="job"><span class="pill pass">done</span><span class="what">Daily sales report uses the customer's timezone<div class="meta">awos/91ab03e4 · tests 10 passed, 0 failed · 2.2 min</div></span><span class="cost">$0.030</span></div>
+        <div class="job"><span class="pill wait">needs you</span><span class="what">Rename public API field? Changes the response format<div class="meta">paused before a breaking change · one question waiting</div></span><span class="cost">$0.004</span></div>
+      </div>
+      <div class="foot">Example report. Job details mirror real AWOS runs; branch ids are illustrative.</div>
+    </div>
+  </div>
+
+  <section id="how">
+    <div class="eyebrow">How it works</div>
+    <h2>From ticket to review branch, without touching your checkout</h2>
+    <p class="sub">You describe the change in a sentence. AWOS does the rest in the background and only interrupts you for a real decision.</p>
+    <div class="steps">
+      <div><span class="n">1 · queue</span><h3>Submit a ticket</h3><p><code>awos submit</code> adds it to a local queue with a budget cap. Queue as many as you like.</p></div>
+      <div><span class="n">2 · isolate</span><h3>Own workspace</h3><p>Each job gets a separate git worktree at your current commit. Your files and branches are never edited.</p></div>
+      <div><span class="n">3 · verify</span><h3>Checked by tests</h3><p>AWOS writes acceptance tests for the goal, runs your suite, and records what passed. A secret scan runs before handoff.</p></div>
+      <div><span class="n">4 · review</span><h3>Branch + report</h3><p>You get <code>awos/&lt;id&gt;</code> with a short report: tests, cost, time, warnings. Merge it or delete it.</p></div>
+    </div>
+  </section>
+
+  <section id="results">
+    <div class="eyebrow">Measured results</div>
+    <h2>What it does on real work</h2>
+    <p class="sub">Numbers from our own runs on public open-source issues and realistic multi-step tasks, judged by hidden tests the agent never saw.</p>
+    <div class="results">
+      <div class="result"><div class="big">72<small> / 73</small></div><h3>Real GitHub issues solved</h3><p>Fixes from 26 Python projects such as click, attrs and rich, one attempt each, on Claude Haiku 5.5. Average cost $0.0071 per issue.</p><span class="src">Run of 2026-10-11</span></div>
+      <div class="result"><div class="big">58<small> / 58</small></div><h3>Hidden tests passed on an app built from a spec</h3><p>An 8-feature finance tracker written from an empty folder in 8.8 minutes for $0.16. Six of six long tasks solved in total.</p><span class="src">Long-task run, 2026-10-11</span></div>
+      <div class="result"><div class="big">8<small> / 10</small></div><h3>Easy issues solved by a free local model</h3><p>Qwen3.5 9B running on a 16 GB MacBook, no cloud and $0 per ticket, for routine work.</p><span class="src">Local-model check, 2026-10</span></div>
+    </div>
+    <p class="note">These are results on public projects with one run per task, so your results will vary with your codebase and tests. A head-to-head study against another open-source agent on the same model is in progress; we will publish it either way.</p>
+  </section>
+
+  <section id="docs">
+    <div class="eyebrow">Docs</div>
+    <h2>Get started in five minutes</h2>
+    <div class="docs">
+      <div class="docnav" role="tablist" aria-label="Docs pages">
+        <button role="tab" aria-selected="true" data-doc="quick" id="tab-quick">Quickstart</button>
+        <button role="tab" aria-selected="false" data-doc="concepts" id="tab-concepts">Concepts</button>
+        <button role="tab" aria-selected="false" data-doc="models" id="tab-models">Models and cost</button>
+        <button role="tab" aria-selected="false" data-doc="cli" id="tab-cli">CLI reference</button>
+        <button role="tab" aria-selected="false" data-doc="faq" id="tab-faq">FAQ</button>
+      </div>
+      <div>
+        <div class="doc" data-page="quick">
+          <h3>Quickstart</h3>
+          <p>Early-access members receive an install link. AWOS runs on macOS and Linux with Python 3.12, inside any git repository.</p>
+<pre><code><span class="c"># 1. add your model key (Anthropic, or run a local model instead)</span>
+export ANTHROPIC_API_KEY=...
+
+<span class="c"># 2. queue a ticket for this repo, with a budget cap</span>
+awos submit --repo . --budget 0.50 "Fix the date parser so 2024-02-29 is accepted"
+
+<span class="c"># 3. start the background worker (or install it to run at login)</span>
+awos serve --worker
+
+<span class="c"># 4. next morning: see what finished</span>
+awos status --digest
+
+<span class="c"># 5. review and merge the branch</span>
+git diff main...awos/&lt;id&gt;
+git merge --no-ff awos/&lt;id&gt;</code></pre>
+          <p>Each finished job writes <code>report.md</code> with the goal, the test results, cost, time and anything it was unsure about.</p>
+        </div>
+        <div class="doc" data-page="concepts" hidden>
+          <h3>Concepts</h3>
+          <ul>
+            <li><b>Job.</b> One ticket: a goal, a repo and a budget. Jobs run one at a time from a local queue and survive restarts.</li>
+            <li><b>Workspace.</b> A throwaway git worktree at your current commit. Your checkout, uncommitted work and branches are left alone.</li>
+            <li><b>Verification.</b> AWOS generates acceptance tests from the goal, runs your test suite in the workspace, and reports pass and fail counts. If a repo has no tests, it asks a model to check the result against the goal and says so in the report.</li>
+            <li><b>Review branch.</b> <code>awos/&lt;id&gt;</code>, created locally from the workspace diff. Bytecode, caches and secrets are never included. Nothing is pushed.</li>
+            <li><b>Blocked.</b> If a model key stops working, jobs pause as blocked instead of failing, you get one notification, and they resume when the key works again.</li>
+          </ul>
+        </div>
+        <div class="doc" data-page="models" hidden>
+          <h3>Models and cost</h3>
+          <p>You bring your own model provider and pay them directly. AWOS records the cost of every call and stops a job at its budget.</p>
+          <ul>
+            <li><b>Cloud default:</b> Claude Haiku 5.5. Typical small ticket: under one cent. Prompt caching cuts repeated context by about 90%.</li>
+            <li><b>Local:</b> run an open model such as Qwen3.5 9B on your own machine with <code>AWOS_PROVIDER=local</code>. Free per ticket and fully offline, best for routine fixes.</li>
+            <li><b>Budgets:</b> <code>--budget</code> per job, plus a daily cap. A job that hits its cap stops and reports where it got to.</li>
+          </ul>
+        </div>
+        <div class="doc" data-page="cli" hidden>
+          <h3>CLI reference</h3>
+<pre><code>awos submit --repo PATH [--budget USD] [--privacy local_only|cloud_ok] "GOAL"
+awos serve --worker [--once]      <span class="c"># run queued jobs</span>
+awos status [--digest]            <span class="c"># queue, running job, finished, blocked</span>
+awos cancel ID                    <span class="c"># stop a queued or running job</span>
+awos unblock ID                   <span class="c"># retry a job blocked on credentials</span>
+awos keys                         <span class="c"># check model keys without spending</span></code></pre>
+        </div>
+        <div class="doc" data-page="faq" hidden>
+          <h3>FAQ</h3>
+          <ul>
+            <li><b>Does my code leave my machine?</b> Only the context sent to the model provider you choose. With a local model, nothing leaves.</li>
+            <li><b>Can it break my repo?</b> It never edits your checkout or pushes. All work lands on a separate local branch you review.</li>
+            <li><b>What kinds of tickets work best?</b> Well-defined bugs, small features, test writing, refactors and migrations with a clear definition of done. Vague product decisions still need you.</li>
+            <li><b>How is this different from an interactive coding assistant?</b> AWOS is built to run unattended through a queue, verify its own work, and hand you finished branches, instead of pairing with you in a chat.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="security">
+    <div class="eyebrow">Security and privacy</div>
+    <h2>Built to run unattended on code you care about</h2>
+    <div class="two">
+      <ul class="facts">
+        <li><b>Runs on your machine</b><span>The worker, queue and logs live on your computer. There is no AWOS cloud holding your code.</span></li>
+        <li><b>Never touches your checkout</b><span>Separate worktree per job; results arrive as a local branch.</span></li>
+        <li><b>Nothing is pushed</b><span>You decide what to merge and push.</span></li>
+      </ul>
+      <ul class="facts">
+        <li><b>Secret scan on every handoff</b><span>A branch is blocked if the diff contains a credential.</span></li>
+        <li><b>Local-only mode</b><span><code>--privacy local_only</code> blanks cloud keys for that job, so it can only use your local model.</span></li>
+        <li><b>Hard budgets</b><span>Per-job and daily caps; spending is counted from your own process only.</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="pricing">
+    <div class="eyebrow">Pricing</div>
+    <h2>Free during early access</h2>
+    <div class="two">
+      <div class="price"><div class="tag">$0</div><p>during early access, for individual developers and small teams.</p>
+        <ul><li>You pay your model provider directly, usually cents per ticket</li><li>Or use a local model for $0 per ticket</li><li>Direct line to the builder for feedback and fixes</li></ul></div>
+      <div><p class="sub">We are working with a small group of early users to shape paid plans. Early-access members keep founding pricing when plans launch.</p>
+        <a class="btn primary" href="#access">Request access</a></div>
+    </div>
+  </section>
+
+  <section id="access">
+    <div class="eyebrow">Early access</div>
+    <h2>Tell us what you would hand off first</h2>
+    <p class="sub">We onboard a few teams at a time. Tell us about your backlog and we will get back to you.</p>
+    <form id="access-form" novalidate data-endpoint="/api/request-access">
+      <div class="row">
+        <label for="f-name">Name<input id="f-name" name="name" autocomplete="name" required></label>
+        <label for="f-email">Work email<input id="f-email" name="email" type="email" autocomplete="email" required></label>
+      </div>
+      <div class="row">
+        <label for="f-role">Role<select id="f-role" name="role"><option>Solo developer</option><option>Engineer on a team</option><option>Engineering lead</option><option>Founder</option><option>Open-source maintainer</option><option>Agency or freelancer</option></select></label>
+        <label for="f-team">Team size<select id="f-team" name="team"><option>Just me</option><option>2–10</option><option>11–50</option><option>51+</option></select></label>
+      </div>
+      <label for="f-tickets">What tickets would you hand off first?<textarea id="f-tickets" name="tickets" placeholder="e.g. flaky tests in our API, dependency bumps, small UI bugs from the support queue"></textarea></label>
+      <label for="f-tools">Which coding tools do you use today?<input id="f-tools" name="tools" placeholder="e.g. Claude Code, Cursor, Copilot"></label>
+      <div class="cta"><button class="btn primary" type="submit">Request access</button></div>
+      <p class="status" id="f-status" role="status" aria-live="polite"></p>
+      <p class="formnote">We only use this to contact you about early access.</p>
+    </form>
+  </section>
+
+  <footer><span>AWOS. Local-first background agent.</span><span>Built in India</span></footer>
+</main>
+
+<script>
+(function(){
+  var tabs=document.querySelectorAll('.docnav button');
+  tabs.forEach(function(t){t.addEventListener('click',function(){
+    tabs.forEach(function(x){x.setAttribute('aria-selected',x===t?'true':'false')});
+    document.querySelectorAll('.doc').forEach(function(d){d.hidden=d.getAttribute('data-page')!==t.getAttribute('data-doc')});
+  })});
+  var form=document.getElementById('access-form'), status=document.getElementById('f-status');
+  form.addEventListener('submit',function(e){
+    e.preventDefault();
+    var name=form.name.value.trim(), email=form.email.value.trim();
+    status.className='status';
+    if(!name||!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){status.className='status err';status.textContent='Add your name and a valid email so we can reach you.';return}
+    var data={name:name,email:email,role:form.role.value,team:form.team.value,tickets:form.tickets.value.trim(),tools:form.tools.value.trim(),ts:new Date().toISOString()};
+    var endpoint=form.getAttribute('data-endpoint');
+    status.textContent='Sending…';
+    fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
+      .then(function(r){if(!r.ok)throw new Error(r.status);status.className='status ok';status.textContent='Thanks, '+name+'. We will email '+email+' about early access.';form.reset()})
+      .catch(function(){status.className='status err';status.textContent='This preview cannot send requests yet. On the live site this form saves your request.'});
+  });
+})();
+</script>
+</body></html>
