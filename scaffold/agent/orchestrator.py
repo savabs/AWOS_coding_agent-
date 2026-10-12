@@ -433,6 +433,30 @@ except ImportError:
         suggest_level = None  # type: ignore
 
 
+def _new_components() -> dict:
+    """A run's component record before anything ran: every component is
+    "not_run" until its code path records otherwise."""
+    return {name: {"status": "not_run"} for name in (
+        "planner", "acceptance", "one_shot", "arbiter", "goal_check",
+        "integration_review", "notebook")}
+
+
+def _emit_components(comps: dict) -> None:
+    """The one `[COMPONENTS] {json}` line (a benchmark parses it per row) and,
+    in a benchmark child (AWOS_SERIES_ARM set), components.json in the cwd."""
+    import json
+    try:
+        line = json.dumps(comps, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        line = json.dumps({"error": "unserialisable components"})
+    print(f"[COMPONENTS] {line}", flush=True)
+    if os.getenv("AWOS_SERIES_ARM"):
+        try:
+            Path("components.json").write_text(line, encoding="utf-8")
+        except OSError:
+            pass
+
+
 class Orchestrator:
     """Orchestrates the full Planner-Worker-Verifier pipeline."""
 
@@ -557,9 +581,10 @@ class Orchestrator:
         """
         pinned = os.getenv("AWOS_AGENT_MODEL", "").strip()
         if pinned:
-            client = chat_client(max_retries=0)
+            model = getattr(self, "_last_agent_model", None) or pinned
+            client = chat_client(max_retries=0, model=model)
             if client is not None:
-                return client, getattr(self, "_last_agent_model", None) or pinned, {}
+                return client, model, {}
         worker = getattr(self, "worker", None)
         # A pinned Claude model without OpenRouter goes to Anthropic directly,
         # never to whichever other vendor key happens to be configured.
@@ -623,7 +648,11 @@ class Orchestrator:
                         from providers import _record_utility_spend
                     _record_utility_spend(f"cheap_{role}", model, response,
                                           getattr(self, "tracker", None))
-                    return response.content[0].text or ""
+                    try:
+                        from .claude_compat import message_text
+                    except ImportError:
+                        from claude_compat import message_text
+                    return message_text(response)
                 text, _info = utility_chat(
                     client, role, model, messages,
                     max_tokens=4096,
@@ -914,6 +943,86 @@ class Orchestrator:
         return max(candidates, key=lambda c: c.get("_critic_confidence", 0.0))
 
     def execute_feature(
+        self,
+        goal: str,
+        codebase_root: str = ".",
+        codebase_context: Optional[dict] = None,
+        pre_planned_tasks: Optional[List] = None,
+        use_parallel: bool = False,
+        resume: bool = False,
+        session_id: Optional[str] = None,
+        auto_approve_plan: bool = False,
+    ) -> dict:
+        """
+        Execute a complete feature request end-to-end (_execute_feature_impl)
+        and record which components actually ran: the result's "components"
+        dict (planner, acceptance, one_shot, arbiter, goal_check,
+        integration_review, notebook), one `[COMPONENTS] {json}` log line at
+        the end, and components.json in the cwd of a benchmark child
+        (AWOS_SERIES_ARM set).
+        """
+        self._components = _new_components()
+        report = None
+        try:
+            report = self._execute_feature_impl(
+                goal, codebase_root, codebase_context, pre_planned_tasks, use_parallel,
+                resume, session_id, auto_approve_plan,
+            )
+            return report
+        finally:
+            comps = self._finish_components(report)
+            if isinstance(report, dict):
+                report["components"] = comps
+            _emit_components(comps)
+
+    def _component(self, name: str, **fields) -> None:
+        """Merge `fields` into this run's record for component `name`."""
+        comps = getattr(self, "_components", None)
+        if comps is None:
+            comps = self._components = _new_components()
+        comps.setdefault(name, {}).update(fields)
+
+    def _component_add(self, name: str, **counts) -> None:
+        """Add numeric `counts` to component `name` (several tasks or calls)."""
+        comps = getattr(self, "_components", None)
+        if comps is None:
+            comps = self._components = _new_components()
+        entry = comps.setdefault(name, {})
+        for key, value in counts.items():
+            entry[key] = round((entry.get(key) or 0) + value, 6)
+
+    def _finish_components(self, report: Optional[dict]) -> dict:
+        """The run's components, with the planner and the integration review
+        read off the report (that is where they are decided)."""
+        comps = {k: dict(v) for k, v in (getattr(self, "_components", None)
+                                         or _new_components()).items()}
+        report = report if isinstance(report, dict) else {}
+        source = report.get("plan_source")
+        planner = comps.setdefault("planner", {})
+        if source in ("planner", "planner_fallback"):
+            planner.update(status="ok", source=source)
+        elif source == "goal_as_task":
+            errors = " | ".join(str(e) for e in report.get("planner_errors") or [])
+            planner.update(status="failed", source=source, error=errors[:300])
+        elif source:
+            planner.update(status="skipped", source=source)
+        review = report.get("integration_review")
+        if isinstance(review, dict) and comps.get("integration_review", {}).get(
+                "status") == "not_run":
+            if review.get("skipped"):
+                comps["integration_review"] = {
+                    "status": "skipped", "reason": str(review.get("skip_reason", ""))[:200]}
+            elif review.get("model_used"):
+                comps["integration_review"] = {
+                    "status": "ran", "model": review.get("model_used"),
+                    "passed": bool(review.get("passed", True)),
+                    "issues": len(review.get("issues") or [])}
+            else:
+                comps["integration_review"] = {"status": "skipped",
+                                               "reason": "run not successful"}
+        return comps
+
+    def _execute_feature_impl(
         self,
         goal: str,
         codebase_root: str = ".",
@@ -1831,6 +1940,9 @@ class Orchestrator:
         AWOS_GOAL_CHECK_ROUNDS (default 2) caps the follow-up rounds.
         """
         if executor_choice() != "agent_loop" or os.getenv("AWOS_GOAL_CHECK", "1") == "0":
+            self._component("goal_check", status="skipped",
+                            reason=("AWOS_GOAL_CHECK=0" if os.getenv("AWOS_GOAL_CHECK", "1") == "0"
+                                    else f"executor {executor_choice()}"))
             return True, [], ""
         try:
             from .goal_check import GoalChecker, goal_check_model, working_tree_changes
@@ -1866,6 +1978,11 @@ class Orchestrator:
                 changed = sorted(getattr(self, "_run_files_changed", set()))
             verdict = checker.check(goal, root, changed, diff)
             self._last_goal_verdict = verdict
+            self._component("goal_check", status="ran", model=check_model or "default",
+                            complete=bool(verdict.complete),
+                            verified=bool(getattr(verdict, "verified", False)),
+                            source=getattr(verdict, "source", "") or "fallback")
+            self._component_add("goal_check", checks=1)
             # Where the verdict came from (tool / text / nudge_*; "" = fallback)
             # tells a run log whether the checker actually decided.
             via = f" [via {getattr(verdict, 'source', '') or 'fallback'}]"
@@ -2016,6 +2133,7 @@ class Orchestrator:
             from project_notebook import (compact_trace, enabled, update_notebook,
                                           verification_level)
         if not enabled():
+            self._component("notebook", status="off")
             return
         traces = getattr(self, "_notebook_traces", None) or []
         # The tests' state at the end: the last task's judged line. These are
@@ -2028,10 +2146,12 @@ class Orchestrator:
         outcome = {**outcome, "verification": verification_level(outcome)}
         print(f"[notebook] job recorded as: {outcome['verification'][:160]}")
         try:
-            update_notebook(codebase_root, goal, outcome, compact_trace(traces),
-                            tracker=getattr(self, "tracker", None))
+            new_text = update_notebook(codebase_root, goal, outcome, compact_trace(traces),
+                                       tracker=getattr(self, "tracker", None))
+            self._component("notebook", status="ran" if new_text else "skipped")
         except Exception as exc:
             logger.warning("[notebook] update failed: %s", exc)
+            self._component("notebook", status="failed", reason=str(exc)[:200])
 
     # ── Per-goal budget ───────────────────────────────────────────────────────
 
@@ -2554,14 +2674,16 @@ class Orchestrator:
         except ImportError:
             import one_shot as one_shot_mod
         if not one_shot_mod.one_shot_enabled():
+            self._component("one_shot", status="off")
             return None
         try:
-            client = one_shot_mod.one_shot_client()
+            client = one_shot_mod.one_shot_client(model)
         except Exception as exc:  # noqa: BLE001
             client = None
             logger.warning("[ONE-SHOT] no client: %s", exc)
         if client is None:
             print("[ONE-SHOT] fell back to the agent loop: no OpenAI-shaped client configured")
+            self._component("one_shot", status="inactive", reason="no client")
             return None
 
         task_text = worker_task_text(task, ctx)
@@ -2670,6 +2792,11 @@ class Orchestrator:
 
         solved = reason is None
         repairs = int(getattr(shot, "repair_calls", 0) or 0)
+        self._component("one_shot", status="used", model=model,
+                        result="solved" if solved else "fell_back",
+                        **({} if solved else {"reason": str(reason)[:200]}))
+        self._component_add("one_shot", runs=1, calls=int(getattr(shot, "calls", 0) or 1),
+                            cost_usd=float(shot.cost_usd or 0.0))
         step = SimpleNamespace(
             thought=shot.reply[:2000],
             action="one_shot",
@@ -2735,6 +2862,7 @@ class Orchestrator:
             import acceptance as acc_mod
             import one_shot as one_shot_mod
         if not acc_mod.acceptance_enabled():
+            self._component("acceptance", status="off", mode=acc_mod.acceptance_mode())
             return None
         acc_mod.remove_leftovers(codebase_root)
         # The user's goal verbatim: a planner action longer than the goal (job 2's
@@ -2743,16 +2871,25 @@ class Orchestrator:
         self._acceptance_goal_text = text
         self._acceptance_repair_used = False
         try:
-            client = one_shot_mod.one_shot_client()
+            client = one_shot_mod.one_shot_client(model)
             if client is None:
                 print("[ACCEPTANCE] gate inactive: no OpenAI-shaped client configured")
+                self._component("acceptance", status="inactive", reason="no client",
+                                mode=acc_mod.acceptance_mode())
                 return None
             suite = acc_mod.build_suite(text, codebase_root, ctx.get("exploration"),
                                         client=client, model=model, sandbox=sandbox,
                                         tracker=getattr(self, "tracker", None))
         except Exception as exc:  # noqa: BLE001
             print(f"[ACCEPTANCE] gate inactive: {type(exc).__name__}: {exc}")
+            self._component("acceptance", status="inactive", mode=acc_mod.acceptance_mode(),
+                            reason=f"{type(exc).__name__}: {exc}"[:200])
             return None
+        self._component("acceptance", status="ran", mode=acc_mod.acceptance_mode(),
+                        active=bool(suite.active), model=model,
+                        **({"error": str(suite.error)[:200]} if suite.error else {}))
+        self._component_add("acceptance", runs=1, generated=int(suite.generated),
+                            kept=len(suite.kept), cost_usd=float(suite.cost_usd or 0.0))
         dropped = ", ".join(f"{v} {k}" for k, v in suite.dropped.items())
         print(f"[ACCEPTANCE] generated {suite.generated} tests, kept {len(suite.kept)} "
               f"(failed on start), ${suite.cost_usd:.4f}"
@@ -2836,7 +2973,7 @@ class Orchestrator:
 
         # 1. Arbitration: which failing tests are wrong, which find missing code.
         try:
-            arb_client = one_shot_mod.one_shot_client()
+            arb_client = one_shot_mod.one_shot_client(model)
         except Exception:  # noqa: BLE001
             arb_client = None
         goal = getattr(self, "_acceptance_goal_text", "") or str(task.get("action", ""))
@@ -2853,6 +2990,10 @@ class Orchestrator:
         out["output_tokens"] = int(arb.get("output_tokens") or 0)
         wrong = [n for n, v in arb["verdicts"].items() if v != acc_mod.CODE_INCOMPLETE]
         incomplete = [n for n, v in arb["verdicts"].items() if v == acc_mod.CODE_INCOMPLETE]
+        self._component("arbiter", status="ran" if arb_client is not None else "inactive",
+                        **({"error": str(arb["error"])[:200]} if arb.get("error") else {}))
+        self._component_add("arbiter", runs=1, failing=len(failing), wrong_test=len(wrong),
+                            code_incomplete=len(incomplete), cost_usd=out["cost_usd"])
         suite.kept = [n for n in suite.kept if n not in wrong]
         print(f"[ACCEPTANCE] arbitration: {len(failing)} failing -> {len(wrong)} wrong_test, "
               f"{len(incomplete)} code_incomplete, ${out['cost_usd']:.4f}"

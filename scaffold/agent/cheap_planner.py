@@ -1,5 +1,9 @@
 """
-Cheap Planner: Uses OpenCode Go (DeepSeek V4 Flash) for planning.
+Cheap Planner: plans on the cheap planner model (AWOS_PLANNER_MODEL).
+
+Client: OpenRouter when OPENROUTER_API_KEY is set; else a claude-* planner
+model goes to Anthropic directly (claude_compat.AnthropicChatClient); else
+the OpenCode Go endpoint with OPENCODE_GO_API_KEY.
 
 Cost: ~$0.0001-0.0005 per planning call (vs $0.03-0.05 for Sonnet)
 Accuracy: Still 90%+ for task decomposition when prompt is clear
@@ -14,12 +18,14 @@ from typing import Optional
 
 try:
     from .providers import (
-        REASONING_OFF, chat_client, openrouter_key, planner_model, planner_reasoning,
+        REASONING_OFF, _record_utility_spend, chat_client, is_anthropic_chat_client,
+        openrouter_key, planner_model, planner_reasoning, sampling_kwargs,
         with_openrouter_routing,
     )
 except ImportError:
     from providers import (
-        REASONING_OFF, chat_client, openrouter_key, planner_model, planner_reasoning,
+        REASONING_OFF, _record_utility_spend, chat_client, is_anthropic_chat_client,
+        openrouter_key, planner_model, planner_reasoning, sampling_kwargs,
         with_openrouter_routing,
     )
 try:  # one log line per model call, for scripts/eval_health.py
@@ -48,23 +54,34 @@ class CheapPlanner:
         """
         self.api_key = api_key or os.getenv("OPENCODE_GO_API_KEY")
         opencode_base = os.getenv("OPENCODE_GO_BASE_URL", "https://opencode.ai/zen/go/v1")
-        self.client = chat_client(self.api_key, opencode_base)
+        self.model_name = model or planner_model(DEFAULT_CHEAP_PLANNER_MODEL)
+        # The model picks the client: a claude-* planner without OpenRouter goes
+        # to Anthropic directly. It used to go to OpenCode, which answered every
+        # call with HTTP 400 MissingSessionID (no plan on any direct-Haiku run).
+        self.client = chat_client(self.api_key, opencode_base, model=self.model_name)
         if self.client is None:
             raise ValueError(
-                "No planner key found. Set OPENROUTER_API_KEY (or OPENCODE_GO_API_KEY) in .env"
+                "No planner key found. Set OPENROUTER_API_KEY (or ANTHROPIC_API_KEY for a "
+                "claude-* AWOS_PLANNER_MODEL, or OPENCODE_GO_API_KEY) in .env"
             )
-        self.model_name = model or planner_model(DEFAULT_CHEAP_PLANNER_MODEL)
-        # The `reasoning` field is OpenRouter's; a direct provider may reject it.
+        # The `reasoning` field is OpenRouter's; the Anthropic adapter maps it to
+        # output_config.effort; any other direct provider may reject it.
         self._via_openrouter = bool(openrouter_key())
+        self._sends_reasoning = self._via_openrouter or is_anthropic_chat_client(self.client)
+
+    def _reasoning_ok(self) -> bool:
+        """May a `reasoning` field be sent? OpenRouter, or the Anthropic adapter."""
+        return bool(getattr(self, "_sends_reasoning", getattr(self, "_via_openrouter", False)))
 
     def _plan_request(self, prompt: str, reasoning: Optional[dict]) -> dict:
         kwargs = dict(
             model=self.model_name,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=PLAN_MAX_TOKENS,
-            temperature=0.3,
+            # No temperature for a model that rejects it (Claude 5.x: HTTP 400).
+            **sampling_kwargs(self.model_name, 0.3),
         )
-        if getattr(self, "_via_openrouter", False) and reasoning is not None:
+        if self._reasoning_ok() and reasoning is not None:
             kwargs["extra_body"] = {"reasoning": reasoning}
         if getattr(self, "_via_openrouter", False):
             # Provider pin / session id (AWOS_OPENROUTER_PROVIDER, AWOS_SESSION_ID);
@@ -72,23 +89,13 @@ class CheapPlanner:
             kwargs = with_openrouter_routing(kwargs)
         return kwargs
 
-    def _record(self, tracker, response, prompt: str, response_text: str) -> None:
-        if not tracker or not getattr(response, "usage", None):
-            return
-        input_tokens = response.usage.prompt_tokens or len(prompt) // 4
-        output_tokens = response.usage.completion_tokens or len(response_text) // 4
-        # DeepSeek V4 Flash pricing via OpenCode Go: $0.14 input, $0.28 output per 1M
-        cost = (
-            (input_tokens  / 1_000_000) * 0.14 +
-            (output_tokens / 1_000_000) * 0.28
-        )
-        tracker.record(
-            request_type="planning",
-            model=f"{self.model_name} (planning)",
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cost=cost
-        )
+    def _record(self, tracker, response, prompt: str, response_text: str) -> Optional[float]:
+        """The call's spend into TokenTracker + BudgetLedger at the planner
+        model's own (cache-aware) prices. It used to be priced as DeepSeek V4
+        Flash whatever the model, and only when a tracker was passed."""
+        if not getattr(response, "usage", None):
+            return None
+        return _record_utility_spend("planning", self.model_name, response, tracker)
 
     def _complete_plan(self, prompt: str, tracker=None) -> str:
         """The model's plan text; retries once without reasoning if cut short.
@@ -100,7 +107,7 @@ class CheapPlanner:
         tokens). Still empty → a clear ValueError naming the cause.
         """
         attempts = [planner_reasoning()]
-        if getattr(self, "_via_openrouter", False) and attempts[0] != REASONING_OFF:
+        if self._reasoning_ok() and attempts[0] != REASONING_OFF:
             attempts.append(dict(REASONING_OFF))
         text, finish = "", None
         for attempt, reasoning in enumerate(attempts, 1):
@@ -114,9 +121,10 @@ class CheapPlanner:
             choice = response.choices[0]
             text = choice.message.content or ""
             finish = getattr(choice, "finish_reason", None)
-            self._record(tracker, response, prompt, text)
+            cost = self._record(tracker, response, prompt, text)
             record_response(
-                "planner", self.model_name, response, visible_chars=len(text), attempt=attempt,
+                "planner", self.model_name, response, cost_usd=cost, visible_chars=len(text),
+                attempt=attempt,
                 final=(bool(text.strip()) and finish != "length") or attempt == len(attempts))
             if text.strip() and finish != "length":
                 return text
@@ -277,7 +285,7 @@ Respond with ONLY the refined goal, no explanation."""
                 # Reasoning models spend tokens thinking before answering;
                 # at 256 the answer could be cut off entirely.
                 max_tokens=1024,
-                temperature=0.3,
+                **sampling_kwargs(self.model_name, 0.3),
             )
             refined = response.choices[0].message.content or ""
 

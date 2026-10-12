@@ -236,19 +236,17 @@ ANTHROPIC_OPENAI_BASE_URL = "https://api.anthropic.com/v1/"
 def _default_client() -> Any:
     """
     OpenAI-shaped client: through OpenRouter when its key is set; else, for a
-    claude-* notebook model, direct Anthropic via its OpenAI-compatible
-    endpoint (the direct-Haiku runtime, OpenRouter off); else None.
+    claude-* notebook model, the direct Anthropic Messages API through
+    claude_compat.AnthropicChatClient (native prompt caching and Claude 5.x
+    param rules; Anthropic's OpenAI-compatible endpoint rejected temperature
+    on Claude 5.x); else None.
     """
     try:
         from .providers import chat_client
     except ImportError:
         from providers import chat_client
-    client = chat_client()
-    if client is None and notebook_model().startswith("claude-"):
-        key = os.getenv("ANTHROPIC_API_KEY", "").strip()
-        if key:
-            client = chat_client(key, ANTHROPIC_OPENAI_BASE_URL)
-    return client
+    model = notebook_model()
+    return chat_client(model=model) if model.startswith("claude-") else chat_client()
 
 
 def build_update_prompt(old: str, goal: str, outcome: dict, trace: str) -> str:

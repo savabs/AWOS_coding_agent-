@@ -310,7 +310,7 @@ def test_cheap_call_uses_the_pinned_model(monkeypatch):
     orch = _orch(MagicMock())
     with patch.object(providers, "chat_client", return_value=client) as make, patch(RECORD):
         assert orch._cheap_call("p", role="post_mortem") == "ok"
-    make.assert_called_once_with(max_retries=0)
+    make.assert_called_once_with(max_retries=0, model="deepseek/deepseek-v4-flash")
     assert client.calls[0]["model"] == "deepseek/deepseek-v4-flash"
 
 
