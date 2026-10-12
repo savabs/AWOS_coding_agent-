@@ -1,0 +1,80 @@
+<!--meta
+title: CLI reference · AWOS docs
+description: Flags and behaviour for awos submit, serve --worker, status, cancel, unblock and keys.
+layout: docs
+section: docs
+-->
+<div class="eyebrow">Docs · CLI reference</div>
+<h1>CLI reference</h1>
+<p class="lede">The commands you use day to day. Run any of them with <code>--help</code> for the same information in your terminal.</p>
+<pre><code>awos submit --repo PATH [--budget USD] [--privacy local_only|cloud_ok] "GOAL"
+awos serve --worker [--once] [--poll SECONDS]
+awos status [--digest] [JOB_ID]
+awos cancel JOB_ID
+awos unblock JOB_ID
+awos keys [--json]</code></pre>
+
+<h2 id="submit"><code>awos submit</code></h2>
+<p>Queue a job and print its id.</p>
+<pre><code>awos submit --repo . --budget 0.50 "Add a --dry-run flag to the import command"</code></pre>
+<table>
+  <thead><tr><th>Argument</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>GOAL</code></td><td>What to get done. Quote it if it has spaces.</td></tr>
+    <tr><td><code>--repo PATH</code></td><td>The git repository the job works on. Puts the job in the background worker's queue.</td></tr>
+    <tr><td><code>--budget USD</code></td><td>Most the job may spend, in US dollars. Default 1.0; <code>0</code> means no cap.</td></tr>
+    <tr><td><code>--privacy local_only|cloud_ok</code></td><td><code>local_only</code> blanks cloud API keys for this job so it can only use a local model. Default <code>cloud_ok</code>.</td></tr>
+  </tbody>
+</table>
+
+<h2 id="serve"><code>awos serve --worker</code></h2>
+<p>Run the background worker: take queued jobs one at a time until stopped.</p>
+<table>
+  <thead><tr><th>Flag</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>--worker</code></td><td>Run the queue worker. Without it, <code>awos serve</code> starts the local web dashboard instead.</td></tr>
+    <tr><td><code>--once</code></td><td>Exit when the queue is empty.</td></tr>
+    <tr><td><code>--poll SECONDS</code></td><td>Seconds between queue checks. Default 2.</td></tr>
+  </tbody>
+</table>
+
+<h2 id="status"><code>awos status</code></h2>
+<p>List the queue's jobs, or show one job when you pass its id.</p>
+<table>
+  <thead><tr><th>Argument</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>JOB_ID</code></td><td>Show one job's record.</td></tr>
+    <tr><td><code>--digest</code></td><td>A short summary for humans: what is running, what is queued, what finished since the last digest, what is blocked (with the action to take), and today's spend.</td></tr>
+  </tbody>
+</table>
+
+<h2 id="cancel"><code>awos cancel</code></h2>
+<p>Cancel a job. A queued job is cancelled at once; a running job stops at its next step. A job that already finished is left as it is.</p>
+<pre><code>awos cancel &lt;id&gt;</code></pre>
+
+<h2 id="unblock"><code>awos unblock</code></h2>
+<p>Re-queue a job that is blocked on credentials, after you fix the key. The attempt the block used is refunded. The worker also does this on its own once the keys check out again.</p>
+<pre><code>awos unblock &lt;id&gt;</code></pre>
+
+<h2 id="keys"><code>awos keys</code></h2>
+<p>Check each configured model provider without spending anything. Each check is a free, read-only request; key values are never printed.</p>
+<table>
+  <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>ok</code></td><td>The provider answered and accepted the credential.</td></tr>
+    <tr><td><code>unauthorized</code></td><td>401 or 403: the key is wrong, revoked or out of credit.</td></tr>
+    <tr><td><code>unreachable</code></td><td>No answer: offline, DNS, timeout or a server error.</td></tr>
+    <tr><td><code>not-configured</code></td><td>No key set (for a local model: no server and no URL set).</td></tr>
+  </tbody>
+</table>
+<p><code>--json</code> prints the same result as JSON.</p>
+
+<h2 id="env">Environment variables</h2>
+<table>
+  <thead><tr><th>Variable</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>ANTHROPIC_API_KEY</code></td><td>Key for the default cloud model.</td></tr>
+    <tr><td><code>AWOS_PROVIDER=local</code></td><td>Use your local model server.</td></tr>
+    <tr><td><code>AWOS_HOST_DIR</code></td><td>Where the queue, job folders and reports live. Default <code>~/.awos/host</code>.</td></tr>
+  </tbody>
+</table>

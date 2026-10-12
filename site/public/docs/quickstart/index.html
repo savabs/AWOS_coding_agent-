@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Quickstart · AWOS docs</title>
+<meta name="description" content="Install AWOS, add a model key, queue your first ticket, run the background worker and review the branch it hands back.">
+<link rel="canonical" href="https://awos-site.pages.dev/docs/quickstart/">
+<meta property="og:title" content="Quickstart · AWOS docs">
+<meta property="og:description" content="Install AWOS, add a model key, queue your first ticket, run the background worker and review the branch it hands back.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://awos-site.pages.dev/docs/quickstart/">
+<meta name="robots" content="index,follow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap">
+  <a class="brand" href="/" aria-label="AWOS home">AWOS<span>.</span></a>
+  <nav class="links" aria-label="Main">
+    <a class="wide" href="/#how">How it works</a>
+    <a class="wide" href="/#results">Results</a>
+    <a href="/docs/" aria-current="page">Docs</a>
+    <a class="wide" href="/docs/security/">Security</a>
+    <a class="wide" href="/#pricing">Pricing</a>
+  </nav>
+  <a class="btn primary" href="/access/">Request access</a>
+</div></header>
+<main id="main" class="wrap"><div class="docs-layout">
+<nav class="docs-side" aria-label="Docs">
+<h2>Docs</h2>
+<ul>
+<li><a href="/docs/">Overview</a></li>
+<li><a href="/docs/quickstart/" aria-current="page">Quickstart</a></li>
+<li><a href="/docs/concepts/">Concepts</a></li>
+<li><a href="/docs/models-and-cost/">Models and cost</a></li>
+<li><a href="/docs/cli/">CLI reference</a></li>
+<li><a href="/docs/security/">Security and privacy</a></li>
+<li><a href="/docs/faq/">FAQ</a></li>
+</ul>
+</nav>
+<article class="doc">
+<div class="eyebrow">Docs · Quickstart</div>
+<h1>Quickstart</h1>
+<p class="lede">Queue a ticket, let the worker run it, and review the branch. This takes about five minutes plus the time the job runs.</p>
+
+<h2 id="requirements">Requirements</h2>
+<ul>
+  <li>macOS or Linux with Python 3.12.</li>
+  <li>A git repository to work on. Test verification uses <code>pytest</code>, so a Python repo with tests gets the most out of the report.</li>
+  <li>A model: an Anthropic API key, or a local model server (see <a href="/docs/models-and-cost/">Models and cost</a>).</li>
+</ul>
+
+<h2 id="install">1. Install</h2>
+<p>Early access members get the install command. <a href="/access/">Request access</a> if you do not have it yet.</p>
+<pre><code>INSTALL_COMMAND</code></pre>
+
+<h2 id="key">2. Add a model key</h2>
+<pre><code><span class="c"># cloud: Claude Haiku 5.5 is the default model</span>
+export ANTHROPIC_API_KEY=...
+
+<span class="c"># check it without spending anything</span>
+awos keys</code></pre>
+<p><code>awos keys</code> prints one line per provider: <code>ok</code>, <code>unauthorized</code>, <code>unreachable</code> or <code>not-configured</code>. Key values are never printed.</p>
+
+<h2 id="submit">3. Queue a ticket</h2>
+<p>Run this from inside the repository. The goal is one sentence with a clear definition of done.</p>
+<pre><code>awos submit --repo . --budget 0.50 "Fix the date parser so 2024-02-29 is accepted"</code></pre>
+<p>It prints the job id. <code>--budget</code> is the most the job may spend, in US dollars (default 1.0). Queue as many tickets as you like; they run one at a time.</p>
+
+<h2 id="worker">4. Start the worker</h2>
+<pre><code><span class="c"># keep running and take new jobs as they arrive</span>
+awos serve --worker
+
+<span class="c"># or: work through the queue, then exit</span>
+awos serve --worker --once</code></pre>
+<p>Leave the first form running in a terminal. The queue lives on disk, so you can stop the worker and start it again later.</p>
+
+<h2 id="review">5. Review the result</h2>
+<pre><code><span class="c"># what finished, what is waiting on you, spend today</span>
+awos status --digest
+
+<span class="c"># one job in detail</span>
+awos status &lt;id&gt;
+
+<span class="c"># look at the change, then merge it or delete it</span>
+git diff main...awos/&lt;id&gt;
+git merge --no-ff awos/&lt;id&gt;
+git branch -D awos/&lt;id&gt;</code></pre>
+<p>Each finished job also writes <code>report.md</code> under <code>~/.awos/host/jobs/&lt;id&gt;/</code> with the goal, test results, cost, time and anything it was unsure about.</p>
+
+<h2 id="next">Next</h2>
+<ul>
+  <li><a href="/docs/concepts/">Concepts</a> explains what happens inside a job.</li>
+  <li><a href="/docs/cli/">CLI reference</a> lists every flag.</li>
+  <li><a href="/docs/security/">Security and privacy</a> covers local-only jobs and the secret scan.</li>
+</ul>
+<nav class="pager" aria-label="Docs pages"><a class="prev" href="/docs/"><small>Previous</small>Overview</a><a class="next" href="/docs/concepts/"><small>Next</small>Concepts</a></nav>
+</article>
+</div></main>
+<footer class="site"><div class="wrap">
+  <span>AWOS. Local-first background agent. Built in India.</span>
+  <nav aria-label="Footer">
+    <a href="/docs/">Docs</a>
+    <a href="/docs/quickstart/">Quickstart</a>
+    <a href="/docs/security/">Security</a>
+    <a href="/docs/faq/">FAQ</a>
+    <a href="/access/">Request access</a>
+  </nav>
+</div></footer>
+</body>
+</html>
