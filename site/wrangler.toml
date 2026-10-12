@@ -1,0 +1,7 @@
+name = "awos"
+pages_build_output_dir = "public"
+compatibility_date = "2026-10-01"
+
+[[kv_namespaces]]
+binding = "ACCESS_REQUESTS"
+id = "7ed8feebbe6147499b5b705d0d25d19f"
