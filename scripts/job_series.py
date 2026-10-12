@@ -513,17 +513,37 @@ def manifest_violations(results: list[dict]) -> list[dict]:
 
 def git_provenance(repo: Path = REPO) -> dict:
     """HEAD sha, branch, and whether code (anything outside .awos/) is modified."""
-    def g(*args: str) -> str:
+    def g(*args: str, strip: bool = True) -> str:
         try:
-            return subprocess.run(["git", "-C", str(repo), *args], capture_output=True,
-                                  text=True, timeout=20).stdout.strip()
+            out = subprocess.run(["git", "-C", str(repo), *args], capture_output=True,
+                                 text=True, timeout=20).stdout
+            return out.strip() if strip else out
         except (OSError, subprocess.SubprocessError):
             return ""
-    status = [ln for ln in g("status", "--porcelain", "--untracked-files=no").splitlines()
-              if ln.strip() and not ln[3:].startswith(".awos/")]
+    paths = porcelain_paths(g("status", "--porcelain", "-z", "--untracked-files=no", strip=False))
+    paths = [p for p in paths if not p.startswith(".awos/")]
     return {"sha": g("rev-parse", "HEAD") or None,
             "branch": g("rev-parse", "--abbrev-ref", "HEAD") or None,
-            "dirty": bool(status), "dirty_paths": [ln[3:] for ln in status][:20]}
+            "dirty": bool(paths), "dirty_paths": paths[:20]}
+
+
+def porcelain_paths(z_output: str) -> list[str]:
+    """Paths from `git status --porcelain -z`: "XY path\\0" records, where a
+    rename/copy is followed by its source path as an extra record. Parsed by
+    record, never after stripping the output: g()'s .strip() once ate the
+    leading space of " M scripts/x.py", so ln[3:] recorded 'cripts/x.py'."""
+    out: list[str] = []
+    records = z_output.split("\0")
+    i = 0
+    while i < len(records):
+        rec = records[i]
+        i += 1
+        if len(rec) < 4:
+            continue
+        out.append(rec[3:])
+        if rec[0] in "RC":
+            i += 1                     # skip the rename/copy source path
+    return out
 
 
 def config_hash(series: str, sdir: Path, arms: list[str], numbers: list[int],
@@ -632,6 +652,16 @@ def _pin_model() -> list[str]:
     return allowed
 
 
+def child_cost_cap(spec_cap: float) -> float:
+    """task.json's cap, lowered to the runner's AWOS_JOB_MAX_COST_USD (what is
+    left of a series budget) when smaller."""
+    try:
+        env_cap = float(os.environ.get("AWOS_JOB_MAX_COST_USD", ""))
+    except ValueError:
+        return spec_cap
+    return min(spec_cap, env_cap) if env_cap > 0 else spec_cap
+
+
 def run_child(job_dir: Path, project: Path) -> None:
     """Hand the goal to a fresh Orchestrator, as scripts/long_tasks.py does."""
     # cwd is the arm's state dir, so the repo is put on the path explicitly.
@@ -646,7 +676,7 @@ def run_child(job_dir: Path, project: Path) -> None:
         "AWOS_USE_WORKTREE": "false",
         "AWOS_ENABLE_CLARIFICATION": "false",
         "AWOS_ENABLE_PLAN_REVIEW": "false",
-        "AWOS_MAX_RUN_COST": str(spec.get("max_cost_usd", 1.0)),
+        "AWOS_MAX_RUN_COST": str(child_cost_cap(float(spec.get("max_cost_usd", 1.0)))),
         "AWOS_AGENT_MAX_TURNS": str(spec.get("max_turns", 150)),
         "AWOS_SANDBOX": os.environ.get("AWOS_SANDBOX", "auto"),
         **PIN_ENV,
@@ -665,8 +695,8 @@ def run_child(job_dir: Path, project: Path) -> None:
     )
     (Path.cwd() / "report.json").write_text(json.dumps({
         k: report.get(k) for k in ("success", "tasks_completed", "tasks_failed",
-                                   "plan_source", "planner_errors", "errors")
-    }), encoding="utf-8")
+                                   "plan_source", "planner_errors", "errors", "components")
+    }, default=str), encoding="utf-8")
 
 
 def run_dry_child(job_dir: Path, project: Path) -> None:
@@ -831,7 +861,6 @@ _TS_PREFIX = re.compile(r"^\+\d+:\d\d ", re.M)
 _NO_EDIT_LINE = re.compile(r"\[harness_aider\] aider_no_edit reason=(\w+)")
 _FINAL_LINE = re.compile(r"\[aider-final\] (\{.*\})")
 _APPLIED_LINE = re.compile(r"^Applied edit to (\S+)", re.M)
-_HARNESS_CRASH = "Traceback (most recent call last)"
 # The harness banner: "add_files=none(0) " (old) / "add_files=auto:src+tests(12 edit, ...".
 _PRELOADED = re.compile(r"\[harness_aider\] aider .*? add_files=\S*?\((\d+)")
 
@@ -850,21 +879,53 @@ def aider_no_edit(log_text: str) -> str | None:
     m = _NO_EDIT_LINE.search(text)
     if m:
         return m.group(1)
-    if (_HARNESS_CRASH in text and not _FINAL_LINE.search(text)
-            and "[aider-usage]" not in text and not _APPLIED_LINE.findall(text)):
-        # The harness died with a traceback before Aider reported anything (it
-        # prints its own no-edit line whenever it reaches the end): setup, not model.
-        return "harness_crashed"
+    ha = _ha()
+    pre = _PRELOADED.search(text)
+    text = ha.last_attempt(text)       # the attempt the row records
     final: dict = {}
     for fm in _FINAL_LINE.finditer(text):
         try:
             final = json.loads(fm.group(1))
         except ValueError:
             pass
-    pre = _PRELOADED.search(text)
+    applied = _APPLIED_LINE.findall(text)
+    if aider_harness_crashed(log_text) and not final.get("edited") and not applied:
+        # The harness never reached its end (it prints its own no-edit line
+        # there) and Aider edited nothing: setup, not model.
+        return "harness_crashed"
+    return ha.no_edit_reason(final, applied, ha.asked_to_add_files(text),
+                             preloaded=bool(pre and int(pre.group(1)) > 0),
+                             empty=ha.ended_with_empty_response(text))
+
+
+def aider_harness_crashed(log_text: str) -> bool:
+    """An Aider job's log section where the harness started (banner) but neither
+    it (`[harness_aider] done`) nor Aider (`[aider-final]`) reached its end, and
+    nobody killed it on purpose (job limit, harness timeout/cost cap): the
+    wrapper died. No traceback needed (a SIGKILL, an OOM or a hard exit prints
+    none). run_job also checks the exit code and report.json live, which catches
+    a harness that died after Aider finished."""
+    text = _TS_PREFIX.sub("", log_text or "")
+    ended = ("[harness_aider] done ", "[harness_aider] aider_no_edit ",
+             "[harness_aider] invalid_run ", "[aider-final]")
+    return ("[harness_aider] aider " in text and not any(e in text for e in ended)
+            and "[job_series] hit the" not in text
+            and "[harness_aider] hit the" not in text and "; stopping aider" not in text)
+
+
+def aider_invalid_run(log_text: str) -> str | None:
+    """The harness's own verdict that the run says nothing about the model
+    (`[harness_aider] invalid_run reason=...`), or, for logs from before that
+    line, a final attempt that ended on an empty model response."""
+    if "[harness_aider]" not in (log_text or ""):
+        return None
     ha = _ha()
-    return ha.no_edit_reason(final, _APPLIED_LINE.findall(text), ha.asked_to_add_files(text),
-                             preloaded=bool(pre and int(pre.group(1)) > 0))
+    m = re.search(re.escape(ha.INVALID_TAG) + r"(\w+)", log_text)
+    if m:
+        return m.group(1)
+    if ha.ended_with_empty_response(_TS_PREFIX.sub("", log_text)):
+        return ha.EMPTY_REASON
+    return None
 
 
 def detect_invalid(log_text: str, turns: int, dry_run: bool) -> str | None:
@@ -879,6 +940,13 @@ def detect_invalid(log_text: str, turns: int, dry_run: bool) -> str | None:
     for marker in INVALID_MARKERS:
         if marker in log_text:
             return f"log shows {marker!r}"
+    bad = aider_invalid_run(log_text)
+    if bad:
+        # e.g. empty_model_response: every Aider attempt ended on a model call
+        # with no content; whatever the tree shows, the model never finished.
+        return f"aider_invalid ({bad}: no usable model response after retries)"
+    if aider_harness_crashed(log_text):
+        return "harness_crashed (the Aider harness never reached its end)"
     no_edit = aider_no_edit(log_text)
     if no_edit in _ha().NO_EDIT_SETUP_REASONS:
         return f"aider_no_edit ({no_edit}: Aider never had the code to edit)"
@@ -934,8 +1002,9 @@ def git(project: Path, *args: str, check: bool = True) -> subprocess.CompletedPr
 
 
 def stream_child(cmd: list[str], cwd: Path, env: dict, log_path: Path, prefix: str,
-                 timeout_s: float) -> bool:
-    """Run cmd, teeing each line to log_path and stdout with prefix. True on timeout."""
+                 timeout_s: float, status: dict | None = None) -> bool:
+    """Run cmd, teeing each line to log_path and stdout with prefix. True on timeout.
+    `status`, if given, receives the child's "returncode"."""
     with open(log_path, "a", encoding="utf-8") as log:
         log.write(f"\n===== {prefix} {time.strftime('%Y-%m-%d %H:%M:%S')} =====\n")
         log.flush()
@@ -969,6 +1038,8 @@ def stream_child(cmd: list[str], cwd: Path, env: dict, log_path: Path, prefix: s
                 proc.kill()
             proc.wait()
         reader.join(timeout=10)
+        if status is not None:
+            status["returncode"] = proc.returncode
         if timed_out:
             msg = f"[job_series] hit the {timeout_s / 60:.0f}-minute limit\n"
             log.write(msg)
@@ -1024,6 +1095,81 @@ def billed_since(state: Path, before: float | None, settle_s: float = 150.0,
         time.sleep(every_s)
 
 
+# Series budget (AWOS_SERIES_BUDGET_USD, set by a capped driver to what is left
+# of its total cap): every attempt's spend counts against it; a job's cost cap is
+# lowered to what is left; the run stops once it is used up.
+_BUDGET: dict = {"limit": None, "spent": 0.0}
+BUDGET_REASON = "budget_cap"
+BUDGET_FLOOR_USD = 0.002
+
+
+def budget_left() -> float | None:
+    if _BUDGET["limit"] is None:
+        return None
+    return round(_BUDGET["limit"] - _BUDGET["spent"], 6)
+
+
+def budget_job_cap(spec_cap: float) -> float:
+    left = budget_left()
+    return spec_cap if left is None else max(0.0, min(spec_cap, left))
+
+
+# ── AWOS component state per row ──────────────────────────────────────────────
+# The AWOS child reports which of its components actually ran: report.json's
+# "components" dict, else its last `[COMPONENTS] {json}` log line.
+_COMPONENTS_LINE = re.compile(r"\[COMPONENTS\]\s*(\{.*\})\s*$", re.M)
+COMPONENT_KEYS = ("planner", "acceptance", "one_shot")
+_RAN_WORDS = {"ran", "run", "ok", "used", "active", "success", "succeeded", "passed",
+              "accepted", "rejected", "applied", "planned", "fired"}
+
+
+def components_from(report, log_text: str) -> dict:
+    if isinstance(report, dict) and isinstance(report.get("components"), dict):
+        return report["components"]
+    found: dict = {}
+    for m in _COMPONENTS_LINE.finditer(_TS_PREFIX.sub("", log_text or "")):
+        try:
+            value = json.loads(m.group(1))
+        except ValueError:
+            continue
+        if isinstance(value, dict):
+            found = value
+    return found
+
+
+def component_ran(value) -> bool:
+    """Did a component actually run? Tolerant of the child's shape: a bool; a
+    count; a status word (ran/ok/used/...); or a dict with ran/used/active, a
+    status/state word, or a positive calls/count."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value > 0
+    if isinstance(value, str):
+        return value.strip().lower() in _RAN_WORDS
+    if isinstance(value, dict):
+        for k in ("ran", "used", "active", "fired"):
+            if k in value:
+                return bool(value[k])
+        for k in ("status", "state", "outcome"):
+            if isinstance(value.get(k), str):
+                return value[k].strip().lower() in _RAN_WORDS
+        for k in ("calls", "count", "runs"):
+            if isinstance(value.get(k), (int, float)):
+                return value[k] > 0
+    return False
+
+
+def component_counts(rows: list[dict]) -> dict:
+    """Rows of one arm where each AWOS component actually ran."""
+    out = {"rows": len(rows),
+           "with_components": sum(1 for r in rows if r.get("components")
+                                  and r["components"] != {"harness": "aider"})}
+    for key in COMPONENT_KEYS:
+        out[key] = sum(1 for r in rows if component_ran((r.get("components") or {}).get(key)))
+    return out
+
+
 def run_job(arm: str, number: int, job_dir: Path, sdir: Path, jobs: list, arm_dir: Path,
             dry_run: bool) -> dict:
     spec = load(job_dir)
@@ -1052,6 +1198,15 @@ def run_job(arm: str, number: int, job_dir: Path, sdir: Path, jobs: list, arm_di
     env.update(experience_env(arm_dir, sdir))
     if _RUN_DOTENV:
         env[JOB_DOTENV] = str(_RUN_DOTENV)
+    spec_cap = float(spec.get("max_cost_usd", 1.0))
+    job_cap = budget_job_cap(spec_cap)
+    env.pop("AWOS_JOB_MAX_COST_USD", None)
+    if job_cap < spec_cap:
+        # What is left of the series budget (AWOS_SERIES_BUDGET_USD): both
+        # children cap themselves at it (harness_aider, run_child).
+        env["AWOS_JOB_MAX_COST_USD"] = f"{job_cap:.6f}"
+        print(f"{prefix} series budget: job cost cap lowered to ${job_cap:.4f} "
+              f"(task.json: ${spec_cap:.2f})", flush=True)
     fill ={"{runner}": str(Path(__file__).resolve()), "{job_dir}": str(job_dir),
             "{project}": str(project)}
     cmd = ([PY, "{runner}", "_dry_child", "{job_dir}", "{project}"] if dry_run
@@ -1062,9 +1217,10 @@ def run_job(arm: str, number: int, job_dir: Path, sdir: Path, jobs: list, arm_di
     log_path = arm_dir / "run.log"
     log_start = log_path.stat().st_size if log_path.exists() else 0
     started = time.monotonic()
+    child_status: dict = {}
     timed_out = stream_child(
         cmd, cwd=state, env=env, log_path=log_path, prefix=prefix,
-        timeout_s=float(spec.get("timeout_min", 30)) * 60,
+        timeout_s=float(spec.get("timeout_min", 30)) * 60, status=child_status,
     )
     minutes = round((time.monotonic() - started) / 60, 2)
     with open(log_path, "rb") as fh:
@@ -1107,6 +1263,26 @@ def run_job(arm: str, number: int, job_dir: Path, sdir: Path, jobs: list, arm_di
         usage["usage_source"] = "call_log (timed out)"
     usage["billed_usd"] = billed_since(state, billed_before)
     invalid_reason = detect_invalid(log_text, usage["turns"], dry_run)
+    is_aider = not dry_run and any("harness_aider.py" in part for part in cmd)
+    returncode = child_status.get("returncode")
+    if (invalid_reason is None or invalid_reason.startswith("harness_crashed")) \
+            and is_aider and not timed_out:
+        # Robust crash check: the harness always exits 0 after writing its
+        # report, so a non-zero exit or a missing report means the wrapper died
+        # (traceback or not). Never the model's result.
+        has_report = isinstance(report, dict) and report.get("harness") == "aider"
+        if returncode != 0 or not has_report:
+            invalid_reason = (f"harness_crashed (exit {returncode}"
+                              f"{'' if has_report else ', no report.json'})")
+    # Retried empty-response attempts inside the harness are billed too.
+    retry_cost = float(report.get("retry_cost_usd") or 0) if isinstance(report, dict) else 0.0
+    spent = round(float(usage.get("cost_usd") or 0) + retry_cost, 6)
+    if _BUDGET["limit"] is not None:
+        _BUDGET["spent"] += spent
+        if invalid_reason is None and job_cap < spec_cap and spent >= 0.9 * job_cap:
+            # The job ran into what was left of the series budget, not its own
+            # cap: its result is cut short by the experiment's money, not the agent.
+            invalid_reason = f"{BUDGET_REASON} (spent ${spent:.4f} of a ${job_cap:.4f} cap)"
     result = {
         "arm": arm, "job": number, "id": spec.get("id", job_dir.name), "dir": job_dir.name,
         "solved": bool(hidden["ok"] and visible["ok"]),
@@ -1121,7 +1297,19 @@ def run_job(arm: str, number: int, job_dir: Path, sdir: Path, jobs: list, arm_di
         "notebook_chars": notebook_chars(state),
         "invalid": invalid_reason is not None, "invalid_reason": invalid_reason, "attempts": 1,
         "inputs": inputs,
+        "exit_code": returncode,
+        # cost_usd describes the scored attempt; spent_usd is every dollar this
+        # row's job cost (harness-internal retries; run_job_with_retries adds
+        # the runner's own failed attempts).
+        "retry_cost_usd": round(retry_cost, 6),
+        "spent_usd": spent,
+        "components": ({"harness": "aider"}
+                       if "harness_aider.py" in " ".join(child["cmd"])
+                       else components_from(report, log_text)),
     }
+    if is_aider and isinstance(report, dict):
+        result["aider_attempts"] = report.get("attempts", 1)
+        result["aider_empty_responses"] = report.get("empty_responses", 0)
     af = aider_files(report, log_text)
     if af:
         inputs["aider_files"] = af
@@ -1168,12 +1356,17 @@ def run_job_with_retries(arm: str, number: int, job_dir: Path, sdir: Path, jobs:
             drop_snapshot(snap)
             drop_snapshot(exp_snap)
         result["attempts"] = len(failed) + 1
+        attempt_spent = result.get("spent_usd", result["cost_usd"])
         if failed:
             result["failed_attempts"] = failed
+            result["spent_usd"] = round(attempt_spent + sum(f.get("spent_usd", f["cost_usd"])
+                                                            for f in failed), 6)
         if not result["invalid"]:
             return result, None
+        if str(result["invalid_reason"]).startswith(BUDGET_REASON):
+            return result, "series budget exhausted"
         failed = failed + [{"reason": result["invalid_reason"], "cost_usd": result["cost_usd"],
-                            "minutes": result["minutes"]}]
+                            "spent_usd": attempt_spent, "minutes": result["minutes"]}]
         if len(failed) > retries:
             print(f"[{arm} j{number:02d}] still invalid after {len(failed)} attempt(s); "
                   f"recording it as invalid and moving on", flush=True)
@@ -1281,6 +1474,9 @@ def summarize(results: list[dict], arms: list[str]) -> dict:
             "all": _block(rows),
             "jobs_1_6": _block([r for r in rows if r["job"] <= 6]),
             "jobs_7_12": _block([r for r in rows if 7 <= r["job"] <= 12]),
+            # Which AWOS components actually ran (planner / acceptance / one_shot),
+            # over every row of the arm, valid or not.
+            "components": component_counts([r for r in results if r["arm"] == arm]),
         }
     multi = _multi(results)
     out["dropped_jobs"] = {_drop_label(k, multi): why for k, why in dropped.items()}
@@ -1331,6 +1527,11 @@ def print_report(results: list[dict], arms: list[str], summary: dict) -> None:
                   f"(rate {_fmt(b['solve_rate'])})  mean cost {_fmt(b['mean_cost_usd'], True)}  "
                   f"mean turns {_fmt(b['mean_turns'])}  "
                   f"mean billed {_fmt(b.get('mean_billed_usd'), True)}")
+    for arm in arms:
+        c = summary[arm].get("components")
+        if c and c.get("with_components"):
+            print(f"  {arm:<4} components ran (of {c['rows']} rows, {c['with_components']} "
+                  f"reporting): " + "  ".join(f"{k} {c[k]}" for k in COMPONENT_KEYS))
     rs = summary.get("repeats")
     if rs:
         print("  " + "-" * (width - 2))
@@ -1417,6 +1618,13 @@ def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
         print(f"[job_series] resuming {ts}: keeping {len(kept)} earlier result(s)")
 
     retries = int(os.environ.get("AWOS_SERIES_RETRIES", 2))
+    try:
+        _BUDGET["limit"] = (float(os.environ["AWOS_SERIES_BUDGET_USD"])
+                            if os.environ.get("AWOS_SERIES_BUDGET_USD") else None)
+    except ValueError:
+        print("[job_series] AWOS_SERIES_BUDGET_USD is not a number")
+        return 1
+    _BUDGET["spent"] = 0.0
     env_src = find_env_file(env_file)
     # Children and key_usage read the key from this one file; no copy is left
     # in any arm dir (99 stale copies had piled up under .awos/job_series).
@@ -1474,6 +1682,11 @@ def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
         sys.stdout.flush()
         for i, n in enumerate(numbers):
             for arm in arms:
+                left = budget_left()
+                if left is not None and left < BUDGET_FLOOR_USD:
+                    stopped = (f"series budget exhausted before {arm} job {n} "
+                               f"(${_BUDGET['spent']:.4f} of ${_BUDGET['limit']:.4f})")
+                    break
                 # Before every job: a key dying mid-run otherwise reads as the agent failing.
                 if not dry_run and not wait_for_backend():
                     stopped = f"backend check failed before {arm} job {n}"
@@ -1513,6 +1726,7 @@ def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
         "provenance": {**provenance, "finished_at": _now()},
         "preflight": pre, "valid": None, "violations": own,
         "run_dir": str(run_root), "stopped": stopped,
+        "budget": {"limit_usd": _BUDGET["limit"], "spent_usd": round(_BUDGET["spent"], 6)},
         "results": results, "summary": summary,
     }
     out.write_text(json.dumps(data, indent=2), encoding="utf-8")

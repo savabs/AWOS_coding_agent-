@@ -58,3 +58,50 @@ def test_combine_rekeys_job_by_issue(tmp_path):
     data = json.loads((tmp_path / "combined.json").read_text())
     keys = {(r["issue"], r["job"], r["repeat"], r["arm"]) for r in data["results"]}
     assert len(keys) == 8 and {(i, j) for i, j, _, _ in keys} == {("a", 1), ("b", 2)}
+
+
+def test_spend_counts_every_attempt_and_every_results_file(tmp_path):
+    # spent_usd (all attempts) wins over cost_usd; old rows add failed attempts.
+    _rows(tmp_path, 1, "a", [{"arm": "off", "cost_usd": 0.01, "spent_usd": 0.03},
+                             {"arm": "aider", "cost_usd": 0.02,
+                              "failed_attempts": [{"cost_usd": 0.005}]}])
+    # An interrupted earlier run of the same issue still cost money.
+    d = tmp_path / "r1" / "a"
+    (d / "job_series_20261010T000000.json").write_text(json.dumps(
+        {"results": [{"arm": "off", "cost_usd": 0.04}]}))
+    assert round(ab.issue_spend(tmp_path, 1, "a"), 4) == 0.095
+    total, n = ab.spend(tmp_path, ["a"], 1)
+    assert round(total, 4) == 0.095 and n == 1
+
+
+def test_projection_uses_the_costliest_issue(tmp_path):
+    _rows(tmp_path, 1, "a", [{"arm": "off", "cost_usd": 0.01}, {"arm": "aider", "cost_usd": 0.01}])
+    _rows(tmp_path, 1, "b", [{"arm": "off", "cost_usd": 0.20}, {"arm": "aider", "cost_usd": 0.10}])
+    total, projected, n = ab.projected_next(tmp_path, ["a", "b", "c"], 1)
+    assert n == 2 and round(total, 2) == 0.32 and round(projected, 2) == 0.62
+    assert ab.projected_next(tmp_path / "empty", ["a"], 1)[1] == ab.FIRST_ISSUE_GUESS_USD
+
+
+def test_driver_passes_budget_and_stops_on_budget(tmp_path, monkeypatch):
+    root = tmp_path / "series"
+    for i in range(3):
+        _issue(root, f"fresh_{i}")
+    (root / "READY").write_text("ok")
+    out = tmp_path / "out"
+    seen = []
+
+    def fake_run(cmd, cwd=None, check=False, env=None):
+        issue = cmd[cmd.index("--series") + 1]
+        seen.append((issue, float(env["AWOS_SERIES_BUDGET_USD"])))
+        stopped = "series budget exhausted" if issue == "fresh_1" else None
+        d = out / "r1" / issue
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "job_series_20261012T000000.json").write_text(json.dumps({"stopped": stopped,
+            "results": [{"arm": "off", "spent_usd": 0.1}, {"arm": "aider", "spent_usd": 0.1}]}))
+
+    monkeypatch.setattr(ab.subprocess, "run", fake_run)
+    monkeypatch.setenv("AWOS_SERIES_MODEL", "claude-haiku-5-5")
+    assert ab.main(["run", "--series-root", str(root), "--out", str(out), "--cap", "1.0",
+                    "--min-issues", "3"]) == 0
+    assert [i for i, _ in seen] == ["fresh_0", "fresh_1"]          # stopped after fresh_1
+    assert seen[0][1] == 1.0 and round(seen[1][1], 4) == 0.8

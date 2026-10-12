@@ -24,7 +24,19 @@ Reads <job_dir>/task.json, runs Aider once, non-interactively (`--message`), in
      "killed": null | "timeout" | "cost", "exit_code": int | null,
      "cost_source": ..., "aider_test_outcome": bool | null, ...}
 
-`turns` = model responses. Aider gets no conventions file, no chat history and
+Empty model responses: Aider prints "Empty response received from LLM" when a
+call returns no text (Haiku 5.5 thinks by default; a call that spends the whole
+max_tokens on thinking comes back empty with finish_reason=length) and ends its
+run without retrying. The launcher records that call's usage (Aider itself
+skips it), and the harness resets the project (git) and runs Aider again, up to
+AWOS_AIDER_EMPTY_RETRIES (default 2) more times with a doubling backoff
+(AWOS_AIDER_RETRY_BACKOFF_S, default 10 s). If the last attempt still ends
+empty, report.json has "invalid_reason": "empty_model_response" and the log a
+`[harness_aider] invalid_run reason=empty_model_response` line: job_series
+scores that run INVALID (infrastructure), never "not solved". Retried attempts
+are listed in "failed_attempts" with their cost ("retry_cost_usd").
+
+`turns` = model responses with content. Aider gets no conventions file, no chat history and
 no memory of earlier jobs: it is the no-memory baseline.
 
 Files in the chat (--add-files, default auto): Aider only edits files that are
@@ -99,25 +111,42 @@ n = int(sys.argv.pop(1))
 from aider.coders import base_coder
 C = base_coder.Coder
 C.max_reflections = n
-_calc = C.calculate_and_show_tokens_and_cost
-def calc(self, messages, completion=None):
-    before = self.total_cost
-    out = _calc(self, messages, completion)
+def _rec(self, completion, cost, finish=None):
     u = getattr(completion, "usage", None)
     hit = (getattr(u, "prompt_cache_hit_tokens", 0) or getattr(u, "cache_read_input_tokens", 0) or 0) if u else 0
     or_cost = getattr(u, "cost", None) if u else None
+    empty = not (self.partial_response_content or "").strip() and not self.partial_response_function_call
     rec = {
         "prompt_tokens": int(getattr(u, "prompt_tokens", 0) or 0) if u else None,
         "completion_tokens": int(getattr(u, "completion_tokens", 0) or 0) if u else None,
         "cache_hit_tokens": int(hit),
         "cache_write_tokens": int(getattr(u, "cache_creation_input_tokens", 0) or 0) if u else 0,
-        "cost": float(self.total_cost - before),
+        "cost": float(cost),
         "session_cost": float(self.total_cost),
         "openrouter_cost": float(or_cost) if isinstance(or_cost, (int, float)) else None,
+        "empty": bool(empty),
     }
+    if finish:
+        rec["finish_reason"] = finish
     print("[aider-usage] " + json.dumps(rec), flush=True)
+_calc = C.calculate_and_show_tokens_and_cost
+def calc(self, messages, completion=None):
+    before = self.total_cost
+    out = _calc(self, messages, completion)
+    _rec(self, completion, self.total_cost - before)
     return out
 C.calculate_and_show_tokens_and_cost = calc
+_sso = C.show_send_output
+def sso(self, completion):
+    try:
+        return _sso(self, completion)
+    except base_coder.FinishReasonLength:
+        # Aider skips its cost line for a response cut at max_tokens (on Haiku 5.5
+        # often all thinking, no text: "Empty response received from LLM"); the
+        # call is still billed, so record its usage here.
+        _rec(self, completion, 0.0, finish="length")
+        raise
+C.show_send_output = sso
 _run = C.run
 def run(self, *a, **k):
     try:
@@ -153,25 +182,42 @@ def _num(text: str, unit: str = "") -> int:
 # `a.py` to the chat", "ask me to *add them to the chat*".
 # Within one sentence: a "." only ends it when followed by a space (not in a.py).
 _ASK_TO_ADD = re.compile(r"\badd\b(?:[^.?!]|[.?!](?=\S)){0,160}?\bto\s+(?:the|this)\s+chat\b", re.I)
+# Aider's own start-up banner when many files are pre-added. It is not the model
+# asking for files; it once matched _ASK_TO_ADD and mislabelled all 7
+# asked_for_files_it_had runs of the B2 experiment (2026-10-11).
+_BANNER_ASK = re.compile(r"Warning:\s+it's\s+best\s+to\s+only\s+add\s+files\s+that\s+need\s+"
+                         r"changes\s+to\s+the\s+chat\.?", re.I)
+# Aider's message when a model call came back with no text (on Haiku 5.5: the
+# whole max_tokens budget spent on thinking). Aider does not retry it and its
+# run ends there: the harness retries the invocation, then reports it invalid.
+EMPTY_RESPONSE_MARKER = "Empty response received from LLM"
+TOKEN_LIMIT_MARKER = "has hit a token limit!"
+ATTEMPT_TAG = "[harness_aider] attempt "
+INVALID_TAG = "[harness_aider] invalid_run reason="
+EMPTY_REASON = "empty_model_response"
 _APPLIED = re.compile(r"^Applied edit to (\S+)")
 NO_EDIT_TAG = "aider_no_edit"
 # Reasons that say the harness left Aider without the code, not that the
 # model failed: job_series treats these as an invalid run.
 # harness_crashed is set by job_series when the harness died before its no-edit line.
 NO_EDIT_SETUP_REASONS = ("no_files_in_chat", "asked_to_add_files", "no_model_response",
-                         "harness_crashed")
+                         "harness_crashed", EMPTY_REASON)
 
 
 def asked_to_add_files(text: str) -> bool:
-    """True if the text asks for files to be added to the chat (line wraps ok)."""
-    return bool(_ASK_TO_ADD.search(" ".join(text.split())))
+    """True if the text asks for files to be added to the chat (line wraps ok).
+    Aider's own "only add files that need changes to the chat" banner is ignored."""
+    return bool(_ASK_TO_ADD.search(_BANNER_ASK.sub(" ", " ".join(text.split()))))
 
 
 def no_edit_reason(final: dict | None, applied: list[str], asked: bool,
                    preloaded: bool = False, api_error: str | None = None,
-                   turns: int | None = None) -> str | None:
+                   turns: int | None = None, empty: bool = False) -> str | None:
     """Why Aider ended without editing anything, or None if it edited.
 
+    empty_model_response - the model's last response had no content (Aider
+                          prints "Empty response received from LLM" and stops):
+                          the provider's doing, invalid like no_model_response
     no_model_response   - not one model response came back and Aider printed a
                           provider error (e.g. a 400 for a request parameter the
                           model rejects): the harness's setup, never the model's work
@@ -188,6 +234,8 @@ def no_edit_reason(final: dict | None, applied: list[str], asked: bool,
     final = final or {}
     if final.get("edited") or applied:
         return None
+    if empty:
+        return EMPTY_REASON
     if api_error and turns == 0:
         return "no_model_response"
     if final and not final.get("in_chat"):
@@ -195,6 +243,26 @@ def no_edit_reason(final: dict | None, applied: list[str], asked: bool,
     if asked:
         return "asked_for_files_it_had" if preloaded else "asked_to_add_files"
     return "no_edits"
+
+
+def last_attempt(log_text: str) -> str:
+    """The part of a harness log after its last `[harness_aider] attempt` line
+    (the whole text for logs from before retries existed)."""
+    i = log_text.rfind(ATTEMPT_TAG)
+    return log_text if i < 0 else log_text[i:]
+
+
+def ended_with_empty_response(log_text: str) -> bool:
+    """For one job's harness log: did the final Aider attempt end on an empty
+    model response (and was not killed)? Works on logs from before the exact
+    `empty` usage flag and the invalid_run line existed."""
+    text = last_attempt(log_text)
+    if "[harness_aider] hit the" in text or "; stopping aider" in text:
+        return False
+    t = UsageTracker()
+    for line in text.splitlines():
+        t.feed(re.sub(r"^\+\d+:\d\d ", "", line))
+    return t.ended_empty
 
 
 class UsageTracker:
@@ -222,6 +290,10 @@ class UsageTracker:
         self.applied: list[str] = []         # "Applied edit to <file>" lines
         self.asked_to_add = False            # model asked for files to be added
         self._prev = ""                      # previous line, for wrapped asks
+        self.empty_responses = 0             # "Empty response received from LLM" lines
+        self.token_limit = False             # Aider printed "has hit a token limit!"
+        self._last = None                    # "response" | "empty": the last model event
+        self._empty_open = False
 
     def feed(self, line: str) -> bool:
         """Parse one output line; True if it carried usage."""
@@ -232,12 +304,25 @@ class UsageTracker:
         a = _APPLIED.match(line)
         if a and a.group(1) not in self.applied:
             self.applied.append(a.group(1))
+        if EMPTY_RESPONSE_MARKER in line:
+            self.empty_responses += 1
+            self._last = "empty"
+            self._empty_open = True
+        if TOKEN_LIMIT_MARKER in line:
+            self.token_limit = True
         if line.startswith(USAGE_TAG):
             try:
-                self.exact.append(json.loads(line[len(USAGE_TAG):]))
-                return True
+                rec = json.loads(line[len(USAGE_TAG):])
             except ValueError:
                 return False
+            self.exact.append(rec)
+            # Aider prints its "Empty response" warning before the usage line of
+            # the same call, so an empty call leaves _last at "empty".
+            if rec.get("empty"):
+                self._last = "empty"
+            else:
+                self._last = "response"
+            return True
         if line.startswith(FINAL_TAG):
             try:
                 self.final = json.loads(line[len(FINAL_TAG):])
@@ -255,6 +340,11 @@ class UsageTracker:
             if parts:
                 hit = True
                 self.text_turns += 1
+                if not self.exact:
+                    # Old logs (no exact lines): this Tokens line closes the call;
+                    # an "Empty response" printed since the last one makes it empty.
+                    self._last = "empty" if self._empty_open else "response"
+                self._empty_open = False
                 for p in parts:
                     n = _num(p.group("num"), p.group("unit"))
                     what = p.group("what")
@@ -271,8 +361,16 @@ class UsageTracker:
         return hit
 
     @property
+    def ended_empty(self) -> bool:
+        """The last model call came back with no content (Aider ends the run there)."""
+        return self._last == "empty"
+
+    @property
     def turns(self) -> int:
-        return len(self.exact) if self.exact else self.text_turns
+        """Model responses with content (an empty response is billed, not a turn)."""
+        if self.exact:
+            return sum(1 for r in self.exact if not r.get("empty"))
+        return self.text_turns
 
     @property
     def input_tokens(self) -> int:
@@ -480,6 +578,70 @@ def model_settings(model: str, provider: str = "openrouter") -> list[dict]:
             # "`temperature` is deprecated for this model"); Aider sends 0 by default.
             s["use_temperature"] = False
     return [s]
+
+
+def _env_number(name: str, default, cast=float):
+    try:
+        value = cast(os.environ.get(name, default))
+    except ValueError:
+        return default
+    return value if value >= 0 else default
+
+
+def empty_retries() -> int:
+    """Extra Aider invocations after one that ended in an empty model response
+    (AWOS_AIDER_EMPTY_RETRIES, default 2)."""
+    return int(_env_number("AWOS_AIDER_EMPTY_RETRIES", 2, int))
+
+
+def retry_backoff_s() -> float:
+    """Wait before the first such retry, doubled each time (AWOS_AIDER_RETRY_BACKOFF_S, default 10)."""
+    return float(_env_number("AWOS_AIDER_RETRY_BACKOFF_S", 10.0))
+
+
+def job_cost_cap(spec_cap: float) -> float:
+    """The job's cost cap, lowered to job_series' AWOS_JOB_MAX_COST_USD (what is
+    left of a series budget) when that is smaller."""
+    try:
+        env_cap = float(os.environ.get("AWOS_JOB_MAX_COST_USD", ""))
+    except ValueError:
+        return spec_cap
+    return min(spec_cap, env_cap) if env_cap > 0 else spec_cap
+
+
+def _git_out(project: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(project), *args], capture_output=True,
+                          text=True, timeout=60)
+
+
+def project_resettable(project: Path) -> bool:
+    """True if project is the top of a git work tree with a commit and nothing
+    uncommitted or untracked, so reset_project puts it back exactly."""
+    try:
+        head = _git_out(project, "rev-parse", "--verify", "-q", "HEAD")
+        top = _git_out(project, "rev-parse", "--show-toplevel")
+        if head.returncode or top.returncode or Path(top.stdout.strip()).resolve() != project.resolve():
+            return False
+        st = _git_out(project, "status", "--porcelain", "--untracked-files=all")
+        return st.returncode == 0 and not st.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def reset_project(project: Path) -> None:
+    """Back to the starting commit: drop Aider's edits and any new files."""
+    _git_out(project, "reset", "-q", "--hard", "HEAD")
+    _git_out(project, "clean", "-q", "-f", "-d")
+
+
+def attempt_summary(tracker: "UsageTracker", model: str, code: int | None, secs: float) -> dict:
+    """One Aider invocation that ended in an empty response, and what it cost."""
+    u = tracker.usage(model)
+    return {"reason": EMPTY_REASON, "cost_usd": u["cost_usd"], "cost_source": tracker.cost()[1],
+            "turns": u["turns"], "input_tokens": u["input_tokens"],
+            "output_tokens": u["output_tokens"], "empty_responses": tracker.empty_responses,
+            "usage_recorded": bool(tracker.exact), "exit_code": code,
+            "minutes": round(secs / 60, 2)}
 
 
 def max_output_tokens() -> int:
@@ -826,7 +988,7 @@ def main(argv: list[str] | None = None) -> int:
     state = Path.cwd()
     spec = json.loads((job_dir / "task.json").read_text(encoding="utf-8"))
     goal = spec["goal"]
-    max_cost = float(spec.get("max_cost_usd", 1.0))
+    max_cost = job_cost_cap(float(spec.get("max_cost_usd", 1.0)))
     timeout_s = max(60.0, float(spec.get("timeout_min", 30)) * 60 - TIMEOUT_MARGIN_S)
 
     # job_series points AWOS_JOB_DOTENV at the source .env (no per-arm copy).
@@ -863,21 +1025,58 @@ def main(argv: list[str] | None = None) -> int:
           f"({len(files)} edit, {len(read_files)} read-only, "
           f"~{estimate_tokens(project, files + read_files)} tokens) "
           f"cost_cap=${max_cost} timeout={timeout_s:.0f}s project={project}", flush=True)
-    tracker = UsageTracker(prices)
     started = time.monotonic()
+    retries, backoff = empty_retries(), retry_backoff_s()
+    # A retry starts Aider again on the job's starting tree, so it needs a
+    # project that git can put back exactly (job_series commits it before the child).
+    can_reset = project_resettable(project)
+    failed: list[dict] = []          # attempts that ended empty and were retried
     env_file = write_key_file(state, env.get(key_env), key_env)
     try:
-        code, killed = run_aider(cmd, project, env, timeout_s, max_cost, tracker)
+        for attempt in range(1, retries + 2):
+            tracker = UsageTracker(prices)
+            print(f"{ATTEMPT_TAG}{attempt}/{retries + 1}", flush=True)
+            spent = sum(f["cost_usd"] for f in failed)
+            attempt_started = time.monotonic()
+            code, killed = run_aider(cmd, project, env, timeout_s - (attempt_started - started),
+                                     max_cost - spent, tracker)
+            # Aider's repo-map cache: not the project's work, and it would count as a
+            # changed file in the runner's metrics.
+            shutil.rmtree(project / ".aider.tags.cache.v4", ignore_errors=True)
+            if killed or not tracker.ended_empty or attempt > retries:
+                break
+            summary = attempt_summary(tracker, args.model, code, time.monotonic() - attempt_started)
+            delay = backoff * 2 ** (attempt - 1)
+            left_s = timeout_s - (time.monotonic() - started)
+            why = ("the project can't be reset (not a clean git tree)" if not can_reset
+                   else f"under {delay + 60:.0f}s of the time limit left" if left_s < delay + 60
+                   else "cost cap reached" if spent + summary["cost_usd"] >= max_cost
+                   else None)
+            if why:
+                print(f"[harness_aider] {EMPTY_REASON} on attempt {attempt}; not retrying: {why}",
+                      flush=True)
+                break
+            failed.append(summary)
+            print(f"[harness_aider] {EMPTY_REASON} on attempt {attempt} "
+                  f"(cost ${summary['cost_usd']:.4f}, {summary['output_tokens']} output tokens); "
+                  f"resetting the project and retrying in {delay:.0f}s", flush=True)
+            reset_project(project)
+            time.sleep(delay)
     finally:
         env_file.unlink(missing_ok=True)
-        # Aider's repo-map cache: not the project's work, and it would count as a
-        # changed file in the runner's metrics.
-        shutil.rmtree(project / ".aider.tags.cache.v4", ignore_errors=True)
     minutes = round((time.monotonic() - started) / 60, 2)
     cost, cost_source = tracker.cost()
+    empty = bool(tracker.ended_empty and not killed)
+    invalid_reason = EMPTY_REASON if empty else None
     no_edit = no_edit_reason(tracker.final, tracker.applied, tracker.asked_to_add,
                              preloaded=bool(files), api_error=tracker.api_error,
-                             turns=tracker.turns)
+                             turns=tracker.turns, empty=empty)
+    if invalid_reason:
+        # Greppable: job_series reads this line and scores the run INVALID
+        # (infrastructure), never "not solved".
+        print(f"{INVALID_TAG}{invalid_reason} attempts={len(failed) + 1} "
+              f"empty_responses={tracker.empty_responses} token_limit={tracker.token_limit}",
+              flush=True)
     if no_edit:
         # Loud and greppable: a run with no edits must never pass as a quiet failure.
         print(f"[harness_aider] {NO_EDIT_TAG} reason={no_edit} preloaded={len(files)} "
@@ -886,7 +1085,7 @@ def main(argv: list[str] | None = None) -> int:
 
     report = {
         # Aider exits 0 even when every model call failed; no response = no run.
-        "success": bool(code == 0 and not killed and tracker.turns > 0),
+        "success": bool(code == 0 and not killed and tracker.turns > 0 and not empty),
         "api_error": tracker.api_error,
         "usage": tracker.usage(args.model),
         "harness": "aider",
@@ -919,6 +1118,15 @@ def main(argv: list[str] | None = None) -> int:
         "files_added": files,
         "files_read": read_files,
         "minutes": minutes,
+        # Empty-response handling. usage/turns describe the final attempt; earlier
+        # attempts that ended empty were retried, are billed, and are listed here.
+        "empty_response": empty,
+        "empty_responses": tracker.empty_responses,
+        "token_limit_hit": tracker.token_limit,
+        "invalid_reason": invalid_reason,
+        "attempts": len(failed) + 1,
+        "failed_attempts": failed,
+        "retry_cost_usd": round(sum(f["cost_usd"] for f in failed), 6),
     }
     (state / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(f"[harness_aider] done exit={code} killed={killed} turns={tracker.turns} "

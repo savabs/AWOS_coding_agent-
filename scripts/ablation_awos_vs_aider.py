@@ -14,8 +14,15 @@ issue run back to back on the same inputs (job_series checks that). The arm orde
 alternates by issue index (even: off first, odd: aider first).
 
 Resumable: a (repeat, issue) whose results file exists with a row for each arm is
-skipped. Spend cap: before each issue the driver stops if the cumulative spend plus
-the running mean per-issue spend would pass --cap (first issue: assumes $0.05).
+skipped. Spend cap (--cap, total USD across everything this out dir ever ran):
+- spend counts every attempt: each row's spent_usd (the scored attempt, the
+  harness's retried empty-response attempts and job_series' failed attempts),
+  summed over every results file of a (repeat, issue), including interrupted ones;
+- before each issue the driver stops if spent + the costliest issue-run so far
+  (at least the running mean; first issue: $0.05) would pass --cap;
+- hard stop: job_series gets AWOS_SERIES_BUDGET_USD = cap - spent, lowers each
+  job's cost cap to what is left, scores a job cut short by it INVALID
+  (budget_cap) and stops; the driver then stops too.
 
 Gates (refuse to start): the series root must hold a READY file (Track A's signal
 that the set validated) and at least --min-issues issue dirs.
@@ -58,8 +65,12 @@ def arm_order(index: int) -> list[str]:
     return list(ARMS) if index % 2 == 0 else list(reversed(ARMS))
 
 
+def result_files(out: Path, rep: int, issue: str) -> list[Path]:
+    return sorted((out / f"r{rep}" / issue).glob("job_series_*.json"))
+
+
 def result_file(out: Path, rep: int, issue: str) -> Path | None:
-    files = sorted((out / f"r{rep}" / issue).glob("job_series_*.json"))
+    files = result_files(out, rep, issue)
     return files[-1] if files else None
 
 
@@ -77,19 +88,51 @@ def done(rows: list[dict]) -> bool:
 
 
 def row_cost(r: dict) -> float:
+    """Every dollar a row's job cost: spent_usd when job_series recorded it
+    (all attempts), else the billed/ledger cost plus failed attempts'."""
     billed = r.get("billed_usd")
-    return float(billed if billed is not None else (r.get("cost_usd") or 0))
+    if billed is not None:
+        return float(billed)
+    if r.get("spent_usd") is not None:
+        return float(r["spent_usd"])
+    return float(r.get("cost_usd") or 0) + sum(float(f.get("cost_usd") or 0)
+                                               for f in r.get("failed_attempts") or [])
+
+
+def issue_spend(out: Path, rep: int, issue: str) -> float:
+    """Spend of one (repeat, issue) over every results file it has (a rerun
+    after an interruption writes a new file; the old one's spend still counts)."""
+    return sum(row_cost(r) for f in result_files(out, rep, issue) for r in load_rows(f))
 
 
 def spend(out: Path, issues: list[str], repeats: int) -> tuple[float, int]:
     total, n = 0.0, 0
     for rep in range(1, repeats + 1):
         for issue in issues:
-            rows = load_rows(result_file(out, rep, issue))
-            if rows:
-                total += sum(row_cost(r) for r in rows)
+            if result_files(out, rep, issue):
+                total += issue_spend(out, rep, issue)
                 n += 1
     return total, n
+
+
+def max_issue_spend(out: Path, issues: list[str], repeats: int) -> float:
+    return max([issue_spend(out, rep, issue) for rep in range(1, repeats + 1)
+                for issue in issues if result_files(out, rep, issue)] or [0.0])
+
+
+def projected_next(out: Path, issues: list[str], repeats: int) -> tuple[float, float, int]:
+    """(spent, spent + the costliest issue-run so far (>= the mean), issue-runs)."""
+    total, n = spend(out, issues, repeats)
+    step = max(total / n, max_issue_spend(out, issues, repeats)) if n else FIRST_ISSUE_GUESS_USD
+    return total, total + step, n
+
+
+def budget_stopped(path: Path | None) -> bool:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path else {}
+    except (OSError, ValueError):
+        return False
+    return "budget" in str(data.get("stopped") or "")
 
 
 def cmd_run(a: argparse.Namespace) -> int:
@@ -106,8 +149,7 @@ def cmd_run(a: argparse.Namespace) -> int:
         for i, issue in enumerate(issues):
             if done(load_rows(result_file(out, rep, issue))):
                 continue
-            total, n = spend(out, issues, a.repeat)
-            projected = total + (total / n if n else FIRST_ISSUE_GUESS_USD)
+            total, projected, n = projected_next(out, issues, a.repeat)
             if projected > a.cap:
                 print(f"[ablation] cap: spent ${total:.4f} over {n} issue-run(s); next would "
                       f"project ${projected:.4f} > ${a.cap:.2f}. Stopping.", flush=True)
@@ -119,8 +161,14 @@ def cmd_run(a: argparse.Namespace) -> int:
             if a.dry_run:
                 cmd.append("--dry-run")
             print(f"[ablation] r{rep} {i + 1}/{len(issues)} {issue} arms={arm_order(i)} "
-                  f"spent=${total:.4f}", flush=True)
-            subprocess.run(cmd, cwd=REPO, check=False)
+                  f"spent=${total:.4f} budget_left=${a.cap - total:.4f}", flush=True)
+            env = {**os.environ, "AWOS_SERIES_BUDGET_USD": f"{a.cap - total:.6f}"}
+            subprocess.run(cmd, cwd=REPO, check=False, env=env)
+            if budget_stopped(result_file(out, rep, issue)):
+                total, _ = spend(out, issues, a.repeat)
+                print(f"[ablation] cap: job_series stopped on the series budget; spent "
+                      f"${total:.4f} of ${a.cap:.2f}. Stopping.", flush=True)
+                return 0
     total, n = spend(out, issues, a.repeat)
     print(f"[ablation] finished: {n} issue-run(s), ${total:.4f}", flush=True)
     return 0
