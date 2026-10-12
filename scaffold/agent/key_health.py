@@ -35,7 +35,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
-REPO = Path(__file__).resolve().parents[2]
+try:
+    from scaffold.agent import paths as _paths
+except ImportError:
+    import paths as _paths  # type: ignore
+
+REPO = _paths.CODE_ROOT
 
 OK, UNAUTHORIZED, UNREACHABLE, NOT_CONFIGURED = "ok", "unauthorized", "unreachable", "not-configured"
 
@@ -69,7 +74,7 @@ class KeyCheck:
 
 
 def _dotenv_values(path: Optional[Path] = None) -> dict:
-    path = path or (REPO / ".env")
+    path = path or _paths.dotenv_path()
     out: dict = {}
     try:
         text = path.read_text(encoding="utf-8")
@@ -239,8 +244,9 @@ def credentials_problem(checks: list[KeyCheck], privacy: str = "cloud_ok") -> Op
                     "summary": f"{c.provider} key rejected ({c.detail}); {c.action}"}
     if privacy != "local_only" and usable and all(c.status == NOT_CONFIGURED for c in usable):
         return {"provider": "any", "status": NOT_CONFIGURED,
-                "action": "set ANTHROPIC_API_KEY in .env (or start the local model server)",
-                "summary": "no model provider is configured; set ANTHROPIC_API_KEY in .env"}
+                "action": "export ANTHROPIC_API_KEY (or put it in .env), or set AWOS_PROVIDER=local",
+                "summary": "no model provider is configured; export ANTHROPIC_API_KEY "
+                           "or set AWOS_PROVIDER=local"}
     return None
 
 
@@ -267,4 +273,9 @@ def main(as_json: bool = False) -> int:
     else:
         print(format_table(checks))
     bad = credentials_problem(checks)
+    if bad and not as_json:
+        if bad.get("status") == NOT_CONFIGURED:
+            print("\n" + _paths.no_provider_message())
+        else:
+            print(f"\n{bad['summary']}")
     return 1 if bad else 0

@@ -68,19 +68,29 @@ import time
 from pathlib import Path
 from datetime import datetime, timedelta
 
-# ── 1. Load .env ──────────────────────────────────────────────────────────────
+# ── 0. Code vs state locations (checkout: repo root; installed: ~/.awos) ─────
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from scaffold.agent import paths as _paths  # noqa: E402
+
+# ── 1. Load .env (never overrides exported variables) ─────────────────────────
 try:
     from dotenv import load_dotenv
-    load_dotenv(Path(__file__).parent / ".env")
+    load_dotenv(_paths.dotenv_path())
 except ImportError:
     pass
 
+# ── 1.2. Fresh-user default: ANTHROPIC_API_KEY alone -> claude-haiku-5-5 ───────
+_paths.apply_model_defaults()
+
 # ── 1.5. Debugger: identify which commit is actually running ──────────────────
-try:
-    from scaffold.agent.debug_trace import startup_banner as _debug_banner
-    _debug_banner()
-except ImportError:
-    pass
+# Source checkouts only (or AWOS_TRACE set): an installed copy has no commit,
+# and the VCS lookup would report the user's own repo instead.
+if not _paths.is_installed() or os.getenv("AWOS_TRACE"):
+    try:
+        from scaffold.agent.debug_trace import startup_banner as _debug_banner
+        _debug_banner()
+    except ImportError:
+        pass
 
 # ── 2. Fix google.genai key conflict ──────────────────────────────────────────
 if os.getenv("GEMINI_API_KEY") and os.getenv("GOOGLE_API_KEY"):
@@ -895,7 +905,11 @@ def cmd_mission_status(args):
 
 def cmd_guide(args):
     """Premium welcome screen for AWOS."""
-    from scaffold.agent.agent_tui import print_welcome
+    try:
+        from scaffold.agent.agent_tui import print_welcome
+    except ImportError:  # the TUI module is not shipped; plain help instead
+        build_parser().print_help()
+        return
     print_welcome()
 
 
@@ -1159,6 +1173,9 @@ def _host_age(iso) -> str:
 def _host_submit(args):
     from scaffold.agent.host.queue import JobQueue
 
+    if (args.privacy or "cloud_ok") != "local_only" and not _paths.provider_configured():
+        # Queue anyway (keys can be added before the worker runs), but say so now.
+        print("Warning: " + _paths.no_provider_message(), file=sys.stderr)
     try:
         job = JobQueue().submit(
             args.goal, args.repo, kind=args.ability,
@@ -1173,6 +1190,9 @@ def _host_serve(args):
     from scaffold.agent.host.queue import JobQueue
     from scaffold.agent.host.worker import HostWorker, resolve_runner
 
+    if (args.runner or os.getenv("AWOS_HOST_RUNNER") or "default") in ("default", "subprocess") \
+            and not _paths.provider_configured():
+        sys.exit("Error: " + _paths.no_provider_message())
     try:
         runner = resolve_runner(args.runner)
         HostWorker(JobQueue(), runner=runner,
@@ -1733,7 +1753,20 @@ def cmd_observe_follow(args):
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="awos",
-        description="AWOS — runtime for autonomous agents (see VISION.md)",
+        description="AWOS — runtime for autonomous agents.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Quickstart (from any git repo):\n"
+            "  export ANTHROPIC_API_KEY=sk-ant-...     # or: export AWOS_PROVIDER=local\n"
+            "  awos keys                               # check credentials (no spend)\n"
+            "  awos submit --repo . --budget 0.50 \"fix the failing test\"\n"
+            "  awos serve --worker --once              # run queued jobs, then exit\n"
+            "  awos status --digest                    # what happened\n"
+            "  git diff HEAD...awos/<id>               # review the result branch\n"
+            "\n"
+            f"Keys file: {_paths.dotenv_path()} (optional; exported vars win).\n"
+            "Docs: https://github.com/savabs/AWOS_coding_agent-/blob/main/docs/INSTALL.md"
+        ),
     )
     sub = parser.add_subparsers(dest="command", help="Available commands")
 
@@ -2002,8 +2035,8 @@ def main():
         if exc.code != 0 and len(sys.argv) > 1:
             cmd = sys.argv[1].lower()
             if "guant" in cmd and cmd != "gauntlet":
-                print("\nDid you mean:  python3 awos.py gauntlet list", file=sys.stderr)
-            print("Run:  python3 awos.py guide", file=sys.stderr)
+                print("\nDid you mean:  awos gauntlet list", file=sys.stderr)
+            print("Run:  awos --help   (or: awos guide)", file=sys.stderr)
         raise
 
     if not args.command:
