@@ -1,0 +1,45 @@
+<!--meta
+title: Concepts · AWOS docs
+description: What a job is in AWOS, how workspaces isolate your checkout, how results are verified, and how review branches and blocked jobs work.
+layout: docs
+section: docs
+-->
+<div class="eyebrow">Docs · Concepts</div>
+<h1>Concepts</h1>
+<p class="lede">Five ideas cover how AWOS works: jobs, workspaces, verification, review branches, and blocked jobs.</p>
+
+<h2 id="job">Job</h2>
+<p>A job is one ticket: a goal, a repository and a budget. <code>awos submit</code> puts it in a local queue, and the worker started with <code>awos serve --worker</code> runs jobs one at a time.</p>
+<ul>
+  <li>The queue is a database on disk under <code>~/.awos/host/</code> (set <code>AWOS_HOST_DIR</code> to move it). Jobs survive restarts of the worker and of your machine.</li>
+  <li>A job moves through <code>queued</code>, <code>running</code>, and then <code>done</code>, <code>failed</code>, <code>cancelled</code> or <code>blocked</code>.</li>
+  <li>If a job runs out of turns but made progress, the worker may give it one continuation before marking it failed.</li>
+</ul>
+
+<h2 id="workspace">Workspace</h2>
+<p>Each job works in a throwaway git worktree created at your repository's current commit. Your checkout, your uncommitted changes and your branches are left alone while the job runs. When the job ends, its changes are turned into a branch and the workspace is no longer needed.</p>
+
+<h2 id="verification">Verification</h2>
+<p>A job is not "done" just because the agent says so. Two checks run before handoff:</p>
+<ul>
+  <li><b>Your tests.</b> If the workspace has a <code>pytest</code> suite (files named <code>test_*.py</code> or <code>*_test.py</code>), the worker runs it itself after the agent finishes and records the pass and fail counts in the report. This is the worker's own evidence, not the agent's claim.</li>
+  <li><b>Goal check.</b> A separate model pass reads the original goal and what changed, looks for every place the goal applies, and tries the goal's behaviour on a throwaway copy of the workspace: the stated inputs, error cases and boundaries. Anything missing comes back as follow-up work before the job finishes.</li>
+</ul>
+<p>Existing tests rarely cover a new multi-part goal, which is why the goal check stays on even when a repository has tests.</p>
+
+<h2 id="branch">Review branch</h2>
+<p>When a job finishes, its diff becomes a local branch named <code>awos/&lt;id&gt;</code>, created from the job's base commit. The branch is built with git plumbing and a temporary index, so your <code>HEAD</code>, index and working tree are not modified.</p>
+<ul>
+  <li>Environment files, private keys, the <code>.awos/</code> folder, bytecode and test caches are never included.</li>
+  <li>A secret scan runs on the diff. If it finds a credential, the branch is blocked and the report says why, without repeating the secret.</li>
+  <li>Nothing is pushed. AWOS has no network git operation in its handoff.</li>
+</ul>
+<p>The job's <code>report.md</code> sits next to it under <code>~/.awos/host/jobs/&lt;id&gt;/</code>: the goal, test results, cost, time and warnings.</p>
+
+<h2 id="blocked">Blocked jobs</h2>
+<p>If a model key is wrong, revoked or out of credit, the job is parked as <code>blocked</code> instead of failing and burning retries. You get one notification with the action to take, and <code>awos status --digest</code> lists it.</p>
+<ul>
+  <li>Once the key checks out again, the worker re-queues credential-blocked jobs on its own.</li>
+  <li>To retry one right away, run <code>awos unblock &lt;id&gt;</code>.</li>
+  <li>A network outage is not a block: the worker backs off and retries.</li>
+</ul>

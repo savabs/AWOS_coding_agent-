@@ -1,0 +1,86 @@
+<!--meta
+title: AWOS Background Agent
+description: AWOS works through your small coding tickets in the background and hands you review branches with test results, for cents per ticket.
+-->
+  <div class="hero">
+    <div>
+      <div class="eyebrow">Background coding agent · early access</div>
+      <h1>Queue your small tickets tonight. Review <em>finished branches</em> in the morning.</h1>
+      <p class="lede">AWOS works through your backlog while you are away. Every ticket runs in its own copy of your repo, gets checked against your tests, and comes back as a review branch with the results attached. It costs cents per ticket, and nothing is ever pushed without you.</p>
+      <div class="cta"><a class="btn primary" href="/access/">Request early access</a><a class="btn ghost" href="/docs/">Read the docs</a></div>
+    </div>
+    <div class="report" role="img" aria-label="Example morning report: three finished jobs with passing tests and one job waiting on a question">
+      <div class="bar"><span>awos status --digest</span><span>08:02</span></div>
+      <div class="body">
+        <div class="job"><span class="pill pass">done</span><span class="what">Fix slugify so punctuation and extra spaces are handled<span class="meta">awos/b94e04a0 · tests 3 passed, 0 failed · 0.4 min</span></span><span class="cost">$0.003</span></div>
+        <div class="job"><span class="pill pass">done</span><span class="what">Add --from/--to/--status filters to orders export<span class="meta">awos/2f1c77d0 · tests 14 passed, 0 failed · 1.5 min</span></span><span class="cost">$0.019</span></div>
+        <div class="job"><span class="pill pass">done</span><span class="what">Daily sales report uses the customer's timezone<span class="meta">awos/91ab03e4 · tests 10 passed, 0 failed · 2.2 min</span></span><span class="cost">$0.030</span></div>
+        <div class="job"><span class="pill wait">needs you</span><span class="what">Rename public API field? Changes the response format<span class="meta">paused before a breaking change · one question waiting</span></span><span class="cost">$0.004</span></div>
+      </div>
+      <div class="foot">Example report. Job details mirror real AWOS runs; branch ids are illustrative.</div>
+    </div>
+  </div>
+
+  <section id="how" aria-labelledby="how-h">
+    <div class="eyebrow">How it works</div>
+    <h2 id="how-h">From ticket to review branch, without touching your checkout</h2>
+    <p class="sub">You describe the change in a sentence. AWOS does the rest in the background and only interrupts you for a real decision.</p>
+    <div class="steps">
+      <div><span class="n">1 · queue</span><h3>Submit a ticket</h3><p><code>awos submit</code> adds it to a local queue with a budget cap. Queue as many as you like.</p></div>
+      <div><span class="n">2 · isolate</span><h3>Own workspace</h3><p>Each job gets a separate git worktree at your current commit. Your files and branches are never edited.</p></div>
+      <div><span class="n">3 · verify</span><h3>Checked by tests</h3><p>AWOS runs your test suite in the workspace and records what passed. A secret scan runs before handoff.</p></div>
+      <div><span class="n">4 · review</span><h3>Branch + report</h3><p>You get <code>awos/&lt;id&gt;</code> with a short report: tests, cost, time, warnings. Merge it or delete it.</p></div>
+    </div>
+  </section>
+
+  <section id="results" aria-labelledby="results-h">
+    <div class="eyebrow">Measured results</div>
+    <h2 id="results-h">What it does on real work</h2>
+    <p class="sub">Numbers from our own runs on public open-source issues and realistic multi-step tasks, judged by hidden tests the agent never saw.</p>
+    <div class="results">
+      <div class="result"><div class="big">72<small> / 73</small></div><h3>Real GitHub issues solved</h3><p>Fixes from 26 Python projects such as click, attrs and rich, one attempt each, on Claude Haiku 5.5. Average cost $0.0071 per issue.</p><span class="src">Run of 2026-10-11</span></div>
+      <div class="result"><div class="big">58<small> / 58</small></div><h3>Hidden tests passed on an app built from a spec</h3><p>An 8-feature finance tracker written from an empty folder in 8.8 minutes for $0.16. Six of six long tasks solved in total.</p><span class="src">Long-task run, 2026-10-11</span></div>
+      <div class="result"><div class="big">8<small> / 10</small></div><h3>Easy issues solved by a free local model</h3><p>Qwen3.5 9B running on a 16 GB MacBook, no cloud and $0 per ticket, for routine work.</p><span class="src">Local-model check, 2026-10</span></div>
+    </div>
+    <p class="note">These are results on public projects with one run per task, so your results will vary with your codebase and tests. A head-to-head study against another open-source agent on the same model is in progress; we will publish it either way.</p>
+  </section>
+
+  <section id="docs" aria-labelledby="docs-h">
+    <div class="eyebrow">Docs</div>
+    <h2 id="docs-h">Get started in five minutes</h2>
+    <p class="sub">Five commands take you from a ticket to a review branch. The docs cover the workflow, the safety model and every command.</p>
+    <div class="cards">
+      <a class="card" href="/docs/quickstart/"><b>Quickstart</b><span>Queue a ticket, run the worker, review the branch.</span></a>
+      <a class="card" href="/docs/concepts/"><b>Concepts</b><span>Jobs, workspaces, verification, review branches, blocked jobs.</span></a>
+      <a class="card" href="/docs/cli/"><b>CLI reference</b><span>Every flag for submit, serve, status, cancel, unblock and keys.</span></a>
+    </div>
+  </section>
+
+  <section id="security" aria-labelledby="security-h">
+    <div class="eyebrow">Security and privacy</div>
+    <h2 id="security-h">Built to run unattended on code you care about</h2>
+    <div class="two">
+      <ul class="facts">
+        <li><b>Runs on your machine</b><span>The worker, queue and logs live on your computer. There is no AWOS cloud holding your code.</span></li>
+        <li><b>Never touches your checkout</b><span>Separate worktree per job; results arrive as a local branch.</span></li>
+        <li><b>Nothing is pushed</b><span>You decide what to merge and push.</span></li>
+      </ul>
+      <ul class="facts">
+        <li><b>Secret scan on every handoff</b><span>A branch is blocked if the diff contains a credential.</span></li>
+        <li><b>Local-only mode</b><span><code>--privacy local_only</code> blanks cloud keys for that job, so it can only use your local model.</span></li>
+        <li><b>Hard budgets</b><span>Every job has a dollar cap, counted by AWOS from its own model calls.</span></li>
+      </ul>
+    </div>
+    <p><a href="/docs/security/">Read the security model</a></p>
+  </section>
+
+  <section id="pricing" aria-labelledby="pricing-h">
+    <div class="eyebrow">Pricing</div>
+    <h2 id="pricing-h">Free during early access</h2>
+    <div class="two">
+      <div class="price"><div class="tag">$0</div><p>during early access, for individual developers and small teams.</p>
+        <ul><li>You pay your model provider directly, usually cents per ticket</li><li>Or use a local model for $0 per ticket</li><li>Direct line to the builder for feedback and fixes</li></ul></div>
+      <div><p class="sub">We are working with a small group of early users to shape paid plans. Early-access members keep founding pricing when plans launch.</p>
+        <a class="btn primary" href="/access/">Request access</a></div>
+    </div>
+  </section>

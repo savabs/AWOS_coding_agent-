@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Docs · AWOS</title>
+<meta name="description" content="How to queue coding tickets with AWOS, run the background worker, and review the branches it hands back.">
+<link rel="canonical" href="https://awos-site.pages.dev/docs/">
+<meta property="og:title" content="Docs · AWOS">
+<meta property="og:description" content="How to queue coding tickets with AWOS, run the background worker, and review the branches it hands back.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://awos-site.pages.dev/docs/">
+<meta name="robots" content="index,follow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap">
+  <a class="brand" href="/" aria-label="AWOS home">AWOS<span>.</span></a>
+  <nav class="links" aria-label="Main">
+    <a class="wide" href="/#how">How it works</a>
+    <a class="wide" href="/#results">Results</a>
+    <a href="/docs/" aria-current="page">Docs</a>
+    <a class="wide" href="/docs/security/">Security</a>
+    <a class="wide" href="/#pricing">Pricing</a>
+  </nav>
+  <a class="btn primary" href="/access/">Request access</a>
+</div></header>
+<main id="main" class="wrap"><div class="docs-layout">
+<nav class="docs-side" aria-label="Docs">
+<h2>Docs</h2>
+<ul>
+<li><a href="/docs/" aria-current="page">Overview</a></li>
+<li><a href="/docs/quickstart/">Quickstart</a></li>
+<li><a href="/docs/concepts/">Concepts</a></li>
+<li><a href="/docs/models-and-cost/">Models and cost</a></li>
+<li><a href="/docs/cli/">CLI reference</a></li>
+<li><a href="/docs/security/">Security and privacy</a></li>
+<li><a href="/docs/faq/">FAQ</a></li>
+</ul>
+</nav>
+<article class="doc">
+<div class="eyebrow">Docs</div>
+<h1>AWOS documentation</h1>
+<p class="lede">AWOS is a background coding agent that runs on your own machine. You queue small, well-defined tickets; a local worker takes them one at a time, works in a separate copy of your repo, checks the result, and leaves a local review branch with a short report.</p>
+
+<h2>Start here</h2>
+<div class="cards">
+  <a class="card" href="/docs/quickstart/"><b>Quickstart</b><span>From a ticket to a review branch in five commands.</span></a>
+  <a class="card" href="/docs/concepts/"><b>Concepts</b><span>Jobs, workspaces, verification, review branches and blocked jobs.</span></a>
+  <a class="card" href="/docs/models-and-cost/"><b>Models and cost</b><span>Cloud or local models, budgets, and what tickets cost.</span></a>
+  <a class="card" href="/docs/cli/"><b>CLI reference</b><span>Every flag for the commands you use day to day.</span></a>
+  <a class="card" href="/docs/security/"><b>Security and privacy</b><span>What runs where, what leaves your machine, and the guards.</span></a>
+  <a class="card" href="/docs/faq/"><b>FAQ</b><span>Short answers to the common questions.</span></a>
+</div>
+
+<h2>The workflow in one picture</h2>
+<ol>
+  <li><b>Queue.</b> <code>awos submit --repo . "GOAL"</code> adds a job with a dollar cap to a local queue.</li>
+  <li><b>Run.</b> <code>awos serve --worker</code> takes queued jobs one at a time.</li>
+  <li><b>Isolate.</b> Each job works in its own git worktree at your current commit.</li>
+  <li><b>Verify.</b> The worker runs your tests in that workspace and checks the result against the goal.</li>
+  <li><b>Hand off.</b> The diff becomes a local branch <code>awos/&lt;id&gt;</code> with <code>report.md</code>. Nothing is pushed.</li>
+  <li><b>Review.</b> <code>awos status --digest</code> shows what finished, what is blocked, and what was spent today.</li>
+</ol>
+
+<div class="callout"><p>AWOS is in early access. <a href="/access/">Request access</a> to get the install command.</p></div>
+<nav class="pager" aria-label="Docs pages"><a class="next" href="/docs/quickstart/"><small>Next</small>Quickstart</a></nav>
+</article>
+</div></main>
+<footer class="site"><div class="wrap">
+  <span>AWOS. Local-first background agent. Built in India.</span>
+  <nav aria-label="Footer">
+    <a href="/docs/">Docs</a>
+    <a href="/docs/quickstart/">Quickstart</a>
+    <a href="/docs/security/">Security</a>
+    <a href="/docs/faq/">FAQ</a>
+    <a href="/access/">Request access</a>
+  </nav>
+</div></footer>
+</body>
+</html>

@@ -2,16 +2,30 @@
 
 The landing page, docs and early-access form for the AWOS background coding agent.
 
-- `index.html` is the page body source.
-- `build.py` wraps it into `public/index.html` for static hosting.
+Plain HTML and CSS, no framework, no external JS.
+
+- `src/partials/` holds the shared head, header and footer.
+- `src/pages/` has one file per page. Each starts with a `<!--meta ... -->` block (title, description, layout, section, optional script). `pages/docs/*.html` use the docs layout, which adds the sidebar and previous/next links.
+- `src/assets/` has `style.css` (the design tokens, light and dark themes) and `access.js` (the request-access form). It is copied to `public/assets/`.
+- `build.py` assembles everything into `public/**` (`/`, `/docs/...`, `/access/`, `404.html`) and writes `sitemap.xml` and `robots.txt`. Set `SITE_URL` for canonical and sitemap URLs (default `https://awos-site.pages.dev`).
+- `check_site.py` checks the built site: every internal link and `#anchor` resolves, tags nest correctly, each page has a title, a meta description and one `<h1>`, and the `INSTALL_COMMAND` placeholder in the quickstart appears exactly once.
 - `functions/api/request-access.js` is a Cloudflare Pages Function. It stores form submissions in a KV namespace and lists them for the owner.
+
+Build and check locally:
+
+```
+python3 site/build.py && python3 site/check_site.py
+python3 -m http.server 8000 -d site/public   # preview at http://localhost:8000/
+```
+
+The quickstart has one placeholder, `INSTALL_COMMAND`, in `src/pages/docs/quickstart.html`. Replace it with the real install command once packaging is ready.
 
 ## Deploy (Cloudflare Pages, free tier)
 
-1. Build the page:
+1. Build and check the site:
 
    ```
-   python3 site/build.py
+   python3 site/build.py && python3 site/check_site.py
    ```
 
 2. Create the KV namespace:
