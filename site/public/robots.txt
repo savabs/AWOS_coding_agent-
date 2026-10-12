@@ -2,4 +2,4 @@ User-agent: *
 Allow: /
 Disallow: /api/
 
-Sitemap: https://awos-site.pages.dev/sitemap.xml
+Sitemap: https://awos.tirramind.com/sitemap.xml

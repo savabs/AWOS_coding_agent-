@@ -28,7 +28,7 @@ description: AWOS works through your small coding tickets in the background and 
     <div class="steps">
       <div><span class="n">1 · queue</span><h3>Submit a ticket</h3><p><code>awos submit</code> adds it to a local queue with a budget cap. Queue as many as you like.</p></div>
       <div><span class="n">2 · isolate</span><h3>Own workspace</h3><p>Each job gets a separate git worktree at your current commit. Your files and branches are never edited.</p></div>
-      <div><span class="n">3 · verify</span><h3>Checked by tests</h3><p>AWOS runs your test suite in the workspace and records what passed. A secret scan runs before handoff.</p></div>
+      <div><span class="n">3 · verify</span><h3>Checked by tests</h3><p>AWOS writes acceptance tests from your goal, runs them with your test suite, and records what passed. A secret scan runs before handoff.</p></div>
       <div><span class="n">4 · review</span><h3>Branch + report</h3><p>You get <code>awos/&lt;id&gt;</code> with a short report: tests, cost, time, warnings. Merge it or delete it.</p></div>
     </div>
   </section>

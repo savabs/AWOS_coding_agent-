@@ -35,7 +35,7 @@ HERE = Path(__file__).resolve().parent
 SRC = HERE / "src"
 OUT = HERE / "public"
 # Cloudflare Pages default domain for the project named in site/README.md.
-SITE_URL = os.environ.get("SITE_URL", "https://awos-site.pages.dev").rstrip("/")
+SITE_URL = os.environ.get("SITE_URL", "https://awos.tirramind.com").rstrip("/")
 
 # Docs sidebar order: (url, label).
 DOCS = [
