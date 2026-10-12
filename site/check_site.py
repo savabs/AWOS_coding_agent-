@@ -8,7 +8,7 @@ Fails (exit 1) when:
   - a "#fragment" link points at an id that does not exist on the target page;
   - a page's tags do not nest/close properly (html.parser pass);
   - a page lacks <title>, meta description, one <h1>, or has duplicate ids;
-  - the INSTALL_COMMAND placeholder does not appear exactly once in the site.
+  - an unfilled INSTALL_COMMAND placeholder is left anywhere in the site.
 External links (http/https/mailto) are listed, not fetched.
 """
 from __future__ import annotations
@@ -146,8 +146,8 @@ def main() -> int:
                     problems.append(f"{f.relative_to(PUBLIC)}: missing anchor {link}")
 
     hits = sum(f.read_text(encoding="utf-8").count("INSTALL_COMMAND") for f in pages)
-    if hits != 1:
-        problems.append(f"INSTALL_COMMAND appears {hits} times (want exactly 1)")
+    if hits:
+        problems.append(f"INSTALL_COMMAND placeholder left in the site ({hits}x); fill in the real command")
 
     for extra in ("sitemap.xml", "robots.txt", "404.html", "assets/style.css"):
         if not (PUBLIC / extra).is_file():
