@@ -91,7 +91,8 @@ def failing_at_base(ids: list[str], argv: list[str], extra_args: list[str],
     for _attempt in range(2):
         if not pending:
             break
-        cmd = list(argv) + list(extra_args) + ["-q", "--tb=no", "-rfE", "-p", "no:cacheprovider",
+        cmd = list(argv) + list(extra_args) + ["-q", "--tb=no", "-rfE", "--continue-on-collection-errors",
+                                               "-p", "no:cacheprovider",
                                                "--color=no"] + pending
         out = _run(cmd, baseline, env, timeout, sandbox)
         if out is None:

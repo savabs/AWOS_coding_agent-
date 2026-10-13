@@ -213,9 +213,11 @@ class TestRunner:
             base += _NO_CONFIG_ARGS
         return base
 
-    def run_targets(self, targets: List[str], timeout_sec: Optional[int] = None) -> TestResult:
+    def run_targets(self, targets: List[str], timeout_sec: Optional[int] = None,
+                    extra_args: Optional[List[str]] = None) -> TestResult:
         """Run pytest on `targets` (none: the configured/visible suite); no safety guard."""
-        result = self._execute(TestConfig("pytest", self.pytest_base() + list(targets),
+        result = self._execute(TestConfig("pytest", self.pytest_base() + list(extra_args or [])
+                                          + list(targets),
                                           int(timeout_sec or self.timeout_sec)))
         result.mode = "mapped" if targets else "full"
         return result

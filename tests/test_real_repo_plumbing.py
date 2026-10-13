@@ -288,6 +288,18 @@ def test_verify_tests_reports_baseline_and_env(tmp_path):
     assert "AWOS's own Python" in res["line"]                 # no venv in this repo: said so
 
 
+def test_preexisting_collection_error_does_not_stop_the_suite(tmp_path):
+    """Soup: 43 modules need the torch extra; pytest stopped at collection and
+    the host reported '0 passed, 43 failed'."""
+    extra = {"tests/test_needs_torch.py": "import torch_not_installed\n\ndef test_t():\n    pass\n"}
+    repo, ws, bl, base = _repo_with_preexisting_failure(tmp_path, extra)
+    (ws / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    res = worker.verify_tests(str(ws), base_commit=base, project_root=str(repo), baseline=str(bl))
+    assert res["full"]["status"] == "passed", res
+    assert (res["full"]["passed"], res["full"]["preexisting"]) == (1, 2)
+    assert res["line"].startswith("full suite: 1 passed, 0 new failures; pre-existing failures: 2")
+
+
 @pytest.mark.timeout(60)
 def test_verify_tests_full_suite_timeout_is_honest(tmp_path, monkeypatch):
     slow = {"tests/test_slow.py": "import time\n\ndef test_slow():\n    time.sleep(30)\n"}

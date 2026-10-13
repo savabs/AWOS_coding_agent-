@@ -343,7 +343,11 @@ Tests: `tests/test_real_repo_plumbing.py` plus updated host/app suites.
   failures: 17 (unchanged), via .venv/bin/python -m pytest (project .venv)` or
   `full suite timed out after 300s; targeted tests (tests/test_x.py): 38
   passed, 0 new failures`. A non-zero exit with no failing test (a coverage
-  threshold) is no longer "failed". The pytest summary parser now reads the
+  threshold) is no longer "failed". The full suite runs with
+  `--continue-on-collection-errors`, so one module that needs an optional
+  extra (Soup's 43 torch modules) no longer stops the run and reads as
+  "0 passed, 43 failed". Each collection error is checked against the
+  baseline like any other failure. The pytest summary parser now reads the
   final summary line. It used to read "assert 1 == 0\nFAILED ..." in the -r
   block as "0 failed".
 - **Handoff polish.** The commit subject is a concise summary: the model's

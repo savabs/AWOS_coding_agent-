@@ -714,7 +714,11 @@ def verify_tests(workspace: str, base_commit: Optional[str] = None,
             targeted = _run_summary(runner.run_targets(targets, timeout_sec=int(timeout)))
             targeted["files"] = targets
         started = time.monotonic()
-        full = _run_summary(runner.run_targets(runner._full_suite_targets(), timeout_sec=int(timeout)))
+        # A module that cannot be imported (an optional extra such as torch)
+        # must not stop the whole suite: its collection error is one id, and
+        # the baseline tells whether it was already broken.
+        full = _run_summary(runner.run_targets(runner._full_suite_targets(), timeout_sec=int(timeout),
+                                               extra_args=["--continue-on-collection-errors"]))
         full["seconds"] = round(time.monotonic() - started, 1)
     finally:
         if baseline:
@@ -731,7 +735,7 @@ def verify_tests(workspace: str, base_commit: Optional[str] = None,
     if full["status"] in ("passed", "failed"):
         main = full
         line = f"full suite: {_fmt_run(full)}"
-        if targeted and targeted["status"] != "passed":
+        if targeted:
             line += f"; {tgt_text}"
     elif targeted:
         main = targeted
@@ -742,7 +746,7 @@ def verify_tests(workspace: str, base_commit: Optional[str] = None,
         main = full
         line = (f"full suite timed out after {timeout:.0f}s; no targeted tests matched the changed files"
                 if full["status"] == "timeout" else f"full suite: {_fmt_run(full)}")
-    line += f" — via {tenv.describe()}"
+    line += f" — via {tenv.describe() if tenv.is_fallback else tenv.short() + ' (' + tenv.source + ')'}"
     out = {"status": main["status"] if main["status"] != "no_tests" else "error",
            "passed": main["passed"], "failed": main["failed"],
            "preexisting": main.get("preexisting", 0), "command": shown,
