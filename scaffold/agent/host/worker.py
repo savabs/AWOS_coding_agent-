@@ -448,6 +448,8 @@ def subprocess_runner(job: JobSpec, ctx: RunContext) -> dict:
 
 WORKSPACE_DIR = "workspace"
 BASE_COMMIT_FILE = "base_commit"
+#: Optional: the git ref a follow-up job starts from instead of the repo HEAD.
+BASE_REF_FILE = "base_ref"
 #: Rollbacks the child recorded instead of applying (git_manager AWOS_DEFER_ROLLBACK).
 DEFERRED_ROLLBACK = "deferred_rollback.jsonl"
 
@@ -470,12 +472,25 @@ def prepare_workspace(job: JobSpec, job_dir: Path) -> tuple[str, Optional[str]]:
     (the base commit), under <job_dir>/workspace, reused by later attempts. The
     user's checkout is never edited; hand-off diffs this workspace instead.
     Returns (workspace, base_commit). A non-git root runs in place (base None).
+    With <job_dir>/base_ref the workspace starts at that ref instead of HEAD.
     """
     ws, base_file = job_dir / WORKSPACE_DIR, job_dir / BASE_COMMIT_FILE
     if ws.is_dir() and base_file.exists():
         return str(ws), base_file.read_text(encoding="utf-8").strip()
-    head = subprocess.run(["git", "-C", job.repo_path, "rev-parse", "--verify", "HEAD"],
-                          capture_output=True, text=True)
+    # A follow-up job starts from an earlier job's review branch: the submitter
+    # writes <job_dir>/base_ref (e.g. "awos/1a2b3c4d") before queueing the job.
+    ref_file = job_dir / BASE_REF_FILE
+    ref = ref_file.read_text(encoding="utf-8").strip() if ref_file.exists() else ""
+    if ref:
+        if ref.startswith("-") or not re.fullmatch(r"[A-Za-z0-9_./-]+", ref):
+            raise RuntimeError(f"invalid base_ref {ref!r}")
+        head = subprocess.run(["git", "-C", job.repo_path, "rev-parse", "--verify", "--quiet",
+                               f"{ref}^{{commit}}"], capture_output=True, text=True)
+        if head.returncode != 0:
+            raise RuntimeError(f"the branch this follow-up starts from ({ref}) no longer exists")
+    else:
+        head = subprocess.run(["git", "-C", job.repo_path, "rev-parse", "--verify", "HEAD"],
+                              capture_output=True, text=True)
     if head.returncode != 0:
         return job.repo_path, None
     base = head.stdout.strip()
