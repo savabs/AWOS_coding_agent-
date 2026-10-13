@@ -65,3 +65,12 @@ Task-level paired solve, AWOS (b = `off`) vs Aider (a = `aider`), scored by `scr
 ## Result (2026-10-13): INCONCLUSIVE, leaning AWOS
 
 AWOS solved 59/71 runs and Aider 46/69. Task-level McNemar: AWOS better on 14 tasks, worse on 4, p = 0.031. P(Δ>0) = 0.910, below the 0.95 bar. Cost per run is ×1.05. The cap stopped the run at 72 issue-runs ($5.73). Aider had 2 INVALID runs (empty responses); AWOS had 0. Full AWOS components ran: acceptance 71/71, one-shot 71/71, planner ok 46, skipped 20, failed 5. Details: `docs/memory/runs/b3_full_awos_vs_aider_2026-10-13.md`.
+
+## Extension addendum (pre-registered 2026-10-13, before any extension run)
+
+The interim result above was INCONCLUSIVE (P=0.910, McNemar p=0.031). The owner asked for an extended run to settle it. The plan is fixed now, before running:
+
+- **Data:** complete repeat 2 (the 8 issues the cap cut) and run a full repeat 3 on all 40 issues. Same arms, same model, same code path (`claude/bench-run` @ 0cf720c), same resumable driver and output dir.
+- **Hard total cap:** $10.50 for all B3 data. If it binds, use complete pairs only.
+- **Analysis:** the same T1 rule (`stats_audit.py --a aider --b off --cost-budget 0.5`), applied ONCE to all B3 data after the extension finishes. No early stop on a favourable interim look.
+- **Disclosure:** this is a single planned extension after one interim look. The report will state that, and also give the repeat-3-only result as a fresh-data check.
