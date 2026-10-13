@@ -1,0 +1,213 @@
+From 3356364f642947ca4c740493c489862de12f79be Mon Sep 17 00:00:00 2001
+From: AWOS host <awos-host@localhost>
+Date: Tue, 13 Oct 2026 19:25:57 +0530
+Subject: [PATCH] awos: Fix https://github.com/MakazhanAlpamys/Soup/issues/1860
+ : a JSONL line t
+
+AWOS-Job: f58d8dbc8a9f40beac965f464e254280
+---
+ changelog.d/0.76.0/1860.fixed.md        |  1 +
+ src/soup_cli/commands/data.py           | 10 ++++--
+ src/soup_cli/data/loader.py             | 36 ++++++++++++++++++--
+ tests/test_issue1860_non_object_rows.py | 44 +++++++++++++++++++++++++
+ tests/test_loader.py                    | 27 +++++++++++++++
+ 5 files changed, 114 insertions(+), 4 deletions(-)
+ create mode 100644 changelog.d/0.76.0/1860.fixed.md
+ create mode 100644 tests/test_issue1860_non_object_rows.py
+
+diff --git a/changelog.d/0.76.0/1860.fixed.md b/changelog.d/0.76.0/1860.fixed.md
+new file mode 100644
+index 0000000..cd41c1b
+--- /dev/null
++++ b/changelog.d/0.76.0/1860.fixed.md
+@@ -0,0 +1 @@
++- `soup data review`, `inspect`, `validate`, `stats` and `dedup` now skip and warn on JSONL/JSON rows that are valid JSON but not objects (e.g. `"abc"`, `[1,2]`, `42`, `null`), naming the line number, instead of crashing with `AttributeError` (#1860).
+diff --git a/src/soup_cli/commands/data.py b/src/soup_cli/commands/data.py
+index b209acb..af18fd0 100644
+--- a/src/soup_cli/commands/data.py
++++ b/src/soup_cli/commands/data.py
+@@ -13,7 +13,7 @@ import typer
+ from rich.console import Console
+ from rich.table import Table
+ 
+-from soup_cli.data.loader import _resolve_media_entries, load_raw_data
++from soup_cli.data.loader import _resolve_media_entries, json_kind, load_raw_data
+ from soup_cli.data.validator import validate_and_stats
+ from soup_cli.utils.embed import DEFAULT_EMBED_MODEL, embed_texts
+ from soup_cli.utils.exit_codes import EXIT_GATE_FAILED, EXIT_USAGE_ERROR, GateCommand
+@@ -2270,7 +2270,7 @@ def review_cmd(
+ 
+     shown = 0
+     with path.open("r", encoding="utf-8") as fh:
+-        for line in fh:
++        for line_no, line in enumerate(fh, 1):
+             if shown >= sample:
+                 break
+             line = line.strip()
+@@ -2280,6 +2280,12 @@ def review_cmd(
+                 entry = _json.loads(line)
+             except _json.JSONDecodeError:
+                 continue
++            if not isinstance(entry, dict):
++                console.print(
++                    f"[yellow]Warning: line {line_no} is a JSON {json_kind(entry)}, "
++                    f"not an object -- skipped[/]"
++                )
++                continue
+             prompt = str(entry.get("prompt", ""))
+             chosen = str(entry.get("chosen", ""))
+             rejected = str(entry.get("rejected", ""))
+diff --git a/src/soup_cli/data/loader.py b/src/soup_cli/data/loader.py
+index 8bb3f4b..6aaa23c 100644
+--- a/src/soup_cli/data/loader.py
++++ b/src/soup_cli/data/loader.py
+@@ -92,6 +92,21 @@ def load_raw_data(path: Path) -> list[dict]:
+     raise ValueError(f"Unsupported format: {ext}")
+ 
+ 
++def json_kind(value: object) -> str:
++    """Name a parsed JSON value's type for warnings (#1860), e.g. ``string``."""
++    if value is None:
++        return "null"
++    if isinstance(value, bool):
++        return "boolean"
++    if isinstance(value, (int, float)):
++        return "number"
++    if isinstance(value, str):
++        return "string"
++    if isinstance(value, list):
++        return "array"
++    return type(value).__name__
++
++
+ def _load_jsonl(path: Path) -> list[dict]:
+     data = []
+     # v0.40.1 Part E — auto-strip UTF-8 BOM (Windows users overwhelmingly
+@@ -103,9 +118,17 @@ def _load_jsonl(path: Path) -> list[dict]:
+             if not line:
+                 continue
+             try:
+-                data.append(json.loads(line))
++                row = json.loads(line)
+             except json.JSONDecodeError as e:
+                 console.print(f"[yellow]Warning: invalid JSON on line {i + 1}: {e}[/]")
++                continue
++            if not isinstance(row, dict):
++                console.print(
++                    f"[yellow]Warning: line {i + 1} is a JSON {json_kind(row)}, "
++                    f"not an object -- skipped[/]"
++                )
++                continue
++            data.append(row)
+     return data
+ 
+ 
+@@ -113,7 +136,16 @@ def _load_json(path: Path) -> list[dict]:
+     with open(path, encoding="utf-8") as f:
+         raw = json.load(f)
+     if isinstance(raw, list):
+-        return raw
++        rows = []
++        for i, item in enumerate(raw):
++            if isinstance(item, dict):
++                rows.append(item)
++            else:
++                console.print(
++                    f"[yellow]Warning: item {i + 1} is a JSON {json_kind(item)}, "
++                    f"not an object -- skipped[/]"
++                )
++        return rows
+     raise ValueError("JSON file must contain a list of objects")
+ 
+ 
+diff --git a/tests/test_issue1860_non_object_rows.py b/tests/test_issue1860_non_object_rows.py
+new file mode 100644
+index 0000000..65b34ca
+--- /dev/null
++++ b/tests/test_issue1860_non_object_rows.py
+@@ -0,0 +1,44 @@
++"""Issue #1860 - non-object JSONL rows must warn and skip, not crash data commands."""
++
++from __future__ import annotations
++
++import json
++
++import pytest
++from typer.testing import CliRunner
++
++from soup_cli.cli import app
++
++runner = CliRunner()
++
++GOOD_1 = {"instruction": "Q1", "input": "", "output": "A1"}
++GOOD_2 = {"instruction": "Q2", "input": "", "output": "A2"}
++
++
++def _write_rows(tmp_path, bad_value):
++    path = tmp_path / "data.jsonl"
++    lines = [
++        json.dumps(GOOD_1),
++        json.dumps(bad_value),
++        json.dumps(GOOD_2),
++    ]
++    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
++    return path
++
++
++@pytest.mark.parametrize("bad_value", ["abc", [1, 2], 42, None])
++@pytest.mark.parametrize("command", ["review", "inspect", "validate", "stats", "dedup"])
++def test_non_object_row_warns_and_does_not_crash(tmp_path, monkeypatch, command, bad_value):
++    monkeypatch.chdir(tmp_path)
++    path = _write_rows(tmp_path, bad_value)
++    args = ["data", command, str(path)]
++    if command == "dedup":
++        pytest.importorskip("datasketch", reason="dedup needs soup-cli[data]")
++        args += ["--output", str(tmp_path / "out.jsonl")]
++    result = runner.invoke(app, args)
++    output = result.output
++    assert "AttributeError" not in output, output
++    assert not isinstance(result.exception, AttributeError), repr(result.exception)
++    assert result.exit_code == 0, (output, repr(result.exception))
++    assert "line 2 is a JSON" in output, output
++    assert "not an object" in output, output
+diff --git a/tests/test_loader.py b/tests/test_loader.py
+index 8b8750a..455be74 100644
+--- a/tests/test_loader.py
++++ b/tests/test_loader.py
+@@ -36,6 +36,33 @@ def test_load_json_not_array(tmp_path: Path):
+         load_raw_data(path)
+ 
+ 
++def test_load_jsonl_skips_non_object_rows(tmp_path: Path, capsys):
++    """Non-object JSONL lines (#1860) are skipped with a line-numbered warning."""
++    path = tmp_path / "data.jsonl"
++    content = (
++        json.dumps({"instruction": "Q1", "output": "A1"}) + "\n"
++        + json.dumps("abc") + "\n"
++        + json.dumps({"instruction": "Q2", "output": "A2"}) + "\n"
++    )
++    path.write_text(content)
++    data = load_raw_data(path)
++    assert [row["instruction"] for row in data] == ["Q1", "Q2"]
++    assert "line 2 is a JSON string, not an object" in capsys.readouterr().out
++
++
++def test_load_json_skips_non_object_items(tmp_path: Path, capsys):
++    """Non-object items in a .json array (#1860) are skipped with an item-numbered warning."""
++    path = tmp_path / "data.json"
++    path.write_text(json.dumps([
++        {"instruction": "Q1", "output": "A1"},
++        7,
++        {"instruction": "Q2", "output": "A2"},
++    ]))
++    data = load_raw_data(path)
++    assert [row["instruction"] for row in data] == ["Q1", "Q2"]
++    assert "item 2 is a JSON number, not an object" in capsys.readouterr().out
++
++
+ def test_load_csv(tmp_path: Path):
+     """Load CSV file with headers."""
+     path = tmp_path / "data.csv"
+-- 
+2.50.1 (Apple Git-155)
+
