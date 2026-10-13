@@ -121,6 +121,7 @@ def build() -> list[str]:
             shutil.rmtree(child) if child.is_dir() else child.unlink()
     OUT.mkdir(exist_ok=True)
     shutil.copytree(SRC / "assets", OUT / "assets")
+    shutil.copy2(SRC / "install.sh", OUT / "install.sh")  # curl -fsSL <site>/install.sh | sh
 
     head_t = read(SRC / "partials" / "head.html")
     header_t = read(SRC / "partials" / "header.html")

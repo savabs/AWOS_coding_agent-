@@ -17,24 +17,69 @@ AWOS never edits your checkout.
 
 ## Install
 
-With pipx (recommended, because it gives `awos` its own isolated environment):
+One line (macOS or Linux):
 
 ```bash
-pipx install "git+https://github.com/savabs/AWOS_coding_agent-@main"
+curl -fsSL https://awos.tirramind.com/install.sh | sh
+```
+
+Then run `awos`. The first time, it asks you to pick a model provider: an
+Anthropic key, which it checks with a free request and saves in
+`~/.awos/.env` with mode 600, or a local model server. It also finds your
+repo's test command. You can run `awos doctor` whenever you like: it checks
+everything and prints one fix line for each problem.
+
+What the installer does:
+
+- If `uv` is on your PATH, it runs `uv tool install`. uv provides Python 3.11+
+  if you don't have it.
+- Otherwise, if you have `pipx` and Python 3.11+, it uses `pipx`.
+- Otherwise, it tells you what it's about to do and installs uv with uv's
+  official installer (`https://astral.sh/uv/install.sh`). uv goes into
+  `~/.local/bin` and no shell rc files are changed. It then uses uv.
+
+It never uses `sudo` and never edits your shell startup files. If `awos` ends
+up in a directory that isn't on your PATH, it prints the `export PATH=...` line
+for you to add. Run it again to reinstall or upgrade in place.
+
+Options (environment variables):
+
+| Variable | Effect |
+|----------|--------|
+| `AWOS_REF=<tag/branch/sha>` | Install a different ref (default `v0.1.0`) |
+| `AWOS_INSTALL_DRY_RUN=1` | Print every action instead of doing it |
+| `AWOS_NO_UV_INSTALL=1` | Never install uv; fail with instructions instead |
+
+To see what it would do first:
+`curl -fsSL https://awos.tirramind.com/install.sh | less`, or
+`curl -fsSL https://awos.tirramind.com/install.sh | AWOS_INSTALL_DRY_RUN=1 sh`.
+
+### Alternatives
+
+With uv:
+
+```bash
+uv tool install --python ">=3.11" "awos @ git+https://github.com/savabs/AWOS_coding_agent-@v0.1.0"
+```
+
+With pipx:
+
+```bash
+pipx install "git+https://github.com/savabs/AWOS_coding_agent-@v0.1.0"
 ```
 
 Or with pip, into a virtualenv:
 
 ```bash
 python3 -m venv ~/.venvs/awos
-~/.venvs/awos/bin/pip install "git+https://github.com/savabs/AWOS_coding_agent-@main"
+~/.venvs/awos/bin/pip install "git+https://github.com/savabs/AWOS_coding_agent-@v0.1.0"
 export PATH="$HOME/.venvs/awos/bin:$PATH"
 ```
 
 From a local clone: `pip install /path/to/AWOS_coding_agent-`, or use `pip install -e .`
 to work on AWOS itself.
 
-To install a branch, replace `@main` with `@<branch>`.
+To install a branch, replace `@v0.1.0` with `@<branch>`.
 
 ### Optional extras
 
@@ -49,14 +94,15 @@ The core install includes only what the quickstart needs: `anthropic`, `openai`,
 | `gemini` | Gemini planner backend |
 | `all` | Everything above, plus `mcp` |
 
-For example: `pipx install "awos[treesitter] @ git+https://github.com/savabs/AWOS_coding_agent-@main"`.
+For example: `pipx install "awos[treesitter] @ git+https://github.com/savabs/AWOS_coding_agent-@v0.1.0"`.
 
 ## Quickstart (about 2 minutes)
 
 Run this from any git repo that has a failing test:
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...        # or see "Local model" below
+awos doctor                                # checklist with fix lines; spends nothing
+export ANTHROPIC_API_KEY=sk-ant-...        # or let `awos` ask for it, or see "Local model"
 awos keys                                  # checks credentials, spends nothing
 awos submit --repo . --budget 0.50 "fix average() so the tests pass"
 awos serve --worker --once                 # runs the queue, then exits
@@ -106,7 +152,7 @@ them yourself, AWOS changes none of them.
 ## Uninstall
 
 ```bash
-pipx uninstall awos            # or: pip uninstall awos
+uv tool uninstall awos         # or: pipx uninstall awos / pip uninstall awos
 rm -rf ~/.awos                 # queue, reports and spend ledger (optional)
 git branch -D awos/<id>        # result branches, in each repo you used (optional)
 ```
