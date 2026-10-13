@@ -104,3 +104,74 @@ def test_job_tail_reads_each_line_once_and_waits_for_partial_lines(tmp_path):
 def test_job_tail_dedupes_repeats(tmp_path):
     (tmp_path / "worker.log").write_text("[agent] t1 run_tests() -> ok\n[agent] t2 run_tests() -> ok\n")
     assert JobTail(tmp_path).poll() == ["running tests"]
+
+
+# ── v0.2.1: worker.log and journal.jsonl merged by time ─────────────────────
+import time as _time  # noqa: E402
+from datetime import datetime as _dt, timezone as _tz  # noqa: E402
+
+from scaffold.agent.app.progress import log_line_time  # noqa: E402
+
+
+def _clock(epoch: float) -> str:
+    return _time.strftime("%H:%M:%S", _time.localtime(epoch))
+
+
+def _iso(epoch: float) -> str:
+    return _dt.fromtimestamp(epoch, _tz.utc).isoformat(timespec="microseconds")
+
+
+def _jrec(epoch: float, step: str, **payload) -> str:
+    return json.dumps({"seq": 1, "ts": _iso(epoch), "step": step, "payload": payload}) + "\n"
+
+
+def test_log_line_time_parses_clock_and_attempt_header():
+    t0 = float(int(_time.time()) - 30)
+    assert log_line_time(f"{_clock(t0)} [worker] x running (attempt 1): g", now=t0 + 30) == t0
+    assert abs(log_line_time(f"===== child, attempt 1 at {_iso(t0 + 0.25)} =====") - (t0 + 0.25)) < 1e-3
+    assert log_line_time("[TASK 1] Executing: fix it") is None
+
+
+def test_job_tail_merges_interleaved_streams_by_time(tmp_path):
+    t0 = float(int(_time.time()) - 60)
+    (tmp_path / "journal.jsonl").write_text(
+        _jrec(t0, "workspace", base_commit="abcdef1234")
+        + _jrec(t0 + 5, "verify_tests", passed=3, failed=0))
+    (tmp_path / "worker.log").write_text(
+        f"{_clock(t0 + 1)} [worker] 7093dc0f running (attempt 1): fix it\n"
+        f"\n===== child, attempt 1 at {_iso(t0 + 2)} =====\n"
+        "[TASK 1] Executing: fix the bug\n"          # no stamp: inherits t0+2
+        f"{_clock(t0 + 6)} [worker] 7093dc0f auto-continue after max_turns\n")
+    got = JobTail(tmp_path).poll()
+    assert got == [
+        "preparing a private copy of the repo at abcdef12",   # journal, t0
+        "started",                                            # log, t0+1
+        "task 1: fix the bug",                                # log, t0+2 (inherited)
+        "verifying: tests 3 passed",                          # journal, t0+5
+        "stopped at a limit with progress; continuing where it left off",  # log, t0+6
+    ]
+
+
+def test_job_tail_unstamped_lines_inherit_across_polls(tmp_path):
+    t0 = float(int(_time.time()) - 60)
+    log, jnl = tmp_path / "worker.log", tmp_path / "journal.jsonl"
+    log.write_text(f"===== child, attempt 1 at {_iso(t0)} =====\n")
+    jnl.write_text("")
+    tail = JobTail(tmp_path)
+    assert tail.poll() == []
+    # next poll: a child line (stamped t0 by inheritance) and a journal record
+    # written later (t0+3); file order in the poll must not matter
+    with open(jnl, "a") as fh:
+        fh.write(_jrec(t0 + 3, "verify_tests", passed=1, failed=1))
+    with open(log, "a") as fh:
+        fh.write("[TASK 2] Executing: second step\n")
+    assert tail.poll() == ["task 2: second step", "verifying: tests 1 passed, 1 failed"]
+
+
+def test_job_tail_ties_keep_file_order_log_first(tmp_path):
+    t0 = float(int(_time.time()) - 60)
+    (tmp_path / "worker.log").write_text(
+        f"{_clock(t0)} [worker] 7093dc0f running (attempt 2): fix it\n")
+    (tmp_path / "journal.jsonl").write_text(_jrec(t0, "workspace", base_commit="ffff0000"))
+    assert JobTail(tmp_path).poll() == ["started again (attempt 2)",
+                                        "preparing a private copy of the repo at ffff0000"]

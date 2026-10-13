@@ -275,22 +275,54 @@ tests on main: 5 passed in 0.01s
 
 ## Known gaps
 
-- **Progress order.** Lines from `worker.log` and `journal.jsonl` are merged
-  per poll, file by file. A journal step such as "preparing a private copy"
-  can therefore print one line after the first log line of the same poll.
-- **Wide characters.** The line editor scrolls long input horizontally, but
-  it counts code points, not display width, so CJK text and emoji can
-  misalign the cursor.
 - **Spinner animation.** The spinner animates only in watch mode (one-shot
   and `/watch`). In the session, each progress line carries the next spinner
   frame and the prompt shows `[n working]`.
-- **Worker restarts.** The app starts a worker only when it opens and when you
-  submit. If the worker dies while the app is idle, the header shows it the
-  next time `awos` opens.
 - **`[o]pen report`** pages the report inside the terminal. It does not open
   an editor or a browser.
 - **Terminal testing.** The app was verified through a pseudo-terminal
   (xterm-256color). Nobody has yet run it by hand in Terminal.app or iTerm2.
-- **Engine behaviour, not app.** In the median job, the failed one-shot
-  attempt left its edit in the workspace, and the agent then built on that
-  edit ("`median` is already in `calc.py`").
+- **Progress order resolution.** Worker lines carry whole-second stamps, so a
+  worker line and a journal step within the same second can still swap.
+- **Hung worker.** The periodic check restarts a worker that has died. A
+  worker that is alive but stuck (it holds the lock but its heartbeat is
+  stale) is only logged, never killed.
+
+## Changelog
+
+### 0.2.1 (2026-10-13)
+
+- **Docs links.** `awos --help`, `awos doctor` (when a check fails), the
+  onboarding menu and the no-provider message now link to the site quickstart,
+  https://awos-6v8.pages.dev/docs/quickstart/. The old GitHub `docs/INSTALL.md`
+  link was dead. The base URL is one constant, `paths.DOCS_BASE_URL`, which
+  `AWOS_DOCS_URL` overrides. Switch it to https://awos.tirramind.com once DNS
+  is live. Test: `tests/test_docs_links.py`.
+- **Progress order.** `JobTail.poll` merges the new `worker.log` and
+  `journal.jsonl` lines by timestamp before translating them. Worker lines are
+  stamped by their `HH:MM:SS` prefix or the `===== child ... at <iso>` header.
+  Journal records are stamped by `ts`. Unstamped child output inherits the
+  last stamp in its file. Tests: the interleaved fixtures in
+  `tests/test_app_progress.py`.
+- **Worker watchdog.** While the session is open and repo jobs are queued or
+  running, `App.tick` checks the worker every 15 s
+  (`AWOS_APP_WORKER_CHECK_SEC`). If no worker holds `worker.lock`, the app
+  restarts one through `workerctl.ensure_worker`, so the existing spawn-lock
+  guard still allows only one worker. The app logs the heartbeat age to
+  `app.log`. Tests: `tests/test_app_worker_guard.py`, including three windows
+  checking at once.
+- **One-shot fallback starts clean (engine).** In a host job workspace (the
+  worker exports `AWOS_JOB_WORKSPACE`), the files are snapshotted into a git
+  tree before the one-shot attempt. A temporary index is used, so HEAD, the
+  real index and the files are untouched. If the attempt fails with tests not
+  green, the files it changed are restored and the files it created are
+  deleted before the agent loop runs. The loop's prompt says the edits were
+  reverted. Edits that left the project tests green are kept on purpose
+  (cut-off reply, a failed block, an acceptance gap), so the loop continues
+  from them. The user's checkout is never touched. `AWOS_ONE_SHOT_RESTORE=0`
+  restores the old behaviour. Module: `scaffold/agent/workspace_restore.py`.
+  Test: `tests/test_one_shot_restore.py`.
+- **Wide characters.** The line editor and the status line measure display
+  columns with `unicodedata`: CJK and emoji take 2 columns, combining marks
+  and ZWJ take 0. The cursor now stays aligned and scrolling stays correct.
+  Test: `tests/test_app_ui_width.py`.
