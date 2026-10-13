@@ -61,3 +61,7 @@ Task-level paired solve, AWOS (b = `off`) vs Aider (a = `aider`), scored by `scr
 - One model only.
 - Fresh issue goals were written to match the hidden tests, so grading is tied to implementation details.
 - The AWOS planner's `auto` mode may skip planning on most fresh issues. That is the shipped behaviour and is what we test.
+
+## Result (2026-10-13): INCONCLUSIVE, leaning AWOS
+
+AWOS solved 59/71 runs and Aider 46/69. Task-level McNemar: AWOS better on 14 tasks, worse on 4, p = 0.031. P(Δ>0) = 0.910, below the 0.95 bar. Cost per run is ×1.05. The cap stopped the run at 72 issue-runs ($5.73). Aider had 2 INVALID runs (empty responses); AWOS had 0. Full AWOS components ran: acceptance 71/71, one-shot 71/71, planner ok 46, skipped 20, failed 5. Details: `docs/memory/runs/b3_full_awos_vs_aider_2026-10-13.md`.
