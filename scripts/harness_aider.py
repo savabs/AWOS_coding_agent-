@@ -465,6 +465,11 @@ def child_env(parent: dict, dotenv: dict, key_env: str = KEY_ENV) -> dict:
     if not env.get(key_env) and dotenv.get(key_env):
         env[key_env] = dotenv[key_env]
     env["PYTHONUNBUFFERED"] = "1"
+    # Aider opens troubleshooting pages (e.g. token-limits.html) in a browser
+    # when a provider limit is hit, and --yes-always auto-confirms. An unattended
+    # benchmark must never pop windows on the owner's desktop: point Python's
+    # webbrowser module at a no-op command. Does not change Aider's behaviour.
+    env["BROWSER"] = "true"
     return env
 
 

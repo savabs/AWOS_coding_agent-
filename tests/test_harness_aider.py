@@ -113,7 +113,7 @@ def test_child_env_drops_other_providers_and_aider_switches():
     parent = {"PATH": "/bin", "OPENAI_API_KEY": "x", "OPENAI_BASE_URL": "https://openrouter.ai/api/v1",
               "ANTHROPIC_API_KEY": "y", "AIDER_MODEL": "gpt-4o", "OR_API_KEY": "z", "HOME": "/h"}
     env = ha.child_env(parent, {"OPENROUTER_API_KEY": FAKE_KEY, "OPENAI_API_KEY": "nope"})
-    assert env == {"PATH": "/bin", "HOME": "/h", "OPENROUTER_API_KEY": FAKE_KEY, "PYTHONUNBUFFERED": "1"}
+    assert env == {"PATH": "/bin", "HOME": "/h", "OPENROUTER_API_KEY": FAKE_KEY, "PYTHONUNBUFFERED": "1", "BROWSER": "true"}
     # the environment's key wins over the .env copy, as in job_series' child
     assert ha.child_env({"OPENROUTER_API_KEY": "env"}, {"OPENROUTER_API_KEY": "file"})[ha.KEY_ENV] == "env"
 
