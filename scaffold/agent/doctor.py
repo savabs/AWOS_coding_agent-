@@ -74,7 +74,7 @@ def check_install(which=shutil.which) -> Check:
     detail = f"{mode} at {where}; `awos` " + (f"on PATH ({exe})" if exe else "not on PATH")
     return Check("Install", bool(exe), detail,
                  "" if exe else "add the install dir to PATH (the installer printed the line), "
-                                "or reinstall: curl -fsSL https://awos.tirramind.com/install.sh | sh",
+                                f"or reinstall: curl -fsSL {_paths.install_url()} | sh",
                  required=False)
 
 
@@ -205,6 +205,8 @@ def format_checks(checks: list[Check]) -> str:
     lines.append("")
     lines.append("Ready: everything required is OK. Run: awos" if not bad
                  else f"Not ready: {len(bad)} required check(s) failed (see fix lines above).")
+    if bad:
+        lines.append(f"Help: {_paths.docs_url()}")
     return "\n".join(lines)
 
 

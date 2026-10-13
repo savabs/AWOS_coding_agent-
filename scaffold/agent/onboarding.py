@@ -229,6 +229,7 @@ def setup_provider(ask: Callable[[str], str] = input,
     say("  1) Claude Haiku 5.5 (Anthropic API) - about a cent or two per task; needs an API key")
     say("  2) A local model - free and private; needs llama-server or Ollama running")
     say("  s) Skip for now")
+    say(f"  (setup guide: {_paths.docs_url()})")
     try:
         choice = (ask("Choose [1/2/s] (default 1): ") or "1").strip().lower()
     except (EOFError, KeyboardInterrupt):
@@ -381,7 +382,7 @@ def ensure_ready(repo: Path, interactive: bool = True, *,
         missing.append("provider")
         notes.append("no model provider: run `awos` in a terminal to set one up, "
                      "or put ANTHROPIC_API_KEY=... in " + str(user_env_path())
-                     + " (or AWOS_PROVIDER=local)")
+                     + " (or AWOS_PROVIDER=local); guide: " + _paths.docs_url())
 
     branch = None
     if is_git_repo(repo):

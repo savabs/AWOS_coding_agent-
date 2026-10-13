@@ -27,6 +27,26 @@ CODE_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ANTHROPIC_MODEL = "claude-haiku-5-5"
 MODEL_ENV_VARS = ("AWOS_AGENT_MODEL", "AWOS_PLANNER_MODEL", "AWOS_NOTEBOOK_MODEL", "AWOS_LADDER")
 
+#: Where the user-facing docs and installer live. The ONE place to change when
+#: the site moves (e.g. to https://awos.tirramind.com once its DNS is live).
+#: AWOS_DOCS_URL overrides it at runtime.
+DOCS_BASE_URL = "https://awos-6v8.pages.dev"
+
+
+def site_url(path: str = "") -> str:
+    """A URL on the docs site: site_url("docs/quickstart/")."""
+    base = (os.getenv("AWOS_DOCS_URL", "").strip() or DOCS_BASE_URL).rstrip("/")
+    return f"{base}/{path.lstrip('/')}" if path else base
+
+
+def docs_url(page: str = "quickstart") -> str:
+    """The docs page for `page` (quickstart, cli, faq, models-and-cost, ...)."""
+    return site_url(f"docs/{page.strip('/')}/")
+
+
+def install_url() -> str:
+    return site_url("install.sh")
+
 
 def is_installed() -> bool:
     """True when running from an installed wheel (code in site-/dist-packages)."""
@@ -85,7 +105,8 @@ def no_provider_message() -> str:
         f"                        (or put ANTHROPIC_API_KEY=... in {where})\n"
         "  Local model:          export AWOS_PROVIDER=local  "
         "(OpenAI-compatible server at AWOS_LOCAL_BASE_URL, default http://127.0.0.1:8080/v1)\n"
-        "Then run `awos keys` to check."
+        "Then run `awos keys` to check.\n"
+        f"Docs: {docs_url()}"
     )
 
 

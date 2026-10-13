@@ -532,6 +532,10 @@ def _run_child(job: JobSpec, ctx: RunContext, job_path: Path, result_path: Path,
     env = child_env(job, budget_left=left,
                     skip_goal_check=goal_check_skip_enabled() and bool(base)
                     and verify_enabled() and has_tests(workspace))
+    if base:
+        # The job's own throwaway worktree: the engine may restore files here
+        # (e.g. undo a failed one-shot attempt), never in the user's checkout.
+        env["AWOS_JOB_WORKSPACE"] = workspace
     deferred = ctx.job_dir / DEFERRED_ROLLBACK
     deferred.unlink(missing_ok=True)
     if base and autopilot.continuations_used(ctx.job_dir) < autopilot.max_continuations():
