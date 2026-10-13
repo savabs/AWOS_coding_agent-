@@ -100,7 +100,8 @@ def merge_branch(repo: Path, branch: str, goal: str = "") -> MergeResult:
             "you have uncommitted changes in files this result also changes ("
             + ", ".join(overlap) + "). Commit or stash them, then merge again.",
             overlap)
-    title = (goal.strip().splitlines()[0][:60] if goal.strip() else "")
+    from scaffold.agent.host.handoff import commit_subject
+    title = commit_subject(goal, limit=60) if goal.strip() else ""
     msg = f"Merge {branch}" + (f": {title}" if title else "")
     out = git(repo, "merge", "--no-ff", "--no-edit", "-m", msg, branch)
     if out.returncode != 0:

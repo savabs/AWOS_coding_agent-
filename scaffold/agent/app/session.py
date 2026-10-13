@@ -187,7 +187,8 @@ class App:
     def header(self, worker_state: str) -> None:
         t = self.term
         branch = gitops.current_branch(self.repo) or "detached"
-        test_cmd = self.ready.get("test_command") or detect_test_command(self.repo) or "none found"
+        test_cmd = (self.ready.get("test_env") or self.ready.get("test_command")
+                    or detect_test_command(self.repo) or "none found")
         model = (self.ready.get("model") or os.getenv("AWOS_AGENT_MODEL")
                  or os.getenv("AWOS_PROVIDER") or "default")
         js = self.repo_jobs()
@@ -241,7 +242,10 @@ class App:
                f"{J.goal_line(job, 56)}{tag}")
         tests = t.s(o.tests, "green" if o.tests_ok else ("red" if o.tests_ok is False else "grey"))
         bits = [f"tests {tests}", f"${o.cost:.4f}", J.fmt_seconds(o.seconds)]
-        if o.branch:
+        if o.branch and job.state != DONE:
+            # Everything the failed job did, kept whole for salvage; not verified.
+            bits.append(f"branch {o.branch} (all of its work, unverified)")
+        elif o.branch:
             bits.append(f"branch {o.branch}")
         t.line("      " + t.s(" · ", "grey").join(bits))
         if job.state in (FAILED, BLOCKED) and o.error:

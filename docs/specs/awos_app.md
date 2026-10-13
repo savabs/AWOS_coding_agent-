@@ -290,6 +290,76 @@ tests on main: 5 passed in 0.01s
 
 ## Changelog
 
+### 0.2.2 (2026-10-13): AWOS on real repositories
+
+Real-repo concierge demos (`docs/launch/demos/README.md`) lost half their runs
+to AWOS plumbing, not the model. This release fixes that plumbing.
+Tests: `tests/test_real_repo_plumbing.py` plus updated host/app suites.
+
+- **Atomic outcome for failed jobs.** In a host job, the child never reverts
+  single files any more: `AWOS_DEFER_ROLLBACK` is always set, and the worker
+  applies the recorded rollback only when the job succeeds (a failed sub-task
+  inside a passing job). A failed (or cancelled) job keeps everything it did.
+  It is handed off whole as `awos/<id8>-failed` (`-cancelled`) with handoff
+  status `handed_off_failed`. The report says "FAILED: the job did not finish.
+  The branch holds EVERYTHING it did ... not verified", the commit subject starts
+  with `[failed]`, and the notification and app card say so. A blocked job also
+  keeps its workspace whole. The partial-rollback-then-handoff path is gone.
+- **Sandbox and `.env.example`.** The Seatbelt dotenv rule now denies only
+  content (`file-read-data`) and writes, so `stat()` works and pytest collection
+  no longer dies in repos that ship `.env.example`. `.env.example`, `.sample`,
+  `.template`, `.dist` and `.defaults` are readable. `.env`, `.env.local`,
+  `.env.production` and the rest stay unreadable. Docker hides only the secret
+  ones. Hand-off and the goal-check copy keep example env files too.
+- **Tests run in the project's environment** (`scaffold/agent/project_env.py`).
+  The order is `AWOS_TEST_COMMAND`, then `~/.awos/projects.json`
+  (`{"<repo>": {"test_command": ...}}`), then the repo's `.venv`/`venv` (with
+  pytest), uv (`uv.lock`: `uv run --frozen --project <repo> pytest`), poetry
+  (`poetry env info -p`), hatch (`hatch env find`), and finally AWOS's own
+  Python with a note saying so. The repo's venv is found in the user's checkout
+  (`AWOS_PROJECT_ROOT`, or the main worktree of the job's git worktree). Tests
+  import the job workspace: the workspace (and `src/`) come first on
+  PYTHONPATH, and a `sitecustomize` shim redirects editable installs of the
+  checkout (plain `.pth` paths, setuptools' editable finders, the hatch
+  `editables` redirector) to the workspace. This covers split layouts such as
+  repowise's `packages/*/src`. Seatbelt lets the venv and its base interpreter
+  be read. Used by the host `verify_tests`, every `TestRunner` caller (the
+  agent's `run_tests`, one-shot, acceptance, orchestrator verification) and
+  `coding_tools.RunTestsTool`. `awos doctor` shows a "Test environment" line,
+  and the app header shows the short command. "No module named pytest" is now
+  reported as "tests could not run", not as an empty pass.
+- **Baseline: only new failures count** (`scaffold/agent/baseline_tests.py`).
+  The worker checks the base commit out a second time (`<job_dir>/baseline`,
+  `AWOS_BASELINE_WORKSPACE`; `AWOS_HOST_BASELINE=0` turns it off). When a run
+  has failures, the failing ids are re-run there, in the same env and the same
+  kind of sandbox. Ids that fail there too are pre-existing and are dropped
+  from `failed`/`errors` (listed in `TestResult.preexisting`). Ids not present
+  at the base commit are new. Verification, rollback and the one-shot decision
+  all see only new failures. The agent's `run_tests` names the pre-existing
+  ones.
+- **Honest suite line.** `verify_tests` runs the tests mapped to the changed
+  files first, then the full suite with its time cap. The report shows one
+  `line`, for example `full suite: 439 passed, 0 new failures; pre-existing
+  failures: 17 (unchanged), via .venv/bin/python -m pytest (project .venv)` or
+  `full suite timed out after 300s; targeted tests (tests/test_x.py): 38
+  passed, 0 new failures`. A non-zero exit with no failing test (a coverage
+  threshold) is no longer "failed". The pytest summary parser now reads the
+  final summary line. It used to read "assert 1 == 0\nFAILED ..." in the -r
+  block as "0 failed".
+- **Handoff polish.** The commit subject is a concise summary: the model's
+  summary when there is one, else the goal's first sentence, with URLs
+  dropped, at most 72 characters and never cut mid-word. The full goal goes in
+  the body, with `AWOS-Job`/`AWOS-Status` trailers. The review hint uses the
+  repo's default branch (origin/HEAD, else main/master) in the report, the
+  hand-off summary and the CLI help.
+- **Packaging.** 22 gitlinks without a `.gitmodules` URL (benchmark scratch
+  under `.awos/` and empty `tests/fixtures/wedge_v1` stubs) were removed from
+  the index and are now ignored, so `uv tool install "awos @ git+...@<ref>"`
+  works. Test: `test_no_gitlinks_in_the_repo`.
+- **Smaller.** The orchestrator's test status names pre-existing failures and,
+  when tests could not run, the environment used. The one-shot fallback reason
+  in `worker.log` is therefore specific.
+
 ### 0.2.1 (2026-10-13)
 
 - **Docs links.** `awos --help`, `awos doctor` (when a check fails), the

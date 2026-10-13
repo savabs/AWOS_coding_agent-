@@ -278,23 +278,13 @@ class RunTestsTool(Tool, WorkspacePathMixin):
             return ToolResult.fail(
                 "Tests blocked — set AWOS_SAFE_TO_RUN_TESTS=1 to enable run_tests tool."
             )
-        result = self._runner.run()
         paths = str(args.get("paths", "")).strip()
         if paths:
-            import subprocess
+            # The project's own env (project_env), workspace first on PYTHONPATH.
             parts = [p.strip() for p in paths.split(",") if p.strip()]
-            cmd = ["pytest", "--tb=short", "-q", *parts]
-            try:
-                proc = subprocess.run(
-                    cmd,
-                    cwd=str(self.project_root),
-                    capture_output=True,
-                    text=True,
-                    timeout=self._runner.timeout_sec,
-                )
-            except subprocess.TimeoutExpired:
-                return ToolResult.fail("Tests timed out.")
-            result = self._runner._parse_pytest(proc.stdout or "", proc.stderr or "", cmd)
+            result = self._runner.run_targets(parts)
+        else:
+            result = self._runner.run()
         summary = (
             f"Tests: {result.passed} passed, {result.failed} failed, "
             f"{result.errors} errors (pass_rate={result.pass_rate:.0%})"

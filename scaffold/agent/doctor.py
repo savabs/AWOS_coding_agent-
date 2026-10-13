@@ -131,6 +131,13 @@ def check_repo(repo: Path) -> list[Check]:
     unsupported = [n for n in notes if "not supported" in n]
     if cmd:
         out.append(Check("Test command", True, cmd, required=False))
+        env = _ob.detect_test_env(repo)
+        if env is not None:
+            # v0.2.2: tests run in the project's env, not AWOS's Python.
+            out.append(Check("Test environment", not env.is_fallback, env.describe(),
+                             "" if not env.is_fallback else
+                             "create the project's .venv (with pytest), or set AWOS_TEST_COMMAND",
+                             required=False))
     else:
         out.append(Check("Test command", False,
                          "no pytest tests found" + (f" ({'; '.join(unsupported)})" if unsupported else ""),

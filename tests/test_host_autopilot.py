@@ -341,11 +341,25 @@ def test_continuation_keeps_deferred_edits(tmp_path, monkeypatch):
     assert "z1 = 3" in seen["a"] and "z2 = 3" in seen["a"]  # attempt 1's edits were kept
 
 
-def test_no_continuation_applies_deferred_rollback(tmp_path, monkeypatch):
+def test_failed_job_keeps_everything_it_did(tmp_path, monkeypatch):
+    """v0.2.2 atomic outcome: a failed job is never half-reverted. Its deferred
+    rollback is dropped, and the whole workspace goes to awos/<id>-failed."""
     monkeypatch.setenv("AWOS_HOST_AUTOCONTINUE", "0")
     seen = _final_a_py(monkeypatch)
-    q, w, _ = _worker(tmp_path, _deferring_runner())
-    job = q.submit("g", _repo(tmp_path))
+    q, w, notes = _worker(tmp_path, _deferring_runner())
+    repo = _repo(tmp_path)
+    job = q.submit("g", repo)
     w.serve(once=True)
-    assert q.get(job.id).state == FAILED
-    assert seen["a"] == "x = 1\n"  # rolled back, as before the autopilot
+    done = q.get(job.id)
+    assert done.state == FAILED
+    assert seen["a"] == "x = 1\nz1 = 3\n"          # nothing rolled back
+    assert not (q.job_dir(job.id) / worker.DEFERRED_ROLLBACK).exists()
+    branch = done.result["handoff"]["branch"]
+    assert branch == f"awos/{job.id.replace('-', '')[:8]}-failed"
+    assert done.result["handoff"]["status"] == "handed_off_failed"
+    shown = _git(repo, "show", f"{branch}:a.py")
+    assert shown == "x = 1\nz1 = 3"                 # the branch holds all of it
+    report = Path(done.result["handoff"]["report_path"]).read_text()
+    assert "FAILED: the job did not finish" in report and "EVERYTHING it did" in report
+    failed_note = [e for e in notes.events if e.get("event") == "failed"]
+    assert failed_note and "-failed (failed: everything the job did" in failed_note[-1]["summary"]

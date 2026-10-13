@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "awos"
-version = "0.2.1"
+version = "0.2.2"
 description = "AWOS: local-first runtime that turns small/local or cloud models into reliable autonomous coding work"
 readme = "docs/INSTALL.md"
 requires-python = ">=3.11"

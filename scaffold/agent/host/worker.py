@@ -447,6 +447,9 @@ def subprocess_runner(job: JobSpec, ctx: RunContext) -> dict:
 
 
 WORKSPACE_DIR = "workspace"
+#: The untouched checkout of the base commit that pre-existing test failures
+#: are checked against (AWOS_BASELINE_WORKSPACE in the child).
+BASELINE_DIR = "baseline"
 BASE_COMMIT_FILE = "base_commit"
 #: Optional: the git ref a follow-up job starts from instead of the repo HEAD.
 BASE_REF_FILE = "base_ref"
@@ -502,16 +505,36 @@ def prepare_workspace(job: JobSpec, job_dir: Path) -> tuple[str, Optional[str]]:
     return str(ws), base
 
 
-def remove_workspace(job: JobSpec, job_dir: Path) -> None:
-    """Drop the job's worktree once the job is final; the review branch holds the result."""
-    ws = job_dir / WORKSPACE_DIR
-    if not ws.exists():
+def prepare_baseline(job: JobSpec, job_dir: Path, base: Optional[str]) -> Optional[str]:
+    """
+    A second, untouched checkout of the base commit (<job_dir>/baseline): a
+    test that fails there too was failing before the job, so it never counts
+    against the job's edits (baseline_tests.py). None when not possible.
+    """
+    if not base or os.getenv("AWOS_HOST_BASELINE", "1").strip().lower() in ("0", "false", "no"):
+        return None
+    bdir = job_dir / BASELINE_DIR
+    if (bdir / ".git").exists():
+        return str(bdir)
+    add = subprocess.run(["git", "-C", job.repo_path, "worktree", "add", "--detach", str(bdir), base],
+                         capture_output=True, text=True)
+    return str(bdir) if add.returncode == 0 else None
+
+
+def _remove_worktree(job: JobSpec, path: Path) -> None:
+    if not path.exists():
         return
-    rm = subprocess.run(["git", "-C", job.repo_path, "worktree", "remove", "--force", str(ws)],
+    rm = subprocess.run(["git", "-C", job.repo_path, "worktree", "remove", "--force", str(path)],
                         capture_output=True, text=True)
     if rm.returncode != 0:
-        shutil.rmtree(ws, ignore_errors=True)
+        shutil.rmtree(path, ignore_errors=True)
         subprocess.run(["git", "-C", job.repo_path, "worktree", "prune"], capture_output=True)
+
+
+def remove_workspace(job: JobSpec, job_dir: Path) -> None:
+    """Drop the job's worktrees once the job is final; the review branch holds the result."""
+    _remove_worktree(job, job_dir / BASELINE_DIR)
+    _remove_worktree(job, job_dir / WORKSPACE_DIR)
 
 
 def _run_child(job: JobSpec, ctx: RunContext, job_path: Path, result_path: Path,
@@ -532,15 +555,25 @@ def _run_child(job: JobSpec, ctx: RunContext, job_path: Path, result_path: Path,
     env = child_env(job, budget_left=left,
                     skip_goal_check=goal_check_skip_enabled() and bool(base)
                     and verify_enabled() and has_tests(workspace))
+    # Tests run in the project's env (project_env): its venv sits in the
+    # user's checkout, not in the job's worktree.
+    env["AWOS_PROJECT_ROOT"] = job.repo_path
     if base:
         # The job's own throwaway worktree: the engine may restore files here
         # (e.g. undo a failed one-shot attempt), never in the user's checkout.
         env["AWOS_JOB_WORKSPACE"] = workspace
+        baseline = prepare_baseline(job, ctx.job_dir, base)
+        if baseline:
+            env["AWOS_BASELINE_WORKSPACE"] = baseline
+            ctx.step("baseline", path=baseline)
     deferred = ctx.job_dir / DEFERRED_ROLLBACK
     deferred.unlink(missing_ok=True)
-    if base and autopilot.continuations_used(ctx.job_dir) < autopilot.max_continuations():
-        # Keep a stopped attempt's edits until the worker decides whether to
-        # auto-continue; it applies the recorded rollback otherwise.
+    if base:
+        # v0.2.2 atomic outcome: the child never reverts single files in the
+        # workspace. Its rollbacks are recorded; the worker applies them only
+        # when the job succeeds (a failed sub-task inside a passing job). A
+        # failed job keeps everything it did and is handed off, labelled, as
+        # awos/<id>-failed: never a half-reverted branch.
         env["AWOS_DEFER_ROLLBACK"] = str(deferred)
     with open(ctx.job_dir / "worker.log", "a", encoding="utf-8") as log:
         log.write(f"\n===== child, attempt {job.attempts} at {now_iso()} =====\n")
@@ -587,7 +620,8 @@ def _run_child(job: JobSpec, ctx: RunContext, job_path: Path, result_path: Path,
         if base:
             result.setdefault("base_commit", base)
         if "tests" not in result and base:   # only an isolated workspace, never the user's checkout
-            tests = verify_tests(workspace)
+            tests = verify_tests(workspace, base_commit=base, project_root=job.repo_path,
+                                 baseline=env.get("AWOS_BASELINE_WORKSPACE"))
             if tests:
                 result["tests"] = tests
                 ctx.step("verify_tests", **tests)
@@ -599,36 +633,131 @@ def _run_child(job: JobSpec, ctx: RunContext, job_path: Path, result_path: Path,
 VERIFY_TIMEOUT_SEC = 300.0
 
 
-def verify_tests(workspace: str) -> Optional[dict]:
+def changed_paths(workspace: str, base: Optional[str]) -> list[str]:
+    """Files the job changed in its workspace (tracked diff vs base + new files)."""
+    if not base:
+        return []
+    out: list[str] = []
+    for args in (["diff", "--name-only", "--no-ext-diff", base],
+                 ["ls-files", "--others", "--exclude-standard"]):
+        try:
+            proc = subprocess.run(["git", "-c", "core.fsmonitor=false", "-C", workspace, *args],
+                                  capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if proc.returncode == 0:
+            out += [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+    return list(dict.fromkeys(out))
+
+
+def _run_summary(res) -> dict:
+    """One TestRunner result as report data (only NEW failures count as failed)."""
+    if res.timed_out:
+        status = "timeout"
+    elif res.infra_error or (res.no_tests_found and not res.passed):
+        status = "error" if res.infra_error else "no_tests"
+    elif res.failed or res.errors:
+        status = "failed"
+    else:
+        status = "passed"
+    out = {"status": status, "passed": res.passed, "failed": res.failed + res.errors,
+           "preexisting": len(res.preexisting), "baseline_checked": res.baseline_checked}
+    if res.infra_error:
+        out["reason"] = res.infra_reason[:300]
+    return out
+
+
+def _fmt_run(r: dict) -> str:
+    if r["status"] == "timeout":
+        return "timed out"
+    if r["status"] == "error":
+        return "could not run (" + (r.get("reason") or "pytest crashed") + ")"
+    if r["status"] == "no_tests":
+        return "no tests collected"
+    text = f"{r['passed']} passed, {r['failed']} new failure{'s' if r['failed'] != 1 else ''}"
+    if r.get("preexisting"):
+        text += f"; pre-existing failures: {r['preexisting']} (unchanged)"
+    return text
+
+
+def verify_tests(workspace: str, base_commit: Optional[str] = None,
+                 project_root: Optional[str] = None,
+                 baseline: Optional[str] = None) -> Optional[dict]:
     """
-    Run the repo's pytest suite in the job's workspace after the child exits, so
-    the morning report carries the host's own test evidence, not the agent's
-    claim. None when there are no tests or AWOS_HOST_VERIFY_TESTS=0.
+    The host's own test evidence after the child exits (v0.2.2):
+
+    - in the PROJECT's environment (project_env: its .venv/uv/poetry env), with
+      the job's workspace first on PYTHONPATH;
+    - targeted first: the test files mapped to the files the job changed (and
+      the test files it changed), then the full suite with a time cap;
+    - only NEW failures count: a failing test that also fails in the untouched
+      baseline checkout is reported as pre-existing.
+
+    `line` is the honest one-line summary the report and notifications show.
+    None when there are no tests or AWOS_HOST_VERIFY_TESTS=0.
     """
     if not verify_enabled() or not has_tests(workspace):
         return None
-    ws = Path(workspace)
-    cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
-    shown = "python -m pytest -q"
-    timeout = float(os.getenv("AWOS_HOST_VERIFY_TIMEOUT_SEC", VERIFY_TIMEOUT_SEC))
-    try:
-        proc = subprocess.run(cmd, cwd=ws, capture_output=True, text=True, timeout=timeout,
-                              env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
-    except subprocess.TimeoutExpired:
-        return {"status": "timeout", "passed": 0, "failed": 0, "command": shown}
-    lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
-    summary = lines[-1] if lines else ""   # pytest's "N passed, M failed in Xs" line
+    from scaffold.agent import project_env
+    from scaffold.agent.test_runner import TestRunner
 
-    def count(word: str) -> int:
-        return sum(int(n) for n in re.findall(rf"(\d+) {word}\b", summary))
-    passed, failed = count("passed"), count("failed") + count("errors?")
-    status = "passed" if proc.returncode == 0 else ("failed" if failed else "error")
-    return {"status": status, "passed": passed, "failed": failed, "command": shown}
+    timeout = float(os.getenv("AWOS_HOST_VERIFY_TIMEOUT_SEC", VERIFY_TIMEOUT_SEC))
+    tenv = project_env.detect(workspace, project_root)
+    runner = TestRunner(project_root=workspace, timeout_sec=int(timeout), test_env=tenv)
+    saved = os.environ.get("AWOS_BASELINE_WORKSPACE")
+    if baseline:
+        os.environ["AWOS_BASELINE_WORKSPACE"] = baseline
+    try:
+        targets = runner.map_tests(changed_paths(workspace, base_commit))
+        targeted = None
+        if targets:
+            targeted = _run_summary(runner.run_targets(targets, timeout_sec=int(timeout)))
+            targeted["files"] = targets
+        started = time.monotonic()
+        full = _run_summary(runner.run_targets(runner._full_suite_targets(), timeout_sec=int(timeout)))
+        full["seconds"] = round(time.monotonic() - started, 1)
+    finally:
+        if baseline:
+            if saved is None:
+                os.environ.pop("AWOS_BASELINE_WORKSPACE", None)
+            else:
+                os.environ["AWOS_BASELINE_WORKSPACE"] = saved
+
+    shown = tenv.command_str()
+    tgt_text = ""
+    if targeted:
+        names = ", ".join(targeted["files"][:4]) + (" ..." if len(targeted["files"]) > 4 else "")
+        tgt_text = f"targeted tests ({names}): {_fmt_run(targeted)}"
+    if full["status"] in ("passed", "failed"):
+        main = full
+        line = f"full suite: {_fmt_run(full)}"
+        if targeted and targeted["status"] != "passed":
+            line += f"; {tgt_text}"
+    elif targeted:
+        main = targeted
+        why = (f"full suite timed out after {timeout:.0f}s" if full["status"] == "timeout"
+               else f"full suite {_fmt_run(full)}")
+        line = f"{why}; {tgt_text}"
+    else:
+        main = full
+        line = (f"full suite timed out after {timeout:.0f}s; no targeted tests matched the changed files"
+                if full["status"] == "timeout" else f"full suite: {_fmt_run(full)}")
+    line += f" — via {tenv.describe()}"
+    out = {"status": main["status"] if main["status"] != "no_tests" else "error",
+           "passed": main["passed"], "failed": main["failed"],
+           "preexisting": main.get("preexisting", 0), "command": shown,
+           "env": tenv.describe(), "env_source": tenv.source, "line": line,
+           "full": full, "targeted": targeted}
+    notes = [n for n in tenv.notes if n]
+    if notes:
+        out["notes"] = notes[:4]
+    return out
 
 
 def _final_summary(job: JobSpec, state: str, result: dict, error: Optional[str]) -> str:
     """One line for the owner: state, goal, tests, cost, branch (or the error)."""
-    goal = job.goal.strip().splitlines()[0][:60] if job.goal.strip() else job.id[:8]
+    from .handoff import commit_subject
+    goal = commit_subject(job.goal, limit=60) if job.goal.strip() else job.id[:8]
     parts = [f"{state}: {goal}"]
     tests = result.get("tests")
     if isinstance(tests, dict):
@@ -638,7 +767,10 @@ def _final_summary(job: JobSpec, state: str, result: dict, error: Optional[str])
     except (TypeError, ValueError):
         pass
     branch = (result.get("handoff") or {}).get("branch")
-    if branch:
+    if branch and state != DONE:
+        # A failed job's branch holds everything it did, unverified: say so.
+        parts.append(f"branch {branch} ({state}: everything the job did, for salvage only)")
+    elif branch:
         parts.append(f"branch {branch}")
     if error:
         parts.append(error[:120])
@@ -799,7 +931,10 @@ class HostWorker:
             self.log(f"[worker] {job.id[:8]} applied deferred rollback ({touched} file(s))", job.id)
             ws = result.get("workspace")
             if result.get("tests") and ws and result.get("base_commit"):
-                tests = verify_tests(ws)
+                bdir = jdir / BASELINE_DIR
+                tests = verify_tests(ws, base_commit=result.get("base_commit"),
+                                     project_root=job.repo_path,
+                                     baseline=str(bdir) if bdir.is_dir() else None)
                 if tests:
                     result["tests"] = tests
 
@@ -828,7 +963,8 @@ class HostWorker:
                 "provider": "unknown", "status": "auth_error",
                 "action": "check the provider API key in .env (run `awos keys`)",
                 "summary": f"the provider rejected the credentials: {error[:120]}"}
-            self._apply_rollback(job, result)
+            # Blocked jobs resume on the same workspace: keep it whole, never half-reverted.
+            settle_rollback(jdir, keep=True)
             return self._block(job, problem, "after an auth error")
         ws = result.get("workspace") or (str(jdir / WORKSPACE_DIR) if (jdir / WORKSPACE_DIR).is_dir() else "")
         base = result.get("base_commit")
@@ -846,7 +982,10 @@ class HostWorker:
                              f"auto-continue {data['used']}: {why}; stopped on: {error[:100]}",
                              str(jdir / "worker.log"))
                 return self.queue.get(job.id)
-        self._apply_rollback(job, result)
+        # v0.2.2 atomic outcome: a failed job keeps EVERYTHING it did (no
+        # per-file rollback) and is handed off as awos/<id>-failed, clearly
+        # labelled, so the human can salvage it. Never a half-reverted branch.
+        settle_rollback(jdir, keep=True)
         result = {**result, "autocontinue": {"kind": kind, "continued": False, "reason": why}}
         if kind == autopilot.LIMIT:
             error = f"{error} (no auto-continue: {why})"

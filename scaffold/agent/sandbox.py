@@ -98,6 +98,18 @@ DRAIN_GRACE_SEC = 2.0
 HOST_GIT_OPTS = ("-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null")
 #: Added to `git diff`: no external diff driver, no textconv filter.
 HOST_GIT_DIFF_OPTS = ("--no-ext-diff", "--no-textconv")
+#: `.env.<suffix>` files that hold no secrets by convention: readable in the
+#: sandbox. Every other .env / .env.* (.env.local, .env.production...) is not.
+DOTENV_EXAMPLE_SUFFIXES = ("example", "sample", "template", "dist", "defaults")
+
+
+def is_secret_dotenv(name: str) -> bool:
+    """True for a .env file name whose content the sandbox hides."""
+    if name == ".env":
+        return True
+    if not name.startswith(".env."):
+        return False
+    return name[len(".env."):] not in DOTENV_EXAMPLE_SUFFIXES
 
 
 @dataclass
@@ -212,8 +224,14 @@ def build_seatbelt_profile(
     lines.append(f"(deny file-write* (regex {q(git_dir)}))")
     # Secrets that commonly sit inside a repo copy. Writes are denied too:
     # renaming .env to a name the read rule does not match would expose it.
+    # Only the CONTENT is denied: stat() stays allowed, or pytest's collection
+    # (which stats every root entry) dies with PermissionError in any repo
+    # that ships a .env.example (v0.2.2; demos README lesson 2).
     dotenv = "^" + ws + r"/(.*/)?\.env(\.[^/]*)?$"
-    lines.append(f"(deny file-read* file-write* (regex {q(dotenv)}))")
+    lines.append(f"(deny file-read-data file-write* (regex {q(dotenv)}))")
+    # Example env files are documentation, not secrets: readable.
+    example = "^" + ws + r"/(.*/)?\.env\.(" + "|".join(DOTENV_EXAMPLE_SUFFIXES) + r")$"
+    lines.append(f"(allow file-read-data (regex {q(example)}))")
     services = ALLOWED_MACH_SERVICES + (NETWORK_MACH_SERVICES if allow_network else ())
     lines.append("(deny mach-lookup)")
     lines.append("(allow mach-lookup " + " ".join(f"(global-name {q(s)})" for s in services) + ")")
@@ -260,9 +278,28 @@ class SeatbeltSandbox:
         deny = _default_read_deny() if read_deny is None else read_deny
         self.read_deny = [Path(os.path.realpath(p)) for p in deny]
         self.allow_network = _network_allowed() if allow_network is None else allow_network
+        self.extra_read: list[Path] = []
+        self._build()
+
+    def _build(self) -> None:
         self.profile = build_seatbelt_profile(
-            self.workspace, self.tmpdir, _python_read_roots(), self.read_deny, self.allow_network
+            self.workspace, self.tmpdir, _python_read_roots() + self.extra_read,
+            self.read_deny, self.allow_network
         )
+
+    def allow_read(self, paths) -> None:
+        """Let sandboxed commands read these dirs too: the project's own venv
+        and the base interpreter it links to (v0.2.2: tests run in the
+        project's env, which usually sits in the user's checkout)."""
+        added = False
+        for p in paths or []:
+            path = Path(os.path.realpath(p))
+            if str(path) in ("/", "") or path in self.extra_read:
+                continue
+            self.extra_read.append(path)
+            added = True
+        if added:
+            self._build()
 
     def _env(self) -> dict[str, str]:
         venv_bin = os.path.dirname(sys.executable)
@@ -524,7 +561,7 @@ def _dotenv_files(workspace: Path) -> list[Path]:
     found = []
     for dirpath, dirnames, filenames in os.walk(workspace):
         dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
-        found += [Path(dirpath) / f for f in filenames if f == ".env" or f.startswith(".env.")]
+        found += [Path(dirpath) / f for f in filenames if is_secret_dotenv(f)]
     return sorted(found)
 
 

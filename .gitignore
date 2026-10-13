@@ -118,3 +118,9 @@ ehthumbs.db
 # Wedge fixture runtime (mission worktrees / local git)
 tests/fixtures/wedge_v1/ci_rescue_sprint/.git/
 tests/fixtures/wedge_v1/ci_rescue_sprint/.awos/
+
+# v0.2.2: nested git checkouts (benchmark scratch, old session worktrees) are never
+# committed: a gitlink without a .gitmodules URL breaks `uv tool install git+...`.
+.awos/worktrees/
+.awos/benchmark_*/awos/
+.awos/benchmark_*/raw/

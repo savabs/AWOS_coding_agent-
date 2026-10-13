@@ -351,7 +351,9 @@ def _acceptance_mode() -> str:
 def _tests_not_run_status(result) -> str:
     """Status text when no test counts exist; says so when pytest crashed."""
     if getattr(result, "infra_error", False):
-        return f"tests could not run ({getattr(result, 'infra_reason', '')[:200]})"
+        env = getattr(result, "env_desc", "")
+        return (f"tests could not run ({getattr(result, 'infra_reason', '')[:200]})"
+                + (f" [env: {env}]" if env else ""))
     return "no tests ran"
 
 
@@ -3173,7 +3175,9 @@ class Orchestrator:
 
         tests_ran = test_result is not None and not getattr(test_result, "no_tests_found", True)
         test_status = (
-            f"{test_result.passed} passed, {test_result.failed} failed"
+            f"{test_result.passed} passed, {test_result.failed + test_result.errors} failed"
+            + (f" (+{len(test_result.preexisting)} pre-existing failure(s) at the base "
+               "commit, not counted)" if getattr(test_result, "preexisting", None) else "")
             if tests_ran
             else _tests_not_run_status(test_result)
         )

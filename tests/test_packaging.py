@@ -186,3 +186,18 @@ def test_wheel_contents(tmp_path):
                    for n in names)
     entry = next(n for n in names if n.endswith("entry_points.txt"))
     assert "awos = awos:main" in zipfile.ZipFile(whl).read(entry).decode()
+
+
+def test_no_gitlinks_in_the_repo():
+    """v0.2.2: `uv tool install "awos @ git+...@<tag>"` runs a recursive
+    submodule update; a gitlink (mode 160000) with no URL in .gitmodules fails
+    the whole install. Nested checkouts (benchmark scratch) are never committed."""
+    out = subprocess.run(["git", "ls-files", "-s"], cwd=REPO, capture_output=True, text=True)
+    if out.returncode != 0:
+        pytest.skip("not a git checkout")
+    links = [ln.split("\t", 1)[-1] for ln in out.stdout.splitlines() if ln.startswith("160000 ")]
+    assert links == [], f"gitlinks break uv installs: {links[:5]}"
+
+
+def test_version_is_0_2_2():
+    assert _pyproject()["project"]["version"] == "0.2.2"
