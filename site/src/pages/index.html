@@ -26,7 +26,7 @@ description: AWOS works through your small coding tickets in the background and 
     <h2 id="how-h">From ticket to review branch, without touching your checkout</h2>
     <p class="sub">You describe the change in a sentence. AWOS does the rest in the background and only interrupts you for a real decision.</p>
     <div class="steps">
-      <div><span class="n">1 · queue</span><h3>Submit a ticket</h3><p><code>awos submit</code> adds it to a local queue with a budget cap. Queue as many as you like.</p></div>
+      <div><span class="n">1 · queue</span><h3>Type a task</h3><p>Run <code>awos</code> in your repo and say what you want done. Queue as many as you like; each has a budget cap.</p></div>
       <div><span class="n">2 · isolate</span><h3>Own workspace</h3><p>Each job gets a separate git worktree at your current commit. Your files and branches are never edited.</p></div>
       <div><span class="n">3 · verify</span><h3>Checked by tests</h3><p>AWOS writes acceptance tests from your goal, runs them with your test suite, and records what passed. A secret scan runs before handoff.</p></div>
       <div><span class="n">4 · review</span><h3>Branch + report</h3><p>You get <code>awos/&lt;id&gt;</code> with a short report: tests, cost, time, warnings. Merge it or delete it.</p></div>

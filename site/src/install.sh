@@ -14,7 +14,7 @@
 # Running it again upgrades/reinstalls in place.
 #
 # Environment:
-#   AWOS_REF=<tag|branch|sha>   git ref to install (default v0.1.0)
+#   AWOS_REF=<tag|branch|sha>   git ref to install (default v0.2.0)
 #   AWOS_REPO=<git url>         repository (default github.com/savabs/AWOS_coding_agent-)
 #   AWOS_INSTALL_DRY_RUN=1      print every action instead of doing it
 #   AWOS_NO_UV_INSTALL=1        never install uv; fail with instructions instead
@@ -25,7 +25,7 @@
 main() {
     set -eu
 
-    AWOS_REF="${AWOS_REF:-v0.1.0}"
+    AWOS_REF="${AWOS_REF:-v0.2.0}"
     AWOS_REPO="${AWOS_REPO:-https://github.com/savabs/AWOS_coding_agent-}"
     DRY_RUN="${AWOS_INSTALL_DRY_RUN:-0}"
     SPEC="awos @ git+${AWOS_REPO}@${AWOS_REF}"

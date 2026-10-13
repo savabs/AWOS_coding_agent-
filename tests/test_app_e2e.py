@@ -219,7 +219,7 @@ def test_session_task_progress_diff_merge(scratch):
     repo = make_repo(base)
     app = Pty([sys.executable, str(AWOS)], repo, app_env(host))
     try:
-        app.expect(r"AWOS .*shop \(main\).*tests: python -m pytest")
+        app.expect(r"AWOS .*shop \(main\).*tests: (python -m )?pytest")
         app.expect(r"queue: 0 running, 0 queued .*worker (started|starting|on)")
         app.expect(r"awos ›")
         app.line("fix average() so the tests in test_calc.py pass")

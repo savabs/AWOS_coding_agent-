@@ -1235,6 +1235,12 @@ def cmd_status(args):
               f"{j.budget_usd:>7.2f}  {goal}")
 
 
+def cmd_doctor(args):
+    """Check that AWOS is ready to run: Python, git, model key, host dir, repo (spends nothing)."""
+    from scaffold.agent.doctor import main as doctor_main
+    sys.exit(doctor_main(getattr(args, "doctor_args", []) or []))
+
+
 def cmd_keys(args):
     """Check each provider's credentials without spending (never prints keys)."""
     from scaffold.agent.key_health import main as keys_main
@@ -1994,6 +2000,8 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--digest", action="store_true",
                         help="Short human digest: running, queued, finished since last digest, "
                              "blocked (with the action to take), spend today")
+    doctor = sub.add_parser("doctor", help="Check that AWOS is ready to run (spends nothing)", add_help=False)
+    doctor.add_argument("doctor_args", nargs=argparse.REMAINDER)
     keys = sub.add_parser("keys", help="Check provider credentials without spending (ok/unauthorized/...)")
     keys.add_argument("--json", action="store_true", help="Output as JSON")
     unblock = sub.add_parser("unblock", help="Re-queue a blocked host-queue job")
