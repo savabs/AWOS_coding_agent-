@@ -6,7 +6,11 @@ AWOS — runtime for autonomous agents (see VISION.md)
 AWOS is a greedy meta-AI that optimizes quality × speed ÷ cost on every project.
 The coding agent is App #1 on the kernel. See VISION.md for full identity.
 
-Usage (primary interface):
+Interactive app (inside a git repo):
+    awos                              Open a session: type tasks, watch progress, review results
+    awos "<goal>"                     One-shot: queue the goal, stream progress, then review
+
+Usage (worker sessions):
     awos worker start "<goal>"       Start work on a coding goal
     awos worker status                List all work sessions
     awos worker resume [session_id]   Continue paused work
@@ -85,7 +89,9 @@ _paths.apply_model_defaults()
 # ── 1.5. Debugger: identify which commit is actually running ──────────────────
 # Source checkouts only (or AWOS_TRACE set): an installed copy has no commit,
 # and the VCS lookup would report the user's own repo instead.
-if not _paths.is_installed() or os.getenv("AWOS_TRACE"):
+# Not for the interactive app (`awos` / `awos "goal"`): it owns the screen.
+_APP_INVOCATION = len(sys.argv) == 1 or (len(sys.argv) == 2 and " " in sys.argv[1])
+if (not _paths.is_installed() and not _APP_INVOCATION) or os.getenv("AWOS_TRACE"):
     try:
         from scaffold.agent.debug_trace import startup_banner as _debug_banner
         _debug_banner()
@@ -1757,6 +1763,10 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Quickstart (from any git repo):\n"
+            "  awos                                    # interactive session (type tasks, review results)\n"
+            "  awos \"fix the failing test\"             # one-shot: queue, watch, review\n"
+            "\n"
+            "Step by step:\n"
             "  export ANTHROPIC_API_KEY=sk-ant-...     # or: export AWOS_PROVIDER=local\n"
             "  awos keys                               # check credentials (no spend)\n"
             "  awos submit --repo . --budget 0.50 \"fix the failing test\"\n"
@@ -2022,6 +2032,14 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _subcommand_names(parser: argparse.ArgumentParser) -> set:
+    names = set()
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            names.update(action.choices)
+    return names
+
+
 def main():
     # Common typo: guantlet → gauntlet
     if len(sys.argv) > 1 and sys.argv[1].lower() == "guantlet":
@@ -2029,6 +2047,25 @@ def main():
         sys.argv[1] = "gauntlet"
 
     parser = build_parser()
+
+    # The interactive app: `awos` alone opens a session in a git repo;
+    # `awos "fix the failing test"` (one quoted goal) is the one-shot form.
+    argv = sys.argv[1:]
+    if not argv:
+        from scaffold.agent.app.gitops import repo_root
+        if repo_root(Path.cwd()) is not None:
+            from scaffold.agent.app import run_session
+            sys.exit(run_session(Path.cwd()))
+        cmd_guide(argparse.Namespace())
+        print("\nTip: run `awos` inside a git repository to open the interactive session.")
+        return
+    # A goal has a space in it; a single unknown word is more likely a typo'd
+    # subcommand, which must not turn into a (paid) job.
+    if (len(argv) == 1 and " " in argv[0].strip() and not argv[0].startswith("-")
+            and argv[0] not in _subcommand_names(parser)):
+        from scaffold.agent.app import run_oneshot
+        sys.exit(run_oneshot(argv[0].strip(), Path.cwd()))
+
     try:
         args = parser.parse_args()
     except SystemExit as exc:
@@ -2037,6 +2074,8 @@ def main():
             if "guant" in cmd and cmd != "gauntlet":
                 print("\nDid you mean:  awos gauntlet list", file=sys.stderr)
             print("Run:  awos --help   (or: awos guide)", file=sys.stderr)
+            if len(sys.argv) == 2:
+                print('To give AWOS a task, quote it:  awos "fix the failing test"', file=sys.stderr)
         raise
 
     if not args.command:
