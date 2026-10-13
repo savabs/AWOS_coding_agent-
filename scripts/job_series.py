@@ -64,6 +64,9 @@ PY = sys.executable
 # Anthropic run (OPENROUTER_API_KEY unset). Results record the model either way.
 PINNED_MODEL = os.environ.get("AWOS_SERIES_MODEL", "").strip() or "deepseek/deepseek-v4-flash"
 FRONTIER_MODEL = "anthropic/claude-sonnet-5.5"   # the aider-frontier arm only
+# The mini-local arm only: the model the local llama-server serves.
+LOCAL_MINI_MODEL = "local/" + (os.environ.get("AWOS_LOCAL_MODEL", "").strip()
+                               .removeprefix("local/") or "qwen3.5-9b")
 # Escalation ladder ids hidden from the router inside the child, so every
 # decision (heuristic, retry escalation, LinUCB, performance veto) lands on
 # Flash. MODELS_UNAVAILABLE is the ladder's own "never pick this" filter.
@@ -132,6 +135,16 @@ ARM_CHILDREN: dict[str, dict] = {
                                "{project}", "--model", FRONTIER_MODEL,
                                "--max-reflections", "10"],
                        "env": {}},
+    # Minimal-harness baseline: mini-swe-agent (bash-only loop, stock prompts,
+    # no memory) on the same model, so the AWOS-harness gain over the raw model
+    # is measurable (docs/specs/mini_arm.md). mini-local: the local llama-server
+    # (AWOS_LOCAL_BASE_URL, AWOS_LOCAL_MODEL), $0.
+    "mini": {"cmd": [PY, str(REPO / "scripts" / "harness_mini.py"), "{job_dir}", "{project}",
+                     "--model", PINNED_MODEL],
+             "env": {}},
+    "mini-local": {"cmd": [PY, str(REPO / "scripts" / "harness_mini.py"), "{job_dir}",
+                           "{project}", "--model", LOCAL_MINI_MODEL],
+                   "env": {}},
 }
 
 # The run sets this to the source .env; jobs read the key from there instead of
@@ -928,6 +941,9 @@ def aider_invalid_run(log_text: str) -> str | None:
     return None
 
 
+_MINI_INVALID = re.compile(r"\[harness_mini\] invalid_run reason=(\w+)")
+
+
 def detect_invalid(log_text: str, turns: int, dry_run: bool) -> str | None:
     """Why this job's result says nothing about the agent, or None if it is a fair result.
 
@@ -940,6 +956,13 @@ def detect_invalid(log_text: str, turns: int, dry_run: bool) -> str | None:
     for marker in INVALID_MARKERS:
         if marker in log_text:
             return f"log shows {marker!r}"
+    mini = _MINI_INVALID.search(log_text or "")
+    if mini:
+        # harness_mini: the model never gave a usable answer / the provider or
+        # the launcher failed (scripts/harness_mini.py invalid_reason).
+        return f"mini_invalid ({mini.group(1)})"
+    if "[harness_mini] mini " in (log_text or "") and "[harness_mini] done " not in log_text:
+        return "harness_crashed (the mini harness never reached its end)"
     bad = aider_invalid_run(log_text)
     if bad:
         # e.g. empty_model_response: every Aider attempt ended on a model call
@@ -1164,10 +1187,19 @@ def component_counts(rows: list[dict]) -> dict:
     """Rows of one arm where each AWOS component actually ran."""
     out = {"rows": len(rows),
            "with_components": sum(1 for r in rows if r.get("components")
-                                  and r["components"] != {"harness": "aider"})}
+                                  and set(r["components"]) != {"harness"})}
     for key in COMPONENT_KEYS:
         out[key] = sum(1 for r in rows if component_ran((r.get("components") or {}).get(key)))
     return out
+
+
+def _harness_name(cmd: list[str]) -> str | None:
+    """"aider"/"mini" for a market/baseline harness child, None for AWOS."""
+    joined = " ".join(cmd)
+    for name in ("aider", "mini"):
+        if f"harness_{name}.py" in joined:
+            return name
+    return None
 
 
 def run_job(arm: str, number: int, job_dir: Path, sdir: Path, jobs: list, arm_dir: Path,
@@ -1264,13 +1296,14 @@ def run_job(arm: str, number: int, job_dir: Path, sdir: Path, jobs: list, arm_di
     usage["billed_usd"] = billed_since(state, billed_before)
     invalid_reason = detect_invalid(log_text, usage["turns"], dry_run)
     is_aider = not dry_run and any("harness_aider.py" in part for part in cmd)
+    harness = _harness_name(child["cmd"])
     returncode = child_status.get("returncode")
     if (invalid_reason is None or invalid_reason.startswith("harness_crashed")) \
-            and is_aider and not timed_out:
+            and harness and not dry_run and not timed_out:
         # Robust crash check: the harness always exits 0 after writing its
         # report, so a non-zero exit or a missing report means the wrapper died
         # (traceback or not). Never the model's result.
-        has_report = isinstance(report, dict) and report.get("harness") == "aider"
+        has_report = isinstance(report, dict) and report.get("harness") == harness
         if returncode != 0 or not has_report:
             invalid_reason = (f"harness_crashed (exit {returncode}"
                               f"{'' if has_report else ', no report.json'})")
@@ -1303,10 +1336,12 @@ def run_job(arm: str, number: int, job_dir: Path, sdir: Path, jobs: list, arm_di
         # the runner's own failed attempts).
         "retry_cost_usd": round(retry_cost, 6),
         "spent_usd": spent,
-        "components": ({"harness": "aider"}
-                       if "harness_aider.py" in " ".join(child["cmd"])
+        "components": ({"harness": harness} if harness
                        else components_from(report, log_text)),
     }
+    if harness == "mini" and not dry_run and isinstance(report, dict):
+        result["mini_exit_status"] = report.get("exit_status")
+        result["mini_empty_responses"] = report.get("empty_responses", 0)
     if is_aider and isinstance(report, dict):
         result["aider_attempts"] = report.get("attempts", 1)
         result["aider_empty_responses"] = report.get("empty_responses", 0)
