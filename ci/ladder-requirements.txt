@@ -1,0 +1,52 @@
+# Harness-lift ladder CI lock. These are the exact packages of the laptop
+# interpreter that runs the driver, job_series, AWOS (arm `off`) and the grader
+# (pytest through sys.executable): AWOS_coding_agent/.venv, Python 3.12.14,
+# pip freeze taken 2026-10-14 with editable/local entries dropped.
+#
+# The 16 series projects (astroid, attrs, boltons, click, markdown,
+# markdown-it-py, more-itertools, networkx, pathspec, pydash, pyflakes,
+# pyparsing, sqlglot, tinydb, tomlkit, typeguard) run from their own source
+# (cwd = the project copy). Their tests use what this environment provides:
+# pytest, pytest-timeout, numpy, typing_extensions, packaging, pygments.
+# Their other test imports (scipy, pandas, matplotlib, lxml, pytz, yaml, ...)
+# are optional/guarded: the fresh set validated with exactly this env
+# (_tools/validate.json, 40/40 ok; the validate logs show this .venv's pytest).
+# The grader's verdicts are only comparable if this env matches, so don't add
+# packages here.
+#
+# pytest-xdist is deliberately absent (Amendment 1: the grader stays serial).
+annotated-types==0.8.0
+anthropic==0.125.0
+anyio==4.14.2
+certifi==2026.7.22
+distro==1.9.0
+docstring_parser==0.18.0
+h11==0.16.0
+httpcore==1.0.9
+httpcore2==2.12.0
+httpx==0.28.1
+httpx2==2.12.0
+idna==3.19
+iniconfig==2.3.0
+jiter==0.16.0
+markdown-it-py==4.2.0
+mdurl==0.1.2
+numpy==2.5.2
+openai==3.3.1
+packaging==26.3
+pluggy==1.6.0
+pydantic==2.13.4
+pydantic_core==2.46.4
+Pygments==2.21.0
+pytest==9.1.1
+pytest-timeout==2.4.0
+python-dotenv==1.2.3
+rich==15.0.0
+ruff==0.16.3
+sniffio==1.3.1
+tree-sitter==0.26.0
+tree-sitter-python==0.25.0
+truststore==0.10.4
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+xxhash==4.0.1

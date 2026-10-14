@@ -33,8 +33,15 @@ issue launches only while spent + (in_flight + 1) * step <= --cap, each child
 gets (cap - spent) / N as its series budget, and a child stopped on the budget
 stops new launches (in-flight issues finish).
 
+Sharding (CI, scripts/ladder_collect.py, ci/README.md): --shard I/N keeps the
+issues whose index in the sorted list of ALL issues is I mod N, then --limit K
+keeps the first K of those. arm_order still uses the global index, so a sharded
+run interleaves exactly as the unsharded one. Each shard writes its own --out
+(and its own --cap); ladder_collect.py merges the shard out dirs for `combine`.
+
 Gates (refuse to start): the series root must hold a READY file (Track A's signal
-that the set validated) and at least --min-issues issue dirs.
+that the set validated) and at least --min-issues issue dirs (counted before
+sharding).
 
 `combine` merges every per-issue result into one job_series-shaped file. job_series
 numbers each one-job series as job 1, so rows are re-keyed: job = issue index
@@ -69,6 +76,29 @@ def gate(series_root: Path, min_issues: int, ready_required: bool = True) -> tup
     if len(issues) < min_issues:
         return issues, f"{len(issues)} issue(s) < {min_issues} required"
     return issues, None
+
+
+def parse_shard(spec: str | None) -> tuple[int, int] | None:
+    """'I/N' -> (I, N) with 0 <= I < N; None for no sharding."""
+    if not spec:
+        return None
+    try:
+        i, n = (int(x) for x in spec.split("/", 1))
+    except ValueError:
+        raise ValueError(f"--shard takes I/N, e.g. 0/8 (got {spec!r})") from None
+    if n < 1 or not 0 <= i < n:
+        raise ValueError(f"--shard {spec}: need 0 <= I < N")
+    return i, n
+
+
+def select(issues: list[str], shard: tuple[int, int] | None = None,
+           limit: int | None = None) -> list[tuple[int, str]]:
+    """[(global index, issue)]: the shard's issues (global index % N == I), then
+    the first `limit` of them. The index is the issue's position in the full
+    sorted list, so arm_order is the same however the set is split."""
+    picked = [(i, issue) for i, issue in enumerate(issues)
+              if shard is None or i % shard[1] == shard[0]]
+    return picked[:limit] if limit is not None else picked
 
 
 def arm_order(index: int) -> list[str]:
@@ -178,14 +208,28 @@ def cmd_run(a: argparse.Namespace) -> int:
     if a.parallel < 1:
         print("[ablation] --parallel must be >= 1", flush=True)
         return 4
+    try:
+        shard = parse_shard(a.shard)
+    except ValueError as exc:
+        print(f"[ablation] {exc}", flush=True)
+        return 4
+    if a.limit is not None and a.limit < 1:
+        print("[ablation] --limit must be >= 1", flush=True)
+        return 4
+    picked = select(issues, shard, a.limit)
+    n_all = len(issues)
+    if shard or a.limit is not None:
+        print(f"[ablation] shard {a.shard or '-'} limit {a.limit or '-'}: {len(picked)} of "
+              f"{n_all} issue(s): {', '.join(f'{i}:{x}' for i, x in picked)}", flush=True)
+    issues = [issue for _, issue in picked]
     out.mkdir(parents=True, exist_ok=True)
     cache = preflight_cache_for(a, root)
     if cache:
         print(f"[ablation] preflight cache: {cache}", flush=True)
     if a.parallel > 1:
-        return run_parallel(a, root, out, issues, cache)
+        return run_parallel(a, root, out, picked, cache, n_all)
     for rep in range(1, a.repeat + 1):
-        for i, issue in enumerate(issues):
+        for i, issue in picked:
             if done(load_rows(result_file(out, rep, issue))):
                 continue
             total, projected, n = projected_next(out, issues, a.repeat)
@@ -194,7 +238,7 @@ def cmd_run(a: argparse.Namespace) -> int:
                       f"project ${projected:.4f} > ${a.cap:.2f}. Stopping.", flush=True)
                 return 0
             cmd = issue_cmd(a, root, out, rep, i, issue, cache)
-            print(f"[ablation] r{rep} {i + 1}/{len(issues)} {issue} arms={arm_order(i)} "
+            print(f"[ablation] r{rep} {i + 1}/{n_all} {issue} arms={arm_order(i)} "
                   f"spent=${total:.4f} budget_left=${a.cap - total:.4f}", flush=True)
             env = {**os.environ, "AWOS_SERIES_BUDGET_USD": f"{a.cap - total:.6f}"}
             subprocess.run(cmd, cwd=REPO, check=False, env=env)
@@ -211,16 +255,17 @@ def cmd_run(a: argparse.Namespace) -> int:
 POLL_S = 2.0
 
 
-def run_parallel(a: argparse.Namespace, root: Path, out: Path, issues: list[str],
-                 cache: Path | None) -> int:
+def run_parallel(a: argparse.Namespace, root: Path, out: Path,
+                 picked: list[tuple[int, str]], cache: Path | None, n_all: int) -> int:
     """Up to a.parallel issues at once, each its own job_series process (its arms
     stay sequential, in arm_order; output to <out>/r<rep>/<issue>/driver.log).
     Budget: an issue launches only while spent + (in_flight + 1) * step <= cap
     (step: projected_next's), and its child gets AWOS_SERIES_BUDGET_USD =
     (cap - spent) / a.parallel. A child stopped on the budget ends the run:
-    nothing new launches, the in-flight ones finish, then the driver stops."""
-    pending = [(rep, i, issue) for rep in range(1, a.repeat + 1)
-               for i, issue in enumerate(issues)]
+    nothing new launches, the in-flight ones finish, then the driver stops.
+    picked: [(global index, issue)] from select()."""
+    issues = [issue for _, issue in picked]
+    pending = [(rep, i, issue) for rep in range(1, a.repeat + 1) for i, issue in picked]
     running: dict[tuple[int, str], tuple[subprocess.Popen, object]] = {}
     stop: str | None = None
     cap_note = ""
@@ -261,7 +306,7 @@ def run_parallel(a: argparse.Namespace, root: Path, out: Path, issues: list[str]
                 proc = subprocess.Popen(issue_cmd(a, root, out, rep, i, issue, cache), cwd=REPO,
                                         env=env, stdout=log, stderr=subprocess.STDOUT)
                 running[(rep, issue)] = (proc, log)
-                print(f"[ablation] r{rep} {i + 1}/{len(issues)} {issue} started "
+                print(f"[ablation] r{rep} {i + 1}/{n_all} {issue} started "
                       f"arms={arm_order(i)} spent=${total:.4f} child_budget=${child_budget:.4f} "
                       f"in_flight={len(running)} log={d / 'driver.log'}", flush=True)
             if not running:
@@ -329,6 +374,10 @@ def main(argv: list[str] | None = None) -> int:
                         "when it exists)")
     r.add_argument("--parallel", type=int, default=1,
                    help="issues run at once, each its own job_series (default 1: sequential)")
+    r.add_argument("--shard", default=None, metavar="I/N",
+                   help="run only issues whose global sorted index %% N == I (CI sharding)")
+    r.add_argument("--limit", type=int, default=None, metavar="K",
+                   help="run only the first K issues (after --shard); smoke runs")
     c = sub.add_parser("combine")
     c.add_argument("--out", required=True)
     for s in (r, c):

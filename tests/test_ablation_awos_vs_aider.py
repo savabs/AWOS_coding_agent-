@@ -260,3 +260,70 @@ def test_parallel_resume_skips_done_issues(tmp_path, monkeypatch):
     assert ab.main(["run", "--series-root", str(root), "--out", str(out), "--cap", "10",
                     "--min-issues", "3", "--dry-run", "--parallel", "2"]) == 0
     assert [e[1] for e in _FakePopen.log if e[0] == "start"] == ["fresh_0", "fresh_2"]
+
+
+# ── --shard I/N and --limit K (CI sharding) ───────────────────────────────────
+
+def test_select_shards_by_global_index_then_limits():
+    issues = [f"fresh_{i:02d}" for i in range(10)]
+    assert ab.select(issues) == list(enumerate(issues))
+    assert ab.select(issues, (1, 4)) == [(1, "fresh_01"), (5, "fresh_05"), (9, "fresh_09")]
+    assert ab.select(issues, (1, 4), 2) == [(1, "fresh_01"), (5, "fresh_05")]
+    assert ab.select(issues, None, 3) == [(0, "fresh_00"), (1, "fresh_01"), (2, "fresh_02")]
+    # every issue lands in exactly one shard
+    shards = [x for k in range(8) for x in ab.select(issues, (k, 8))]
+    assert sorted(shards) == list(enumerate(issues))
+
+
+def test_parse_shard():
+    assert ab.parse_shard(None) is None and ab.parse_shard("3/8") == (3, 8)
+    for bad in ("8/8", "-1/8", "1/0", "x/8", "3"):
+        with pytest.raises(ValueError):
+            ab.parse_shard(bad)
+
+
+def test_shard_run_keeps_global_arm_order(tmp_path, monkeypatch):
+    root = _series(tmp_path, 6)
+    out = tmp_path / "out"
+    cmds = []
+
+    def fake_run(cmd, cwd=None, check=False, env=None):
+        cmds.append(cmd)
+        _write_result(out, cmd[cmd.index("--series") + 1])
+
+    monkeypatch.setattr(ab.subprocess, "run", fake_run)
+    assert ab.main(["run", "--series-root", str(root), "--out", str(out), "--cap", "10",
+                    "--min-issues", "6", "--dry-run", "--shard", "1/2"]) == 0
+    got = [(c[c.index("--series") + 1], c[c.index("--arms") + 1]) for c in cmds]
+    # global indices 1, 3, 5 are all odd: aider first, as in the unsharded run
+    assert got == [(f"fresh_{i}", ",".join(ab.arm_order(i))) for i in (1, 3, 5)]
+    assert all(arms == "aider,off" for _, arms in got)
+
+
+def test_shard_with_limit_and_parallel(tmp_path, monkeypatch):
+    root = _series(tmp_path, 6)
+    out = tmp_path / "out"
+    _fake_popen(monkeypatch, out)
+    assert ab.main(["run", "--series-root", str(root), "--out", str(out), "--cap", "10",
+                    "--min-issues", "6", "--dry-run", "--parallel", "2",
+                    "--shard", "0/3", "--limit", "1"]) == 0
+    starts = [e for e in _FakePopen.log if e[0] == "start"]
+    assert [(s[1], s[4]) for s in starts] == [("fresh_0", "off,aider")]
+
+
+def test_bad_shard_or_limit_blocks(tmp_path):
+    root = _series(tmp_path, 2)
+    base = ["run", "--series-root", str(root), "--out", str(tmp_path / "o"),
+            "--min-issues", "2", "--dry-run"]
+    assert ab.main(base + ["--shard", "2/2"]) == 4
+    assert ab.main(base + ["--limit", "0"]) == 4
+
+
+def test_min_issues_gate_counts_all_issues_not_the_shard(tmp_path, monkeypatch):
+    root = _series(tmp_path, 4)
+    out = tmp_path / "out"
+    monkeypatch.setattr(ab.subprocess, "run",
+                        lambda cmd, **k: _write_result(out, cmd[cmd.index("--series") + 1]))
+    assert ab.main(["run", "--series-root", str(root), "--out", str(out), "--min-issues", "4",
+                    "--dry-run", "--shard", "0/4"]) == 0
+    assert sorted(p.name for p in (out / "r1").iterdir()) == ["fresh_0"]
