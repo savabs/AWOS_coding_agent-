@@ -30,7 +30,7 @@ MODEL_ENV_VARS = ("AWOS_AGENT_MODEL", "AWOS_PLANNER_MODEL", "AWOS_NOTEBOOK_MODEL
 #: Where the user-facing docs and installer live. The ONE place to change when
 #: the site moves (e.g. to https://awos.tirramind.com once its DNS is live).
 #: AWOS_DOCS_URL overrides it at runtime.
-DOCS_BASE_URL = "https://awos-6v8.pages.dev"
+DOCS_BASE_URL = "https://awos.tirramind.com"
 
 
 def site_url(path: str = "") -> str:

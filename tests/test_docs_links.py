@@ -8,13 +8,13 @@ from pathlib import Path
 from scaffold.agent import doctor, paths
 
 ROOT = Path(__file__).resolve().parents[1]
-QUICKSTART = "https://awos-6v8.pages.dev/docs/quickstart/"
+QUICKSTART = "https://awos.tirramind.com/docs/quickstart/"
 
 
 def test_docs_url_comes_from_one_constant(monkeypatch):
     monkeypatch.delenv("AWOS_DOCS_URL", raising=False)
     assert paths.docs_url() == QUICKSTART
-    assert paths.install_url() == "https://awos-6v8.pages.dev/install.sh"
+    assert paths.install_url() == "https://awos.tirramind.com/install.sh"
     monkeypatch.setattr(paths, "DOCS_BASE_URL", "https://awos.tirramind.com")
     assert paths.docs_url() == "https://awos.tirramind.com/docs/quickstart/"
     assert paths.docs_url("faq") == "https://awos.tirramind.com/docs/faq/"
