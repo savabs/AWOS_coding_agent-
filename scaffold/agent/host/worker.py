@@ -239,6 +239,24 @@ def _stop_grace_sec() -> float:
         return 30.0
 
 
+def _free_tier_gate(job: JobSpec):
+    """licence.gate_job_start for this job (None if the module is unavailable)."""
+    try:
+        from scaffold.agent import licence, usage_ping
+        return licence.gate_job_start(job.id, usage_ping.provider_kind(privacy=job.privacy))
+    except Exception:  # noqa: BLE001 - the gate never breaks the worker
+        return None
+
+
+def _usage_ping_job_finished(job: JobSpec, state: str, result: dict, spent) -> None:
+    """Opt-in anonymous count (scaffold/agent/usage_ping.py); never raises."""
+    try:
+        from scaffold.agent import usage_ping
+        usage_ping.job_finished(job, state, result, spent)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def local_only_blanked_keys(env: dict, dotenv_path: Optional[Path] = None) -> set[str]:
     """
     Every credential a local_only child must not hold: CLOUD_KEYS plus any
@@ -948,6 +966,9 @@ class HostWorker:
         problem = self._credentials_problem(job) if self.precheck else None
         if problem:
             return self._block(job, problem, "before the run")
+        gate = _free_tier_gate(job)
+        if gate is not None and not gate.allowed:
+            return self._block_free_tier(job, gate.message)
         try:
             result = self.runner(job, ctx)
         except StopRequested as exc:
@@ -1131,6 +1152,19 @@ class HostWorker:
         self._notify(state, job, _final_summary(job, state, shown, error),
                      (handoff or {}).get("report_path") or (handoff or {}).get("report")
                      or str(self.queue.job_dir(job.id) / "report.md"))
+        self._write_digest()
+        _usage_ping_job_finished(self.queue.get(job.id) or job, state, result, spent)
+        return self.queue.get(job.id)
+
+    def _block_free_tier(self, job: JobSpec, message: str) -> JobSpec:
+        """Free-tier limit reached: park the job unstarted (scaffold/agent/licence.py)."""
+        action = f"get AWOS Pro, `awos activate <key>`, then `awos unblock {job.id[:8]}`"
+        result = {"success": False, "blocked": "free_tier", "action": action,
+                  "summary": message, "dedupe_key": f"blocked|free_tier|{job.id}"}
+        self.queue.block(job.id, "blocked: free tier limit", result=result)
+        self.log(f"[worker] {job.id[:8]} blocked: free tier limit -> {action}", job.id)
+        self._notify("blocked", job, message, str(self.queue.job_dir(job.id)),
+                     dedupe_key=result["dedupe_key"])
         self._write_digest()
         return self.queue.get(job.id)
 

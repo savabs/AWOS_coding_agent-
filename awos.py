@@ -2016,6 +2016,10 @@ def build_parser() -> argparse.ArgumentParser:
     job = sub.add_parser("job", help="Show one job's record and report path")
     job.add_argument("job_id", metavar="JOB_ID")
 
+    # telemetry / activate / licence (AWOS Pro): scaffold/agent/pro_cli.py
+    from scaffold.agent.pro_cli import register as _register_pro
+    _register_pro(sub)
+
     # goals
     sub.add_parser("goals", help="List tracked goals and their status")
 
@@ -2114,6 +2118,9 @@ def main():
         handler = cmd_serve
     else:
         handler = globals().get(f"cmd_{args.command}")
+
+    if getattr(args, "_pro_handler", None) is not None:  # scaffold/agent/pro_cli.py
+        handler = args._pro_handler
 
     if handler is None:
         parser.print_help()

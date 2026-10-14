@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Usage counts · AWOS</title>
+<meta name="description" content="AWOS can send anonymous usage counts if you opt in. This page lists every field it sends and how to turn it off.">
+<link rel="canonical" href="https://awos.tirramind.com/telemetry/">
+<meta property="og:title" content="Usage counts · AWOS">
+<meta property="og:description" content="AWOS can send anonymous usage counts if you opt in. This page lists every field it sends and how to turn it off.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://awos.tirramind.com/telemetry/">
+<meta name="robots" content="index,follow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap">
+  <a class="brand" href="/" aria-label="AWOS home">AWOS<span>.</span></a>
+  <nav class="links" aria-label="Main">
+    <a class="wide" href="/#how">How it works</a>
+    <a class="wide" href="/#results">Results</a>
+    <a href="/docs/">Docs</a>
+    <a class="wide" href="/docs/security/">Security</a>
+    <a class="wide" href="/#pricing">Pricing</a>
+  </nav>
+  <a class="btn primary" href="/access/">Request access</a>
+</div></header>
+<main id="main" class="wrap">
+<div class="access">
+  <div class="eyebrow">Privacy</div>
+  <h1>What AWOS sends, if you say yes</h1>
+  <p class="sub">Usage counts are off unless you opt in. AWOS asks once during setup; the default answer is no. Change it any time:</p>
+  <pre><code>awos telemetry on
+awos telemetry off
+awos telemetry status</code></pre>
+  <h2>The whole payload</h2>
+  <pre><code>{"v": 1,
+ "event": "install" | "first_run" | "job_finished",
+ "install_id": "random uuid4, made when you opt in",
+ "awos_version": "0.2.2",
+ "os": "darwin" | "linux" | "windows" | "other",
+ "outcome": "solved" | "failed" | "cancelled",
+ "duration": "lt1m" | "1to5m" | "5to15m" | "15to60m" | "gt60m",
+ "cost": "zero" | "lt1c" | "1to10c" | "10cto1" | "gt1",
+ "provider": "anthropic" | "local" | "other"}</code></pre>
+  <p>The last four fields are only on <code>job_finished</code> (and <code>provider</code> on <code>first_run</code>).</p>
+  <h2>Never sent</h2>
+  <p>Code, diffs, prompts, goals, test output, repository or file names, paths, branch names, API keys, host or user names. The install id is random, not derived from your machine, and turning telemetry off forgets it.</p>
+  <h2>What we keep</h2>
+  <p>The server keeps daily totals only, such as "12 jobs solved on linux today". It does not store your IP address or install id. Pings are also off when <code>DO_NOT_TRACK=1</code> or <code>AWOS_TELEMETRY=0</code> is set.</p>
+</div>
+</main>
+<footer class="site"><div class="wrap">
+  <span>AWOS. Local-first background agent. Built in India.</span>
+  <nav aria-label="Footer">
+    <a href="/docs/">Docs</a>
+    <a href="/docs/quickstart/">Quickstart</a>
+    <a href="/docs/security/">Security</a>
+    <a href="/docs/faq/">FAQ</a>
+    <a href="/access/">Request access</a>
+  </nav>
+</div></footer>
+</body>
+</html>
