@@ -400,6 +400,13 @@ def ensure_ready(repo: Path, interactive: bool = True, *,
                      "or put ANTHROPIC_API_KEY=... in " + str(user_env_path())
                      + " (or AWOS_PROVIDER=local); guide: " + _paths.docs_url())
 
+    if interactive:  # asks once; off unless the user says yes (usage_ping.py)
+        try:
+            from scaffold.agent import usage_ping
+        except ImportError:  # pragma: no cover - flat import
+            import usage_ping  # type: ignore
+        usage_ping.maybe_ask_consent(ask=ask or input, say=say, interactive=True)
+
     branch = None
     if is_git_repo(repo):
         branch = default_branch(repo)

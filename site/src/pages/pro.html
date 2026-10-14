@@ -1,0 +1,33 @@
+<!--meta
+title: AWOS Pro · unlimited cloud-model jobs
+description: AWOS is free for local models and for 25 cloud-model jobs a month. AWOS Pro removes the monthly limit. You keep paying your model provider directly.
+script: /assets/pro.js
+-->
+<div class="access">
+  <div class="eyebrow">Pricing</div>
+  <h1>AWOS Pro</h1>
+  <p class="sub">AWOS runs on your machine with your own Anthropic key or a local model. You always pay your model provider directly. Pro removes the monthly limit on cloud-model jobs.</p>
+  <div class="two">
+    <div class="price"><div class="tag">Free</div>
+      <ul>
+        <li>Local-model jobs: unlimited</li>
+        <li>Cloud-model jobs: 25 a month, counted on your machine</li>
+        <li>Everything else in AWOS</li>
+      </ul>
+    </div>
+    <div class="price"><div class="tag" id="pro-price">Pro</div>
+      <ul>
+        <li>Cloud-model jobs: unlimited</li>
+        <li>Local-model jobs: unlimited</li>
+        <li>Cancel any time; access runs to the end of the period you paid for</li>
+      </ul>
+      <div class="cta"><button class="btn primary" id="pro-buy" type="button" disabled>Checkout opening soon</button></div>
+      <p class="status" id="pro-status" role="status" aria-live="polite"></p>
+    </div>
+  </div>
+  <h2>After you pay</h2>
+  <p>The next page shows your licence key. Activate it once on each machine:</p>
+  <pre><code>awos activate awos_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+awos licence status</code></pre>
+  <p class="note">AWOS checks the key with this site at most once a day and keeps working offline for 14 days. Payments are handled by Paddle, our reseller and merchant of record. Usage counts are a separate, opt-in setting: see <a href="/telemetry/">what AWOS sends</a>.</p>
+</div>
