@@ -209,7 +209,15 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--dry-run", action="store_true")
     c = sub.add_parser("combine")
     c.add_argument("--out", required=True)
+    for s in (r, c):
+        # Two job_series arms to pair; default AWOS vs Aider. The harness-lift
+        # ladder uses e.g. --arms off,mini (docs/specs/harness_lift_ladder.md).
+        s.add_argument("--arms", default=",".join(ARMS))
     a = p.parse_args(argv)
+    arms = tuple(x.strip() for x in a.arms.split(",") if x.strip())
+    if len(arms) != 2:
+        p.error("--arms takes exactly two arms, e.g. off,mini")
+    globals()["ARMS"] = arms
     return cmd_run(a) if a.command == "run" else cmd_combine(a)
 
 
