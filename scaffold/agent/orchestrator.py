@@ -81,6 +81,22 @@ def _asks_for_tests(task: dict) -> bool:
     return False
 
 
+def _one_shot_observe(one_shot_mod, shot, model, task_id) -> None:
+    """Observability only: one log line per failed block, and the attempt's
+    JSON record (.awos/one_shot/). Never raises, never changes the outcome."""
+    try:
+        failed = list(getattr(shot, "failed", None) or [])
+        if failed:
+            for line in one_shot_mod.failure_log_lines(failed):
+                print(line)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[ONE-SHOT] failure lines: %s", exc)
+    try:
+        one_shot_mod.write_one_shot_record(shot, model=model, task_id=task_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[ONE-SHOT] record: %s", exc)
+
+
 def _stable_prefix():
     """The stable_prefix module (T7b, AWOS_STABLE_PREFIX)."""
     try:
@@ -2846,6 +2862,7 @@ class Orchestrator:
             print(f"[ONE-SHOT] repair call: {shot.repaired} block(s) applied, "
                   f"{shot.repair_failed} still failed"
                   + (f" ({shot.repair_error})" if shot.repair_error else ""))
+        _one_shot_observe(one_shot_mod, shot, model, task_id)
         verdict = None
         green = False   # project tests green after the edits (partially correct by design)
         acc_feedback = ""

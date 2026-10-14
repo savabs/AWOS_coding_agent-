@@ -26,6 +26,9 @@ Env:
   AWOS_REASONING_ONE_SHOT        reasoning for the one-shot and repair calls
                                  (default off: DeepSeek V4 Flash spent the
                                  16k reply cap on hidden reasoning)
+  AWOS_ONE_SHOT_LOG_DIR          one JSON record per attempt (default
+                                 .awos/one_shot in the state dir; off under
+                                 pytest; 0/off disables)
 
 Ablation 3b: a cut-off reply is never retried (its complete blocks are
 applied, the rest counts as failed and the job falls back); blocks that fail
@@ -756,7 +759,7 @@ def apply_blocks(project_root: str, blocks: list[EditBlock], *,
             # X -> X "succeeds" in EditFileTool but changes nothing; let it
             # reach the repair call as a failed block instead of looking applied.
             failed.append({"path": rel, "reason": NO_OP_REASON,
-                           "search": b.search[:300], "index": idx})
+                           "search": b.search[:600], "index": idx})
             continue
         if b.search.strip() == "" and target.exists() and target.read_text(
                 encoding="utf-8", errors="replace").strip():
@@ -786,7 +789,7 @@ def apply_blocks(project_root: str, blocks: list[EditBlock], *,
         else:
             # "index" marks a block the repair call may fix (it reached the file).
             failed.append({"path": rel, "reason": str(why)[:600],
-                           "search": b.search[:300], "index": idx})
+                           "search": b.search[:600], "index": idx})
     return applied, failed
 
 
@@ -1269,3 +1272,154 @@ def run_one_shot(client: Any, model: str, project_root: str, task: str,
     result.input_tokens, result.output_tokens = tap.input_tokens, tap.output_tokens
     result.elapsed_s = time.time() - start
     return result
+
+
+# ── Observability: per-attempt record ───────────────────────────────────────
+
+LOG_DIR_ENV = "AWOS_ONE_SHOT_LOG_DIR"
+RECORD_REPLY_CHARS = 60000
+RECORD_SEARCH_CHARS = 600
+_LOG_OFF = {"0", "off", "false", "no", ""}
+FAILURE_CATEGORIES = ("no_match", "ambiguous_match", "no_op", "outside_root",
+                      "read_only", "other")
+
+
+def classify_failure(reason: Any) -> str:
+    """
+    A short category for a failed block's reason, from the strings
+    apply_blocks / EditFileTool / Verifier produce:
+      no_match        Verifier "SEARCH block did not match ...", "SEARCH string
+                      not found", EditFileTool "File not found: ..."
+      ambiguous_match EditFileTool "old_string appears N times ... ambiguous"
+      no_op           NO_OP_REASON, NO_NET_CHANGE_REASON
+      outside_root    "path outside the project root", ".git/.awos" refusals
+      read_only       "read-only test file", EditFileTool "tests are read-only"
+      other           syntax / static-gate / fidelity rejections, cut-off
+                      replies, malformed blocks, write errors
+    A repair failure ("after repair: ...") is classified by what follows.
+    """
+    text = str(reason or "").strip()
+    if text.startswith("after repair: "):
+        text = text[len("after repair: "):]
+    low = text.lower()
+    if (text.startswith("SEARCH block did not match") or "search string not found" in low
+            or text.startswith("File not found:")):
+        return "no_match"
+    if "old_string appears" in low and "ambiguous" in low:
+        return "ambiguous_match"
+    if text.startswith(NO_OP_REASON) or text.startswith(NO_NET_CHANGE_REASON):
+        return "no_op"
+    if text == "path outside the project root" or "under .git/.awos are not allowed" in low:
+        return "outside_root"
+    if text == "read-only test file" or "tests are read-only" in low:
+        return "read_only"
+    return "other"
+
+
+def failure_log_lines(failed: list, limit: int = 8, width: int = 160) -> list:
+    """One `[ONE-SHOT] block <index> <path>: <reason>` line per failed block
+    (reason collapsed to one line, first `width` chars), at most `limit`, then
+    `[ONE-SHOT] ... N more`. Blocks with no index (malformed, cut-off reply,
+    after repair, no net change) show `-`."""
+    failed = list(failed or [])
+    lines = []
+    for f in failed[:limit]:
+        f = f if isinstance(f, dict) else {"reason": str(f)}
+        idx = f.get("index")
+        why = " ".join(str(f.get("reason", "")).split())[:width]
+        lines.append(f"[ONE-SHOT] block {idx if idx is not None else '-'} "
+                     f"{f.get('path', '?')}: {why}")
+    if len(failed) > limit:
+        lines.append(f"[ONE-SHOT] ... {len(failed) - limit} more")
+    return lines
+
+
+def one_shot_log_dir() -> Optional[Path]:
+    """Where attempt records go, or None when off. Same convention as
+    llm_calls.jsonl and trajectories: the relative `.awos/` of the state dir
+    (the job child's cwd, paths.state_root()). Off under pytest by default."""
+    value = os.environ.get(LOG_DIR_ENV)
+    if value is None:
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            return None
+        return Path(".awos") / "one_shot"
+    if value.strip().lower() in _LOG_OFF:
+        return None
+    return Path(value)
+
+
+def one_shot_record(result: Any, *, model: Optional[str] = None,
+                    task_id: Any = None) -> dict:
+    """The JSON-able record of one attempt (and its repair call, if any)."""
+    def g(name, default=None):
+        return getattr(result, name, default)
+
+    failed = []
+    for f in g("failed", []) or []:
+        f = f if isinstance(f, dict) else {"reason": str(f)}
+        reason = str(f.get("reason", ""))
+        failed.append({
+            "path": f.get("path", "?"),
+            "reason": reason,
+            "category": classify_failure(reason),
+            "search": str(f.get("search", ""))[:RECORD_SEARCH_CHARS],
+            "index": f.get("index"),
+        })
+    counts: dict = {}
+    for f in failed:
+        counts[f["category"]] = counts.get(f["category"], 0) + 1
+    reply = str(g("reply", "") or "")
+    repair_reply = str(g("repair_reply", "") or "")
+    return {
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "task_id": None if task_id is None else str(task_id),
+        "model": model,
+        "input_tokens": int(g("input_tokens", 0) or 0),
+        "output_tokens": int(g("output_tokens", 0) or 0),
+        "cost_usd": float(g("cost_usd", 0.0) or 0.0),
+        "calls": int(g("calls", 0) or 0),
+        "elapsed_s": round(float(g("elapsed_s", 0.0) or 0.0), 3),
+        "context_tokens": int(g("context_tokens", 0) or 0),
+        "context_files": list(g("context_files", []) or []),
+        "blocks": int(g("blocks", 0) or 0),
+        "applied": list(g("applied", []) or []),
+        "failed": failed,
+        "failure_categories": counts,
+        "truncated": bool(g("truncated", False)),
+        "error": g("error"),
+        "repair_calls": int(g("repair_calls", 0) or 0),
+        "repaired": int(g("repaired", 0) or 0),
+        "repair_failed": int(g("repair_failed", 0) or 0),
+        "repair_error": g("repair_error"),
+        "reply_chars": len(reply),
+        "reply": reply[:RECORD_REPLY_CHARS],
+        "repair_reply": repair_reply[:RECORD_REPLY_CHARS],
+    }
+
+
+def write_one_shot_record(result: Any, *, model: Optional[str] = None,
+                          task_id: Any = None) -> Optional[Path]:
+    """Persist one attempt's record as <log dir>/<task>-<timestamp>.json (the
+    timestamp alone without a task id; never overwrites). Returns the path, or
+    None when off or on any error. Never raises."""
+    try:
+        base = one_shot_log_dir()
+        if base is None:
+            return None
+        import json
+        rec = one_shot_record(result, model=model, task_id=task_id)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        tid = (re.sub(r"[^A-Za-z0-9._-]+", "_", str(task_id))[:80]
+               if task_id not in (None, "") else "")
+        name = f"{tid}-{stamp}" if tid else stamp
+        base.mkdir(parents=True, exist_ok=True)
+        path = base / f"{name}.json"
+        n = 1
+        while path.exists():
+            path = base / f"{name}-{n}.json"
+            n += 1
+        path.write_text(json.dumps(rec, indent=1, default=str), encoding="utf-8")
+        return path
+    except Exception as exc:  # noqa: BLE001 — observability must never break a run
+        logger.warning("[ONE-SHOT] record not written: %s", exc)
+        return None
