@@ -240,15 +240,24 @@ def test_code_incomplete_triggers_one_bounded_repair_that_passes(capsys):
     assert r.suite.kept == ["test_b"]
     assert r.out["success"] is True
     assert "def sub" in (r.root / "pkg" / "calc.py").read_text()   # repair kept
-    assert (r.root / "pkg" / "extra.py").exists()
+    # Early stop: the kept acceptance test passed right after the turn-1 edit,
+    # so the repair ended there (turn 2 would have created extra.py).
+    assert "repair stopped early after turn 1 of 3" in log and "acceptance_green" in log
+    assert not (r.root / "pkg" / "extra.py").exists()
+    assert r.check.call_count == 2                  # one-shot check, then the done check
     assert "pkg/calc.py" in r.orch._run_files_changed
 
 
 def test_failed_repair_restores_green_edit_and_succeeds(capsys):
     root = _project()
-    r = _run2([FAIL2, FAIL_B], script=_repair_edit(root), turns="3", root=root,
+    # Checks: the one-shot's (first, before the suite), the done check after
+    # the repair's edit turn, the post-repair check (acceptance first).
+    r = _run2([FAIL2, FAIL_B, FAIL_B], script=_repair_edit(root), turns="3", root=root,
               arb_reply='{"test_a": "CODE_INCOMPLETE", "test_b": "CODE_INCOMPLETE"}')
     log = capsys.readouterr().out
+    assert r.check.call_count == 3
+    assert "repair: kept acceptance tests still failing; project test suite skipped" in log
+    assert "running the deferred project test suite on the kept edit" in log
     assert "[ACCEPTANCE] repair failed; restored the green edit" in log
     assert r.inits == [3]
     assert (r.root / "pkg" / "calc.py").read_text() == GREEN_CALC     # green contents back
@@ -262,7 +271,7 @@ def test_turn_cap_stops_the_repair_then_restores(capsys):
     reads = [ModelReply(text="", tool_calls=[ToolCall(id=f"r{i}", name="read_file", arguments={
         "path": "pkg/calc.py" if i % 2 else "pkg/__init__.py"})], input_tokens=10,
         output_tokens=5) for i in range(6)]
-    r = _run2([FAIL2], script=reads, turns="2",
+    r = _run2([FAIL2, FAIL2], script=reads, turns="2",
               arb_reply='{"test_a": "CODE_INCOMPLETE", "test_b": "WRONG_TEST"}')
     log = capsys.readouterr().out
     assert r.inits == [2] and len(r.scripted._replies) == 4    # only 2 turns used
@@ -278,7 +287,7 @@ def test_agent_loop_green_gets_one_repair_never_a_resume(capsys):
                  input_tokens=100, output_tokens=20),
              ModelReply(text="Done.", input_tokens=100, output_tokens=20)]
     root = _project()
-    r = _run2([FAIL2, FAIL2], one_shot="0", script=first + _repair_edit(root),
+    r = _run2([FAIL2, FAIL2, FAIL2], one_shot="0", script=first + _repair_edit(root),
               turns="5", retries="3", root=root,
               arb_reply='{"test_a": "CODE_INCOMPLETE", "test_b": "CODE_INCOMPLETE"}')
     log = capsys.readouterr().out

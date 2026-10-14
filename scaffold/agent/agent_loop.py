@@ -24,6 +24,7 @@ Usage:
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import logging
@@ -32,7 +33,7 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional, Protocol
+from typing import Any, Callable, Optional, Protocol
 
 try:  # one log line per model call, for scripts/eval_health.py
     from .llm_call_log import record_error, record_response
@@ -354,6 +355,26 @@ def with_cache_breakpoints(system: Any, messages: list, tools: list) -> tuple[An
     return system, messages, tools
 
 
+def _effort_from_env(env_name: str, model: Optional[str]) -> Optional[str]:
+    try:
+        from .claude_compat import effort_from_env
+    except ImportError:
+        from claude_compat import effort_from_env
+    return effort_from_env(env_name, model)
+
+
+def agent_effort(model: Optional[str]) -> Optional[str]:
+    """AWOS_REASONING_AGENT as an Anthropic effort for `model`; None when unset."""
+    return _effort_from_env("AWOS_REASONING_AGENT", model)
+
+
+def with_repair_effort(client: Any) -> Any:
+    """The agent client for the bounded acceptance repair: AWOS_REASONING_REPAIR
+    when set (Anthropic client only), else the client unchanged."""
+    swap = getattr(client, "with_effort_env", None)
+    return swap("AWOS_REASONING_REPAIR") if callable(swap) else client
+
+
 class AnthropicToolClient:
     """Adapter for the Anthropic Messages API (native tool use)."""
 
@@ -361,9 +382,23 @@ class AnthropicToolClient:
         self._client = client
         self.model = model
         self.max_tokens = max_tokens or _int_env("AWOS_AGENT_MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS)
+        # AWOS_REASONING_AGENT: output_config.effort on every turn; unset (the
+        # default) sends nothing, so requests are byte-for-byte as before.
+        self.effort: Optional[str] = agent_effort(model)
+
+    def with_effort_env(self, env_name: str) -> "AnthropicToolClient":
+        """A copy whose effort comes from `env_name` when that is set (e.g.
+        AWOS_REASONING_REPAIR for the acceptance repair), else this client."""
+        if not os.getenv(env_name, "").strip():
+            return self
+        clone = copy.copy(self)
+        clone.effort = _effort_from_env(env_name, self.model)
+        return clone
 
     def complete(self, system, messages, registry, tool_choice: Optional[str] = None) -> ModelReply:
         extra = {"tool_choice": {"type": "tool", "name": tool_choice}} if tool_choice else {}
+        if getattr(self, "effort", None):
+            extra["output_config"] = {"effort": self.effort}
         system, messages, tools = with_cache_breakpoints(system, messages,
                                                          registry.anthropic_schemas())
         response = self._client.messages.create(
@@ -700,8 +735,13 @@ class AgentLoop:
         post_green_turns: Optional[int] = None,
         no_progress_turns: Optional[int] = None,
         wall_s: Optional[float] = None,
+        done_check: Optional[Callable[[], Optional[str]]] = None,
     ) -> None:
         self.registry = registry
+        # Called after every turn that changed files; a non-empty string it
+        # returns ends the run as a success with that string as stop_reason
+        # (the acceptance repair: "acceptance_green"). None: never called.
+        self.done_check = done_check
         self.client = client
         self.max_turns = (
             max_turns
@@ -949,6 +989,7 @@ class AgentLoop:
             fresh_green = False  # green (re-)established by this turn
             turn_version = state_version
             progressed = False
+            turn_edited = False  # an edit or a workspace-changing command this turn
             for call in reply.tool_calls:
                 signature = f"{call.name}:{json.dumps(call.arguments, sort_keys=True, default=str)}"
                 key = (signature, state_version)
@@ -1057,6 +1098,7 @@ class AgentLoop:
                 if result.success and (call.name in ("edit_file", "write_file")
                                        or (is_command and changed)):
                     edited = True
+                    turn_edited = True
                 if call.name == "run_tests":
                     data = getattr(result, "data", None) or {}
                     score = _test_score(data)
@@ -1093,6 +1135,25 @@ class AgentLoop:
                 not r.success for r in results
             ):
                 break
+
+            if self.done_check is not None and turn_edited:
+                # A cheap external "done" test (the kept acceptance tests in
+                # the bounded repair): once it holds, further turns only
+                # re-check finished work; the caller's gate runs next.
+                try:
+                    done = self.done_check()
+                except Exception as exc:  # noqa: BLE001 - a check must not end the run
+                    logger.warning("[agent_loop] done_check raised: %s", exc)
+                    done = None
+                if done:
+                    outcome.success = True
+                    outcome.stop_reason = str(done)
+                    outcome.final_message = (
+                        f"Stopped after turn {turn}: the done check passed ({done})."
+                    )
+                    self._emit("done_check", turn=turn, reason=str(done))
+                    _trace(f"t{turn} stopped: done check passed ({done})")
+                    break
 
             if progressed or state_version != turn_version:
                 stalled, stall_nudged = 0, False

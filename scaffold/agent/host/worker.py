@@ -568,6 +568,12 @@ def _run_child(job: JobSpec, ctx: RunContext, job_path: Path, result_path: Path,
             ctx.step("baseline", path=baseline)
     deferred = ctx.job_dir / DEFERRED_ROLLBACK
     deferred.unlink(missing_ok=True)
+    # The child's green whole-suite run on its final tree, if any: verify_tests
+    # reuses it instead of running the suite a second time (tree hash + command
+    # must match). Never one from an earlier attempt.
+    marker = ctx.job_dir / FULL_SUITE_MARKER
+    marker.unlink(missing_ok=True)
+    env["AWOS_FULL_SUITE_MARKER"] = str(marker)
     if base:
         # v0.2.2 atomic outcome: the child never reverts single files in the
         # workspace. Its rollbacks are recorded; the worker applies them only
@@ -621,7 +627,8 @@ def _run_child(job: JobSpec, ctx: RunContext, job_path: Path, result_path: Path,
             result.setdefault("base_commit", base)
         if "tests" not in result and base:   # only an isolated workspace, never the user's checkout
             tests = verify_tests(workspace, base_commit=base, project_root=job.repo_path,
-                                 baseline=env.get("AWOS_BASELINE_WORKSPACE"))
+                                 baseline=env.get("AWOS_BASELINE_WORKSPACE"),
+                                 marker=marker)
             if tests:
                 result["tests"] = tests
                 ctx.step("verify_tests", **tests)
@@ -680,9 +687,46 @@ def _fmt_run(r: dict) -> str:
     return text
 
 
+#: In the job dir: the child's green whole-suite run (test_runner marker).
+FULL_SUITE_MARKER = "full_suite_green.json"
+
+
+def reused_full_suite(marker: Optional[Path], workspace: str, runner) -> Optional[dict]:
+    """
+    The child's full-suite result as a verify_tests summary, when the child
+    ran the whole suite green on exactly this tree (same tree hash of tracked
+    + untracked files, same pytest command); else None and the host runs it.
+    """
+    if marker is None:
+        return None
+    try:
+        data = json.loads(Path(marker).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    try:
+        from scaffold.agent.test_runner import workspace_tree_hash
+        if data.get("command") != runner.full_suite_key():
+            print("[worker] child full-suite result not reused: different test command")
+            return None
+        if data.get("tree") != workspace_tree_hash(workspace):
+            print("[worker] child full-suite result not reused: the tree changed since")
+            return None
+    except Exception as exc:  # noqa: BLE001 - fall back to running it
+        print(f"[worker] child full-suite result not reused: {exc}")
+        return None
+    passed = int(data.get("passed") or 0)
+    pre = data.get("preexisting") or []
+    print(f"[worker] reused child full-suite result ({passed} passed on the same tree); "
+          "full suite not run again")
+    return {"status": "passed", "passed": passed, "failed": 0, "preexisting": len(pre),
+            "baseline_checked": bool(data.get("baseline_checked")), "seconds": 0.0,
+            "reused": True}
+
+
 def verify_tests(workspace: str, base_commit: Optional[str] = None,
                  project_root: Optional[str] = None,
-                 baseline: Optional[str] = None) -> Optional[dict]:
+                 baseline: Optional[str] = None,
+                 marker: Optional[Path] = None) -> Optional[dict]:
     """
     The host's own test evidence after the child exits (v0.2.2):
 
@@ -714,12 +758,15 @@ def verify_tests(workspace: str, base_commit: Optional[str] = None,
             targeted = _run_summary(runner.run_targets(targets, timeout_sec=int(timeout)))
             targeted["files"] = targets
         started = time.monotonic()
-        # A module that cannot be imported (an optional extra such as torch)
-        # must not stop the whole suite: its collection error is one id, and
-        # the baseline tells whether it was already broken.
-        full = _run_summary(runner.run_targets(runner._full_suite_targets(), timeout_sec=int(timeout),
-                                               extra_args=["--continue-on-collection-errors"]))
-        full["seconds"] = round(time.monotonic() - started, 1)
+        full = reused_full_suite(marker, workspace, runner)
+        if full is None:
+            # A module that cannot be imported (an optional extra such as torch)
+            # must not stop the whole suite: its collection error is one id, and
+            # the baseline tells whether it was already broken.
+            full = _run_summary(runner.run_targets(runner._full_suite_targets(),
+                                                   timeout_sec=int(timeout),
+                                                   extra_args=["--continue-on-collection-errors"]))
+            full["seconds"] = round(time.monotonic() - started, 1)
     finally:
         if baseline:
             if saved is None:
@@ -735,6 +782,8 @@ def verify_tests(workspace: str, base_commit: Optional[str] = None,
     if full["status"] in ("passed", "failed"):
         main = full
         line = f"full suite: {_fmt_run(full)}"
+        if full.get("reused"):
+            line += " (reused child full-suite result on the same tree)"
         if targeted:
             line += f"; {tgt_text}"
     elif targeted:

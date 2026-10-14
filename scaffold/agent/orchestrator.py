@@ -325,7 +325,7 @@ def _agent_resume_reason(outcome, verdict: dict, model_errors: int) -> Optional[
         if model_errors > 1:
             return None
         return f"the model call failed ({outcome.final_message[:200]})"
-    if stop != "completed":
+    if stop not in ("completed", "acceptance_green"):
         return None
     if not verdict["success"]:
         return "it finished without editing any file"
@@ -333,6 +333,13 @@ def _agent_resume_reason(outcome, verdict: dict, model_errors: int) -> Optional[
     if result is not None and not getattr(result, "no_tests_found", True) and result.failed > 0:
         return f"{result.failed} test(s) failed after its edits"
     return None
+
+def _verdict_green(verdict: Optional[dict]) -> bool:
+    """The project's tests ran and passed (no new failure, at least one pass)."""
+    tr = (verdict or {}).get("test_result")
+    return (tr is not None and not getattr(tr, "no_tests_found", True)
+            and tr.failed == 0 and tr.errors == 0 and tr.passed > 0)
+
 
 #: Stops after which a green verdict may be resumed for failing acceptance
 #: tests: not wall_budget / no_progress (final by the resume rules above).
@@ -2441,12 +2448,22 @@ class Orchestrator:
             shot_out += shot["output_tokens"]
             shot_steps = list(shot.get("steps") or [shot["step"]])
             files_changed.extend(shot["applied"])
+            fell_back_note = ""
             if shot["solved"]:
                 verdict = shot["verdict"]
                 extra = {}
                 if shot.get("acceptance_pending"):
                     # AWOS_ACCEPTANCE=2: arbitrate, one bounded repair, and
                     # the green one-shot edit restored if the repair fails.
+                    # verdict None: the acceptance tests ran first and failed,
+                    # so the project suite has not run yet; the fail-safe runs
+                    # it (judge) once, on whichever state it keeps.
+                    def _judge_shot(applied=list(files_changed)) -> dict:
+                        return self._judge_agent_attempt(
+                            task, SimpleNamespace(
+                                stop_reason="completed",
+                                final_message=f"One-shot edits to {', '.join(applied)}"),
+                            list(applied), needs_edits, codebase_root, sandbox, task_id)
                     try:
                         fs = self._acceptance_failsafe(
                             task=task, failing=shot["acceptance_pending"][1],
@@ -2454,8 +2471,18 @@ class Orchestrator:
                             base_prompt=prompt, registry=registry, client=client,
                             on_event=_on_event, cost_cap=cost_cap, spent=shot_cost,
                             model=model, codebase_root=codebase_root, sandbox=sandbox,
-                            task_id=task_id, needs_edits=needs_edits)
-                    finally:
+                            task_id=task_id, needs_edits=needs_edits,
+                            judge_base=None if verdict is not None else _judge_shot)
+                    except BaseException:
+                        registry.close()
+                        self._acceptance_cleanup(codebase_root)
+                        raise
+                    # Deferred suite, red (or nothing ran) on the one-shot
+                    # edit: not solved. Fall back to the agent loop as a red
+                    # one-shot always did (its edits reverted first).
+                    deferred_red = (verdict is None and not fs["repaired"]
+                                    and not _verdict_green(fs["verdict"]))
+                    if not deferred_red:
                         registry.close()
                         self._acceptance_cleanup(codebase_root)
                     verdict = fs["verdict"]
@@ -2471,9 +2498,13 @@ class Orchestrator:
                         shot_steps += self._agent_steps([o])
                     extra = {"acceptance_repaired": fs["repaired"],
                              "acceptance_restored": fs["restored"]}
+                    if deferred_red:
+                        fell_back_note = self._one_shot_deferred_fallback(
+                            shot, verdict, files_changed, codebase_root)
                 else:
                     registry.close()
                     self._acceptance_cleanup(codebase_root)
+            if shot["solved"] and not fell_back_note:
                 result = {
                     "success": True,
                     "summary": verdict["summary"],
@@ -2502,6 +2533,8 @@ class Orchestrator:
                 )
             if shot["note"]:
                 prompt = _stable_prefix().append_feedback(prompt, shot["note"])
+            if fell_back_note:
+                prompt = _stable_prefix().append_feedback(prompt, fell_back_note)
         base_prompt = prompt
 
         try:
@@ -2535,41 +2568,88 @@ class Orchestrator:
                     rel = os.path.relpath(path, codebase_root)
                     if rel not in files_changed:
                         files_changed.append(rel)
-                verdict = self._judge_agent_attempt(
-                    task, outcome, files_changed, needs_edits, codebase_root, sandbox, task_id
-                )
                 model_errors = sum(o.stop_reason == "model_error" for o in outcomes)
-                reason = _agent_resume_reason(outcome, verdict, model_errors)
                 acc_feedback = ""
-                if (reason is None and verdict["success"]
+                acc_summary = ""
+
+                def _judge_now(outcome=outcome) -> dict:
+                    return self._judge_agent_attempt(
+                        task, outcome, files_changed, needs_edits, codebase_root, sandbox,
+                        task_id)
+
+                # Cheap check first: with kept acceptance tests, they run (in
+                # seconds) before the project's suite; a failure goes straight
+                # to its repair/resume and the suite runs once they pass.
+                acc_pre = None
+                if (self._acceptance_first() and files_changed
                         and outcome.stop_reason in _ACCEPTANCE_RESUMABLE_STOPS):
+                    acc_pre = (self._acceptance_check_detail(codebase_root, sandbox)
+                               if _acceptance_mode() == "2"
+                               else self._acceptance_check(codebase_root, sandbox) + ({},))
+                if acc_pre is not None and not acc_pre[0]:
+                    acc_summary = acc_pre[1]
+                    print(f"[ACCEPTANCE] checked first: {acc_summary}; the project test "
+                          "suite is deferred until they pass")
                     if _acceptance_mode() == "2":
-                        # Fail-safe gate: never an acceptance-triggered resume;
-                        # arbitrate, one bounded repair, restore if it fails.
-                        acc_ok, _, _, acc_failing = self._acceptance_check_detail(
+                        fs = self._acceptance_failsafe(
+                            task=task, failing=acc_pre[3], green_verdict=None,
+                            files_changed=files_changed, base_prompt=base_prompt,
+                            registry=registry, client=client, on_event=_on_event,
+                            cost_cap=cost_cap,
+                            spent=shot_cost + sum(o.cost_usd for o in outcomes),
+                            model=model, codebase_root=codebase_root, sandbox=sandbox,
+                            task_id=task_id, needs_edits=needs_edits, judge_base=_judge_now)
+                        verdict = fs["verdict"]
+                        files_changed[:] = fs["files_changed"]
+                        shot_cost += fs["cost_usd"]
+                        shot_in += fs["input_tokens"]
+                        shot_out += fs["output_tokens"]
+                        if fs["outcome"] is not None:
+                            outcomes.append(fs["outcome"])
+                        # Repaired, or the kept edit is green: done, as before.
+                        # A red kept edit resumes as a red attempt always did.
+                        reason = (None if fs["repaired"]
+                                  else _agent_resume_reason(outcome, verdict, model_errors))
+                        if reason is None:
+                            break
+                    else:
+                        verdict = None
+                        reason = f"acceptance tests failing ({acc_summary})"
+                        acc_feedback = acc_pre[2]
+                else:
+                    verdict = _judge_now()
+                    reason = _agent_resume_reason(outcome, verdict, model_errors)
+                    if (acc_pre is None and reason is None and verdict["success"]
+                            and outcome.stop_reason in _ACCEPTANCE_RESUMABLE_STOPS):
+                        if _acceptance_mode() == "2":
+                            # Fail-safe gate: never an acceptance-triggered resume;
+                            # arbitrate, one bounded repair, restore if it fails.
+                            acc_ok, _, _, acc_failing = self._acceptance_check_detail(
+                                codebase_root, sandbox)
+                            if not acc_ok:
+                                fs = self._acceptance_failsafe(
+                                    task=task, failing=acc_failing, green_verdict=verdict,
+                                    files_changed=files_changed, base_prompt=base_prompt,
+                                    registry=registry, client=client, on_event=_on_event,
+                                    cost_cap=cost_cap,
+                                    spent=shot_cost + sum(o.cost_usd for o in outcomes),
+                                    model=model, codebase_root=codebase_root, sandbox=sandbox,
+                                    task_id=task_id, needs_edits=needs_edits)
+                                verdict = fs["verdict"]
+                                files_changed[:] = fs["files_changed"]
+                                shot_cost += fs["cost_usd"]
+                                shot_in += fs["input_tokens"]
+                                shot_out += fs["output_tokens"]
+                                if fs["outcome"] is not None:
+                                    outcomes.append(fs["outcome"])
+                            break
+                        acc_ok, acc_summary, acc_feedback = self._acceptance_check(
                             codebase_root, sandbox)
                         if not acc_ok:
-                            fs = self._acceptance_failsafe(
-                                task=task, failing=acc_failing, green_verdict=verdict,
-                                files_changed=files_changed, base_prompt=base_prompt,
-                                registry=registry, client=client, on_event=_on_event,
-                                cost_cap=cost_cap,
-                                spent=shot_cost + sum(o.cost_usd for o in outcomes),
-                                model=model, codebase_root=codebase_root, sandbox=sandbox,
-                                task_id=task_id, needs_edits=needs_edits)
-                            verdict = fs["verdict"]
-                            files_changed[:] = fs["files_changed"]
-                            shot_cost += fs["cost_usd"]
-                            shot_in += fs["input_tokens"]
-                            shot_out += fs["output_tokens"]
-                            if fs["outcome"] is not None:
-                                outcomes.append(fs["outcome"])
-                        break
-                    acc_ok, acc_summary, acc_feedback = self._acceptance_check(
-                        codebase_root, sandbox)
-                    if not acc_ok:
-                        reason = f"acceptance tests failing ({acc_summary})"
+                            reason = f"acceptance tests failing ({acc_summary})"
                 if reason is None or retries_left <= 0:
+                    if verdict is None:
+                        verdict = _judge_now()   # the suite gates the result once
                     if acc_feedback:
                         print(f"[ACCEPTANCE] still failing at the end ({acc_summary}); "
                               "the visible-test verdict stands, edits kept")
@@ -2581,10 +2661,14 @@ class Orchestrator:
                         # Not even one more turn fits under the task's cap.
                         print(f"[TASK {task_id}] AgentLoop not resumed: ${spent:.4f} of "
                               f"the ${cost_cap:.4f} cap spent")
+                        if verdict is None:
+                            verdict = _judge_now()
                         break
                 if self._goal_budget_exhausted():
                     self._goal_budget_skipped_work = True
                     print(f"[TASK {task_id}] AgentLoop not resumed: {GOAL_BUDGET_REASON}")
+                    if verdict is None:
+                        verdict = _judge_now()
                     break
                 # One stop used to end the job. The edits so far stay in place
                 # (no rollback between attempts) and the next attempt resumes.
@@ -2594,7 +2678,9 @@ class Orchestrator:
                     base_prompt,
                     f"A previous attempt stopped: {reason}. "
                     + f"It changed these files: {', '.join(files_changed) or 'none'}. "
-                    + f"Test status: {verdict['test_status']}. "
+                    + "Test status: " + (verdict["test_status"] if verdict is not None
+                                         else "not run yet (the acceptance tests run first)")
+                    + ". "
                     + "Continue from the current state of the files; do not start over."
                     + (f"\n\n{acc_feedback}" if acc_feedback else "")
                 )
@@ -2773,16 +2859,42 @@ class Orchestrator:
             if getattr(shot, "truncated", False):
                 reason += "; reply cut off"
         else:
-            verdict = bon_verdict if bon_verdict is not None else self._judge_agent_attempt(
-                task,
-                SimpleNamespace(stop_reason="completed",
-                                final_message=f"One-shot edits to {', '.join(shot.applied)}"),
-                list(shot.applied), needs_edits, codebase_root, sandbox, task_id,
-            )
-            tr = verdict["test_result"]
-            tests_ran = tr is not None and not getattr(tr, "no_tests_found", True)
-            green = tests_ran and tr.failed == 0 and tr.errors == 0 and tr.passed > 0
-            if green and not shot.failed:
+            # Cheap check first: with kept acceptance tests, run them (~2 s)
+            # before the project's suite (mapped, else the whole suite: 36 s
+            # on astroid). Failing ones go straight to their repair; the suite
+            # runs once they pass, or after the repair (fail-safe gate).
+            acc_first = None
+            if bon_verdict is None and not shot.failed and self._acceptance_first():
+                if _acceptance_mode() == "2":
+                    acc_first = self._acceptance_check_detail(codebase_root, sandbox)
+                else:
+                    acc_first = self._acceptance_check(codebase_root, sandbox) + ({},)
+            deferred = acc_first is not None and not acc_first[0]
+            if deferred:
+                green = None   # unknown: the project tests have not run yet
+                print(f"[ACCEPTANCE] checked first: {acc_first[1]}; the project test suite "
+                      "is deferred until they pass")
+                if _acceptance_mode() == "2":
+                    reason = None
+                    acc_pending = (acc_first[1], acc_first[3])
+                else:
+                    reason = f"acceptance: {acc_first[1]}"
+                    acc_feedback = acc_first[2]
+            else:
+                verdict = bon_verdict if bon_verdict is not None else self._judge_agent_attempt(
+                    task,
+                    SimpleNamespace(stop_reason="completed",
+                                    final_message=f"One-shot edits to {', '.join(shot.applied)}"),
+                    list(shot.applied), needs_edits, codebase_root, sandbox, task_id,
+                )
+                tr = verdict["test_result"]
+                tests_ran = tr is not None and not getattr(tr, "no_tests_found", True)
+                green = tests_ran and tr.failed == 0 and tr.errors == 0 and tr.passed > 0
+            if deferred:
+                pass
+            elif green and not shot.failed and acc_first is not None:
+                reason = None   # the acceptance tests already passed above
+            elif green and not shot.failed:
                 reason = None
                 if _acceptance_mode() == "2":
                     # Fail-safe gate: a green one-shot is never sent to the full
@@ -2834,18 +2946,20 @@ class Orchestrator:
             "output_tokens": shot.output_tokens,
             "acceptance_pending": acc_pending,
         }
+        out["snapshot"] = snap   # a deferred-judge fall back restores from it
         if solved:
             calls = 1 + repairs
             print(f"[ONE-SHOT] solved in {calls} call{'s' if calls > 1 else ''}"
                   + (" (1 repair)" if repairs else "")
                   + f" — {len(shot.applied)} file(s) changed, "
-                  f"tests {verdict['test_result'].passed} passed")
+                  + (f"tests {verdict['test_result'].passed} passed" if verdict is not None
+                     else "acceptance pending; project tests deferred"))
             return out
 
         print(f"[ONE-SHOT] fell back to the agent loop: {reason}")
         if shot.error or not shot.applied:
             return out  # nothing changed: the agent loop starts as it always did
-        if snap and not green:
+        if snap and green is False:
             # Tests not green: the edits are not a base to build on. Put the
             # files the attempt changed back as they were before it.
             res = ws_restore.restore(codebase_root, snap, list(shot.applied))
@@ -2871,6 +2985,7 @@ class Orchestrator:
             return out
         print("[ONE-SHOT] keeping the attempt's edits for the agent loop ("
               + ("project tests are green; only the remaining gap is left" if green
+                 else "acceptance tests failing; project tests not run yet" if green is None
                  else "restore off" if not ws_restore.restore_enabled()
                  else "no job-workspace snapshot") + ")")
         parts = ["A first one-shot attempt already ran on this task."]
@@ -2943,6 +3058,59 @@ class Orchestrator:
             print(f"[ACCEPTANCE] kept: {', '.join(suite.kept)}")
         return suite
 
+    def _one_shot_deferred_fallback(self, shot: dict, verdict: dict, files_changed: list,
+                                    codebase_root: str) -> str:
+        """
+        A one-shot whose acceptance tests ran first and failed, whose repair
+        did not pass, and whose deferred project-suite run is not green: as a
+        red one-shot always did, revert its edits in a job workspace (the
+        pre-attempt snapshot) and hand the agent loop a note. Returns the note
+        and updates files_changed to what is still in place.
+        """
+        try:
+            from . import workspace_restore as ws_restore
+        except ImportError:
+            import workspace_restore as ws_restore
+        status = verdict.get("test_status", "no tests ran")
+        print(f"[ONE-SHOT] fell back to the agent loop: tests: {status} (project suite "
+              "deferred behind the acceptance tests)")
+        self._component("one_shot", status="used", result="fell_back",
+                        reason=f"tests: {status}"[:200])
+        applied = list(shot.get("applied") or [])
+        snap = shot.get("snapshot")
+        parts = ["A first one-shot attempt already ran on this task and failed "
+                 f"(tests: {status})."]
+        if snap:
+            res = ws_restore.restore(codebase_root, snap, applied)
+            print("[ONE-SHOT] restored the workspace to its pre-attempt state before the "
+                  f"agent loop: {len(res['restored'])} file(s) reverted, "
+                  f"{len(res['removed'])} removed")
+            files_changed[:] = list(res["skipped"])
+            parts[0] += " Its edits were reverted: the files are as they were before it."
+            parts.append("It had tried changing: " + ", ".join(applied) + ".")
+        else:
+            parts.append("It changed these files: " + (", ".join(applied) or "none") + ".")
+        tr = verdict.get("test_result")
+        raw = getattr(tr, "raw_output", "") if tr is not None else ""
+        if raw:
+            trimmed = raw if len(raw) <= 2000 else "...\n" + raw[-2000:]
+            parts.append(f"Test output with its edits in place:\n{trimmed}")
+        parts.append("Work from the current files" + ("; do not assume its edits exist."
+                                                      if snap else "; do not start over."))
+        return "\n\n".join(parts)
+
+    def _acceptance_first(self) -> bool:
+        """
+        Cheap checks first (AWOS_ACCEPTANCE_FIRST, default on): with kept
+        acceptance tests, they run before the project's test suite after an
+        edit, and a failure skips the suite until they pass (or the repair is
+        done); the suite still gates success. Off ("0"): suite first, as before.
+        """
+        if os.getenv("AWOS_ACCEPTANCE_FIRST", "1").strip().lower() in ("0", "off", "false", "no"):
+            return False
+        suite = getattr(self, "_acceptance_suite", None)
+        return bool(suite is not None and suite.active and suite.kept)
+
     def _acceptance_check(self, codebase_root: str, sandbox) -> tuple:
         """(all_passed, summary, feedback); passes when the gate is inactive."""
         suite = getattr(self, "_acceptance_suite", None)
@@ -2985,7 +3153,7 @@ class Orchestrator:
         self, *, task: dict, failing: dict, green_verdict: dict, files_changed: list,
         base_prompt: str, registry, client, on_event, cost_cap: Optional[float],
         spent: float, model: str, codebase_root: str, sandbox, task_id,
-        needs_edits: bool,
+        needs_edits: bool, judge_base=None,
     ) -> dict:
         """
         AWOS_ACCEPTANCE=2 (ablation C2): the visible suite is green and some
@@ -2997,22 +3165,35 @@ class Orchestrator:
         Returns {"verdict", "files_changed", "outcome" (the repair's or None),
         "cost_usd", "input_tokens", "output_tokens" (arbitration), "repaired",
         "restored"}. Never raises.
+
+        Cheap checks first: green_verdict None means the acceptance tests ran
+        before the project suite and failed, so the suite has not run;
+        `judge_base()` then runs it once, on whichever state is kept (the
+        caller's edit, or the repair's when that passes). After the repair the
+        kept acceptance tests run first; the suite only when they pass.
         """
         try:
             from . import acceptance as acc_mod
             from . import one_shot as one_shot_mod
-            from .agent_loop import AgentLoop
+            from .agent_loop import AgentLoop, with_repair_effort
         except ImportError:
             import acceptance as acc_mod
             import one_shot as one_shot_mod
-            from agent_loop import AgentLoop
+            from agent_loop import AgentLoop, with_repair_effort
 
         out = {"verdict": green_verdict, "files_changed": list(files_changed),
                "outcome": None, "cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0,
                "repaired": False, "restored": False}
+
+        def finish(result: dict) -> dict:
+            if result["verdict"] is None and judge_base is not None:
+                print("[ACCEPTANCE] running the deferred project test suite on the kept edit")
+                result["verdict"] = judge_base()
+            return result
+
         suite = getattr(self, "_acceptance_suite", None)
         if suite is None or not suite.active or not failing:
-            return out
+            return finish(out)
 
         # 1. Arbitration: which failing tests are wrong, which find missing code.
         try:
@@ -3043,29 +3224,29 @@ class Orchestrator:
               + (f" ({arb['error']})" if arb.get("error") else ""))
         if not incomplete:
             print("[ACCEPTANCE] no code_incomplete test left; the visible-green result stands")
-            return out
+            return finish(out)
 
         # 2. Bounded repair: one per task, never a full loop.
         if getattr(self, "_acceptance_repair_used", False):
             print("[ACCEPTANCE] repair already used for this task; the visible-green "
                   "result stands")
-            return out
+            return finish(out)
         spent += out["cost_usd"]
         if cost_cap is not None and cost_cap - spent <= 0:
             print(f"[ACCEPTANCE] no repair: ${spent:.4f} of the ${cost_cap:.4f} cap spent; "
                   "the visible-green result stands")
-            return out
+            return finish(out)
         if self._goal_budget_exhausted():
             print(f"[ACCEPTANCE] no repair: {GOAL_BUDGET_REASON}; the visible-green "
                   "result stands")
-            return out
+            return finish(out)
         # 3. Never lose the green edit.
         try:
             snap = acc_mod.snapshot_workspace(codebase_root)
         except Exception as exc:  # noqa: BLE001
             print(f"[ACCEPTANCE] no repair: snapshot failed ({exc}); the visible-green "
                   "result stands")
-            return out
+            return finish(out)
         self._acceptance_repair_used = True
         turns = acc_mod.repair_turns()
         print(f"[TASK {task_id}] [ACCEPTANCE] bounded repair: {len(incomplete)} "
@@ -3075,11 +3256,22 @@ class Orchestrator:
         outcome = None
         repaired_green = False
         rfiles = list(files_changed)
+        acc_first = self._acceptance_first()
+
+        def _acceptance_done() -> Optional[str]:
+            # Early stop: after a turn that edited, only the kept acceptance
+            # tests (seconds); the project suite runs once, after the loop.
+            ok, summary, _, _ = self._acceptance_check_detail(codebase_root, sandbox)
+            return "acceptance_green" if ok and "could not run" not in summary else None
+
+        early_stop = os.getenv("AWOS_ACCEPTANCE_EARLY_STOP", "1").strip().lower() not in (
+            "0", "off", "false", "no")
         try:
             outcome = AgentLoop(
-                registry=registry, client=client, on_event=on_event,
+                registry=registry, client=with_repair_effort(client), on_event=on_event,
                 max_turns=turns, require_edits=False,
                 max_cost_usd=None if cost_cap is None else cost_cap - spent,
+                **({"done_check": _acceptance_done} if early_stop else {}),
             ).run(prompt)
             self._record_agent_loop_spend(model, outcome)
             for path in [*outcome.files_touched,
@@ -3087,18 +3279,31 @@ class Orchestrator:
                 rel = os.path.relpath(path, codebase_root)
                 if rel not in rfiles:
                     rfiles.append(rel)
-            rverdict = self._judge_agent_attempt(task, outcome, rfiles, needs_edits,
-                                                 codebase_root, sandbox, task_id)
-            tr = rverdict["test_result"]
-            tests_bad = (tr is not None and not getattr(tr, "no_tests_found", True)
-                         and (tr.failed > 0 or tr.errors > 0))
-            visible_green = (rverdict["success"] and not tests_bad
-                             and outcome.stop_reason not in ("cost_cap", "budget_blocked")
-                             and _agent_resume_reason(outcome, rverdict, 0) is None)
-            if visible_green:
-                acc_ok, acc_summary, _, _ = self._acceptance_check_detail(codebase_root,
-                                                                          sandbox)
-                repaired_green = acc_ok
+            if outcome.stop_reason == "acceptance_green":
+                print(f"[ACCEPTANCE] repair stopped early after turn {outcome.turns} of "
+                      f"{turns}: the kept acceptance tests pass (acceptance_green); "
+                      "running the project test suite once")
+                acc_ok = True    # just checked by the done check, nothing changed since
+            elif acc_first:
+                acc_ok = self._acceptance_check_detail(codebase_root, sandbox)[0]
+                if not acc_ok:
+                    print("[ACCEPTANCE] repair: kept acceptance tests still failing; "
+                          "project test suite skipped")
+            else:
+                acc_ok = None    # suite first, as before
+            if acc_ok is not False:
+                rverdict = self._judge_agent_attempt(task, outcome, rfiles, needs_edits,
+                                                     codebase_root, sandbox, task_id)
+                tr = rverdict["test_result"]
+                tests_bad = (tr is not None and not getattr(tr, "no_tests_found", True)
+                             and (tr.failed > 0 or tr.errors > 0))
+                visible_green = (rverdict["success"] and not tests_bad
+                                 and outcome.stop_reason not in ("cost_cap", "budget_blocked")
+                                 and _agent_resume_reason(outcome, rverdict, 0) is None)
+                if visible_green:
+                    if acc_ok is None:
+                        acc_ok = self._acceptance_check_detail(codebase_root, sandbox)[0]
+                    repaired_green = acc_ok
         except Exception as exc:  # noqa: BLE001
             logger.warning("[ACCEPTANCE] repair attempt raised: %s", exc)
         out["outcome"] = outcome
@@ -3112,7 +3317,7 @@ class Orchestrator:
               + (f", {outcome.turns} turn(s)" if outcome is not None else "")
               + f"; {len(touched)} path(s) restored)")
         out["restored"] = True
-        return out
+        return finish(out)
 
     def _acceptance_cleanup(self, codebase_root: str) -> None:
         """The acceptance tests never outlive their task, on disk or in memory."""
@@ -3203,7 +3408,10 @@ class Orchestrator:
             and test_result.passed > 0
         )
 
-        completed = outcome.stop_reason == "completed"
+        # acceptance_green: the bounded repair stopped once its kept
+        # acceptance tests passed (AgentLoop done_check); a finish like
+        # "completed", judged by the same tests below.
+        completed = outcome.stop_reason in ("completed", "acceptance_green")
         summary = outcome.final_message[:500]
         if green_stop:
             success, error = True, ""
