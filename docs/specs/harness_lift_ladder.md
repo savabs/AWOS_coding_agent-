@@ -42,3 +42,21 @@ Each hypothesis is judged KEEP / INCONCLUSIVE / REJECT under the T1 rule.
 - One repeat per pair, so the MDE is roughly 20 pp for Haiku and much larger for the 15 local issues.
 - The goals in the fresh set were written to match the hidden tests.
 - mini-swe-agent's prompts are tuned for SWE-bench-style tasks. That is the point of a minimal baseline, but it may under- or over-state "no harness".
+
+## Amendment 1 (2026-10-14, before any data counted)
+
+A first H1 launch was paused after 5 of 40 issues because each issue took ~8 min, of which AWOS
+used ~2. Those 5 issues are archived at `~/.awos-harness/ladder_haiku_paused_slow` and are **not
+counted**; H1 restarts fresh, so every counted row comes from one AWOS build.
+
+- **AWOS build changes (speed, not scoring):** the acceptance check now runs before the full suite,
+  test mapping includes tests that import the changed module, the bounded repair stops as soon as
+  the acceptance tests pass, and the full suite still gates success once. The exact commit is
+  recorded in the result note.
+- **Runner changes (no effect on scoring):** preflight reuses the cached `fresh_series/_tools/validate.json`
+  when it is newer than the series files, the backend check is skipped if it passed in the last 5 min,
+  and the driver may run 2 issues at once (`--parallel 2`). Within an issue the arms stay sequential in
+  the pre-registered alternating order. Concurrency adds CPU contention that affects both arms; wall
+  time is reported descriptively only, and the hypotheses are judged on solve rate and $ as before.
+- **Rejected:** pytest-xdist for the grader. The astroid suite fails under `-n 4` / `-n 8` (19 and 8
+  spurious failures), so the grader stays serial.
