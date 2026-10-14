@@ -386,6 +386,52 @@ def preflight(sdir: Path, jobs: list[tuple[int, Path]], numbers: list[int]) -> d
             "invalid_jobs": bad, "seconds": round(time.monotonic() - started, 1)}
 
 
+_CACHE_SKIP = {"__pycache__", ".pytest_cache"}
+
+
+def _newest_mtime(sdir: Path) -> float:
+    """Newest mtime of any file or dir under the series' jobs/ and base/ (bytecode
+    caches aside): a job edited after validation makes the cached verdict stale."""
+    newest = 0.0
+    for sub in ("jobs", "base"):
+        top = sdir / sub
+        if not top.exists():
+            continue
+        for dirpath, dirnames, filenames in os.walk(top):
+            dirnames[:] = [d for d in dirnames if d not in _CACHE_SKIP]
+            for name in [None, *filenames]:
+                p = Path(dirpath) if name is None else Path(dirpath) / name
+                try:
+                    newest = max(newest, p.lstat().st_mtime)
+                except OSError:
+                    pass
+    return newest
+
+
+def cached_preflight(cache: Path, series: str, sdir: Path, numbers: list[int]) -> dict | None:
+    """The preflight verdict from a `validate` cache (_tools/validate.json:
+    {series: {ok, seconds, line, problems}}, written by validate_all.py), or None
+    (-> live preflight) when the entry is missing, not ok, or older than any file
+    under the series' jobs/ and base/. Only an ok verdict is ever reused."""
+    try:
+        entry = json.loads(cache.read_text(encoding="utf-8")).get(series)
+        cache_mtime = cache.stat().st_mtime
+    except (OSError, ValueError, AttributeError) as exc:
+        print(f"[job_series] preflight cache {cache} unreadable ({exc}); validating live", flush=True)
+        return None
+    if not isinstance(entry, dict) or entry.get("ok") is not True:
+        why = "no entry" if not isinstance(entry, dict) else "entry not ok"
+        print(f"[job_series] preflight cache: {why} for {series}; validating live", flush=True)
+        return None
+    if _newest_mtime(sdir) > cache_mtime:
+        print(f"[job_series] preflight cache older than the series files of {series}; "
+              f"validating live", flush=True)
+        return None
+    return {"status": "cached", "source": str(cache), "seconds": 0,
+            "jobs": {str(n): [] for n in numbers}, "invalid_jobs": [],
+            "validated_seconds": entry.get("seconds"), "line": entry.get("line")}
+
+
 # ── provenance, input manifests, end-of-run hooks ─────────────────────────────
 
 # Not part of what an arm "received": VCS data, AWOS runtime state, bytecode.
@@ -830,17 +876,38 @@ def backend_ok() -> bool:
     return True
 
 
+# When the real backend check last passed in this process (time.monotonic()).
+# A pass within BACKEND_MEMO_S lets the next job start without another model
+# call; an invalid job attempt clears it (forget_backend_ok), so a key dying
+# mid-run is still checked for real before the retry.
+_BACKEND_OK_AT: float | None = None
+BACKEND_MEMO_S = 300.0
+
+
+def forget_backend_ok() -> None:
+    global _BACKEND_OK_AT
+    _BACKEND_OK_AT = None
+
+
 def wait_for_backend(max_wait_s: float | None = None, check=None, sleep=time.sleep) -> bool:
     """Poll backend_ok with backoff (15s doubling, capped at 3 min) for up to max_wait_s.
 
     Default wait: AWOS_SERIES_BACKEND_WAIT_S or 15 minutes. False if still down.
+    With the default check, a pass within the last BACKEND_MEMO_S seconds (and
+    no invalid attempt since) is reused instead of another model call.
     """
+    global _BACKEND_OK_AT
+    memo = check is None
+    if memo and _BACKEND_OK_AT is not None and time.monotonic() - _BACKEND_OK_AT < BACKEND_MEMO_S:
+        return True
     check = check or backend_ok
     if max_wait_s is None:
         max_wait_s = float(os.environ.get("AWOS_SERIES_BACKEND_WAIT_S", 900))
     waited, delay = 0.0, 15.0
     while True:
         if check():
+            if memo:
+                _BACKEND_OK_AT = time.monotonic()
             return True
         if waited >= max_wait_s:
             print(f"[job_series] backend ({PINNED_MODEL}) still down after {waited:.0f}s; giving up",
@@ -1075,7 +1142,11 @@ def key_usage(state: Path) -> float | None:
 
     Jobs run one at a time, so the change across a job is everything that job
     billed, whichever harness ran it and whether or not it wrote the ledger.
+    Under AWOS_SERIES_CONCURRENT=1 (a driver running several job_series at once
+    on one key) the change can't be attributed to one job: None.
     """
+    if os.environ.get("AWOS_SERIES_CONCURRENT") == "1":
+        return None
     import urllib.request
     try:
         key = next((ln.split("=", 1)[1].strip().strip('"').strip("'")
@@ -1384,6 +1455,7 @@ def run_job_with_retries(arm: str, number: int, job_dir: Path, sdir: Path, jobs:
         try:
             result = run_job(arm, number, job_dir, sdir, jobs, arm_dir, dry_run)
             if result["invalid"]:
+                forget_backend_ok()   # the next check is a real one
                 restore_notebook(state, snap)
                 restore_notebook(state, exp_snap, "experience")
                 result["notebook_chars"] = notebook_chars(state)
@@ -1612,13 +1684,15 @@ def save_partial(out: Path, series: str, ts: str, arms: list[str], numbers: list
 def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
         root: Path | None = None, out_root: Path | None = None,
         env_file: str | None = None, resume: str | None = None, repeat: int = 1,
-        skip_preflight: bool = False) -> int:
+        skip_preflight: bool = False, preflight_cache: str | None = None) -> int:
     """Run the selected jobs `repeat` times. With repeat > 1 each repeat gets its
     own fresh arm dirs (run_root/r<k>/<arm>), so no state carries across repeats;
     every row carries its `repeat` number.
 
     Before any arm starts, the selected jobs are validated (preflight; skipped
-    under --dry-run or --skip-preflight, and recorded as skipped). An INVALID job
+    under --dry-run or --skip-preflight, and recorded as skipped; with
+    preflight_cache, an ok and up-to-date `validate` verdict for the series is
+    reused and recorded as "cached", anything else validates live). An INVALID job
     aborts the run before any model spend (exit 3). After the run, the health
     check and report hooks run (see finish)."""
     started_at = _now()
@@ -1670,10 +1744,16 @@ def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
     out_root.mkdir(parents=True, exist_ok=True)
     out = out_root / f"job_series_{ts}.json"
 
-    if dry_run or skip_preflight:
+    pre = None
+    if preflight_cache and not skip_preflight:
+        pre = cached_preflight(Path(preflight_cache), series, sdir, numbers)
+        if pre:
+            print(f"[job_series] preflight CACHED ({pre['source']}: ok, validated in "
+                  f"{pre['validated_seconds']}s)", flush=True)
+    if pre is None and (dry_run or skip_preflight):
         pre = {"status": "skipped", "reason": "dry-run" if dry_run else "--skip-preflight"}
         print(f"[job_series] preflight SKIPPED ({pre['reason']})", flush=True)
-    else:
+    elif pre is None:
         pre = preflight(sdir, jobs, numbers)
     if pre["status"] == "failed":
         bar = "!" * 78
@@ -1903,6 +1983,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="no-op child instead of the orchestrator")
     parser.add_argument("--skip-preflight", action="store_true",
                         help="don't validate the selected jobs before the run (recorded as skipped)")
+    parser.add_argument("--preflight-cache", default=None, metavar="PATH",
+                        help="validate.json ({series: {ok, ...}}, from _tools/validate_all.py): "
+                             "an ok entry newer than the series files replaces the live preflight")
     parser.add_argument("--series-root", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--out-root", default=None, help="where results/state go (default .awos/)")
     parser.add_argument("--data-root", default=None,
@@ -1928,7 +2011,8 @@ def main(argv: list[str] | None = None) -> int:
     if not arms or any(a not in ARM_CHILDREN for a in arms):
         parser.error(f"--arms takes any of {', '.join(ARM_CHILDREN)}")
     return run(args.series, arms, args.jobs, args.dry_run, root, out_root, args.env_file,
-               args.resume, args.repeat, args.skip_preflight)
+               args.resume, args.repeat, args.skip_preflight,
+               str(Path(args.preflight_cache).expanduser().resolve()) if args.preflight_cache else None)
 
 
 if __name__ == "__main__":

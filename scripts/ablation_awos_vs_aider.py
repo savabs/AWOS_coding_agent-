@@ -24,6 +24,15 @@ skipped. Spend cap (--cap, total USD across everything this out dir ever ran):
   job's cost cap to what is left, scores a job cut short by it INVALID
   (budget_cap) and stops; the driver then stops too.
 
+Speed (benchmark overhead only; scoring unchanged): job_series reuses the
+series' `validate` verdict from --preflight-cache (default
+<series-root>/_tools/validate.json) instead of re-running the preflight pytest
+runs. --parallel N runs up to N issues at once (each its own job_series, arms
+still sequential in arm_order, output in <out>/r<rep>/<issue>/driver.log); an
+issue launches only while spent + (in_flight + 1) * step <= --cap, each child
+gets (cap - spent) / N as its series budget, and a child stopped on the budget
+stops new launches (in-flight issues finish).
+
 Gates (refuse to start): the series root must hold a READY file (Track A's signal
 that the set validated) and at least --min-issues issue dirs.
 
@@ -38,6 +47,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -135,6 +145,27 @@ def budget_stopped(path: Path | None) -> bool:
     return "budget" in str(data.get("stopped") or "")
 
 
+def preflight_cache_for(a: argparse.Namespace, root: Path) -> Path | None:
+    """--preflight-cache, else <series-root>/_tools/validate.json when it exists."""
+    if getattr(a, "preflight_cache", None):
+        return Path(a.preflight_cache).expanduser().resolve()
+    default = root / "_tools" / "validate.json"
+    return default.resolve() if default.is_file() else None
+
+
+def issue_cmd(a: argparse.Namespace, root: Path, out: Path, rep: int, i: int, issue: str,
+              cache: Path | None) -> list[str]:
+    cmd = [sys.executable, str(REPO / "scripts" / "job_series.py"), "run",
+           "--series", issue, "--series-root", str(root),
+           "--arms", ",".join(arm_order(i)),
+           "--out-root", str(out / f"r{rep}" / issue)]
+    if cache:
+        cmd += ["--preflight-cache", str(cache)]
+    if a.dry_run:
+        cmd.append("--dry-run")
+    return cmd
+
+
 def cmd_run(a: argparse.Namespace) -> int:
     root, out = Path(a.series_root).expanduser(), Path(a.out).expanduser()
     issues, why = gate(root, a.min_issues, not a.no_ready_check)
@@ -144,7 +175,15 @@ def cmd_run(a: argparse.Namespace) -> int:
     if os.environ.get("AWOS_SERIES_MODEL", "").strip() != "claude-haiku-5-5" and not a.dry_run:
         print("[ablation] AWOS_SERIES_MODEL must be claude-haiku-5-5 (pre-registered)", flush=True)
         return 4
+    if a.parallel < 1:
+        print("[ablation] --parallel must be >= 1", flush=True)
+        return 4
     out.mkdir(parents=True, exist_ok=True)
+    cache = preflight_cache_for(a, root)
+    if cache:
+        print(f"[ablation] preflight cache: {cache}", flush=True)
+    if a.parallel > 1:
+        return run_parallel(a, root, out, issues, cache)
     for rep in range(1, a.repeat + 1):
         for i, issue in enumerate(issues):
             if done(load_rows(result_file(out, rep, issue))):
@@ -154,12 +193,7 @@ def cmd_run(a: argparse.Namespace) -> int:
                 print(f"[ablation] cap: spent ${total:.4f} over {n} issue-run(s); next would "
                       f"project ${projected:.4f} > ${a.cap:.2f}. Stopping.", flush=True)
                 return 0
-            cmd = [sys.executable, str(REPO / "scripts" / "job_series.py"), "run",
-                   "--series", issue, "--series-root", str(root),
-                   "--arms", ",".join(arm_order(i)),
-                   "--out-root", str(out / f"r{rep}" / issue)]
-            if a.dry_run:
-                cmd.append("--dry-run")
+            cmd = issue_cmd(a, root, out, rep, i, issue, cache)
             print(f"[ablation] r{rep} {i + 1}/{len(issues)} {issue} arms={arm_order(i)} "
                   f"spent=${total:.4f} budget_left=${a.cap - total:.4f}", flush=True)
             env = {**os.environ, "AWOS_SERIES_BUDGET_USD": f"{a.cap - total:.6f}"}
@@ -169,6 +203,89 @@ def cmd_run(a: argparse.Namespace) -> int:
                 print(f"[ablation] cap: job_series stopped on the series budget; spent "
                       f"${total:.4f} of ${a.cap:.2f}. Stopping.", flush=True)
                 return 0
+    total, n = spend(out, issues, a.repeat)
+    print(f"[ablation] finished: {n} issue-run(s), ${total:.4f}", flush=True)
+    return 0
+
+
+POLL_S = 2.0
+
+
+def run_parallel(a: argparse.Namespace, root: Path, out: Path, issues: list[str],
+                 cache: Path | None) -> int:
+    """Up to a.parallel issues at once, each its own job_series process (its arms
+    stay sequential, in arm_order; output to <out>/r<rep>/<issue>/driver.log).
+    Budget: an issue launches only while spent + (in_flight + 1) * step <= cap
+    (step: projected_next's), and its child gets AWOS_SERIES_BUDGET_USD =
+    (cap - spent) / a.parallel. A child stopped on the budget ends the run:
+    nothing new launches, the in-flight ones finish, then the driver stops."""
+    pending = [(rep, i, issue) for rep in range(1, a.repeat + 1)
+               for i, issue in enumerate(issues)]
+    running: dict[tuple[int, str], tuple[subprocess.Popen, object]] = {}
+    stop: str | None = None
+    cap_note = ""
+    try:
+        while True:
+            for (rep, issue), (proc, log) in list(running.items()):
+                if proc.poll() is None:
+                    continue
+                log.close()
+                del running[(rep, issue)]
+                print(f"[ablation] r{rep} {issue} finished (exit {proc.returncode}) "
+                      f"spend=${issue_spend(out, rep, issue):.4f} in_flight={len(running)}",
+                      flush=True)
+                if stop is None and budget_stopped(result_file(out, rep, issue)):
+                    stop = f"job_series stopped on the series budget ({issue})"
+                    print(f"[ablation] cap: {stop}; launching nothing new, waiting for "
+                          f"{len(running)} in-flight issue(s)", flush=True)
+            while stop is None and pending and len(running) < a.parallel:
+                rep, i, issue = pending[0]
+                if done(load_rows(result_file(out, rep, issue))):
+                    pending.pop(0)
+                    continue
+                total, projected, n = projected_next(out, issues, a.repeat)
+                need = total + (len(running) + 1) * (projected - total)
+                if need > a.cap:
+                    cap_note = (f"spent ${total:.4f} over {n} issue-run(s); {len(running)} in "
+                                f"flight + next would project ${need:.4f} > ${a.cap:.2f}")
+                    break
+                pending.pop(0)
+                d = out / f"r{rep}" / issue
+                d.mkdir(parents=True, exist_ok=True)
+                log = open(d / "driver.log", "a", encoding="utf-8")
+                child_budget = (a.cap - total) / a.parallel
+                # AWOS_SERIES_CONCURRENT: one key's usage delta can't be split
+                # between concurrent jobs, so job_series skips the billed figure.
+                env = {**os.environ, "AWOS_SERIES_BUDGET_USD": f"{child_budget:.6f}",
+                       "AWOS_SERIES_CONCURRENT": "1", "PYTHONUNBUFFERED": "1"}
+                proc = subprocess.Popen(issue_cmd(a, root, out, rep, i, issue, cache), cwd=REPO,
+                                        env=env, stdout=log, stderr=subprocess.STDOUT)
+                running[(rep, issue)] = (proc, log)
+                print(f"[ablation] r{rep} {i + 1}/{len(issues)} {issue} started "
+                      f"arms={arm_order(i)} spent=${total:.4f} child_budget=${child_budget:.4f} "
+                      f"in_flight={len(running)} log={d / 'driver.log'}", flush=True)
+            if not running:
+                if stop:
+                    total, _ = spend(out, issues, a.repeat)
+                    print(f"[ablation] cap: stopped on the series budget; spent "
+                          f"${total:.4f} of ${a.cap:.2f}. Stopping.", flush=True)
+                    return 0
+                if pending:   # nothing in flight and the next issue still doesn't fit
+                    print(f"[ablation] cap: {cap_note}. Stopping.", flush=True)
+                    return 0
+                break
+            time.sleep(POLL_S)
+    except KeyboardInterrupt:
+        for proc, _ in running.values():
+            if proc.poll() is None:
+                proc.terminate()
+        for proc, log in running.values():
+            try:
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            log.close()
+        raise
     total, n = spend(out, issues, a.repeat)
     print(f"[ablation] finished: {n} issue-run(s), ${total:.4f}", flush=True)
     return 0
@@ -207,6 +324,11 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--min-issues", type=int, default=15)
     r.add_argument("--no-ready-check", action="store_true")
     r.add_argument("--dry-run", action="store_true")
+    r.add_argument("--preflight-cache", default=None,
+                   help="job_series validate cache (default <series-root>/_tools/validate.json "
+                        "when it exists)")
+    r.add_argument("--parallel", type=int, default=1,
+                   help="issues run at once, each its own job_series (default 1: sequential)")
     c = sub.add_parser("combine")
     c.add_argument("--out", required=True)
     for s in (r, c):

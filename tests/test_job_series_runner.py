@@ -694,3 +694,112 @@ def test_main_resolves_relative_roots(tmp_path, monkeypatch):
     assert seen["root"] == tmp_path.resolve() / "series"
     assert seen["out_root"] == tmp_path.resolve() / "out"
     assert seen["env_file"] == str(tmp_path.resolve() / "e" / ".env")
+
+
+# ── speed: cached preflight, backend-check memo ───────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _fresh_backend_memo():
+    js.forget_backend_ok()
+    yield
+    js.forget_backend_ok()
+
+
+def _cache(tmp_path: Path, entry: dict | None, series: str = "mini", age_s: float = 0.0) -> Path:
+    import os
+    import time
+    path = tmp_path / "_tools" / "validate.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({} if entry is None else {series: entry}))
+    t = time.time() + 60 - age_s     # default: written after the series files
+    os.utime(path, (t, t))
+    return path
+
+
+_OK = {"ok": True, "seconds": 74, "line": "1 01_sub ok", "problems": []}
+
+
+def test_cached_preflight_ok_entry(tmp_path):
+    s = make_series(tmp_path)
+    pre = js.cached_preflight(_cache(tmp_path, _OK), "mini", s, [1, 2])
+    assert pre["status"] == "cached" and pre["seconds"] == 0 and pre["invalid_jobs"] == []
+    assert pre["source"].endswith("validate.json") and pre["jobs"] == {"1": [], "2": []}
+
+
+@pytest.mark.parametrize("entry, age_s", [
+    (_OK, 3600.0),                                          # a series file is newer
+    (None, 0.0),                                            # no entry for the series
+    ({"ok": False, "seconds": 9, "line": "", "problems": ["x"]}, 0.0),
+])
+def test_cached_preflight_falls_back_to_live(tmp_path, entry, age_s):
+    s = make_series(tmp_path)
+    assert js.cached_preflight(_cache(tmp_path, entry, age_s=age_s), "mini", s, [1]) is None
+    assert js.cached_preflight(tmp_path / "missing.json", "mini", s, [1]) is None
+
+
+def test_cached_preflight_sees_an_edited_job(tmp_path):
+    import os
+    import time
+    s = make_series(tmp_path)
+    cache = _cache(tmp_path, _OK)
+    assert js.cached_preflight(cache, "mini", s, [1])
+    hidden = s / "jobs" / "02_mul" / "hidden_tests" / "test_mul.py"
+    later = time.time() + 120
+    os.utime(hidden, (later, later))
+    assert js.cached_preflight(cache, "mini", s, [1]) is None
+
+
+@_E2E_TIMEOUT
+def test_run_records_cached_preflight_without_warning(tmp_path, monkeypatch):
+    make_series(tmp_path, "mini")
+    cache = _cache(tmp_path, _OK)
+    monkeypatch.setattr(js, "preflight", lambda *a: pytest.fail("live preflight ran"))
+    out_root = tmp_path / "out"
+    assert js.main(["run", "--series", "mini", "--series-root", str(tmp_path), "--dry-run",
+                    "--jobs", "1", "--out-root", str(out_root), "--preflight-cache", str(cache)]) == 0
+    [f] = out_root.glob("job_series_*.json")
+    data = json.loads(f.read_text())
+    assert data["preflight"]["status"] == "cached"
+    assert not [v for v in data["violations"] if "preflight" in v["check"]]
+
+
+def test_run_with_stale_cache_validates_live(tmp_path, monkeypatch):
+    make_series(tmp_path, "mini")
+    cache = _cache(tmp_path, _OK, age_s=3600)
+    calls = []
+
+    def live(sdir, jobs, numbers):
+        calls.append(numbers)
+        return {"status": "failed", "jobs": {"1": ["boom"]}, "invalid_jobs": [1], "seconds": 1}
+
+    monkeypatch.setattr(js, "preflight", live)
+    assert js.main(["run", "--series", "mini", "--series-root", str(tmp_path), "--jobs", "1",
+                    "--out-root", str(tmp_path / "out"), "--preflight-cache", str(cache)]) == 3
+    assert calls == [[1]]
+
+
+def test_backend_check_is_memoized_for_300s(monkeypatch):
+    calls = []
+    now = [1000.0]
+    monkeypatch.setattr(js, "backend_ok", lambda: calls.append(1) or True)
+    monkeypatch.setattr(js.time, "monotonic", lambda: now[0])
+    assert js.wait_for_backend() and js.wait_for_backend()
+    assert len(calls) == 1
+    now[0] += 299
+    assert js.wait_for_backend() and len(calls) == 1
+    now[0] += 2                                   # 301 s after the real check
+    assert js.wait_for_backend() and len(calls) == 2
+    js.forget_backend_ok()                        # an invalid attempt forgets it
+    assert js.wait_for_backend() and len(calls) == 3
+
+
+def test_backend_memo_never_hides_a_failure(monkeypatch):
+    monkeypatch.setattr(js, "backend_ok", lambda: False)
+    assert not js.wait_for_backend(max_wait_s=0)
+    assert not js.wait_for_backend(max_wait_s=0)  # a failure is never memoized
+
+
+def test_key_usage_is_off_under_concurrency(monkeypatch, tmp_path):
+    monkeypatch.undo()                            # the real key_usage, not the autouse stub
+    monkeypatch.setenv("AWOS_SERIES_CONCURRENT", "1")
+    assert js.key_usage(tmp_path) is None
