@@ -15,7 +15,7 @@ section: security
 <p>Each job works in its own git worktree at your current commit. The review branch is assembled with git plumbing and a temporary index, so your <code>HEAD</code>, index, working tree and uncommitted changes are not read-modified-written.</p>
 
 <h2 id="push">Nothing is pushed</h2>
-<p>Results land on a local branch <code>awos/&lt;id&gt;</code>. The handoff has no network git operation: you decide what to merge and what to push.</p>
+<p>Results land on a local branch <code>awos/&lt;id&gt;</code>. The handoff has no network git operation: you decide what to merge and what to push. The one exception is one you ask for explicitly: <code>awos fix --pr</code> / <code>--push</code> pushes the fix branch (and with <code>--pr</code> opens a draft PR) after the job succeeds.</p>
 
 <h2 id="secrets">Secret scan on every handoff</h2>
 <ul>

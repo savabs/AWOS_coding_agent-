@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Fix a GitHub issue or PR · AWOS docs</title>
+<meta name="description" content="Point awos fix at a GitHub issue or a pull request with failing checks; AWOS works on a local branch and reports what it changed, what it tested and what it cost.">
+<link rel="canonical" href="https://awos.tirramind.com/docs/fix-github/">
+<meta property="og:title" content="Fix a GitHub issue or PR · AWOS docs">
+<meta property="og:description" content="Point awos fix at a GitHub issue or a pull request with failing checks; AWOS works on a local branch and reports what it changed, what it tested and what it cost.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://awos.tirramind.com/docs/fix-github/">
+<meta name="robots" content="index,follow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap">
+  <a class="brand" href="/" aria-label="AWOS home">AWOS<span>.</span></a>
+  <nav class="links" aria-label="Main">
+    <a class="wide" href="/#how">How it works</a>
+    <a class="wide" href="/#results">Results</a>
+    <a href="/docs/" aria-current="page">Docs</a>
+    <a class="wide" href="/docs/security/">Security</a>
+    <a class="wide" href="/#pricing">Pricing</a>
+  </nav>
+  <a class="btn primary" href="/access/">Request access</a>
+</div></header>
+<main id="main" class="wrap"><div class="docs-layout">
+<nav class="docs-side" aria-label="Docs">
+<h2>Docs</h2>
+<ul>
+<li><a href="/docs/">Overview</a></li>
+<li><a href="/docs/quickstart/">Quickstart</a></li>
+<li><a href="/docs/fix-github/" aria-current="page">Fix a GitHub issue or PR</a></li>
+<li><a href="/docs/concepts/">Concepts</a></li>
+<li><a href="/docs/models-and-cost/">Models and cost</a></li>
+<li><a href="/docs/cli/">CLI reference</a></li>
+<li><a href="/docs/security/">Security and privacy</a></li>
+<li><a href="/docs/faq/">FAQ</a></li>
+</ul>
+</nav>
+<article class="doc">
+<div class="eyebrow">Docs · Fix a GitHub issue or PR</div>
+<h1>Fix a GitHub issue or PR</h1>
+<p class="lede">Paste a GitHub link into <code>awos fix</code> from your local clone. AWOS reads the issue or the failing CI logs, does the work on a new local branch, runs the tests and tells you what it did. Nothing is pushed unless you ask.</p>
+
+<h2 id="before">Before you start</h2>
+<ul>
+  <li>AWOS is installed and has a model (<code>awos doctor</code> says so).</li>
+  <li>The <a href="https://cli.github.com">GitHub CLI</a> is installed and logged in: <code>gh auth login</code>. AWOS uses it to read issues, PRs and check logs.</li>
+  <li>You are inside a clone of the repository the link points to (its <code>origin</code> remote, https or ssh, must match).</li>
+</ul>
+
+<h2 id="issue">Fix an issue</h2>
+<pre><code><span class="c"># see exactly what AWOS will be asked to do; runs nothing</span>
+awos fix https://github.com/OWNER/REPO/issues/12 --dry-run
+
+<span class="c"># do it, spending at most $0.50</span>
+awos fix https://github.com/OWNER/REPO/issues/12 --budget 0.50</code></pre>
+<p>AWOS builds a goal from the issue title, description, labels and the most recent human comments (HTML comments, images and bot comments are left out), adds the issue link, and runs it as a normal AWOS job starting from your current commit. Your working tree must be clean; pass <code>--allow-dirty</code> to run anyway (uncommitted changes are not part of the job).</p>
+<p>When it finishes you get a short report:</p>
+<pre><code>awos fix: done
+  Branch:  awos/issue-12-crash-on-empty-input
+  Files:   widget/cli.py, tests/test_cli.py
+  Tests:   12 passed
+  Cost:    $0.0123
+Next:
+  git diff main...awos/issue-12-crash-on-empty-input
+  Open a draft PR (pushes the branch):
+    git push -u origin awos/issue-12-crash-on-empty-input
+    gh pr create --draft ...</code></pre>
+<p>Add <code>--pr</code> to have AWOS push the branch and open a <b>draft</b> pull request whose body holds the report and <code>Fixes #12</code>. It only does this when the job finished with a reviewable branch.</p>
+
+<h2 id="pr">Fix a PR's failing checks</h2>
+<p>Typical case: a dependency bump whose CI went red.</p>
+<pre><code>awos fix https://github.com/OWNER/REPO/pull/34 --dry-run
+awos fix https://github.com/OWNER/REPO/pull/34</code></pre>
+<p>AWOS lists the PR's checks, and for each failing GitHub Actions run reads the failed-step log (trimmed to the end of the log plus the error lines). If nothing is failing it says so and stops. Otherwise it checks out the PR into your clone (<code>gh pr checkout</code>; your tree must be clean), and asks the agent to make the failing checks pass <i>without reverting the PR's intent</i>. The result is a new local branch <code>awos/pr-34-fix</code> on top of the PR head; review it with <code>git diff &lt;pr-branch&gt;...awos/pr-34-fix</code>.</p>
+<p>Add <code>--push</code> to push <code>awos/pr-34-fix</code> to <code>origin</code>. The report also prints the commands to update the PR branch itself and to leave a comment with <code>gh pr comment</code>. Use <code>--goal "..."</code> to add instructions, or to work on a PR whose checks are green.</p>
+
+<h2 id="flags">Flags</h2>
+<table>
+  <thead><tr><th>Flag</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>--dry-run</code></td><td>Print the goal text and the commands it would run. Reads from GitHub, changes nothing, spends nothing.</td></tr>
+    <tr><td><code>--budget USD</code></td><td>Most the job may spend. Default 1.0 (or <code>AWOS_APP_BUDGET</code>); <code>0</code> means no cap.</td></tr>
+    <tr><td><code>--pr</code></td><td>Issues only: push the branch and open a draft PR.</td></tr>
+    <tr><td><code>--push</code></td><td>PRs only: push <code>awos/pr-N-fix</code> to <code>origin</code>.</td></tr>
+    <tr><td><code>--allow-dirty</code></td><td>Issues only: run even with uncommitted changes.</td></tr>
+    <tr><td><code>--goal TEXT</code></td><td>Extra instructions for the agent.</td></tr>
+  </tbody>
+</table>
+
+<h2 id="trouble">If something goes wrong</h2>
+<ul>
+  <li><b>gh is not installed / not logged in</b>: install it, then <code>gh auth login</code>.</li>
+  <li><b>origin is X, but the URL is for Y</b>: run the command from a clone of the repository in the link.</li>
+  <li><b>Ctrl-C while it runs</b>: you only stop watching; the job keeps running. Check it with <code>awos</code> or <code>awos status</code>.</li>
+  <li>A failed job still leaves its work on a branch ending in <code>-failed</code> so you can salvage it; no PR is opened and nothing is pushed for it.</li>
+</ul>
+<p>See the <a href="/docs/cli/#fix">CLI reference</a> for all commands.</p>
+<nav class="pager" aria-label="Docs pages"><a class="prev" href="/docs/quickstart/"><small>Previous</small>Quickstart</a><a class="next" href="/docs/concepts/"><small>Next</small>Concepts</a></nav>
+</article>
+</div></main>
+<footer class="site"><div class="wrap">
+  <span>AWOS. Local-first background agent. Built in India.</span>
+  <nav aria-label="Footer">
+    <a href="/docs/">Docs</a>
+    <a href="/docs/quickstart/">Quickstart</a>
+    <a href="/docs/security/">Security</a>
+    <a href="/docs/faq/">FAQ</a>
+    <a href="/access/">Request access</a>
+  </nav>
+</div></footer>
+</body>
+</html>

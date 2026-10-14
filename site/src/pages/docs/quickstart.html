@@ -55,6 +55,11 @@ awos submit --repo . --budget 0.50 "bump requests to 2.32 and fix any breakage"
 awos status --digest</code></pre>
 <p>See the <a href="/docs/cli/">CLI reference</a> for every command.</p>
 
+<h2 id="github">Fix a GitHub issue or PR</h2>
+<pre><code>awos fix https://github.com/OWNER/REPO/issues/12 --dry-run
+awos fix https://github.com/OWNER/REPO/pull/34      <span class="c"># make a PR's failing checks pass</span></code></pre>
+<p>Needs the <code>gh</code> CLI. See <a href="/docs/fix-github/">Fix a GitHub issue or PR</a>.</p>
+
 <h2 id="next">Next</h2>
 <ul>
   <li><a href="/docs/concepts/">Concepts</a> explains what happens inside a job.</li>

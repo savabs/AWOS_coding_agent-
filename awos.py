@@ -17,6 +17,11 @@ Usage (worker sessions):
     awos worker diff [session_id]     Show sandbox changes
     awos worker cancel [session_id]   Stop active work
 
+Fix a GitHub issue or PR (run inside your clone; needs the gh CLI):
+    awos fix https://github.com/OWNER/REPO/issues/N   Work on a new local branch awos/issue-N-<slug>
+    awos fix https://github.com/OWNER/REPO/pull/N     Make a PR's failing checks pass (branch awos/pr-N-fix)
+             [--dry-run] [--budget USD] [--pr | --push] [--allow-dirty] [--goal TEXT]
+
 Job host (always-on; jobs survive crashes and restarts):
     awos submit "<goal>" [--root DIR] [--ability coding]   Queue a job, print its id
     awos host [--once]                Run queued jobs one at a time
@@ -1521,6 +1526,20 @@ def cmd_serve(args):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# awos fix <github issue/PR url>
+# ═════════════════════════════════════════════════════════════════════════════
+
+def cmd_fix(args):
+    """Fix a GitHub issue, or a PR's failing checks, from the user's local clone."""
+    from scaffold.agent.app.fix import FixOptions, run_fix
+
+    opts = FixOptions(url=args.url, dry_run=args.dry_run, budget=args.budget,
+                      allow_dirty=args.allow_dirty, pr=args.pr, push=args.push,
+                      goal=args.goal or "")
+    sys.exit(run_fix(opts, Path.cwd()))
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # CI repair command (supported coding-agent workflow)
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -1771,6 +1790,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Quickstart (from any git repo):\n"
             "  awos                                    # interactive session (type tasks, review results)\n"
             "  awos \"fix the failing test\"             # one-shot: queue, watch, review\n"
+            "  awos fix https://github.com/OWNER/REPO/issues/12   # fix a GitHub issue (or a PR's failing CI)\n"
             "\n"
             "Step by step:\n"
             "  export ANTHROPIC_API_KEY=sk-ant-...     # or: export AWOS_PROVIDER=local\n"
@@ -1796,6 +1816,37 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--poll", type=float, default=2.0, help="With --worker: seconds between queue checks")
     serve.add_argument("--runner", default=None,
                        help="With --worker: 'default', 'sleep' or module:callable (or AWOS_HOST_RUNNER)")
+
+    # fix (GitHub issue / PR -> local review branch)
+    fix = sub.add_parser(
+        "fix", help="Fix a GitHub issue or a PR's failing checks (run inside your clone)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=(
+            "Run inside your local clone of the repo (needs the gh CLI, logged in).\n"
+            "  issue URL: AWOS works on a new local branch awos/issue-N-<slug>.\n"
+            "  PR URL:    checks out the PR, reads the failing CI logs and makes them pass\n"
+            "             on a new local branch awos/pr-N-fix based on the PR head.\n"
+            "Nothing is pushed unless you pass --pr (issue) or --push (PR)."),
+        epilog=(
+            "Examples:\n"
+            "  awos fix https://github.com/me/app/issues/12 --dry-run\n"
+            "  awos fix https://github.com/me/app/issues/12 --budget 0.50\n"
+            "  awos fix https://github.com/me/app/pull/34          # e.g. a failing dependency bump\n"
+            "  awos fix https://github.com/me/app/issues/12 --pr   # also push + open a draft PR"),
+    )
+    fix.add_argument("url", help="https://github.com/OWNER/REPO/issues/N or .../pull/N")
+    fix.add_argument("--dry-run", action="store_true", dest="dry_run",
+                     help="Print the goal text and the commands it would run; run nothing")
+    fix.add_argument("--budget", type=float, default=None, metavar="USD",
+                     help="Most the job may spend in USD (default: AWOS_APP_BUDGET or 1.0; 0 = no cap)")
+    fix.add_argument("--allow-dirty", action="store_true", dest="allow_dirty",
+                     help="Issue mode: run even with uncommitted changes (the job starts from your last commit)")
+    fix.add_argument("--pr", action="store_true",
+                     help="Issue mode: push the branch and open a draft PR (body has the report and 'Fixes #N')")
+    fix.add_argument("--push", action="store_true",
+                     help="PR mode: push awos/pr-N-fix to origin when done")
+    fix.add_argument("--goal", default=None, metavar="TEXT",
+                     help="Extra instructions; for a PR with no failing checks, what to do instead")
 
     # fix-ci (optional coding-agent workload adapter)
     fix_ci = sub.add_parser("fix-ci", help="Optional CI repair workload for any Python repo")

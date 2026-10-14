@@ -9,6 +9,7 @@ section: docs
 <p class="lede">The commands you use day to day. Run any of them with <code>--help</code> for the same information in your terminal.</p>
 <pre><code>awos                              <span class="c"># interactive session in the current repo</span>
 awos "GOAL"                       <span class="c"># one task: run it, then review</span>
+awos fix URL [--dry-run] [--budget USD] [--pr|--push]   <span class="c"># fix a GitHub issue or a PR's failing checks</span>
 awos doctor [--json]              <span class="c"># check your setup (spends nothing)</span>
 awos submit --repo PATH [--budget USD] [--privacy local_only|cloud_ok] "GOAL"
 awos serve --worker [--once] [--poll SECONDS]
@@ -20,6 +21,9 @@ awos keys [--json]</code></pre>
 <h2 id="session"><code>awos</code></h2>
 <p>Opens an interactive session inside a git repository. Type tasks in plain English; each one is queued and run by the background worker, which AWOS starts for you if it is not already running. Progress appears above the prompt while you keep typing. When a job finishes, press <b>d</b> (diff), <b>m</b> (merge into your current branch), <b>r</b> (reject), <b>f</b> (follow-up from this branch) or <b>o</b> (open report). Slash commands: <code>/status</code>, <code>/diff ID</code>, <code>/merge ID</code>, <code>/reject ID</code>, <code>/follow ID</code>, <code>/open ID</code>, <code>/cancel ID</code>, <code>/watch</code>, <code>/keys</code>, <code>/help</code>, <code>/quit</code>. Ctrl-C leaves the session; background jobs keep running.</p>
 <p><code>awos "GOAL"</code> does the same for a single task: it queues the goal, shows progress until it finishes, and then offers the same review keys. The goal must contain a space, so a mistyped command is never run as a paid job.</p>
+
+<h2 id="fix"><code>awos fix</code></h2>
+<p>Run inside your clone of a GitHub repository, with the <code>gh</code> CLI logged in. An issue URL (<code>.../issues/N</code>) becomes a job whose result is the local branch <code>awos/issue-N-&lt;slug&gt;</code>; a pull request URL (<code>.../pull/N</code>) checks out the PR, reads its failing CI logs and puts the fix on <code>awos/pr-N-fix</code> on top of the PR head. Flags: <code>--dry-run</code> (print the goal and commands, run nothing), <code>--budget USD</code>, <code>--pr</code> (issue: push and open a draft PR), <code>--push</code> (PR: push the fix branch), <code>--allow-dirty</code>, <code>--goal TEXT</code>. Nothing is pushed without <code>--pr</code> or <code>--push</code>. See <a href="/docs/fix-github/">Fix a GitHub issue or PR</a>.</p>
 
 <h2 id="doctor"><code>awos doctor</code></h2>
 <p>Checks Python, git, your model key (without spending), the local model server, the current repo and its test command, the job folder, and whether the worker is running. Each problem comes with a one-line fix. It exits 0 when everything required is OK.</p>

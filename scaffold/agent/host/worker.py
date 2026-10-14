@@ -453,6 +453,8 @@ BASELINE_DIR = "baseline"
 BASE_COMMIT_FILE = "base_commit"
 #: Optional: the git ref a follow-up job starts from instead of the repo HEAD.
 BASE_REF_FILE = "base_ref"
+#: Optional review-branch name for the hand-off (written by `awos fix`).
+BRANCH_NAME_FILE = "branch_name"
 #: Rollbacks the child recorded instead of applying (git_manager AWOS_DEFER_ROLLBACK).
 DEFERRED_ROLLBACK = "deferred_rollback.jsonl"
 
@@ -932,6 +934,9 @@ class HostWorker:
                 base_file = job_dir / BASE_COMMIT_FILE
                 if base_file.exists() and not spec.get("base_commit"):
                     spec["base_commit"] = base_file.read_text(encoding="utf-8").strip()
+                name_file = job_dir / BRANCH_NAME_FILE
+                if name_file.exists():
+                    spec["branch_name"] = name_file.read_text(encoding="utf-8").strip()
                 return self._handoff(spec, workspace, outcome)
             return write_minimal_report(job, job_dir, outcome)
         except Exception as exc:  # the job's outcome stands either way

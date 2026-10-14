@@ -41,6 +41,7 @@ SITE_URL = os.environ.get("SITE_URL", "https://awos.tirramind.com").rstrip("/")
 DOCS = [
     ("/docs/", "Overview"),
     ("/docs/quickstart/", "Quickstart"),
+    ("/docs/fix-github/", "Fix a GitHub issue or PR"),
     ("/docs/concepts/", "Concepts"),
     ("/docs/models-and-cost/", "Models and cost"),
     ("/docs/cli/", "CLI reference"),

@@ -35,6 +35,7 @@
 <ul>
 <li><a href="/docs/">Overview</a></li>
 <li><a href="/docs/quickstart/" aria-current="page">Quickstart</a></li>
+<li><a href="/docs/fix-github/">Fix a GitHub issue or PR</a></li>
 <li><a href="/docs/concepts/">Concepts</a></li>
 <li><a href="/docs/models-and-cost/">Models and cost</a></li>
 <li><a href="/docs/cli/">CLI reference</a></li>
@@ -94,13 +95,18 @@ awos submit --repo . --budget 0.50 "bump requests to 2.32 and fix any breakage"
 awos status --digest</code></pre>
 <p>See the <a href="/docs/cli/">CLI reference</a> for every command.</p>
 
+<h2 id="github">Fix a GitHub issue or PR</h2>
+<pre><code>awos fix https://github.com/OWNER/REPO/issues/12 --dry-run
+awos fix https://github.com/OWNER/REPO/pull/34      <span class="c"># make a PR's failing checks pass</span></code></pre>
+<p>Needs the <code>gh</code> CLI. See <a href="/docs/fix-github/">Fix a GitHub issue or PR</a>.</p>
+
 <h2 id="next">Next</h2>
 <ul>
   <li><a href="/docs/concepts/">Concepts</a> explains what happens inside a job.</li>
   <li><a href="/docs/models-and-cost/">Models and cost</a> covers keys, local models and budgets.</li>
   <li><a href="/docs/security/">Security</a> covers what leaves your machine.</li>
 </ul>
-<nav class="pager" aria-label="Docs pages"><a class="prev" href="/docs/"><small>Previous</small>Overview</a><a class="next" href="/docs/concepts/"><small>Next</small>Concepts</a></nav>
+<nav class="pager" aria-label="Docs pages"><a class="prev" href="/docs/"><small>Previous</small>Overview</a><a class="next" href="/docs/fix-github/"><small>Next</small>Fix a GitHub issue or PR</a></nav>
 </article>
 </div></main>
 <footer class="site"><div class="wrap">

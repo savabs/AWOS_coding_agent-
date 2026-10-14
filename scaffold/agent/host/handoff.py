@@ -51,6 +51,8 @@ SECRET_PATTERNS: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
 SECRET_ENV_NAME = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL", re.I)
 MIN_ENV_SECRET_LEN = 8
 JOB_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
+#: A caller-chosen review branch (e.g. ``awos fix``: "awos/issue-12-crash-on-start").
+BRANCH_NAME_RE = re.compile(r"awos/[A-Za-z0-9][A-Za-z0-9._-]{0,80}")
 MAX_JOB_ID_LEN = 128
 # Larger than any file a workspace can hold; keeps staged blobs loose.
 STAGING_BIG_FILE_THRESHOLD = "1024g"
@@ -634,7 +636,13 @@ def finish(job: Dict[str, Any], workspace: str, outcome: Dict[str, Any], *,
     if not id8:
         raise HandoffError("job id needs at least one character other than '-'")
     state = str(outcome.get("state") or "")
-    branch = f"{BRANCH_PREFIX}{id8}{UNFINISHED_SUFFIX.get(state, '')}"
+    named = str(job.get("branch_name") or "").strip()
+    bad_name = bool(named) and (not BRANCH_NAME_RE.fullmatch(named) or ".." in named
+                                or named.endswith((".", ".lock")))
+    if bad_name:
+        named = ""   # fall back to awos/<id8>; noted in the warnings below
+    stem = named or f"{BRANCH_PREFIX}{id8}"
+    branch = f"{stem}{UNFINISHED_SUFFIX.get(state, '')}"
     jdir = Path(job_dir) if job_dir else host_root() / "jobs" / job_id
     jdir.mkdir(parents=True, exist_ok=True)
     report_path = jdir / "report.md"
@@ -649,6 +657,8 @@ def finish(job: Dict[str, Any], workspace: str, outcome: Dict[str, Any], *,
         "secret_scan": {"diff": [], "report": []}, "created_at": _now_iso(),
         "minutes": _minutes(job, outcome),
     }
+    if bad_name:
+        info["warnings"].append("ignored invalid branch_name (must look like awos/<name>)")
     diffstat = ""
     review_base = "main"
     staging_dir: Optional[str] = None
