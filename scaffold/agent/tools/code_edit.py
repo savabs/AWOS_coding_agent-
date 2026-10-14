@@ -254,8 +254,12 @@ class RunTestsTool(Tool):
         changed = [p.strip() for p in raw.split(",") if p.strip()] or None
 
         TestRunner = _load_test_runner()
+        # related=True: also the test files that import the changed modules
+        # (capped), so a module without a name-matched test file is checked by
+        # the tests that use it, not the whole suite. The orchestrator's own
+        # success gate still runs the full suite when names do not match.
         result = TestRunner(project_root=str(self.project_root), sandbox=self.sandbox).run(
-            changed_files=changed
+            changed_files=changed, related=True
         )
 
         if getattr(result, "infra_error", False):

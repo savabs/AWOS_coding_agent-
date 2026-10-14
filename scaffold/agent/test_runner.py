@@ -39,6 +39,69 @@ _SKIP_DIRS = {
 }
 _MAX_WALK_FILES = 20000
 
+#: map_tests(related=True): at most this many test files in all (name
+#: matches first), so a widely imported module never maps to the whole suite.
+MAX_RELATED_TEST_FILES = 12
+_MAX_REF_SCAN_BYTES = 1_000_000
+
+#: Set by the host worker for its orchestrator child: where a green
+#: whole-suite run records the tree it ran on (host verify_tests reuses it).
+FULL_SUITE_MARKER_ENV = "AWOS_FULL_SUITE_MARKER"
+#: Never part of the tree hash: VCS/state dirs and what a test run writes.
+_TREE_SKIP_DIRS = {".git", ".awos", "__pycache__", ".pytest_cache", ".mypy_cache",
+                   ".ruff_cache", ".hypothesis"}
+
+
+def _tree_files(root: str) -> List[str]:
+    """Tracked + untracked (not ignored) files, relative; os.walk without git."""
+    try:
+        proc = subprocess.run(
+            ["git", "-c", "core.fsmonitor=false", "-C", root, "ls-files", "-co",
+             "--exclude-standard", "-z"],
+            capture_output=True, timeout=60)
+        if proc.returncode == 0:
+            names = proc.stdout.decode("utf-8", "replace").split("\0")
+            return sorted({n for n in names if n})
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    out: List[str] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _TREE_SKIP_DIRS]
+        for name in filenames:
+            out.append(os.path.relpath(os.path.join(dirpath, name), root))
+    return sorted(out)
+
+
+def workspace_tree_hash(root: str) -> str:
+    """
+    sha256 over the workspace's tracked and untracked files (path + bytes; a
+    deleted tracked file hashes as missing), excluding .git, .awos and test-run
+    byproducts (__pycache__, *.pyc, .pytest_cache). Same tree, same hash.
+    """
+    import hashlib
+    digest = hashlib.sha256()
+    for rel in _tree_files(root):
+        if (any(p in _TREE_SKIP_DIRS for p in Path(rel).parts)
+                or rel.endswith((".pyc", ".pyo"))):
+            continue
+        path = os.path.join(root, rel)
+        digest.update(rel.encode("utf-8", "replace") + b"\0")
+        try:
+            if os.path.islink(path):
+                digest.update(b"L" + os.readlink(path).encode("utf-8", "replace"))
+            elif os.path.isfile(path):
+                h = hashlib.sha256()
+                with open(path, "rb") as fh:
+                    for chunk in iter(lambda: fh.read(1 << 20), b""):
+                        h.update(chunk)
+                digest.update(b"F" + h.digest())
+            else:
+                digest.update(b"-")
+        except OSError:
+            digest.update(b"?")
+        digest.update(b"\n")
+    return digest.hexdigest()
+
 
 @dataclass
 class TestConfig:
@@ -152,8 +215,14 @@ class TestRunner:
                 return cfg
         return None
 
-    def run(self, changed_files: Optional[List[str]] = None) -> TestResult:
-        """Run tests using detected config."""
+    def run(self, changed_files: Optional[List[str]] = None,
+            related: bool = False) -> TestResult:
+        """
+        Run tests using detected config. related=True also maps test files
+        that import/reference the changed modules (map_tests): for the agent's
+        own intermediate checks. The success gate keeps related=False, so a
+        change with no name-matched test still runs the whole suite.
+        """
         # ── Safety guard ────────────────────────────────────────────────
         if os.environ.get(_SAFETY_ENV_VAR) != "1":
             logger.info(
@@ -174,11 +243,12 @@ class TestRunner:
             result = self._execute(cfg)
             result.mode = "full"
             return result
-        return self._run_pytest(cfg, changed_files or [])
+        return self._run_pytest(cfg, changed_files or [], related=related)
 
     # ── pytest: mapped tests first, else the whole visible suite ─────────
 
-    def _run_pytest(self, cfg: TestConfig, changed_files: List[str]) -> TestResult:
+    def _run_pytest(self, cfg: TestConfig, changed_files: List[str],
+                    related: bool = False) -> TestResult:
         """
         Run the tests mapped to changed_files; when the mapping finds none, or
         they collect nothing, run the whole visible suite instead. Source and
@@ -186,7 +256,7 @@ class TestRunner:
         tests/test_tokenize.py), so an empty mapping is not "no tests".
         """
         base = self.pytest_base(cfg)
-        mapped = self.map_tests(changed_files)
+        mapped = self.map_tests(changed_files, related=related)
         if mapped:
             result = self._execute(TestConfig("pytest", base + mapped, self.timeout_sec))
             if not result.no_tests_found:
@@ -200,7 +270,45 @@ class TestRunner:
         result = self._execute(TestConfig("pytest", base + targets, timeout))
         result.mode = "full"
         logger.info("[test_runner] mode=full targets=%s", targets or "(pytest config)")
+        self._record_full_suite(base + targets, result)
         return result
+
+    def full_suite_key(self) -> List[str]:
+        """The whole-suite pytest command without run-specific extras (marker key)."""
+        return self.pytest_base() + self._full_suite_targets()
+
+    def _record_full_suite(self, command: List[str], result: TestResult) -> None:
+        """
+        AWOS_FULL_SUITE_MARKER (set by the host worker for its child): after a
+        whole-suite run, record whether it was green on this exact tree, so
+        the host's verify_tests can reuse it instead of running it again. A
+        non-green run removes any earlier marker. Never raises.
+        """
+        path = os.environ.get(FULL_SUITE_MARKER_ENV, "").strip()
+        if not path:
+            return
+        try:
+            green = (not result.timed_out and not result.infra_error
+                     and not result.no_tests_found and result.failed == 0
+                     and result.errors == 0 and result.passed > 0)
+            if not green:
+                Path(path).unlink(missing_ok=True)
+                return
+            data = {
+                "tree": workspace_tree_hash(str(self.project_root)),
+                "command": list(command),
+                "passed": result.passed, "failed": result.failed, "errors": result.errors,
+                "preexisting": list(result.preexisting),
+                "baseline_checked": bool(result.baseline_checked),
+                "env": result.env_desc,
+            }
+            tmp = Path(path + ".tmp")
+            tmp.parent.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(json.dumps(data), encoding="utf-8")
+            os.replace(tmp, path)
+            logger.info("[test_runner] full suite green; marker written for host reuse")
+        except Exception as exc:  # noqa: BLE001 - an optimisation only
+            logger.debug("[test_runner] full-suite marker not written: %s", exc)
 
     def pytest_base(self, cfg: Optional[TestConfig] = None) -> List[str]:
         """The pytest command without targets."""
@@ -240,16 +348,22 @@ class TestRunner:
                 break
         return sorted(found)
 
-    def map_tests(self, changed_files: List[str]) -> List[str]:
+    def map_tests(self, changed_files: List[str], related: bool = False) -> List[str]:
         """
         Test files matched to changed_files by name: a changed test file
         itself, or test_<stem>.py / test_<stem>_*.py / <stem>_test.py for a
         changed source file. Empty when nothing matches.
+
+        related=True adds test files that import or reference a changed
+        module (astroid/protocols.py has no test_protocols.py, but tests that
+        say `from astroid import protocols` or `astroid.protocols` cover it),
+        up to MAX_RELATED_TEST_FILES in all; name matches come first.
         """
         if not changed_files:
             return []
         tests = self.find_test_files()
         mapped: List[str] = []
+        sources: List[Path] = []
         for changed in changed_files:
             path = Path(changed)
             if path.is_absolute():
@@ -268,11 +382,57 @@ class TestRunner:
             stem = stem.lstrip("_")
             if not stem:
                 continue
+            sources.append(path)
             for test in tests:
                 tstem = Path(test).stem
                 if tstem in (f"test_{stem}", f"{stem}_test") or tstem.startswith(f"test_{stem}_"):
                     mapped.append(test)
-        return list(dict.fromkeys(mapped))
+        mapped = list(dict.fromkeys(mapped))
+        if related and sources and len(mapped) < MAX_RELATED_TEST_FILES:
+            extra = self._referencing_tests(sources, [t for t in tests if t not in mapped])
+            mapped += extra[:MAX_RELATED_TEST_FILES - len(mapped)]
+        return mapped
+
+    def _referencing_tests(self, sources: List[Path], tests: List[str]) -> List[str]:
+        """
+        Test files whose text imports or names one of `sources`' modules.
+        Strong references first (`pkg.mod`, `from pkg import mod`,
+        `import mod`, `from mod import`), then `mod.` attribute use; each
+        tier sorted by path.
+        """
+        strong, weak = [], []
+        for src in sources:
+            parts = list(src.with_suffix("").parts)
+            if parts and parts[-1] == "__init__":
+                parts = parts[:-1]
+            if parts and parts[0] in ("src", "lib"):
+                parts = parts[1:]
+            if not parts or not all(p.isidentifier() for p in parts):
+                continue
+            mod = re.escape(parts[-1])
+            pats = [rf"^\s*import\s+{mod}\b", rf"^\s*from\s+{mod}\s+import\b"]
+            if len(parts) > 1:
+                pkg = re.escape(".".join(parts[:-1]))
+                pats.append(rf"\b{pkg}\.{mod}\b")
+                pats.append(rf"^\s*from\s+{pkg}\s+import\s+[^\n#]*\b{mod}\b")
+            strong.append(re.compile("|".join(pats), re.MULTILINE))
+            weak.append(re.compile(rf"(?<![\w.]){mod}\."))
+        if not strong:
+            return []
+        hits_strong, hits_weak = [], []
+        for test in tests:
+            path = self.project_root / test
+            try:
+                if path.stat().st_size > _MAX_REF_SCAN_BYTES:
+                    continue
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if any(p.search(text) for p in strong):
+                hits_strong.append(test)
+            elif any(p.search(text) for p in weak):
+                hits_weak.append(test)
+        return sorted(hits_strong) + sorted(hits_weak)
 
     def _full_suite_targets(self) -> List[str]:
         """

@@ -31,6 +31,7 @@ This module holds the shared fix:
 """
 from __future__ import annotations
 
+import os
 import re
 from types import SimpleNamespace
 from typing import Any, Optional
@@ -130,6 +131,32 @@ def _effort_from_reasoning(reasoning: Any) -> Optional[str]:
     if effort == "minimal":
         return "low"
     return effort if effort in _EFFORTS else None
+
+
+#: Agent-loop effort knobs (Anthropic tool client). Unset: nothing is sent.
+AGENT_EFFORT_ENV = "AWOS_REASONING_AGENT"
+REPAIR_EFFORT_ENV = "AWOS_REASONING_REPAIR"
+
+
+def effort_from_env(env_name: str, model: Optional[str]) -> Optional[str]:
+    """
+    The `output_config.effort` for `model` from env var `env_name`
+    (off | low | medium | high), through the same mapping as utility calls
+    (_effort_from_reasoning: "off" -> "low", Claude thinking cannot be fully
+    disabled). None — send nothing, the model's default — when the variable
+    is unset, unknown, or the model does not take an effort.
+    """
+    raw = os.getenv(env_name, "").strip().lower()
+    if not raw or raw in ("default", "model"):
+        return None
+    if raw in ("off", "none", "0", "false", "disabled"):
+        reasoning: dict = {"enabled": False}
+    else:
+        reasoning = {"effort": raw}
+    effort = _effort_from_reasoning(reasoning)
+    if effort and claude_supports_effort(model):
+        return effort
+    return None
 
 
 def _text_of(content: Any) -> str:
