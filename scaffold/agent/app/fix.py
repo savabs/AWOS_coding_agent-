@@ -17,6 +17,7 @@ Every external command goes through a `Runner` so tests can fake `gh`/`git`.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
 import shutil
@@ -44,9 +45,23 @@ class FixError(Exception):
 Runner = Callable[[Sequence[str], Optional[Path]], subprocess.CompletedProcess]
 
 
+# Token variables gh prefers over its own login. AWOS's .env can set them (often
+# empty or stale), which makes gh fail although the user is logged in.
+GH_TOKEN_VARS = ("GH_TOKEN", "GITHUB_TOKEN")
+# Set by check_gh when gh works only without those variables.
+_gh_drop_tokens = False
+
+
+def _gh_env(drop_tokens: bool) -> Optional[dict]:
+    if not drop_tokens:
+        return None
+    return {k: v for k, v in os.environ.items() if k not in GH_TOKEN_VARS}
+
+
 def default_runner(cmd: Sequence[str], cwd: Optional[Path] = None) -> subprocess.CompletedProcess:
+    drop = _gh_drop_tokens and bool(cmd) and cmd[0] == "gh"
     return subprocess.run(list(cmd), cwd=str(cwd) if cwd else None, capture_output=True,
-                          text=True)
+                          text=True, env=_gh_env(drop))
 
 
 # ── URL / remote parsing ─────────────────────────────────────────────────────
@@ -224,6 +239,17 @@ def check_gh(run: Runner, which: Callable[[str], Optional[str]] = shutil.which,
         out = run(["gh", "auth", "status"], cwd)
     except FileNotFoundError:
         raise FixError(gh_missing_message())
+    if out.returncode != 0 and run is default_runner and any(os.environ.get(v) is not None
+                                                             for v in GH_TOKEN_VARS):
+        # A token variable (e.g. from AWOS's .env) can shadow a working gh login.
+        global _gh_drop_tokens
+        _gh_drop_tokens = True
+        out = run(["gh", "auth", "status"], cwd)
+        if out.returncode == 0:
+            print("awos fix: ignoring GH_TOKEN/GITHUB_TOKEN from the environment; "
+                  "using your gh login")
+        else:
+            _gh_drop_tokens = False
     if out.returncode != 0:
         raise FixError("gh is not logged in to GitHub. Run: gh auth login")
 
