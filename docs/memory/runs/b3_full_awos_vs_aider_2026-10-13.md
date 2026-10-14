@@ -35,3 +35,19 @@ Yes, unlike B2:
 - **It does not clear our strict pre-registered Bayesian bar** (0.95), because the per-issue Beta model with about 2 runs per issue is conservative and the cap cut repeat 2 short. A third repeat or more issues would likely settle it, at about $3–6.
 - **Safe public claim:** "On 40 fresh real issues (fixes merged Aug–Oct 2026), same model and same cost, AWOS solved 83% of runs vs 67% for Aider. It was better on 14 issues and worse on 4 (McNemar p = 0.03). Our stricter Bayesian test did not reach its 95% bar (91%)."
 - **Do not claim** that "AWOS is proven better".
+
+## Final (2026-10-14, after the pre-registered extension)
+
+| All 3 repeats | AWOS | Aider |
+|---|---|---|
+| Runs solved | **102/120 (85%)** | 81/116 (70%) |
+| Tasks better | **16** | 4 |
+| Cost per run | $0.0333 | $0.0341 |
+
+- **Stats:** McNemar p = 0.012; P(Δ>0) = 0.949 against the 0.95 bar, so INCONCLUSIVE by 0.001.
+- **Repeat 3 alone** (fresh data): 33/38 vs 26/38, 10 better and 3 worse. Same direction.
+- **Reading:**
+  - Across three repeats AWOS consistently solves more fresh real issues than Aider on the same model, and at no extra cost.
+  - The standard exact test is significant (p = 0.012).
+  - Our deliberately strict Bayesian bar is missed by a hair.
+- **Public claim:** "a consistent, statistically significant lead by the standard test (16 issues better, 4 worse, p = 0.01), just short of our stricter 95% Bayesian bar."

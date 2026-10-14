@@ -74,3 +74,16 @@ The interim result above was INCONCLUSIVE (P=0.910, McNemar p=0.031). The owner 
 - **Hard total cap:** $10.50 for all B3 data. If it binds, use complete pairs only.
 - **Analysis:** the same T1 rule (`stats_audit.py --a aider --b off --cost-budget 0.5`), applied ONCE to all B3 data after the extension finishes. No early stop on a favourable interim look.
 - **Disclosure:** this is a single planned extension after one interim look. The report will state that, and also give the repeat-3-only result as a fresh-data check.
+
+## Final result after the pre-registered extension (2026-10-14): INCONCLUSIVE by 0.001, leaning AWOS
+
+All B3 data: 3 repeats × 40 issues, 120 issue-runs, $9.49 of the $10.50 cap. One T1 analysis, as pre-registered:
+- AWOS solved **102/120 runs** and Aider 81/116 (4 Aider runs INVALID).
+- Task-level exact McNemar: AWOS better on **16** tasks, worse on 4, **p = 0.012**.
+- P(Δ>0) = **0.949**, against a bar of 0.95. Posterior Δ is +12.6 pp, 95% credible interval [-2.4, +27.4]; the plain Bayesian bootstrap gives P = 0.990.
+- Cost per run is **×0.98**: AWOS is slightly cheaper.
+- **Verdict: INCONCLUSIVE.** The rule misses by 0.001. We do not round.
+
+Fresh-data check, repeat 3 only: 33/38 vs 26/38, better on 10 tasks and worse on 3, McNemar p = 0.092, P = 0.842, cost ×0.91. Same direction, too few runs to decide alone.
+
+Disclosure: this is one planned extension after one interim look (P = 0.910).
