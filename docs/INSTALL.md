@@ -46,7 +46,7 @@ Options (environment variables):
 
 | Variable | Effect |
 |----------|--------|
-| `AWOS_REF=<tag/branch/sha>` | Install a different ref (default `v0.2.0`) |
+| `AWOS_REF=<tag/branch/sha>` | Install a different ref (default `v0.2.2`) |
 | `AWOS_INSTALL_DRY_RUN=1` | Print every action instead of doing it |
 | `AWOS_NO_UV_INSTALL=1` | Never install uv; fail with instructions instead |
 
@@ -59,27 +59,27 @@ To see what it would do first:
 With uv:
 
 ```bash
-uv tool install --python ">=3.11" "awos @ git+https://github.com/savabs/AWOS_coding_agent-@v0.2.0"
+uv tool install --python ">=3.11" "awos @ git+https://github.com/savabs/AWOS_coding_agent-@v0.2.2"
 ```
 
 With pipx:
 
 ```bash
-pipx install "git+https://github.com/savabs/AWOS_coding_agent-@v0.2.0"
+pipx install "git+https://github.com/savabs/AWOS_coding_agent-@v0.2.2"
 ```
 
 Or with pip, into a virtualenv:
 
 ```bash
 python3 -m venv ~/.venvs/awos
-~/.venvs/awos/bin/pip install "git+https://github.com/savabs/AWOS_coding_agent-@v0.2.0"
+~/.venvs/awos/bin/pip install "git+https://github.com/savabs/AWOS_coding_agent-@v0.2.2"
 export PATH="$HOME/.venvs/awos/bin:$PATH"
 ```
 
 From a local clone: `pip install /path/to/AWOS_coding_agent-`, or use `pip install -e .`
 to work on AWOS itself.
 
-To install a branch, replace `@v0.2.0` with `@<branch>`.
+To install a branch, replace `@v0.2.2` with `@<branch>`.
 
 ### Optional extras
 
@@ -94,7 +94,7 @@ The core install includes only what the quickstart needs: `anthropic`, `openai`,
 | `gemini` | Gemini planner backend |
 | `all` | Everything above, plus `mcp` |
 
-For example: `pipx install "awos[treesitter] @ git+https://github.com/savabs/AWOS_coding_agent-@v0.2.0"`.
+For example: `pipx install "awos[treesitter] @ git+https://github.com/savabs/AWOS_coding_agent-@v0.2.2"`.
 
 ## Quickstart (about 2 minutes)
 

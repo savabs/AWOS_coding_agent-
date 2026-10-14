@@ -25,7 +25,10 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("AWOS_HOME", str(awos_home))
     monkeypatch.setenv("AWOS_HOST_DIR", str(awos_home / "host"))
     for v in ENV_VARS:
-        monkeypatch.delenv(v, raising=False)
+        # setenv first so teardown restores the original state even when
+        # ensure_ready() writes the variable later (it sets os.environ on purpose).
+        monkeypatch.setenv(v, "")
+        monkeypatch.delenv(v)
     monkeypatch.setattr(paths, "dotenv_path", lambda: awos_home / ".env")
     return awos_home
 
