@@ -526,14 +526,21 @@ def workspace_diff(project_root: str, limit: int = ARBITRATION_DIFF_CHARS) -> st
     return diff if len(diff) <= limit else diff[:limit] + "\n... (diff trimmed)"
 
 
+def _diff_note(suite_checked: bool) -> str:
+    """What the diff header may claim: the visible suite only ran if suite_checked
+    (with acceptance-first ordering it is deferred until these tests pass)."""
+    return ("the visible tests pass with it" if suite_checked
+            else "the project test suite has not been run on it yet")
+
+
 def build_arbitration_messages(goal_text: str, suite: AcceptanceSuite, failing: dict,
-                               diff: str) -> list:
+                               diff: str, suite_checked: bool = True) -> list:
     parts = [f"# Issue\n\n{goal_text.strip()}", "# Failing acceptance tests"]
     for name, output in failing.items():
         src = test_function_source(suite.source, name)[:ARBITRATION_TEST_CHARS]
         out = (output or "")[-ARBITRATION_TEST_CHARS:]
         parts.append(f"## {name}\n```python\n{src}\n```\nFailure output:\n```\n{out}\n```")
-    parts.append(f"# Current diff (the visible tests pass with it)\n```diff\n"
+    parts.append(f"# Current diff ({_diff_note(suite_checked)})\n```diff\n"
                  f"{diff or '(empty)'}\n```")
     parts.append("Answer with the JSON object for these tests: " + ", ".join(failing))
     return [{"role": "system", "content": ARBITRATION_PROMPT},
@@ -563,7 +570,8 @@ def parse_arbitration(reply: str, names: list) -> tuple[dict, bool]:
 
 
 def arbitrate(goal_text: str, suite: AcceptanceSuite, failing: dict, diff: str, *,
-              client: Any, model: str, tracker: Any = None) -> dict:
+              client: Any, model: str, tracker: Any = None,
+              suite_checked: bool = True) -> dict:
     """
     One utility call (reasoning off) judging each failing kept test. Returns
     {"verdicts", "parsed", "cost_usd", "input_tokens", "output_tokens", "error"}.
@@ -577,7 +585,7 @@ def arbitrate(goal_text: str, suite: AcceptanceSuite, failing: dict, diff: str, 
         from providers import REASONING_OFF, utility_chat
     if arbiter_version() == "2":
         return arbitrate_v2(goal_text, suite, failing, diff, client=client, model=model,
-                            tracker=tracker)
+                            tracker=tracker, suite_checked=suite_checked)
     names = list(failing)
     out = {"verdicts": {n: WRONG_TEST for n in names}, "parsed": False, "cost_usd": 0.0,
            "input_tokens": 0, "output_tokens": 0, "error": "", "reply": ""}
@@ -587,7 +595,7 @@ def arbitrate(goal_text: str, suite: AcceptanceSuite, failing: dict, diff: str, 
     try:
         text, info = utility_chat(
             tap, "acceptance", model,
-            build_arbitration_messages(goal_text, suite, failing, diff),
+            build_arbitration_messages(goal_text, suite, failing, diff, suite_checked),
             max_tokens=ARBITRATION_MAX_TOKENS, tracker=tracker,
             request_type="acceptance_arbitration", temperature=0,
             send_reasoning=one_shot._sends_reasoning(client),
@@ -735,7 +743,7 @@ def triage_toxic(suite: AcceptanceSuite, failing: dict, goal_text: str = "") -> 
 
 
 def build_arbitration_messages_v2(goal_text: str, suite: AcceptanceSuite, failing: dict,
-                                  diff: str) -> list:
+                                  diff: str, suite_checked: bool = True) -> list:
     """
     Strictly: the verbatim goal, each failing test's source and raw log, and
     the sanitized diff. No agent text (summary, turn narration, comments,
@@ -749,7 +757,7 @@ def build_arbitration_messages_v2(goal_text: str, suite: AcceptanceSuite, failin
     clean = sanitize_diff(diff)
     if len(clean) > ARBITRATION_DIFF_CHARS:
         clean = clean[:ARBITRATION_DIFF_CHARS] + "\n... (diff trimmed)"
-    parts.append(f"# Code diff (comments removed; the visible tests pass with it)\n```diff\n"
+    parts.append(f"# Code diff (comments removed; {_diff_note(suite_checked)})\n```diff\n"
                  f"{clean or '(empty)'}\n```")
     parts.append("Answer with the JSON object for these tests: " + ", ".join(failing))
     return [{"role": "system", "content": ARBITRATION_PROMPT_V2},
@@ -779,7 +787,8 @@ def parse_arbitration_v2(reply: str, names: list) -> tuple[dict, bool]:
 
 
 def arbitrate_v2(goal_text: str, suite: AcceptanceSuite, failing: dict, diff: str, *,
-                 client: Any, model: str, tracker: Any = None) -> dict:
+                 client: Any, model: str, tracker: Any = None,
+                 suite_checked: bool = True) -> dict:
     """
     AWOS_ARBITER_V=2. Same contract as arbitrate() ("verdicts" holds only
     WRONG_TEST / CODE_INCOMPLETE, so the caller is unchanged), plus "labels"
@@ -815,7 +824,7 @@ def arbitrate_v2(goal_text: str, suite: AcceptanceSuite, failing: dict, diff: st
     try:
         text, info = utility_chat(
             tap, "acceptance", model,
-            build_arbitration_messages_v2(goal, suite, rest, diff),
+            build_arbitration_messages_v2(goal, suite, rest, diff, suite_checked),
             max_tokens=ARBITRATION_MAX_TOKENS, tracker=tracker,
             request_type="acceptance_arbitration", temperature=0,
             send_reasoning=one_shot._sends_reasoning(client),
@@ -850,14 +859,16 @@ def _print_labels(labels: dict) -> None:
           + (", ".join(f"{n}={v}" for n, v in labels.items()) or "(none)"))
 
 
-def repair_feedback(suite: AcceptanceSuite, failing: dict) -> str:
+def repair_feedback(suite: AcceptanceSuite, failing: dict, suite_checked: bool = True) -> str:
     """The bounded repair's feedback: only the CODE_INCOMPLETE tests."""
     blocks = []
     for name, output in failing.items():
         src = test_function_source(suite.source, name)[:ARBITRATION_TEST_CHARS]
         blocks.append(f"## {name}\n```python\n{src}\n```\nOutput:\n```\n"
                       f"{(output or '')[-1500:]}\n```")
-    return ("The project's visible tests pass, but acceptance tests written from the issue "
+    lead = ("The project's visible tests pass, but acceptance tests" if suite_checked
+            else "Acceptance tests")
+    return (f"{lead} written from the issue "
             f"still fail ({len(failing)}), and a review judged that the code misses a "
             "requirement the issue states. They are not in the project and run "
             "automatically after you finish; fix the code, not the tests. Keep the "

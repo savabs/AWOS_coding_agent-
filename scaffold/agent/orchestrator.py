@@ -3208,7 +3208,8 @@ class Orchestrator:
         else:
             arb = acc_mod.arbitrate(goal, suite, failing, acc_mod.workspace_diff(codebase_root),
                                     client=arb_client, model=model,
-                                    tracker=getattr(self, "tracker", None))
+                                    tracker=getattr(self, "tracker", None),
+                                    suite_checked=green_verdict is not None)
         out["cost_usd"] = float(arb.get("cost_usd") or 0.0)
         out["input_tokens"] = int(arb.get("input_tokens") or 0)
         out["output_tokens"] = int(arb.get("output_tokens") or 0)
@@ -3252,7 +3253,8 @@ class Orchestrator:
         print(f"[TASK {task_id}] [ACCEPTANCE] bounded repair: {len(incomplete)} "
               f"code_incomplete test(s), at most {turns} turns")
         prompt = _stable_prefix().append_feedback(
-            base_prompt, acc_mod.repair_feedback(suite, {n: failing[n] for n in incomplete}))
+            base_prompt, acc_mod.repair_feedback(suite, {n: failing[n] for n in incomplete},
+                                   suite_checked=green_verdict is not None))
         outcome = None
         repaired_green = False
         rfiles = list(files_changed)
