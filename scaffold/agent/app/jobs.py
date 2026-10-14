@@ -57,6 +57,9 @@ def find_job(queue: JobQueue, repo: Path, ref: str) -> Optional[JobSpec]:
     ref = ref.strip()
     if ref.startswith("awos/"):
         ref = ref[5:]
+        for suffix in ("-failed", "-cancelled"):   # a failed job's salvage branch
+            if ref.endswith(suffix):
+                ref = ref[: -len(suffix)]
     if not ref:
         return None
     matches = [j for j in repo_jobs(queue, repo) if j.id.startswith(ref)]
@@ -150,6 +153,11 @@ def outcome(queue: JobQueue, job: JobSpec) -> Outcome:
     if tests:
         passed, failed = int(tests.get("passed") or 0), int(tests.get("failed") or 0)
         text = f"{passed} passed" + (f", {failed} failed" if failed else "")
+        if tests.get("preexisting"):
+            text += f" ({tests['preexisting']} pre-existing failures, unchanged)"
+        full = tests.get("full") if isinstance(tests.get("full"), dict) else {}
+        if full.get("status") == "timeout" and tests.get("status") != "timeout":
+            text += " (targeted; full suite timed out)"
         if tests.get("status") == "timeout":
             text = "tests timed out"
         ok = tests.get("status") == "passed"

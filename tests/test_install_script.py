@@ -57,7 +57,7 @@ def test_script_is_posix_sh_and_wrapped_in_main():
     assert text.rstrip().endswith('main "$@"')
     code = [ln for ln in text.splitlines() if not ln.lstrip().startswith("#")]
     assert not [ln for ln in code if re.search(r"(^|[;&|(]|\brun)\s*sudo\b", ln)]
-    assert "v0.1.0" in text and "AWOS_REF" in text
+    assert "v0.2.0" in text and "AWOS_REF" in text
 
 
 def test_syntax_ok():
@@ -75,7 +75,7 @@ def test_dry_run_with_uv(tmp_path):
     r = _run(env)
     assert r.returncode == 0, r.stderr
     out = r.stdout
-    assert "+ uv tool install --force --python >=3.11 awos @ git+https://github.com/savabs/AWOS_coding_agent-@v0.1.0" in out
+    assert "+ uv tool install --force --python >=3.11 awos @ git+https://github.com/savabs/AWOS_coding_agent-@v0.2.0" in out
     assert "REAL UV CALLED" not in out
     assert out.rstrip().endswith("Run: awos")
     # bin dir not on PATH: print the line, never edit rc files
@@ -87,7 +87,7 @@ def test_ref_override(tmp_path):
     env = _fake_env(tmp_path, {"git": GIT, "uv": UV}, {"AWOS_REF": "main"})
     r = _run(env)
     assert r.returncode == 0, r.stderr
-    assert "@main" in r.stdout and "@v0.1.0" not in r.stdout
+    assert "@main" in r.stdout and "@v0.2.0" not in r.stdout
 
 
 def test_dry_run_with_pipx(tmp_path):
@@ -95,7 +95,7 @@ def test_dry_run_with_pipx(tmp_path):
     r = _run(env)
     assert r.returncode == 0, r.stderr
     assert "+ pipx install --force --python " in r.stdout
-    assert "awos @ git+https://github.com/savabs/AWOS_coding_agent-@v0.1.0" in r.stdout
+    assert "awos @ git+https://github.com/savabs/AWOS_coding_agent-@v0.2.0" in r.stdout
     assert "REAL PIPX CALLED" not in r.stdout
     assert r.stdout.rstrip().endswith("Run: awos")
 

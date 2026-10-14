@@ -98,6 +98,14 @@ NUDGEABLE_STOPS = ("max_turns", "completed", "repeated_tool_call")
 COPY_IGNORE = (".git", ".venv", "venv", "node_modules", "__pycache__", ".env", ".env.*",
                ".awos", "build", "dist", ".mypy_cache", ".pytest_cache", ".ruff_cache",
                ".tox")
+
+
+def _is_secret_dotenv(name: str) -> bool:
+    try:
+        from scaffold.agent.sandbox import is_secret_dotenv
+    except ImportError:  # pragma: no cover - flat import
+        from sandbox import is_secret_dotenv  # type: ignore
+    return is_secret_dotenv(name)
 #: Past this many MB the copy is abandoned and the review runs without
 #: executing anything (AWOS_GOAL_CHECK_MAX_COPY_MB): a large repo copied up to
 #: three times per goal could fill $TMPDIR or stall the run.
@@ -600,6 +608,8 @@ def _copy_workspace(root: str, max_bytes: Optional[int] = None) -> tuple[str, st
 
     def _ignore(directory: str, names: list[str]) -> set[str]:
         skipped = set(base_ignore(directory, names))
+        # .env.example and friends hold no secrets; tests may read them.
+        skipped -= {n for n in names if n.startswith(".env.") and not _is_secret_dotenv(n)}
         for name in names:
             path = os.path.join(directory, name)
             # An unreadable directory would fail the whole copy.

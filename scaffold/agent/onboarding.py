@@ -229,6 +229,7 @@ def setup_provider(ask: Callable[[str], str] = input,
     say("  1) Claude Haiku 5.5 (Anthropic API) - about a cent or two per task; needs an API key")
     say("  2) A local model - free and private; needs llama-server or Ollama running")
     say("  s) Skip for now")
+    say(f"  (setup guide: {_paths.docs_url()})")
     try:
         choice = (ask("Choose [1/2/s] (default 1): ") or "1").strip().lower()
     except (EOFError, KeyboardInterrupt):
@@ -315,6 +316,18 @@ def _has_pytest_config(repo: Path) -> Optional[str]:
     return None
 
 
+def detect_test_env(repo: Path):
+    """The project env AWOS runs pytest in (project_env.TestEnv), or None on error."""
+    try:
+        try:
+            from scaffold.agent import project_env
+        except ImportError:  # pragma: no cover - flat import
+            import project_env  # type: ignore
+        return project_env.detect(Path(repo))
+    except Exception:  # noqa: BLE001 - onboarding must never crash on this
+        return None
+
+
 def detect_test_command(repo: Path) -> tuple[Optional[str], list[str]]:
     """(test command or None, notes). v0.1 runs pytest only."""
     repo = Path(repo)
@@ -331,6 +344,10 @@ def detect_test_command(repo: Path) -> tuple[Optional[str], list[str]]:
     if why:
         cmd = "pytest"
         notes.append(f"test command: pytest (found {why})")
+        env = detect_test_env(repo)
+        if env is not None:
+            notes.append(f"tests run with: {env.describe()}")
+            notes.extend(env.notes)
 
     pkg = repo / "package.json"
     if pkg.is_file():
@@ -381,7 +398,7 @@ def ensure_ready(repo: Path, interactive: bool = True, *,
         missing.append("provider")
         notes.append("no model provider: run `awos` in a terminal to set one up, "
                      "or put ANTHROPIC_API_KEY=... in " + str(user_env_path())
-                     + " (or AWOS_PROVIDER=local)")
+                     + " (or AWOS_PROVIDER=local); guide: " + _paths.docs_url())
 
     branch = None
     if is_git_repo(repo):
@@ -398,8 +415,12 @@ def ensure_ready(repo: Path, interactive: bool = True, *,
         missing.append("test_command")
         notes.append("no pytest tests found (AWOS v0.1 needs a pytest suite to verify fixes)")
 
+    test_env = None
+    if test_cmd:
+        env = detect_test_env(repo)
+        test_env = env.short() if env is not None else None
     return {"provider": provider, "model": model, "test_command": test_cmd,
-            "default_branch": branch, "missing": missing, "notes": notes}
+            "test_env": test_env, "default_branch": branch, "missing": missing, "notes": notes}
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import threading
+import time
 import traceback
 from pathlib import Path
 from typing import Optional
@@ -87,6 +88,10 @@ class App:
         self._monitor: Optional[threading.Thread] = None
         self._events: dict[str, threading.Event] = {}
         self.compact_cards = False                # one-shot shows its own review keys
+        # While jobs wait, re-check the worker every N seconds (it can die mid-session).
+        self.worker_check_sec = float(os.getenv("AWOS_APP_WORKER_CHECK_SEC", "15"))
+        self._last_worker_check = time.monotonic()
+        self._worker_lock = threading.Lock()   # one restart attempt at a time per app
 
     # ── plumbing ─────────────────────────────────────────────────────────
     def fail(self, what: str, exc: BaseException) -> None:
@@ -125,6 +130,41 @@ class App:
                 self.term.line("  " + paths.no_provider_message())
         return state
 
+    def check_worker(self, jobs: Optional[list[JobSpec]] = None, force: bool = False) -> Optional[str]:
+        """
+        Periodic liveness check while the session is open: when jobs are queued
+        (or marked running) and no worker holds the lock, start one again through
+        workerctl.ensure_worker, whose spawn lock keeps it to a single instance
+        even when several app windows check at once. Returns the ensure_worker
+        state when a restart was attempted, else None.
+        """
+        if not self.auto_worker:
+            return None
+        now = time.monotonic()
+        if not force and now - self._last_worker_check < self.worker_check_sec:
+            return None
+        if not self._worker_lock.acquire(blocking=False):
+            return None   # a check is already in progress on another thread
+        try:
+            self._last_worker_check = now
+            js = jobs if jobs is not None else self.repo_jobs()
+            if not any(j.state in (QUEUED, RUNNING) for j in js):
+                return None
+            if workerctl.worker_running(self.root):
+                return None
+            age = workerctl.heartbeat_age(self.root)
+            self.log.warning("background worker not running (last heartbeat %s ago) with jobs "
+                             "waiting; restarting it",
+                             "never" if age is None else f"{age:.0f}s")
+            state = self.ensure_worker()
+            if state in ("started", "spawned"):
+                self.term.line(self.term.s("  The background worker had stopped; started it again.",
+                                           "yellow"))
+            self.log.info("worker restart: %s", state)
+            return state
+        finally:
+            self._worker_lock.release()
+
     def repo_jobs(self) -> list[JobSpec]:
         return J.repo_jobs(self.queue, self.repo)
 
@@ -147,7 +187,8 @@ class App:
     def header(self, worker_state: str) -> None:
         t = self.term
         branch = gitops.current_branch(self.repo) or "detached"
-        test_cmd = self.ready.get("test_command") or detect_test_command(self.repo) or "none found"
+        test_cmd = (self.ready.get("test_env") or self.ready.get("test_command")
+                    or detect_test_command(self.repo) or "none found")
         model = (self.ready.get("model") or os.getenv("AWOS_AGENT_MODEL")
                  or os.getenv("AWOS_PROVIDER") or "default")
         js = self.repo_jobs()
@@ -201,7 +242,10 @@ class App:
                f"{J.goal_line(job, 56)}{tag}")
         tests = t.s(o.tests, "green" if o.tests_ok else ("red" if o.tests_ok is False else "grey"))
         bits = [f"tests {tests}", f"${o.cost:.4f}", J.fmt_seconds(o.seconds)]
-        if o.branch:
+        if o.branch and job.state != DONE:
+            # Everything the failed job did, kept whole for salvage; not verified.
+            bits.append(f"branch {o.branch} (all of its work, unverified)")
+        elif o.branch:
             bits.append(f"branch {o.branch}")
         t.line("      " + t.s(" · ", "grey").join(bits))
         if job.state in (FAILED, BLOCKED) and o.error:
@@ -248,7 +292,9 @@ class App:
         """One monitor pass: progress lines for running jobs, a card for finished ones."""
         t = self.term
         changed = False
-        for j in self.repo_jobs():
+        jobs = self.repo_jobs()
+        self.check_worker(jobs)
+        for j in jobs:
             prev = self.states.get(j.id)
             just_ended = prev in (RUNNING, QUEUED) and j.state in J.FINISHED
             if j.state == RUNNING or just_ended:

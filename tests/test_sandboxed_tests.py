@@ -53,7 +53,9 @@ def test_runner_uses_the_sandbox_and_parses_its_output():
     assert (result.passed, result.failed) == (3, 1)
     command, _ = sb.commands[0]
     # The host interpreter path means nothing inside a container.
-    assert command.startswith("python -m pytest") and sys.executable not in command
+    assert "python -m pytest" in command and sys.executable not in command
+    # v0.2.2: the workspace is first on PYTHONPATH (tests import the job's code).
+    assert command.startswith("PYTHONPATH=")
 
 
 def test_runner_reports_a_sandbox_timeout():

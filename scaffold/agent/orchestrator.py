@@ -351,7 +351,9 @@ def _acceptance_mode() -> str:
 def _tests_not_run_status(result) -> str:
     """Status text when no test counts exist; says so when pytest crashed."""
     if getattr(result, "infra_error", False):
-        return f"tests could not run ({getattr(result, 'infra_reason', '')[:200]})"
+        env = getattr(result, "env_desc", "")
+        return (f"tests could not run ({getattr(result, 'infra_reason', '')[:200]})"
+                + (f" [env: {env}]" if env else ""))
     return "no tests ran"
 
 
@@ -2417,8 +2419,10 @@ class Orchestrator:
 
         # ── One shot first (AWOS_ONE_SHOT, ablation 3) ────────────────────
         # One call with the relevant files preloaded, emitting SEARCH/REPLACE
-        # edits; if the tests then pass, the AgentLoop never runs. Otherwise
-        # its edits stay and the loop continues from them.
+        # edits; if the tests then pass, the AgentLoop never runs. Otherwise,
+        # in a host job workspace, edits that left the tests red are reverted
+        # first (workspace_restore); green-but-incomplete edits stay and the
+        # loop continues from them.
         # AWOS_ACCEPTANCE (ablation C): acceptance tests from the issue, kept
         # only where they fail on this start state; they gate "done" below.
         self._acceptance_suite = self._acceptance_prepare(task, ctx, model, codebase_root,
@@ -2686,6 +2690,16 @@ class Orchestrator:
             self._component("one_shot", status="inactive", reason="no client")
             return None
 
+        # Pre-attempt snapshot of the job workspace, so a failed attempt's
+        # edits can be undone before the agent loop (never the user's checkout).
+        try:
+            from . import workspace_restore as ws_restore
+        except ImportError:
+            import workspace_restore as ws_restore
+        snap = None
+        if ws_restore.restore_enabled() and ws_restore.is_job_workspace(codebase_root):
+            snap = ws_restore.snapshot(codebase_root)
+
         task_text = worker_task_text(task, ctx)
         files = task_files(task)
         if files:
@@ -2747,6 +2761,7 @@ class Orchestrator:
                   f"{shot.repair_failed} still failed"
                   + (f" ({shot.repair_error})" if shot.repair_error else ""))
         verdict = None
+        green = False   # project tests green after the edits (partially correct by design)
         acc_feedback = ""
         acc_pending = None  # mode 2: (summary, failing detail) for the fail-safe gate
         if shot.error:
@@ -2830,6 +2845,34 @@ class Orchestrator:
         print(f"[ONE-SHOT] fell back to the agent loop: {reason}")
         if shot.error or not shot.applied:
             return out  # nothing changed: the agent loop starts as it always did
+        if snap and not green:
+            # Tests not green: the edits are not a base to build on. Put the
+            # files the attempt changed back as they were before it.
+            res = ws_restore.restore(codebase_root, snap, list(shot.applied))
+            print("[ONE-SHOT] restored the workspace to its pre-attempt state before the "
+                  f"agent loop: {len(res['restored'])} file(s) reverted, "
+                  f"{len(res['removed'])} removed"
+                  + (f", {len(res['skipped'])} skipped ({', '.join(res['skipped'][:5])})"
+                     if res["skipped"] else ""))
+            logger.info("[ONE-SHOT] restore %s", res)
+            out["applied"] = list(res["skipped"])   # only what is still in place
+            out["restored"] = res
+            parts = ["A first one-shot attempt already ran on this task and failed "
+                     f"({reason}). Its edits were reverted: the files are as they were "
+                     "before it."]
+            parts.append("It had tried changing: " + ", ".join(shot.applied) + ".")
+            tr = verdict["test_result"] if verdict else None
+            if tr is not None and getattr(tr, "raw_output", ""):
+                raw = tr.raw_output
+                trimmed = raw if len(raw) <= 2000 else "...\n" + raw[-2000:]
+                parts.append(f"Test output with its edits in place:\n{trimmed}")
+            parts.append("Work from the current files; do not assume its edits exist.")
+            out["note"] = "\n\n".join(parts)
+            return out
+        print("[ONE-SHOT] keeping the attempt's edits for the agent loop ("
+              + ("project tests are green; only the remaining gap is left" if green
+                 else "restore off" if not ws_restore.restore_enabled()
+                 else "no job-workspace snapshot") + ")")
         parts = ["A first one-shot attempt already ran on this task."]
         parts.append("It changed these files: " + (", ".join(shot.applied) or "none") + ".")
         if shot.failed:
@@ -3132,7 +3175,9 @@ class Orchestrator:
 
         tests_ran = test_result is not None and not getattr(test_result, "no_tests_found", True)
         test_status = (
-            f"{test_result.passed} passed, {test_result.failed} failed"
+            f"{test_result.passed} passed, {test_result.failed + test_result.errors} failed"
+            + (f" (+{len(test_result.preexisting)} pre-existing failure(s) at the base "
+               "commit, not counted)" if getattr(test_result, "preexisting", None) else "")
             if tests_ran
             else _tests_not_run_status(test_result)
         )

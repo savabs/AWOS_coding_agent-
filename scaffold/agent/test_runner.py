@@ -72,6 +72,13 @@ class TestResult:
     #: treats it as no evidence rather than a red suite.
     infra_error: bool = False
     infra_reason: str = ""
+    #: v0.2.2 baseline: ids failing now that ALSO fail at the job's base
+    #: commit. They are not counted in failed/errors (only new failures are).
+    preexisting: List[str] = field(default_factory=list)
+    #: True when failures were compared against the baseline workspace.
+    baseline_checked: bool = False
+    #: Where the tests ran: the project env's description (project_env).
+    env_desc: str = ""
 
 
 #: Through the running interpreter, not a bare `pytest` on PATH: without an
@@ -103,12 +110,29 @@ class TestRunner:
         project_root: str = ".",
         timeout_sec: int = _DEFAULT_TIMEOUT_SEC,
         sandbox=None,
+        test_env=None,
     ):
         self.project_root = Path(project_root)
         self.timeout_sec = timeout_sec
         # When set, tests run inside it: pytest imports project code (and any
         # conftest.py), which may have been written by the model.
         self.sandbox = sandbox
+        # The project's own environment (project_env.TestEnv), detected lazily.
+        self._test_env = test_env
+
+    @property
+    def test_env(self):
+        """How pytest runs for this project: its venv/uv/poetry env, else AWOS's Python."""
+        if self._test_env is None:
+            try:
+                from scaffold.agent import project_env
+            except ImportError:  # pragma: no cover - flat import
+                import project_env  # type: ignore
+            self._test_env = project_env.detect(self.project_root)
+        return self._test_env
+
+    def pytest_command(self) -> List[str]:
+        return list(self.test_env.argv) + ["--tb=short", "-q"]
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -161,11 +185,7 @@ class TestRunner:
         test files are often named differently (sqlparse/sql.py is covered by
         tests/test_tokenize.py), so an empty mapping is not "no tests".
         """
-        # No cache plugin: nothing written to .pytest_cache, inside a sandbox
-        # or not. No color: ANSI codes would sit inside the summary line.
-        base = list(cfg.command) + ["-p", "no:cacheprovider", "--color=no"]
-        if not self._has_pytest_config():
-            base += _NO_CONFIG_ARGS
+        base = self.pytest_base(cfg)
         mapped = self.map_tests(changed_files)
         if mapped:
             result = self._execute(TestConfig("pytest", base + mapped, self.timeout_sec))
@@ -180,6 +200,26 @@ class TestRunner:
         result = self._execute(TestConfig("pytest", base + targets, timeout))
         result.mode = "full"
         logger.info("[test_runner] mode=full targets=%s", targets or "(pytest config)")
+        return result
+
+    def pytest_base(self, cfg: Optional[TestConfig] = None) -> List[str]:
+        """The pytest command without targets."""
+        # No cache plugin: nothing written to .pytest_cache, inside a sandbox
+        # or not. No color: ANSI codes would sit inside the summary line.
+        # -rfE: the short summary names each failing id (baseline comparison).
+        command = list(cfg.command) if cfg is not None else self.pytest_command()
+        base = command + ["-p", "no:cacheprovider", "--color=no", "-rfE"]
+        if not self._has_pytest_config():
+            base += _NO_CONFIG_ARGS
+        return base
+
+    def run_targets(self, targets: List[str], timeout_sec: Optional[int] = None,
+                    extra_args: Optional[List[str]] = None) -> TestResult:
+        """Run pytest on `targets` (none: the configured/visible suite); no safety guard."""
+        result = self._execute(TestConfig("pytest", self.pytest_base() + list(extra_args or [])
+                                          + list(targets),
+                                          int(timeout_sec or self.timeout_sec)))
+        result.mode = "mapped" if targets else "full"
         return result
 
     def find_test_files(self) -> List[str]:
@@ -294,27 +334,27 @@ class TestRunner:
         """Detect pytest via pytest.ini, pyproject.toml, or setup.cfg."""
         root = self.project_root
         if (root / "pytest.ini").exists():
-            return TestConfig("pytest", _PYTEST_CMD)
+            return TestConfig("pytest", self.pytest_command())
 
         pyproject = root / "pyproject.toml"
         if pyproject.exists():
             content = pyproject.read_text(encoding="utf-8")
             if "[tool.pytest" in content:
-                return TestConfig("pytest", _PYTEST_CMD)
+                return TestConfig("pytest", self.pytest_command())
 
         setup_cfg = root / "setup.cfg"
         if setup_cfg.exists():
             content = setup_cfg.read_text(encoding="utf-8")
             if "[tool:pytest]" in content:
-                return TestConfig("pytest", _PYTEST_CMD)
+                return TestConfig("pytest", self.pytest_command())
 
         if "[pytest]" in self._read(root / "tox.ini"):
-            return TestConfig("pytest", _PYTEST_CMD)
+            return TestConfig("pytest", self.pytest_command())
 
         # No pytest config: most real projects (sqlparse, more-itertools) have
         # none, yet pytest runs their tests/ (unittest-style included).
         if (root / "conftest.py").exists() or self.find_test_files():
-            return TestConfig("pytest", _PYTEST_CMD)
+            return TestConfig("pytest", self.pytest_command())
 
         return None
 
@@ -375,7 +415,10 @@ class TestRunner:
         """Run the configured test command and parse output."""
         logger.info("[test_runner] Running: %s (timeout=%ds)", " ".join(cfg.command), cfg.timeout_sec)
         if self.sandbox is not None:
-            return self._execute_in_sandbox(cfg)
+            return self._with_baseline(cfg, self._execute_in_sandbox(cfg))
+        # pytest runs in the project's env with the workspace first on
+        # PYTHONPATH, so an editable install of the user's checkout loses.
+        env = self.test_env.env_for(self.project_root) if cfg.runner == "pytest" else None
         try:
             result = subprocess.run(
                 cfg.command,
@@ -383,6 +426,7 @@ class TestRunner:
                 capture_output=True,
                 text=True,
                 timeout=cfg.timeout_sec,
+                env=env,
             )
         except subprocess.TimeoutExpired:
             logger.warning("[test_runner] Timed out after %ds", cfg.timeout_sec)
@@ -400,14 +444,110 @@ class TestRunner:
                 no_tests_found=True,
             )
 
-        return self._parse(cfg, result.stdout or "", result.stderr or "", getattr(result, "returncode", None))
+        if cfg.runner == "pytest" and "No module named pytest" in (result.stderr or ""):
+            return self._no_pytest(result.stderr or "", cfg.command)
+        parsed = self._parse(cfg, result.stdout or "", result.stderr or "",
+                             getattr(result, "returncode", None))
+        return self._with_baseline(cfg, parsed)
+
+    # ── baseline: only new failures count (baseline_tests.py) ───────────
+
+    def _with_baseline(self, cfg: TestConfig, result: TestResult) -> TestResult:
+        if cfg.runner != "pytest":
+            return result
+        result.env_desc = self.test_env.describe()
+        if result.infra_error or result.timed_out or not (result.failed or result.errors):
+            return result
+        try:
+            from scaffold.agent import baseline_tests as bt
+        except ImportError:  # pragma: no cover - flat import
+            import baseline_tests as bt  # type: ignore
+        base_dir = bt.baseline_dir()
+        if base_dir is None or os.path.realpath(base_dir) == os.path.realpath(self.project_root):
+            return result
+        ids = bt.parse_failed_ids(result.raw_output)
+        if not ids or len(ids) < result.failed + result.errors:
+            # Not every failure is named (a custom -r in addopts): cannot compare.
+            return result
+        argv = list(self.test_env.argv)
+        extra = ["-c", os.devnull, "--rootdir=.", "--confcutdir=."] if "-c" in cfg.command else []
+        sandbox = self._baseline_sandbox(base_dir)
+        env = self.test_env.env_for(base_dir)
+        mount = getattr(sandbox, "MOUNT", None)
+        if isinstance(mount, str) and mount:
+            env["PYTHONPATH"] = os.pathsep.join(
+                [mount] + ([f"{mount}/src"] if (base_dir / "src").is_dir() else []))
+        try:
+            at_base = bt.failing_at_base(
+                ids, self._sandbox_argv(argv) if sandbox is not None else argv, extra, base_dir,
+                env, timeout=max(cfg.timeout_sec, 60), sandbox=sandbox)
+        finally:
+            if sandbox is not None:
+                try:
+                    sandbox.close()
+                except Exception:  # noqa: BLE001 - cleanup only
+                    pass
+        if at_base is None:
+            return result
+        result.baseline_checked = True
+        pre = [i for i in ids if i in at_base]
+        if not pre:
+            return result
+        err_ids = set(re.findall(r"^ERROR (\S.*?)(?: - .*)?$", result.raw_output, re.M))
+        pre_err = len([i for i in pre if i in err_ids])
+        result.errors = max(0, result.errors - pre_err)
+        result.failed = max(0, result.failed - (len(pre) - pre_err))
+        result.preexisting = pre
+        total = result.passed + result.failed + result.errors
+        result.pass_rate = round(result.passed / total, 4) if total else 1.0
+        note = (f"[awos] pre-existing failures: {len(pre)} (they fail at the base commit too, "
+                f"so the edit did not cause them; not counted): " + ", ".join(pre)[:600])
+        result.raw_output = note + "\n\n" + result.raw_output
+        logger.info("[test_runner] %d failure(s) pre-existing at the base commit", len(pre))
+        return result
+
+    def _baseline_sandbox(self, base_dir: Path):
+        """The same kind of sandbox for the baseline run, so both runs see the same limits."""
+        if self.sandbox is None:
+            return None
+        backend = getattr(self.sandbox, "backend", "")
+        if backend not in ("seatbelt", "docker"):
+            return None
+        try:
+            from scaffold.agent.sandbox import make_sandbox
+        except ImportError:  # pragma: no cover - flat import
+            from sandbox import make_sandbox  # type: ignore
+        sb = make_sandbox(base_dir, backend=backend)
+        if sb is not None and hasattr(sb, "allow_read") and self.test_env.read_roots:
+            sb.allow_read(self.test_env.read_roots)
+        return sb
+
+    def _sandbox_argv(self, argv: List[str]) -> List[str]:
+        """The command as the sandbox sees it: a host path means nothing in a container."""
+        docker = getattr(self.sandbox, "backend", "") == "docker"
+        py = self.test_env.python
+        return ["python" if (part == sys.executable or (docker and py and part == py)) else part
+                for part in argv]
 
     def _execute_in_sandbox(self, cfg: TestConfig) -> TestResult:
         """Run the test command inside the sandbox; same parsing as on the host."""
         # The host interpreter's path means nothing in a container; "python" is
-        # first on the sandbox's PATH in both backends.
-        command = ["python" if part == sys.executable else part for part in cfg.command]
-        result = self.sandbox.run(shlex.join(command), timeout_sec=cfg.timeout_sec)
+        # first on the sandbox's PATH in both backends. A project venv's python
+        # stays (Seatbelt), and the sandbox is told to let it read that env.
+        command = self._sandbox_argv(list(cfg.command))
+        shell = shlex.join(command)
+        if cfg.runner == "pytest":
+            mount = getattr(self.sandbox, "MOUNT", None)
+            mount = mount if isinstance(mount, str) and mount else None
+            ws = str(self.project_root.resolve())
+            if hasattr(self.sandbox, "allow_read"):
+                roots = list(self.test_env.read_roots)
+                if not mount and self.test_env.remap_from(ws):
+                    roots.append(self.test_env.env_vars(ws)["PYTHONPATH"].split(os.pathsep)[0])
+                if roots:
+                    self.sandbox.allow_read(roots)
+            shell = f"{self.test_env.shell_prefix(ws, mount)} {shell}"
+        result = self.sandbox.run(shell, timeout_sec=cfg.timeout_sec)
         if result.timed_out:
             return TestResult(
                 timed_out=True,
@@ -416,10 +556,17 @@ class TestRunner:
             )
         if "No module named pytest" in result.stderr:
             # Nothing ran (e.g. a container image without pytest): no evidence.
-            return TestResult(
-                raw_output=result.stderr[-2000:], test_command=command, no_tests_found=True
-            )
+            return self._no_pytest(result.stderr, command)
         return self._parse(cfg, result.stdout, result.stderr, getattr(result, "exit_code", None))
+
+    def _no_pytest(self, stderr: str, command: List[str]) -> TestResult:
+        return TestResult(
+            raw_output=stderr[-2000:], test_command=command, no_tests_found=True,
+            infra_error=True,
+            infra_reason=f"pytest is not installed in the test environment ({command[0]}); "
+                         "install it there or set AWOS_TEST_COMMAND",
+            env_desc=self.test_env.describe() if command else "",
+        )
 
     def _parse(
         self, cfg: TestConfig, stdout: str, stderr: str, exit_code: Optional[int] = None
@@ -518,9 +665,16 @@ class TestRunner:
         # Search each component independently so order doesn't matter.
         summary_match = re.search(r"in\s+[\d.]+s", combined)
         if summary_match or "no tests ran" in combined.lower():
-            passed_match = re.search(r"(\d+)\s+passed", combined, re.IGNORECASE)
-            failed_match = re.search(r"(\d+)\s+failed", combined, re.IGNORECASE)
-            errors_match = re.search(r"(\d+)\s+errors?", combined, re.IGNORECASE)
+            # Count from pytest's final summary line when there is one: the
+            # short summary above it ("assert 1 == 0\nFAILED tests/...") would
+            # otherwise read as "0 failed". Same line, lower case, one space.
+            final = [ln for ln in combined.splitlines()
+                     if re.search(r"\d+ (passed|failed|errors?)\b", ln)
+                     and re.search(r"\bin\s+[\d.]+s\b", ln)]
+            scope = final[-1] if final else combined
+            passed_match = re.search(r"(\d+)[ \t]+passed", scope, re.IGNORECASE)
+            failed_match = re.search(r"(\d+)[ \t]+failed", scope, re.IGNORECASE)
+            errors_match = re.search(r"(\d+)[ \t]+errors?", scope, re.IGNORECASE)
 
             passed = int(passed_match.group(1)) if passed_match else 0
             failed = int(failed_match.group(1)) if failed_match else 0

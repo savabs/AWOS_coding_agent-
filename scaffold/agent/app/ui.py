@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import unicodedata
 from typing import Optional, TextIO
 
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
@@ -21,6 +22,71 @@ _STYLES = {
 }
 
 _MAX_HISTORY = 200
+
+
+def char_width(ch: str) -> int:
+    """Terminal columns one character takes: 2 for wide (CJK, most emoji), 0 for
+    combining marks / zero-width joiners / variation selectors, else 1."""
+    if not ch:
+        return 0
+    o = ord(ch)
+    if o in (0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF) or 0xFE00 <= o <= 0xFE0F \
+            or 0xE0100 <= o <= 0xE01EF:
+        return 0
+    if unicodedata.combining(ch) or unicodedata.category(ch) in ("Mn", "Me", "Cf"):
+        return 0
+    if o < 0x20 or 0x7F <= o < 0xA0:
+        return 0
+    if unicodedata.east_asian_width(ch) in ("W", "F"):
+        return 2
+    if 0x1F300 <= o <= 0x1FAFF:   # pictographs some Unicode tables mark neutral
+        return 2
+    return 1
+
+
+def display_width(text: str) -> int:
+    """Columns `text` takes on screen (no ANSI codes expected)."""
+    return sum(char_width(c) for c in text)
+
+
+def edit_window(chars: list, cur: int, avail: int) -> tuple[int, int, int]:
+    """
+    The slice chars[start:end] the line editor shows in `avail` columns so the
+    cursor (before chars[cur]) stays visible, plus how many columns the cursor
+    sits left of the slice's end. Widths are display columns, not characters.
+    """
+    n = len(chars)
+    widths = [char_width(c) for c in chars]
+    if sum(widths) <= avail:
+        start, end = 0, n
+    else:
+        # the cursor cell needs room: the char under it, or one column at the end
+        need = widths[cur] if cur < n else 1
+        start, used = cur, need
+        while start > 0 and used + widths[start - 1] <= avail:
+            start -= 1
+            used += widths[start]
+        end, used = start, 0
+        while end < n and used + widths[end] <= avail:
+            used += widths[end]
+            end += 1
+        end = max(end, cur)
+    back = sum(widths[cur:end])
+    return start, end, back
+
+
+def fit_width(text: str, width: int) -> str:
+    """Cut `text` to at most `width` columns, ending in "…" when cut."""
+    if display_width(text) <= width:
+        return text
+    out, used = [], 0
+    for ch in text:
+        w = char_width(ch)
+        if used + w > max(0, width - 1):
+            break
+        out.append(ch)
+        used += w
+    return "".join(out) + "…"
 
 
 class Term:
@@ -93,10 +159,10 @@ class Term:
         # Keep the status line on one row; count only visible characters.
         from .progress import strip_ansi
         width = self.width() - 1
-        if len(strip_ansi(text)) <= width:
-            return text
         plain = strip_ansi(text)
-        return plain[: max(0, width - 1)] + "…"
+        if display_width(plain) <= width:
+            return text
+        return fit_width(plain, width)
 
     # ── input ────────────────────────────────────────────────────────────
     def set_prompt(self, prompt: str) -> None:
@@ -148,11 +214,11 @@ class Term:
     def _redraw(self) -> None:
         from .progress import strip_ansi
         prompt = self.prompt or ""
-        avail = max(10, self.width() - len(strip_ansi(prompt)) - 1)
-        text, cur = "".join(self._buf), self._cur
-        start = 0 if len(text) <= avail else max(0, min(cur - avail + 1, len(text) - avail))
-        shown = text[start:start + avail]
-        back = len(shown) - (cur - start)
+        # Columns, not characters: a CJK character or emoji takes two cells,
+        # a combining mark none, so the cursor lands where the text really is.
+        avail = max(10, self.width() - display_width(strip_ansi(prompt)) - 1)
+        start, end, back = edit_window(self._buf, self._cur, avail)
+        shown = "".join(self._buf[start:end])
         self._write("\r\x1b[2K" + prompt + shown + (f"\x1b[{back}D" if back > 0 else ""))
 
     def _edit_line(self, prompt: str) -> str:

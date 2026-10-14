@@ -126,6 +126,97 @@ def test_worker_that_exits_at_once_is_reported(tmp_path):
     assert workerctl.ensure_worker(tmp_path, spawn=spawn, wait_sec=3) == "failed"
 
 
+# ── v0.2.1: the open app re-checks the worker periodically ──────────────────
+
+
+def _app(root: Path, check_sec: float = 15.0):
+    import io
+
+    from scaffold.agent.app.session import App
+    from scaffold.agent.app.ui import Term
+    from scaffold.agent.host.queue import JobQueue
+
+    app = App(root, term=Term(out=io.StringIO(), inp=io.StringIO(), force_plain=True),
+              queue=JobQueue(root / "host"), auto_worker=True)
+    app.worker_check_sec = check_sec
+    return app
+
+
+def _queued():
+    from types import SimpleNamespace
+
+    from scaffold.agent.host.models import QUEUED
+    return [SimpleNamespace(state=QUEUED)]
+
+
+@pytest.fixture
+def counted_spawn(monkeypatch, procs):
+    calls = []
+    lock = threading.Lock()
+
+    def spawn(cmd, root):
+        with lock:
+            calls.append(list(cmd))
+        p = _holder(root)
+        procs.append(p)
+        return p
+
+    monkeypatch.delenv("AWOS_APP_NO_WORKER", raising=False)
+    monkeypatch.setattr(workerctl, "_spawn_detached", spawn)
+    return calls
+
+
+def test_periodic_check_restarts_a_dead_worker_once(tmp_path, counted_spawn, procs):
+    app = _app(tmp_path)
+    assert app.check_worker(_queued(), force=True) == "started"
+    assert len(counted_spawn) == 1
+    assert "started it again" in app.term.out.getvalue()
+    # worker alive now: the next check does nothing
+    assert app.check_worker(_queued(), force=True) is None
+    assert len(counted_spawn) == 1
+    # the worker dies mid-session: the next periodic check starts one again
+    procs[0].kill()
+    procs[0].wait()
+    assert app.check_worker(_queued(), force=True) == "started"
+    assert len(counted_spawn) == 2
+
+
+def test_periodic_check_waits_for_its_interval(tmp_path, counted_spawn):
+    app = _app(tmp_path, check_sec=15.0)
+    assert app.check_worker(_queued()) is None        # opened just now: too early
+    assert counted_spawn == []
+    app._last_worker_check -= 16                      # 16 s later
+    assert app.check_worker(_queued()) == "started"
+    assert len(counted_spawn) == 1
+
+
+def test_periodic_check_leaves_an_idle_queue_alone(tmp_path, counted_spawn):
+    app = _app(tmp_path)
+    assert app.check_worker([], force=True) is None
+    assert counted_spawn == []
+
+
+def test_periodic_checks_from_two_windows_start_one_worker(tmp_path, counted_spawn):
+    apps = [_app(tmp_path) for _ in range(3)]
+    results = []
+    threads = [threading.Thread(target=lambda a=a: results.append(a.check_worker(_queued(), force=True)))
+               for a in apps]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(counted_spawn) == 1                    # single-instance guard holds
+    assert results.count("started") == 1
+
+
+def test_tick_runs_the_periodic_check(tmp_path, monkeypatch):
+    app = _app(tmp_path)
+    seen = []
+    monkeypatch.setattr(app, "check_worker", lambda jobs=None, force=False: seen.append(jobs))
+    app.tick()
+    assert len(seen) == 1
+
+
 def test_worker_command_runs_serve_worker(monkeypatch):
     monkeypatch.setenv("AWOS_APP_WORKER_ARGS", "--poll 0.2")
     cmd = workerctl.worker_command()

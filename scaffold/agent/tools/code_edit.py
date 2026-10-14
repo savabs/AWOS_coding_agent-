@@ -258,6 +258,15 @@ class RunTestsTool(Tool):
             changed_files=changed
         )
 
+        if getattr(result, "infra_error", False):
+            # The tests could not run at all (environment, sandbox): say why,
+            # instead of "no tests", so the agent does not chase a ghost.
+            return ToolResult.ok(
+                "The tests could not run (not a test failure): "
+                f"{getattr(result, 'infra_reason', '')}"
+                + (f"\nTest environment: {result.env_desc}" if getattr(result, "env_desc", "") else ""),
+                {"no_tests_found": True, "infra_error": True, "pass_rate": None},
+            )
         if getattr(result, "no_tests_found", False):
             return ToolResult.ok(
                 "No tests were found for this project.",
@@ -265,9 +274,14 @@ class RunTestsTool(Tool):
             )
 
         passed = getattr(result, "passed", 0)
-        failed = getattr(result, "failed", 0)
+        failed = getattr(result, "failed", 0) + getattr(result, "errors", 0)
         pass_rate = getattr(result, "pass_rate", None)
         summary = f"{passed} passed, {failed} failed."
+        pre = getattr(result, "preexisting", None) or []
+        if pre:
+            summary += (f" ({len(pre)} more fail at the base commit too: pre-existing, not "
+                        f"caused by your edit, not counted: {', '.join(pre[:5])}"
+                        + (" ..." if len(pre) > 5 else "") + ")")
 
         if failed:
             output = getattr(result, "raw_output", "") or ""

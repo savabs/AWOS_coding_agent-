@@ -106,7 +106,9 @@ def test_goal_check_skipped_only_when_tests_exist(tmp_path, monkeypatch):
 def test_verify_tests_reports_counts(tmp_path):
     (tmp_path / "test_x.py").write_text("def test_ok():\n    pass\n\ndef test_bad():\n    assert 0\n")
     res = worker.verify_tests(str(tmp_path))
-    assert res == {"status": "failed", "passed": 1, "failed": 1, "command": "python -m pytest -q"}
+    assert (res["status"], res["passed"], res["failed"]) == ("failed", 1, 1)
+    assert res["command"].endswith("-m pytest") and res["env_source"] == "awos"
+    assert res["line"].startswith("full suite: 1 passed, 1 new failure")
     (tmp_path / "test_x.py").write_text("def test_ok():\n    pass\n")
     assert worker.verify_tests(str(tmp_path))["status"] == "passed"
 

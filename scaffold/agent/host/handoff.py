@@ -179,7 +179,15 @@ def _git_bytes(args: List[str], *, cwd: Optional[str] = None,
     return proc.stdout
 
 
+#: .env.<suffix> files that are documentation, not secrets: handed off like
+#: any file (their content still goes through the secret scan).
+EXAMPLE_ENV_SUFFIXES = ("example", "sample", "template", "dist", "defaults")
+
+
 def _is_excluded(path: str) -> bool:
+    name = path.rsplit("/", 1)[-1]
+    if name.startswith(".env.") and name[len(".env."):] in EXAMPLE_ENV_SUFFIXES:
+        return False
     return any(fnmatch.fnmatch(path, g) for g in EXCLUDE_GLOBS)
 
 
@@ -189,6 +197,54 @@ def host_root() -> Path:
 
 def _now_iso() -> str:
     return _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
+
+
+#: Job states whose branch is handed off with a suffix: the work is kept
+#: whole (never half-reverted) but clearly labelled as not finished.
+UNFINISHED_SUFFIX = {"failed": "-failed", "cancelled": "-cancelled"}
+SUBJECT_MAX = 72
+_URL = re.compile(r"https?://\S+\s*[:;,]?")
+
+
+def commit_subject(goal: str, summary: Optional[str] = None, limit: int = SUBJECT_MAX) -> str:
+    """A concise one-line summary: the model's own summary when given, else the
+    goal's first sentence; URLs dropped, at most `limit` chars, never cut
+    mid-word."""
+    text = ""
+    for cand in (summary, goal):
+        cand = " ".join(str(cand or "").split())
+        cand = _URL.sub("", cand)
+        cand = re.sub(r"\s+([:;,.])", r"\1", cand)
+        cand = re.sub(r"^[\s:;,.-]+", "", cand)
+        cand = " ".join(cand.split())
+        if cand:
+            text = cand
+            break
+    if not text:
+        return "AWOS job"
+    m = re.search(r"(?<=[^\s.])[.!?](?=\s+[A-Z(\[]|$)", text)
+    if m:
+        text = text[:m.start()]
+    text = re.sub(r"(\s*[:;,-])+$", "", text).strip()
+    if len(text) <= limit:
+        return text or "AWOS job"
+    cut = text[:limit - 1]
+    if " " in cut:
+        cut = cut[:cut.rfind(" ")]
+    return re.sub(r"(\s*[:;,-])+$", "", cut).strip() + "\u2026"
+
+
+def default_branch(repo: str) -> Optional[str]:
+    """The repo's default branch: origin/HEAD, else main/master."""
+    ref = _git(["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"], cwd=repo,
+               check=False).strip()
+    if ref:
+        return ref.split("/", 1)[1] if "/" in ref else ref
+    for name in ("main", "master"):
+        if _git(["rev-parse", "--verify", "--quiet", f"refs/heads/{name}"], cwd=repo,
+                check=False).strip():
+            return name
+    return None
 
 
 def _minutes(job: Dict[str, Any], outcome: Dict[str, Any]) -> Optional[float]:
@@ -487,7 +543,9 @@ def _render_report(job: Dict[str, Any], outcome: Dict[str, Any], info: Dict[str,
     goal = str(job.get("goal", ""))
     fence = "````" if "```" in goal else "```"
     tests = outcome.get("tests") or {}
-    if isinstance(tests, dict) and tests:
+    if isinstance(tests, dict) and tests.get("line"):
+        t_line = str(tests["line"])
+    elif isinstance(tests, dict) and tests:
         t_line = f"{tests.get('status', 'unknown')}"
         if "passed" in tests or "failed" in tests:
             t_line += f" — passed {tests.get('passed', '?')}, failed {tests.get('failed', '?')}"
@@ -502,6 +560,13 @@ def _render_report(job: Dict[str, Any], outcome: Dict[str, Any], info: Dict[str,
         cost_line += f" of ${float(budget):.2f} budget"
     minutes = info.get("minutes")
     branch = info.get("branch")
+    state = str(outcome.get("state") or "")
+    status = info["status"]
+    if state in UNFINISHED_SUFFIX:
+        status = (f"{state.upper()}: the job did not finish. "
+                  + ("The branch holds EVERYTHING it did (nothing was rolled back), "
+                     "so you can salvage it; it is not verified." if branch else
+                     "No branch was created."))
     lines = [
         f"# AWOS job {job.get('id', '?')}",
         "",
@@ -511,7 +576,7 @@ def _render_report(job: Dict[str, Any], outcome: Dict[str, Any], info: Dict[str,
         goal,
         fence,
         "",
-        f"- **Status:** {info['status']}",
+        f"- **Status:** {status}",
         f"- **Branch:** `{branch}`" if branch else "- **Branch:** none created",
         f"- **Base commit:** `{info.get('base_commit') or '?'}`",
         f"- **Tests:** {t_line}",
@@ -519,6 +584,8 @@ def _render_report(job: Dict[str, Any], outcome: Dict[str, Any], info: Dict[str,
         f"- **Minutes:** {minutes if minutes is not None else 'not reported'}",
         "",
     ]
+    if isinstance(tests, dict) and tests.get("notes"):
+        lines += ["Test environment notes:"] + [f"- {n}" for n in tests["notes"]] + [""]
     if outcome.get("summary"):
         lines += ["## Summary", "", str(outcome["summary"]), ""]
     lines += ["## What changed", ""]
@@ -566,7 +633,8 @@ def finish(job: Dict[str, Any], workspace: str, outcome: Dict[str, Any], *,
     id8 = job_id.replace("-", "")[:8]
     if not id8:
         raise HandoffError("job id needs at least one character other than '-'")
-    branch = f"{BRANCH_PREFIX}{id8}"
+    state = str(outcome.get("state") or "")
+    branch = f"{BRANCH_PREFIX}{id8}{UNFINISHED_SUFFIX.get(state, '')}"
     jdir = Path(job_dir) if job_dir else host_root() / "jobs" / job_id
     jdir.mkdir(parents=True, exist_ok=True)
     report_path = jdir / "report.md"
@@ -593,7 +661,7 @@ def finish(job: Dict[str, Any], workspace: str, outcome: Dict[str, Any], *,
         base = _git(["rev-parse", "--verify", f"{base_ref}^{{commit}}"], cwd=repo).strip()
         info["base_commit"] = base
         cur = _git(["symbolic-ref", "--short", "-q", "HEAD"], cwd=repo, check=False).strip()
-        review_base = cur or base[:12]
+        review_base = default_branch(repo) or cur or base[:12]
         base_tree = _git(["rev-parse", f"{base}^{{tree}}"], cwd=repo).strip()
 
         repo_objects = _git(["rev-parse", "--git-path", "objects"], cwd=repo).strip()
@@ -622,8 +690,13 @@ def finish(job: Dict[str, Any], workspace: str, outcome: Dict[str, Any], *,
                 diffstat = _git(["diff-tree", "--stat", "--no-color", "--no-ext-diff",
                                  "--no-textconv", base_tree, tree],
                                 cwd=repo, env=senv)
-                msg = (f"awos: {str(job.get('goal', '')).strip().splitlines()[0][:72] if str(job.get('goal', '')).strip() else 'job'}"
-                       f"\n\nAWOS-Job: {job_id}\n")
+                summary = outcome.get("commit_summary") if state == "done" else None
+                subject = commit_subject(str(job.get("goal", "")), summary)
+                if state in UNFINISHED_SUFFIX:
+                    subject = commit_subject(f"[{state}] {subject}", None)
+                goal_text = str(job.get("goal", "")).strip()
+                msg = (f"{subject}\n\n{goal_text}\n\nAWOS-Job: {job_id}\n"
+                       f"AWOS-Status: {state or 'unknown'}\n")
                 msg = redact_secrets(msg, env)
                 ref = f"refs/heads/{branch}"
                 existing = _git(["rev-parse", "-q", "--verify", ref], cwd=repo, check=False).strip()
@@ -641,7 +714,8 @@ def finish(job: Dict[str, Any], workspace: str, outcome: Dict[str, Any], *,
                                   env=dict(senv, **_GIT_IDENTITY), input_text=msg).strip()
                     _promote_objects(repo, senv, commit, base)
                     _git(["update-ref", "-m", "awos handoff", ref, commit, ""], cwd=repo)
-                info.update(status="handed_off", branch=branch, commit=commit)
+                info.update(status="handed_off_failed" if state in UNFINISHED_SUFFIX
+                            else "handed_off", branch=branch, commit=commit, job_state=state)
                 overlap = sorted(set(_dirty_files(repo)) & set(files))
                 if overlap:
                     info["warnings"].append(
@@ -665,8 +739,12 @@ def finish(job: Dict[str, Any], workspace: str, outcome: Dict[str, Any], *,
     report = redact_secrets(report, env)  # always, whatever the scan found
     report_path.write_text(report, encoding="utf-8")
 
+    info["review_base"] = review_base
     if info["status"] == "handed_off":
         info["summary"] = f"{len(info['files'])} file(s) on {branch}; review: git diff {review_base}...{branch}"
+    elif info["status"] == "handed_off_failed":
+        info["summary"] = (f"job {state}; everything it did ({len(info['files'])} file(s)) is on "
+                           f"{branch} for salvage, unverified; review: git diff {review_base}...{branch}")
     elif info["status"] == "no_changes":
         info["summary"] = "no changes to hand off"
     elif info["status"] == "blocked_secret":

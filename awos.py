@@ -1778,10 +1778,10 @@ def build_parser() -> argparse.ArgumentParser:
             "  awos submit --repo . --budget 0.50 \"fix the failing test\"\n"
             "  awos serve --worker --once              # run queued jobs, then exit\n"
             "  awos status --digest                    # what happened\n"
-            "  git diff HEAD...awos/<id>               # review the result branch\n"
+            "  git diff main...awos/<id>               # review (your default branch; the report names it)\n"
             "\n"
             f"Keys file: {_paths.dotenv_path()} (optional; exported vars win).\n"
-            "Docs: https://github.com/savabs/AWOS_coding_agent-/blob/main/docs/INSTALL.md"
+            f"Docs: {_paths.docs_url()}"
         ),
     )
     sub = parser.add_subparsers(dest="command", help="Available commands")

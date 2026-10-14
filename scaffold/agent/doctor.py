@@ -74,7 +74,7 @@ def check_install(which=shutil.which) -> Check:
     detail = f"{mode} at {where}; `awos` " + (f"on PATH ({exe})" if exe else "not on PATH")
     return Check("Install", bool(exe), detail,
                  "" if exe else "add the install dir to PATH (the installer printed the line), "
-                                "or reinstall: curl -fsSL https://awos.tirramind.com/install.sh | sh",
+                                f"or reinstall: curl -fsSL {_paths.install_url()} | sh",
                  required=False)
 
 
@@ -131,6 +131,13 @@ def check_repo(repo: Path) -> list[Check]:
     unsupported = [n for n in notes if "not supported" in n]
     if cmd:
         out.append(Check("Test command", True, cmd, required=False))
+        env = _ob.detect_test_env(repo)
+        if env is not None:
+            # v0.2.2: tests run in the project's env, not AWOS's Python.
+            out.append(Check("Test environment", not env.is_fallback, env.describe(),
+                             "" if not env.is_fallback else
+                             "create the project's .venv (with pytest), or set AWOS_TEST_COMMAND",
+                             required=False))
     else:
         out.append(Check("Test command", False,
                          "no pytest tests found" + (f" ({'; '.join(unsupported)})" if unsupported else ""),
@@ -205,6 +212,8 @@ def format_checks(checks: list[Check]) -> str:
     lines.append("")
     lines.append("Ready: everything required is OK. Run: awos" if not bad
                  else f"Not ready: {len(bad)} required check(s) failed (see fix lines above).")
+    if bad:
+        lines.append(f"Help: {_paths.docs_url()}")
     return "\n".join(lines)
 
 

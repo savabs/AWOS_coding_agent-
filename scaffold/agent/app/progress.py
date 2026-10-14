@@ -5,12 +5,21 @@ The worker appends the orchestrator child's output to <job_dir>/worker.log and
 its own steps to <job_dir>/journal.jsonl. `ProgressTranslator.translate(line)`
 maps one raw line to a short plain-English update (or None for noise), and
 `JobTail` follows both files by byte offset so each line is read once.
+
+The two files are written by different processes, so `JobTail.poll` merges
+their new lines by timestamp before translating: worker.log lines carry a
+local "HH:MM:SS" prefix or a "===== child, attempt N at <iso> =====" header,
+journal records an ISO "ts". A line without a stamp of its own (the
+orchestrator child's output) inherits the last stamp seen in its file; ties
+keep file order, worker.log first.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import time
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -20,6 +29,38 @@ _AGENT_TOOL = re.compile(r"^\[agent\] t(\d+) ([A-Za-z_][\w]*)\((.*)\)\s*->\s*(\w
 _AGENT_SAYS = re.compile(r"^\[agent\] t\d+ says:\s*(.+)")
 _AGENT_STOP = re.compile(r"^\[agent\] stop:\s*(\w+)")
 _TESTS = re.compile(r"Tests:\s*(\d+) passed,\s*(\d+) failed")
+_CLOCK = re.compile(r"^(\d\d):(\d\d):(\d\d)\s")
+_ATTEMPT_HEADER = re.compile(r"^=====.*\bat (\d{4}-\d\d-\d\dT[0-9:.]+(?:[+-]\d\d:\d\d|Z)?)")
+
+
+def _iso_epoch(text: str) -> Optional[float]:
+    try:
+        dt = datetime.fromisoformat(text.strip().replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+    return dt.timestamp()   # naive = local time, as the writers use
+
+
+def _clock_epoch(h: int, m: int, s: int, ref: float) -> float:
+    """Local HH:MM:SS -> epoch, on the day of `ref` (yesterday if that lands in the future)."""
+    lt = time.localtime(ref)
+    stamp = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, h, m, s, 0, 0, -1))
+    if stamp > ref + 3600:   # a pre-midnight line read just after midnight
+        stamp -= 86400
+    return stamp
+
+
+def log_line_time(raw: str, now: Optional[float] = None) -> Optional[float]:
+    """Epoch seconds a worker.log line was written, or None if it carries no stamp."""
+    line = strip_ansi(raw).strip()
+    m = _CLOCK.match(line)
+    if m:
+        return _clock_epoch(int(m.group(1)), int(m.group(2)), int(m.group(3)),
+                            time.time() if now is None else now)
+    m = _ATTEMPT_HEADER.match(line)
+    if m:
+        return _iso_epoch(m.group(1))
+    return None
 
 
 def strip_ansi(text: str) -> str:
@@ -203,6 +244,7 @@ class JobTail:
         self.tr = translator or ProgressTranslator()
         self._offsets: dict[str, int] = {}
         self._partial: dict[str, str] = {}
+        self._last_ts: dict[str, float] = {}
         self._last: Optional[str] = None
         self.last_update: Optional[str] = None
 
@@ -226,17 +268,44 @@ class JobTail:
         self._partial[name] = lines.pop()   # an unfinished last line waits
         return lines
 
+    def _stamped(self, name: str, stamp_of) -> list[tuple[float, str]]:
+        """New lines of `name` with a timestamp each (inherited when missing)."""
+        out = []
+        last = self._last_ts.get(name, float("-inf"))
+        for line in self._new_lines(name):
+            ts = stamp_of(line)
+            if ts is None:
+                ts = last
+            else:
+                last = max(last, ts)   # one file's stamps never go backwards
+                ts = last
+            out.append((ts, line))
+        self._last_ts[name] = last
+        return out
+
+    @staticmethod
+    def _journal_time(line: str) -> Optional[float]:
+        try:
+            return _iso_epoch(json.loads(line).get("ts") or "")
+        except (ValueError, TypeError, AttributeError):
+            return None
+
     def poll(self) -> list[str]:
+        now = time.time()
+        log = [(ts, 0, i, line) for i, (ts, line) in
+               enumerate(self._stamped("worker.log", lambda l: log_line_time(l, now)))]
+        jnl = [(ts, 1, i, line) for i, (ts, line) in
+               enumerate(self._stamped("journal.jsonl", self._journal_time))]
         out: list[str] = []
-        for line in self._new_lines("worker.log"):
-            msg = self.tr.translate(line)
-            if msg:
-                out.append(msg)
-        for line in self._new_lines("journal.jsonl"):
-            try:
-                msg = self.tr.translate_journal(json.loads(line))
-            except (ValueError, TypeError, AttributeError):
-                msg = None
+        # Merge by time; ties keep each file's own order (worker.log first).
+        for _ts, src, _i, line in sorted(log + jnl, key=lambda r: (r[0], r[1], r[2])):
+            if src == 0:
+                msg = self.tr.translate(line)
+            else:
+                try:
+                    msg = self.tr.translate_journal(json.loads(line))
+                except (ValueError, TypeError, AttributeError):
+                    msg = None
             if msg:
                 out.append(msg)
         deduped = []
@@ -250,7 +319,9 @@ class JobTail:
 
     def skip_to_end(self) -> None:
         """Start following from now (used when re-attaching to an old job)."""
+        now = time.time()
         for name in ("worker.log", "journal.jsonl"):
+            self._last_ts[name] = now   # unstamped lines from here on are "now or later"
             try:
                 self._offsets[name] = (self.job_dir / name).stat().st_size
             except OSError:
