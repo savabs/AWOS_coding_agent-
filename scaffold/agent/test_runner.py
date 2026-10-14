@@ -164,9 +164,22 @@ _NO_CONFIG_ARGS = ["-c", os.devnull, "--rootdir=.", "--confcutdir=."]
 _PYTEST_CRASH_CODES = {2, 3, 4}
 
 
+
+# A project's pytest addopts can name a plugin that is not installed (most
+# often `--cov` without pytest-cov): pytest then exits with a usage error and
+# runs nothing. ADDOPTS_OVERRIDE clears them for AWOS's own runs.
+ADDOPTS_OVERRIDE = ["-o", "addopts="]
+_ADDOPTS_ERROR = re.compile(r"error: unrecognized arguments:|unrecognized arguments: --")
+
+
+def _is_addopts_usage_error(output: str) -> bool:
+    return bool(_ADDOPTS_ERROR.search(output or ""))
+
 class TestRunner:
     """Language-agnostic test executor with auto-detection."""
     __test__ = False  # suppress pytest collection warning
+    # Set once the project's addopts caused a pytest usage error (_execute).
+    _drop_addopts = False
 
     def __init__(
         self,
@@ -319,6 +332,8 @@ class TestRunner:
         base = command + ["-p", "no:cacheprovider", "--color=no", "-rfE"]
         if not self._has_pytest_config():
             base += _NO_CONFIG_ARGS
+        if self._drop_addopts:
+            base += ADDOPTS_OVERRIDE
         return base
 
     def run_targets(self, targets: List[str], timeout_sec: Optional[int] = None,
@@ -572,6 +587,27 @@ class TestRunner:
     # ── Execution ───────────────────────────────────────────────────────
 
     def _execute(self, cfg: TestConfig) -> TestResult:
+        """
+        Run the configured test command and parse output. A pytest usage error
+        from the project's own addopts (e.g. `--cov` in pytest.ini without
+        pytest-cov installed) is retried once with `-o addopts=`, and later
+        runs keep that override; otherwise the run reports nothing passed.
+        """
+        if cfg.runner == "pytest" and self._drop_addopts and ADDOPTS_OVERRIDE[1] not in cfg.command:
+            cfg = TestConfig(cfg.runner, list(cfg.command) + ADDOPTS_OVERRIDE, cfg.timeout_sec)
+        result = self._execute_once(cfg)
+        if (cfg.runner == "pytest" and not self._drop_addopts
+                and _is_addopts_usage_error(result.raw_output or "")):
+            self._drop_addopts = True
+            logger.warning("[test_runner] pytest rejected the project's addopts (a plugin it "
+                           "names is not installed); rerunning with -o addopts=")
+            print("[TESTS] the project's pytest addopts need a plugin that is not installed; "
+                  "running without them (-o addopts=)")
+            result = self._execute_once(TestConfig(cfg.runner, list(cfg.command) + ADDOPTS_OVERRIDE,
+                                                   cfg.timeout_sec))
+        return result
+
+    def _execute_once(self, cfg: TestConfig) -> TestResult:
         """Run the configured test command and parse output."""
         logger.info("[test_runner] Running: %s (timeout=%ds)", " ".join(cfg.command), cfg.timeout_sec)
         if self.sandbox is not None:
