@@ -33,6 +33,7 @@ import filecmp
 import fnmatch
 import importlib.util
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -178,7 +179,7 @@ def merge(out: Path, sources: list[Path], arms: str = "off,mini") -> dict:
 
 
 CONFIG_KEYS = ("ARMS", "N_SHARDS", "SHARDS", "CAP", "LIMIT", "REPEAT", "MODEL",
-               "DATA_TAG", "DATA_ASSET")
+               "DATA_TAG", "DATA_ASSET", "SERIES_DIR")
 
 
 def read_config(path: Path) -> dict:
@@ -214,7 +215,15 @@ def read_config(path: Path) -> dict:
             "cap_shard": f"{cap / n:.4f}", "limit": limit, "repeat": int(raw.get("REPEAT") or 1),
             "model": raw.get("MODEL") or "claude-haiku-5-5",
             "data_tag": raw.get("DATA_TAG") or "bench-data-fresh-v1",
-            "data_asset": raw.get("DATA_ASSET") or "fresh_series.tar.gz.enc"}
+            "data_asset": raw.get("DATA_ASSET") or "fresh_series.tar.gz.enc",
+            # the dir the asset unpacks to under ~/.awos-harness
+            "series_dir": _series_dir(raw.get("SERIES_DIR") or "fresh_series")}
+
+
+def _series_dir(name: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", name) or name in (".", ".."):
+        raise ValueError(f"SERIES_DIR must be a plain directory name, got {name!r}")
+    return name
 
 
 def check_data(series_root: Path, min_issues: int = 15, shard: str | None = None,

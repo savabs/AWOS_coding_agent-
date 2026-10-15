@@ -30,6 +30,7 @@ jobs:
       model: ${{ steps.cfg.outputs.model }}
       data_tag: ${{ steps.cfg.outputs.data_tag }}
       data_asset: ${{ steps.cfg.outputs.data_asset }}
+      series_dir: ${{ steps.cfg.outputs.series_dir }}
     steps:
       - uses: actions/checkout@v4
       - id: cfg
@@ -54,6 +55,7 @@ jobs:
       LIMIT: ${{ needs.config.outputs.limit }}
       REPEAT: ${{ needs.config.outputs.repeat }}
       MODEL: ${{ needs.config.outputs.model }}
+      SERIES_DIR: ${{ needs.config.outputs.series_dir }}
       HOMEBREW_NO_AUTO_UPDATE: "1"
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
     steps:
@@ -73,7 +75,7 @@ jobs:
           # harness_mini's venv (~/.awos-harness/venvs/mini) and its sandbox
           # profile (denies reads of ~/.awos-harness) are HOME-relative.
           {
-            echo "SERIES_ROOT=$HOME/.awos-harness/fresh_series"
+            echo "SERIES_ROOT=$HOME/.awos-harness/$SERIES_DIR"
             echo "OUT=$HOME/.awos-harness/ladder_haiku"
           } >> "$GITHUB_ENV"
           mkdir -p "$HOME/.awos-harness/ladder_haiku"
