@@ -60,3 +60,18 @@ counted**; H1 restarts fresh, so every counted row comes from one AWOS build.
   time is reported descriptively only, and the hypotheses are judged on solve rate and $ as before.
 - **Rejected:** pytest-xdist for the grader. The astroid suite fails under `-n 4` / `-n 8` (19 and 8
   spurious failures), so the grader stays serial.
+
+## Amendment 2 (2026-10-15, before the re-run): H1b, in-sample re-test after engine fixes
+
+H1 was judged **REJECT** (AWOS 33/40 vs mini 39/40; `docs/memory/runs/ladder_h1_haiku_2026-10-15.md`).
+Three engine fixes target the observed early-stop failures: a full-suite success gate, a bounded
+verify loop when the acceptance gate is inactive, and extra repair rounds while kept acceptance tests
+still fail and progress is being made.
+
+- **H1b** re-runs both arms fresh (`off`, `mini`) on the same 40 issues, same model, same runner
+  (GitHub Actions, 8 shards, $5 cap), and is judged by the same T1 rule (`--a mini --b off --cost-budget 0.5`).
+- **This is in-sample.** The fixes were designed after reading these 40 issues' failure logs, so a
+  KEEP on H1b is weaker evidence than a KEEP on unseen issues. It would be reported as
+  "the fixes close the gap on the issues they were aimed at", and **confirmation requires a held-out
+  set** of fresh issues not used for any design decision. H1 stays REJECT on the record whatever H1b shows.
+- The engine commit is recorded in the result note; mini is unchanged (2.4.6).
