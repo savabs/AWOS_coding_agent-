@@ -75,3 +75,15 @@ still fail and progress is being made.
   "the fixes close the gap on the issues they were aimed at", and **confirmation requires a held-out
   set** of fresh issues not used for any design decision. H1 stays REJECT on the record whatever H1b shows.
 - The engine commit is recorded in the result note; mini is unchanged (2.4.6).
+
+## Amendment 3 (2026-10-15, before any held-out data): H1c, held-out confirmation
+
+- **Set:** `heldout_series`, 30 issues from PRs merged 2026-09-11 to 2026-10-14 in 11 repos (≤ 4 per
+  repo), none used for any AWOS design decision, validated with the same `job_series.py validate`.
+  Built separately from the fresh set; one hidden test (markdown_1631, a performance bug) carries a
+  5 s `pytest.mark.timeout`, recorded in its `SOURCE.md`.
+- **H1c:** AWOS (engine with the amendment-2 fixes) vs mini-swe-agent 2.4.6, Haiku 5.5, 1 repeat,
+  GitHub Actions 8 shards, $5 cap, judged by the same T1 rule (`--a mini --b off --cost-budget 0.5`).
+- **H1c is the confirmatory test** for the engine fixes; H1b (in-sample) cannot confirm on its own.
+  With n = 30 the MDE is large (~20+ pp), so INCONCLUSIVE is a likely outcome and would be reported as such.
+- Run after H1b finishes, on the same engine commit plus the CI-only SERIES_DIR change (48b78fc).
