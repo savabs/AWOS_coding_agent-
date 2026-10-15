@@ -240,6 +240,14 @@ def build_seatbelt_profile(
     lines.append("(deny lsopen)")
     if not allow_network:
         lines.append("(deny network*)")
+        # Loopback only: unit tests commonly open a localhost server or a
+        # socketpair (boltons' socketutils tests). Denying those fails tests
+        # the change never touched, and the gate then rejects a correct fix.
+        # Per operation, so an outbound connection is allowed only TO
+        # localhost (a combined network* rule also let the internet through).
+        lines.append('(allow network-bind (local ip "localhost:*"))')
+        lines.append('(allow network-inbound (local ip "localhost:*"))')
+        lines.append('(allow network-outbound (remote ip "localhost:*"))')
     return "\n".join(lines) + "\n"
 
 
