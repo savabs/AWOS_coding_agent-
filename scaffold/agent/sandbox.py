@@ -18,6 +18,10 @@ Two backends, one interface:
   network off. Stronger isolation, needs the docker CLI (OrbStack, Docker
   Desktop) and a running daemon.
 
+ContainerSandbox (AWOS_SANDBOX=container, explicit only) runs commands
+directly, for a process that already lives in a disposable task container
+(Harbor / Terminal-Bench: harbor_agents/awos_agent.py).
+
 make_sandbox() picks one; when it returns None the caller must not offer code
 execution at all — there is deliberately no "run unsandboxed" fallback.
 
@@ -592,6 +596,65 @@ def _docker_cli_env() -> dict[str, str]:
     return env
 
 
+# ── Container (already isolated) ─────────────────────────────────────────────
+
+#: AWOS_SANDBOX value that declares "this process already runs inside a
+#: disposable, isolated container (a benchmark task container): run commands
+#: directly". Only this exact explicit value enables ContainerSandbox; "auto"
+#: never picks it, so a laptop can never fall into unsandboxed execution.
+CONTAINER_MODE = "container"
+#: Env names never passed to commands in container mode, so model-written code
+#: cannot read the agent's own credentials.
+_SECRET_ENV_MARKERS = ("API_KEY", "AUTH_TOKEN", "SECRET", "PASSWORD", "ACCESS_KEY",
+                       "SESSION_TOKEN", "OAUTH_TOKEN")
+#: AWOS's own process env that must not leak into the task's commands.
+_AGENT_ONLY_ENV = ("PYTHONPATH", "PYTHONHOME", "PYTHONSAFEPATH", "VIRTUAL_ENV",
+                   "PYTHONNOUSERSITE")
+
+
+def container_mode() -> bool:
+    """True when AWOS_SANDBOX is explicitly "container"."""
+    return (os.environ.get("AWOS_SANDBOX") or "").strip().lower() == CONTAINER_MODE
+
+
+def _container_env() -> dict[str, str]:
+    env = {}
+    for key, value in os.environ.items():
+        upper = key.upper()
+        if upper in _AGENT_ONLY_ENV or upper.startswith("AWOS_"):
+            continue
+        if any(marker in upper for marker in _SECRET_ENV_MARKERS):
+            continue
+        env[key] = value
+    env.setdefault("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+    return env
+
+
+class ContainerSandbox:
+    """
+    Commands run directly, as the current user, in `workspace`: for a process
+    that already lives in a disposable container (e.g. a Terminal-Bench task
+    container driven by Harbor), where the container IS the sandbox. Same
+    interface and output caps as the other backends; no filesystem or network
+    restriction is added (the task may need both). The command env is the
+    process env minus credentials and AWOS's own Python settings.
+    """
+
+    backend = CONTAINER_MODE
+
+    def __init__(self, workspace: str | Path) -> None:
+        self.workspace = Path(workspace).resolve()
+        if not self.workspace.is_dir():
+            raise FileNotFoundError(f"workspace is not a directory: {self.workspace}")
+
+    def run(self, command: str, timeout_sec: int = DEFAULT_TIMEOUT_SEC) -> SandboxResult:
+        return _run_capped(["/bin/sh", "-c", command], timeout_sec, cwd=self.workspace,
+                           env=_container_env())
+
+    def close(self) -> None:
+        pass
+
+
 # ── Selection ────────────────────────────────────────────────────────────────
 
 
@@ -616,13 +679,22 @@ def seatbelt_available() -> bool:
 def make_sandbox(workspace: str | Path, backend: Optional[str] = None) -> Optional[Sandbox]:
     """Return a sandbox for workspace, or None when code must not run.
 
-    backend None reads AWOS_SANDBOX ("auto" | "seatbelt" | "docker" | "none").
-    An explicitly requested backend that is unavailable yields None rather
-    than a silent swap to a different isolation model.
+    backend None reads AWOS_SANDBOX ("auto" | "seatbelt" | "docker" |
+    "container" | "none"). An explicitly requested backend that is
+    unavailable yields None rather than a silent swap to a different
+    isolation model. "container" (ContainerSandbox: run directly, the process
+    is already inside a disposable container) is only ever used when named
+    explicitly; "auto" never selects it.
     """
     choice = (backend or os.environ.get("AWOS_SANDBOX") or "auto").strip().lower()
     if choice == "none":
         return None
+    if choice == CONTAINER_MODE:
+        try:
+            return ContainerSandbox(workspace)
+        except OSError as exc:
+            logger.warning("sandbox container failed to start: %s", exc)
+            return None
     if choice not in ("auto", "seatbelt", "docker"):
         logger.warning("unknown AWOS_SANDBOX=%r; code execution disabled", choice)
         return None

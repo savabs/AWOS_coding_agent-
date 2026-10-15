@@ -1,0 +1,12 @@
+# Harbor terminal-bench-sample@2.0 (10 tasks), run from terminal-bench/terminal-bench-2-1@6.
+# Written by scripts/harbor_tasks.py sample.
+terminal-bench/build-cython-ext
+terminal-bench/chess-best-move
+terminal-bench/configure-git-webserver
+terminal-bench/fix-code-vulnerability
+terminal-bench/log-summary-date-ranges
+terminal-bench/polyglot-c-py
+terminal-bench/qemu-alpine-ssh
+terminal-bench/qemu-startup
+terminal-bench/regex-log
+terminal-bench/sqlite-with-gcov

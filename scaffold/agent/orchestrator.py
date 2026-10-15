@@ -47,12 +47,17 @@ def executor_choice() -> str:
 @functools.lru_cache(maxsize=1)
 def _sandbox_possible() -> bool:
     """Whether the loop's sandbox can exist here (it refuses to run without one)."""
-    if (os.getenv("AWOS_SANDBOX") or "auto").strip().lower() == "none":
+    choice = (os.getenv("AWOS_SANDBOX") or "auto").strip().lower()
+    if choice == "none":
         return False
     try:
         from scaffold.agent import sandbox as _sb
     except ImportError:  # pragma: no cover - flat import
         import sandbox as _sb  # type: ignore
+    if choice == _sb.CONTAINER_MODE:
+        # Explicit only: the process declares it already runs in a disposable
+        # container (sandbox.ContainerSandbox). Never inferred.
+        return True
     return _sb.seatbelt_available() or _sb.docker_available()
 
 
@@ -2986,7 +2991,8 @@ class Orchestrator:
         sandbox = make_sandbox(codebase_root)
         if sandbox is None:
             # Commands never run on the bare host (AWOS_SANDBOX=none, or no backend).
-            return _fail("no sandbox for the bash tool (AWOS_SANDBOX: seatbelt or docker)")
+            return _fail("no sandbox for the bash tool (AWOS_SANDBOX: seatbelt or docker; "
+                         "container only inside a disposable task container)")
         registry = lx.build_loop_registry(sandbox)
         self._last_agent_model = model
         needs_edits = _task_needs_edits(task)

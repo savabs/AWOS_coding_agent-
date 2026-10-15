@@ -4,7 +4,8 @@ name: ladder
 
 on:
   push:
-    branches: ["bench-cloud/**"]
+    # bench-cloud/harbor-** is the Harbor head-to-head (.github/workflows/harbor.yml)
+    branches: ["bench-cloud/**", "!bench-cloud/harbor-**"]
   workflow_dispatch:
 
 permissions:

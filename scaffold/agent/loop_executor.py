@@ -252,7 +252,7 @@ Each response should include:
 - Until you submit, your response MUST include AT LEAST ONE bash tool call
 - Directory or environment variable changes are not persistent. Every action is executed in a new subshell.
 - However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files
-- Commands run in a sandbox: writes are limited to the repository, and there is no network access except to localhost.
+- {sandbox_rule}
 - To finish, reply with no tool call and `{marker}` as the first line of your reply.
 
 <system_information>
@@ -325,13 +325,28 @@ GATE_FEEDBACK_TEMPLATE = (
 )
 
 
-def instance_prompt(goal: str, uname: Optional[Any] = None) -> str:
+#: The environment rule line of the instance prompt, per sandbox backend.
+SANDBOX_RULE = ("Commands run in a sandbox: writes are limited to the repository, and there "
+                "is no network access except to localhost.")
+#: sandbox.ContainerSandbox (AWOS_SANDBOX=container): commands run directly in a
+#: disposable task container, so the sandbox rule above would be false.
+CONTAINER_RULE = ("Commands run directly in this machine, a disposable container set up "
+                  "for the task: you may read and write anywhere, install what you need "
+                  "and use the network if the task requires it.")
+
+
+def sandbox_rule(backend: Optional[str] = None) -> str:
+    return CONTAINER_RULE if backend == "container" else SANDBOX_RULE
+
+
+def instance_prompt(goal: str, uname: Optional[Any] = None,
+                    sandbox_backend: Optional[str] = None) -> str:
     """The first user message: the goal verbatim plus mini's workflow and rules."""
     u = uname or platform.uname()
     darwin = u.system == "Darwin"
     return _INSTANCE_TEMPLATE.format(
         goal=goal.strip(), marker=SUBMIT_MARKER, system=u.system, release=u.release,
-        machine=u.machine,
+        machine=u.machine, sandbox_rule=sandbox_rule(sandbox_backend),
         sed_note=("\n<important>\nYou are on MacOS. For all the below examples, you need to "
                   "use `sed -i ''` instead of `sed -i`.\n</important>\n" if darwin else ""),
         sed_arg=" ''" if darwin else "",
@@ -432,6 +447,7 @@ class LoopExecutor:
         path_filter: Optional[Callable[[list], list]] = None,
         system_prompt: str = SYSTEM_PROMPT,
         clock: Callable[[], float] = time.monotonic,
+        watch_workspace: bool = True,
     ) -> None:
         self.client = client
         self.registry = registry
@@ -447,6 +463,10 @@ class LoopExecutor:
         self.path_filter = path_filter
         self.system_prompt = system_prompt
         self.clock = clock
+        #: False: no before/after stat walk of the workspace (files_changed stays
+        #: empty). For a workspace that is not a repository, e.g. a task
+        #: container's cwd that may be "/" (headless_loop.py).
+        self.watch_workspace = watch_workspace
         self.messages: list[dict[str, Any]] = []
 
     @property
@@ -518,9 +538,12 @@ class LoopExecutor:
     def run(self) -> LoopRun:
         run = LoopRun()
         started = self.clock()
-        watch = WorkspaceWatch(self.workspace) if self.workspace else None
+        watch = (WorkspaceWatch(self.workspace)
+                 if self.workspace and self.watch_workspace else None)
         before = watch.snapshot() if watch is not None else None
-        self.messages = [{"role": "user", "content": instance_prompt(self.goal)}]
+        backend = getattr(getattr(self.registry, "sandbox", None), "backend", None)
+        self.messages = [{"role": "user",
+                          "content": instance_prompt(self.goal, sandbox_backend=backend)}]
         format_errors = truncations = 0
         try:
             while True:

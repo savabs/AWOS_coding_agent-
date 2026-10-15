@@ -1,0 +1,33 @@
+# 30 of 89 terminal-bench/terminal-bench-2-1@6 tasks, seed 1, stratified by difficulty (proportional) and spread over categories.
+# difficulty mix: easy=1, hard=10, medium=19
+# Written by: python scripts/harbor_tasks.py stratified --seed 1 --count 30
+terminal-bench/adaptive-rejection-sampler
+terminal-bench/build-cython-ext
+terminal-bench/chess-best-move
+terminal-bench/constraints-scheduling
+terminal-bench/count-dataset-tokens
+terminal-bench/distribution-search
+terminal-bench/extract-moves-from-video
+terminal-bench/financial-document-processor
+terminal-bench/install-windows-3.11
+terminal-bench/kv-store-grpc
+terminal-bench/large-scale-text-editing
+terminal-bench/largest-eigenval
+terminal-bench/llm-inference-batching-scheduler
+terminal-bench/mailman
+terminal-bench/merge-diff-arc-agi-task
+terminal-bench/model-extraction-relu-logits
+terminal-bench/mteb-retrieve
+terminal-bench/overfull-hbox
+terminal-bench/portfolio-optimization
+terminal-bench/protein-assembly
+terminal-bench/regex-log
+terminal-bench/rstan-to-pystan
+terminal-bench/sam-cell-seg
+terminal-bench/sanitize-git-repo
+terminal-bench/sparql-university
+terminal-bench/torch-tensor-parallelism
+terminal-bench/train-fasttext
+terminal-bench/tune-mjcf
+terminal-bench/video-processing
+terminal-bench/vulnerable-secret

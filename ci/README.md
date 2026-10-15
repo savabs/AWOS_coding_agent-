@@ -1,5 +1,7 @@
 # Harness-lift ladder on GitHub Actions
 
+(The Harbor / Terminal-Bench 2.1 head-to-head is separate: `ci/HARBOR.md`.)
+
 `.github/workflows/ladder.yml` runs H1 of `docs/specs/harness_lift_ladder.md`
 (AWOS `off` vs mini-swe-agent `mini`, `claude-haiku-5-5`, the 40 fresh-set
 issues, 1 repeat, $5 cap) on `macos-14` runners, split into shards, so the run
