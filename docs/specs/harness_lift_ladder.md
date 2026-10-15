@@ -90,3 +90,19 @@ still fail and progress is being made.
 - **Addendum (2026-10-15, still before any held-out data):** H1c runs on engine commit
   **0d4fe24**, which adds the Seatbelt loopback fix found in H1b (localhost sockets were denied, so
   the full-suite gate rejected correct fixes). No other engine change.
+
+## Amendment 4 (2026-10-15, before any data): H1d, the `loop` executor
+
+After H1/H1b (REJECT) and H1c (INCONCLUSIVE at a ceiling, AWOS ×2.2 cost), AWOS gets a mini-style
+executor (`AWOS_EXECUTOR=loop`): one open bash loop until the model submits, inside AWOS's sandbox and
+cost tracking, with AWOS's full-suite gate after submit that feeds failures back (it never stops the loop early).
+
+- **H1d:** arm `loop` vs `mini` on the same 40 fresh issues, both arms run fresh, Haiku 5.5, GitHub Actions
+  8 shards, $5 cap, T1 rule (`--a mini --b loop --cost-budget 0.5`).
+- **Default switch rule (decided now):** `AWOS_EXECUTOR` defaults to `loop` only if all three hold:
+  1. H1d is not REJECT;
+  2. `loop` solves ≥ 34/40 (the pipeline's best on this set);
+  3. `loop` costs ≤ 1.5× `mini` per run.
+  Otherwise the default stays `pipeline` and the result is reported as is.
+- **Bias note:** the 40 issues were read for the pipeline's failure analysis, but `loop` was not tuned on them; its
+  design is mini-swe-agent's. A further held-out check needs a harder held-out set (H1c hit a ceiling).
