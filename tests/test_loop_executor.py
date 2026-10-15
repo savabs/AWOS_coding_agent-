@@ -442,7 +442,11 @@ def test_executor_switch_default_is_pipeline(monkeypatch, value, choice, label):
 def test_doctor_shows_the_active_executor(monkeypatch):
     from scaffold.agent import doctor
     monkeypatch.setattr(doctor._ob, "_env_files", lambda: [])
+    # Unset: loop when a sandbox exists, else the pipeline (test_executor_default.py).
+    monkeypatch.setattr(orch_mod, "_sandbox_possible", lambda: False)
     assert doctor.check_executor({}).detail.startswith("pipeline")
+    monkeypatch.setattr(orch_mod, "_sandbox_possible", lambda: True)
+    assert doctor.check_executor({}).detail.startswith("loop")
     c = doctor.check_executor({"AWOS_EXECUTOR": "loop"})
     assert c.ok and c.detail.startswith("loop")
     assert not doctor.check_executor({"AWOS_EXECUTOR": "bogus"}).ok

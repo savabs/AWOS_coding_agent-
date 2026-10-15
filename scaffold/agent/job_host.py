@@ -375,7 +375,6 @@ def _run_coding(job: Job) -> dict:
 ABILITIES: dict[str, Callable[[Job], dict]] = {"coding": _run_coding}
 
 CHILD_ENV = {
-    "AWOS_EXECUTOR": "agent_loop",
     "AWOS_SAFE_TO_RUN_TESTS": "1",
     "AWOS_USE_WORKTREE": "false",
     "AWOS_ENABLE_CLARIFICATION": "false",
@@ -405,12 +404,15 @@ def child_main(job_path: str, result_path: str, parent_pid: int) -> int:
         load_dotenv(_paths.dotenv_path())
     except ImportError:
         pass
-    # AWOS_EXECUTOR=loop (the mini-style loop, set in the user's env or .env)
-    # survives the child's pins; anything else runs the pipeline.
-    keep_loop = os.environ.get("AWOS_EXECUTOR", "").strip().lower() == "loop"
+    # The executor: an explicit AWOS_EXECUTOR of loop or pipeline (user env or
+    # .env) is kept; anything else is dropped so the default applies
+    # (orchestrator.executor_choice: loop when a sandbox exists, else pipeline).
+    chosen = os.environ.get("AWOS_EXECUTOR", "").strip().lower()
     os.environ.update(CHILD_ENV)
-    if keep_loop:
-        os.environ["AWOS_EXECUTOR"] = "loop"
+    if chosen in ("loop", "pipeline", "agent_loop"):
+        os.environ["AWOS_EXECUTOR"] = chosen
+    else:
+        os.environ.pop("AWOS_EXECUTOR", None)
     job = Job.from_dict(json.loads(Path(job_path).read_text(encoding="utf-8")))
     result = ABILITIES[job.ability](job)
     write_json_atomic(Path(result_path), result)

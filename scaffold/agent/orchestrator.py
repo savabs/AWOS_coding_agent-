@@ -9,6 +9,7 @@ import ast
 import contextlib
 import hashlib
 import logging
+import functools
 import os
 import re
 import time
@@ -22,18 +23,37 @@ logger = logging.getLogger(__name__)
 
 #: AWOS_EXECUTOR names: "pipeline" is the user-facing name of the default
 #: agent_loop path (planner → acceptance → one-shot → gates → capped repair).
-_EXECUTOR_ALIASES = {"pipeline": "agent_loop", "": "agent_loop"}
+_EXECUTOR_ALIASES = {"pipeline": "agent_loop"}
 
 
 def executor_choice() -> str:
     """
-    Which executor runs a task: agent_loop (default; also "pipeline") | loop |
-    react | worker. "loop" is the mini-style open loop (loop_executor.py): one
-    bash tool until the model submits, then the success gate.
-    See docs/specs/agent_loop_executor_spec.md for the measurements behind it.
+    Which executor runs a task: loop (default when a sandbox is available) |
+    agent_loop ("pipeline") | react | worker. "loop" is the mini-style open
+    loop (loop_executor.py): one sandboxed bash tool until the model submits,
+    then the success gate. It became the default after the pre-registered H1d
+    run (docs/memory/runs/ladder_h1d_loop_2026-10-15.md). An explicit
+    AWOS_EXECUTOR always wins; unset under pytest keeps the pipeline, so the
+    existing pipeline tests mean what they did.
     """
-    raw = os.getenv("AWOS_EXECUTOR", "agent_loop").strip().lower()
-    return _EXECUTOR_ALIASES.get(raw, raw)
+    raw = os.getenv("AWOS_EXECUTOR", "").strip().lower()
+    if raw:
+        return _EXECUTOR_ALIASES.get(raw, raw)
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return "agent_loop"
+    return "loop" if _sandbox_possible() else "agent_loop"
+
+
+@functools.lru_cache(maxsize=1)
+def _sandbox_possible() -> bool:
+    """Whether the loop's sandbox can exist here (it refuses to run without one)."""
+    if (os.getenv("AWOS_SANDBOX") or "auto").strip().lower() == "none":
+        return False
+    try:
+        from scaffold.agent import sandbox as _sb
+    except ImportError:  # pragma: no cover - flat import
+        import sandbox as _sb  # type: ignore
+    return _sb.seatbelt_available() or _sb.docker_available()
 
 
 def executor_label(choice: Optional[str] = None) -> str:

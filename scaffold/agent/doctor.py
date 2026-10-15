@@ -121,8 +121,8 @@ def check_provider(env: Optional[dict] = None, get=None) -> list[Check]:
 
 
 #: AWOS_EXECUTOR values a coding job can run with (orchestrator.executor_choice).
-EXECUTORS = {"pipeline": "planner, one-shot edit, gates, capped repair (default)",
-             "agent_loop": "planner, one-shot edit, gates, capped repair (default)",
+EXECUTORS = {"pipeline": "planner, one-shot edit, gates, capped repair",
+             "agent_loop": "planner, one-shot edit, gates, capped repair",
              "loop": "open bash loop until the model submits, then the success gate",
              "react": "ReAct worker", "worker": "single-file worker"}
 
@@ -130,13 +130,20 @@ EXECUTORS = {"pipeline": "planner, one-shot edit, gates, capped repair (default)
 def check_executor(env: Optional[dict] = None) -> Check:
     """Which executor runs a coding job (AWOS_EXECUTOR); informational."""
     e = _ob.known_env(env)
-    raw = (e.get("AWOS_EXECUTOR") or "").strip().lower() or "pipeline"
+    raw = (e.get("AWOS_EXECUTOR") or "").strip().lower()
+    source = "AWOS_EXECUTOR"
+    if not raw:
+        try:
+            from scaffold.agent.orchestrator import _sandbox_possible
+        except ImportError:  # pragma: no cover - flat import
+            from orchestrator import _sandbox_possible  # type: ignore
+        raw = "loop" if _sandbox_possible() else "pipeline"
+        source = "default" if raw == "loop" else "default: no sandbox available for loop"
     name = "pipeline" if raw == "agent_loop" else raw
     if raw not in EXECUTORS:
         return Check("Executor", False, f"AWOS_EXECUTOR={raw!r} is unknown",
                      "set AWOS_EXECUTOR to pipeline or loop (or unset it)", required=False)
-    return Check("Executor", True, f"{name}: {EXECUTORS[raw]} (AWOS_EXECUTOR)",
-                 required=False)
+    return Check("Executor", True, f"{name}: {EXECUTORS[raw]} ({source})", required=False)
 
 
 def check_repo(repo: Path) -> list[Check]:
