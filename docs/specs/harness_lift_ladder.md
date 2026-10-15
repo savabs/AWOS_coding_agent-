@@ -87,3 +87,6 @@ still fail and progress is being made.
 - **H1c is the confirmatory test** for the engine fixes; H1b (in-sample) cannot confirm on its own.
   With n = 30 the MDE is large (~20+ pp), so INCONCLUSIVE is a likely outcome and would be reported as such.
 - Run after H1b finishes, on the same engine commit plus the CI-only SERIES_DIR change (48b78fc).
+- **Addendum (2026-10-15, still before any held-out data):** H1c runs on engine commit
+  **0d4fe24**, which adds the Seatbelt loopback fix found in H1b (localhost sockets were denied, so
+  the full-suite gate rejected correct fixes). No other engine change.
