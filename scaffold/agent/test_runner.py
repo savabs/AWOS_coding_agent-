@@ -278,6 +278,9 @@ class TestRunner:
                 return result
             logger.info("[test_runner] mapped tests collected nothing; running the full suite")
 
+        return self._run_full(base)
+
+    def _run_full(self, base: List[str]) -> TestResult:
         targets = self._full_suite_targets()
         timeout = max(self.timeout_sec, _FULL_SUITE_TIMEOUT_SEC)
         result = self._execute(TestConfig("pytest", base + targets, timeout))
@@ -285,6 +288,38 @@ class TestRunner:
         logger.info("[test_runner] mode=full targets=%s", targets or "(pytest config)")
         self._record_full_suite(base + targets, result)
         return result
+
+    def run_full_suite(self) -> TestResult:
+        """
+        The whole visible pytest suite (full-suite timeout, baseline
+        comparison, marker recorded), for the success gate's check after a
+        green mapped run (AWOS_FULL_SUITE_GATE). Same safety guard as run().
+        """
+        if os.environ.get(_SAFETY_ENV_VAR) != "1":
+            return TestResult(raw_output=f"Tests skipped — set {_SAFETY_ENV_VAR}=1 to enable.",
+                              no_tests_found=True)
+        cfg = self.detect()
+        if cfg is None or cfg.runner != "pytest":
+            return TestResult(raw_output="No pytest suite detected.", no_tests_found=True)
+        return self._run_full(self.pytest_base(cfg))
+
+    def full_suite_marker_green(self, tree: Optional[str] = None) -> Optional[dict]:
+        """
+        The AWOS_FULL_SUITE_MARKER record when it says the whole suite was
+        green on exactly this tree with this command; else None. Never raises.
+        """
+        path = os.environ.get(FULL_SUITE_MARKER_ENV, "").strip()
+        if not path:
+            return None
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+            if data.get("command") != self.full_suite_key():
+                return None
+            if data.get("tree") != (tree or workspace_tree_hash(str(self.project_root))):
+                return None
+            return data
+        except Exception:  # noqa: BLE001 - absent or unreadable: no reuse
+            return None
 
     def full_suite_key(self) -> List[str]:
         """The whole-suite pytest command without run-specific extras (marker key)."""

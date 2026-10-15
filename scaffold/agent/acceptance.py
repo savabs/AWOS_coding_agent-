@@ -65,6 +65,12 @@ TEST_FILENAME = "test_awos_acceptance.py"
 CONTEXT_BUDGET_TOKENS = 6000
 MAX_REPLY_TOKENS = 3000
 RUN_TIMEOUT_SEC = 120
+#: The start run (generated tests on the unedited tree, must-fail-first) has
+#: its own, longer cap: on slow suites (astroid_3286, boltons_443) it timed
+#: out at RUN_TIMEOUT_SEC and the gate went inactive. Per-check runs keep
+#: RUN_TIMEOUT_SEC.
+START_TIMEOUT_ENV = "AWOS_ACCEPTANCE_START_TIMEOUT"
+DEFAULT_START_TIMEOUT_SEC = 240
 FEEDBACK_CHARS = 3000
 REPAIR_TURNS_ENV = "AWOS_ACCEPTANCE_REPAIR_TURNS"
 DEFAULT_REPAIR_TURNS = 10
@@ -122,6 +128,34 @@ def repair_turns() -> int:
         return max(1, int(os.getenv(REPAIR_TURNS_ENV, str(DEFAULT_REPAIR_TURNS))))
     except ValueError:
         return DEFAULT_REPAIR_TURNS
+
+
+REPAIR_EXTEND_ENV = "AWOS_REPAIR_EXTEND"
+REPAIR_EXTRA_ROUNDS_ENV = "AWOS_REPAIR_EXTRA_ROUNDS"
+DEFAULT_REPAIR_EXTRA_ROUNDS = 2
+
+
+def repair_extend_enabled() -> bool:
+    """AWOS_REPAIR_EXTEND (default on): keep repairing while the rounds make progress."""
+    return os.getenv(REPAIR_EXTEND_ENV, "1").strip().lower() not in ("0", "off", "false", "no")
+
+
+def repair_extra_rounds() -> int:
+    """AWOS_REPAIR_EXTRA_ROUNDS (default 2): extra repair rounds after the first."""
+    if not repair_extend_enabled():
+        return 0
+    try:
+        return max(0, int(os.getenv(REPAIR_EXTRA_ROUNDS_ENV, str(DEFAULT_REPAIR_EXTRA_ROUNDS))))
+    except ValueError:
+        return DEFAULT_REPAIR_EXTRA_ROUNDS
+
+
+def start_timeout_sec() -> int:
+    """AWOS_ACCEPTANCE_START_TIMEOUT (default 240 s): the start run's cap."""
+    try:
+        return max(1, int(float(os.getenv(START_TIMEOUT_ENV, str(DEFAULT_START_TIMEOUT_SEC)))))
+    except ValueError:
+        return DEFAULT_START_TIMEOUT_SEC
 
 
 @dataclass
@@ -284,12 +318,14 @@ def _failure_sections(output: str) -> dict:
 
 
 def run_tests_once(project_root: str, source: str, names: Optional[list] = None,
-                   sandbox: Any = None) -> dict:
+                   sandbox: Any = None, timeout_sec: Optional[int] = None) -> dict:
     """
     Write `source` into a hidden dir under the project, run it (only `names`
     when given) with the visible tests' pytest args and sandbox, delete the
     dir. Returns {"outcomes", "collection_error", "result", "skipped"}.
+    timeout_sec: the run's cap (default RUN_TIMEOUT_SEC, the per-check cap).
     """
+    timeout = int(timeout_sec or RUN_TIMEOUT_SEC)
     try:
         from .test_runner import _NO_CONFIG_ARGS, _SAFETY_ENV_VAR, TestConfig, TestRunner
     except ImportError:
@@ -298,7 +334,7 @@ def run_tests_once(project_root: str, source: str, names: Optional[list] = None,
     if os.environ.get(_SAFETY_ENV_VAR) != "1":
         out["skipped"] = f"{_SAFETY_ENV_VAR} not set"
         return out
-    runner = TestRunner(project_root=project_root, timeout_sec=RUN_TIMEOUT_SEC, sandbox=sandbox)
+    runner = TestRunner(project_root=project_root, timeout_sec=timeout, sandbox=sandbox)
     cfg = runner.detect()
     if cfg is None or cfg.runner != "pytest":
         out["skipped"] = "not a pytest project"
@@ -313,7 +349,7 @@ def run_tests_once(project_root: str, source: str, names: Optional[list] = None,
         if not runner._has_pytest_config():
             command += _NO_CONFIG_ARGS
         command += [f"{rel}::{n}" for n in names] if names else [rel]
-        result = runner._execute(TestConfig("pytest", command, RUN_TIMEOUT_SEC))
+        result = runner._execute(TestConfig("pytest", command, timeout))
     finally:
         shutil.rmtree(hidden, ignore_errors=True)
     out["result"] = result
@@ -379,7 +415,8 @@ def build_suite(goal_text: str, project_root: str, exploration: Optional[dict] =
         suite.error = gen["error"] or "no tests generated"
         return suite
     try:
-        run = run_tests_once(project_root, gen["source"], sandbox=sandbox)
+        run = run_tests_once(project_root, gen["source"], sandbox=sandbox,
+                             timeout_sec=start_timeout_sec())
     except Exception as exc:  # noqa: BLE001
         suite.error = f"start run failed: {type(exc).__name__}: {exc}"
         return suite
@@ -388,7 +425,8 @@ def build_suite(goal_text: str, project_root: str, exploration: Optional[dict] =
         return suite
     result = run["result"]
     if result is not None and (result.timed_out or getattr(result, "infra_error", False)):
-        suite.error = "start run timed out" if result.timed_out else "start run could not run"
+        suite.error = (f"start run timed out ({start_timeout_sec()}s cap)" if result.timed_out
+                       else "start run could not run")
         return suite
     suite.generated = len(run["outcomes"])
     suite.kept, suite.dropped = filter_start_failing(run["outcomes"], run["collection_error"])

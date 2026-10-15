@@ -83,7 +83,7 @@ class _LoopSpy(agent_loop_mod.AgentLoop):
 
 
 def _run2(checks, *, arb_reply, one_shot="1", script=None, mode="2", turns="3",
-          retries="1", root=None):
+          retries="1", root=None, env=None):
     root = root or _project()
     orch = _orchestrator()
     orch._run_files_changed = set()
@@ -101,7 +101,7 @@ def _run2(checks, *, arb_reply, one_shot="1", script=None, mode="2", turns="3",
     _LoopSpy.inits = []
     with patch.dict(os.environ, {"AWOS_ONE_SHOT": one_shot, "AWOS_ACCEPTANCE": mode,
                                  "AWOS_AGENT_RETRIES": retries,
-                                 "AWOS_ACCEPTANCE_REPAIR_TURNS": turns}), \
+                                 "AWOS_ACCEPTANCE_REPAIR_TURNS": turns, **(env or {})}), \
          patch("scaffold.agent.agent_loop.build_client_from_env", return_value=scripted), \
          patch("scaffold.agent.agent_loop.AgentLoop", _LoopSpy), \
          patch("scaffold.agent.one_shot.one_shot_client", return_value=seq), \
@@ -252,8 +252,11 @@ def test_failed_repair_restores_green_edit_and_succeeds(capsys):
     root = _project()
     # Checks: the one-shot's (first, before the suite), the done check after
     # the repair's edit turn, the post-repair check (acceptance first).
+    # The repair made progress (0 -> 1 of 2), so AWOS_REPAIR_EXTEND would add
+    # a round (tests/test_engine_early_stop.py); off here: the single round.
     r = _run2([FAIL2, FAIL_B, FAIL_B], script=_repair_edit(root), turns="3", root=root,
-              arb_reply='{"test_a": "CODE_INCOMPLETE", "test_b": "CODE_INCOMPLETE"}')
+              arb_reply='{"test_a": "CODE_INCOMPLETE", "test_b": "CODE_INCOMPLETE"}',
+              env={"AWOS_REPAIR_EXTEND": "0"})
     log = capsys.readouterr().out
     assert r.check.call_count == 3
     assert "repair: kept acceptance tests still failing; project test suite skipped" in log

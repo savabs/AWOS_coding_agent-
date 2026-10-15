@@ -357,6 +357,56 @@ def _verdict_green(verdict: Optional[dict]) -> bool:
             and tr.failed == 0 and tr.errors == 0 and tr.passed > 0)
 
 
+_OFF_WORDS = ("0", "off", "false", "no")
+
+
+def _full_suite_gate_enabled() -> bool:
+    """AWOS_FULL_SUITE_GATE (default on): a green mapped verdict is confirmed
+    by one full visible-suite run before the task is reported solved."""
+    return os.getenv("AWOS_FULL_SUITE_GATE", "1").strip().lower() not in _OFF_WORDS
+
+
+def _verify_unchecked_enabled() -> bool:
+    """
+    AWOS_VERIFY_UNCHECKED (default on): a visible-green one-shot edit whose
+    acceptance gate is inactive gets a bounded verify loop before it is
+    accepted. Under pytest, unset means off (as AWOS_ACCEPTANCE does), so the
+    suites that pin the one-shot path never make an unscripted model call.
+    """
+    default = "0" if "PYTEST_CURRENT_TEST" in os.environ else "1"
+    return os.getenv("AWOS_VERIFY_UNCHECKED", default).strip().lower() not in _OFF_WORDS
+
+
+def _verify_turns() -> int:
+    """AWOS_VERIFY_TURNS (default 15): the verify loop's turn cap."""
+    try:
+        return max(1, int(os.getenv("AWOS_VERIFY_TURNS", "15")))
+    except ValueError:
+        return 15
+
+
+def _task_wall_s() -> float:
+    """The task's wall-clock budget (AWOS_AGENT_WALL_S, the agent loop's own
+    default); 0 or less: none."""
+    try:
+        return float(os.getenv("AWOS_AGENT_WALL_S", "1500"))
+    except ValueError:
+        return 1500.0
+
+
+def _failsafe_outcomes(fs: dict) -> list:
+    """Every AgentLoop outcome of an _acceptance_failsafe result (the bounded
+    repair plus any AWOS_REPAIR_EXTEND rounds), oldest first."""
+    if fs.get("outcomes"):
+        return list(fs["outcomes"])
+    return [fs["outcome"]] if fs.get("outcome") is not None else []
+
+
+#: An extra loop (verify, extra repair round) is not started with less
+#: wall clock than this left in the task's budget.
+_MIN_EXTRA_WALL_S = 30.0
+
+
 #: Stops after which a green verdict may be resumed for failing acceptance
 #: tests: not wall_budget / no_progress (final by the resume rules above).
 _ACCEPTANCE_RESUMABLE_STOPS = ("completed", "max_turns", "repeated_tool_call")
@@ -463,7 +513,7 @@ def _new_components() -> dict:
     "not_run" until its code path records otherwise."""
     return {name: {"status": "not_run"} for name in (
         "planner", "acceptance", "one_shot", "arbiter", "goal_check",
-        "integration_review", "notebook")}
+        "integration_review", "notebook", "full_suite_gate", "verify", "repair_extend")}
 
 
 def _emit_components(comps: dict) -> None:
@@ -2439,6 +2489,10 @@ class Orchestrator:
                   else self._agent_loop_prompt(task, ctx))
         files_changed: list = []
         outcomes = []
+        # Per task: the full-suite gate's runs by tree hash (never twice on
+        # one tree) and the task's wall-clock start (extra loops' budget).
+        self._full_gate_cache = {}
+        self._task_t0 = time.monotonic()
 
         # ── One shot first (AWOS_ONE_SHOT, ablation 3) ────────────────────
         # One call with the relevant files preloaded, emitting SEARCH/REPLACE
@@ -2506,8 +2560,7 @@ class Orchestrator:
                     shot_cost += fs["cost_usd"]
                     shot_in += fs["input_tokens"]
                     shot_out += fs["output_tokens"]
-                    if fs["outcome"] is not None:
-                        o = fs["outcome"]
+                    for o in _failsafe_outcomes(fs):
                         shot_cost += o.cost_usd
                         shot_in += o.input_tokens
                         shot_out += o.output_tokens
@@ -2518,6 +2571,32 @@ class Orchestrator:
                         fell_back_note = self._one_shot_deferred_fallback(
                             shot, verdict, files_changed, codebase_root)
                 else:
+                    # AWOS_VERIFY_UNCHECKED (F2): no acceptance test checked
+                    # this edit; a bounded verify loop runs before it is
+                    # accepted, and the green one-shot state is restored if
+                    # the loop leaves the visible tests red.
+                    if (_verify_unchecked_enabled() and not (acc is not None and acc.active)
+                            and _verdict_green(verdict)):
+                        try:
+                            vf = self._verify_unchecked(
+                                task=task, ctx=ctx, verdict=verdict,
+                                files_changed=files_changed, registry=registry,
+                                client=client, on_event=_on_event, cost_cap=cost_cap,
+                                spent=shot_cost, model=model, codebase_root=codebase_root,
+                                sandbox=sandbox, task_id=task_id, needs_edits=needs_edits)
+                        except BaseException:
+                            registry.close()
+                            self._acceptance_cleanup(codebase_root)
+                            raise
+                        verdict = vf["verdict"]
+                        files_changed[:] = vf["files_changed"]
+                        if vf["outcome"] is not None:
+                            o = vf["outcome"]
+                            shot_cost += o.cost_usd
+                            shot_in += o.input_tokens
+                            shot_out += o.output_tokens
+                            shot_steps += self._agent_steps([o])
+                        extra = {"verify_ran": vf["ran"], "verify_restored": vf["restored"]}
                     registry.close()
                     self._acceptance_cleanup(codebase_root)
             if shot["solved"] and not fell_back_note:
@@ -2620,8 +2699,7 @@ class Orchestrator:
                         shot_cost += fs["cost_usd"]
                         shot_in += fs["input_tokens"]
                         shot_out += fs["output_tokens"]
-                        if fs["outcome"] is not None:
-                            outcomes.append(fs["outcome"])
+                        outcomes.extend(_failsafe_outcomes(fs))
                         # Repaired, or the kept edit is green: done, as before.
                         # A red kept edit resumes as a red attempt always did.
                         reason = (None if fs["repaired"]
@@ -2656,8 +2734,7 @@ class Orchestrator:
                                 shot_cost += fs["cost_usd"]
                                 shot_in += fs["input_tokens"]
                                 shot_out += fs["output_tokens"]
-                                if fs["outcome"] is not None:
-                                    outcomes.append(fs["outcome"])
+                                outcomes.extend(_failsafe_outcomes(fs))
                             break
                         acc_ok, acc_summary, acc_feedback = self._acceptance_check(
                             codebase_root, sandbox)
@@ -3273,9 +3350,17 @@ class Orchestrator:
             base_prompt, acc_mod.repair_feedback(suite, {n: failing[n] for n in incomplete},
                                    suite_checked=green_verdict is not None))
         outcome = None
+        outcomes: list = []
         repaired_green = False
+        rverdict = None
         rfiles = list(files_changed)
         acc_first = self._acceptance_first()
+        k = len(suite.kept)
+        # AWOS_REPAIR_EXTEND (F3): kept tests passing before the repair, to
+        # measure each round's progress against.
+        passing_before = k - len(incomplete)
+        extra_left = acc_mod.repair_extra_rounds()
+        round_no = 1
 
         def _acceptance_done() -> Optional[str]:
             # Early stop: after a turn that edited, only the kept acceptance
@@ -3285,58 +3370,139 @@ class Orchestrator:
 
         early_stop = os.getenv("AWOS_ACCEPTANCE_EARLY_STOP", "1").strip().lower() not in (
             "0", "off", "false", "no")
-        try:
-            outcome = AgentLoop(
-                registry=registry, client=with_repair_effort(client), on_event=on_event,
-                max_turns=turns, require_edits=False,
-                max_cost_usd=None if cost_cap is None else cost_cap - spent,
-                **({"done_check": _acceptance_done} if early_stop else {}),
-            ).run(prompt)
-            self._record_agent_loop_spend(model, outcome)
-            for path in [*outcome.files_touched,
-                         *_not_ignored(codebase_root, getattr(outcome, "files_written", []))]:
-                rel = os.path.relpath(path, codebase_root)
-                if rel not in rfiles:
-                    rfiles.append(rel)
-            if outcome.stop_reason == "acceptance_green":
-                print(f"[ACCEPTANCE] repair stopped early after turn {outcome.turns} of "
-                      f"{turns}: the kept acceptance tests pass (acceptance_green); "
-                      "running the project test suite once")
-                acc_ok = True    # just checked by the done check, nothing changed since
-            elif acc_first:
-                acc_ok = self._acceptance_check_detail(codebase_root, sandbox)[0]
-                if not acc_ok:
-                    print("[ACCEPTANCE] repair: kept acceptance tests still failing; "
-                          "project test suite skipped")
-            else:
-                acc_ok = None    # suite first, as before
+        while True:
+            acc_fail_detail = None
+            acc_ok = False
+            try:
+                outcome = AgentLoop(
+                    registry=registry, client=with_repair_effort(client), on_event=on_event,
+                    max_turns=turns, require_edits=False,
+                    max_cost_usd=None if cost_cap is None else cost_cap - spent,
+                    **({"done_check": _acceptance_done} if early_stop else {}),
+                ).run(prompt)
+                outcomes.append(outcome)
+                self._record_agent_loop_spend(model, outcome)
+                spent += float(getattr(outcome, "cost_usd", 0.0) or 0.0)
+                for path in [*outcome.files_touched,
+                             *_not_ignored(codebase_root, getattr(outcome, "files_written", []))]:
+                    rel = os.path.relpath(path, codebase_root)
+                    if rel not in rfiles:
+                        rfiles.append(rel)
+                if outcome.stop_reason == "acceptance_green":
+                    print(f"[ACCEPTANCE] repair stopped early after turn {outcome.turns} of "
+                          f"{turns}: the kept acceptance tests pass (acceptance_green); "
+                          "running the project test suite once")
+                    acc_ok = True    # just checked by the done check, nothing changed since
+                elif acc_first:
+                    chk = self._acceptance_check_detail(codebase_root, sandbox)
+                    acc_ok, acc_fail_detail = chk[0], chk[3]
+                    if not acc_ok:
+                        print("[ACCEPTANCE] repair: kept acceptance tests still failing; "
+                              "project test suite skipped")
+                else:
+                    acc_ok = None    # suite first, as before
+                if acc_ok is not False:
+                    rverdict = self._judge_agent_attempt(task, outcome, rfiles, needs_edits,
+                                                         codebase_root, sandbox, task_id)
+                    tr = rverdict["test_result"]
+                    tests_bad = (tr is not None and not getattr(tr, "no_tests_found", True)
+                                 and (tr.failed > 0 or tr.errors > 0))
+                    visible_green = (rverdict["success"] and not tests_bad
+                                     and outcome.stop_reason not in ("cost_cap", "budget_blocked")
+                                     and _agent_resume_reason(outcome, rverdict, 0) is None)
+                    if visible_green:
+                        if acc_ok is None:
+                            acc_ok = self._acceptance_check_detail(codebase_root, sandbox)[0]
+                        repaired_green = acc_ok
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[ACCEPTANCE] repair attempt raised: %s", exc)
+                break
             if acc_ok is not False:
-                rverdict = self._judge_agent_attempt(task, outcome, rfiles, needs_edits,
-                                                     codebase_root, sandbox, task_id)
-                tr = rverdict["test_result"]
-                tests_bad = (tr is not None and not getattr(tr, "no_tests_found", True)
-                             and (tr.failed > 0 or tr.errors > 0))
-                visible_green = (rverdict["success"] and not tests_bad
-                                 and outcome.stop_reason not in ("cost_cap", "budget_blocked")
-                                 and _agent_resume_reason(outcome, rverdict, 0) is None)
-                if visible_green:
-                    if acc_ok is None:
-                        acc_ok = self._acceptance_check_detail(codebase_root, sandbox)[0]
-                    repaired_green = acc_ok
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("[ACCEPTANCE] repair attempt raised: %s", exc)
+                break
+            # F3: kept CODE_INCOMPLETE tests still fail at the turn cap. Keep
+            # repairing while each round makes progress and budget is left.
+            passing_now = self._repair_extend_decision(
+                round_no=round_no, extra_left=extra_left, k=k,
+                passing_before=passing_before, failing_now=acc_fail_detail,
+                outcome=outcome, cost_cap=cost_cap, spent=spent)
+            if passing_now is None:
+                break
+            extra_left -= 1
+            self._component("repair_extend", status="ran")
+            self._component_add("repair_extend", rounds=1)
+            print(f"[ACCEPTANCE] extra repair round {round_no}: {passing_now} of {k} kept "
+                  f"acceptance test(s) pass (up from {passing_before}); at most {turns} more "
+                  "turns")
+            round_no += 1
+            passing_before = passing_now
+            prompt = _stable_prefix().append_feedback(
+                base_prompt,
+                acc_mod.repair_feedback(suite, acc_fail_detail,
+                                        suite_checked=green_verdict is not None)
+                + "\n\nAn earlier repair round already edited the code (its edits are in "
+                f"place) and got {passing_now} of {k} acceptance tests passing. Continue "
+                "from the current state of the files; do not start over.")
         out["outcome"] = outcome
+        out["outcomes"] = outcomes
         stop = outcome.stop_reason if outcome is not None else "error"
+        n_turns = sum(int(getattr(o, "turns", 0) or 0) for o in outcomes)
+        rounds = f", {len(outcomes)} rounds" if len(outcomes) > 1 else ""
         if repaired_green:
-            print(f"[ACCEPTANCE] repair passed ({stop}, {outcome.turns} turn(s))")
+            print(f"[ACCEPTANCE] repair passed ({stop}, {n_turns} turn(s){rounds})")
             out.update(verdict=rverdict, files_changed=rfiles, repaired=True)
             return out
         touched = acc_mod.restore_workspace(snap)
         print(f"[ACCEPTANCE] repair failed; restored the green edit ({stop}"
-              + (f", {outcome.turns} turn(s)" if outcome is not None else "")
+              + (f", {n_turns} turn(s)" if outcome is not None else "") + rounds
               + f"; {len(touched)} path(s) restored)")
         out["restored"] = True
         return finish(out)
+
+    def _task_wall_left(self) -> Optional[float]:
+        """Seconds left of the task's wall-clock budget; None when unbounded."""
+        wall = _task_wall_s()
+        t0 = getattr(self, "_task_t0", None)
+        if wall <= 0 or t0 is None:
+            return None
+        return wall - (time.monotonic() - t0)
+
+    def _repair_extend_decision(self, *, round_no: int, extra_left: int, k: int,
+                                passing_before: int, failing_now: Optional[dict], outcome,
+                                cost_cap: Optional[float], spent: float) -> Optional[int]:
+        """
+        AWOS_REPAIR_EXTEND (F3): after a repair round that ended with kept
+        acceptance tests still failing, the kept-passing count when one more
+        round should run, else None (logged). Another round needs rounds
+        left, per-test evidence, progress (more kept tests passing than
+        before the round), budget (task cost cap, goal budget) and wall clock.
+        """
+        if extra_left <= 0 or failing_now is None:
+            return None
+        passing_now = k - len(failing_now)
+        if passing_now <= passing_before:
+            print(f"[ACCEPTANCE] no extra repair round: round {round_no} made no progress "
+                  f"({passing_now} of {k} kept passing, {passing_before} before it)")
+            return None
+        stop = getattr(outcome, "stop_reason", "")
+        if stop in ("cost_cap", "budget_blocked"):
+            print(f"[ACCEPTANCE] no extra repair round: the round stopped on {stop}")
+            return None
+        if cost_cap is not None:
+            per_turn = (float(getattr(outcome, "cost_usd", 0.0) or 0.0)
+                        / max(1, int(getattr(outcome, "turns", 1) or 1)))
+            if cost_cap - spent <= 0 or cost_cap - spent < per_turn:
+                print(f"[ACCEPTANCE] no extra repair round: ${spent:.4f} of the "
+                      f"${cost_cap:.4f} cap spent")
+                return None
+        if self._goal_budget_exhausted():
+            print(f"[ACCEPTANCE] no extra repair round: {GOAL_BUDGET_REASON}")
+            return None
+        left = self._task_wall_left()
+        if left is not None and left < _MIN_EXTRA_WALL_S:
+            print(f"[ACCEPTANCE] no extra repair round: {max(0.0, left):.0f}s of the task's "
+                  "wall clock left")
+            return None
+        return passing_now
 
     def _acceptance_cleanup(self, codebase_root: str) -> None:
         """The acceptance tests never outlive their task, on disk or in memory."""
@@ -3371,6 +3537,226 @@ class Orchestrator:
             tracker=getattr(self, "tracker", None),
         )
 
+    def _full_suite_gate(self, result, codebase_root: str, sandbox, task_id):
+        """
+        AWOS_FULL_SUITE_GATE (F1). The success judge runs name-mapped tests
+        and only ran the whole suite when the mapping found nothing; on
+        astroid_3286 17 mapped tests passed while the edit broke 61 others.
+        A green MAPPED result is now confirmed by one full visible-suite run
+        (full-suite timeout, baseline comparison: only new failures count,
+        marker recorded for the host). Returns the result the judge uses:
+        the full run's when it ran and finished (red: the attempt is not
+        green), else the mapped one (timeout / infra error: logged, kept).
+        Never runs the full suite twice on one tree in a task (cache by tree
+        hash; a green full-suite marker for the tree is reused). Never raises.
+        """
+        if result is None or not _full_suite_gate_enabled():
+            return result
+        mode = getattr(result, "mode", "")
+        if mode not in ("mapped", "full"):
+            return result
+        try:
+            from .test_runner import workspace_tree_hash
+        except ImportError:
+            from test_runner import workspace_tree_hash
+        cache = getattr(self, "_full_gate_cache", None)
+        if cache is None:
+            cache = self._full_gate_cache = {}
+        try:
+            tree = workspace_tree_hash(codebase_root)
+        except Exception:  # noqa: BLE001 - no hash: no reuse, still gated
+            tree = None
+        if mode == "full":
+            if tree:
+                cache.setdefault(tree, result)   # the judge's own full run counts
+            return result
+        if (not _verdict_green({"test_result": result})
+                or getattr(result, "timed_out", False) or getattr(result, "infra_error", False)):
+            return result
+        mapped_passed = result.passed
+        full = cache.get(tree) if tree else None
+        if full is not None:
+            print("[GATE] full suite already ran on this tree in this task; reusing its "
+                  f"result ({full.passed} passed, {full.failed + full.errors} failed)")
+        else:
+            runner = TestRunner(project_root=codebase_root, sandbox=sandbox)
+            marker_fn = getattr(runner, "full_suite_marker_green", None)
+            marker = marker_fn(tree) if callable(marker_fn) and tree else None
+            if isinstance(marker, dict):
+                print("[GATE] full suite: the full-suite marker records a green run on this "
+                      f"tree ({marker.get('passed')} passed); not run again")
+                self._component_add("full_suite_gate", reused=1)
+                return result
+            run_full = getattr(runner, "run_full_suite", None)
+            if not callable(run_full):
+                return result
+            print(f"[GATE] full suite: {mapped_passed} mapped test(s) passed; running the "
+                  "full visible suite once before reporting success")
+            self._component("full_suite_gate", status="ran")
+            self._component_add("full_suite_gate", runs=1)
+            try:
+                full = run_full()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[GATE] full suite could not run ({type(exc).__name__}: {exc}); "
+                      "keeping the mapped verdict")
+                return result
+            if not isinstance(getattr(full, "failed", None), int):
+                return result
+            if tree:
+                cache[tree] = full
+            if (not full.timed_out and not full.infra_error and not full.no_tests_found
+                    and (full.failed or full.errors)):
+                full.raw_output = (
+                    f"[awos] full visible suite after {mapped_passed} mapped test(s) passed: "
+                    f"{full.failed + full.errors} NEW failure(s) vs the base commit (the "
+                    "edit broke tests outside the mapped files)\n\n" + (full.raw_output or ""))
+        if full.timed_out or full.infra_error or full.no_tests_found:
+            why = ("timed out" if full.timed_out else
+                   f"could not run ({getattr(full, 'infra_reason', '') or 'infra error'})"
+                   if full.infra_error else "found no tests")
+            print(f"[GATE] full suite {why}; keeping the mapped verdict "
+                  f"({mapped_passed} mapped passed)")
+            self._component_add("full_suite_gate", inconclusive=1)
+            return result
+        if full.failed or full.errors:
+            print(f"[GATE] full suite red: {full.failed + full.errors} new failure(s) vs the "
+                  f"baseline ({full.passed} passed) although {mapped_passed} mapped test(s) "
+                  "passed; the attempt is not green")
+            self._component_add("full_suite_gate", red=1)
+            return full
+        print(f"[GATE] full suite green: {full.passed} passed")
+        self._component_add("full_suite_gate", green=1)
+        return full
+
+    def _verify_prompt(self, task: dict, ctx: dict, codebase_root: str) -> str:
+        """The verify loop's prompt (F2): goal verbatim, the current diff, the checklist."""
+        try:
+            from .acceptance import workspace_diff
+        except ImportError:
+            from acceptance import workspace_diff
+        diff = workspace_diff(codebase_root, limit=12000) or "(no diff available)"
+        return (
+            "# Verify a change against the issue\n\n"
+            + worker_task_text(task, ctx)
+            + "\n\nA first attempt already edited the code for this issue (diff below). The "
+            "project's visible tests pass with it, but no test checks this issue's own "
+            "requirements, so the change is unverified. Do not trust it; verify it:\n"
+            "1. List every requirement, example and expected output the issue states.\n"
+            "2. Check each one against the code: read the code, and run targeted tests "
+            "(run_tests) or small `python -c` checks that reproduce the issue's examples.\n"
+            "3. Fix anything missing or wrong with edit_file (do not edit existing tests), "
+            "and keep the visible tests passing.\n"
+            "4. When every requirement is verified, reply with a short summary and NO tool "
+            "calls.\n\n"
+            f"Current diff:\n```diff\n{diff}\n```"
+        )
+
+    def _verify_unchecked(
+        self, *, task: dict, ctx: dict, verdict: dict, files_changed: list, registry,
+        client, on_event, cost_cap: Optional[float], spent: float, model: str,
+        codebase_root: str, sandbox, task_id, needs_edits: bool,
+    ) -> dict:
+        """
+        AWOS_VERIFY_UNCHECKED (F2). The acceptance gate is inactive (0 tests
+        kept, start run timed out, generation failed, or acceptance off) and
+        the one-shot edit is visible-green: on click_3818 and
+        markdown-it-py_433 that shipped incomplete. Run a bounded verify
+        loop (AWOS_VERIFY_TURNS, within the task cost cap and wall clock, no
+        done check) on the edited workspace, then judge the final state
+        (with the F1 gate). If the loop leaves the visible tests red, the
+        one-shot snapshot is restored: never worse than the green one-shot.
+        Returns {"verdict", "files_changed", "outcome", "ran", "restored"}.
+        """
+        from types import SimpleNamespace
+
+        try:
+            from . import acceptance as acc_mod
+            from .agent_loop import AgentLoop
+            from .test_runner import workspace_tree_hash
+        except ImportError:
+            import acceptance as acc_mod
+            from agent_loop import AgentLoop
+            from test_runner import workspace_tree_hash
+        out = {"verdict": verdict, "files_changed": list(files_changed), "outcome": None,
+               "ran": False, "restored": False}
+        acc = getattr(self, "_acceptance_suite", None)
+        why = ("acceptance off" if acc is None
+               else acc.error or ("0 tests kept" if not acc.kept else "suite inactive"))
+        self._component("verify", status="considered", reason=str(why)[:200])
+        if cost_cap is not None and cost_cap - spent <= 0:
+            print(f"[VERIFY] skipped: ${spent:.4f} of the ${cost_cap:.4f} cap spent; the "
+                  "one-shot result stands")
+            return out
+        if self._goal_budget_exhausted():
+            print(f"[VERIFY] skipped: {GOAL_BUDGET_REASON}; the one-shot result stands")
+            return out
+        wall_left = self._task_wall_left()
+        if wall_left is not None and wall_left < _MIN_EXTRA_WALL_S:
+            print(f"[VERIFY] skipped: {max(0.0, wall_left):.0f}s of the task's wall clock "
+                  "left; the one-shot result stands")
+            return out
+        try:
+            snap = acc_mod.snapshot_workspace(codebase_root)
+            tree_before = workspace_tree_hash(codebase_root)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[VERIFY] skipped: snapshot failed ({exc}); the one-shot result stands")
+            return out
+        turns = _verify_turns()
+        print(f"[VERIFY] acceptance gate inactive ({why}); the one-shot edit is visible-green "
+              f"but unchecked against the issue: verify loop, at most {turns} turns")
+        out["ran"] = True
+        self._component("verify", status="ran", reason=str(why)[:200])
+        self._component_add("verify", runs=1)
+        try:
+            outcome = AgentLoop(
+                registry=registry, client=client, on_event=on_event, max_turns=turns,
+                require_edits=False,
+                max_cost_usd=None if cost_cap is None else cost_cap - spent,
+                **({"wall_s": wall_left} if wall_left is not None else {}),
+            ).run(self._verify_prompt(task, ctx, codebase_root))
+        except Exception as exc:  # noqa: BLE001
+            touched = acc_mod.restore_workspace(snap)
+            print(f"[VERIFY] the verify loop raised ({type(exc).__name__}: {exc}); restored "
+                  f"the green one-shot edit ({len(touched)} path(s))")
+            out["restored"] = bool(touched)
+            return out
+        out["outcome"] = outcome
+        self._record_agent_loop_spend(model, outcome)
+        self._component_add("verify", turns=int(getattr(outcome, "turns", 0) or 0),
+                            cost_usd=float(getattr(outcome, "cost_usd", 0.0) or 0.0))
+        vfiles = list(files_changed)
+        for path in [*outcome.files_touched,
+                     *_not_ignored(codebase_root, getattr(outcome, "files_written", []))]:
+            rel = os.path.relpath(path, codebase_root)
+            if rel not in vfiles:
+                vfiles.append(rel)
+        try:
+            unchanged = workspace_tree_hash(codebase_root) == tree_before
+        except Exception:  # noqa: BLE001
+            unchanged = False
+        if unchanged:
+            print(f"[VERIFY] done ({outcome.stop_reason}, {outcome.turns} turn(s)): no change "
+                  "needed; the one-shot edit stands")
+            self._component("verify", result="verified_unchanged")
+            return out
+        vverdict = self._judge_agent_attempt(
+            task, SimpleNamespace(stop_reason="completed",
+                                  final_message=(outcome.final_message or "")[:500]
+                                  or "Verified and fixed the one-shot edit"),
+            vfiles, needs_edits, codebase_root, sandbox, task_id)
+        if _verdict_green(vverdict):
+            print(f"[VERIFY] done ({outcome.stop_reason}, {outcome.turns} turn(s)): changed "
+                  f"{', '.join(vfiles)}; visible tests green ({vverdict['test_status']})")
+            self._component("verify", result="fixed")
+            out.update(verdict=vverdict, files_changed=vfiles)
+            return out
+        touched = acc_mod.restore_workspace(snap)
+        print(f"[VERIFY] the verify loop left the visible tests red ({vverdict['test_status']}); "
+              f"restored the green one-shot edit ({len(touched)} path(s))")
+        self._component("verify", result="restored")
+        out["restored"] = True
+        return out
+
     def _judge_agent_attempt(
         self, task: dict, outcome, files_changed: list, needs_edits: bool,
         codebase_root: str, sandbox, task_id,
@@ -3396,6 +3782,9 @@ class Orchestrator:
                 )
             except Exception as exc:
                 logger.warning("[TASK %s] TestRunner error: %s", task_id, exc)
+            # AWOS_FULL_SUITE_GATE (F1): a green verdict from name-mapped
+            # tests is confirmed by the full visible suite, once per tree.
+            test_result = self._full_suite_gate(test_result, codebase_root, sandbox, task_id)
 
         tests_ran = test_result is not None and not getattr(test_result, "no_tests_found", True)
         test_status = (
