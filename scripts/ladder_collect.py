@@ -210,6 +210,10 @@ def read_config(path: Path) -> dict:
     arms = raw.get("ARMS") or "off,mini"
     if len([a for a in arms.split(",") if a.strip()]) != 2:
         raise ValueError("ARMS takes exactly two arms")
+    known = _known_arms()
+    bad = [a.strip() for a in arms.split(",") if a.strip() and a.strip() not in known]
+    if bad:
+        raise ValueError(f"ARMS: unknown arm(s) {bad}; job_series arms: {', '.join(known)}")
     return {"arms": arms, "n_shards": n, "shards": json.dumps(shards), "cap_total": cap,
             # each shard spends from its own out dir, so the total cap is split evenly
             "cap_shard": f"{cap / n:.4f}", "limit": limit, "repeat": int(raw.get("REPEAT") or 1),
@@ -218,6 +222,19 @@ def read_config(path: Path) -> dict:
             "data_asset": raw.get("DATA_ASSET") or "fresh_series.tar.gz.enc",
             # the dir the asset unpacks to under ~/.awos-harness
             "series_dir": _series_dir(raw.get("SERIES_DIR") or "fresh_series")}
+
+
+def _job_series():
+    spec = importlib.util.spec_from_file_location("job_series_for_ladder_collect",
+                                                  REPO / "scripts" / "job_series.py")
+    js = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(js)
+    return js
+
+
+def _known_arms() -> list[str]:
+    """job_series's arm names (ARM_CHILDREN), so a typo in ARMS fails at config time."""
+    return list(_job_series().ARM_CHILDREN)
 
 
 def _series_dir(name: str) -> str:
