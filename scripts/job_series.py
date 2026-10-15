@@ -101,7 +101,9 @@ ROUTING_ENV = ("AWOS_OPENROUTER_PROVIDER", "AWOS_OPENROUTER_ALLOW_FALLBACKS",
                # trick T7b: stable prompt prefix (docs/specs/prompt_caching.md)
                "AWOS_STABLE_PREFIX", "AWOS_STABLE_PREFIX_BLOCK",
                # trick T4: fuzzy apply + edit grammar (docs/specs/edit_robustness.md)
-               "AWOS_FUZZY_APPLY", "AWOS_EDIT_GRAMMAR")
+               "AWOS_FUZZY_APPLY", "AWOS_EDIT_GRAMMAR",
+               # the loop executor's knobs (arm "loop", scaffold/agent/loop_executor.py)
+               "AWOS_LOOP_MAX_STEPS", "AWOS_LOOP_GATE_RETRIES", "AWOS_LOOP_CMD_TIMEOUT_S")
 
 
 def routing_env() -> dict:
@@ -122,6 +124,12 @@ ARM_CHILDREN: dict[str, dict] = {
     # Pair with "off" (both off). Don't also set AWOS_EXPERIENCE in the shell.
     "learn": {"cmd": [PY, "{runner}", "_child", "{job_dir}", "{project}"],
               "env": {"AWOS_NOTEBOOK": "1", "AWOS_EXPERIENCE": "1", **PIN_ENV}},
+    # The `off` AWOS child with the mini-style open loop as its executor
+    # (AWOS_EXECUTOR=loop, scaffold/agent/loop_executor.py): one sandboxed bash
+    # tool until the model submits, then AWOS's success gate. Pair with "mini"
+    # (same loop shape, no AWOS product layer) or "off" (the pipeline).
+    "loop": {"cmd": [PY, "{runner}", "_child", "{job_dir}", "{project}"],
+             "env": {"AWOS_NOTEBOOK": "0", "AWOS_EXECUTOR": "loop", **PIN_ENV}},
     # Head-to-head: a market harness (Aider) with no project memory. Stock Aider
     # stops after 3 follow-up rounds per message; 10 is generous to it, so a
     # win for AWOS is not a win against a handicapped competitor.
@@ -721,6 +729,11 @@ def child_cost_cap(spec_cap: float) -> float:
     return min(spec_cap, env_cap) if env_cap > 0 else spec_cap
 
 
+def child_executor(arm: str) -> str:
+    """The AWOS_EXECUTOR an AWOS child runs: its arm's, else the pipeline."""
+    return ARM_CHILDREN.get(arm, {}).get("env", {}).get("AWOS_EXECUTOR", "agent_loop")
+
+
 def run_child(job_dir: Path, project: Path) -> None:
     """Hand the goal to a fresh Orchestrator, as scripts/long_tasks.py does."""
     # cwd is the arm's state dir, so the repo is put on the path explicitly.
@@ -729,8 +742,15 @@ def run_child(job_dir: Path, project: Path) -> None:
 
     load_dotenv(job_dotenv(Path.cwd()))   # never overrides the pins
     spec = load(job_dir)
+    # The arm's own executor (arm "loop": AWOS_EXECUTOR=loop), never one leaked
+    # from the launching shell into another arm.
+    executor = child_executor(os.environ.get("AWOS_SERIES_ARM", ""))
+    if executor == "loop" and not os.environ.get("AWOS_LOOP_MAX_STEPS"):
+        # The step budget the mini arm gets (harness_mini: step_limit =
+        # task.json max_turns), so the A/B differs in harness, not in budget.
+        os.environ["AWOS_LOOP_MAX_STEPS"] = str(spec.get("max_turns", 150))
     os.environ.update({
-        "AWOS_EXECUTOR": "agent_loop",
+        "AWOS_EXECUTOR": executor,
         "AWOS_SAFE_TO_RUN_TESTS": "1",
         "AWOS_USE_WORKTREE": "false",
         "AWOS_ENABLE_CLARIFICATION": "false",
@@ -745,7 +765,8 @@ def run_child(job_dir: Path, project: Path) -> None:
 
     allowed = _pin_model() or allowed  # again, in case the fallback import path loaded
     print(f"[job_series] child cwd={Path.cwd()} notebook={os.environ.get('AWOS_NOTEBOOK')} "
-          f"goal_check={os.environ.get('AWOS_GOAL_CHECK')} ladder={allowed}", flush=True)
+          f"goal_check={os.environ.get('AWOS_GOAL_CHECK')} executor={executor} "
+          f"ladder={allowed}", flush=True)
     report = Orchestrator().execute_feature(
         goal=spec["goal"],
         codebase_root=str(project),
@@ -767,6 +788,7 @@ def run_dry_child(job_dir: Path, project: Path) -> None:
     """
     print(f"[job_series] dry-run child cwd={Path.cwd()} project={project} "
           f"notebook={os.environ.get('AWOS_NOTEBOOK')} goal_check={os.environ.get('AWOS_GOAL_CHECK')} "
+          f"executor={child_executor(os.environ.get('AWOS_SERIES_ARM', ''))} "
           f"model={os.environ.get('AWOS_AGENT_MODEL')}", flush=True)
     fail = os.environ.get("AWOS_SERIES_DRY_FAIL", "")
     if fail:

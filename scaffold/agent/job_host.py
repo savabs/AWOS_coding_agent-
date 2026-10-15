@@ -405,7 +405,12 @@ def child_main(job_path: str, result_path: str, parent_pid: int) -> int:
         load_dotenv(_paths.dotenv_path())
     except ImportError:
         pass
+    # AWOS_EXECUTOR=loop (the mini-style loop, set in the user's env or .env)
+    # survives the child's pins; anything else runs the pipeline.
+    keep_loop = os.environ.get("AWOS_EXECUTOR", "").strip().lower() == "loop"
     os.environ.update(CHILD_ENV)
+    if keep_loop:
+        os.environ["AWOS_EXECUTOR"] = "loop"
     job = Job.from_dict(json.loads(Path(job_path).read_text(encoding="utf-8")))
     result = ABILITIES[job.ability](job)
     write_json_atomic(Path(result_path), result)

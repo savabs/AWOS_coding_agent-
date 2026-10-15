@@ -412,7 +412,7 @@ def test_report_usage_overrides_ledger(tmp_path, monkeypatch):
 
 
 def test_arms_mapping_drives_cli_and_child(tmp_path, monkeypatch):
-    assert set(js.ARM_CHILDREN) == {"off", "on", "learn", "aider", "aider-frontier",
+    assert set(js.ARM_CHILDREN) == {"off", "on", "learn", "loop", "aider", "aider-frontier",
                                     "mini", "mini-local"}
     for arm, child in js.ARM_CHILDREN.items():
         assert "{job_dir}" in child["cmd"] and "{project}" in child["cmd"]

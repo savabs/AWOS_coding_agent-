@@ -20,12 +20,26 @@ from typing import Any, List, Optional
 logger = logging.getLogger(__name__)
 
 
+#: AWOS_EXECUTOR names: "pipeline" is the user-facing name of the default
+#: agent_loop path (planner → acceptance → one-shot → gates → capped repair).
+_EXECUTOR_ALIASES = {"pipeline": "agent_loop", "": "agent_loop"}
+
+
 def executor_choice() -> str:
     """
-    Which executor runs a task: agent_loop (default) | react | worker.
+    Which executor runs a task: agent_loop (default; also "pipeline") | loop |
+    react | worker. "loop" is the mini-style open loop (loop_executor.py): one
+    bash tool until the model submits, then the success gate.
     See docs/specs/agent_loop_executor_spec.md for the measurements behind it.
     """
-    return os.getenv("AWOS_EXECUTOR", "agent_loop").strip().lower()
+    raw = os.getenv("AWOS_EXECUTOR", "agent_loop").strip().lower()
+    return _EXECUTOR_ALIASES.get(raw, raw)
+
+
+def executor_label(choice: Optional[str] = None) -> str:
+    """The user-facing name of the active executor: pipeline | loop | <other>."""
+    choice = choice or executor_choice()
+    return "pipeline" if choice == "agent_loop" else choice
 
 
 def _is_test_file(path: str) -> bool:
@@ -1291,7 +1305,10 @@ class Orchestrator:
 
         # ── Exploration phase (pre-plan grep/find) ─────────────────────────
         _exploration_data: dict = {}
-        if exploration_enabled() and pre_planned_tasks is None:
+        # AWOS_EXECUTOR=loop: no exploration, no planner — the model explores
+        # with its own shell (loop_executor.py).
+        _loop_executor = executor_choice() == "loop"
+        if exploration_enabled() and pre_planned_tasks is None and not _loop_executor:
             print("\n[EXPLORE] Pre-plan repository scan...")
             _exploration_data = run_exploration(goal, codebase_root)
             codebase_context = enrich_codebase_context(codebase_context, _exploration_data)
@@ -1307,6 +1324,12 @@ class Orchestrator:
             print(f"\n[PLANNER] Using pre-built plan: {len(tasks)} tasks")
             for task in tasks:
                 print(f"  Task {task['task_id']}: {task['action']} (complexity: {task['complexity']})")
+        elif _loop_executor:
+            print("\n[PLANNER] skipped: AWOS_EXECUTOR=loop runs the goal as one task", flush=True)
+            plan = self._goal_as_single_task_plan(goal)
+            plan["reasoning"] = "planner skipped: AWOS_EXECUTOR=loop"
+            _plan_source = "skipped_by_executor"
+            tasks = plan["plan"]
         else:
             _skip_reason = (
                 _planner_skip_reason(_exploration_data)
@@ -1585,7 +1608,7 @@ class Orchestrator:
             if (
                 failed_tasks
                 and decomposition_depth < max_decomposition
-                and executor_choice() != "agent_loop"
+                and executor_choice() not in ("agent_loop", "loop")
             ):
                 new_tasks = []
                 for task in failed_tasks:
@@ -1632,13 +1655,17 @@ class Orchestrator:
         overall_success = tasks_failed == 0 and goal_complete
 
         # ── Project notebook: learn from this goal, after its goal check ──
-        self._update_project_notebook(goal, codebase_root, {
-            "success": overall_success,
-            "tasks_completed": tasks_completed,
-            "tasks_failed": tasks_failed,
-            "goal_check": self._goal_check_summary(goal_complete, goal_check_reasoning),
-            "incomplete_reason": incomplete_reason,
-        })
+        # Not on the loop path: it makes no notebook call.
+        if _loop_executor:
+            self._component("notebook", status="skipped", reason="executor loop")
+        else:
+            self._update_project_notebook(goal, codebase_root, {
+                "success": overall_success,
+                "tasks_completed": tasks_completed,
+                "tasks_failed": tasks_failed,
+                "goal_check": self._goal_check_summary(goal_complete, goal_check_reasoning),
+                "incomplete_reason": incomplete_reason,
+            })
         # ── Experience store + trajectory log: the goal's outcome is final ──
         self._experience_goal_end(goal, codebase_root, start_time, overall_success,
                                   list(results) + _gc_results)
@@ -1748,7 +1775,10 @@ class Orchestrator:
         # The run's agent model (or AWOS_REVIEW_MODEL); its spend is recorded
         # to the ledger, so it counts toward the goal budget.
         review = {"passed": True, "issues": [], "suggestions": []}
-        if overall_success:
+        if _loop_executor:
+            # One task, judged by the success gate: nothing to cross-check.
+            review = {**review, "skipped": True, "skip_reason": "executor loop"}
+        elif overall_success:
             try:
                 # n_tasks gates AWOS_INTEGRATION_REVIEW=auto: a cross-task
                 # check has nothing to cross-check after one task.
@@ -2837,6 +2867,198 @@ class Orchestrator:
             _live_t=_live_t,
             _task_usage=_task_usage,
         )
+
+    # ── AWOS_EXECUTOR=loop ───────────────────────────────────────────────────
+
+    def _loop_gate(self, task: dict, files_changed: list, submission: str,
+                   needs_edits: bool, codebase_root: str, sandbox, task_id) -> dict:
+        """
+        The loop executor's success gate on the final tree: the same judge the
+        pipeline uses (mapped tests, then the full visible suite once per tree,
+        failures compared against the baseline so only NEW ones count).
+        retry=True (red with new failures, or no edit on a task that needs
+        one) sends the feedback back into the loop's conversation.
+        """
+        from types import SimpleNamespace
+
+        verdict = self._judge_agent_attempt(
+            task, SimpleNamespace(stop_reason="completed", final_message=submission or ""),
+            list(files_changed), needs_edits, codebase_root, sandbox, task_id)
+        tr = verdict.get("test_result")
+        ran = tr is not None and not getattr(tr, "no_tests_found", True)
+        new_failures = (tr.failed + tr.errors) if ran else 0
+        green = bool(verdict.get("success")) and new_failures == 0
+        feedback, retry = "", False
+        if ran and new_failures:
+            retry = True
+            out = (getattr(tr, "raw_output", "") or "").strip()
+            if len(out) > 6000:
+                out = "...\n" + out[-6000:]
+            feedback = (f"{verdict.get('test_status', '')}\n\n" + out).strip()
+        elif not verdict.get("success"):
+            # No edit on a task that needs one: one more chance, the model decides.
+            retry = True
+            feedback = (verdict.get("error") or "the submission was not accepted") + (
+                ". No file in the repository differs from the start; make the change "
+                "the task asks for, or explain why none is needed.")
+        print(f"[LOOP] gate on submit: {'green' if green else 'red'} — "
+              f"{verdict.get('test_status', '')}", flush=True)
+        return {"green": green, "retry": retry, "feedback": feedback, "verdict": verdict,
+                "new_failures": new_failures}
+
+    def _execute_task_via_loop(
+        self,
+        task: dict,
+        ctx: dict,
+        *,
+        task_id,
+        esc_decision,
+        _span,
+        _strategy,
+        _task_ts: float,
+        _live_t,
+        _task_usage: dict,
+    ) -> dict:
+        """
+        AWOS_EXECUTOR=loop: the goal goes verbatim to a mini-style open loop
+        (loop_executor.LoopExecutor: one sandboxed bash tool, the model works
+        until it submits). On a submit the success gate (_loop_gate) runs; red
+        with new failures goes back into the same conversation, up to
+        AWOS_LOOP_GATE_RETRIES times. The result has the same shape as the
+        agent loop's, so git tracking, the host's handoff, reports and
+        `awos fix` work unchanged.
+        """
+        from types import SimpleNamespace
+
+        try:
+            from . import loop_executor as lx
+            from .agent_loop import build_client_from_env
+            from .providers import openrouter_key, openrouter_model_id
+            from .sandbox import make_sandbox
+        except ImportError:
+            import loop_executor as lx
+            from agent_loop import build_client_from_env
+            from providers import openrouter_key, openrouter_model_id
+            from sandbox import make_sandbox
+
+        codebase_root = ctx["codebase_root"]
+        record = dict(tool_name="Loop", tag="LOOP", marker="loop_executor",
+                      failure_kind="loop_fail", task_id=task_id, esc_decision=esc_decision,
+                      _span=_span, _strategy=_strategy, _task_ts=_task_ts, _live_t=_live_t,
+                      _task_usage=_task_usage)
+
+        def _fail(reason: str) -> dict:
+            print(f"[TASK {task_id}] LOOP cannot run: {reason}")
+            self._component(lx.COMPONENT, status="failed", reason=reason[:300])
+            return self._record_tool_executor_result(
+                {"success": False, "summary": "", "error": reason, "files_changed": [],
+                 "steps": [], "test_result": None, "input_tokens": 0, "output_tokens": 0,
+                 "cost_usd": 0.0}, task, ctx, **record)
+
+        model = esc_decision.spec.model_id
+        if openrouter_key():
+            model = openrouter_model_id(model)
+        try:
+            client = build_client_from_env(model)
+        except Exception as exc:  # noqa: BLE001
+            return _fail(f"no model client ({exc})")
+        model = str(getattr(client, "model", "") or model)
+        sandbox = make_sandbox(codebase_root)
+        if sandbox is None:
+            # Commands never run on the bare host (AWOS_SANDBOX=none, or no backend).
+            return _fail("no sandbox for the bash tool (AWOS_SANDBOX: seatbelt or docker)")
+        registry = lx.build_loop_registry(sandbox)
+        self._last_agent_model = model
+        needs_edits = _task_needs_edits(task)
+        # Per task: the full-suite gate's runs by tree hash, the wall clock start.
+        self._full_gate_cache = {}
+        self._task_t0 = time.monotonic()
+        goal = _session_goal(ctx) or str(task.get("action", ""))
+        print(f"[TASK {task_id}] LOOP ({model}; max {lx.max_steps()} steps, "
+              f"{lx.gate_retries()} gate retries)", flush=True)
+        if _live_t:
+            _live_t.worker_start(1, esc_decision.spec.name)
+
+        def _on_call(reply, cost: float) -> None:
+            # Every call is spend the budget ledger (goal budget, host spend
+            # tracker) and the TokenTracker see at once, cache-aware.
+            if getattr(self, "tracker", None) is not None:
+                try:
+                    self.tracker.record(lx.COMPONENT, model, reply.input_tokens,
+                                        reply.output_tokens, cost)
+                except Exception:  # noqa: BLE001
+                    pass
+            try:
+                try:
+                    from .budget_ledger import get_ledger as _gl
+                except ImportError:
+                    from budget_ledger import get_ledger as _gl
+                _gl().record(request_type=lx.COMPONENT, model=model,
+                             input_tokens=reply.input_tokens,
+                             output_tokens=reply.output_tokens, cost=cost)
+            except Exception:  # noqa: BLE001
+                pass
+
+        def _path_filter(rels: list) -> list:
+            kept = _not_ignored(codebase_root, [os.path.join(codebase_root, r) for r in rels])
+            return [os.path.relpath(p, codebase_root) for p in kept]
+
+        def _gate(files_changed: list, submission: str) -> dict:
+            return self._loop_gate(task, files_changed, submission, needs_edits,
+                                   codebase_root, sandbox, task_id)
+
+        def _budget_hit() -> bool:
+            if self._goal_budget_exhausted():
+                self._goal_budget_skipped_work = True
+                return True
+            return False
+
+        cap = _run_cost_cap()
+        wall = _task_wall_s()
+        try:
+            run = lx.LoopExecutor(
+                client, registry, goal, workspace=codebase_root, gate=_gate,
+                cost_cap=cap, wall_s=wall if wall > 0 else None,
+                budget_exhausted=_budget_hit, on_call=_on_call, path_filter=_path_filter,
+            ).run()
+        finally:
+            registry.close()  # a docker sandbox holds a container until closed
+
+        verdict = (run.gate or {}).get("verdict") or {}
+        test_result = verdict.get("test_result")
+        if run.stop_reason == "submitted":
+            error = ""
+        elif run.stop_reason == "gate_red":
+            error = (f"the success gate stayed red after {run.gate_retries} feedback "
+                     f"round(s): {verdict.get('test_status') or verdict.get('error') or ''}")
+        else:
+            error = f"loop stopped before a green submit: {run.stop_reason}"
+        print(f"[TASK {task_id}] LOOP {run.stop_reason}: {run.steps} step(s), "
+              f"{run.submits} submit(s), {run.gate_retries} gate retr(ies), "
+              f"${run.cost_usd:.4f}", flush=True)
+        self._component(lx.COMPONENT, **run.component())
+        result = {
+            "success": run.success,
+            "summary": (run.final_message or verdict.get("summary") or "")[:500],
+            "error": error,
+            "files_changed": list(run.files_changed),
+            "steps": [
+                SimpleNamespace(thought=t.get("text", ""),
+                                action="bash" if t.get("commands") else "",
+                                action_input={"commands": t.get("commands", [])},
+                                observation="", success=True, latency_ms=0.0)
+                for t in run.transcript
+            ],
+            "test_result": test_result,
+            "input_tokens": run.input_tokens,
+            "output_tokens": run.output_tokens,
+            "cost_usd": run.cost_usd,
+            "model_used": model,
+            "loop": run.component(),
+            "_applied_context": (self._agent_applied_context(task, run.files_changed, verdict)
+                                 if run.success and verdict else ""),
+        }
+        return self._record_tool_executor_result(result, task, ctx, **record)
 
     def _one_shot_first(
         self, task: dict, ctx: dict, model: str, codebase_root: str, sandbox,
@@ -4165,7 +4387,7 @@ class Orchestrator:
         # follow-up with no file, or a placeholder like "multiple files", must
         # still run — it used to crash the run (IsADirectoryError on the root)
         # or fail as file_not_found without the agent ever looking.
-        _agent_executor = executor_choice() == "agent_loop"
+        _agent_executor = executor_choice() in ("agent_loop", "loop")
         _no_single_file = not task["file"] or os.path.isdir(file_path)
 
         _live_t = ctx.get("_live")           # LiveRenderer (optional)
@@ -4334,6 +4556,19 @@ class Orchestrator:
 
         # ── Executor selection (AWOS_EXECUTOR) ────────────────────────────
         _executor = executor_choice()
+        if _executor == "loop":
+            # AWOS_EXECUTOR=loop: the mini-style open loop (loop_executor.py).
+            return self._execute_task_via_loop(
+                task,
+                ctx,
+                task_id=task_id,
+                esc_decision=esc_decision,
+                _span=_span,
+                _strategy=_strategy,
+                _task_ts=_task_ts,
+                _live_t=_live_t,
+                _task_usage=_task_usage,
+            )
         if _executor == "agent_loop":
             _loop_result = self._execute_task_via_agent_loop(
                 task,

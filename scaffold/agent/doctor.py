@@ -120,6 +120,25 @@ def check_provider(env: Optional[dict] = None, get=None) -> list[Check]:
     return out
 
 
+#: AWOS_EXECUTOR values a coding job can run with (orchestrator.executor_choice).
+EXECUTORS = {"pipeline": "planner, one-shot edit, gates, capped repair (default)",
+             "agent_loop": "planner, one-shot edit, gates, capped repair (default)",
+             "loop": "open bash loop until the model submits, then the success gate",
+             "react": "ReAct worker", "worker": "single-file worker"}
+
+
+def check_executor(env: Optional[dict] = None) -> Check:
+    """Which executor runs a coding job (AWOS_EXECUTOR); informational."""
+    e = _ob.known_env(env)
+    raw = (e.get("AWOS_EXECUTOR") or "").strip().lower() or "pipeline"
+    name = "pipeline" if raw == "agent_loop" else raw
+    if raw not in EXECUTORS:
+        return Check("Executor", False, f"AWOS_EXECUTOR={raw!r} is unknown",
+                     "set AWOS_EXECUTOR to pipeline or loop (or unset it)", required=False)
+    return Check("Executor", True, f"{name}: {EXECUTORS[raw]} (AWOS_EXECUTOR)",
+                 required=False)
+
+
 def check_repo(repo: Path) -> list[Check]:
     repo = Path(repo).expanduser().resolve()
     if not _ob.is_git_repo(repo):
@@ -193,6 +212,7 @@ def run_checks(repo: Optional[Path] = None, env: Optional[dict] = None, get=None
     repo = Path(repo) if repo else Path.cwd()
     checks = [check_python(), check_install(), check_git()]
     checks += check_provider(env=env, get=get)
+    checks.append(check_executor(env=env))
     checks += check_repo(repo)
     checks.append(check_host_dir())
     checks.append(check_worker())
