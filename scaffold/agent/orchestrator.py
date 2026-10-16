@@ -16,7 +16,7 @@ import time
 import uuid
 from collections import deque
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -1061,6 +1061,9 @@ class Orchestrator:
         resume: bool = False,
         session_id: Optional[str] = None,
         auto_approve_plan: bool = False,
+        extra_context: str = "",
+        cancel_event=None,
+        on_runtime_session: Optional[Callable[[str], None]] = None,
     ) -> dict:
         """
         Execute a complete feature request end-to-end (_execute_feature_impl)
@@ -1069,8 +1072,18 @@ class Orchestrator:
         integration_review, notebook), one `[COMPONENTS] {json}` log line at
         the end, and components.json in the cwd of a benchmark child
         (AWOS_SERIES_ARM set).
+
+        The GUI chat (gui_chat._run_agent) also passes:
+          extra_context       prior chat turns, given to the model with the
+                              same channel as AWOS_EXPERIENCE context
+          cancel_event        a threading.Event; once set, the run stops after
+                              the current task, as a pause would
+          on_runtime_session  called with the RuntimeSession id once it exists
         """
         self._components = _new_components()
+        self._extra_context = (extra_context or "").strip()
+        self._cancel_event = cancel_event
+        self._on_runtime_session = on_runtime_session
         report = None
         try:
             report = self._execute_feature_impl(
@@ -1224,6 +1237,12 @@ class Orchestrator:
                 self._runtime_session = self._runtime_store.create(goal, repo_root)
             self._runtime_session.status = SessionStatus.RUNNING
             self._runtime_store.save(self._runtime_session)
+            _on_rs = getattr(self, "_on_runtime_session", None)
+            if _on_rs is not None:
+                try:
+                    _on_rs(self._runtime_session.session_id)
+                except Exception as _cb_exc:  # a GUI callback never breaks the run
+                    logger.debug("[SESSION] on_runtime_session failed: %s", _cb_exc)
             print(
                 f"[SESSION] Runtime session {self._runtime_session.session_id} "
                 f"({self._runtime_session.status.value})"
@@ -1520,8 +1539,12 @@ class Orchestrator:
         # AWOS_EXPERIENCE (ablation B): this repo's most similar past verified
         # changes, for the one-shot context and the agent's first message.
         _experience = self._experience_context(goal, codebase_root)
-        if _experience:
-            _exploration_data = {**(_exploration_data or {}), "extra_context": _experience}
+        _caller_context = getattr(self, "_extra_context", "")
+        if _caller_context:
+            _caller_context = f"Earlier conversation with the user:\n{_caller_context}"
+        _extra = "\n\n".join(x for x in (_caller_context, _experience) if x)
+        if _extra:
+            _exploration_data = {**(_exploration_data or {}), "extra_context": _extra}
 
         # Bind context needed by _execute_single_task into a closure
         _ctx = dict(
@@ -1582,7 +1605,7 @@ class Orchestrator:
                 tasks_failed = sum(1 for r in results if not r["success"])
                 break
 
-            if self._pause_requested:
+            if self._cancel_requested():
                 if self._runtime_session and self._runtime_store:
                     from .runtime_session import SessionStatus
                     print("[SESSION] Pause requested — stopping after last checkpoint")
@@ -2363,6 +2386,8 @@ class Orchestrator:
         results = []
         prev_task_context: str = ""
         for task in tasks:
+            if self._cancel_requested():
+                break
             if prev_task_context:
                 task = {**task, "prev_task_context": prev_task_context}
             r = run_one(task)
@@ -2372,9 +2397,18 @@ class Orchestrator:
             if r.get("success") and r.get("_applied_context"):
                 prev_task_context = r["_applied_context"]
                 logger.debug("[CHAIN] Passing context to next task: %s chars", len(prev_task_context))
-            if self._pause_requested:
+            if self._cancel_requested():
                 break
         return results
+
+    def _cancel_requested(self) -> bool:
+        """A pause, or the caller's cancel_event (GUI stop), ends the run at the
+        next task boundary; a cancel then goes down the pause path."""
+        event = getattr(self, "_cancel_event", None)
+        if event is not None and event.is_set() and not self._pause_requested:
+            print("[SESSION] Cancel requested — stopping after the current task")
+            self._pause_requested = True
+        return self._pause_requested
 
     def _execute_task_via_react(
         self,
@@ -2984,7 +3018,39 @@ class Orchestrator:
             model = openrouter_model_id(model)
         # AWOS_LOOP_ROUTE (loop_route.py, rea_synthesis A6): start on the
         # cheapest rung and escalate one way; off = the one model as before.
-        ladder = lr.route_ladder()
+        # route_policy gates the rungs first: a forced decision skips the
+        # ladder, local_only drops remote rungs, cheap-only / an exhausted
+        # premium budget drops premium rungs (typed reasons, route log).
+        try:
+            from . import route_policy as rp
+        except ImportError:
+            import route_policy as rp
+        raw_ladder = lr.route_ladder()
+        local_only = rp.local_only_enabled()
+
+        def _premium_left():
+            try:
+                return self.escalation._premium_budget_remaining()
+            except Exception:  # noqa: BLE001 - unknown: no premium gate
+                return None
+
+        try:
+            from .escalation_engine import is_cheap_only as _cheap_only
+        except ImportError:
+            from escalation_engine import is_cheap_only as _cheap_only
+        ladder, route_skips = rp.filter_ladder(
+            raw_ladder, forced=bool(getattr(esc_decision, "forced", False)),
+            local_only=local_only, cheap_only=_cheap_only(), premium_left=_premium_left())
+        for _s in route_skips:
+            _s["step"] = 0
+            print(f"[TASK {task_id}] LOOP route: skipped {_s['skip']} ({_s['reason']})", flush=True)
+        if raw_ladder and not ladder and local_only \
+                and os.getenv("AWOS_PROVIDER", "").strip().lower() != "local":
+            lr.record_decisions([{"start": None, "step": 0}] + route_skips,
+                                goal_key=str(task_id), solved=False,
+                                stop_reason="no_allowed_rung", cost_usd=0.0, steps=0)
+            return _fail("local_only: every AWOS_LOOP_ROUTE rung is remote and the "
+                         "default provider is not local")
         escalate, rung_steps = None, None
         try:
             client = lr.build_route_client(ladder[0]) if ladder else build_client_from_env(model)
@@ -3000,6 +3066,14 @@ class Orchestrator:
                 nonlocal model
                 while rest:
                     spec = rest.pop(0)
+                    # The premium budget can run out mid-run: re-check it.
+                    _, late = rp.filter_ladder([spec], premium_left=_premium_left())
+                    if late:
+                        late[0]["step"] = None
+                        route_skips.extend(late)
+                        print(f"[TASK {task_id}] LOOP route: skipped {spec} "
+                              f"({late[0]['reason']})", flush=True)
+                        continue
                     try:
                         nxt = lr.build_route_client(spec)
                     except Exception as exc:  # noqa: BLE001 - skip a rung we can't build
@@ -3066,7 +3140,12 @@ class Orchestrator:
         # The host sets AWOS_LOOP_CHECKPOINT_PATH (host/worker.py) when the job
         # has its own worktree that survives a kill (loop_checkpoint.py, C9).
         checkpoint = None
-        task_key = lc.task_key(goal, first_model,
+        # The host passes the job's original goal (AWOS_LOOP_CHECKPOINT_GOAL):
+        # an auto-continue appends a NOTE to the goal, and the key must not
+        # change with it, or the attempt starts over instead of resuming. The
+        # NOTE is in <checkpoint>.note for the executor to append on resume.
+        key_goal = os.getenv("AWOS_LOOP_CHECKPOINT_GOAL", "").strip() or goal
+        task_key = lc.task_key(key_goal, first_model,
                                bool(getattr(lx.wrap_for_loop(client), "text_protocol", False)),
                                extra=str(task_id))
         ckpt_path = os.getenv("AWOS_LOOP_CHECKPOINT_PATH", "").strip()
@@ -3081,9 +3160,11 @@ class Orchestrator:
             ).run()
         finally:
             registry.close()  # a docker sandbox holds a container until closed
-        if ladder:
-            # Labelled route decisions for calibrating ml_router (rea_synthesis A8).
-            lr.record_decisions([{"start": first_model, "step": 0}] + list(run.escalations),
+        if raw_ladder:
+            # Labelled route decisions for calibrating ml_router (rea_synthesis A8),
+            # plus each skipped rung with its typed reason.
+            lr.record_decisions([{"start": first_model, "step": 0}] + list(run.escalations)
+                                + route_skips,
                                 goal_key=task_key, solved=run.success,
                                 stop_reason=run.stop_reason, cost_usd=run.cost_usd,
                                 steps=run.steps)
@@ -3118,6 +3199,12 @@ class Orchestrator:
             "output_tokens": run.output_tokens,
             "cost_usd": run.cost_usd,
             "model_used": model,
+            # Which models did the work: _record_tool_executor_result credits
+            # the final rung, not esc_decision, when a ladder was used.
+            "route": ({"ladder": list(ladder), "skipped": route_skips,
+                       "first_model": first_model, "final_model": model,
+                       "escalations": len(getattr(run, "escalations", []) or [])}
+                      if raw_ladder else None),
             "loop": run.component(),
             "_applied_context": (self._agent_applied_context(task, run.files_changed, verdict)
                                  if run.success and verdict else ""),
@@ -4364,8 +4451,30 @@ class Orchestrator:
             print(f"[TASK {task_id}] {_tests_not_run_status(test_result)}")
             task["test_result"] = test_result
 
-        _cost = float(_task_usage.get("cost_usd", 0)) or esc_decision.spec.cost_per_req
-        _aid = esc_decision.spec.level.value
+        # Routing credit: when an AWOS_LOOP_ROUTE ladder did the work, the
+        # escalation decision's arm did not; credit the final rung's model
+        # when it is on the escalation ladder, else skip the arm credit.
+        _credit_spec = esc_decision.spec
+        _route = result.get("route") if isinstance(result.get("route"), dict) else None
+        if _route is not None and _route.get("ladder"):
+            try:
+                from . import route_policy as _rp
+            except ImportError:
+                import route_policy as _rp
+            _ct = _rp.credit_target(_route.get("final_model") or result.get("model_used", ""))
+            if _ct["action"] == "credit_rung":
+                _credit_spec = _ct["spec"]
+                _credit = {"action": "credit_rung", "model": _ct["model"],
+                           "spec": _credit_spec.name, "level": _credit_spec.level.name}
+            else:
+                _credit_spec = None
+                _credit = {"action": "skip", "model": _ct["model"], "reason": _ct["reason"]}
+            _route["credit"] = _credit
+            self._component("route_credit", **_credit)
+            print(f"[TASK {task_id}] route credit: {_credit}")
+
+        _cost = float(_task_usage.get("cost_usd", 0)) or (_credit_spec or esc_decision.spec).cost_per_req
+        _aid = (_credit_spec or esc_decision.spec).level.value
         if success and test_result is not None and not test_result.no_tests_found and not test_result.timed_out:
             _reward = compute_reward(test_result.pass_rate, _aid, _cost)
             _success = test_result.pass_rate >= 1.0
@@ -4373,14 +4482,20 @@ class Orchestrator:
             _reward = compute_reward(success, _aid, _cost)
             _success = success
 
-        _features = self._feature_extractor.extract(task, self.escalation.failure_count(str(task_id)))
-        self.reward_store.store(
-            task=task, action_id=_aid, features=_features, success=_success,
-            cost_usd=_cost, model_name=esc_decision.spec.name,
-            input_tokens=int(_task_usage.get("input_tokens", 0)),
-            output_tokens=int(_task_usage.get("output_tokens", 0)),
-        )
-        self.escalation.record_outcome(str(task_id), esc_decision.spec.level, _success, task=task, reward=_reward)
+        if _credit_spec is not None:
+            _features = self._feature_extractor.extract(task, self.escalation.failure_count(str(task_id)))
+            self.reward_store.store(
+                task=task, action_id=_aid, features=_features, success=_success,
+                cost_usd=_cost, model_name=_credit_spec.name,
+                input_tokens=int(_task_usage.get("input_tokens", 0)),
+                output_tokens=int(_task_usage.get("output_tokens", 0)),
+            )
+            self.escalation.record_outcome(str(task_id), _credit_spec.level, _success, task=task,
+                                           reward=_reward)
+        else:
+            # Failure history only (retries still escalate); task=None trains no arm.
+            self.escalation.record_outcome(str(task_id), esc_decision.spec.level, _success,
+                                           task=None, reward=_reward)
         self.strategy_router.update(task, _strategy.name, _reward)
 
         _span.complete_ts = _time.time()

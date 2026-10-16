@@ -49,8 +49,14 @@ def queue(root):
 
 @pytest.fixture
 def repo(tmp_path):
+    # A git repo with a commit: the worker refuses non-git roots (it would
+    # otherwise edit the user's directory in place).
     d = tmp_path / "repo"
     d.mkdir()
+    (d / "README").write_text("r\n")
+    for args in (["init", "-q"], ["add", "-A"],
+                 ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "base"]):
+        subprocess.run(["git", *args], cwd=d, check=True, capture_output=True)
     return d
 
 

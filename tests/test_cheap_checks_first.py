@@ -39,6 +39,13 @@ from scaffold.agent.claude_compat import effort_from_env  # noqa: E402
 from scaffold.agent.host import worker  # noqa: E402
 from scaffold.agent.test_runner import TestResult, TestRunner  # noqa: E402
 
+
+@pytest.fixture(autouse=True)
+def _host_verify_unsandboxed(monkeypatch):
+    """verify_tests needs a sandbox backend or the documented unsafe opt-in
+    (host/worker.py); these tests' code is trusted, so opt in."""
+    monkeypatch.setenv(worker.UNSAFE_HOST_VERIFY_ENV, "1")
+
 RED = TestResult(passed=2, failed=1, errors=0, pass_rate=0.66, raw_output="1 failed",
                  no_tests_found=False)
 

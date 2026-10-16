@@ -16,7 +16,17 @@ module adds what keeps those worktrees safe and bounded:
    what .gitignore excludes) is committed to a hidden ref
    ``refs/awos/snapshots/<job>/<UTC timestamp>`` in the user's repo, without
    touching the worktree's own index or HEAD. A worktree whose snapshot fails is
-   kept. A clean worktree still at its base commit needs no snapshot.
+   kept. A clean worktree still at its base commit needs no snapshot. A
+   worktree holding nested git repos / initialised submodules is never
+   snapshotted (their files would be lost as bare gitlinks): it is kept.
+4. **Retention**: retire() also calls prune_snapshots (newest 3 per job, none
+   older than 30 days; pinned jobs' snapshots kept). A prune pass removes at
+   most MAX_REMOVALS_PER_PASS worktrees and re-reads each owner record right
+   before removing it. ``set_pinned()`` marks a worktree never to be pruned.
+5. **Creation** (add_worktree): hardened git env (handoff._git_env: hooks and
+   fsmonitor off) plus GIT_LFS_SKIP_SMUDGE=1; a ``.metadata_never_index``
+   marker (macOS Spotlight) in each worktree, listed in the repo's
+   info/exclude so no diff sees it.
 
 Spec: docs/specs/host_workspace.md.
 """
@@ -41,6 +51,9 @@ BASELINE_DIR = "baseline"
 OWNER_SUFFIX = ".owner.json"
 SNAPSHOT_PREFIX = "refs/awos/snapshots"
 DEFAULT_MAX_WORKTREES = 20
+#: At most this many worktree removals per prune pass (each one snapshots and
+#: deletes files; a backlog is worked off over later passes).
+MAX_REMOVALS_PER_PASS = 10
 ACTIVE, FINISHED = "active", "finished"
 #: Never part of a snapshot even when .gitignore misses them (handoff excludes them too).
 _SNAPSHOT_EXCLUDES = (":(exclude,glob)**/__pycache__/**", ":(exclude,glob)**/*.pyc",
@@ -73,6 +86,62 @@ def _git(args: List[str], cwd: Optional[str] = None, env: Optional[Dict[str, str
 
 def _is_worktree(path: Path) -> bool:
     return (path / ".git").exists()
+
+
+#: macOS Spotlight skips a directory holding this file (job worktrees churn).
+NEVER_INDEX = ".metadata_never_index"
+#: Extra env for creating worktrees: never download LFS objects on checkout
+#: (a smudge filter is code run on checkout, and the download costs time).
+_WORKTREE_ENV = {"GIT_LFS_SKIP_SMUDGE": "1"}
+
+
+def _mark_never_index(worktree: Path, repo: str) -> None:
+    """Write NEVER_INDEX into the worktree and keep it out of every diff: it is
+    listed in the repo's info/exclude (shared by its worktrees, never
+    committed), so handoff, changed_paths and tree hashes do not see it."""
+    try:
+        common = _git(["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=repo)
+        if common.returncode == 0 and common.stdout.strip():
+            exclude = Path(common.stdout.strip()) / "info" / "exclude"
+            line = f"/{NEVER_INDEX}"
+            text = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
+            if line not in text.splitlines():
+                exclude.parent.mkdir(parents=True, exist_ok=True)
+                with open(exclude, "a", encoding="utf-8") as fh:
+                    fh.write(("" if not text or text.endswith("\n") else "\n")
+                             + "# awos: macOS Spotlight marker in job worktrees\n" + line + "\n")
+        (worktree / NEVER_INDEX).touch(exist_ok=True)
+    except OSError:
+        pass   # an optimisation only
+
+
+def add_worktree(repo: str, dest: Path | str, base: str) -> str:
+    """`git worktree add --detach dest base` with the hardened git env
+    (handoff._git_env: hooks/fsmonitor off, scrubbed GIT_*) plus
+    GIT_LFS_SKIP_SMUDGE=1, then the Spotlight marker. Raises RuntimeError."""
+    dest = Path(dest)
+    add = _git(["worktree", "add", "--detach", str(dest), base], cwd=repo, env=dict(_WORKTREE_ENV))
+    if add.returncode != 0:
+        raise RuntimeError(f"could not create the job workspace: {add.stderr.strip()[:300]}")
+    _mark_never_index(dest, repo)
+    return str(dest)
+
+
+def nested_repos(worktree: Path | str) -> List[str]:
+    """Nested git repositories / initialised submodules inside a worktree
+    (a `.git` dir or file below its root), relative paths. Symlinks are not
+    followed."""
+    root = Path(worktree)
+    found: List[str] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        here = Path(dirpath)
+        if here == root:
+            dirnames[:] = [d for d in dirnames if d != ".git"]
+            continue
+        if ".git" in dirnames or ".git" in filenames:
+            found.append(str(here.relative_to(root)))
+            dirnames[:] = []   # its contents belong to that repo
+    return sorted(found)
 
 
 # ── owner record ─────────────────────────────────────────────────────────────
@@ -159,6 +228,12 @@ def snapshot(worktree: Path | str, job_id: str, base_commit: Optional[str] = Non
     Raises RuntimeError when the state cannot be saved.
     """
     wt = str(worktree)
+    nested = nested_repos(wt)
+    if nested:
+        # `git add -A` would record each one as a bare gitlink and lose its
+        # files: refuse, so remove_worktree keeps the worktree.
+        raise RuntimeError("nested git repositories / submodules present ("
+                           + ", ".join(nested[:5]) + "); snapshot refused")
     head = _git(["rev-parse", "--verify", "HEAD"], cwd=wt, check=True).stdout.strip()
     index = _git(["rev-parse", "--path-format=absolute", "--git-path", "index"], cwd=wt,
                  check=True).stdout.strip()
@@ -207,7 +282,8 @@ def restore_snapshot(repo: Path | str, ref: str, dest: Path | str) -> str:
     """Check a snapshot out as a new detached worktree at `dest` (its state is in one commit)."""
     if not ref.startswith(SNAPSHOT_PREFIX + "/"):
         raise ValueError(f"not an awos snapshot ref: {ref}")
-    _git(["worktree", "add", "--detach", str(dest), ref], cwd=str(repo), check=True)
+    _git(["worktree", "add", "--detach", str(dest), ref], cwd=str(repo),
+         env=dict(_WORKTREE_ENV), check=True)
     return str(dest)
 
 
@@ -283,6 +359,8 @@ def list_worktrees(jobs_dir: Path | str) -> List[dict]:
 def protected_reason(entry: dict, is_final: Optional[IsFinal] = None) -> Optional[str]:
     """Why a worktree must not be pruned, or None when it may go."""
     rec = entry.get("record") or {}
+    if rec.get("pinned"):
+        return "pinned"
     final = None
     if is_final is not None:
         try:
@@ -316,12 +394,26 @@ def prune_worktrees(jobs_dir: Path | str, keep: Optional[int] = None,
         return []
     entries.sort(key=lambda e: float(e["record"].get("last_used_ts") or 0.0))
     pruned: List[dict] = []
+    removals = 0
     for entry in entries:
         if excess <= 0:
             break
+        if removals >= MAX_REMOVALS_PER_PASS:
+            if log:
+                log(f"[workspace] removal cap ({MAX_REMOVALS_PER_PASS}) reached; "
+                    "the rest waits for the next pass")
+            break
         if protected_reason(entry, is_final):
             continue
+        # Re-read the owner record right before removing: a worker may have
+        # claimed (retry) or the owner pinned it since the inventory was taken.
+        fresh = read_owner(entry["path"])
+        if fresh is not None:
+            entry = {**entry, "record": fresh, "legacy": False}
+            if protected_reason(entry, is_final):
+                continue
         rec, job_dir = entry["record"], Path(entry["job_dir"])
+        removals += 1
         res = remove_worktree(entry["path"], entry["job_id"], rec.get("repo_path"),
                               rec.get("base_commit"), reason="prune")
         if res["removed"]:
@@ -358,4 +450,79 @@ def retire(job_id: str, repo_path: str, job_dir: Path | str,
         return is_final(jid) if is_final is not None else None
 
     pruned = prune_worktrees(job_dir.parent, is_final=final, log=log)
-    return {"baseline": baseline, "pruned": pruned}
+    snaps: List[dict] = []
+    if repo_path and Path(repo_path).is_dir():
+        pinned = {e["job_id"] for e in list_worktrees(job_dir.parent)
+                  if (e.get("record") or {}).get("pinned")}
+        try:
+            snaps = prune_snapshots(repo_path, pinned_jobs=pinned, log=log)
+        except Exception as exc:  # noqa: BLE001 - cleanup never fails the job
+            if log:
+                log(f"[workspace] snapshot pruning failed: {exc}")
+    return {"baseline": baseline, "pruned": pruned, "snapshots_pruned": snaps}
+
+
+# ── pinning + snapshot retention ─────────────────────────────────────────────
+
+
+def set_pinned(worktree: Path | str, pinned: bool = True) -> Optional[dict]:
+    """Pin (or unpin) a job worktree: pinned ones are never pruned, nor are
+    their job's snapshots. Kept across claim/release (the record is merged)."""
+    rec = read_owner(worktree)
+    if rec is None:
+        if not Path(worktree).is_dir():
+            return None
+        rec = {"created_at": now_iso(), "path": str(worktree),
+               "job_id": Path(worktree).parent.name, "last_used_ts": time.time()}
+    rec["pinned"] = bool(pinned)
+    return write_owner(worktree, rec)
+
+
+_STAMP = re.compile(r"(\d{8}T\d{6}Z)(?:-\d+)?$")
+
+
+def _snapshot_ts(ref: str) -> Optional[float]:
+    m = _STAMP.search(ref)
+    if not m:
+        return None
+    try:
+        import calendar
+        return float(calendar.timegm(time.strptime(m.group(1), "%Y%m%dT%H%M%SZ")))
+    except ValueError:
+        return None
+
+
+def prune_snapshots(repo: Path | str, keep_per_job: int = 3, max_age_days: float = 30,
+                    pinned_jobs: Optional[set] = None, now: Optional[float] = None,
+                    max_removals: Optional[int] = None,
+                    log: Optional[Callable[[str], None]] = None) -> List[str]:
+    """
+    Delete snapshot refs beyond the newest `keep_per_job` per job, and any
+    older than `max_age_days`. Pinned jobs' snapshots are kept. At most
+    `max_removals` (default 10 * MAX_REMOVALS_PER_PASS) refs per call; the
+    rest goes on the next pass. Returns the deleted refs.
+    """
+    pinned_jobs = {_ref_part(j) for j in (pinned_jobs or set())}
+    now = time.time() if now is None else now
+    cap = max_removals if max_removals is not None else 10 * MAX_REMOVALS_PER_PASS
+    by_job: Dict[str, List[dict]] = {}
+    for snap in list_snapshots(repo):
+        by_job.setdefault(snap["job_id"], []).append(snap)
+    doomed: List[str] = []
+    for job, snaps in by_job.items():
+        if job in pinned_jobs:
+            continue
+        snaps.sort(key=lambda s: s["ref"])   # timestamped names sort by time
+        keep = snaps[-keep_per_job:] if keep_per_job > 0 else []
+        for snap in snaps:
+            ts = _snapshot_ts(snap["ref"])
+            too_old = ts is not None and now - ts > max_age_days * 86400
+            if snap not in keep or too_old:
+                doomed.append(snap["ref"])
+    deleted: List[str] = []
+    for ref in doomed[:cap]:
+        if _git(["update-ref", "-d", ref], cwd=str(repo)).returncode == 0:
+            deleted.append(ref)
+    if log and deleted:
+        log(f"[workspace] pruned {len(deleted)} snapshot ref(s)")
+    return deleted

@@ -672,3 +672,28 @@ def test_grep_without_a_match_is_not_a_failure_in_the_loop(tmp_path):
     run = ex.run()
     assert run.success and run.stuck["neutral_results"] == 6
     assert run.stuck["triggers"]["failure_rate"] == 0
+
+
+def test_auto_continue_note_reaches_a_resumed_conversation_once(tmp_path):
+    ws = _ws(tmp_path)
+    path = tmp_path / "ckpt.jsonl"
+    with pytest.raises(Killed):
+        _exec(ws, DiesAt([bash("echo one")], die_at=2),
+              checkpoint=LoopCheckpoint(path, "k"))[0].run()
+    (tmp_path / "ckpt.jsonl.note").write_text("NOTE: the last attempt hit the time limit.")
+    client = Scripted([submit()])
+    run = _exec(ws, client, checkpoint=LoopCheckpoint(path, "k"),
+                gate=lambda f, s: {"green": True})[0].run()
+    assert run.resumed and run.success
+    text = json.dumps(client.seen[0])
+    assert text.count("hit the time limit") == 1
+
+
+def test_auto_continue_note_ignored_on_a_fresh_start(tmp_path):
+    ws = _ws(tmp_path)
+    path = tmp_path / "ckpt.jsonl"
+    (tmp_path / "ckpt.jsonl.note").write_text("NOTE: should not be added twice")
+    client = Scripted([submit()])
+    run = _exec(ws, client, checkpoint=LoopCheckpoint(path, "k"),
+                gate=lambda f, s: {"green": True})[0].run()
+    assert not run.resumed and "should not be added" not in json.dumps(client.seen[0])

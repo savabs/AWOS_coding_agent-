@@ -52,6 +52,32 @@ _TREE_SKIP_DIRS = {".git", ".awos", "__pycache__", ".pytest_cache", ".mypy_cache
                    ".ruff_cache", ".hypothesis"}
 
 
+#: Env names never handed to a test run on the host: tests import project code
+#: (and its conftest.py), which may be model-written.
+_SECRET_SUFFIXES = ("_API_KEY", "_APIKEY", "_TOKEN", "_SECRET", "_SECRET_KEY",
+                    "_ACCESS_KEY", "_PASSWORD", "_CREDENTIALS", "_PRIVATE_KEY")
+_SECRET_PREFIXES = ("AWS_", "GH_", "GITHUB_TOKEN", "ANTHROPIC", "OPENAI", "OPENROUTER",
+                    "AZURE_", "GOOGLE_APPLICATION_CREDENTIALS", "GCLOUD_", "CLOUDSDK_",
+                    "HF_TOKEN", "HUGGING_FACE", "NPM_TOKEN", "PYPI_", "TWINE_")
+#: Credential files / agents (path or socket): also never passed through.
+_SECRET_NAMES = {"NETRC", "SSH_AUTH_SOCK", "GIT_ASKPASS", "SSH_ASKPASS", "KUBECONFIG",
+                 "DOCKER_CONFIG", "DOCKER_AUTH_CONFIG", "GNUPGHOME", "GPG_AGENT_INFO",
+                 "PGPASSFILE", "PGPASSWORD", "MYSQL_PWD"}
+
+
+def is_secret_env_name(name: str) -> bool:
+    up = name.upper()
+    return (up in _SECRET_NAMES or up.endswith(_SECRET_SUFFIXES)
+            or up.startswith(_SECRET_PREFIXES) or "CREDENTIAL" in up)
+
+
+def scrub_env(env: Optional[dict] = None) -> dict:
+    """A copy of `env` (default os.environ) without API keys, tokens, secrets,
+    cloud credentials or credential-file paths (is_secret_env_name)."""
+    src = os.environ if env is None else env
+    return {k: v for k, v in src.items() if not is_secret_env_name(k)}
+
+
 def _tree_files(root: str) -> List[str]:
     """Tracked + untracked (not ignored) files, relative; os.walk without git."""
     try:
@@ -649,7 +675,9 @@ class TestRunner:
             return self._with_baseline(cfg, self._execute_in_sandbox(cfg))
         # pytest runs in the project's env with the workspace first on
         # PYTHONPATH, so an editable install of the user's checkout loses.
-        env = self.test_env.env_for(self.project_root) if cfg.runner == "pytest" else None
+        # Never the worker's secrets: the code under test may be model-written.
+        env = scrub_env(self.test_env.env_for(self.project_root) if cfg.runner == "pytest"
+                        else None)
         try:
             result = subprocess.run(
                 cfg.command,
@@ -703,7 +731,7 @@ class TestRunner:
         argv = list(self.test_env.argv)
         extra = ["-c", os.devnull, "--rootdir=.", "--confcutdir=."] if "-c" in cfg.command else []
         sandbox = self._baseline_sandbox(base_dir)
-        env = self.test_env.env_for(base_dir)
+        env = scrub_env(self.test_env.env_for(base_dir))
         mount = getattr(sandbox, "MOUNT", None)
         if isinstance(mount, str) and mount:
             env["PYTHONPATH"] = os.pathsep.join(

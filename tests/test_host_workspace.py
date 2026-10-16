@@ -10,9 +10,19 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from scaffold.agent.host import worker
 from scaffold.agent.host.journal import Journal
 from scaffold.agent.host.models import JobSpec
+
+
+@pytest.fixture(autouse=True)
+def _host_verify_unsandboxed(monkeypatch):
+    """These tests exercise verify_tests' counting on any machine: no sandbox
+    backend, and the documented unsafe opt-in (tests are trusted here)."""
+    monkeypatch.setenv("AWOS_SANDBOX", "none")
+    monkeypatch.setenv(worker.UNSAFE_HOST_VERIFY_ENV, "1")
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -73,11 +83,17 @@ def test_workspace_isolates_the_users_checkout(tmp_path):
     assert str(Path(ws).resolve()) not in _git(repo, "worktree", "list")
 
 
-def test_non_git_root_runs_in_place(tmp_path):
-    job = JobSpec(id="j3", goal="g", repo_path=str(tmp_path), attempts=1)
+def test_non_git_root_is_refused(tmp_path):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "a.py").write_text("x = 1\n")
+    job = JobSpec(id="j3", goal="g", repo_path=str(proj), attempts=1)
     job_dir = tmp_path / "host" / "jobs" / "j3"
     job_dir.mkdir(parents=True)
-    assert worker.prepare_workspace(job, job_dir) == (str(tmp_path), None)
+    with pytest.raises(worker.NonGitRoot, match="not a git repository"):
+        worker.prepare_workspace(job, job_dir)
+    assert not (job_dir / worker.WORKSPACE_DIR).exists()
+    assert (proj / "a.py").read_text() == "x = 1\n"
 
 
 def test_child_env_turns_off_orchestrator_branching(tmp_path):

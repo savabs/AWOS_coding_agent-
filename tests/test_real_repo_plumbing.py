@@ -23,6 +23,13 @@ from scaffold.agent.host import handoff, worker
 from scaffold.agent.sandbox import _dotenv_files, build_seatbelt_profile, is_secret_dotenv
 from scaffold.agent.test_runner import TestRunner
 
+
+@pytest.fixture(autouse=True)
+def _host_verify_unsandboxed(monkeypatch):
+    """verify_tests needs a sandbox backend or the documented unsafe opt-in
+    (host/worker.py); these tests' code is trusted, so opt in."""
+    monkeypatch.setenv(worker.UNSAFE_HOST_VERIFY_ENV, "1")
+
 PYVER = f"python{sys.version_info.major}.{sys.version_info.minor}"
 
 

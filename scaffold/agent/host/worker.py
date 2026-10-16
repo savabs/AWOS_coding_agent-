@@ -279,6 +279,58 @@ def verify_enabled() -> bool:
     return os.getenv("AWOS_HOST_VERIFY_TESTS", "1").strip().lower() not in ("0", "false", "no")
 
 
+#: UNSAFE opt-in: when no sandbox backend is available, run the host's own
+#: post-run test verification directly on this machine (scrubbed env, but
+#: model-written conftest.py / test code then runs with the owner's file
+#: access). Off by default: without a sandbox, verification reports an error.
+UNSAFE_HOST_VERIFY_ENV = "AWOS_HOST_VERIFY_UNSANDBOXED"
+
+
+def unsafe_host_verify() -> bool:
+    """AWOS_HOST_VERIFY_UNSANDBOXED=1 (UNSAFE, default off)."""
+    return os.getenv(UNSAFE_HOST_VERIFY_ENV, "").strip().lower() in ("1", "true", "yes")
+
+
+def verify_isolation_available() -> bool:
+    """True when verify_tests can run: a sandbox backend for AWOS_SANDBOX
+    exists, or the owner opted into unsandboxed verification. A cheap probe
+    (no container is started)."""
+    if unsafe_host_verify():
+        return True
+    try:
+        from scaffold.agent import sandbox as _sb
+    except ImportError:  # pragma: no cover
+        return False
+    choice = (os.environ.get("AWOS_SANDBOX") or "auto").strip().lower()
+    if choice == "docker":
+        return _sb.docker_available()
+    if choice == "seatbelt":
+        return _sb.seatbelt_available()
+    if choice == "auto":
+        return _sb.seatbelt_available() or _sb.docker_available()
+    return False
+
+
+def _verify_sandbox(workspace: str):
+    """(sandbox, None) | (None, None) when the unsafe opt-in allows a host run
+    | (None, reason) when verification must not run."""
+    try:
+        from scaffold.agent.sandbox import make_sandbox
+        sb = make_sandbox(workspace)
+    except Exception as exc:  # noqa: BLE001 - treated as "no backend"
+        sb = None
+        print(f"[worker] sandbox for verify_tests failed: {exc}")
+    if sb is not None:
+        return sb, None
+    if unsafe_host_verify():
+        print(f"[worker] WARNING: no sandbox backend; {UNSAFE_HOST_VERIFY_ENV}=1, so the "
+              "job's tests run on this machine (scrubbed env)")
+        return None, None
+    return None, ("no sandbox backend for the host's test run (AWOS_SANDBOX: docker or "
+                  f"seatbelt); not run on the bare host. {UNSAFE_HOST_VERIFY_ENV}=1 runs "
+                  "them unsandboxed (unsafe)")
+
+
 def goal_check_skip_enabled() -> bool:
     """AWOS_HOST_SKIP_GOAL_CHECK (default OFF): skip the LLM goal check when the
     repo has tests. Off by default because existing tests rarely cover a new
@@ -478,6 +530,38 @@ BRANCH_NAME_FILE = "branch_name"
 DEFERRED_ROLLBACK = "deferred_rollback.jsonl"
 
 
+#: The loop executor's per-turn checkpoint (loop_checkpoint.py) in the job dir.
+LOOP_CHECKPOINT_FILE = "loop_checkpoint.jsonl"
+
+
+def loop_resume_note_path(checkpoint: Path | str) -> Path:
+    """<checkpoint>.note: the auto-continue NOTE for a resumed conversation
+    (plain UTF-8 text; absent when this attempt has none)."""
+    return Path(str(checkpoint) + ".note")
+
+
+def loop_checkpoint_env(job: JobSpec, job_dir: Path, note: Optional[str]) -> dict:
+    """
+    The child's loop-checkpoint env, and the resume note on disk:
+
+    - AWOS_LOOP_CHECKPOINT_PATH = <job_dir>/loop_checkpoint.jsonl
+    - AWOS_LOOP_CHECKPOINT_GOAL = job.goal, the ORIGINAL goal: the
+      orchestrator keys the checkpoint on it, so an auto-continue (which
+      appends "NOTE: ..." to the goal the child gets) resumes the paid
+      conversation instead of starting over and overwriting it;
+    - <checkpoint>.note holds this attempt's NOTE (removed when there is
+      none), for the loop executor to append as one extra user message
+      after a resume. On a fresh start the NOTE is already in the goal.
+    """
+    ckpt = Path(job_dir) / LOOP_CHECKPOINT_FILE
+    note_path = loop_resume_note_path(ckpt)
+    if note:
+        note_path.write_text(note, encoding="utf-8")
+    else:
+        note_path.unlink(missing_ok=True)   # never one from an earlier attempt
+    return {"AWOS_LOOP_CHECKPOINT_PATH": str(ckpt), "AWOS_LOOP_CHECKPOINT_GOAL": job.goal}
+
+
 def settle_rollback(job_dir: Path, keep: bool) -> int:
     """Apply (keep=False) or drop (keep=True) the child's deferred rollback."""
     path = job_dir / DEFERRED_ROLLBACK
@@ -495,8 +579,13 @@ def prepare_workspace(job: JobSpec, job_dir: Path) -> tuple[str, Optional[str]]:
     The job's own checkout: a detached git worktree of job.repo_path at its HEAD
     (the base commit), under <job_dir>/workspace, reused by later attempts. The
     user's checkout is never edited; hand-off diffs this workspace instead.
-    Returns (workspace, base_commit). A non-git root runs in place (base None).
+    Returns (workspace, base_commit).
     With <job_dir>/base_ref the workspace starts at that ref instead of HEAD.
+
+    A root that is not a git repository with a commit is REFUSED (NonGitRoot):
+    a queued job would otherwise edit the user's directory in place with no
+    baseline to diff, review or undo. The owner runs `git init && git commit`
+    first (the simplest safe option; no silent copy is made).
     """
     ws, base_file = job_dir / WORKSPACE_DIR, job_dir / BASE_COMMIT_FILE
     if ws.is_dir() and base_file.exists():
@@ -510,23 +599,29 @@ def prepare_workspace(job: JobSpec, job_dir: Path) -> tuple[str, Optional[str]]:
     if ref:
         if ref.startswith("-") or not re.fullmatch(r"[A-Za-z0-9_./-]+", ref):
             raise RuntimeError(f"invalid base_ref {ref!r}")
-        head = subprocess.run(["git", "-C", job.repo_path, "rev-parse", "--verify", "--quiet",
-                               f"{ref}^{{commit}}"], capture_output=True, text=True)
+        head = _workspace._git(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+                               cwd=job.repo_path)
         if head.returncode != 0:
             raise RuntimeError(f"the branch this follow-up starts from ({ref}) no longer exists")
     else:
-        head = subprocess.run(["git", "-C", job.repo_path, "rev-parse", "--verify", "HEAD"],
-                              capture_output=True, text=True)
+        head = _workspace._git(["rev-parse", "--verify", "HEAD"], cwd=job.repo_path)
     if head.returncode != 0:
-        return job.repo_path, None
+        raise NonGitRoot(non_git_message(job.repo_path))
     base = head.stdout.strip()
-    add = subprocess.run(["git", "-C", job.repo_path, "worktree", "add", "--detach", str(ws), base],
-                         capture_output=True, text=True)
-    if add.returncode != 0:
-        raise RuntimeError(f"could not create the job workspace: {add.stderr.strip()}")
+    _workspace.add_worktree(job.repo_path, ws, base)
     base_file.write_text(base + "\n", encoding="utf-8")
     _workspace.claim(job.id, job.repo_path, ws, base)
     return str(ws), base
+
+
+class NonGitRoot(RuntimeError):
+    """The job's repo_path is not a git repository with at least one commit."""
+
+
+def non_git_message(repo_path: str) -> str:
+    return (f"refused: {repo_path} is not a git repository with a commit, so the job "
+            "cannot get its own worktree and would edit your files in place. Run "
+            "`git init && git add -A && git commit -m base` there, then resubmit.")
 
 
 def prepare_baseline(job: JobSpec, job_dir: Path, base: Optional[str]) -> Optional[str]:
@@ -540,9 +635,11 @@ def prepare_baseline(job: JobSpec, job_dir: Path, base: Optional[str]) -> Option
     bdir = job_dir / BASELINE_DIR
     if (bdir / ".git").exists():
         return str(bdir)
-    add = subprocess.run(["git", "-C", job.repo_path, "worktree", "add", "--detach", str(bdir), base],
-                         capture_output=True, text=True)
-    return str(bdir) if add.returncode == 0 else None
+    try:
+        _workspace.add_worktree(job.repo_path, bdir, base)
+    except RuntimeError:
+        return None
+    return str(bdir)
 
 
 def _remove_worktree(job: JobSpec, path: Path) -> None:
@@ -586,7 +683,9 @@ def _run_child(job: JobSpec, ctx: RunContext, job_path: Path, result_path: Path,
     timeout = job_host._timeout_sec()
     env = child_env(job, budget_left=left,
                     skip_goal_check=goal_check_skip_enabled() and bool(base)
-                    and verify_enabled() and has_tests(workspace))
+                    and verify_enabled() and has_tests(workspace)
+                    # no sandbox -> the host's tests will not run: keep the goal check
+                    and verify_isolation_available())
     # Tests run in the project's env (project_env): its venv sits in the
     # user's checkout, not in the job's worktree.
     env["AWOS_PROJECT_ROOT"] = job.repo_path
@@ -611,7 +710,7 @@ def _run_child(job: JobSpec, ctx: RunContext, job_path: Path, result_path: Path,
         # an attempt after a kill continues the same conversation on the same
         # worktree instead of paying for the turns again. Keyed by goal, model
         # and task, so an attempt with another goal or model starts fresh.
-        env["AWOS_LOOP_CHECKPOINT_PATH"] = str(ctx.job_dir / "loop_checkpoint.jsonl")
+        env.update(loop_checkpoint_env(job, ctx.job_dir, note))
     if base:
         # v0.2.2 atomic outcome: the child never reverts single files in the
         # workspace. Its rollbacks are recorded; the worker applies them only
@@ -777,15 +876,27 @@ def verify_tests(workspace: str, base_commit: Optional[str] = None,
 
     `line` is the honest one-line summary the report and notifications show.
     None when there are no tests or AWOS_HOST_VERIFY_TESTS=0.
+
+    The job's tests are model-written code (conftest.py included): they run
+    inside a sandbox on the workspace (make_sandbox, like the loop's gate),
+    never on the bare host. With no backend the result is status "error"
+    (reason "no_sandbox") unless AWOS_HOST_VERIFY_UNSANDBOXED=1 (unsafe);
+    a host run always gets a scrubbed env (test_runner.scrub_env).
     """
     if not verify_enabled() or not has_tests(workspace):
         return None
     from scaffold.agent import project_env
     from scaffold.agent.test_runner import TestRunner
 
+    sandbox, refused = _verify_sandbox(workspace)
+    if refused:
+        return {"status": "error", "passed": 0, "failed": 0, "preexisting": 0,
+                "command": "", "reason": "no_sandbox", "sandboxed": False,
+                "line": f"tests not run: {refused}", "full": None, "targeted": None}
     timeout = float(os.getenv("AWOS_HOST_VERIFY_TIMEOUT_SEC", VERIFY_TIMEOUT_SEC))
     tenv = project_env.detect(workspace, project_root)
-    runner = TestRunner(project_root=workspace, timeout_sec=int(timeout), test_env=tenv)
+    runner = TestRunner(project_root=workspace, timeout_sec=int(timeout), test_env=tenv,
+                        sandbox=sandbox)
     saved = os.environ.get("AWOS_BASELINE_WORKSPACE")
     if baseline:
         os.environ["AWOS_BASELINE_WORKSPACE"] = baseline
@@ -806,6 +917,11 @@ def verify_tests(workspace: str, base_commit: Optional[str] = None,
                                                    extra_args=["--continue-on-collection-errors"]))
             full["seconds"] = round(time.monotonic() - started, 1)
     finally:
+        if sandbox is not None:
+            try:
+                sandbox.close()   # a docker sandbox holds a container until closed
+            except Exception:  # noqa: BLE001 - cleanup only
+                pass
         if baseline:
             if saved is None:
                 os.environ.pop("AWOS_BASELINE_WORKSPACE", None)
@@ -838,7 +954,11 @@ def verify_tests(workspace: str, base_commit: Optional[str] = None,
            "passed": main["passed"], "failed": main["failed"],
            "preexisting": main.get("preexisting", 0), "command": shown,
            "env": tenv.describe(), "env_source": tenv.source, "line": line,
-           "full": full, "targeted": targeted}
+           "full": full, "targeted": targeted,
+           "sandboxed": sandbox is not None,
+           "sandbox": getattr(sandbox, "backend", None) if sandbox is not None else None}
+    if sandbox is None:
+        out["line"] += f" (UNSANDBOXED: {UNSAFE_HOST_VERIFY_ENV}=1)"
     notes = [n for n in tenv.notes if n]
     if notes:
         out["notes"] = notes[:4]

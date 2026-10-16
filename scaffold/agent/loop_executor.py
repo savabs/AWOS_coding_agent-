@@ -105,6 +105,7 @@ import re
 import shlex
 import threading
 import time
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -1210,7 +1211,22 @@ class LoopExecutor:
         self.messages = list(messages)
         run.resumed = True
         self._resume_note(run, counters.get("workspace"), snap)
+        self._operator_note()
         return True
+
+    def _operator_note(self) -> None:
+        """An auto-continue attempt's NOTE (host/worker.py writes it next to
+        the checkpoint as `<checkpoint>.note`). A fresh start already has it in
+        the goal; a resumed conversation gets it here, once."""
+        path = getattr(self.checkpoint, "path", None)
+        if path is None:
+            return
+        try:
+            text = Path(f"{path}.note").read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeDecodeError):
+            return
+        if text:
+            self._append_note(text)
 
     def _escalate(self, run: LoopRun, reason: str, watch: Optional[WorkspaceWatch],
                   before: Optional[dict], note: str = "") -> bool:
