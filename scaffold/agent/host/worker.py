@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from . import autopilot
+from . import workspace as _workspace
 from .models import BLOCKED, CANCELLED, DONE, FAILED, JobSpec, now_iso
 from .queue import JobQueue, max_attempts
 
@@ -499,7 +500,9 @@ def prepare_workspace(job: JobSpec, job_dir: Path) -> tuple[str, Optional[str]]:
     """
     ws, base_file = job_dir / WORKSPACE_DIR, job_dir / BASE_COMMIT_FILE
     if ws.is_dir() and base_file.exists():
-        return str(ws), base_file.read_text(encoding="utf-8").strip()
+        base = base_file.read_text(encoding="utf-8").strip()
+        _workspace.claim(job.id, job.repo_path, ws, base)   # a retry: this worker owns it now
+        return str(ws), base
     # A follow-up job starts from an earlier job's review branch: the submitter
     # writes <job_dir>/base_ref (e.g. "awos/1a2b3c4d") before queueing the job.
     ref_file = job_dir / BASE_REF_FILE
@@ -522,6 +525,7 @@ def prepare_workspace(job: JobSpec, job_dir: Path) -> tuple[str, Optional[str]]:
     if add.returncode != 0:
         raise RuntimeError(f"could not create the job workspace: {add.stderr.strip()}")
     base_file.write_text(base + "\n", encoding="utf-8")
+    _workspace.claim(job.id, job.repo_path, ws, base)
     return str(ws), base
 
 
@@ -542,19 +546,27 @@ def prepare_baseline(job: JobSpec, job_dir: Path, base: Optional[str]) -> Option
 
 
 def _remove_worktree(job: JobSpec, path: Path) -> None:
-    if not path.exists():
-        return
-    rm = subprocess.run(["git", "-C", job.repo_path, "worktree", "remove", "--force", str(path)],
-                        capture_output=True, text=True)
-    if rm.returncode != 0:
-        shutil.rmtree(path, ignore_errors=True)
-        subprocess.run(["git", "-C", job.repo_path, "worktree", "prune"], capture_output=True)
+    # Snapshots its state to refs/awos/snapshots/<job>/<ts> first; kept if that fails.
+    res = _workspace.remove_worktree(path, job.id, job.repo_path)
+    if res.get("error"):
+        raise RuntimeError(res["error"])
 
 
 def remove_workspace(job: JobSpec, job_dir: Path) -> None:
-    """Drop the job's worktrees once the job is final; the review branch holds the result."""
+    """Drop the job's worktrees now (each snapshotted to a hidden ref first)."""
     _remove_worktree(job, job_dir / BASELINE_DIR)
     _remove_worktree(job, job_dir / WORKSPACE_DIR)
+
+
+def retire_workspace(job: JobSpec, job_dir: Path, queue: Optional[JobQueue] = None,
+                     log: Optional[Callable[[str], None]] = None) -> dict:
+    """The job is final: drop its baseline, keep its workspace for inspection and
+    prune the least recently used finished worktrees beyond AWOS_MAX_WORKTREES
+    (docs/specs/host_workspace.md)."""
+    def is_final(jid: str) -> Optional[bool]:
+        got = queue.get(jid) if queue is not None else None
+        return None if got is None else got.state in (DONE, FAILED, CANCELLED)
+    return _workspace.retire(job.id, job.repo_path, job_dir, is_final=is_final, log=log)
 
 
 def _run_child(job: JobSpec, ctx: RunContext, job_path: Path, result_path: Path,
@@ -1150,7 +1162,8 @@ class HostWorker:
         if handoff is not None:
             result = {**result, "handoff": handoff}
         try:
-            remove_workspace(job, self.queue.job_dir(job.id))
+            retire_workspace(job, self.queue.job_dir(job.id), self.queue,
+                             lambda m: self.log(m, job.id))
         except Exception as exc:  # cleanup never changes the outcome
             self.log(f"[worker] {job.id[:8]} workspace cleanup failed: {exc}", job.id)
         self.queue.finish(job.id, state, result=result, error=error)

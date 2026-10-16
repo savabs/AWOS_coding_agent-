@@ -327,8 +327,8 @@ def _deferring_runner(limit_on=(1,)):
 
 def _final_a_py(monkeypatch):
     seen = {}
-    monkeypatch.setattr(worker, "remove_workspace",
-                        lambda j, d: seen.setdefault("a", (d / "workspace" / "a.py").read_text()))
+    monkeypatch.setattr(worker, "retire_workspace",
+                        lambda j, d, *a, **k: seen.setdefault("a", (d / "workspace" / "a.py").read_text()))
     return seen
 
 

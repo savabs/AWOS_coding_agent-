@@ -9,9 +9,9 @@ ever pushed.
 from __future__ import annotations
 
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 
 def git(repo: Path | str, *args: str, check: bool = False) -> subprocess.CompletedProcess:
@@ -76,13 +76,72 @@ class MergeResult:
     ok: bool
     message: str
     conflicts: list[str]
+    #: paths the merge changes (or would change) in the user's branch
+    applied: list[str] = field(default_factory=list)
+    #: paths the branch changes that the user's branch already has as-is
+    skipped: list[str] = field(default_factory=list)
+    #: a step failed after the checkout changed and it was put back
+    rolled_back: bool = False
 
 
-def merge_branch(repo: Path, branch: str, goal: str = "") -> MergeResult:
+@dataclass
+class MergePlan:
+    """A 3-way merge computed with `git merge-tree`, without touching the checkout."""
+    tree: str
+    applied: list[str]
+    skipped: list[str]
+    conflicts: list[str]
+
+
+def _names(out: str) -> list[str]:
+    return [p for p in out.split("\0") if p]
+
+
+def plan_merge(repo: Path, branch: str) -> Optional[MergePlan]:
     """
-    `git merge --no-ff <branch>` into the user's current branch. Refuses when
-    uncommitted changes touch files the branch changes, and aborts cleanly if
-    git reports conflicts, so the user's tree is never left half-merged.
+    Dry-run the merge of `branch` into HEAD (git >= 2.38 `merge-tree --write-tree`):
+    which paths would apply, which are already the same (skipped) and which
+    would conflict. Writes objects only, never refs, index or files. None when
+    this git cannot do it.
+    """
+    out = git(repo, "merge-tree", "--write-tree", "--name-only", "--no-messages", "-z",
+              "HEAD", branch)
+    if out.returncode not in (0, 1) or not out.stdout:
+        return None
+    parts = _names(out.stdout)
+    tree, conflicts = parts[0], sorted(set(parts[1:]))
+    touched = _names(git(repo, "diff", "--name-only", "-z", "--no-renames", "HEAD", tree).stdout)
+    applied = sorted(set(touched) - set(conflicts))
+    branch_side = _names(git(repo, "diff", "--name-only", "-z", "--no-renames",
+                             f"HEAD...{branch}").stdout)
+    skipped = sorted(set(branch_side) - set(applied) - set(conflicts))
+    return MergePlan(tree, applied, skipped, conflicts)
+
+
+def _head(repo: Path) -> str:
+    return git(repo, "rev-parse", "HEAD").stdout.strip()
+
+
+def _roll_back(repo: Path, pre: str) -> bool:
+    """Put the checkout back to `pre` after a failed step; keeps unrelated local edits."""
+    if git(repo, "rev-parse", "-q", "--verify", "MERGE_HEAD").returncode == 0:
+        git(repo, "merge", "--abort")
+    if _head(repo) != pre:
+        git(repo, "reset", "--merge", pre)
+    return _head(repo) == pre
+
+
+def merge_branch(repo: Path, branch: str, goal: str = "",
+                 on_merged: Optional[Callable[[str], None]] = None) -> MergeResult:
+    """
+    `git merge --no-ff <branch>` into the user's current branch, as a transaction:
+
+    1. plan (git merge-tree, nothing changes): applied / skipped / conflicted
+       paths. Conflicts -> refused, the checkout untouched, paths reported.
+    2. refuse when uncommitted changes touch a path the merge would change.
+    3. merge; on any failure abort and verify HEAD is back where it was.
+    4. `on_merged(new_head)` (e.g. record the review); if it raises, the merge is
+       undone (`git reset --merge` to the old HEAD) and the result says so.
     """
     if not branch_exists(repo, branch):
         return MergeResult(False, f"branch {branch} does not exist (already merged or rejected?)", [])
@@ -93,29 +152,50 @@ def merge_branch(repo: Path, branch: str, goal: str = "") -> MergeResult:
         return MergeResult(False, "a merge is already in progress in your checkout; finish or abort it first", [])
     if is_merged(repo, branch):
         return MergeResult(True, f"{branch} is already part of {cur}; nothing to do", [])
-    overlap = sorted(set(dirty_files(repo)) & set(changed_files(repo, branch)))
+    plan = plan_merge(repo, branch)
+    applied = plan.applied if plan else []
+    skipped = plan.skipped if plan else []
+    if plan and plan.conflicts:
+        return MergeResult(
+            False, f"git could not merge cleanly (conflicts in {', '.join(plan.conflicts)}); "
+                   "nothing was changed", plan.conflicts, applied, skipped)
+    touched = set(plan.applied) if plan else set(changed_files(repo, branch))
+    overlap = sorted(set(dirty_files(repo)) & touched)
     if overlap:
         return MergeResult(
             False,
             "you have uncommitted changes in files this result also changes ("
             + ", ".join(overlap) + "). Commit or stash them, then merge again.",
-            overlap)
+            overlap, applied, skipped)
     from scaffold.agent.host.handoff import commit_subject
     title = commit_subject(goal, limit=60) if goal.strip() else ""
     msg = f"Merge {branch}" + (f": {title}" if title else "")
+    pre = _head(repo)
     out = git(repo, "merge", "--no-ff", "--no-edit", "-m", msg, branch)
     if out.returncode != 0:
         conflicts = [ln for ln in git(repo, "diff", "--name-only", "--diff-filter=U").stdout.splitlines()
                      if ln.strip()]
-        git(repo, "merge", "--abort")
+        restored = _roll_back(repo, pre)
         if conflicts:
             detail = "conflicts in " + ", ".join(conflicts)
         else:
             lines = (out.stderr.strip() or out.stdout.strip()).splitlines()
             detail = lines[-1] if lines else "unknown error"
-        return MergeResult(False, f"git could not merge cleanly ({detail}); nothing was changed", conflicts)
-    head = git(repo, "rev-parse", "--short", "HEAD").stdout.strip()
-    return MergeResult(True, f"merged {branch} into {cur} ({head})", [])
+        tail = "nothing was changed" if restored else "could not restore your checkout; check `git status`"
+        return MergeResult(False, f"git could not merge cleanly ({detail}); {tail}", conflicts,
+                           applied, skipped, rolled_back=restored)
+    head = _head(repo)
+    if on_merged is not None:
+        try:
+            on_merged(head)
+        except Exception as exc:
+            restored = _roll_back(repo, pre)
+            tail = "the merge was undone" if restored else "could not undo the merge; check `git log`"
+            return MergeResult(False, f"merged, but a follow-up step failed ({exc}); {tail}", [],
+                               applied, skipped, rolled_back=restored)
+    if not plan:   # older git: report what the merge commit changed
+        applied = _names(git(repo, "diff", "--name-only", "-z", "--no-renames", pre, head).stdout)
+    return MergeResult(True, f"merged {branch} into {cur} ({head[:7]})", [], applied, skipped)
 
 
 def delete_branch(repo: Path, branch: str) -> tuple[bool, str]:

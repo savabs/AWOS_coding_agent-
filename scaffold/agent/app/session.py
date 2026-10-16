@@ -384,11 +384,16 @@ class App:
         if job.state != DONE:
             if not self.term.confirm(f"  {J.short(job.id)} is {job.state}, not done. Merge anyway?"):
                 return False
-        res = gitops.merge_branch(self.repo, branch, job.goal)
+        into = gitops.current_branch(self.repo)
+        # Recording the review is part of the merge transaction: if it fails,
+        # the merge is undone (gitops.merge_branch rolls back).
+        res = gitops.merge_branch(self.repo, branch, job.goal,
+                                  on_merged=lambda _head: J.mark_reviewed(
+                                      self.queue, job, "merged", branch=branch, into=into))
         if res.ok:
             self.term.line(f"  {self.term.s('✓', 'green')} {res.message}")
-            J.mark_reviewed(self.queue, job, "merged", branch=branch,
-                            into=gitops.current_branch(self.repo))
+            if res.skipped:
+                self.term.line(f"  already in {into}: {', '.join(res.skipped)}")
         else:
             self.term.line(f"  {self.term.s('Not merged:', 'yellow')} {res.message}")
         return res.ok
