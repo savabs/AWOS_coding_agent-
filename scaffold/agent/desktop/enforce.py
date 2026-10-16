@@ -115,9 +115,14 @@ class Enforcer:
                       arg_sources: Sequence[Provenance] = ()) -> Enforcement:
         return self._finish(decide_command(self.policy, cmd, initiator, arg_sources), cmd)
 
-    def check_action(self, action: Action) -> Enforcement:
-        return self._finish(self.policy.decide(action),
-                            action.description or f"{action.cls.value}:{action.target}")
+    def check_action(self, action: Action, *, force_ask: str = "") -> Enforcement:
+        """``force_ask`` (a reason) turns an ALLOW into ASK: used for apps
+        where every action needs the owner (app_policy elevated tier)."""
+        d = self.policy.decide(action)
+        if force_ask and d.verdict is Verdict.ALLOW:
+            d = Decision(Verdict.ASK, f"{force_ask}: every action confirms", "R4-elevated-app",
+                         d.action, d.grant_id)
+        return self._finish(d, action.description or f"{action.cls.value}:{action.target}")
 
     # -- wrappers -----------------------------------------------------------
     def run_command(self, cmd: str, execute: Callable[[str], T],

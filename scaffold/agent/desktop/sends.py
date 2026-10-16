@@ -30,9 +30,18 @@ How it sits on the sink policy (policy.py):
            key, is refused. An executor that raises leaves the key burned:
            it may already have sent, so a retry needs a new key and a new
            approval.
-The idempotency key defaults to a hash of (kind, target, payload), so
-preparing the same message twice is caught as a duplicate. Pass ``ledger``
-(a JSONL path) to keep burned keys across restarts.
+The idempotency key is ``<content hash>-<nonce>``: the content hash of
+(kind, target, payload) plus a fresh per-prepare nonce, so each prepared send
+has its own key. Content dedup is separate and time-boxed: the same content
+committed (or attempted) less than ``dedup_window`` seconds ago (default 10
+minutes) is refused at prepare and at commit, which catches a double send
+without forbidding the same "OK, thanks" forever. A caller-supplied ``key``
+is used as is and skips content dedup (a deliberate repeat); a burned key is
+always refused. Pass ``ledger`` (a JSONL path) to keep burned keys and recent
+content across restarts.
+
+``halt(reason)`` (the emergency stop) rejects every prepared or approved
+send and refuses all later prepare / approve / commit calls.
 """
 from __future__ import annotations
 
@@ -75,6 +84,11 @@ class PreparedSend:
     description: str = ""
     status: str = "prepared"           # prepared|approved|rejected|committing|committed|failed
     edited: bool = False
+    content_key: str = ""              # hash of (kind, target, payload) at prepare
+    explicit_key: bool = False
+    fields: Dict[str, Any] = field(default_factory=dict)   # UI path: payload key -> field record
+    verified: Optional[bool] = None    # UI path: did the screen confirm the send?
+    warning: str =""
     decision: Optional[Decision] = None
     result: Any = None
     error: str = ""
@@ -91,25 +105,65 @@ def idempotency_key(kind: str, target: str, payload: Any) -> str:
 
 class SendBroker:
     def __init__(self, policy: SinkPolicy, approver: Optional[SendApprover] = None,
-                 audit: Optional[AuditLog] = None, ledger: Optional[Union[str, Path]] = None):
+                 audit: Optional[AuditLog] = None, ledger: Optional[Union[str, Path]] = None,
+                 *, dedup_window: float = 600.0, clock: Callable[[], float] = time.time):
         self.policy = policy
         self.approver = approver
         self.audit = audit
         self.ledger = Path(ledger) if ledger else None
+        self.dedup_window = dedup_window
+        self.clock = clock
+        self.halted: Optional[str] = None
         self.sends: Dict[str, PreparedSend] = {}
         self.burned: Dict[str, str] = {}          # key -> status at burn time
+        self.recent: Dict[str, tuple] = {}        # content hash -> (ts, status)
         if self.ledger and self.ledger.exists():
             for line in self.ledger.read_text().splitlines():
                 if line.strip():
                     rec = json.loads(line)
                     self.burned[rec["key"]] = rec.get("status", "committing")
+                    if rec.get("content"):
+                        self.recent[rec["content"]] = (rec.get("ts", 0), rec.get("status", ""))
+
+    def _recent_dup(self, content: str) -> Optional[str]:
+        hit = self.recent.get(content)
+        if hit and self.clock() - hit[0] < self.dedup_window:
+            return hit[1]
+        return None
+
+    def halt(self, reason: str) -> List[str]:
+        """Emergency stop: reject every open send; refuse everything after."""
+        self.halted = reason
+        ids = []
+        for p in self.sends.values():
+            if p.status in ("prepared", "approved"):
+                p.status = "rejected"
+                p.history.append(f"rejected by stop: {reason}")
+                self._log("halt", p, "rejected", reason=reason)
+                ids.append(p.id)
+        return ids
+
+    def _check_halt(self, phase: str, p: Optional[PreparedSend] = None) -> None:
+        if self.halted:
+            self._log(phase, p, "refused", reason=f"stopped: {self.halted}")
+            raise SendRefused(f"computer use is stopped ({self.halted})")
 
     # -- phase 1 --------------------------------------------------------------
     def prepare(self, kind: str, target: str, payload: Any, *,
                 initiator: Provenance = Provenance.AGENT,
                 arg_sources: Sequence[Provenance] = (Provenance.AGENT,),
                 description: str = "", key: Optional[str] = None) -> PreparedSend:
-        key = key or idempotency_key(kind, target, payload)
+        self._check_halt("prepare")
+        content = idempotency_key(kind, target, payload)
+        explicit = bool(key)
+        if not explicit:
+            dup = self._recent_dup(content)
+            if dup:
+                self._log("prepare", None, "refused", key=content, target=target,
+                          reason=f"duplicate content within {self.dedup_window:.0f}s ({dup})")
+                raise SendRefused(f"duplicate send: the same content was already {dup} "
+                                  f"less than {self.dedup_window:.0f}s ago")
+            key = f"{content}-{uuid.uuid4().hex[:8]}"
         if key in self.burned:
             self._log("prepare", None, "refused", key=key, target=target,
                       reason=f"duplicate: key already {self.burned[key]}")
@@ -117,7 +171,8 @@ class SendBroker:
                               f"{self.burned[key]}")
         p = PreparedSend(uuid.uuid4().hex[:12], key, kind, target, copy.deepcopy(payload),
                          Provenance(initiator), [Provenance(s) for s in arg_sources],
-                         description or f"{kind} to {target}")
+                         description or f"{kind} to {target}", content_key=content,
+                         explicit_key=explicit)
         d = self.policy.decide(Action(ActionClass.SEND, target, p.initiator, p.arg_sources,
                                       p.description))
         p.decision = d
@@ -134,6 +189,7 @@ class SendBroker:
     # -- phase 2 --------------------------------------------------------------
     def approve(self, send_id: str, approver: Optional[SendApprover] = None) -> PreparedSend:
         p = self._get(send_id)
+        self._check_halt("approve", p)
         if p.status != "prepared":
             raise SendRefused(f"send {send_id} is {p.status}, not awaiting approval")
         fn = approver or self.approver
@@ -157,8 +213,16 @@ class SendBroker:
         return p
 
     # -- phase 3 --------------------------------------------------------------
-    def commit(self, send_id: str, execute: Callable[[Any], Any]) -> Any:
+    def precommit_check(self, send_id: str) -> PreparedSend:
+        """Raise SendRefused if ``commit`` would refuse before running anything
+        (unknown, stopped, already committed, not approved, duplicate content)."""
         p = self._get(send_id)
+        self._check_halt("commit", p)
+        self._precommit(p)
+        return p
+
+    def _precommit(self, p: PreparedSend) -> None:
+        send_id = p.id
         if p.status in ("committing", "committed", "failed") or p.key in self.burned:
             self._log("commit", p, "refused", reason="already committed")
             raise SendRefused(f"send {send_id} already committed "
@@ -166,6 +230,16 @@ class SendBroker:
         if p.status != "approved":
             self._log("commit", p, "refused", reason=f"status {p.status}")
             raise SendRefused(f"send {send_id} is {p.status}; it needs owner approval first")
+        dup = None if p.explicit_key else self._recent_dup(p.content_key)
+        if dup:
+            self._log("commit", p, "refused", reason=f"duplicate content ({dup})")
+            raise SendRefused(f"send {send_id}: the same content was already {dup} "
+                              f"less than {self.dedup_window:.0f}s ago")
+
+    def commit(self, send_id: str, execute: Callable[[Any], Any]) -> Any:
+        p = self._get(send_id)
+        self._check_halt("commit", p)
+        self._precommit(p)
         once = SinkPolicy(self.policy.sandbox, [exact_grant(ActionClass.SEND, p.target)],
                           self.policy.audit)
         d = once.decide(Action(ActionClass.SEND, p.target, p.initiator, [Provenance.OWNER],
@@ -198,11 +272,15 @@ class SendBroker:
     def _burn(self, p: PreparedSend, status: str) -> None:
         p.status = status
         self.burned[p.key] = status
+        now = self.clock()
+        if not p.explicit_key:
+            self.recent[p.content_key] = (now, status)
         if self.ledger is not None:
             self.ledger.parent.mkdir(parents=True, exist_ok=True)
             with open(self.ledger, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"ts": round(time.time(), 3), "key": p.key, "id": p.id,
-                                    "status": status, "target": p.target}) + "\n")
+                f.write(json.dumps({"ts": round(now, 3), "key": p.key, "id": p.id,
+                                    "status": status, "target": p.target,
+                                    "content": "" if p.explicit_key else p.content_key}) + "\n")
 
     def _log(self, phase: str, p: Optional[PreparedSend], outcome: str, **extra) -> None:
         if self.audit is None:

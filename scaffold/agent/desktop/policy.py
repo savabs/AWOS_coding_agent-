@@ -43,19 +43,43 @@ Every decision is appended to an audit log (JSONL) when one is attached.
 
 Desktop UI actions (D16, docs/research/rea_synthesis_2026-10-16.md):
 classify_ui_action() maps a click / type / key on an AX element to a class:
-  click on a send-like control (Send, Post, Submit, ...)  -> SEND, which the
-      UI layer only performs through the two-phase broker (sends.py)
+  click on a send-like control (Send, Post, Submit, Share, Comment, Publish,
+      Deploy, Transfer, Pay, Confirm purchase, ...)  -> SEND, which the UI
+      layer only performs through the two-phase broker (sends.py)
   click on a destructive control (button role "destructive",
-      ax_compress.button_role: Delete, Discard, Don't Save, Empty Trash, ...)
-                                                       -> DESTRUCTIVE_UI (R4 ask)
-  Return/Enter -> whatever the default button does; with no default button,
-      Return (or typed text with a newline) in a text input while a send
-      control is on screen is treated as a send (chat composers send on Return)
+      ax_compress.button_role: Delete, Discard, Don't Save, Empty Trash,
+      and consent words Merge, Approve, Accept, Authorize, Grant, Allow,
+      Always Allow)                                    -> DESTRUCTIVE_UI (R4 ask)
+  typing into a secure / password / card field         -> CREDENTIAL (R4 ask;
+      ui_session also requires owner-provided text)
+  any input into a terminal (``shell=True``)           -> OPAQUE (it is a shell
+      command the shell classifier never saw; never covered by a grant)
+  drag / drop                                          -> OPAQUE
+  keys, by the chord risk table:
+      modifier + delete/backspace                      -> DESTRUCTIVE_UI
+      cmd/ctrl+Return in a mail/chat app or next to a send control,
+      cmd+shift+D                                      -> SEND (two-phase only)
+      cmd+Q, cmd+W, cmd+opt+Esc, cmd+shift+Q, cmd+R, and every modifier
+      chord not on the edit/navigation list            -> OPAQUE (ask)
+      edit/navigation chords (cmd+C/V/A/Z, shift+arrows, ...) and plain keys
+                                                       -> UI_ACTION
+      Return/Enter -> whatever the default button does; with no default
+      button, Return (or typed text with a newline) in a text input while a
+      send control is on screen is treated as a send (chat composers send
+      on Return)
   a clickable with no label or no button role (unknown risk) -> OPAQUE (ask)
   an unknown action kind                                     -> OPAQUE (ask)
-  other clicks / typing / keys                -> UI_ACTION (ask unless an
-      owner grant covers the app, target ``app:<App>/<role>:<label>``)
+  other clicks / typing                       -> UI_ACTION (ask unless an
+      owner grant covers the app, target ``app:<bundle id>/<role>:<label>``)
   observe / scroll / hover                    -> READ
+
+provenance_of(value, owner_texts, screen_texts) computes where a typed or
+sent value came from: OWNER when an owner text quotes it (whole words),
+UNTRUSTED when it (or a recipient / URL / amount inside it) was seen on
+screen but no owner text quotes it, else AGENT. Callers take the stricter of
+computed and declared provenance; unquotable_entities() lists recipients,
+URLs, amounts and account numbers the owner never wrote (ui_session treats
+those as untrusted arguments, so the action asks).
 """
 from __future__ import annotations
 
@@ -281,15 +305,76 @@ def exact_grant(cls: ActionClass, target: str, id: str = "") -> Grant:
 # desktop UI action -> action class (D16)
 # ---------------------------------------------------------------------------
 
-#: controls whose click sends something off the machine (two-phase only)
+#: controls whose click sends something off the machine, or pays (two-phase only)
 UI_SEND_RE = re.compile(
     r"\b(send(?! (to back|to front|backward|forward))|post|publish|submit|tweet|upload|"
-    r"invite)\b", re.I)
+    r"invite|share|comment|deploy|transfer|pay|pay now|buy now|place order|"
+    r"confirm (purchase|payment|order|transfer))\b", re.I)
 UI_READ_KINDS = {"observe", "read", "screenshot", "scroll", "hover", "move", "wait"}
 UI_CLICK_KINDS = {"click", "press", "double_click", "right_click", "select", "toggle", "pick"}
-UI_INPUT_KINDS = {"type", "set_value", "paste", "clear", "key"}
-_ENTER_RE = re.compile(r"(^|\+)(return|enter|kp_enter)$", re.I)
-_TEXT_INPUTS = {"textarea", "textfield", "combobox", "input"}
+UI_INPUT_KINDS = {"type", "set_value", "paste", "clear", "key", "drag", "drop"}
+_TEXT_INPUTS = {"textarea", "textfield", "combobox", "input", "securetextfield"}
+
+# -- key chords ---------------------------------------------------------------
+_MOD_ALIASES = {"cmd": "cmd", "command": "cmd", "meta": "cmd", "super": "cmd", "win": "cmd",
+                "\u2318": "cmd", "ctrl": "ctrl", "control": "ctrl", "\u2303": "ctrl",
+                "opt": "opt", "option": "opt", "alt": "opt", "\u2325": "opt",
+                "shift": "shift", "\u21e7": "shift"}
+_KEY_ALIASES = {"backspace": "delete", "del": "delete", "forwarddelete": "delete",
+                "forward_delete": "delete", "\u232b": "delete", "enter": "return",
+                "kp_enter": "return", "\u21a9": "return", "esc": "escape"}
+#: chords that only move, select, copy, undo or format: plain UI input
+_SAFE = {
+    "cmd": set("c x v a z f g b i u".split()) | {"left", "right", "up", "down"},
+    "cmd+shift": {"z", "g", "left", "right", "up", "down"},
+    "shift": {"left", "right", "up", "down", "tab", "home", "end", "pageup", "pagedown"},
+    "opt": {"left", "right", "up", "down"},
+    "opt+shift": {"left", "right", "up", "down"},
+    "ctrl": {"a", "e", "tab"},
+    "ctrl+shift": {"tab"},
+}
+#: chords that quit, close or force-quit something: always ask
+_OPAQUE_CHORDS = {
+    ("cmd", "q"): "quits the app", ("cmd", "w"): "closes the window or tab",
+    ("cmd+opt", "escape"): "opens Force Quit", ("cmd+shift", "q"): "logs out",
+    ("cmd+ctrl", "q"): "locks the screen", ("cmd+opt+shift", "escape"): "force-quits the app",
+    ("cmd", "r"): "reloads (may resubmit a form)",
+}
+#: apps where cmd/ctrl+Return sends the message being written
+MAIL_CHAT_APPS = {
+    "com.apple.mail", "com.microsoft.outlook", "com.tinyspeck.slackmacgap", "com.apple.mobilesms",
+    "ru.keepcoder.telegram", "org.telegram.desktop", "net.whatsapp.whatsapp", "desktop.whatsapp",
+    "com.hnc.discord", "com.microsoft.teams", "com.microsoft.teams2", "org.mozilla.thunderbird",
+    "com.readdle.smartemail-mac", "com.superhuman.electron", "com.facebook.archon",
+    "mail", "outlook", "slack", "messages", "telegram", "whatsapp", "discord", "teams",
+    "thunderbird", "spark", "superhuman", "messenger",
+}
+
+
+def parse_chord(key: str) -> tuple:
+    """(frozenset of modifiers, base key), both normalised: ``cmd+Shift+D``
+    -> ({cmd, shift}, "d"). ``fn`` is not a modifier (fn+delete is delete)."""
+    parts = [p for p in re.split(r"\s*\+\s*", (key or "").strip().lower()) if p]
+    if not parts:
+        return frozenset(), ""
+    mods = set()
+    base = parts[-1]
+    for p in parts[:-1]:
+        if p == "fn":
+            continue
+        mods.add(_MOD_ALIASES.get(p, p))
+    base = _KEY_ALIASES.get(base, base.replace(" ", ""))
+    return frozenset(mods), base
+
+
+def _modkey(mods) -> str:
+    order = ["cmd", "ctrl", "opt", "shift"]
+    return "+".join(sorted(mods, key=lambda m: order.index(m) if m in order else 9))
+
+
+def is_mail_or_chat(app: str) -> bool:
+    a = (app or "").strip().lower()
+    return a in MAIL_CHAT_APPS or a.split(".")[-1] in MAIL_CHAT_APPS
 
 
 def is_send_control(el) -> bool:
@@ -304,7 +389,8 @@ def _ui_label(el) -> str:
 
 
 def ui_target(app: str, el) -> str:
-    """Grant-matchable target: ``app:<App>/<role>:<label>``."""
+    """Grant-matchable target: ``app:<App>/<role>:<label>``. ui_session
+    passes the bundle id as <App> (never the window title)."""
     if el is None:
         return f"app:{app or '?'}/"
     return f"app:{app or '?'}/{getattr(el, 'role', '?')}:{_ui_label(el)}"
@@ -323,18 +409,52 @@ def _click_class(el, app: str) -> tuple:
     return ActionClass.UI_ACTION, ui_target(app, el), f"{role} control {label!r}"
 
 
+def _key_class(key: str, tgt_el, app: str, default_button, send_visible: bool) -> tuple:
+    """The chord risk table (see the module docstring)."""
+    mods, base = parse_chord(key)
+    tgt = ui_target(app, tgt_el)
+    if not base:
+        return ActionClass.OPAQUE, tgt, "empty key"
+    if mods - {"cmd", "ctrl", "opt", "shift"}:
+        return ActionClass.OPAQUE, tgt, f"unknown modifier in {key!r}"
+    mk = _modkey(mods)
+    if base == "delete" and mods:
+        return ActionClass.DESTRUCTIVE_UI, tgt, f"{key!r} deletes (modifier+delete)"
+    if (mk, base) in (("cmd+shift", "d"),) or (
+            base == "return" and mk in ("cmd", "ctrl") and (is_mail_or_chat(app) or send_visible)):
+        return ActionClass.SEND, tgt, f"{key!r} is a send chord"
+    if base == "return":
+        if default_button is not None and (not mods or mk in ("cmd", "ctrl")):
+            cls, t, why = _click_class(default_button, app)
+            return cls, t, f"Return activates the default button: {why}"
+        if mods:
+            return ActionClass.OPAQUE, tgt, f"unknown chord {key!r}"
+        if send_visible and getattr(tgt_el, "role", "") in _TEXT_INPUTS:
+            return ActionClass.SEND, tgt, "Return in a text input next to a send control may send it"
+        return ActionClass.UI_ACTION, tgt, "key input"
+    if (mk, base) in _OPAQUE_CHORDS:
+        return ActionClass.OPAQUE, tgt, f"{key!r} {_OPAQUE_CHORDS[(mk, base)]}"
+    if not mods or (mk == "shift" and len(base) == 1):
+        return ActionClass.UI_ACTION, tgt, "key input"
+    if base in _SAFE.get(mk, ()):
+        return ActionClass.UI_ACTION, tgt, f"{key!r} (edit/navigation chord)"
+    return ActionClass.OPAQUE, tgt, f"unknown chord {key!r} (unknown risk)"
+
+
 def classify_ui_action(kind: str, element=None, *, app: str = "", key: str = "",
                        text: str = "", focused=None, default_button=None,
-                       send_visible: bool = False) -> tuple:
+                       send_visible: bool = False, shell: bool = False) -> tuple:
     """(ActionClass, target, why) for one desktop UI action.
 
     ``element`` is the AX element acted on (ax_compress.Element or anything
     with role / label / text / button_role); ``focused`` and
     ``default_button`` come from the latest observation and decide what a
     Return/Enter keystroke would do; ``send_visible`` says a send control is
-    on screen (so Return in a text input may send). Missing information never makes an
-    action look safer: an unknown kind, or a clickable without a role or a
-    label, is OPAQUE (always asks)."""
+    on screen (so Return in a text input may send). ``shell`` says the app is
+    a terminal: any input there is a shell command the shell classifier never
+    saw, so it is OPAQUE (never covered by an app grant). Missing information
+    never makes an action look safer: an unknown kind, or a clickable without
+    a role or a label, is OPAQUE (always asks)."""
     kind = (kind or "").strip().lower()
     if kind in UI_READ_KINDS:
         return ActionClass.READ, ui_target(app, element), f"{kind} reads"
@@ -344,17 +464,90 @@ def classify_ui_action(kind: str, element=None, *, app: str = "", key: str = "",
         return _click_class(element, app)
     if kind in UI_INPUT_KINDS:
         tgt_el = element if element is not None else focused
-        enter = kind == "key" and bool(_ENTER_RE.search((key or "").strip().replace(" ", "")))
-        if enter and default_button is not None:
-            cls, tgt, why = _click_class(default_button, app)
-            return cls, tgt, f"Return activates the default button: {why}"
+        if shell:
+            return (ActionClass.OPAQUE, ui_target(app, tgt_el),
+                    f"{kind} into a terminal runs as a shell command (bypasses the shell classifier)")
+        if kind in ("drag", "drop"):
+            return ActionClass.OPAQUE, ui_target(app, tgt_el), f"{kind} (unknown risk)"
+        if getattr(tgt_el, "secure", False) and kind != "key":
+            return (ActionClass.CREDENTIAL, ui_target(app, tgt_el),
+                    f"{kind} into a secure / password / card field")
+        if kind == "key":
+            return _key_class(key, tgt_el, app, default_button, send_visible)
         newline = kind in ("type", "paste") and ("\n" in (text or "") or "\r" in (text or ""))
-        if ((enter or newline) and send_visible
-                and getattr(tgt_el, "role", "") in _TEXT_INPUTS):
+        if newline and send_visible and getattr(tgt_el, "role", "") in _TEXT_INPUTS:
             return (ActionClass.SEND, ui_target(app, tgt_el),
                     "Return in a text input next to a send control may send it")
         return ActionClass.UI_ACTION, ui_target(app, tgt_el), f"{kind} input"
     return ActionClass.OPAQUE, ui_target(app, element), f"unknown ui action kind {kind!r}"
+
+
+# ---------------------------------------------------------------------------
+# provenance of a value the agent wants to type / send
+# ---------------------------------------------------------------------------
+#: values that pick *where* or *how much*: recipients, links, amounts, accounts
+_ENTITY_RES = [
+    re.compile(r"[\w.+\-]+@[\w\-]+(?:\.[\w\-]+)+"),                       # e-mail
+    re.compile(r"\b(?:https?|ftp|file|mailto|sms|tel)://\S+|\bwww\.\S+", re.I),  # URL
+    re.compile(r"\b[\w\-]+(?:\.[\w\-]+)*\.(?:com|net|org|io|dev|app|co|ai|xyz|ru|cn|info|biz|me|link)"
+               r"(?:/\S*)?\b", re.I),                                            # bare domain
+    re.compile(r"[$\u20ac\u00a3\u00a5]\s?\d[\d,]*(?:\.\d+)?|\b\d[\d,]*\.\d{2}\b|"
+               r"\b\d[\d,]*(?:\.\d+)?\s?(?:usd|eur|gbp|dollars?|euros?|btc|eth)\b", re.I),  # amount
+    re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b"),                               # IBAN
+    re.compile(r"(?<!\w)\+?\d[\d \-()]{7,}\d(?!\w)"),                               # phone / account
+]
+
+
+def _pnorm(s) -> str:
+    return " ".join(str(s or "").casefold().split())
+
+
+def _quoted_in(needle: str, hay: str) -> bool:
+    """``needle`` occurs in ``hay`` as whole words (both already normalised):
+    "a" is not quoted by "Email bob", "bob@x.test" is by "email bob@x.test"."""
+    if not needle or len(needle) > len(hay):
+        return False
+    return re.search(r"(?<!\w)" + re.escape(needle) + r"(?!\w)", hay) is not None
+
+
+def value_entities(value: str) -> List[str]:
+    """Recipients, URLs, domains, amounts, IBANs, phone/account numbers in ``value``."""
+    out: List[str] = []
+    for rx in _ENTITY_RES:
+        out += [m.group(0).rstrip(".,;:)]}>'\"") for m in rx.finditer(str(value or ""))]
+    return [e for e in dict.fromkeys(out) if e]
+
+
+def unquotable_entities(value: str, owner_texts: Iterable[str] = ()) -> List[str]:
+    """Entities in ``value`` that no owner text contains."""
+    owners = [_pnorm(t) for t in owner_texts if t]
+    return [e for e in value_entities(value) if not any(_quoted_in(_pnorm(e), o) for o in owners)]
+
+
+def provenance_of(value, owner_texts: Iterable[str] = (),
+                  screen_texts: Iterable[str] = ()) -> Provenance:
+    """Where a typed / sent value most plausibly came from.
+
+    OWNER      the value appears in an owner text (the goal, text the owner
+               approved or wrote)
+    UNTRUSTED  it is not in any owner text but was seen on screen (the whole
+               value, or a recipient / URL / amount inside it)
+    AGENT      neither: the agent composed it
+    Callers take the stricter of this and what they declared."""
+    v = _pnorm(value)
+    if not v:
+        return Provenance.AGENT
+    owners = [_pnorm(t) for t in owner_texts if t]
+    if any(_quoted_in(v, o) for o in owners):
+        return Provenance.OWNER
+    screens = [_pnorm(t) for t in screen_texts if t]
+    if any(v == sc or (len(v) >= 4 and _quoted_in(v, sc)) for sc in screens):
+        return Provenance.UNTRUSTED
+    for e in value_entities(str(value)):
+        en = _pnorm(e)
+        if not any(_quoted_in(en, o) for o in owners) and any(_quoted_in(en, sc) for sc in screens):
+            return Provenance.UNTRUSTED
+    return Provenance.AGENT
 
 
 # ---------------------------------------------------------------------------

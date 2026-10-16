@@ -1,6 +1,5 @@
 """D16 perception: stable IDs, diff-only-when-shorter, no_change, range notes,
 button roles (scaffold/agent/desktop/ax_observe.py, ax_compress.py)."""
-import copy
 
 import pytest
 
@@ -105,9 +104,9 @@ def test_ids_are_never_reused():
 
 
 def test_same_label_siblings_get_distinct_ids():
-    # (identical siblings under one parent collapse into one "x2" element, so
-    # the two buttons live in different unlabelled groups)
-    tree = node("AXWindow", "W", children=[
+    # (the two buttons live in different unlabelled groups; the window is
+    # big enough that it does not clip either of them)
+    tree = node("AXWindow", "W", (0, 0, 200, 200), children=[
         node("AXGroup", "", children=[node("AXButton", "Edit", (0, 0, 10, 10))]),
         node("AXGroup", "", children=[node("AXButton", "Edit", (0, 50, 10, 10))])])
     m = Observer().observe(tree)
@@ -204,7 +203,8 @@ def test_element_cap_note():
     m = Observer(max_elements=5).observe(tree)
     assert len(m.elements) == 5
     assert m.notes[0] == "showing 1–5 of 20 elements"
-    assert m.text.splitlines()[1] == "note: showing 1–5 of 20 elements"
+    assert m.text.splitlines()[1].startswith("<untrusted-screen-content obs=1 ")
+    assert m.text.splitlines()[2] == "note: showing 1–5 of 20 elements"
 
 
 def test_range_note_change_appears_in_diff():

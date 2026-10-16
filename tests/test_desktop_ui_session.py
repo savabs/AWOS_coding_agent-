@@ -1,15 +1,16 @@
 """D16 session: turn-scoped lease, user takeover, guarded actions, two-phase
 UI sends — all on a fake backend (scaffold/agent/desktop/ui_session.py)."""
-import copy
 
-import pytest
 
 from scaffold.agent.desktop.enforce import Enforcer, Mode
 from scaffold.agent.desktop.policy import (
     ActionClass as C, AuditLog, Grant, Provenance as P, SinkPolicy,
 )
+from scaffold.agent.desktop.app_policy import AppPolicy
+from scaffold.agent.desktop.fake_backend import FakeBackend
 from scaffold.agent.desktop.sends import SendApproval
-from scaffold.agent.desktop.ui_session import DesktopSession, TurnLease
+from scaffold.agent.desktop.stop import StopSwitch
+from scaffold.agent.desktop.ui_session import DesktopSession, Outcome, TurnLease
 
 
 def node(role, title="", frame=(0, 0, 10, 10), children=(), **kw):
@@ -32,41 +33,32 @@ def mail(sheet=False, draft=""):
                 [node("AXWindow", "Compose", (0, 0, 800, 600), kids)])
 
 
-class FakeBackend:
-    def __init__(self, tree):
-        self.tree = tree
-        self.ops = []
-        self.took_over = False
-
-    def snapshot(self):
-        return copy.deepcopy(self.tree)
-
-    def perform(self, op):
-        self.ops.append(op)
-        return "done"
-
-    def user_took_over(self):
-        t, self.took_over = self.took_over, False
-        return t
-
-
-def session(tmp_path, tree=None, approver=None, send_approver=lambda p: True, grants=None):
-    grants = [Grant(C.UI_ACTION, "app:Mail/*")] if grants is None else grants
+def session(tmp_path, tree=None, approver=None, send_approver=lambda p: True, grants=None,
+            identity=None, app_policy=None, **kw):
+    grants = [Grant(C.UI_ACTION, "app:com.apple.mail/*")] if grants is None else grants
     audit = AuditLog(tmp_path / "audit.jsonl")
     enf = Enforcer(SinkPolicy(tmp_path / "sb", grants), Mode.ENFORCE, approver, audit)
     (tmp_path / "sb").mkdir(exist_ok=True)
-    be = FakeBackend(tree or mail())
-    return DesktopSession(be, enf, send_approver=send_approver), be, audit
+    be = FakeBackend(tree or mail(), identity)
+    kw.setdefault("quiet_period", 0)
+    s = DesktopSession(be, enf, send_approver=send_approver,
+                       app_policy=app_policy or AppPolicy(),
+                       stop=StopSwitch(tmp_path / "cu_stop", audit), **kw)
+    return s, be, audit
 
 
 def sid(s, text):
     return next(e.sid for e in s.latest.elements if e.text == text)
 
 
+def area(s):
+    return next(e.sid for e in s.latest.elements if e.role == "textarea")
+
+
 # -- lease ----------------------------------------------------------------------
 
 def test_lease_unit():
-    l = TurnLease()
+    l = TurnLease(quiet_period=0)
     assert "no observation" in l.check()
     l.observed()
     assert l.valid
@@ -167,7 +159,7 @@ def test_destructive_click_runs_when_owner_approves(tmp_path):
     s.observe()
     r = s.act("click", sid(s, "Delete"))
     assert r.ok and r.enforcement.outcome == "approved"
-    assert asked == ["app:Mail/button:Delete"]
+    assert asked == ["app:com.apple.mail/button:Delete"]
 
 
 def test_ui_grant_does_not_cover_destructive(tmp_path):
@@ -208,7 +200,8 @@ def test_typed_newline_in_compose_goes_to_send_path(tmp_path):
 def test_return_in_editor_without_send_control_is_plain_input(tmp_path):
     tree = node("AXApplication", "Notes", (0, 0, 800, 600), [node("AXWindow", "Note", (0, 0, 800, 600), [
         node("AXTextArea", "", (10, 50, 400, 200), focused=True)])])
-    s, be, _ = session(tmp_path, tree=tree, grants=[Grant(C.UI_ACTION, "app:Notes/*")])
+    s, be, _ = session(tmp_path, tree=tree, grants=[Grant(C.UI_ACTION, "app:com.apple.Notes/*")],
+                       identity={"bundle_id": "com.apple.Notes", "pid": 7, "window_id": 3})
     s.observe()
     assert s.act("key", key="Return").ok
 
@@ -238,25 +231,32 @@ def test_return_in_compose_area_is_routed_to_send_path(tmp_path):
 
 
 def test_full_send_flow_with_edit_and_single_commit(tmp_path):
-    s, be, audit = session(tmp_path, send_approver=lambda p: SendApproval(True, {"body": "Edited"}))
+    s, be, audit = session(tmp_path, tree=mail(draft="Draft"),
+                           send_approver=lambda p: SendApproval(True, {"body": "Edited"}))
     s.observe()
     send = sid(s, "Send")
+    area = next(e.sid for e in s.latest.elements if e.role == "textarea")
     r = s.prepare_send(send, {"body": "Draft"}, recipient="bob@x.test")
-    assert r.ok and r.send.target == "app:Mail/button:Send->bob@x.test"
+    assert r.ok and r.outcome is Outcome.PENDING_APPROVAL
+    assert r.send.target == "app:com.apple.mail/button:Send->bob@x.test"
+    assert r.send.fields == {"body": {"sid": area, "key": r.send.fields["body"]["key"]}}
     assert s.approve_send(r.send.id).ok
     c = s.commit_send(r.send.id)
-    assert c.ok
-    assert be.ops == [{"op": "click", "sid": send, "center": be.ops[0]["center"],
-                       "payload": {"body": "Edited"}, "idempotency_key": r.send.key}]
+    assert c.ok and c.outcome is Outcome.OK
+    # the owner's edit is written into the compose field, re-read, then sent once
+    assert [o["op"] for o in be.ops] == ["set_value", "click"]
+    assert be.ops[0]["sid"] == area and be.ops[0]["text"] == "Edited"
+    assert be.ops[1] == {"op": "click", "sid": send, "center": be.ops[1]["center"],
+                         "payload": {"body": "Edited"}, "idempotency_key": r.send.key}
     s.observe()
     again = s.commit_send(r.send.id)
-    assert not again.ok and again.by == "broker" and len(be.ops) == 1
+    assert not again.ok and again.by == "broker" and len(be.ops) == 2
 
 
 def test_commit_needs_fresh_read_after_takeover(tmp_path):
     s, be, _ = session(tmp_path)
     s.observe()
-    p = s.prepare_send(sid(s, "Send"), {"body": "x"}).send
+    p = s.prepare_send(sid(s, "Send"), {"body": "x"}, fields={"body": area(s)}).send
     s.approve_send(p.id)
     s.user_takeover()
     r = s.commit_send(p.id)
@@ -268,7 +268,7 @@ def test_commit_needs_fresh_read_after_takeover(tmp_path):
 def test_commit_refused_when_send_button_gone(tmp_path):
     s, be, _ = session(tmp_path)
     s.observe()
-    p = s.prepare_send(sid(s, "Send"), {"body": "x"}).send
+    p = s.prepare_send(sid(s, "Send"), {"body": "x"}, fields={"body": area(s)}).send
     s.approve_send(p.id)
     t = mail()
     t["children"][0]["children"] = [c for c in t["children"][0]["children"] if c["title"] != "Send"]
@@ -281,7 +281,7 @@ def test_commit_refused_when_send_button_gone(tmp_path):
 def test_commit_without_approval(tmp_path):
     s, be, _ = session(tmp_path, send_approver=lambda p: False)
     s.observe()
-    p = s.prepare_send(sid(s, "Send"), {"body": "x"}).send
+    p = s.prepare_send(sid(s, "Send"), {"body": "x"}, fields={"body": area(s)}).send
     assert not s.approve_send(p.id).ok
     assert not s.commit_send(p.id).ok and be.ops == []
 
@@ -296,14 +296,15 @@ def test_prepare_send_on_non_send_control(tmp_path):
 def test_send_started_by_screen_text_is_refused(tmp_path):
     s, be, _ = session(tmp_path)
     s.observe()
-    r = s.prepare_send(sid(s, "Send"), {"body": "x"}, initiator=P.UNTRUSTED)
+    r = s.prepare_send(sid(s, "Send"), {"body": "x"}, fields={"body": area(s)},
+                       initiator=P.UNTRUSTED)
     assert not r.ok and r.by == "broker" and "R3" in r.message
 
 
 def test_backend_failure_mid_send_is_not_retried(tmp_path):
-    s, be, _ = session(tmp_path)
+    s, be, _ = session(tmp_path, tree=mail(draft="x"))
     s.observe()
-    p = s.prepare_send(sid(s, "Send"), {"body": "x"}).send
+    p = s.prepare_send(sid(s, "Send"), {"body": "x"}, fields={"body": area(s)}).send
     s.approve_send(p.id)
 
     def boom(op):
@@ -311,6 +312,7 @@ def test_backend_failure_mid_send_is_not_retried(tmp_path):
     be.perform = boom
     r = s.commit_send(p.id)
     assert not r.ok and r.by == "backend" and p.status == "failed"
+    assert r.outcome is Outcome.BACKEND_ERROR_MAYBE_APPLIED
     s.observe()
     assert s.commit_send(p.id).by == "broker"
 

