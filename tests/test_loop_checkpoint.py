@@ -483,3 +483,70 @@ class TestFsyncPath(_Tmp):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSaveResultAndRedaction(_Tmp):
+    """save() reports failures; secrets never reach the file; text without a
+    secret is saved byte for byte."""
+
+    def test_save_returns_true_and_counts_failures(self):
+        ck = self.ck()
+        msgs = [{"role": "user", "content": "go"}] + _turn(1)
+        self.assertIs(ck.save(msgs, _counters(1)), True)
+        with mock.patch.object(LoopCheckpoint, "_append_line", side_effect=OSError("disk full")):
+            self.assertIs(ck.save(msgs + _turn(2), _counters(2)), False)
+        self.assertEqual(ck.failures, 1)
+        self.assertIs(ck.save(msgs + _turn(2) + _turn(3), _counters(3)), True)
+        self.assertEqual(self.ck().load()[1]["steps"], 3)
+
+    def test_env_secret_value_is_redacted_on_disk_only(self):
+        secret = "s3cr3t-value-0123456789abcdef"
+        with mock.patch.dict(os.environ, {"MY_SERVICE_TOKEN": secret}):
+            msgs = [{"role": "user", "content": "go"}, {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "t1", "name": "bash",
+                 "input": {"command": f"curl -H 'auth: {secret}' localhost"}}]},
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1",
+                                              "content": f"echoed {secret}"}]}]
+            before = json.dumps(msgs)
+            ck = self.ck()
+            self.assertTrue(ck.save(msgs, {"steps": 1, "note": secret}))
+        self.assertNotIn(secret.encode(), self.path.read_bytes())
+        self.assertIn(b"[REDACTED:MY_SERVICE_TOKEN]", self.path.read_bytes())
+        self.assertEqual(json.dumps(msgs), before)  # the live conversation is untouched
+        loaded, counters = self.ck().load()
+        self.assertIn("[REDACTED:MY_SERVICE_TOKEN]", json.dumps(loaded))
+        self.assertEqual(counters["note"], "[REDACTED:MY_SERVICE_TOKEN]")
+
+    def test_known_key_format_is_redacted(self):
+        key = "sk-ant-api03-" + "Q7wErTy9UiOp2AsDfGh5JkL3ZxCvBn8M"
+        msgs = [{"role": "user", "content": f"the key is {key} ok"}]
+        self.ck().save(msgs, {})
+        self.assertNotIn(key.encode(), self.path.read_bytes())
+        self.assertNotIn(key, json.dumps(self.ck().load()[0]))
+
+    def test_no_secret_round_trips_byte_identical(self):
+        ck = self.ck()
+        msgs = self.run_turns(ck, 4)
+        self.assertEqual(self.ck().load()[0], msgs)
+
+    def test_append_only_still_holds_with_redaction(self):
+        ck = self.ck()
+        msgs = self.run_turns(ck, 3)
+        self.assertEqual(len(self.lines()), 3)  # one record per save, no rewrite
+        msgs[-1]["content"].append({"type": "text", "text": "note added in place"})
+        ck.save(msgs, _counters(3, 1.0))
+        self.assertEqual(len(self.lines()), 1)  # an edited last message rewrites
+        self.assertIn("note added in place", json.dumps(self.ck().load()[0]))
+
+    def test_redact_off(self):
+        secret = "s3cr3t-value-0123456789abcdef"
+        with mock.patch.dict(os.environ, {"MY_SERVICE_TOKEN": secret}):
+            ck = LoopCheckpoint(self.path, self.key, fsync=False, redact=False)
+            ck.save([{"role": "user", "content": secret}], {})
+        self.assertIn(secret.encode(), self.path.read_bytes())
+
+    def test_redact_text_helpers(self):
+        self.assertEqual(lc.redact_text("plain text, nothing here"), "plain text, nothing here")
+        self.assertIs(lc.redact_text(None), None)
+        obj = {"a": ["x", {"b": "y"}], "n": 3}
+        self.assertIs(lc.redact_obj(obj), obj)  # unchanged -> the same object

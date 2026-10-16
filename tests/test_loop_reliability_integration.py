@@ -313,7 +313,8 @@ def test_compaction_swaps_in_a_summary_and_keeps_the_goal(tmp_path, monkeypatch)
         else GOAL in json.dumps(after[0]["content"])
     assert "SUMMARY: tried echo" in json.dumps(after[0])
     seen = client.seen
-    assert any(len(b) < len(a) for a, b in zip(seen, seen[1:])), "a request should shrink"
+    # without compaction request i (0-based) holds 2*i + 1 messages
+    assert any(len(req) < 2 * i + 1 for i, req in enumerate(seen)), "history should shrink"
     # the summary call is accounted like any other call
     assert run.input_tokens >= sum(100 * (i + 1) for i in range(12)) + 50
 
@@ -369,3 +370,305 @@ def test_orchestrator_without_checkpoint_path_writes_none(tmp_path, monkeypatch)
     monkeypatch.delenv("AWOS_LOOP_CHECKPOINT_PATH", raising=False)
     r = _run_task(tmp_path, [bash(EDIT), submit()], [GREEN], monkeypatch)
     assert r.out["success"] is True and not list(tmp_path.rglob("loop_checkpoint*"))
+
+
+# ── per-rung step budget ─────────────────────────────────────────────────────
+
+
+def test_final_rung_gets_full_max_steps_from_its_own_start(tmp_path):
+    ws = _ws(tmp_path)
+    cheap = Scripted([bash(f"echo c{i}") for i in range(10)])
+    strong = Strong([bash(f"echo s{i}") for i in range(20)])
+    ex, _ = _exec(ws, cheap, escalate=Ladder(strong), rung_steps_=3, max_steps_=5)
+    run = ex.run()
+    assert run.stop_reason == "max_steps" and run.rung == 1
+    assert len(cheap.seen) == 3 and len(strong.seen) == 5 and run.steps == 8
+
+
+def test_non_final_rung_out_of_max_steps_hands_over(tmp_path):
+    ws = _ws(tmp_path)
+    cheap = Scripted([bash(f"echo c{i}") for i in range(10)])
+    strong = Strong([bash(EDIT), submit()])
+    ex, _ = _exec(ws, cheap, escalate=Ladder(strong), max_steps_=3,
+                  gate=lambda f, s: {"green": True})
+    run = ex.run()
+    assert run.success and len(cheap.seen) == 3
+    assert "step budget" in run.escalations[0]["reason"]
+
+
+def test_cost_cap_stays_per_task_across_rungs(tmp_path):
+    ws = _ws(tmp_path)
+    cheap = Scripted([bash(f"echo c{i}", tin=200_000) for i in range(10)])
+    strong = Strong([bash(f"echo s{i}", tin=200_000) for i in range(10)])
+    ex, _ = _exec(ws, cheap, escalate=Ladder(strong), rung_steps_=2, max_steps_=50,
+                  cost_cap=0.5)
+    run = ex.run()
+    assert run.stop_reason == "cost_cap" and run.rung == 1 and run.steps < 10
+
+
+def test_escalation_event_carries_rung_steps_cost_and_stuck(tmp_path):
+    ws = _ws(tmp_path)
+    cheap = Scripted([bash(f"echo c{i}", tin=1000) for i in range(5)])
+    strong = Strong([bash(EDIT), submit()])
+    ex, _ = _exec(ws, cheap, gate=lambda f, s: {"green": True}, escalate=Ladder(strong),
+                  rung_steps_=3)
+    run = ex.run()
+    ev = run.escalations[0]
+    assert ev["rung_steps"] == 3 and ev["rung_cost_usd"] > 0
+    assert ev["stuck"]["mode"] == "log" and "triggers" in ev["stuck"]
+    assert json.dumps(ev)  # goes to the labelled route log as is
+
+
+# ── model errors ─────────────────────────────────────────────────────────────
+
+
+class AuthError(Exception):
+    status_code = 401
+
+
+class RateLimitError(Exception):
+    status_code = 429
+
+
+class FailsAfter(Scripted):
+    """Replies normally, then raises `exc` once the replies run out."""
+
+    def __init__(self, replies, exc):
+        super().__init__(replies)
+        self.exc = exc
+
+    def complete(self, system, messages, registry):
+        if self.replies:
+            return super().complete(system, messages, registry)
+        self.seen.append(list(messages))
+        raise self.exc
+
+
+def test_auth_error_at_the_top_stops_and_finishes_the_checkpoint(tmp_path):
+    ws = _ws(tmp_path)
+    path = tmp_path / "ckpt.jsonl"
+    run = _exec(ws, FailsAfter([bash("echo one")], AuthError("invalid x-api-key")),
+                checkpoint=LoopCheckpoint(path, "k"))[0].run()
+    assert run.stop_reason == "model_error" and run.error_kind == "auth"
+    assert run.component()["error_kind"] == "auth"
+    assert LoopCheckpoint(path, "k").load() is None  # a retry will not fix a bad key
+
+
+def test_transient_error_leaves_the_checkpoint_resumable(tmp_path):
+    ws = _ws(tmp_path)
+    path = tmp_path / "ckpt.jsonl"
+    run = _exec(ws, FailsAfter([bash("echo one")], RateLimitError("slow down")),
+                checkpoint=LoopCheckpoint(path, "k"))[0].run()
+    assert run.stop_reason == "model_error" and run.error_kind == "rate_limit"
+    assert LoopCheckpoint(path, "k").load() is not None
+
+
+def test_auth_error_on_a_lower_rung_still_escalates(tmp_path):
+    ws = _ws(tmp_path)
+    strong = Strong([bash(EDIT), submit()])
+    run = _exec(ws, FailsAfter([], AuthError("no key")), gate=lambda f, s: {"green": True},
+                escalate=Ladder(strong))[0].run()
+    assert run.success and "auth" in run.escalations[0]["reason"]
+    assert run.error_kind is None and run.model_errors == ["auth"]
+
+
+# ── context overflow ─────────────────────────────────────────────────────────
+
+
+class Overflow(Exception):
+    status_code = 400
+
+    def __init__(self):
+        super().__init__("prompt is too long: 250000 tokens > 200000 maximum")
+
+
+class OverflowsWhenLong(Summarising):
+    """Raises a context overflow while the request holds > `limit` messages."""
+
+    def __init__(self, replies, limit, summary_fails=False):
+        super().__init__(replies)
+        self.limit = limit
+        self.overflows = 0
+        self.summary_fails = summary_fails
+
+    def complete(self, system, messages, registry):
+        is_summary = len(messages) == 1 and "<transcript>" in str(messages[0].get("content"))
+        if is_summary and self.summary_fails:
+            raise RuntimeError("summary model down")
+        if not is_summary and len(messages) > self.limit:
+            self.overflows += 1
+            raise Overflow()
+        return super().complete(system, messages, registry)
+
+
+@pytest.mark.parametrize("compact", [False, True])
+def test_context_overflow_compacts_once_and_retries(tmp_path, compact):
+    ws = _ws(tmp_path)
+    replies = [bash(f"echo {i}") for i in range(6)] + [bash(EDIT), submit()]
+    client = OverflowsWhenLong(replies, limit=11)
+    ex, _ = _exec(ws, client, compact=compact, gate=lambda f, s: {"green": True})
+    run = ex.run()
+    assert run.success and run.stop_reason == "submitted"
+    assert client.overflows >= 1 and run.forced_compactions >= 1 and client.summaries >= 1
+    assert run.error_kind is None and "context_overflow" in run.model_errors
+    assert run.compaction["forced"] >= 1
+
+
+def test_context_overflow_with_a_failing_summary_uses_the_fallback(tmp_path):
+    ws = _ws(tmp_path)
+    replies = [bash(f"echo {i}") for i in range(6)] + [bash(EDIT), submit()]
+    client = OverflowsWhenLong(replies, limit=11, summary_fails=True)
+    run = _exec(ws, client, gate=lambda f, s: {"green": True})[0].run()
+    assert run.success and run.compaction["fallbacks"] >= 1
+
+
+def test_context_overflow_that_compaction_cannot_fix_stops_without_looping(tmp_path):
+    ws = _ws(tmp_path)
+    client = OverflowsWhenLong([bash(f"echo {i}") for i in range(6)], limit=0)
+    path = tmp_path / "ckpt.jsonl"
+    run = _exec(ws, client, checkpoint=LoopCheckpoint(path, "k"))[0].run()
+    assert run.stop_reason == "context_overflow" and run.error_kind == "context_overflow"
+    assert client.overflows == 1 and run.steps == 1  # nothing to compact: stop at once
+    assert LoopCheckpoint(path, "k").load() is None
+
+
+def test_context_overflow_after_a_forced_compaction_escalates(tmp_path):
+    ws = _ws(tmp_path)
+    strong = Strong([bash(EDIT), submit()])
+
+    class AlwaysOverflowAfter(OverflowsWhenLong):
+        """Once it has overflowed, every loop request overflows (summaries work)."""
+
+        def complete(self, system, messages, registry):
+            if self.overflows and not (len(messages) == 1 and "<transcript>"
+                                       in str(messages[0].get("content"))):
+                self.overflows += 1
+                raise Overflow()
+            return super().complete(system, messages, registry)
+
+    cheap = AlwaysOverflowAfter([bash(f"echo {i}") for i in range(8)], limit=9)
+    run = _exec(ws, cheap, gate=lambda f, s: {"green": True}, escalate=Ladder(strong))[0].run()
+    assert run.success and run.rung == 1
+    assert run.escalations[0]["reason"].startswith("context overflow")
+    assert run.forced_compactions == 1  # one per overflow streak, then the next rung
+
+
+# ── resume safety ────────────────────────────────────────────────────────────
+
+
+def test_resume_names_files_changed_after_the_last_saved_step(tmp_path):
+    ws = _ws(tmp_path)
+    path = tmp_path / "ckpt.jsonl"
+    first = DiesAt([bash("echo one"), bash(EDIT)], die_at=3)
+    with pytest.raises(Killed):
+        _exec(ws, first, checkpoint=LoopCheckpoint(path, "k1"))[0].run()
+    saved = LoopCheckpoint(path, "k1").load()
+    assert "workspace" in saved[1]
+    # the kill landed mid-command: a write happened after the last save
+    import time
+    time.sleep(0.01)
+    (ws / "half_written.py").write_text("x = (\n", encoding="utf-8")
+    second = Scripted([submit()])
+    run = _exec(ws, second, checkpoint=LoopCheckpoint(path, "k1"),
+                gate=lambda f, s: {"green": True})[0].run()
+    assert run.resumed and run.success
+    assert run.resume_changed == ["half_written.py"]
+    sent = json.dumps(second.seen[0][-1])
+    assert "[harness note]" in sent and "half_written.py" in sent and "resumed" in sent
+    assert second.seen[0][:-1] == saved[0][:-1]  # only the last turn got the note
+    assert run.component()["resume_changed"] == ["half_written.py"]
+    assert set(run.files_changed) == {"calc.py", "half_written.py"}
+
+
+def test_resume_keeps_escalations(tmp_path):
+    ws = _ws(tmp_path)
+    path = tmp_path / "ckpt.jsonl"
+    cheap = Scripted([bash("echo a"), bash("echo b")])
+    strong = DiesAt([bash("echo strong")], die_at=2)
+    strong.model = "claude-sonnet-5-5"
+    with pytest.raises(Killed):
+        _exec(ws, cheap, checkpoint=LoopCheckpoint(path, "k"), escalate=Ladder(strong),
+              rung_steps_=2)[0].run()
+    run = _exec(ws, Scripted([]), checkpoint=LoopCheckpoint(path, "k"),
+                escalate=Ladder(Strong([submit()])), rung_steps_=2,
+                gate=lambda f, s: {"green": True})[0].run()
+    assert run.resumed and len(run.escalations) == 1
+    assert run.escalations[0]["to"] == "claude-sonnet-5-5"
+
+
+def test_resume_keeps_the_compaction_count(tmp_path, monkeypatch):
+    monkeypatch.setenv("AWOS_LOOP_CONTEXT_TOKENS", "1000")
+    ws = _ws(tmp_path)
+    path = tmp_path / "ckpt.jsonl"
+    class DiesWhenDone(Summarising):
+        """Answers summaries; killed on the first loop call past its replies."""
+
+        def complete(self, system, messages, registry):
+            summary = len(messages) == 1 and "<transcript>" in str(messages[0].get("content"))
+            if not summary and not self.replies:
+                raise Killed()
+            return super().complete(system, messages, registry)
+
+    client = DiesWhenDone([bash(f"echo {i}", tin=100 * (i + 1)) for i in range(10)])
+    with pytest.raises(Killed):
+        _exec(ws, client, compact=True, checkpoint=LoopCheckpoint(path, "k"))[0].run()
+    saved = LoopCheckpoint(path, "k").load()[1]
+    assert saved["compaction_summaries"] >= 1
+    ex, _ = _exec(ws, Summarising([submit()]), compact=True,
+                  checkpoint=LoopCheckpoint(path, "k"), gate=lambda f, s: {"green": True})
+    run = ex.run()
+    assert run.resumed and run.compaction["summaries"] == saved["compaction_summaries"]
+
+
+def test_checkpoint_failures_reach_telemetry(tmp_path):
+    class Broken:
+        def load(self):
+            return None
+
+        def save(self, messages, counters):
+            return False
+
+        def finish(self, reason):
+            pass
+
+    ws = _ws(tmp_path)
+    run = _exec(ws, Scripted([bash("echo 1"), bash("echo 2"), submit()]), checkpoint=Broken(),
+                gate=lambda f, s: {"green": True})[0].run()
+    assert run.checkpoint_failures == 2 and run.component()["checkpoint_failures"] == 2
+    plain = _exec(ws, Scripted([submit()]), gate=lambda f, s: {"green": True})[0].run()
+    assert "checkpoint_failures" not in plain.component()
+
+
+# ── hand-over redaction ──────────────────────────────────────────────────────
+
+
+def test_handover_note_is_redacted(tmp_path, monkeypatch):
+    secret = "s3cr3t-value-0123456789abcdef"
+    key = "sk-ant-api03-" + "Q7wErTy9UiOp2AsDfGh5JkL3ZxCvBn8M"
+    monkeypatch.setenv("MY_SERVICE_TOKEN", secret)
+    ws = _ws(tmp_path)
+    verdicts = iter([{"green": False, "retry": False, "feedback": f"FAILED: auth {key}"},
+                     {"green": True}])
+    cheap = Scripted([bash(f"curl -H 'x: {secret}' localhost"), submit("done?")])
+    strong = Strong([submit()])
+    run = _exec(ws, cheap, gate=lambda f, s: next(verdicts), escalate=Ladder(strong))[0].run()
+    assert run.success
+    first = strong.seen[0][0]["content"]
+    assert secret not in first and key not in first
+    assert "[REDACTED:MY_SERVICE_TOKEN]" in first and "FAILED: auth [REDACTED" in first
+
+
+# ── stuck precision inside the loop ──────────────────────────────────────────
+
+
+def test_grep_without_a_match_is_not_a_failure_in_the_loop(tmp_path):
+    ws = _ws(tmp_path)
+    from scaffold.agent.loop_stuck import StuckDetector
+
+    greps = [bash(f"grep -rn needle{i} .") for i in range(6)]
+    ex, _ = _exec(ws, Scripted(greps + [bash(EDIT), submit()]),
+                  gate=lambda f, s: {"green": True},
+                  stuck=StuckDetector("log", window=4, fail_threshold=4))
+    run = ex.run()
+    assert run.success and run.stuck["neutral_results"] == 6
+    assert run.stuck["triggers"]["failure_rate"] == 0

@@ -13,7 +13,10 @@ compaction/overflow; Kiro never steps back down a tier).
     AWOS_LOOP_ROUTE=""                         off (default): one model, as before
     AWOS_LOOP_ROUTE_RUNG_STEPS=30              steps a rung gets before the next
                                                rung takes over (the last rung
-                                               runs to the task's max steps)
+                                               gets the full AWOS_LOOP_MAX_STEPS
+                                               counted from its own start; the
+                                               cost cap, goal budget and wall
+                                               clock stay per task)
     AWOS_ROUTE_LOG=<path> | 0                  labelled route decisions (A8),
                                                default .awos/route_decisions.jsonl,
                                                off under pytest unless named
@@ -29,10 +32,17 @@ the rung's format/truncation limit, a model error, and a red gate after the
 feedback rounds. A run never stops early because of routing: escalation only
 ever hands the same task to a stronger model.
 
-Changing protocol (local text protocol → Anthropic tool calls) cannot keep
-the old conversation as is, so the new rung starts a fresh conversation with
-the goal and a handover note (what was run, how it ended, files changed);
-the workspace keeps the edits. Same protocol: the conversation carries over.
+Every escalation starts the new rung on a fresh conversation: the goal plus
+a handover note (what was run, how it ended, files changed, and the last
+gate report when a red gate caused it), with secrets redacted
+(loop_checkpoint.redact_text). This holds even when both rungs speak the
+same protocol: the prompt cache is per model anyway, and the old history
+may be in another message shape. The workspace keeps the edits.
+
+Each escalation event (LoopRun.escalations) carries from / to / reason /
+step plus the finished rung's own steps (`rung_steps`), its spend
+(`rung_cost_usd`) and its stuck-detector summary (`stuck`), so the labelled
+log below can tell a cheap rung that spun from one that ran out of steps.
 
 Every decision is appended as one JSON line, labelled once the task ends
 (solved or not), so ml_router.py's prior can be calibrated on real outcomes

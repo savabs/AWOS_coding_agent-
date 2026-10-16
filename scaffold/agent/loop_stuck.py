@@ -27,18 +27,28 @@ Modes:
   nudge  as log, plus observe() returns the nudge text when a trigger fires.
 
 Triggers (names are stable; they appear in summaries and telemetry):
-  repeat_command     the same normalised command run >= repeat_threshold times
-                     in a row, or the same command with the same output
-                     signature >= repeat_threshold times within the last
-                     `window` commands (catches A, B, A, B, A loops);
+  repeat_command     the same normalised command with the same output
+                     signature >= repeat_threshold times in a row, or
+                     >= repeat_threshold times within the last `window`
+                     commands (catches A, B, A, B, A loops). Polling a status
+                     whose output changes is not a repeat;
   failure_rate       >= fail_threshold of the last `window` tool results
                      failed (only once the window is full);
   failure_signature  the same failure signature (last meaningful output
                      line, digits and hex stripped) in >= repeat_threshold
                      consecutive failing results;
   no_progress        the caller's progress_key unchanged for
-                     no_progress_steps observed steps (only once a key has
-                     been seen; None means "unknown" and is ignored).
+                     no_progress_steps observed steps, counted only after
+                     the key has changed once (the first workspace change:
+                     reading code before the first edit is normal). None
+                     means "unknown" and is ignored.
+
+Neutral results: exit status 1 from a search or comparison command (grep,
+rg, egrep, fgrep, ag, test, [, diff, cmp) means "no match" / "differs", not
+an error, so it counts neither as a failure nor as a success. The command
+whose status the shell reports is the last one of the command list (after
+`cd x &&`, env assignments, `;`), and of a pipeline its last element
+(`grep x f | head` reports head's status) unless `pipefail` is set.
 
 Step accounting: cooldowns and escalation count observe() calls (steps that
 ran commands), not the caller's step numbers, so gaps or odd step values do
@@ -55,6 +65,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import shlex
 from collections import Counter, deque
 from itertools import zip_longest
 from typing import Any, Optional
@@ -116,9 +127,93 @@ def _result_data(result: Any) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def result_failed(result: Any) -> Optional[bool]:
-    """True / False, or None when the result says nothing either way."""
+#: Commands whose exit status 1 means "no match" / "false" / "differs".
+NEUTRAL_EXIT1 = frozenset({"grep", "rg", "egrep", "fgrep", "ag", "test", "[", "[[", "diff",
+                           "cmp", "git-grep"})
+#: Words that run the next word as the command (timeout takes a duration first).
+_WRAPPERS = frozenset({"sudo", "env", "nice", "time", "command", "builtin", "exec", "nohup",
+                       "stdbuf", "timeout", "!"})
+_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_LIST_OPS = {";", "&&", "||", "&", ";;"}
+
+
+def _tokens(command: str) -> list:
+    """Shell-ish tokens with control operators as their own tokens; quotes kept
+    together (a newline separates commands). Falls back to a plain split on
+    unbalanced quotes."""
+    text = command.replace("\r", " ").replace("\n", " ; ")
+    try:
+        lex = shlex.shlex(text, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        return list(lex)
+    except ValueError:
+        return re.findall(r"[;&|<>()]+|[^\s;&|<>()]+", text)
+
+
+def _command_word(words: list) -> str:
+    """The program a simple command runs: skips env assignments and wrappers."""
+    i = 0
+    while i < len(words):
+        w = words[i]
+        if _ASSIGN.match(w) or w in ("(", ")", "{", "}", "then", "do", "else", "if", "while"):
+            i += 1
+            continue
+        base = w.rsplit("/", 1)[-1]
+        if base in _WRAPPERS:
+            i += 1
+            if base == "timeout":  # timeout [-opts] DURATION cmd
+                while i < len(words) and words[i].startswith("-"):
+                    i += 1
+                i += 1
+            elif base in ("env", "sudo", "nice", "stdbuf"):
+                while i < len(words) and (words[i].startswith("-") or _ASSIGN.match(words[i])):
+                    i += 1
+            continue
+        if base == "git" and i + 1 < len(words) and words[i + 1] == "grep":
+            return "git-grep"
+        return base
+    return ""
+
+
+def status_commands(command: Any) -> list:
+    """Programs whose exit status the shell reports for `command`: the last
+    element of the last pipeline, or every element of it under pipefail."""
+    if not isinstance(command, str) or not command.strip():
+        return []
+    try:
+        toks = _tokens(command)
+    except Exception:  # noqa: BLE001
+        return []
+    pipeline: list = [[]]
+    for tok in toks:
+        if tok in _LIST_OPS or (tok and set(tok) <= set(";&")):
+            pipeline = [[]]
+        elif tok in ("|", "|&"):
+            pipeline.append([])
+        else:
+            pipeline[-1].append(tok)
+    elements = [_command_word(words) for words in pipeline if words]
+    if not elements:
+        return []
+    return elements if "pipefail" in command else elements[-1:]
+
+
+def neutral_result(command: Any, result: Any) -> bool:
+    """Exit status 1 from a search/compare command (see NEUTRAL_EXIT1)."""
+    data = _result_data(result)
+    code = data.get("exit_code")
+    if code != 1 or isinstance(code, bool) or data.get("timed_out"):
+        return False
+    progs = status_commands(command)
+    return bool(progs) and any(p in NEUTRAL_EXIT1 for p in progs)
+
+
+def result_failed(result: Any, command: Any = None) -> Optional[bool]:
+    """True / False, or None when the result says nothing either way (also
+    for a neutral exit 1 of a search command, when `command` is given)."""
     if result is None:
+        return None
+    if command is not None and neutral_result(command, result):
         return None
     success = getattr(result, "success", None)
     if isinstance(success, bool):
@@ -230,17 +325,20 @@ class StuckDetector:
         self.nudges = 0  # nudge texts returned (mode nudge)
         self.would_nudge = 0  # nudge points in any non-off mode
         self.errors = 0  # swallowed internal errors
+        self.neutral = 0  # exit-1 results of search/compare commands (not failures)
 
         self._tick = 0
         self._states = {name: _TriggerState() for name in TRIGGERS}
         self._fails: deque = deque(maxlen=self.window)
         self._recent_pairs: deque = deque(maxlen=self.window)
-        self._last_cmd: Optional[str] = None
+        self._last_cmd: Optional[tuple] = None  # (command, output signature)
         self._cmd_run = 0
         self._last_fail_sig: Optional[str] = None
         self._fail_sig_run = 0
         self._progress_key: Any = None
         self._seen_key = False
+        #: The key has moved off its first value (the first workspace change).
+        self._key_moved = False
         self._unchanged = 0
 
     # -- public ---------------------------------------------------------------
@@ -269,6 +367,7 @@ class StuckDetector:
                 "first_fire_step": {name: st.first_step for name, st in self._states.items()
                                     if st.fires},
                 "steps_observed": self._tick,
+                "neutral_results": self.neutral,
                 "errors": self.errors,
             }
         except Exception:
@@ -308,20 +407,26 @@ class StuckDetector:
         cmd = normalize_command(command) if command is not None else None
 
         if cmd is not None:
-            if cmd == self._last_cmd:
+            sig = output_signature(result) if result is not None else None
+            # A repeat is the same command AND the same output: polling a
+            # status that keeps changing is not spinning.
+            if (cmd, sig) == self._last_cmd:
                 self._cmd_run += 1
             else:
-                self._last_cmd, self._cmd_run = cmd, 1
+                self._last_cmd, self._cmd_run = (cmd, sig), 1
             if cmd and self._cmd_run >= self.repeat_threshold:
                 hit["repeat_command"] = {"command": cmd, "count": self._cmd_run}
             if cmd and result is not None:
-                pair = (cmd, output_signature(result))
+                pair = (cmd, sig)
                 self._recent_pairs.append(pair)
                 count = Counter(self._recent_pairs)[pair]
                 if count >= self.repeat_threshold and "repeat_command" not in hit:
                     hit["repeat_command"] = {"command": cmd, "count": count}
 
         if result is None:
+            return
+        if command is not None and neutral_result(command, result):
+            self.neutral += 1  # "no match" from grep & co: neither failure nor success
             return
         failed = result_failed(result)
         if failed is None:
@@ -355,8 +460,9 @@ class StuckDetector:
         if same:
             self._unchanged += 1
         else:
-            self._progress_key, self._unchanged = key, 0
-        if self._unchanged >= self.no_progress_steps:
+            self._progress_key, self._unchanged, self._key_moved = key, 0, True
+        # Before the first change, exploring (reading, running tests) is normal.
+        if self._key_moved and self._unchanged >= self.no_progress_steps:
             hit["no_progress"] = {"steps": self._unchanged}
 
     def _update_triggers(self, step: Any, hit: dict) -> Optional[str]:

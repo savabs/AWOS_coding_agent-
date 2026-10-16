@@ -17,8 +17,9 @@ The loop:
     cut mini-style (head + tail with a notice) past OUTPUT_LIMIT characters;
   * the model works until it replies, without a tool call, starting with
     SUBMIT_MARKER (or runs `echo SUBMIT_MARKER`, mini-swe-agent's convention);
-  * limits: AWOS_LOOP_MAX_STEPS model calls (default 60), the task cost cap,
-    the goal budget and a wall clock;
+  * limits: AWOS_LOOP_MAX_STEPS model calls (default 60) per route rung,
+    counted from the rung's start (without routing: per task), and per task
+    the cost cap, the goal budget and a wall clock;
   * after a submit the caller's success gate runs on the final tree (the
     orchestrator's judge + full-suite gate, new failures vs the baseline only).
     Red with new failures: the failing output goes back into the SAME
@@ -49,8 +50,23 @@ in docs/specs/loop_reliability_ab.md), each its own module:
     rung that is stuck, out of its step allowance, out of format or
     truncation retries, erroring, or red after the gate's rounds hands the
     task one way up the ladder. The next rung starts a fresh conversation
-    (goal + handover note; the prompt cache does not carry across models
-    anyway) on the same working tree.
+    (goal + handover note with secrets redacted; the prompt cache does not
+    carry across models anyway) on the same working tree. A non-final rung
+    is bounded by its allowance (rung_steps_); the final rung gets the full
+    max steps from its own start, so a late escalation does not starve the
+    stronger model.
+
+Model errors are classified (error_kind: context_overflow, auth, rate_limit,
+timeout, connection, server, other; LoopRun.error_kind). Only the transient
+kinds (rate_limit, timeout, connection, server) leave the checkpoint
+resumable. A context overflow first forces one synchronous compaction and
+retries (at most once per overflow streak), then tries the next rung, then
+stops with stop_reason "context_overflow".
+
+Command output that contains the harness's own note markers (the stuck
+detector's "[harness note]", the handover and gate-feedback lead lines) is
+quoted in render_observation, so a file the model prints cannot pose as the
+harness.
 
 Prompt text (SYSTEM_PROMPT, _INSTANCE_TEMPLATE, FORMAT_ERROR_MESSAGE,
 TRUNCATED_MESSAGE) and the observation truncation rule are adapted from
@@ -81,8 +97,11 @@ mini-swe-agent 2.4.6 (minisweagent/config/mini.yaml), under its MIT licence:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import platform
+import re
 import shlex
 import threading
 import time
@@ -93,19 +112,25 @@ try:
     from .agent_loop import (TRUNCATED_FINISH, WorkspaceWatch, _finish_reason, _int0,
                              estimate_cost)
     from .llm_call_log import record_error, record_response, timing_fields
-    from .loop_compaction import Compactor, compaction_enabled, summary_request
+    from .loop_checkpoint import redact_text
+    from .loop_compaction import (CHARS_PER_TOKEN, SUMMARY_INSTRUCTION, Compactor,
+                                  compaction_enabled, context_window, estimate_tokens,
+                                  next_request_tokens, summary_request)
     from .loop_grammar import wrap_for_loop
-    from .loop_route import handover_note
-    from .loop_stuck import StuckDetector, stuck_mode
+    from .loop_route import HANDOVER_TEMPLATE, handover_note
+    from .loop_stuck import NUDGE_PREFIX, StuckDetector, stuck_mode
     from .tools.base import Tool, ToolRegistry, ToolResult
 except ImportError:  # flat sys.path import (scaffold/agent on the path)
     from agent_loop import (TRUNCATED_FINISH, WorkspaceWatch, _finish_reason, _int0,
                             estimate_cost)
     from llm_call_log import record_error, record_response, timing_fields
-    from loop_compaction import Compactor, compaction_enabled, summary_request
+    from loop_checkpoint import redact_text
+    from loop_compaction import (CHARS_PER_TOKEN, SUMMARY_INSTRUCTION, Compactor,
+                                 compaction_enabled, context_window, estimate_tokens,
+                                 next_request_tokens, summary_request)
     from loop_grammar import wrap_for_loop
-    from loop_route import handover_note
-    from loop_stuck import StuckDetector, stuck_mode
+    from loop_route import HANDOVER_TEMPLATE, handover_note
+    from loop_stuck import NUDGE_PREFIX, StuckDetector, stuck_mode
     from tools.base import Tool, ToolRegistry, ToolResult
 
 #: The line that ends the loop (mini-swe-agent's own marker, kept so the two
@@ -126,6 +151,12 @@ OUTPUT_LIMIT = 10_000
 MAX_FORMAT_ERRORS = 3
 #: Replies in a row cut off by the output-token limit before giving up.
 MAX_TRUNCATIONS = 3
+#: Output cap assumed when the client does not say (compaction reserve).
+DEFAULT_OUTPUT_CAP = 8192
+#: Safety margin (tokens) under the window for compaction and summary requests.
+CONTEXT_MARGIN_TOKENS = 1000
+#: keep_recent of the temporary compactor a context overflow builds.
+OVERFLOW_KEEP_RECENT = 2
 
 
 def _int_env(name: str, default: int, minimum: int = 0) -> int:
@@ -136,7 +167,8 @@ def _int_env(name: str, default: int, minimum: int = 0) -> int:
 
 
 def max_steps() -> int:
-    """AWOS_LOOP_MAX_STEPS (default 60): model calls per task."""
+    """AWOS_LOOP_MAX_STEPS (default 60): model calls per route rung, counted
+    from the rung's start (per task when routing is off)."""
     return _int_env("AWOS_LOOP_MAX_STEPS", DEFAULT_MAX_STEPS, minimum=1)
 
 
@@ -149,6 +181,91 @@ def command_timeout() -> int:
     """AWOS_LOOP_CMD_TIMEOUT_S (default 120, max 600): one bash command's limit."""
     return min(MAX_CMD_TIMEOUT_S, _int_env("AWOS_LOOP_CMD_TIMEOUT_S", DEFAULT_CMD_TIMEOUT_S,
                                            minimum=1))
+
+
+# ── model error classification ───────────────────────────────────────────────
+
+
+ERROR_KINDS = ("context_overflow", "auth", "rate_limit", "timeout", "connection", "server",
+               "other")
+#: Kinds worth another attempt later: they leave the checkpoint resumable.
+TRANSIENT_ERROR_KINDS = frozenset({"rate_limit", "timeout", "connection", "server"})
+
+_OVERFLOW_TEXT = re.compile(
+    r"prompt is too long|context_length_exceeded|maximum context length|"
+    r"exceeds the available context size|context size|context window|"
+    r"too many tokens|input is too long|reduce the length of the messages", re.I)
+_AUTH_TEXT = re.compile(
+    r"invalid x-api-key|invalid api key|incorrect api key|api key not valid|"
+    r"authentication|unauthori[sz]ed|permission denied|api_key is not set|"
+    r"api key is not set|no api key|missing api key", re.I)
+_RATE_TEXT = re.compile(r"rate limit|rate_limit|too many requests", re.I)
+_OVERLOAD_TEXT = re.compile(r"overloaded|internal server error|bad gateway|"
+                            r"service unavailable|gateway timeout", re.I)
+_TIMEOUT_TEXT = re.compile(r"timed out|timeout", re.I)
+_CONNECTION_TEXT = re.compile(r"connection (refused|reset|error|aborted)|"
+                              r"failed to establish|name or service not known|"
+                              r"server disconnected|remote end closed", re.I)
+
+
+def _status_code(exc: BaseException) -> Optional[int]:
+    for obj in (exc, getattr(exc, "response", None)):
+        code = getattr(obj, "status_code", None) if obj is not None else None
+        if code is None and obj is not None:
+            code = getattr(obj, "status", None)
+        if isinstance(code, int) and not isinstance(code, bool):
+            return code
+    return None
+
+
+def _error_text(exc: BaseException) -> str:
+    parts = [str(exc)]
+    for attr in ("message", "code", "type", "body"):
+        val = getattr(exc, attr, None)
+        if val is not None and not callable(val):
+            parts.append(val if isinstance(val, str) else repr(val))
+    return " ".join(parts)
+
+
+def error_kind(exc: BaseException) -> str:
+    """Classify a model-call exception: "context_overflow" | "auth" |
+    "rate_limit" | "timeout" | "connection" | "server" | "other".
+
+    Matches Anthropic / OpenAI SDK exception class names (any class in the
+    MRO), HTTP status codes and message text (Anthropic "prompt is too long",
+    OpenAI "context_length_exceeded" / "maximum context length", llama-server
+    "exceeds the available context size")."""
+    try:
+        names = {c.__name__ for c in type(exc).__mro__}
+        text = _error_text(exc)
+        code = _status_code(exc)
+        if _OVERFLOW_TEXT.search(text) or code == 413:
+            return "context_overflow"
+        if (names & {"AuthenticationError", "PermissionDeniedError"}
+                or code in (401, 403) or _AUTH_TEXT.search(text)):
+            return "auth"
+        if "RateLimitError" in names or code == 429 or _RATE_TEXT.search(text):
+            return "rate_limit"
+        # Timeouts before connection errors: APITimeoutError subclasses
+        # APIConnectionError in both SDKs.
+        if (names & {"APITimeoutError", "Timeout", "TimeoutError", "TimeoutException",
+                     "ReadTimeout", "ConnectTimeout", "WriteTimeout", "PoolTimeout",
+                     "timeout"} or code in (408, 504)):
+            return "timeout"
+        if (names & {"InternalServerError", "OverloadedError", "ServiceUnavailableError",
+                     "APIStatusError"} and (code is None or code >= 500)) \
+                or (code is not None and code >= 500) or _OVERLOAD_TEXT.search(text):
+            return "server"
+        if (names & {"APIConnectionError", "ConnectionError", "ConnectError",
+                     "RemoteProtocolError", "NetworkError", "ConnectionRefusedError",
+                     "ConnectionResetError", "BrokenPipeError"}
+                or _CONNECTION_TEXT.search(text)):
+            return "connection"
+        if _TIMEOUT_TEXT.search(text):
+            return "timeout"
+    except Exception:  # noqa: BLE001 - classification never raises
+        pass
+    return "other"
 
 
 # ── the bash tool ────────────────────────────────────────────────────────────
@@ -165,8 +282,30 @@ def truncate_output(text: str, limit: int = OUTPUT_LIMIT) -> str:
             f"rest.</warning>\n\n{text[-half:]}")
 
 
+#: Lead text of the harness's own notes (stuck nudges and resume / overflow
+#: notes use NUDGE_PREFIX; the handover note and gate feedback use these).
+HARNESS_LEADS = (HANDOVER_TEMPLATE.split("(", 1)[0].strip(),
+                 "You submitted, but AWOS ran the project's tests",
+                 "The last check reported:")
+_FORGED_PREFIX = re.compile(r"\[\s*" + r"\s+".join(
+    re.escape(w) for w in NUDGE_PREFIX.strip("[]").split()) + r"\s*\]", re.I)
+_FORGED_LEADS = re.compile("|".join(r"\s+".join(re.escape(w) for w in lead.split())
+                                    for lead in HARNESS_LEADS), re.I)
+
+
+def neutralise_harness_text(output: str) -> str:
+    """Quote anything in command output that looks like a harness note, so a
+    file the model prints cannot speak as the harness. Output without such
+    text comes back unchanged (same bytes)."""
+    if not output:
+        return output
+    out = _FORGED_PREFIX.sub("[quoted text: harness note]", output)
+    return _FORGED_LEADS.sub(lambda m: f"(quoted from command output) {m.group(0)}", out)
+
+
 def render_observation(exit_code: int, output: str, timed_out: bool = False,
                        timeout_s: int = 0) -> str:
+    output = neutralise_harness_text(output)
     head = f"<returncode>{exit_code}</returncode>"
     if timed_out:
         head += (f"\n<warning>The command timed out after {timeout_s}s and was killed. "
@@ -532,8 +671,9 @@ class LoopRun:
 
     success: bool = False
     #: submitted | gate_red | max_steps | cost_cap | goal_budget | wall_clock |
-    #: format_error | truncated | model_error
-    stop_reason: str = "max_steps"
+    #: format_error | truncated | model_error | context_overflow. "running"
+    #: only while the loop runs: every way out of it sets a real reason.
+    stop_reason: str = "running"
     steps: int = 0
     submits: int = 0
     gate_retries: int = 0
@@ -565,12 +705,24 @@ class LoopRun:
     #: Continued from a checkpoint of a killed run (loop_checkpoint.py).
     resumed: bool = False
     #: Route rung the run ended on (0 = the first) and each escalation
-    #: {"from", "to", "reason", "step"} (loop_route.py).
+    #: {"from", "to", "reason", "step", "rung_steps", "rung_cost_usd",
+    #: "stuck"} (loop_route.py; "stuck" only when the detector ran).
     rung: int = 0
     escalations: list = field(default_factory=list)
     #: StuckDetector.summary() / Compactor.summary(), when they ran.
     stuck: Optional[dict] = None
     compaction: Optional[dict] = None
+    #: error_kind() of the model error the run stopped on (None otherwise),
+    #: and the kind of every model error met on the way.
+    error_kind: Optional[str] = None
+    model_errors: list = field(default_factory=list)
+    #: Compactions forced by a context overflow.
+    forced_compactions: int = 0
+    #: Checkpoint writes that failed (None: no checkpoint in use).
+    checkpoint_failures: Optional[int] = None
+    #: On resume: files that changed after the last saved step (the kill
+    #: landed mid-command), or None when the workspace matched.
+    resume_changed: Optional[list] = None
 
     def telemetry(self) -> dict:
         """Prompt-cache and speed summary (rea_synthesis B2): cached_fraction =
@@ -586,6 +738,16 @@ class LoopRun:
             out["prefix_cache"] = self.prefix_cache.get("status")
         if self.resumed:
             out["resumed"] = True
+            if self.resume_changed is not None:
+                out["resume_changed"] = list(self.resume_changed)
+        if self.error_kind is not None:
+            out["error_kind"] = self.error_kind
+        if self.model_errors:
+            out["model_errors"] = list(self.model_errors)
+        if self.forced_compactions:
+            out["forced_compactions"] = self.forced_compactions
+        if self.checkpoint_failures is not None:
+            out["checkpoint_failures"] = self.checkpoint_failures
         if self.escalations:
             out["rung"] = self.rung
             out["escalations"] = list(self.escalations)
@@ -612,7 +774,42 @@ class LoopRun:
 _CHECKPOINT_FIELDS = ("steps", "submits", "gate_retries", "tool_calls", "input_tokens",
                       "output_tokens", "cached_tokens", "cache_write_tokens", "cost_usd",
                       "format_errors", "parse_failures", "timed_calls", "prefill_ms",
-                      "prefill_tokens", "gen_tokens", "gen_ms", "rung")
+                      "prefill_tokens", "gen_tokens", "gen_ms", "rung", "escalations",
+                      "forced_compactions", "model_errors")
+
+
+def workspace_fingerprint(snap: Optional[dict], files: list) -> Optional[dict]:
+    """What a checkpoint remembers of the workspace: a stable hash of every
+    file's (size, mtime), the newest mtime, and the changed files' stats.
+    None when the tree was too big to watch."""
+    if snap is None:
+        return None
+    items = sorted((k, list(v)) for k, v in snap.items())
+    digest = hashlib.sha256(json.dumps(items, separators=(",", ":")).encode("utf-8",
+                                                                          "replace"))
+    return {"fp": digest.hexdigest()[:24],
+            "max_mtime_ns": max((v[1] for v in snap.values()), default=0),
+            "files": {f: list(snap[f]) for f in files if f in snap}}
+
+
+def changed_since(saved: Any, snap: Optional[dict]) -> Optional[list]:
+    """Files that changed after `saved` (a workspace_fingerprint) was taken:
+    None when the workspace still matches; [] when it differs but no file can
+    be named (e.g. only deletions)."""
+    if not isinstance(saved, dict) or snap is None:
+        return None
+    current = workspace_fingerprint(snap, [])
+    if current is None or current["fp"] == saved.get("fp"):
+        return None
+    try:
+        newest = int(saved.get("max_mtime_ns") or 0)
+    except (TypeError, ValueError):
+        newest = 0
+    names = {f for f, st in snap.items() if st[1] > newest}
+    for f, st in (saved.get("files") or {}).items():
+        if snap.get(f) is None or list(snap.get(f)) != list(st):
+            names.add(f)
+    return sorted(names)
 
 
 def _prepare_local_prefix(system_prompt: str) -> Optional[dict]:
@@ -697,7 +894,19 @@ class LoopExecutor:
         self._files_before_resume: list = []
         self._stuck_earlier: list = []
         self._state_step = -1
-        self._last_used_tokens = 0
+        self._state_snap: Optional[dict] = None
+        #: Size of the last request and its reply, and len(messages) before it
+        #: (compaction triggers on the estimated NEXT request).
+        self._last_in = 0
+        self._last_out = 0
+        self._msgs_at_call: Optional[int] = None
+        self._rung_cost_start = 0.0
+        #: A forced compaction already answered the current overflow streak.
+        self._overflow_forced = False
+        #: Compactor a context overflow built when compaction is off.
+        self._overflow_compactor: Optional[Compactor] = None
+        self._resume_summaries = 0
+        self._resume_rung = 0
 
     @property
     def model_name(self) -> str:
@@ -718,8 +927,26 @@ class LoopExecutor:
             self.stuck = StuckDetector(mode)
         else:
             self.stuck = None
-        self.compactor = (Compactor(self.model_name, summarize=self._summarize)
-                          if self.compact else None)
+        self.compactor = self._make_compactor() if self.compact else None
+        self._overflow_compactor = None
+
+    def _output_cap(self) -> int:
+        """The client's output-token cap (max_tokens), or DEFAULT_OUTPUT_CAP."""
+        for obj in (self.client, getattr(self.client, "inner", None)):
+            cap = getattr(obj, "max_tokens", None) if obj is not None else None
+            if isinstance(cap, int) and not isinstance(cap, bool) and cap > 0:
+                return cap
+        return DEFAULT_OUTPUT_CAP
+
+    def _make_compactor(self, keep_recent: Optional[int] = None) -> Compactor:
+        """A compactor for the client in use: thresholds keep room for one
+        reply plus one maximal observation; a failed summary falls back to a
+        deterministic one."""
+        reserve = (self._output_cap() + OUTPUT_LIMIT // CHARS_PER_TOKEN
+                   + CONTEXT_MARGIN_TOKENS)
+        kw = {"keep_recent": keep_recent} if keep_recent else {}
+        return Compactor(self.model_name, summarize=self._summarize, reserve_tokens=reserve,
+                         deterministic_fallback=True, **kw)
 
     def _changed(self, watch: Optional[WorkspaceWatch], before: Optional[dict]) -> list:
         if watch is None:
@@ -739,7 +966,11 @@ class LoopExecutor:
             return "wall_clock"
         if self.budget_exhausted is not None and self.budget_exhausted():
             return "goal_budget"
-        if run.steps >= self.max_steps:
+        # Steps are per rung, counted from the rung's start: the final rung
+        # gets the full max_steps however late it took over (a non-final
+        # rung hands over at its rung_steps allowance first). The cost cap,
+        # goal budget and wall clock stay per task.
+        if run.steps - self._rung_start >= self.max_steps:
             return "max_steps"
         # A resumed run's earlier spend was already taken off the cap by the
         # caller (host SpendTracker), so only this attempt's spend counts here.
@@ -800,8 +1031,12 @@ class LoopExecutor:
         if g.get("retry") and self._rung_gate_retries < self.max_gate_retries:
             self._rung_gate_retries += 1
             run.gate_retries += 1
-            return False, gate_feedback(str(g.get("feedback", "")), self._rung_gate_retries,
-                                        self.max_gate_retries)
+            feedback = gate_feedback(str(g.get("feedback", "")), self._rung_gate_retries,
+                                     self.max_gate_retries)
+            for comp in (self.compactor, self._overflow_compactor):
+                if comp is not None:
+                    comp.note_gate_feedback(feedback)
+            return False, feedback
         run.success = bool(g.get("green"))
         run.stop_reason = "submitted" if run.success else "gate_red"
         return True, ""
@@ -826,7 +1061,7 @@ class LoopExecutor:
         whenever a changed file's size or mtime moves."""
         if step == self._state_step:
             return self._state
-        files, key = [], None
+        files, key, snap = [], None, None
         if watch is not None:
             snap = watch.snapshot()
             if snap is not None:
@@ -834,15 +1069,25 @@ class LoopExecutor:
                 key = hash(tuple(sorted((f, snap.get(f)) for f in files)))
         if self._files_before_resume:
             files = sorted(set(files) | set(self._files_before_resume))
-        self._state_step, self._state = step, (files, key)
+        self._state_step, self._state, self._state_snap = step, (files, key), snap
         return self._state
+
+    def _summary_budget_chars(self) -> int:
+        """Characters the summary request's transcript may take: the window
+        minus the summary's own output, the system prompt and a margin."""
+        comp = self.compactor or self._overflow_compactor
+        window = comp.window if comp is not None else context_window(self.model_name)
+        tokens = (window - self._output_cap() - CONTEXT_MARGIN_TOKENS
+                  - estimate_tokens([], self.system_prompt))
+        return max(2000, tokens * CHARS_PER_TOKEN - len(SUMMARY_INSTRUCTION) - 200)
 
     def _summarize(self, msgs: list) -> str:
         """Compaction's summary call: the plain tool client (never the bash
-        grammar), a tool-free transcript request. Cost is accounted by the
-        loop thread (_drain_summaries)."""
+        grammar), a tool-free transcript request sized to fit the window.
+        Cost is accounted by the loop thread (_drain_summaries)."""
         inner = getattr(self.client, "inner", self.client)
-        reply = inner.complete(self.system_prompt, summary_request(msgs), self.registry)
+        request = summary_request(msgs, budget_chars=self._summary_budget_chars())
+        reply = inner.complete(self.system_prompt, request, self.registry)
         with self._summary_lock:
             self._summary_replies.append(reply)
         return reply.text or ""
@@ -855,12 +1100,37 @@ class LoopExecutor:
 
     def _counters(self, run: LoopRun, files: list) -> dict:
         out = {name: getattr(run, name) for name in _CHECKPOINT_FIELDS}
+        comp = self.compactor or self._overflow_compactor
         out.update(rung_start=self._rung_start, rung_gate_retries=self._rung_gate_retries,
-                   files_changed=list(files))
+                   rung_cost_start=self._rung_cost_start, files_changed=list(files),
+                   compaction_summaries=comp.summaries if comp is not None else 0)
+        fp = workspace_fingerprint(self._state_snap, files)
+        if fp is not None:
+            out["workspace"] = fp
         return out
 
-    def _resume(self, run: LoopRun) -> bool:
-        """Continue a killed run from its checkpoint. False: start fresh."""
+    def _resume_note(self, run: LoopRun, saved: Any, snap: Optional[dict]) -> None:
+        """After a resume: when the workspace moved after the last saved step
+        (the kill may have landed mid-command), say so in the conversation."""
+        names = changed_since(saved, snap)
+        if names is None:
+            return
+        run.resume_changed = list(names)
+        # The baseline snapshot of this attempt already holds these edits, so
+        # report them with the files changed before the kill.
+        self._files_before_resume = sorted(set(self._files_before_resume) | set(names))
+        shown = ", ".join(names[:30]) + (f" (and {len(names) - 30} more)"
+                                         if len(names) > 30 else "")
+        self._append_note(
+            f"{NUDGE_PREFIX} This run was interrupted and has been resumed. The workspace "
+            "changed after the last step saved above, so the interruption may have landed "
+            "in the middle of a command and its effect may be partial. Files changed since "
+            f"then: {shown or '(could not tell which; possibly deletions)'}. Check them "
+            "(for example with `git status` and `git diff`) before you continue.")
+
+    def _resume(self, run: LoopRun, snap: Optional[dict] = None) -> bool:
+        """Continue a killed run from its checkpoint. False: start fresh.
+        `snap`: the workspace snapshot taken at this attempt's start."""
         if self.checkpoint is None:
             return False
         try:
@@ -886,10 +1156,17 @@ class LoopExecutor:
                 setattr(run, name, type(getattr(run, name))(counters[name]))
         self._rung_start = int(counters.get("rung_start") or 0)
         self._rung_gate_retries = int(counters.get("rung_gate_retries") or 0)
+        try:
+            self._rung_cost_start = float(counters.get("rung_cost_start") or 0.0)
+        except (TypeError, ValueError):
+            self._rung_cost_start = 0.0
         self._files_before_resume = list(counters.get("files_changed") or [])
+        self._resume_summaries = int(counters.get("compaction_summaries") or 0)
+        self._resume_rung = rung
         self._cost_at_start = run.cost_usd
         self.messages = list(messages)
         run.resumed = True
+        self._resume_note(run, counters.get("workspace"), snap)
         return True
 
     def _escalate(self, run: LoopRun, reason: str, watch: Optional[WorkspaceWatch],
@@ -908,24 +1185,58 @@ class LoopExecutor:
         self._drain_summaries(run)
         old = self.model_name
         files = self._changed(watch, before)
-        if self.stuck is not None:
-            self._stuck_earlier.append({"model": old, **self.stuck.summary()})
+        stuck_summary = self.stuck.summary() if self.stuck is not None else None
+        if stuck_summary is not None:
+            self._stuck_earlier.append({"model": old, **stuck_summary})
         self._set_client(nxt)
         run.rung += 1
-        run.escalations.append({"from": old, "to": self.model_name, "reason": reason,
-                                "step": run.steps})
+        event = {"from": old, "to": self.model_name, "reason": reason, "step": run.steps,
+                 "rung_steps": run.steps - self._rung_start,
+                 "rung_cost_usd": round(run.cost_usd - self._rung_cost_start, 6)}
+        if stuck_summary is not None:
+            event["stuck"] = stuck_summary
+        run.escalations.append(event)
         handover = handover_note(run.transcript, files, reason)
         if note:
             handover += f"\n\nThe last check reported:\n{note.strip()[:4000]}"
+        # The note quotes commands and test output: keep secrets out of it.
+        handover = redact_text(handover)
         # A fresh conversation in the new rung's protocol: the old one may be
         # in another message shape, and the cache is per model anyway.
         self.messages = [{"role": "user", "content": instance_prompt(
             self.goal, text_protocol=self.text_protocol) + "\n\n" + handover}]
         self._new_rung_layers()
         self._rung_start = run.steps
+        self._rung_cost_start = run.cost_usd
         self._rung_gate_retries = 0
         self._format_errors = self._truncations = 0
-        run.stop_reason, run.success = "max_steps", False
+        self._overflow_forced = False
+        self._msgs_at_call = None
+        run.stop_reason, run.success = "running", False
+        return True
+
+    def _recover_overflow(self, run: LoopRun) -> bool:
+        """Context overflow: force one synchronous compaction (a temporary
+        compactor with fewer recent turns when compaction is off) so the call
+        can be retried. False when this overflow streak already had its
+        forced compaction or nothing could be compacted."""
+        if self._overflow_forced:
+            return False
+        self._overflow_forced = True
+        comp = self.compactor
+        if comp is None:
+            if self._overflow_compactor is None:
+                self._overflow_compactor = self._make_compactor(OVERFLOW_KEEP_RECENT)
+                if self._resume_summaries and run.resumed and run.rung == self._resume_rung:
+                    self._overflow_compactor.restore(self.messages, self._resume_summaries)
+            comp = self._overflow_compactor
+        swapped = comp.force(self.messages)
+        self._drain_summaries(run)
+        if swapped is None:
+            return False
+        self.messages = swapped
+        self._msgs_at_call = None
+        run.forced_compactions += 1
         return True
 
     def _after_turn(self, run: LoopRun, watch: Optional[WorkspaceWatch],
@@ -944,18 +1255,34 @@ class LoopExecutor:
         if self.compactor is not None:
             files, _ = self._turn_state(watch, before, run.steps)
             self.compactor.note_files(files)
-            self.compactor.maybe_start(self.messages, self._last_used_tokens)
-            swapped = self.compactor.maybe_swap(self.messages, self._last_used_tokens)
+            used = self._next_request_tokens()
+            self.compactor.maybe_start(self.messages, used)
+            swapped = self.compactor.maybe_swap(self.messages, used)
             if swapped is not None:
                 self.messages = swapped
+                self._msgs_at_call = None
             self._drain_summaries(run)
+        if self._overflow_compactor is not None:
+            self._overflow_compactor.note_files(self._turn_state(watch, before, run.steps)[0])
         if self.checkpoint is not None:
             files = (self._turn_state(watch, before, run.steps)[0]
                      if watch is not None else list(self._files_before_resume))
             try:
-                self.checkpoint.save(self.messages, self._counters(run, files))
+                ok = self.checkpoint.save(self.messages, self._counters(run, files))
             except Exception:  # noqa: BLE001 - a checkpoint never ends the loop
-                pass
+                ok = False
+            if ok is False:
+                run.checkpoint_failures = (run.checkpoint_failures or 0) + 1
+
+    def _next_request_tokens(self) -> int:
+        """Estimated size of the next request (0: unknown, the compactor then
+        estimates the whole list): the last request + its reply + what was
+        appended since, without the reply's own assistant turn."""
+        if self._msgs_at_call is None or self._msgs_at_call > len(self.messages):
+            return 0
+        appended = [m for m in self.messages[self._msgs_at_call:]
+                    if not (isinstance(m, dict) and m.get("role") == "assistant")]
+        return next_request_tokens(self._last_in, self._last_out, appended)
 
     # -- the loop --
 
@@ -968,11 +1295,15 @@ class LoopExecutor:
         # or dropped mid-run, so every request is the previous request plus a
         # suffix (tests/test_prefix_stability.py). The exceptions are opt-in:
         # compaction (AWOS_LOOP_COMPACT) and an escalation to another rung.
-        if not self._resume(run):
+        if not self._resume(run, before):
             run = LoopRun(grammar=self.text_protocol)
             self.messages = [{"role": "user", "content": instance_prompt(
                 self.goal, text_protocol=self.text_protocol)}]
         self._new_rung_layers()
+        if self.checkpoint is not None:
+            run.checkpoint_failures = 0
+        if run.resumed and self._resume_summaries and self.compactor is not None:
+            self.compactor.restore(self.messages, self._resume_summaries)
         if self.text_protocol and not run.resumed:
             # Local llama-server: restore (or build) the saved KV of the static
             # system prefix before the first call. The text protocol sends no
@@ -983,24 +1314,47 @@ class LoopExecutor:
         try:
             while True:
                 stop = self._stop_reason_before_call(run, started)
+                if stop == "max_steps" and self._escalate(
+                        run, f"rung step budget ({self.max_steps}) spent", watch, before):
+                    continue  # a non-final rung out of steps: the next rung takes over
                 if stop:
                     run.stop_reason = stop
                     break
                 format_message = (FORMAT_ERROR_MESSAGE_TEXT if self.text_protocol
                                   else FORMAT_ERROR_MESSAGE).format(marker=SUBMIT_MARKER)
                 run.steps += 1
+                msgs_before = len(self.messages)
                 try:
                     reply = self.client.complete(self.system_prompt, self.messages,
                                                  self.registry)
                 except Exception as exc:  # noqa: BLE001
                     record_error(COMPONENT, self.model_name, exc, turn=run.steps)
-                    run.stop_reason = "model_error"
+                    kind = error_kind(exc)
+                    run.error_kind = kind
+                    run.model_errors.append(kind)
                     run.final_message = f"{type(exc).__name__}: {exc}"[:500]
-                    if self._escalate(run, f"model error: {type(exc).__name__}", watch, before):
+                    if kind == "context_overflow":
+                        # Compact once and retry; then a rung with a fresh
+                        # conversation; else stop.
+                        if self._recover_overflow(run):
+                            continue
+                        run.stop_reason = "context_overflow"
+                        if self._escalate(run, f"context overflow: {type(exc).__name__}",
+                                          watch, before):
+                            continue
+                        break
+                    run.stop_reason = "model_error"
+                    # Auth / no key on a lower rung: the next rung is another
+                    # provider or key, so moving up is still right. At the top: stop.
+                    if self._escalate(run, f"model error ({kind}): {type(exc).__name__}",
+                                      watch, before):
                         continue
                     break
+                self._overflow_forced = False
                 self._account(run, reply)
-                self._last_used_tokens = int(reply.input_tokens or 0)
+                self._last_in = int(reply.input_tokens or 0)
+                self._last_out = int(reply.output_tokens or 0)
+                self._msgs_at_call = msgs_before
                 calls = list(reply.tool_calls or [])
                 run.transcript.append({"step": run.steps, "text": (reply.text or "")[:500],
                                        "commands": [str((c.arguments or {}).get("command", ""))[:300]
@@ -1094,13 +1448,21 @@ class LoopExecutor:
                     run.stuck["earlier_rungs"] = list(self._stuck_earlier)
             if self.compactor is not None:
                 run.compaction = self.compactor.summary()
+            elif self._overflow_compactor is not None:
+                run.compaction = {**self._overflow_compactor.summary(), "enabled": False}
+        if run.stop_reason not in ("model_error", "context_overflow"):
+            run.error_kind = None  # an error met on the way did not end the run
         if run.stop_reason not in ("submitted", "gate_red"):
             # Stopped by a limit, not by the model: what it changed is still reported.
             run.files_changed = self._changed(watch, before)
             run.success = False
-        if self.checkpoint is not None and run.stop_reason != "model_error":
-            # Ended on its own: not resumable. A model error (a crashed local
-            # server) or a kill leaves the checkpoint for the next attempt.
+        transient = (run.stop_reason == "model_error"
+                     and run.error_kind in TRANSIENT_ERROR_KINDS)
+        if self.checkpoint is not None and not transient:
+            # Ended on its own (or on an error a retry will not fix: auth, an
+            # overflow, a bad request): not resumable. A transient model error
+            # (rate limit, timeout, a crashed local server) or a kill leaves
+            # the checkpoint for the next attempt.
             try:
                 self.checkpoint.finish(run.stop_reason)
             except Exception:  # noqa: BLE001

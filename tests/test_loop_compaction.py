@@ -555,3 +555,177 @@ def test_goal_with_block_content_is_merged():
 def test_invalid_fractions():
     with pytest.raises(ValueError):
         lc.Compactor("m", start_frac=0.9, swap_frac=0.8, summarize=_fake())
+
+
+# ── robustness: next-request trigger, reserve, budget, fallback, force ──────
+
+
+def test_next_request_tokens():
+    assert lc.next_request_tokens(0, 50, []) == 0  # unknown input: caller estimates
+    assert lc.next_request_tokens(1000, 200, []) == 1200
+    appended = [{"role": "user", "content": "x" * 400}]
+    assert lc.next_request_tokens(1000, 200, appended) == 1200 + lc.estimate_tokens(appended)
+
+
+def test_threshold_keeps_a_reserve_and_the_stage_ratio():
+    comp = _compactor(_fake(), window=32_768, reserve_tokens=11_692)
+    assert comp.threshold(comp.swap_frac) == 32_768 - 11_692
+    assert comp.threshold(comp.start_frac) == pytest.approx(
+        (32_768 - 11_692) * comp.start_frac / comp.swap_frac)
+    big = _compactor(_fake(), window=200_000, reserve_tokens=11_692)
+    assert big.threshold(big.swap_frac) == 0.85 * 200_000  # the fraction binds first
+    tiny = _compactor(_fake(), window=1000, reserve_tokens=50_000)
+    assert tiny.reserve_tokens == 500 and tiny.threshold(tiny.swap_frac) == 500
+    assert _compactor(_fake()).threshold(0.85) == 0.85 * WINDOW  # no reserve: as before
+
+
+def test_reserve_makes_the_swap_happen_earlier():
+    conv = Conv("anthropic")
+    for _ in range(6):
+        conv.turn()
+    plain, reserved = _compactor(_fake()), _compactor(_fake(), reserve_tokens=400)
+    assert plain.maybe_swap(conv.messages, 700) is None
+    assert reserved.maybe_swap(conv.messages, 700) is not None
+
+
+def test_summary_request_budget_is_fair_and_keeps_commands():
+    msgs = [{"role": "user", "content": "short goal"},
+            {"role": "assistant", "content": [
+                {"type": "text", "text": "running the tests"},
+                {"type": "tool_use", "id": "t1", "name": "bash",
+                 "input": {"command": "pytest -x tests/test_big.py"}}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1",
+                                          "content": "<returncode>1</returncode>\n<output>\n"
+                                          + "noise line\n" * 5000 + "FAILED test_x\n</output>"}]},
+            {"role": "assistant", "content": "a small reply"}]
+    full = lc.summary_request(msgs)[0]["content"]
+    cut = lc.summary_request(msgs, budget_chars=3000)[0]["content"]
+    assert len(full) > 50_000
+    body = cut.split("<transcript>\n", 1)[1]
+    assert len(body) <= 3000 + 200
+    assert "short goal" in body and "a small reply" in body  # short messages intact
+    assert "pytest -x tests/test_big.py" in body               # the command
+    assert "<returncode>1</returncode>" in body                # its exit code
+    assert "FAILED test_x" in body                             # the tail of the output
+    assert "characters cut from the middle" in body
+
+
+def test_fair_caps_water_filling():
+    assert lc._fair_caps([10, 20, 30], 100) == [10, 20, 30]
+    caps = lc._fair_caps([10, 1000, 2000], 610)
+    assert caps[0] == 10 and caps[1] == caps[2] == 300 and sum(caps) <= 610
+
+
+@pytest.mark.parametrize("shape", SHAPES)
+def test_deterministic_summary_lists_commands_codes_and_last_error(shape):
+    conv = Conv(shape)
+    bad = "<returncode>2</returncode>\n<output>\nTraceback\nKeyError: 'x'\n</output>"
+    if shape == "text":  # the text protocol's replies carry a fenced bash block
+        conv.messages += [
+            {"role": "assistant", "content": "look\n```bash\necho 1\n```"},
+            {"role": "user", "content": "<returncode>0</returncode>\n<output>\n1\n</output>"},
+            {"role": "assistant", "content": "try\n```bash\npython run.py\n```"},
+            {"role": "user", "content": bad}]
+    else:
+        conv.turn()
+        tc = ToolCall(id="bad1", name="bash", arguments={"command": "python run.py"})
+        conv.messages.append(conv.client.format_assistant_turn(
+            ModelReply(text="try", tool_calls=[tc])))
+        conv.messages.extend(conv.client.format_tool_results(
+            [tc], [ToolResult(success=False, text=bad, error=bad)]))
+    text = lc.deterministic_summary(conv.messages, ["run.py"])
+    assert "`echo 1` -> exit 0" in text
+    assert "`python run.py` -> exit 2" in text
+    assert "KeyError: 'x'" in text and "run.py" in text
+
+
+def test_deterministic_summary_never_raises():
+    assert lc.deterministic_summary([None, 3, {"role": "assistant", "content": object()}])
+    assert "No commands" in lc.deterministic_summary([])
+
+
+@pytest.mark.parametrize("bad", [RuntimeError("down"), ""])
+def test_failed_summary_falls_back_to_the_deterministic_one(bad):
+    def summarize(msgs):
+        if isinstance(bad, Exception):
+            raise bad
+        return bad
+
+    conv = Conv("anthropic")
+    for _ in range(6):
+        conv.turn()
+    comp = _compactor(summarize, deterministic_fallback=True)
+    new = comp.maybe_swap(conv.messages, 900)
+    assert new is not None and comp.fallbacks == 1 and comp.failures == 0
+    assert "Automatic summary" in new[0]["content"] and "`echo 1` -> exit" in new[0]["content"]
+    assert comp.history[-1]["fallback"] is True
+    _assert_valid(new)
+
+
+def test_gate_feedback_is_kept_verbatim_next_to_the_goal():
+    conv = Conv("anthropic")
+    conv.turn()
+    feedback = "You submitted, but tests fail:\nFAILED tests/test_a.py::test_x - assert 1 == 2"
+    conv.messages.append(conv.client.format_assistant_turn(ModelReply(text="done?")))
+    conv.messages.append({"role": "user", "content": feedback})
+    for _ in range(5):
+        conv.turn()
+    comp = _compactor(_fake())
+    comp.note_gate_feedback(feedback)
+    new = comp.maybe_swap(conv.messages, 900)
+    assert new is not None and feedback in new[0]["content"]
+    assert new[0]["content"].startswith(GOAL)
+
+
+def test_gate_feedback_not_duplicated_while_still_in_the_tail():
+    conv = Conv("anthropic")
+    for _ in range(5):
+        conv.turn()
+    feedback = "FAILED tests/test_a.py::test_x"
+    conv.messages.append(conv.client.format_assistant_turn(ModelReply(text="done?")))
+    conv.messages.append({"role": "user", "content": feedback})
+    comp = _compactor(_fake())
+    comp.note_gate_feedback(feedback)
+    new = comp.maybe_swap(conv.messages, 900)
+    assert new is not None and feedback not in new[0]["content"]
+    assert any(m.get("content") == feedback for m in new[1:])
+
+
+@pytest.mark.parametrize("shape", SHAPES)
+def test_force_swaps_below_the_thresholds(shape):
+    conv = Conv(shape)
+    for _ in range(3):
+        conv.turn()
+    s = _fake()
+    comp = _compactor(s, keep_recent=6)  # too few turns for keep_recent=6
+    assert comp.maybe_swap(conv.messages, 1) is None
+    new = comp.force(conv.messages)
+    assert new is not None and comp.forced == 1 and len(new) < len(conv.messages)
+    _assert_valid(new)
+
+
+def test_force_with_nothing_to_summarise_returns_none():
+    comp = _compactor(_fake())
+    assert comp.force([{"role": "user", "content": GOAL}]) is None
+
+
+def test_restore_continues_the_summary_numbering_on_the_original_goal():
+    conv = Conv("anthropic")
+    for _ in range(6):
+        conv.turn()
+    first = _compactor(_fake())
+    swapped = first.maybe_swap(conv.messages, 900)
+    assert swapped is not None and first.summaries == 1
+    # a resumed run: a new compactor over the saved (already compacted) list
+    resumed = _compactor(_fake({1: "SECOND"}))
+    resumed.restore(swapped, 1)
+    assert resumed.summaries == 1 and resumed._goal["content"] == GOAL
+    more = list(swapped)
+    conv.messages = more
+    for _ in range(6):
+        conv.turn()
+    again = resumed.maybe_swap(conv.messages, 900)
+    assert again is not None and resumed.summaries == 2
+    content = again[0]["content"]
+    assert content.startswith(GOAL) and content.count("<summary number=") == 1
+    assert '<summary number="2">' in content and "SECOND" in content

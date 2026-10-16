@@ -67,9 +67,10 @@ def test_explicit_mode_beats_env_and_invalid_falls_back(monkeypatch):
 
 def test_repeat_command_consecutive_fires_at_threshold():
     d = ls.StuckDetector("nudge")
-    assert d.observe(1, ["pytest  -x"], [bad("E1")]) is None
-    assert d.observe(2, ["pytest -x "], [bad("E2 other")]) is None
-    text = d.observe(3, ["pytest -x"], [bad("E3 different")])
+    # digits are scrubbed from the output signature: these outputs are "the same"
+    assert d.observe(1, ["pytest  -x"], [bad("E1 in 0.1s")]) is None
+    assert d.observe(2, ["pytest -x "], [bad("E2 in 0.3s")]) is None
+    text = d.observe(3, ["pytest -x"], [bad("E3 in 0.2s")])
     assert text and "`pytest -x`" in text and "3 times" in text
     assert d.summary()["triggers"]["repeat_command"] == 1
     assert d.summary()["first_fire_step"]["repeat_command"] == 3
@@ -77,8 +78,15 @@ def test_repeat_command_consecutive_fires_at_threshold():
 
 def test_repeat_command_within_one_step():
     d = ls.StuckDetector("nudge")
-    text = d.observe(1, ["ls", "ls", "ls"], [ok("a"), ok("b"), ok("c")])
+    text = d.observe(1, ["ls", "ls", "ls"], [ok("a"), ok("a"), ok("a")])
     assert text and "`ls`" in text
+
+
+def test_polling_a_changing_status_is_not_a_repeat():
+    d = ls.StuckDetector("log")
+    for i, state in enumerate(["queued", "running", "running tests", "almost", "done"]):
+        d.observe(i, ["cat status.txt"], [ok(state)])
+    assert d.summary()["triggers"]["repeat_command"] == 0
 
 
 def test_repeat_command_same_output_alternating():
@@ -173,9 +181,21 @@ def test_failure_signature_timeouts_and_empty_output():
 
 def test_no_progress_fires_after_k_unchanged_steps():
     d = ls.StuckDetector("nudge", no_progress_steps=3)
-    out = [d.observe(i, [f"c{i}"], [ok(chr(97 + i))], progress_key="h1") for i in range(4)]
-    assert out[:3] == [None, None, None]
-    assert "has not changed in the last 3 steps" in out[3]
+    keys = ["h0", "h1", "h1", "h1", "h1"]  # first workspace change at step 1
+    out = [d.observe(i, [f"c{i}"], [ok(chr(97 + i))], progress_key=k)
+           for i, k in enumerate(keys)]
+    assert out[:4] == [None, None, None, None]
+    assert "has not changed in the last 3 steps" in out[4]
+
+
+def test_no_progress_waits_for_the_first_workspace_change():
+    d = ls.StuckDetector("log", no_progress_steps=3)
+    for i in range(30):  # exploring before any edit: the key never moves
+        d.observe(i, [f"c{i}"], [ok(chr(65 + i))], progress_key="untouched")
+    assert d.summary()["triggers"]["no_progress"] == 0
+    for i in range(30, 35):  # one edit, then nothing
+        d.observe(i, [f"c{i}"], [ok(chr(65 + i))], progress_key="edited")
+    assert d.summary()["triggers"]["no_progress"] == 1
 
 
 def test_no_progress_reset_on_change_and_none_is_ignored():
@@ -195,8 +215,9 @@ def test_no_progress_never_without_keys():
 
 def test_no_progress_unhashable_key():
     d = ls.StuckDetector("log", no_progress_steps=2)
+    d.observe(0, ["c"], [ok("Z")], progress_key={"files": []})
     for i in range(3):
-        d.observe(i, [f"c{i}"], [ok(chr(65 + i))], progress_key={"files": ["a.py"]})
+        d.observe(i + 1, [f"c{i}"], [ok(chr(65 + i))], progress_key={"files": ["a.py"]})
     assert d.summary()["triggers"]["no_progress"] == 1
 
 
@@ -251,29 +272,29 @@ def test_nudge_texts_never_say_stop_or_submit():
 
 
 def test_cooldown_suppresses_quick_refire_then_nudges_if_still_active():
-    # distinct outputs, so only the consecutive-command rule is in play
+    # distinct commands, the window never fills: only failure_signature is in play
     d2 = ls.StuckDetector("nudge", window=10, escalate_after=100)  # cooldown 5
     assert d2.cooldown == 5
     outs = []
-    seq = ["ls", "ls", "ls", "pwd", "ls", "ls", "ls", "ls", "ls"]
-    for i, c in enumerate(seq, 1):
-        outs.append(d2.observe(i, [c], [ok(f"o{chr(96 + i)}")]))
+    seq = ["E", "E", "E", None, "E", "E", "E", "E", "E"]
+    for i, e in enumerate(seq, 1):
+        outs.append(d2.observe(i, [f"c{chr(96 + i)}"], [bad(e) if e else ok(f"o{chr(96 + i)}")]))
     # tick 3 nudge; tick 4 deactivates; tick 7 refires (fires=2) but within cooldown (7-3<5);
     # tick 8 cooldown elapsed and still active -> nudge
     assert outs[2] is not None
     assert outs[6] is None
     assert outs[7] is not None
     assert outs[8] is None
-    assert d2.summary()["triggers"]["repeat_command"] == 2
+    assert d2.summary()["triggers"]["failure_signature"] == 2
     assert d2.summary()["nudges"] == 2
 
 
 def test_refire_after_cooldown_nudges_immediately():
     d = ls.StuckDetector("nudge", window=4, fail_threshold=4, escalate_after=100)  # cooldown 2
     outs = []
-    seq = ["a", "a", "a", "b", "c", "d", "a", "a", "a"]
-    for i, c in enumerate(seq, 1):
-        outs.append(d.observe(i, [c], [ok(f"o{chr(96 + i)}")]))
+    seq = ["E", "E", "E", None, None, None, "E", "E", "E"]
+    for i, e in enumerate(seq, 1):
+        outs.append(d.observe(i, [f"c{chr(96 + i)}"], [bad(e) if e else ok(f"o{chr(96 + i)}")]))
     assert outs[2] and outs[8]
     assert sum(1 for o in outs if o) == 2
 
@@ -284,13 +305,13 @@ def test_refire_after_cooldown_nudges_immediately():
 def test_escalation_after_persisting_past_nudge():
     d = ls.StuckDetector("nudge", escalate_after=4, no_progress_steps=2)
     flags = []
-    for i in range(1, 9):
-        d.observe(i, [f"c{i}"], [ok(chr(96 + i))], progress_key="same")
+    for i in range(1, 10):
+        d.observe(i, [f"c{i}"], [ok(chr(96 + i))], progress_key="start" if i == 1 else "same")
         flags.append(d.escalate_recommended)
-    # no_progress active from tick 3 (nudged), escalates at tick 7
-    assert flags == [False] * 6 + [True, True]
+    # first change at tick 2; no_progress active from tick 4 (nudged), escalates at tick 8
+    assert flags == [False] * 7 + [True, True]
     s = d.summary()
-    assert s["escalate_step"] == 7 and s["escalate_trigger"] == "no_progress"
+    assert s["escalate_step"] == 8 and s["escalate_trigger"] == "no_progress"
 
 
 def test_no_escalation_when_trigger_clears():
@@ -376,3 +397,52 @@ def test_summary_shape():
     assert s["triggers"] == {name: 0 for name in ls.TRIGGERS}
     assert s["nudges"] == 0 and s["escalate_recommended"] is False
     assert s["first_fire_step"] == {}
+
+
+# ── neutral exit codes (search / compare commands) ───────────────────────────
+
+
+@pytest.mark.parametrize("command,progs", [
+    ("grep -rn foo src", ["grep"]),
+    ("grep x f | head", ["head"]),               # the pipeline reports head's status
+    ("cd pkg && grep -n 'a|b' mod.py", ["grep"]),  # quoted | is not a pipe
+    ("FOO=1 BAR=2 rg needle", ["rg"]),
+    ("grep x f 2>&1", ["grep"]),
+    ("set -o pipefail; grep x f | head", ["grep", "head"]),
+    ("timeout 10 grep x f", ["grep"]),
+    ("(cd x && diff a b)", ["diff"]),
+    ("[ -f setup.py ]", ["["]),
+    ("git grep foo", ["git-grep"]),
+    ("ls\ngrep x f", ["grep"]),                # a newline separates commands
+    ("echo 'unbalanced", ["echo"]),
+    ("", []),
+])
+def test_status_commands(command, progs):
+    assert ls.status_commands(command) == progs
+
+
+@pytest.mark.parametrize("command", ["grep -rn missing .", "rg nothing", "test -f x.py",
+                                     "[ -d build ]", "diff a.txt b.txt", "cmp a b",
+                                     "cd src && egrep 'x|y' f.py", "git grep nope"])
+def test_exit_1_of_search_commands_is_neutral(command):
+    d = ls.StuckDetector("log", window=4, fail_threshold=4)
+    for i in range(8):
+        d.observe(i, [f"{command} #{i}"], [res(1, f"no {chr(97 + i)}")])
+    s = d.summary()
+    assert s["triggers"]["failure_rate"] == 0 and s["triggers"]["failure_signature"] == 0
+    assert s["neutral_results"] == 8
+
+
+def test_exit_1_after_a_pipe_into_another_command_still_counts():
+    d = ls.StuckDetector("log", window=4, fail_threshold=4)
+    for i in range(4):  # status is python's, not grep's
+        d.observe(i, [f"grep -l x . | xargs python t{i}.py"], [res(1, f"boom {chr(97 + i)}")])
+    assert d.summary()["triggers"]["failure_rate"] == 1
+
+
+def test_other_exit_codes_of_search_commands_still_fail():
+    d = ls.StuckDetector("log", window=3, fail_threshold=3)
+    for i in range(3):  # grep exit 2 = a real error (bad file, bad regex)
+        d.observe(i, [f"grep x missing{i}"], [res(2, f"grep: no such file {chr(97 + i)}")])
+    assert d.summary()["triggers"]["failure_rate"] == 1
+    assert ls.neutral_result("grep x f", res(1, "", timed_out=True)) is False

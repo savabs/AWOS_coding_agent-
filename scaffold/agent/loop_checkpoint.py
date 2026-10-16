@@ -72,8 +72,31 @@ A resumed run (load() returned (messages, counters)) must take care that:
     by an auto-continue NOTE, starts fresh rather than resuming a mismatched
     conversation (key the checkpoint on the original goal);
   * finish(stop_reason) is called when the run ends by itself (submitted,
-    gate_red, max_steps...), so a finished run is never resumed; only a kill
-    leaves a resumable file.
+    gate_red, max_steps..., and model errors a retry will not fix: auth, a
+    context overflow, a bad request), so a finished run is never resumed;
+    only a kill or a transient model error leaves a resumable file;
+  * the loop executor also keeps a workspace fingerprint in the counters
+    (loop_executor.workspace_fingerprint: a hash of every file's size and
+    mtime, the newest mtime, the changed files' stats). On resume, a
+    workspace that moved after the last save (the kill landed mid-command)
+    gets a harness note naming the files, appended to the last turn. The
+    counters also carry the escalations and the compaction summary count.
+
+Secrets
+-------
+What save() writes is passed through redact_text() first: the owner's
+secret env values (names with KEY / TOKEN / SECRET / PASSWORD..., values of
+8+ characters) and known key formats (host/handoff.py's patterns plus
+secret_scan.py's rules) become "[REDACTED:<name>]". Nothing else is touched,
+so a history with no secret in it is saved byte for byte and a resumed run
+sends exactly the killed run's prompt. When a secret WAS present, the
+resumed prefix differs from the killed run's at that spot (one prompt-cache
+miss, and the model sees the placeholder instead of the value). The
+in-memory conversation of the live run is never changed.
+
+save() returns True when the state is on disk (or already was) and False on
+a failed write; `failures` counts the failed writes (loop telemetry
+`checkpoint_failures`).
 
 Env: AWOS_LOOP_CHECKPOINT (default on; 0/false/off/no disables).
 Tests: tests/test_loop_checkpoint.py.
@@ -85,6 +108,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -117,6 +141,84 @@ def task_key(goal: str, model: str, text_protocol: bool, *, extra: str = "") -> 
                           "text": bool(text_protocol), "extra": extra},
                          sort_keys=True, ensure_ascii=True, separators=(",", ":"))
     return "lc1-" + hashlib.sha256(payload.encode("ascii")).hexdigest()[:32]
+
+
+# ── secret redaction (what goes to disk) ─────────────────────────────────────
+
+
+def _import_first(*names: str) -> Any:
+    """The first of the dotted module names that imports (package or flat
+    sys.path layout), or None."""
+    import importlib
+
+    for name in names:
+        try:
+            if name.startswith("."):
+                if not __package__:
+                    continue
+                return importlib.import_module(name, __package__)
+            return importlib.import_module(name)
+        except Exception:  # noqa: BLE001 - try the next layout
+            continue
+    return None
+
+
+def _handoff_redact():
+    mod = _import_first(".host.handoff", "scaffold.agent.host.handoff", "host.handoff")
+    return getattr(mod, "redact_secrets", None) if mod is not None else None
+
+
+def _scan_rules() -> tuple:
+    ss = _import_first(".secret_scan", "scaffold.agent.secret_scan", "secret_scan")
+    if ss is None:
+        return (), None
+    return tuple(getattr(ss, "RULES", ())), getattr(ss, "_is_placeholder", None)
+
+
+def redact_text(text: Any) -> Any:
+    """`text` with the owner's secret env values and known key formats
+    replaced by "[REDACTED:<name>]"; anything that is not a str is returned
+    as is. Text without a secret comes back unchanged (same bytes). Never
+    raises (a redaction error returns the text with whatever was done)."""
+    if not isinstance(text, str) or not text:
+        return text
+    out = text
+    try:
+        fn = _handoff_redact()
+        if fn is not None:
+            out = fn(out)
+        else:  # host package not importable: the env-value rule handoff applies
+            secret_name = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL", re.I)
+            values = sorted(((k, v) for k, v in os.environ.items()
+                             if secret_name.search(k) and v and len(v) >= 8),
+                            key=lambda kv: -len(kv[1]))
+            for name, val in values:
+                out = out.replace(val, f"[REDACTED:{name}]")
+        rules, placeholder = _scan_rules()
+        for rule, pat in rules:
+            def _sub(m, rule=rule):
+                tok = m.group(0)
+                if placeholder is not None and placeholder(tok):
+                    return tok
+                return f"[REDACTED:{rule}]"
+            out = pat.sub(_sub, out)
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+def redact_obj(obj: Any) -> Any:
+    """Every string in a JSON-able structure through redact_text. Returns the
+    SAME object when nothing changed (so unchanged messages stay identical)."""
+    if isinstance(obj, str):
+        return redact_text(obj)
+    if isinstance(obj, dict):
+        new = {k: redact_obj(v) for k, v in obj.items()}
+        return obj if all(new[k] is obj[k] for k in obj) else new
+    if isinstance(obj, list):
+        new_l = [redact_obj(v) for v in obj]
+        return obj if all(a is b for a, b in zip(new_l, obj)) else new_l
+    return obj
 
 
 def _canon(obj: Any) -> str:
@@ -162,10 +264,18 @@ class _State:
 class LoopCheckpoint:
     """Append-only, fsynced checkpoint of one loop conversation."""
 
-    def __init__(self, path: str | os.PathLike, key: str, fsync: bool = True) -> None:
+    def __init__(self, path: str | os.PathLike, key: str, fsync: bool = True,
+                 redact: bool = True) -> None:
         self.path = Path(path)
         self.key = str(key)
         self.fsync = fsync
+        #: Pass saved messages and counters through redact_text (module docstring).
+        self.redact = redact
+        #: save() calls that could not write (telemetry: checkpoint_failures).
+        self.failures = 0
+        #: Last saved message index -> its redacted form, so each save
+        #: redacts only the new suffix.
+        self._redacted: list = []
         #: Lines load() skipped (unparseable, wrong shape, chain mismatch).
         self.skipped_lines = 0
         # Writer state: what this instance knows is on disk for self.key.
@@ -341,15 +451,43 @@ class LoopCheckpoint:
         self._last_canon = _canon(messages[len(st.messages) - 1])
         self._last_counters = _canon(st.counters)
 
-    def save(self, messages: list[dict], counters: dict) -> None:
+    def _redacted_messages(self, messages: list) -> list:
+        """`messages` with secrets redacted, reusing the redaction of messages
+        saved before when they are the same objects (append-only history)."""
+        if not self.redact:
+            return messages
+        cache = self._redacted
+        out = []
+        for i, m in enumerate(messages):
+            # The previous save's last message is redone: the append-only
+            # check in _save compares it, and it may have been edited in place.
+            if i < len(cache) - 1 and cache[i][0] is m:
+                out.append(cache[i][1])
+            else:
+                out.append(redact_obj(m))
+        # Keep the cache only for messages the next save will see again.
+        self._redacted = list(zip(messages, out))
+        return out
+
+    def save(self, messages: list[dict], counters: dict) -> bool:
         """Checkpoint after a completed turn: append the new suffix of
-        `messages` and the counters. Never raises."""
+        `messages` and the counters (secrets redacted, see the module
+        docstring). True when the state is on disk; False (and `failures`
+        + 1) when the write failed. Never raises."""
         try:
-            self._save(list(messages), dict(counters or {}))
+            msgs = self._redacted_messages(list(messages))
+            ctr = dict(counters or {})
+            if self.redact:
+                ctr = redact_obj(ctr)
+            self._save(msgs, ctr)
+            return True
         except Exception as exc:  # noqa: BLE001 - a checkpoint never ends the loop
             log.warning("loop checkpoint: save failed (%s): %s", self.path, exc)
+            self.failures += 1
             # Unknown disk state: re-derive it on the next save.
             self._synced = False
+            self._redacted = []
+            return False
 
     def _save(self, messages: list, counters: dict) -> None:
         if not self._synced:
