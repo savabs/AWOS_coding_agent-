@@ -34,10 +34,15 @@ Site: https://awos.tirramind.com (Cloudflare Pages; deploys are blocked until th
 | H1c (held-out 30) | 30 vs 30: INCONCLUSIVE (ceiling), AWOS ×2.2 cost |
 | H1d (new `loop` engine vs mini) | **40 vs 39**: INCONCLUSIVE, **×0.62 cost**, so `loop` became the default engine |
 
-**REA (reverse engineering of 13 AI products):** the owner's raw REA write-ups live only on the laptop
-(`~/Projects/REA`). Read `docs/research/rea_digest_2026-10-16.md` (per-product lessons, in our own words) and
-`docs/research/rea_synthesis_2026-10-16.md` (the ranked AWOS roadmap). Never paste REA raw material
-(decompiled code, extracted prompts) into this public repo.
+**REA (reverse engineering of 13 AI products):**
+- **Full write-ups:** the **private** repo `savabs/REA-writeups` (README.md + report.md per investigation; start at
+  `investigations/INDEX.md`). Clone it next to this repo, e.g. `gh repo clone savabs/REA-writeups ../REA-writeups`.
+  The Claude GitHub app needs access to that repo.
+- **Raw evidence:** stays on the laptop (`~/Projects/REA`).
+- **In this repo:** `docs/research/rea_digest_2026-10-16.md` (per-product lessons, own words) and
+  `docs/research/rea_synthesis_2026-10-16.md` (ranked AWOS roadmap).
+- **Never copy REA material** (decompiled code, extracted prompts, report text) into this **public** repo, and keep
+  `REA-writeups` private.
 
 **Honest reading:** on a strong model the model does the work. AWOS's measurable edge is cost (prompt caching, fewer turns)
 and product (sandbox, verified branches, background jobs). REA reverse-engineering of 13 products
