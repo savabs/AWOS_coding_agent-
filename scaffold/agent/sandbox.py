@@ -31,6 +31,31 @@ backends let sandboxed code read them but not write them.
   listed in DockerSandbox.unprotected rather than silently assumed safe.
 There is no third backend, so nothing runs without one of these.
 
+Opt-in egress (AWOS_SANDBOX_EGRESS=allowlist; default off; REA synthesis
+item 14, after Claude Cowork's egress proxy): for tasks that must `pip
+install`, `npm install` or `git fetch`. An HTTP(S) forward proxy
+(egress_proxy.py, stdlib) allows CONNECT / plain HTTP only to an allowlisted
+host (DEFAULT_EGRESS_ALLOW, edited with AWOS_SANDBOX_EGRESS_ALLOW), strips
+Authorization / Proxy-Authorization / Cookie from plain-HTTP requests, adds
+no credentials, and logs each allowed / denied host to a JSONL
+(egress_report()). The sandbox env gets HTTP(S)_PROXY, http(s)_proxy,
+PIP_PROXY, npm_config_(https_)proxy. Started on the first run(), stopped by
+close(). What each backend enforces:
+- Seatbelt: the proxy runs on the host at 127.0.0.1:<port>. The kernel
+  profile still denies all non-loopback network, so a process that ignores
+  the proxy variables is BLOCKED (it cannot reach the internet directly).
+  Loopback stays open as before (localhost:*), so the proxy port is
+  reachable; the profile also names it explicitly and admits trustd for TLS.
+- Docker: the container runs on a per-sandbox `--internal` network (no
+  route out, unlike the default bridge) instead of `--network none`; the
+  proxy runs in a small sidecar container (same egress_proxy.py, no env, no
+  caps, read-only rootfs, host uid) attached to both that network and the
+  default bridge. A process that ignores the proxy variables is BLOCKED by
+  docker's routing: the only thing it can reach is the sidecar's port.
+Neither backend can inspect what goes through an allowed CONNECT tunnel:
+data can be sent to an allowlisted host (e.g. a push to any GitHub repo
+with a token the code brought along). See egress_report()["enforcement"].
+
 Usage:
     sb = make_sandbox("/path/to/task/workspace")
     if sb is not None:
@@ -55,7 +80,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, Protocol
 
+try:
+    from . import egress_proxy as _egress
+except ImportError:  # loaded as a top-level module (scaffold/agent on sys.path)
+    import egress_proxy as _egress
+
 logger = logging.getLogger(__name__)
+
+DEFAULT_EGRESS_ALLOW = _egress.DEFAULT_EGRESS_ALLOW
+EGRESS_ALLOW_ENV = _egress.EGRESS_ALLOW_ENV
 
 #: Per-stream cap on captured output. Enough to read a traceback or a report
 #: summary; a runaway print loop must not flood the model's context.
@@ -147,6 +180,23 @@ READONLY_SWITCH_ENV = "AWOS_SANDBOX_READONLY"
 #: Set inside the sandbox: git skips the optional .git/index refresh-and-
 #: write that `git status` does, which the read-only .git would refuse.
 SANDBOX_GIT_ENV = {"GIT_OPTIONAL_LOCKS": "0"}
+#: Env: "off" (default) | "allowlist" — the opt-in egress proxy.
+EGRESS_SWITCH_ENV = "AWOS_SANDBOX_EGRESS"
+#: Env: a file path to keep the egress JSONL at (default: a temp file that
+#: close() removes; its events stay readable via egress_report()).
+EGRESS_LOG_ENV = "AWOS_SANDBOX_EGRESS_LOG"
+#: Env: the image the docker egress sidecar runs (needs python3).
+EGRESS_IMAGE_ENV = "AWOS_SANDBOX_EGRESS_IMAGE"
+#: Mach services Seatbelt admits in egress mode: TLS certificate trust, for
+#: git / curl built against the system TLS stack. No DNS service: through a
+#: proxy the client never resolves the target itself.
+EGRESS_MACH_SERVICES = ("com.apple.trustd", "com.apple.trustd.agent")
+#: Local servers a test starts must not be sent through the proxy.
+EGRESS_NO_PROXY = "localhost,127.0.0.1,::1"
+DOCKER_EGRESS_PORT = 3128
+DOCKER_EGRESS_ALIAS = "awos-egress-proxy"
+DOCKER_EGRESS_READY_SEC = 15.0
+_EGRESS_PROXY_SRC = Path(__file__).with_name("egress_proxy.py")
 
 
 def _normalize_rel(entry: str) -> Optional[str]:
@@ -181,6 +231,123 @@ def readonly_control_paths(env: Optional[dict] = None) -> list[str]:
         elif rel not in paths:
             paths.append(rel)
     return paths
+
+
+def egress_mode(env: Optional[dict] = None) -> str:
+    """"off" or "allowlist" from AWOS_SANDBOX_EGRESS. Anything unrecognised
+    is "off" (fail closed: no network), with a warning."""
+    env = os.environ if env is None else env
+    value = env.get(EGRESS_SWITCH_ENV, "").strip().lower()
+    if value in ("", "off", "0", "none", "false", "no"):
+        return "off"
+    if value == "allowlist":
+        return "allowlist"
+    logger.warning("unknown %s=%r; egress stays off", EGRESS_SWITCH_ENV, value)
+    return "off"
+
+
+def egress_allowlist(env: Optional[dict] = None) -> list[str]:
+    """DEFAULT_EGRESS_ALLOW plus AWOS_SANDBOX_EGRESS_ALLOW additions
+    ("host", "*.suffix"), minus its "!host" removals."""
+    env = os.environ if env is None else env
+    return _egress.parse_allowlist(env.get(EGRESS_ALLOW_ENV, ""))
+
+
+def egress_proxy_env(proxy_url: str) -> dict[str, str]:
+    """The variables pip, npm, git, curl and Python's urllib/requests read."""
+    env = {}
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy",
+                "PIP_PROXY", "npm_config_proxy", "npm_config_https_proxy"):
+        env[key] = proxy_url
+    env["NO_PROXY"] = env["no_proxy"] = EGRESS_NO_PROXY
+    return env
+
+
+def summarize_egress(events: list[dict]) -> dict[str, dict[str, int]]:
+    """{"allowed": {host: n}, "denied": {host: n}, "errors": {host: n}}."""
+    out: dict[str, dict[str, int]] = {"allowed": {}, "denied": {}, "errors": {}}
+    bucket = {"allow": "allowed", "deny": "denied", "error": "errors"}
+    for ev in events:
+        b = out[bucket.get(ev.get("decision"), "errors")]
+        host = str(ev.get("host"))
+        b[host] = b.get(host, 0) + 1
+    return out
+
+
+def _read_jsonl(path: Optional[Path]) -> list[dict]:
+    import json
+    events = []
+    try:
+        with open(path, encoding="utf-8") as fh:  # type: ignore[arg-type]
+            for line in fh:
+                try:
+                    events.append(json.loads(line))
+                except ValueError:
+                    continue
+    except (OSError, TypeError):
+        pass
+    return events
+
+
+class _EgressMixin:
+    """Shared egress bookkeeping: mode, allowlist, log location, report."""
+
+    egress: str = "off"
+    egress_allow: list[str] = []
+    egress_log_path: Optional[Path] = None
+    _egress_dir: Optional[Path] = None
+    _egress_cached: Optional[list[dict]] = None
+    ENFORCEMENT = ""
+
+    def _init_egress(self, egress: Optional[str], allow_network: bool,
+                     egress_allow: Optional[list[str]]) -> None:
+        mode = egress_mode() if egress is None else egress
+        if mode not in ("off", "allowlist"):
+            raise ValueError(f"egress must be 'off' or 'allowlist', got {mode!r}")
+        if mode == "allowlist" and allow_network:
+            logger.warning("%s=allowlist ignored: AWOS_SANDBOX_NETWORK=1 already gives full network",
+                           EGRESS_SWITCH_ENV)
+            mode = "off"
+        self.egress = mode
+        self.egress_allow = egress_allowlist() if egress_allow is None else list(egress_allow)
+        self.egress_log_path = None
+        self._egress_dir = None
+        self._egress_cached = None
+
+    def _new_egress_log(self) -> Path:
+        if self._egress_dir is not None:  # a failed earlier start
+            shutil.rmtree(self._egress_dir, ignore_errors=True)
+        self._egress_dir = Path(tempfile.mkdtemp(prefix="awos-egress-")).resolve()
+        custom = os.environ.get(EGRESS_LOG_ENV, "").strip()
+        self.egress_log_path = Path(custom) if custom else self._egress_dir / "egress.jsonl"
+        return self.egress_log_path
+
+    def egress_events(self) -> list[dict]:
+        if self._egress_cached is not None:
+            return list(self._egress_cached)
+        return _read_jsonl(self.egress_log_path)
+
+    def _finish_egress_log(self) -> None:
+        """Keep the events in memory, then remove the temp log dir."""
+        if self.egress_log_path is not None and self._egress_cached is None:
+            self._egress_cached = _read_jsonl(self.egress_log_path)
+        if self._egress_dir is not None:
+            shutil.rmtree(self._egress_dir, ignore_errors=True)
+            if self.egress_log_path is not None and self._egress_dir in self.egress_log_path.parents:
+                self.egress_log_path = None
+            self._egress_dir = None
+
+    def egress_report(self) -> dict:
+        """What the run can report: mode, allowlist, per-host counts, and
+        what this backend does and does not enforce. No URLs, no headers."""
+        events = self.egress_events()
+        return {
+            "mode": self.egress,
+            "allow": list(self.egress_allow) if self.egress != "off" else [],
+            "log_path": str(self.egress_log_path) if self.egress_log_path else None,
+            **summarize_egress(events),
+            "enforcement": self.ENFORCEMENT if self.egress != "off" else "egress off: no network beyond loopback",
+        }
 
 
 def is_secret_dotenv(name: str) -> bool:
@@ -271,12 +438,15 @@ def build_seatbelt_profile(
     read_deny: list[Path],
     allow_network: bool,
     readonly_paths: Optional[list[str]] = None,
+    egress_proxy_port: Optional[int] = None,
 ) -> str:
     """Generate the SBPL profile. SBPL applies the *last* matching rule, so
     each deny is followed by the narrower allows that carve holes in it.
 
     readonly_paths: workspace-relative control paths (readonly_control_paths)
-    that are write-denied in addition to .git; None means none."""
+    that are write-denied in addition to .git; None means none.
+    egress_proxy_port: the host egress proxy's loopback port (egress mode);
+    ignored when allow_network is True."""
     q = sbpl_quote
     ws = _regex_escape(str(workspace))
     lines = [
@@ -325,7 +495,10 @@ def build_seatbelt_profile(
     # Example env files are documentation, not secrets: readable.
     example = "^" + ws + r"/(.*/)?\.env\.(" + "|".join(DOTENV_EXAMPLE_SUFFIXES) + r")$"
     lines.append(f"(allow file-read-data (regex {q(example)}))")
+    egress = egress_proxy_port is not None and not allow_network
     services = ALLOWED_MACH_SERVICES + (NETWORK_MACH_SERVICES if allow_network else ())
+    if egress:
+        services += EGRESS_MACH_SERVICES
     lines.append("(deny mach-lookup)")
     lines.append("(allow mach-lookup " + " ".join(f"(global-name {q(s)})" for s in services) + ")")
     # Two more ways to have a daemon start a program on the sandbox's behalf.
@@ -341,6 +514,14 @@ def build_seatbelt_profile(
         lines.append('(allow network-bind (local ip "localhost:*"))')
         lines.append('(allow network-inbound (local ip "localhost:*"))')
         lines.append('(allow network-outbound (remote ip "localhost:*"))')
+        if egress:
+            # Egress mode: the only way out is the host proxy on loopback.
+            # localhost:* above already admits it; named here so the profile
+            # states the intent, and so a later tightening of the loopback
+            # rule keeps it. Every non-loopback destination stays denied by
+            # (deny network*), whether or not a process honours the proxy
+            # variables.
+            lines.append(f'(allow network-outbound (remote ip "localhost:{int(egress_proxy_port)}"))')
     return "\n".join(lines) + "\n"
 
 
@@ -358,8 +539,15 @@ def _default_read_deny() -> list[Path]:
     )]
 
 
-class SeatbeltSandbox:
+class SeatbeltSandbox(_EgressMixin):
     backend = "seatbelt"
+    ENFORCEMENT = (
+        "seatbelt: proxy on host 127.0.0.1; kernel profile denies every non-loopback "
+        "connection, so a process ignoring HTTP(S)_PROXY cannot reach the internet. "
+        "Not enforced: anything listening on the host's loopback stays reachable (as "
+        "without egress, e.g. a local DNS resolver on 127.0.0.1:53); contents of allowed "
+        "CONNECT tunnels are opaque; uploads to allowlisted hosts are possible."
+    )
 
     def __init__(
         self,
@@ -367,6 +555,9 @@ class SeatbeltSandbox:
         read_deny: Optional[list[str | Path]] = None,
         allow_network: Optional[bool] = None,
         readonly_paths: Optional[list[str]] = None,
+        egress: Optional[str] = None,
+        egress_allow: Optional[list[str]] = None,
+        egress_resolver=None,
     ) -> None:
         self.workspace = Path(workspace).resolve()
         if not self.workspace.is_dir():
@@ -382,13 +573,37 @@ class SeatbeltSandbox:
         self.allow_network = _network_allowed() if allow_network is None else allow_network
         self.readonly_paths = readonly_control_paths() if readonly_paths is None else list(readonly_paths)
         self.extra_read: list[Path] = []
+        self._init_egress(egress, self.allow_network, egress_allow)
+        self._proxy: Optional[_egress.EgressProxy] = None
+        self._egress_resolver = egress_resolver  # tests map names without real DNS
         self._build()
 
     def _build(self) -> None:
         self.profile = build_seatbelt_profile(
             self.workspace, self.tmpdir, _python_read_roots() + self.extra_read,
             self.read_deny, self.allow_network, self.readonly_paths,
+            egress_proxy_port=self._proxy.port if self._proxy is not None else None,
         )
+
+    def _ensure_egress(self) -> None:
+        """Start the host proxy on first use and rebuild the profile with its
+        port. The log lives in a temp dir of its own: outside the workspace
+        and the sandbox tmpdir, so sandboxed code can neither write nor read
+        it (writes are deny-by-default; the temp areas are read-denied)."""
+        if self.egress != "allowlist" or self._proxy is not None:
+            return
+        log_path = self._new_egress_log()
+        self._proxy = _egress.EgressProxy(
+            allow=self.egress_allow, bind="127.0.0.1", log_path=str(log_path),
+            resolver=self._egress_resolver,
+        ).start()
+        # Backstop for a sandbox dropped without close(): no orphan listener.
+        weakref.finalize(self, self._proxy.stop)
+        self._build()
+
+    @property
+    def egress_proxy_url(self) -> Optional[str]:
+        return f"http://127.0.0.1:{self._proxy.port}" if self._proxy is not None else None
 
     def allow_read(self, paths) -> None:
         """Let sandboxed commands read these dirs too: the project's own venv
@@ -417,9 +632,15 @@ class SeatbeltSandbox:
             if os.environ.get(key):
                 env[key] = os.environ[key]
         env.setdefault("LANG", "en_US.UTF-8")
+        if self.egress_proxy_url:
+            env.update(egress_proxy_env(self.egress_proxy_url))
         return env
 
     def run(self, command: str, timeout_sec: int = DEFAULT_TIMEOUT_SEC) -> SandboxResult:
+        try:
+            self._ensure_egress()
+        except OSError as exc:
+            return SandboxResult(1, "", f"[sandbox] egress proxy failed to start: {exc}", False, 0.0)
         # Seatbelt has no disk quota; a per-file size cap stops a runaway
         # writer from filling the owner's disk. `ulimit` with no -S/-H sets
         # the hard limit too, so the command cannot raise it back.
@@ -428,6 +649,10 @@ class SeatbeltSandbox:
         return _run_capped(argv, timeout_sec, cwd=self.workspace, env=self._env())
 
     def close(self) -> None:
+        if self._proxy is not None:
+            self._proxy.stop()
+            self._proxy = None
+        self._finish_egress_log()
         self._cleanup()  # idempotent: a finalizer runs at most once
 
 
@@ -584,9 +809,18 @@ def _run_capped(
 # ── Docker ───────────────────────────────────────────────────────────────────
 
 
-class DockerSandbox:
+class DockerSandbox(_EgressMixin):
     backend = "docker"
     MOUNT = "/workspace"
+    ENFORCEMENT = (
+        "docker: container on a per-sandbox --internal network (no route out); proxy in a "
+        "sidecar container on that network and the default bridge. A process ignoring "
+        "HTTP(S)_PROXY cannot reach the internet: the sidecar's port is the only reachable "
+        "endpoint. Not enforced: contents of allowed CONNECT tunnels are opaque; uploads to "
+        "allowlisted hosts are possible; DNS queries via docker's embedded resolver may be "
+        "forwarded upstream on older docker engines (a low-bandwidth DNS channel); the sidecar "
+        "listens on 0.0.0.0, so other containers on the default bridge could use it too."
+    )
 
     def __init__(
         self,
@@ -594,6 +828,8 @@ class DockerSandbox:
         image: Optional[str] = None,
         allow_network: Optional[bool] = None,
         readonly_paths: Optional[list[str]] = None,
+        egress: Optional[str] = None,
+        egress_allow: Optional[list[str]] = None,
     ) -> None:
         self.workspace = Path(workspace).resolve()
         if not self.workspace.is_dir():
@@ -609,6 +845,11 @@ class DockerSandbox:
         weakref.finalize(self, shutil.rmtree, str(self._empty_dir), True)
         self.unprotected: list[str] = []
         self._placeholders: list[Path] = []
+        self._init_egress(egress, self.allow_network, egress_allow)
+        self.egress_network: Optional[str] = f"{self.name}-net" if self.egress == "allowlist" else None
+        self.egress_sidecar = f"{self.name}-egress"
+        self._network_created = False
+        self._sidecar_started = False
         self._start()
 
     def _readonly_mounts(self, nested_git: list[Path]) -> tuple[list[str], list[Path], list[str]]:
@@ -653,7 +894,11 @@ class DockerSandbox:
 
     def start_argv(self) -> list[str]:
         argv = ["docker", "run", "-d", "--rm", "--name", self.name]
-        if not self.allow_network:
+        if self.egress_network:
+            # An --internal network has no gateway route out: the container
+            # can reach only other members of it, i.e. the egress sidecar.
+            argv += ["--network", self.egress_network]
+        elif not self.allow_network:
             argv += ["--network", "none"]
         argv += ["--memory", "2g", "--cpus", "2", "--pids-limit", "256"]
         argv += ["--mount", _bind(self.workspace, self.MOUNT)]
@@ -675,12 +920,120 @@ class DockerSandbox:
         if self.unprotected:
             logger.warning("docker sandbox cannot make these control paths read-only "
                            "(missing non-default path, or a symlink): %s", ", ".join(self.unprotected))
+        if self.egress_network:
+            net = subprocess.run(self.network_create_argv(), capture_output=True, text=True,
+                                 timeout=60, env=_docker_cli_env())
+            if net.returncode != 0:
+                self._remove_placeholders()
+                raise RuntimeError(f"docker network create failed: {str(net.stderr).strip()[:500]}")
+            self._network_created = True
         # Pulling an image can take a while on first use; that is the one slow step.
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=600, env=_docker_cli_env())
         if proc.returncode != 0:
             self._remove_placeholders()
+            self._remove_network()
             raise RuntimeError(f"docker run failed: {proc.stderr.strip()[:500]}")
         self.container_id = proc.stdout.strip() or self.name
+
+    # ── egress sidecar ──
+
+    def network_create_argv(self) -> list[str]:
+        return ["docker", "network", "create", "--internal",
+                "--label", "awos.sandbox=egress", self.egress_network or ""]
+
+    def sidecar_argv(self, log_dir: Path) -> list[str]:
+        """The proxy sidecar: egress_proxy.py mounted read-only, the final
+        allowlist on its command line, no environment, no capabilities, a
+        read-only rootfs, the host user's uid, small resource caps. Its only
+        writable path is the log dir, which the sandbox container never sees."""
+        image = os.environ.get(EGRESS_IMAGE_ENV) or DEFAULT_DOCKER_IMAGE
+        argv = ["docker", "run", "-d", "--rm", "--name", self.egress_sidecar,
+                "--network", "bridge", "--read-only", "--cap-drop", "ALL",
+                "--security-opt", "no-new-privileges",
+                "--memory", "256m", "--cpus", "0.5", "--pids-limit", "128"]
+        if hasattr(os, "getuid"):
+            argv += ["--user", f"{os.getuid()}:{os.getgid()}"]
+        argv += ["--mount", _bind(_EGRESS_PROXY_SRC.resolve(), "/awos/egress_proxy.py", readonly=True),
+                 "--mount", _bind(log_dir, "/awos-log"),
+                 image, "python3", "-I", "/awos/egress_proxy.py",
+                 "--listen", f"0.0.0.0:{DOCKER_EGRESS_PORT}",
+                 "--allow", ",".join(self.egress_allow),
+                 "--log", "/awos-log/egress.jsonl"]
+        return argv
+
+    @property
+    def egress_proxy_url(self) -> Optional[str]:
+        if not self._sidecar_started:
+            return None
+        return f"http://{DOCKER_EGRESS_ALIAS}:{DOCKER_EGRESS_PORT}"
+
+    def _ensure_egress(self) -> None:
+        """Start the sidecar on first run() and attach it to the sandbox's
+        internal network under DOCKER_EGRESS_ALIAS. Raises RuntimeError."""
+        if self.egress != "allowlist" or self._sidecar_started:
+            return
+        self._new_egress_log()
+        log_dir = self._egress_dir
+        assert log_dir is not None
+        # The sidecar writes the log there; with a custom AWOS_SANDBOX_EGRESS_LOG
+        # the file is copied out on close().
+        self._sidecar_log = log_dir / "egress.jsonl"
+        env = _docker_cli_env()
+        proc = subprocess.run(self.sidecar_argv(log_dir), capture_output=True, text=True, timeout=600, env=env)
+        if proc.returncode != 0:
+            raise RuntimeError(f"egress sidecar failed to start: {str(proc.stderr).strip()[:500]}")
+        self._sidecar_started = True
+        try:
+            conn = subprocess.run(
+                ["docker", "network", "connect", "--alias", DOCKER_EGRESS_ALIAS,
+                 self.egress_network or "", self.egress_sidecar],
+                capture_output=True, text=True, timeout=60, env=env)
+            if conn.returncode != 0:
+                raise RuntimeError(f"egress sidecar network connect failed: {str(conn.stderr).strip()[:500]}")
+            deadline = time.monotonic() + DOCKER_EGRESS_READY_SEC
+            while True:
+                logs = subprocess.run(["docker", "logs", self.egress_sidecar], capture_output=True,
+                                      text=True, timeout=30, env=env)
+                if "listening" in _decode(logs.stdout):
+                    return
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("egress sidecar did not report ready: "
+                                       + _decode(logs.stderr).strip()[:300])
+                time.sleep(0.2)
+        except BaseException:
+            # Half-started: remove it so no proxy env points at a dead alias
+            # and the next run() tries again from scratch.
+            subprocess.run(["docker", "rm", "-f", self.egress_sidecar], capture_output=True,
+                           timeout=30, env=env)
+            self._sidecar_started = False
+            raise
+
+    def egress_events(self) -> list[dict]:
+        if self._egress_cached is not None:
+            return list(self._egress_cached)
+        return _read_jsonl(getattr(self, "_sidecar_log", None))
+
+    def _stop_egress(self) -> None:
+        if self._sidecar_started:
+            subprocess.run(["docker", "rm", "-f", self.egress_sidecar], capture_output=True,
+                           timeout=30, env=_docker_cli_env())
+            self._sidecar_started = False
+        sidecar_log = getattr(self, "_sidecar_log", None)
+        if sidecar_log is not None and self._egress_cached is None:
+            self._egress_cached = _read_jsonl(sidecar_log)
+            if self.egress_log_path is not None and self.egress_log_path != sidecar_log:
+                try:  # AWOS_SANDBOX_EGRESS_LOG: keep a copy past close()
+                    with open(self.egress_log_path, "a", encoding="utf-8") as fh:
+                        fh.write(sidecar_log.read_text(encoding="utf-8") if sidecar_log.exists() else "")
+                except OSError as exc:
+                    logger.warning("could not write %s: %s", self.egress_log_path, exc)
+        self._finish_egress_log()
+
+    def _remove_network(self) -> None:
+        if self._network_created and self.egress_network:
+            subprocess.run(["docker", "network", "rm", self.egress_network], capture_output=True,
+                           timeout=30, env=_docker_cli_env())
+            self._network_created = False
 
     def _remove_placeholders(self) -> None:
         """Remove the empty mountpoint dirs docker created for missing control
@@ -696,11 +1049,19 @@ class DockerSandbox:
     def exec_argv(self, command: str) -> list[str]:
         # The only -e flags are fixed, non-secret settings (SANDBOX_GIT_ENV);
         # the host's environment never reaches the container.
-        env_flags = [x for k, v in SANDBOX_GIT_ENV.items() for x in ("-e", f"{k}={v}")]
+        fixed = dict(SANDBOX_GIT_ENV)
+        if self.egress_proxy_url:
+            fixed.update(egress_proxy_env(self.egress_proxy_url))
+        env_flags = [x for k, v in fixed.items() for x in ("-e", f"{k}={v}")]
         return ["docker", "exec", *env_flags, "-w", self.MOUNT, self.container_id or self.name,
                 "/bin/sh", "-c", command]
 
     def run(self, command: str, timeout_sec: int = DEFAULT_TIMEOUT_SEC) -> SandboxResult:
+        try:
+            self._ensure_egress()
+        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            # The container stays networkless; say why installs will fail.
+            return SandboxResult(1, "", f"[sandbox] egress proxy failed to start: {exc}", False, 0.0)
         return _run_capped(self.exec_argv(command), timeout_sec, kill=self._kill_exec, env=_docker_cli_env())
 
     def _kill_exec(self, proc: subprocess.Popen) -> None:
@@ -718,10 +1079,12 @@ class DockerSandbox:
     def close(self) -> None:
         if self.container_id is None:
             return
+        self._stop_egress()
         subprocess.run(
             ["docker", "rm", "-f", self.container_id], capture_output=True, timeout=30, env=_docker_cli_env()
         )
         self.container_id = None
+        self._remove_network()
         self._remove_placeholders()
 
 
