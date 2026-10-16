@@ -20,6 +20,22 @@ default). Runs are paused until the owner approves each one; nothing here is run
 All decisions use the T1 rule (`docs/specs/stats_decision_rule.md`) unless stated. INVALID rules are the ladder's
 (provider or empty-response failures are invalid, never "unsolved").
 
+## R0: regression check of the integrated loop (cloud, approved by the owner 2026-10-16)
+
+Fixed before the run. The measured commit is the head of `claude/loop-executor-tests-2i0l7p` at launch
+(1015397: A6–A8, C9, C10, D13, D15 merged with their defaults: stuck `log`, routing off, compaction off,
+read-only control paths on, secret scan on).
+- **Run:** arm `loop` alone, `claude-haiku-5-5`, the 40 fresh issues, 1 repeat, GitHub Actions macOS runners, 8 shards,
+  cap $2 (`bench-cloud/loop-r0-2026-10-16`). Compared descriptively with H1d's `loop` row (40/40, $0.0123 / run);
+  no A/B statistics (one arm, n = 40).
+- **PASS:** ≥ 38/40 solved AND $ / run ≤ 1.3 × $0.0123 AND 0 fatal health violations. **FAIL** otherwise. On FAIL, read
+  every lost issue's transcript and attribute it (new code vs model variance) before any default changes; a loss
+  traced to D13 (a write to a protected path) or D15 (a false-positive block) is fixed before anything else.
+- **Also recorded (R2 step 0):** per run, which stuck triggers fired (log mode) and whether escalation would have been
+  recommended; the share of runs with any trigger decides whether R2 is worth running (≥ 10%).
+- macOS runners mean the Seatbelt read-only rules (D13) run for real for the first time; any sandbox denial in the
+  logs is reported.
+
 ## R1: cost routing (A6) — laptop + API
 
 - **Arms:** `loop` with `AWOS_LOOP_ROUTE=local,claude-haiku-5-5` (routed) vs `loop` on Haiku alone (baseline).
