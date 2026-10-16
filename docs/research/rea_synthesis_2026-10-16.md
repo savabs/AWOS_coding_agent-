@@ -8,8 +8,10 @@ here is a hypothesis to test, not a proven win.
 ## What it means for the question "is it the model or AWOS?"
 
 Across Cursor, the Codex app, Devin, Amp/Droid, Kiro and Claude Desktop, **no product shows evidence that its harness
-raises accuracy.**
-- Cursor ships a bash-only, mini-swe-agent-style tool profile next to its full tool set.
+raises accuracy.** (Static analysis cannot observe accuracy and none of them publishes numbers: this is absence of
+evidence, not evidence of absence.)
+- Cursor's client registers a bash-only, mini-swe-agent-style executor next to its full tool set (per-model selection
+  is inferred).
 - What the products share is product infrastructure: isolation, resume, cost routing, safety, and scheduling.
 
 This matches our ladder results:
@@ -58,7 +60,8 @@ Each item gets its own pre-registered A/B before it becomes a default, as with t
    Primary: tokens wasted and solve rate under random kills. S–M.
 10. **Two-stage compaction:** start a summary at about 70% of the window, swap it in at about 85%; keep the goal word
     for word and the list of edited files; tell the model how many summaries it has had; never split a tool call from
-    its result (Cursor, Devin, Amp). Primary: solve rate on tasks over 60 steps, together with a cost check (summaries cost cache hits). M.
+    its result (Droid; Cursor for the two-stage idea, whose real thresholds are server-set and unknown, so 70/85% are
+    our own guesses). Primary: solve rate on tasks over 60 steps, together with a cost check (summaries cost cache hits). M.
 11. **Keep the prompt cache warm through long test runs** (longer TTL, or a keep-alive call). Primary: cache-read ratio when the gate runs over 5 minutes. S.
 12. **Layered edit tool for weak models:** exact → whitespace-insensitive → "did you mean", normalising the matched
     region only (Cursor), on `fuzzy_apply.py`. Local only. S.
@@ -92,3 +95,32 @@ Each item gets its own pre-registered A/B before it becomes a default, as with t
 2. **A6–A7:** cost routing with a behavioural stuck detector.
 3. **C9–C10:** resume and compaction, before the Terminal-Bench run (long tasks, battery).
 4. **D13, D15:** cheap safety wins, then D14 and D16 as computer use matures.
+
+## Second pass against the full write-ups (2026-10-16, cloud)
+
+Six reviewers compared what was built (A6–A8, B1–B5, C9–C11, D13–D17) with the full private write-ups
+(`savabs/REA-writeups`). Corrections went into the digest above. Being fixed now: per-rung step budget and
+model-error classes before R1; context-overflow recovery; stuck-detector precision (grep exit 1 is not a failure,
+polling is not a repeat, no "no progress" before the first edit); resume-time workspace check; host-side test
+verification inside the sandbox with a scrubbed environment; non-git and MCP in-place runs; computer-use target
+policy, emergency stop and secret masking; one secret rule set with more formats and redaction at rest; sandbox
+loopback deny-list and worktree gitdir access; local task lease, prefix-drift and speculation telemetry; response
+cache key.
+
+New items, ranked (each needs its own pre-registered A/B before it changes a default):
+
+| item | source | bet | size | where |
+|---|---|---|---|---|
+| Consult-a-stronger-model tool (one call, keep going on the cheap rung) as an arm beside A6's rung switch | Amp oracle, Droid self-upgrade | cost | M | cloud build, laptop A/B |
+| Cheap static check (syntax/import on changed files) before accepting a submit; new lint errors after edits, capped | Devin, Cursor | cost, local | S | cloud |
+| Typed loop guards: refusal → resample then escalate or INVALID; empty-reply cap; degenerate-output resample (≤ 3) | Droid | local, long | S | cloud |
+| Two-phase commit with idempotency keys for `awos fix` push/PR/comment (crash + resume must not double-push) | ChatGPT sends, Codex | safety | S | cloud |
+| Per-job permission profile stored with the job; unattended jobs never escalate; denial breaker (sandbox/egress/policy refusals → BLOCKED) | Codex | safety | S–M | cloud |
+| Steer a running job (`awos steer`), soft interrupt at turn boundaries, keep rewritten checkpoints as new files | Codex sessions | product | S | cloud |
+| Hide benchmark identifiers from the agent's environment | Cursor | validity | S | cloud |
+| Scheduler that only enqueues normal jobs (jitter, per-tick cap, structured result) | Codex | product | M | cloud |
+| Read-only egress zone (MITM, GET/HEAD only, no credentials) to close uploads through allowed tunnels | Claude Desktop | safety | M | cloud |
+| Token-exact transcript for the local model if prefix drift is confirmed | Apple TokenGeneration | local speed | M | laptop |
+
+Still rejected (the planner result holds): plan languages, spec phases, mission orchestrators, context engines,
+semantic output caches.

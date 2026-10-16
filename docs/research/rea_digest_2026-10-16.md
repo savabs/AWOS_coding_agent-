@@ -16,7 +16,7 @@ have the substance.
 - **Thin client, server brain.** The loop, model calls, compaction and edit-merge run on Cursor's servers over one
   two-way stream. The client runs about 41 typed executors (shell, file I/O, grep, MCP, hooks, subagents).
 - **Tool profile per model family.** A full tool set, a minimal set, and a bash-only profile modelled on
-  mini-swe-agent. Even Cursor ships the minimal loop as a first-class option.
+  mini-swe-agent. The client registers a bash-only executor; that the server selects it per model is inferred.
 - **Content-addressed conversation checkpoints.** Each turn's state is stored by content hash with a pointer to the
   latest, so any turn can be resumed or forked.
 - **Two-stage compaction.** A background summary starts early and is swapped in near the limit. User queries are kept
@@ -32,7 +32,7 @@ have the substance.
   worktrees, protects live ones, and **snapshots to a hidden ref before deleting**.
 - **Transactional merge-back:** each step rolls back on failure, or a 3-way apply reports applied, skipped and
   conflicted paths.
-- **Sessions are append-only logs** supporting resume, fork, revert, compact, steer and interrupt; a fork can reuse the parent's prompt cache.
+- **Sessions are append-only logs** supporting resume, fork, revert, compact, steer and interrupt; one experimental fork mode (ephemeral only) can reuse the parent's prompt cache.
 - **Sandbox:** deny-by-default Seatbelt with `.git` and agent control dirs read-only; git runs on the host.
 - **Approvals on three axes:** sandbox × approval policy × reviewer (human or an AI reviewer with a denial breaker).
 - An automation scheduler (recurring rules, jitter, per-tick caps, a structured result per run).
@@ -65,7 +65,8 @@ have the substance.
 - **Spec → tasks graph:** requirements (structured sentence patterns), a design with correctness properties, and a
   task tree with optional dependency "waves". Bad graphs are repaired or fall back to sequential order; up to 5
   subagents run per wave; a human approves each phase.
-- **Failure detector:** if most of the recent tool results failed, it injects "try a different approach".
+- **Failure detector:** if most of the recent tool results failed (15 of the last 20 by default), it injects a short
+  message telling the model to change approach.
 - **One-way model escalation:** fast/balanced/smart tiers; a periodic probe on a forked context decides yield or continue.
 - **Hooks:** 12 triggers with an exit-code contract. Lesson: one trigger claimed to block but didn't, so test the contract.
 - **Permissions** compiled to a policy language (deny > ask > allow, explainable); a permission classifier runs in shadow mode.
@@ -88,7 +89,8 @@ have the substance.
   small typed language under a grammar → an interpreter runs it step by step.
 - Each step returns a **typed outcome** (needs value, confirm, disambiguate, not allowed, model-facing error, failure)
   that feeds the next plan cycle.
-- **Ask-or-act is a small learned decision program, not an LLM.** It weighs the chance of each candidate (from usage
+- **Ask-or-act is a small hand-written decision program shipped as a model file, not an LLM;** only the per-user
+  posteriors are learned (from usage counts). It weighs the chance of each candidate (from usage
   history) against a risk/payoff table and picks the action with the highest expected value. A shadow policy and a
   forced-ask rate keep training labels coming.
 - Per-tool precondition checks; string arguments must quote the user (limits invention and injection); an injection
@@ -104,7 +106,8 @@ have the substance.
   instead of exact sizes, and a log of every cloud request.
 
 ### ChatGPT "Work with Apps" / computer use (Mac)
-- Perception is mostly **accessibility-tree text, not pixels**: visible range only, a "showing a–b of N" note, many
+- Perception uses **accessibility-tree text** (it also always captures a screenshot; its "needs pixels" classifier
+  is an unwired stub, and AX diffing ships default-off behind a remote flag): visible range only, a "showing a–b of N" note, many
   cleanup passes, one line per element with a **stable ID** that survives between steps.
 - **Diffs only when shorter than the full tree**, plus a "no change" message.
 - Code edits go through file patches, never typing into an IDE; terminals are forbidden targets.
@@ -116,7 +119,8 @@ have the substance.
 - UI frameworks describe their own views as a **typed element tree** (21 kinds, sparse attributes, values that may
   still be loading). **Buttons have roles: normal, primary, cancel, destructive.**
 - Collection from every app within a short deadline; late fragments are dropped and the reason reported. Occlusion
-  and visibility filtering use a small area threshold.
+  and visibility filtering keep an element that is at least a few percent visible OR shows a minimum area,
+  intersected down the tree; selected elements are kept even off-screen (capped).
 - The planner sees **flattened typed items under a size cap**, never the raw tree. Semantic actions (menu commands,
   text insertion) are preferred over coordinate clicks.
 
@@ -135,7 +139,8 @@ have the substance.
 ### Apple ModelManager (model residency daemon)
 - One daemon owns which models stay loaded. Clients take **leases naming a policy**; policies merge most-restrictively
   (minimum of limits, maximum of priorities).
-- **Memory budget** by RAM tier; a static cost catalog per model; admission refuses a job that would go over budget.
+- **Memory budget** by RAM tier; a static cost catalog per model; admission defers a job that would go over budget (foreground work gets a small overcommit; background
+  work can be preempted).
 - Eviction order: prefer-unload, then not-avoid-unload, then least recently used. Idle purge after 5 minutes.
   All rule-based, nothing learned.
 - **AWOS use:** idle unload, a battery policy and memory admission for llama-server (done in B5).
@@ -143,7 +148,7 @@ have the substance.
 ### Apple LLMCache (semantic output cache)
 - Each entry is one model output plus every phrasing that produced it, stored as embeddings.
 - Lookup ranks exact matches first, then similarity, then recency; the caller decides the threshold.
-- Content-addressed entries; a sliding TTL refreshed by reads; a model version in the key; fail-open on any error.
+- Content-addressed entries; a sliding TTL refreshed by reads; the model version in the key is the client's choice (the cache itself resets when the embedding size changes); fail-open on any error.
 - **AWOS use:** only an exact-match cache keyed on provider + model + full prompt. A semantic cache for code is unsafe without a verifier.
 
 ### Apple Notes (practice target)
@@ -151,7 +156,8 @@ have the substance.
 
 ## Cross-cutting conclusion
 
-No product shows that its harness raises accuracy. They converge on **minimal loops plus product infrastructure**:
+No product shows that its harness raises accuracy (static analysis cannot observe accuracy and none publishes numbers,
+so this is absence of evidence, not evidence that harnesses don't help). They converge on **minimal loops plus product infrastructure**:
 isolation, resume, cost routing, safety and scheduling. That matches AWOS's own pre-registered results (planner and
 gate layers lost on Haiku; the minimal loop wins at lower cost). The measurable AWOS bets are cost routing,
 local-model reliability, long-task resume and compaction, and unattended safety (`rea_synthesis_2026-10-16.md`).
