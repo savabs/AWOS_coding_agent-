@@ -2951,12 +2951,16 @@ class Orchestrator:
         from types import SimpleNamespace
 
         try:
+            from . import loop_checkpoint as lc
             from . import loop_executor as lx
+            from . import loop_route as lr
             from .agent_loop import build_client_from_env
             from .providers import openrouter_key, openrouter_model_id
             from .sandbox import make_sandbox
         except ImportError:
+            import loop_checkpoint as lc
             import loop_executor as lx
+            import loop_route as lr
             from agent_loop import build_client_from_env
             from providers import openrouter_key, openrouter_model_id
             from sandbox import make_sandbox
@@ -2978,11 +2982,35 @@ class Orchestrator:
         model = esc_decision.spec.model_id
         if openrouter_key():
             model = openrouter_model_id(model)
+        # AWOS_LOOP_ROUTE (loop_route.py, rea_synthesis A6): start on the
+        # cheapest rung and escalate one way; off = the one model as before.
+        ladder = lr.route_ladder()
+        escalate, rung_steps = None, None
         try:
-            client = build_client_from_env(model)
+            client = lr.build_route_client(ladder[0]) if ladder else build_client_from_env(model)
         except Exception as exc:  # noqa: BLE001
             return _fail(f"no model client ({exc})")
         model = str(getattr(client, "model", "") or model)
+        first_model = model
+        if len(ladder) > 1:
+            rest = list(ladder[1:])
+            rung_steps = lr.rung_steps()
+
+            def escalate(reason: str):
+                nonlocal model
+                while rest:
+                    spec = rest.pop(0)
+                    try:
+                        nxt = lr.build_route_client(spec)
+                    except Exception as exc:  # noqa: BLE001 - skip a rung we can't build
+                        print(f"[TASK {task_id}] LOOP route: skipped {spec} ({exc})", flush=True)
+                        continue
+                    print(f"[TASK {task_id}] LOOP route: {model} -> {nxt.model} ({reason})",
+                          flush=True)
+                    model = str(getattr(nxt, "model", "") or spec)
+                    self._last_agent_model = model
+                    return nxt
+                return None
         sandbox = make_sandbox(codebase_root)
         if sandbox is None:
             # Commands never run on the bare host (AWOS_SANDBOX=none, or no backend).
@@ -3035,14 +3063,30 @@ class Orchestrator:
 
         cap = _run_cost_cap()
         wall = _task_wall_s()
+        # The host sets AWOS_LOOP_CHECKPOINT_PATH (host/worker.py) when the job
+        # has its own worktree that survives a kill (loop_checkpoint.py, C9).
+        checkpoint = None
+        task_key = lc.task_key(goal, first_model,
+                               bool(getattr(lx.wrap_for_loop(client), "text_protocol", False)),
+                               extra=str(task_id))
+        ckpt_path = os.getenv("AWOS_LOOP_CHECKPOINT_PATH", "").strip()
+        if ckpt_path and lc.checkpoint_enabled():
+            checkpoint = lc.LoopCheckpoint(ckpt_path, task_key)
         try:
             run = lx.LoopExecutor(
                 client, registry, goal, workspace=codebase_root, gate=_gate,
                 cost_cap=cap, wall_s=wall if wall > 0 else None,
                 budget_exhausted=_budget_hit, on_call=_on_call, path_filter=_path_filter,
+                checkpoint=checkpoint, escalate=escalate, rung_steps_=rung_steps,
             ).run()
         finally:
             registry.close()  # a docker sandbox holds a container until closed
+        if ladder:
+            # Labelled route decisions for calibrating ml_router (rea_synthesis A8).
+            lr.record_decisions([{"start": first_model, "step": 0}] + list(run.escalations),
+                                goal_key=task_key, solved=run.success,
+                                stop_reason=run.stop_reason, cost_usd=run.cost_usd,
+                                steps=run.steps)
 
         verdict = (run.gate or {}).get("verdict") or {}
         test_result = verdict.get("test_result")

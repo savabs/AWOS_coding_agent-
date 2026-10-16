@@ -595,6 +595,12 @@ def _run_child(job: JobSpec, ctx: RunContext, job_path: Path, result_path: Path,
     marker.unlink(missing_ok=True)
     env["AWOS_FULL_SUITE_MARKER"] = str(marker)
     if base:
+        # The loop executor saves each finished turn here (loop_checkpoint.py):
+        # an attempt after a kill continues the same conversation on the same
+        # worktree instead of paying for the turns again. Keyed by goal, model
+        # and task, so an attempt with another goal or model starts fresh.
+        env["AWOS_LOOP_CHECKPOINT_PATH"] = str(ctx.job_dir / "loop_checkpoint.jsonl")
+    if base:
         # v0.2.2 atomic outcome: the child never reverts single files in the
         # workspace. Its rollbacks are recorded; the worker applies them only
         # when the job succeeds (a failed sub-task inside a passing job). A

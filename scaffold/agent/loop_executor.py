@@ -35,6 +35,23 @@ the prompt bytes are fixed, so each request extends the previous one
 (prefix-cache reuse); per-call cache and speed telemetry goes to
 llm_call_log and the components.json `loop` entry (LoopRun.telemetry).
 
+Reliability and cost layers (rea_synthesis A6, A7, C9, C10; pre-registered
+in docs/specs/loop_reliability_ab.md), each its own module:
+  * stuck detector (loop_stuck.py, AWOS_LOOP_STUCK, default "log": counts
+    triggers, prompt unchanged; "nudge" appends a short note to the tool
+    results). It never stops the run;
+  * checkpoint (loop_checkpoint.py): when the caller passes one, every
+    finished turn is saved and a killed run resumes the same conversation;
+  * compaction (loop_compaction.py, AWOS_LOOP_COMPACT, default off): the
+    only thing that ever rewrites the history (goal verbatim + summary +
+    recent turns); with it off the history stays append-only;
+  * cost routing (loop_route.py): when the caller passes `escalate`, a
+    rung that is stuck, out of its step allowance, out of format or
+    truncation retries, erroring, or red after the gate's rounds hands the
+    task one way up the ladder. The next rung starts a fresh conversation
+    (goal + handover note; the prompt cache does not carry across models
+    anyway) on the same working tree.
+
 Prompt text (SYSTEM_PROMPT, _INSTANCE_TEMPLATE, FORMAT_ERROR_MESSAGE,
 TRUNCATED_MESSAGE) and the observation truncation rule are adapted from
 mini-swe-agent 2.4.6 (minisweagent/config/mini.yaml), under its MIT licence:
@@ -67,6 +84,7 @@ from __future__ import annotations
 import os
 import platform
 import shlex
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
@@ -75,13 +93,19 @@ try:
     from .agent_loop import (TRUNCATED_FINISH, WorkspaceWatch, _finish_reason, _int0,
                              estimate_cost)
     from .llm_call_log import record_error, record_response, timing_fields
+    from .loop_compaction import Compactor, compaction_enabled, summary_request
     from .loop_grammar import wrap_for_loop
+    from .loop_route import handover_note
+    from .loop_stuck import StuckDetector, stuck_mode
     from .tools.base import Tool, ToolRegistry, ToolResult
 except ImportError:  # flat sys.path import (scaffold/agent on the path)
     from agent_loop import (TRUNCATED_FINISH, WorkspaceWatch, _finish_reason, _int0,
                             estimate_cost)
     from llm_call_log import record_error, record_response, timing_fields
+    from loop_compaction import Compactor, compaction_enabled, summary_request
     from loop_grammar import wrap_for_loop
+    from loop_route import handover_note
+    from loop_stuck import StuckDetector, stuck_mode
     from tools.base import Tool, ToolRegistry, ToolResult
 
 #: The line that ends the loop (mini-swe-agent's own marker, kept so the two
@@ -538,6 +562,15 @@ class LoopRun:
     gate: Optional[dict] = None
     transcript: list = field(default_factory=list)
     elapsed_sec: float = 0.0
+    #: Continued from a checkpoint of a killed run (loop_checkpoint.py).
+    resumed: bool = False
+    #: Route rung the run ended on (0 = the first) and each escalation
+    #: {"from", "to", "reason", "step"} (loop_route.py).
+    rung: int = 0
+    escalations: list = field(default_factory=list)
+    #: StuckDetector.summary() / Compactor.summary(), when they ran.
+    stuck: Optional[dict] = None
+    compaction: Optional[dict] = None
 
     def telemetry(self) -> dict:
         """Prompt-cache and speed summary (rea_synthesis B2): cached_fraction =
@@ -551,6 +584,15 @@ class LoopRun:
                "parse_failures": self.parse_failures}
         if self.prefix_cache is not None:
             out["prefix_cache"] = self.prefix_cache.get("status")
+        if self.resumed:
+            out["resumed"] = True
+        if self.escalations:
+            out["rung"] = self.rung
+            out["escalations"] = list(self.escalations)
+        if self.stuck is not None:
+            out["stuck"] = self.stuck
+        if self.compaction is not None:
+            out["compaction"] = self.compaction
         if self.timed_calls:
             out["mean_prefill_ms"] = round(self.prefill_ms / self.timed_calls, 1)
             out["mean_prefill_tokens"] = round(self.prefill_tokens / self.timed_calls, 1)
@@ -564,6 +606,13 @@ class LoopRun:
                 "gate_retries": self.gate_retries, "cost_usd": round(self.cost_usd, 6),
                 "stop_reason": self.stop_reason, "success": self.success,
                 **self.telemetry()}
+
+
+#: LoopRun counters a checkpoint carries (small; the transcript is not saved).
+_CHECKPOINT_FIELDS = ("steps", "submits", "gate_retries", "tool_calls", "input_tokens",
+                      "output_tokens", "cached_tokens", "cache_write_tokens", "cost_usd",
+                      "format_errors", "parse_failures", "timed_calls", "prefill_ms",
+                      "prefill_tokens", "gen_tokens", "gen_ms", "rung")
 
 
 def _prepare_local_prefix(system_prompt: str) -> Optional[dict]:
@@ -603,13 +652,17 @@ class LoopExecutor:
         path_filter: Optional[Callable[[list], list]] = None,
         system_prompt: str = SYSTEM_PROMPT,
         clock: Callable[[], float] = time.monotonic,
+        checkpoint: Any = None,
+        stuck: Optional[StuckDetector] = None,
+        escalate: Optional[Callable[[str], Any]] = None,
+        rung_steps_: Optional[int] = None,
+        compact: Optional[bool] = None,
     ) -> None:
         # AWOS_LOOP_GRAMMAR (default on for AWOS_PROVIDER=local): the local
         # OpenAI-compatible client becomes the grammar-constrained text
         # protocol (loop_grammar.py). Anthropic and every other client pass
         # through unchanged.
-        self.client = wrap_for_loop(client)
-        self.text_protocol = bool(getattr(self.client, "text_protocol", False))
+        self._set_client(client)
         self.registry = registry
         self.goal = goal
         self.workspace = workspace or getattr(registry, "project_root", "") or ""
@@ -624,6 +677,27 @@ class LoopExecutor:
         self.system_prompt = system_prompt
         self.clock = clock
         self.messages: list[dict[str, Any]] = []
+        #: loop_checkpoint.LoopCheckpoint (or anything with save/load/finish).
+        self.checkpoint = checkpoint
+        self._stuck_given = stuck
+        self.stuck: Optional[StuckDetector] = None
+        #: escalate(reason) -> the next rung's client, or None at the top.
+        self.escalate = escalate
+        self.rung_steps = rung_steps_
+        self.compact = compaction_enabled() if compact is None else bool(compact)
+        self.compactor: Optional[Compactor] = None
+        self._summary_replies: list = []
+        self._summary_lock = threading.Lock()
+        self._ladder_done = escalate is None
+        self._rung_start = 0
+        self._rung_gate_retries = 0
+        self._format_errors = 0
+        self._truncations = 0
+        self._cost_at_start = 0.0
+        self._files_before_resume: list = []
+        self._stuck_earlier: list = []
+        self._state_step = -1
+        self._last_used_tokens = 0
 
     @property
     def model_name(self) -> str:
@@ -631,10 +705,28 @@ class LoopExecutor:
 
     # -- helpers --
 
+    def _set_client(self, client: Any) -> None:
+        self.client = wrap_for_loop(client)
+        self.text_protocol = bool(getattr(self.client, "text_protocol", False))
+
+    def _new_rung_layers(self) -> None:
+        """A fresh stuck detector and compactor for the client now in use."""
+        if self._stuck_given is not None and self.stuck is None:
+            self.stuck = self._stuck_given
+        elif stuck_mode() != "off" or self._stuck_given is not None:
+            mode = self._stuck_given.mode if self._stuck_given is not None else None
+            self.stuck = StuckDetector(mode)
+        else:
+            self.stuck = None
+        self.compactor = (Compactor(self.model_name, summarize=self._summarize)
+                          if self.compact else None)
+
     def _changed(self, watch: Optional[WorkspaceWatch], before: Optional[dict]) -> list:
         if watch is None:
-            return []
+            return list(self._files_before_resume)
         rels = watch.changed(before, watch.snapshot()) or []
+        if self._files_before_resume:
+            rels = sorted(set(rels) | set(self._files_before_resume))
         if self.path_filter is not None:
             try:
                 rels = list(self.path_filter(rels))
@@ -649,7 +741,9 @@ class LoopExecutor:
             return "goal_budget"
         if run.steps >= self.max_steps:
             return "max_steps"
-        if self.cost_cap is not None and run.cost_usd >= self.cost_cap:
+        # A resumed run's earlier spend was already taken off the cap by the
+        # caller (host SpendTracker), so only this attempt's spend counts here.
+        if self.cost_cap is not None and run.cost_usd - self._cost_at_start >= self.cost_cap:
             return "cost_cap"
         return None
 
@@ -690,13 +784,165 @@ class LoopExecutor:
         g = self.gate(files, submission) if self.gate is not None else {"green": True}
         g = dict(g or {})
         run.gate = g
-        if g.get("retry") and run.gate_retries < self.max_gate_retries:
+        if g.get("retry") and self._rung_gate_retries < self.max_gate_retries:
+            self._rung_gate_retries += 1
             run.gate_retries += 1
-            return False, gate_feedback(str(g.get("feedback", "")), run.gate_retries,
+            return False, gate_feedback(str(g.get("feedback", "")), self._rung_gate_retries,
                                         self.max_gate_retries)
         run.success = bool(g.get("green"))
         run.stop_reason = "submitted" if run.success else "gate_red"
         return True, ""
+
+    def _append_note(self, text: str) -> None:
+        """Add a harness note to the user turn just appended (tool results), so
+        roles still alternate; OpenAI `tool` messages get a user message after."""
+        last = self.messages[-1] if self.messages else None
+        if isinstance(last, dict) and last.get("role") == "user":
+            content = last.get("content")
+            if isinstance(content, str):
+                last["content"] = f"{content}\n\n{text}"
+                return
+            if isinstance(content, list):
+                content.append({"type": "text", "text": text})
+                return
+        self.messages.append({"role": "user", "content": text})
+
+    def _turn_state(self, watch: Optional[WorkspaceWatch], before: Optional[dict],
+                    step: int) -> tuple[list, Any]:
+        """(files changed so far, a progress key) once per step: the key moves
+        whenever a changed file's size or mtime moves."""
+        if step == self._state_step:
+            return self._state
+        files, key = [], None
+        if watch is not None:
+            snap = watch.snapshot()
+            if snap is not None:
+                files = watch.changed(before, snap) or []
+                key = hash(tuple(sorted((f, snap.get(f)) for f in files)))
+        if self._files_before_resume:
+            files = sorted(set(files) | set(self._files_before_resume))
+        self._state_step, self._state = step, (files, key)
+        return self._state
+
+    def _summarize(self, msgs: list) -> str:
+        """Compaction's summary call: the plain tool client (never the bash
+        grammar), a tool-free transcript request. Cost is accounted by the
+        loop thread (_drain_summaries)."""
+        inner = getattr(self.client, "inner", self.client)
+        reply = inner.complete(self.system_prompt, summary_request(msgs), self.registry)
+        with self._summary_lock:
+            self._summary_replies.append(reply)
+        return reply.text or ""
+
+    def _drain_summaries(self, run: LoopRun) -> None:
+        with self._summary_lock:
+            replies, self._summary_replies = self._summary_replies, []
+        for reply in replies:
+            self._account(run, reply)
+
+    def _counters(self, run: LoopRun, files: list) -> dict:
+        out = {name: getattr(run, name) for name in _CHECKPOINT_FIELDS}
+        out.update(rung_start=self._rung_start, rung_gate_retries=self._rung_gate_retries,
+                   files_changed=list(files))
+        return out
+
+    def _resume(self, run: LoopRun) -> bool:
+        """Continue a killed run from its checkpoint. False: start fresh."""
+        if self.checkpoint is None:
+            return False
+        try:
+            state = self.checkpoint.load()
+        except Exception:  # noqa: BLE001 - a broken checkpoint means a fresh start
+            state = None
+        if not state:
+            return False
+        messages, counters = state
+        rung = int(counters.get("rung") or 0)
+        for _ in range(rung):  # back onto the rung the conversation belongs to
+            nxt = None
+            if self.escalate is not None:
+                try:
+                    nxt = self.escalate("resume")
+                except Exception:  # noqa: BLE001
+                    nxt = None
+            if nxt is None:
+                return False  # that rung is gone: its history can't be replayed here
+            self._set_client(nxt)
+        for name in _CHECKPOINT_FIELDS:
+            if name in counters:
+                setattr(run, name, type(getattr(run, name))(counters[name]))
+        self._rung_start = int(counters.get("rung_start") or 0)
+        self._rung_gate_retries = int(counters.get("rung_gate_retries") or 0)
+        self._files_before_resume = list(counters.get("files_changed") or [])
+        self._cost_at_start = run.cost_usd
+        self.messages = list(messages)
+        run.resumed = True
+        return True
+
+    def _escalate(self, run: LoopRun, reason: str, watch: Optional[WorkspaceWatch],
+                  before: Optional[dict], note: str = "") -> bool:
+        """Hand the task one way up the route ladder. True when a stronger rung
+        took over (the loop continues); False at the top or without routing."""
+        if self._ladder_done:
+            return False
+        try:
+            nxt = self.escalate(reason) if self.escalate is not None else None
+        except Exception:  # noqa: BLE001 - a rung that can't be built = no rung
+            nxt = None
+        if nxt is None:
+            self._ladder_done = True
+            return False
+        self._drain_summaries(run)
+        old = self.model_name
+        files = self._changed(watch, before)
+        if self.stuck is not None:
+            self._stuck_earlier.append({"model": old, **self.stuck.summary()})
+        self._set_client(nxt)
+        run.rung += 1
+        run.escalations.append({"from": old, "to": self.model_name, "reason": reason,
+                                "step": run.steps})
+        handover = handover_note(run.transcript, files, reason)
+        if note:
+            handover += f"\n\nThe last check reported:\n{note.strip()[:4000]}"
+        # A fresh conversation in the new rung's protocol: the old one may be
+        # in another message shape, and the cache is per model anyway.
+        self.messages = [{"role": "user", "content": instance_prompt(
+            self.goal, text_protocol=self.text_protocol) + "\n\n" + handover}]
+        self._new_rung_layers()
+        self._rung_start = run.steps
+        self._rung_gate_retries = 0
+        self._format_errors = self._truncations = 0
+        run.stop_reason, run.success = "max_steps", False
+        return True
+
+    def _after_turn(self, run: LoopRun, watch: Optional[WorkspaceWatch],
+                    before: Optional[dict]) -> None:
+        """Between turns (every model reply that did not end the run): route,
+        compact, checkpoint."""
+        self._drain_summaries(run)
+        if not self._ladder_done:
+            reason = None
+            if self.stuck is not None and self.stuck.escalate_recommended:
+                reason = f"stuck: {self.stuck.summary().get('escalate_trigger') or 'signal'}"
+            elif self.rung_steps and run.steps - self._rung_start >= self.rung_steps:
+                reason = f"rung step allowance ({self.rung_steps}) spent"
+            if reason and self._escalate(run, reason, watch, before):
+                return
+        if self.compactor is not None:
+            files, _ = self._turn_state(watch, before, run.steps)
+            self.compactor.note_files(files)
+            self.compactor.maybe_start(self.messages, self._last_used_tokens)
+            swapped = self.compactor.maybe_swap(self.messages, self._last_used_tokens)
+            if swapped is not None:
+                self.messages = swapped
+            self._drain_summaries(run)
+        if self.checkpoint is not None:
+            files = (self._turn_state(watch, before, run.steps)[0]
+                     if watch is not None else list(self._files_before_resume))
+            try:
+                self.checkpoint.save(self.messages, self._counters(run, files))
+            except Exception:  # noqa: BLE001 - a checkpoint never ends the loop
+                pass
 
     # -- the loop --
 
@@ -707,24 +953,28 @@ class LoopExecutor:
         before = watch.snapshot() if watch is not None else None
         # History is append-only from here: no message is edited, re-rendered
         # or dropped mid-run, so every request is the previous request plus a
-        # suffix (tests/test_prefix_stability.py).
-        self.messages = [{"role": "user", "content": instance_prompt(
-            self.goal, text_protocol=self.text_protocol)}]
-        if self.text_protocol:
+        # suffix (tests/test_prefix_stability.py). The exceptions are opt-in:
+        # compaction (AWOS_LOOP_COMPACT) and an escalation to another rung.
+        if not self._resume(run):
+            run = LoopRun(grammar=self.text_protocol)
+            self.messages = [{"role": "user", "content": instance_prompt(
+                self.goal, text_protocol=self.text_protocol)}]
+        self._new_rung_layers()
+        if self.text_protocol and not run.resumed:
             # Local llama-server: restore (or build) the saved KV of the static
             # system prefix before the first call. The text protocol sends no
             # tools, so that prefix is exactly the start of every request.
             # No-op unless AWOS_PROVIDER=local; never raises.
             run.prefix_cache = _prepare_local_prefix(self.system_prompt)
-        format_message = (FORMAT_ERROR_MESSAGE_TEXT if self.text_protocol
-                          else FORMAT_ERROR_MESSAGE).format(marker=SUBMIT_MARKER)
-        format_errors = truncations = 0
+        self._format_errors = self._truncations = 0
         try:
             while True:
                 stop = self._stop_reason_before_call(run, started)
                 if stop:
                     run.stop_reason = stop
                     break
+                format_message = (FORMAT_ERROR_MESSAGE_TEXT if self.text_protocol
+                                  else FORMAT_ERROR_MESSAGE).format(marker=SUBMIT_MARKER)
                 run.steps += 1
                 try:
                     reply = self.client.complete(self.system_prompt, self.messages,
@@ -733,70 +983,113 @@ class LoopExecutor:
                     record_error(COMPONENT, self.model_name, exc, turn=run.steps)
                     run.stop_reason = "model_error"
                     run.final_message = f"{type(exc).__name__}: {exc}"[:500]
+                    if self._escalate(run, f"model error: {type(exc).__name__}", watch, before):
+                        continue
                     break
                 self._account(run, reply)
+                self._last_used_tokens = int(reply.input_tokens or 0)
                 calls = list(reply.tool_calls or [])
                 run.transcript.append({"step": run.steps, "text": (reply.text or "")[:500],
                                        "commands": [str((c.arguments or {}).get("command", ""))[:300]
                                                     for c in calls]})
 
                 if calls:
-                    format_errors = truncations = 0
+                    self._format_errors = self._truncations = 0
                     self.messages.append(self.client.format_assistant_turn(reply))
                     if any(is_submit_command(c) for c in calls):
                         done, feedback = self._submit(run, reply.text or "",
                                                       self._changed(watch, before))
                         if done:
+                            if not run.success and self._escalate(
+                                    run, "gate red after the feedback rounds", watch, before,
+                                    note=str((run.gate or {}).get("feedback", ""))):
+                                continue
                             break
                         results = [ToolResult(success=False, text=feedback, error=feedback)
                                    if is_submit_command(c) else
                                    ToolResult.fail("Not run: this reply also submitted.")
                                    for c in calls]
                         self.messages.extend(self.client.format_tool_results(calls, results))
+                        self._after_turn(run, watch, before)
                         continue
                     results = []
                     for call in calls:
                         run.tool_calls += 1
                         results.append(self.registry.execute(call.name, call.arguments))
                     self.messages.extend(self.client.format_tool_results(calls, results))
+                    run.transcript[-1]["ok"] = all(getattr(r, "success", False) for r in results)
+                    if self.stuck is not None:
+                        _, key = self._turn_state(watch, before, run.steps)
+                        nudge = self.stuck.observe(run.steps, run.transcript[-1]["commands"],
+                                                   results, key)
+                        if nudge:
+                            self._append_note(nudge)
+                    self._after_turn(run, watch, before)
                     continue
 
                 submission = submitted_text(reply.text or "")
                 if submission is not None:
-                    format_errors = truncations = 0
+                    self._format_errors = self._truncations = 0
                     self.messages.append(self.client.format_assistant_turn(reply))
                     done, feedback = self._submit(run, submission,
                                                   self._changed(watch, before))
                     if done:
+                        if not run.success and self._escalate(
+                                run, "gate red after the feedback rounds", watch, before,
+                                note=str((run.gate or {}).get("feedback", ""))):
+                            continue
                         break
                     self.messages.append({"role": "user", "content": feedback})
+                    self._after_turn(run, watch, before)
                     continue
 
                 if _finish_reason(reply.raw) in TRUNCATED_FINISH:
-                    truncations += 1
-                    if truncations > MAX_TRUNCATIONS:
+                    self._truncations += 1
+                    if self._truncations > MAX_TRUNCATIONS:
                         run.stop_reason = "truncated"
+                        if self._escalate(run, "replies kept hitting the token limit",
+                                          watch, before):
+                            continue
                         break
                     if reply.text:
                         self.messages.append(self.client.format_assistant_turn(reply))
                     self.messages.append({"role": "user", "content": TRUNCATED_MESSAGE})
+                    self._after_turn(run, watch, before)
                     continue
 
-                format_errors += 1
+                self._format_errors += 1
                 run.format_errors += 1
                 if self.text_protocol:
                     run.parse_failures += 1  # the grammar should make this impossible
-                if format_errors >= MAX_FORMAT_ERRORS:
+                if self._format_errors >= MAX_FORMAT_ERRORS:
                     run.stop_reason = "format_error"
                     run.final_message = (reply.text or "")[:500]
+                    if self._escalate(run, "replies kept missing the action format",
+                                      watch, before):
+                        continue
                     break
                 if reply.text:
                     self.messages.append(self.client.format_assistant_turn(reply))
                 self.messages.append({"role": "user", "content": format_message})
+                self._after_turn(run, watch, before)
         finally:
             run.elapsed_sec = self.clock() - started
+            self._drain_summaries(run)
+            if self.stuck is not None:
+                run.stuck = self.stuck.summary()
+                if self._stuck_earlier:
+                    run.stuck["earlier_rungs"] = list(self._stuck_earlier)
+            if self.compactor is not None:
+                run.compaction = self.compactor.summary()
         if run.stop_reason not in ("submitted", "gate_red"):
             # Stopped by a limit, not by the model: what it changed is still reported.
             run.files_changed = self._changed(watch, before)
             run.success = False
+        if self.checkpoint is not None and run.stop_reason != "model_error":
+            # Ended on its own: not resumable. A model error (a crashed local
+            # server) or a kill leaves the checkpoint for the next attempt.
+            try:
+                self.checkpoint.finish(run.stop_reason)
+            except Exception:  # noqa: BLE001
+                pass
         return run
