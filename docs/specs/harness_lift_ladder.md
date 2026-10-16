@@ -106,3 +106,19 @@ cost tracking, with AWOS's full-suite gate after submit that feeds failures back
   Otherwise the default stays `pipeline` and the result is reported as is.
 - **Bias note:** the 40 issues were read for the pipeline's failure analysis, but `loop` was not tuned on them; its
   design is mini-swe-agent's. A further held-out check needs a harder held-out set (H1c hit a ceiling).
+
+## Amendment 5 (2026-10-16, before any local data): H2 runs on the `loop` engine, plus a grammar ablation
+
+`loop` is now AWOS's default engine (amendment 4 / H1d). H2 tests it on the local model with the local-reliability
+work from `docs/research/rea_synthesis_2026-10-16.md` (B1: grammar-constrained loop replies; B2: byte-stable
+prefix and cache telemetry; B3–B5 runtime switches if merged; all recorded in the result note).
+
+- **H2:** AWOS arm `loop` with `AWOS_PROVIDER=local` vs `mini-local`, on the same 15 single-file issues fixed in the
+  original H2 design (first 15 sorted fresh-set names whose reference fix touches one source file; list written to
+  the out dir first). One llama-server (`AWOS_LOCAL_SLOTS=1`), on AC power, nothing else running, 1 repeat, $0.
+  Decision as pre-registered: `--a mini-local --b loop --cost-budget 0.5`; KEEP also requires an observed Δ ≥ 15 pp.
+- **H2-g (secondary, ablation of B1):** `loop`-local with `AWOS_LOOP_GRAMMAR=1` vs `=0` on the same 15 issues, 1 repeat.
+  Primary metric: solve rate (T1 rule, reported descriptively at n = 15). Secondary: valid-action rate per reply and
+  format-error nudges per run; expect the grammar to drive nudges to about 0.
+- **Descriptive:** seconds per step, cached-prefix fraction, tokens/s and the power state per run.
+- No run starts until the owner approves it (as of 2026-10-16 the owner has paused runs).
