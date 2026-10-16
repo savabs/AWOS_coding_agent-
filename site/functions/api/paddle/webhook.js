@@ -8,7 +8,7 @@ import { verifySignature, applyEvent } from "../../../lib/paddle.js";
 const MAX_BODY = 256 * 1024;
 
 export async function onRequestPost({ request, env }) {
-  if (!env.LICENSES) return json({ error: "not configured" }, 503);
+  if (!env.LICENSES || !env.PADDLE_WEBHOOK_SECRET) return json({ error: "licensing not configured" }, 503);
   const raw = await readBodyCapped(request, MAX_BODY);
   if (raw === null) return json({ error: "body too large" }, 413);
   const check = await verifySignature({

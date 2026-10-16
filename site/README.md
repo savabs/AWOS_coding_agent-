@@ -47,17 +47,26 @@ The quickstart has one placeholder, `INSTALL_COMMAND`, in `src/pages/docs/quicks
 5. Deploy:
 
    ```
-   npx wrangler pages deploy site/public --project-name awos-site
+   cd site && npx wrangler pages deploy public
    ```
 
    The functions directory is picked up from `site/functions` when you deploy from `site/`. You can also deploy with `cd site && npx wrangler pages deploy public`.
 
 6. Optional: attach a custom domain in Pages → Custom domains.
 
-Read the requests:
+Read the requests (early-access form and the home-page waitlist share KV `ACCESS_REQUESTS` and `ADMIN_TOKEN`):
 
 ```
-curl "https://<your-site>/api/request-access?token=$ADMIN_TOKEN"
+curl "https://<your-site>/api/request-access?token=$ADMIN_TOKEN"                        # early-access requests + waitlist_count
+curl "https://<your-site>/api/request-access?token=$ADMIN_TOKEN&view=waitlist"          # counts by segment/role/why/country + entries
+curl -o waitlist.csv "https://<your-site>/api/request-access?token=$ADMIN_TOKEN&view=waitlist&format=csv"
 ```
+
+Waitlist records (`wl:e:<email>` or `wl:a:<ts>:<rand>`): `{form, segment, role, why, note, email, src, ts, country}` (`src` = `?src=` on the landing URL: hn, localllama, devindia, x, interview, other).
+`role` is one of solo_dev, team_dev, founder, researcher, other; `why` one of privacy, cost, offline, speed,
+curiosity, other; `segment` is derived from both (privacy_team, privacy_individual, cost_sensitive, local_builder,
+unclassified). Discovery plan: `docs/launch/discovery/`.
+
+`USAGE` and `LICENSES` KV bindings are optional; see `docs/launch/paddle_setup.md` section 3.
 
 Every number on the page must stay traceable to a run in `docs/memory/runs/`. Update the page when results change.

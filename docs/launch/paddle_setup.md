@@ -66,9 +66,35 @@ npx wrangler kv namespace create USAGE
 npx wrangler kv namespace create LICENSES
 ```
 
-Paste the two ids into `site/wrangler.toml` in place of
-`REPLACE_WITH_USAGE_NAMESPACE_ID` and `REPLACE_WITH_LICENSES_NAMESPACE_ID`.
-A deploy fails while the placeholders are there, which is the point.
+`USAGE` and `LICENSES` are optional and are **not** bound in
+`site/wrangler.toml` by default (placeholder ids made every `wrangler pages
+deploy` fail, which also blocked unrelated site changes). Without them the site
+deploys and the functions degrade safely:
+
+| endpoint | without the binding |
+|---|---|
+| `POST /api/ping` | `204`, count dropped (the CLI treats any 2xx as sent) |
+| `GET /api/usage` | `404` |
+| `POST /api/license/check`, `GET /api/license/claim`, `POST /api/paddle/webhook` | `503 {"error":"licensing not configured"}` (also when the Paddle secrets are missing) |
+| `GET /api/paddle/config` | `{"enabled":false}` |
+
+To turn them on, add these two blocks back to `site/wrangler.toml` (they sit
+there commented out) with the ids the commands above printed:
+
+```
+[[kv_namespaces]]
+binding = "USAGE"
+id = "<USAGE id>"
+
+[[kv_namespaces]]
+binding = "LICENSES"
+id = "<LICENSES id>"
+```
+
+Pages treats `wrangler.toml` as the source of truth for bindings, so bindings
+added only in the dashboard are not used. Check after the next deploy:
+`curl -s -o /dev/null -w '%{http_code}' -X POST https://awos.tirramind.com/api/license/check -d '{}'`
+returns `400` (bound) instead of `503` (unbound).
 
 Secrets (each command prompts for the value; nothing goes in the repo):
 

@@ -1,0 +1,3 @@
+date,kind,source,segment,role,why,country,serious,signals,price_named,pays_today,referred,offered_repo,note_file,summary
+2026-10-17,example_signups,localllama,cost_sensitive,,,,,,,,,,,"EXAMPLE ROW, delete: count of waitlist sign-ups from ?view=waitlist for this source and segment goes in summary as n=0"
+2026-10-17,example_interview,hn,privacy_team,team_dev,privacy,DE,yes,"pain;approver;price",50 USD/mo,yes,no,no,notes/2026-10-17_ab.md,"EXAMPLE ROW, delete: contract forbids cloud AI on client code"

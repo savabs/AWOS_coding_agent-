@@ -5,7 +5,7 @@ import { json, readJson, readBodyCapped, nowSeconds, LICENCE_KEY_RE } from "../.
 import { accessFor } from "../../../lib/paddle.js";
 
 export async function onRequestPost({ request, env }) {
-  if (!env.LICENSES) return json({ error: "not configured" }, 503);
+  if (!env.LICENSES) return json({ error: "licensing not configured" }, 503);
   const raw = await readBodyCapped(request, 2048);
   let body = null;
   try { body = raw === null ? null : JSON.parse(raw); } catch { body = null; }

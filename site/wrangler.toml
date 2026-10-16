@@ -6,17 +6,22 @@ compatibility_date = "2026-10-01"
 binding = "ACCESS_REQUESTS"
 id = "7ed8feebbe6147499b5b705d0d25d19f"
 
-# Opt-in anonymous usage counters (functions/api/ping.js, api/usage.js).
-# Create with `npx wrangler kv namespace create USAGE` and paste the id.
-[[kv_namespaces]]
-binding = "USAGE"
-id = "REPLACE_WITH_USAGE_NAMESPACE_ID"
-
-# AWOS Pro licences (functions/api/paddle/webhook.js, api/license/*.js).
-# Create with `npx wrangler kv namespace create LICENSES` and paste the id.
-[[kv_namespaces]]
-binding = "LICENSES"
-id = "REPLACE_WITH_LICENSES_NAMESPACE_ID"
+# USAGE and LICENSES are OPTIONAL and deliberately not bound here yet.
+# Pages rejects a deploy whose wrangler.toml names a KV id that does not exist,
+# so placeholder ids blocked every deploy. Without the bindings the functions
+# degrade safely: /api/ping answers 204 and drops the count, /api/usage is 404,
+# /api/license/* and /api/paddle/webhook answer 503 "licensing not configured",
+# /api/paddle/config stays {"enabled":false}.
+# To turn them on, create the namespaces and add these blocks back with the
+# real ids (steps: docs/launch/paddle_setup.md, section 3):
+#
+# [[kv_namespaces]]
+# binding = "USAGE"        # opt-in usage counters: functions/api/ping.js, api/usage.js
+# id = "<id from: npx wrangler kv namespace create USAGE>"
+#
+# [[kv_namespaces]]
+# binding = "LICENSES"     # AWOS Pro licences: functions/api/paddle/webhook.js, api/license/*.js
+# id = "<id from: npx wrangler kv namespace create LICENSES>"
 
 [vars]
 # sandbox -> sandbox-api.paddle.com + Paddle.Environment "sandbox"; live -> api.paddle.com.

@@ -15,7 +15,7 @@ const MAX_CLAIMS = 5;               // ...at most this many times
 
 export async function onRequestGet({ request, env, fetchImpl }) {
   const kv = env.LICENSES;
-  if (!kv || !env.PADDLE_API_KEY) return json({ status: "not_configured" }, 503);
+  if (!kv || !env.PADDLE_API_KEY) return json({ status: "not_configured", error: "licensing not configured" }, 503);
   const txn = new URL(request.url).searchParams.get("txn") || "";
   if (!TXN_RE.test(txn)) return json({ status: "unknown_transaction" }, 404);
 

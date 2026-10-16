@@ -11,6 +11,8 @@ import { onRequestGet as claim } from "../functions/api/license/claim.js";
 import { onRequestPost as check } from "../functions/api/license/check.js";
 import { onRequestPost as ping, cleanPing } from "../functions/api/ping.js";
 import { onRequestGet as usage } from "../functions/api/usage.js";
+import { onRequestPost as accessPost, onRequestGet as accessGet, segmentFor, cleanWaitlist, waitlistCsv }
+  from "../functions/api/request-access.js";
 
 class FakeKV {
   constructor() { this.m = new Map(); this.puts = 0; }
@@ -348,6 +350,161 @@ test("ping endpoint: counts per day/event, stores no IP or install id; usage nee
   assert.equal(unset.status, 404);
   const ok = await body(await usage({ request: new Request("https://awos.test/api/usage?token=owner-token"), env: e }));
   assert.equal(ok.days[day].job_finished.total, 3);
+});
+
+// ── optional bindings unbound (USAGE / LICENSES not in wrangler.toml) ────────
+
+test("unbound USAGE: ping is accepted and dropped (204), usage is 404", async () => {
+  const bare = { ADMIN_TOKEN: "owner-token" };
+  const r = await ping({ request: pingReq({ v: 1, event: "install", install_id: IID, os: "linux" }), env: bare });
+  assert.equal(r.status, 204);
+  assert.equal(await r.text(), "");
+  const garbage = new Request("https://awos.test/api/ping", { method: "POST", body: "not json" });
+  assert.equal((await ping({ request: garbage, env: bare })).status, 204);
+  const u = await usage({ request: new Request("https://awos.test/api/usage?token=owner-token"), env: bare });
+  assert.equal(u.status, 404);
+});
+
+test("unbound LICENSES or secrets: licence endpoints say 503 licensing not configured; config disabled", async () => {
+  const bare = {};
+  const c = await check({ request: new Request("https://awos.test/api/license/check",
+    { method: "POST", body: JSON.stringify({ key: "awos_" + "A".repeat(32) }) }), env: bare });
+  assert.equal(c.status, 503);
+  assert.equal((await body(c)).error, "licensing not configured");
+  const cl = await claim({ request: new Request("https://awos.test/api/license/claim?txn=txn_01abcdefghij"), env: bare });
+  assert.equal(cl.status, 503);
+  assert.deepEqual(await body(cl), { status: "not_configured", error: "licensing not configured" });
+  const noKey = await claim({ request: new Request("https://awos.test/api/license/claim?txn=txn_01abcdefghij"),
+    env: { LICENSES: new FakeKV() } });
+  assert.equal(noKey.status, 503);
+  const wh = await webhook({ request: await signed(subEvent("subscription.activated")), env: bare });
+  assert.equal(wh.status, 503);
+  assert.equal((await body(wh)).error, "licensing not configured");
+  const whNoSecret = await webhook({ request: await signed(subEvent("subscription.activated")),
+    env: { LICENSES: new FakeKV() } });
+  assert.equal(whNoSecret.status, 503);
+  assert.deepEqual(await body(await config({ env: bare })), { enabled: false });
+  assert.deepEqual(await body(await config({ env: { PADDLE_CHECKOUT_ENABLED: "1", PADDLE_CLIENT_TOKEN: "test_x",
+    PADDLE_API_KEY: "k", PADDLE_WEBHOOK_SECRET: "s", PADDLE_PRICE_IDS: PRICE } })), { enabled: false });
+});
+
+// ── request-access + local-first waitlist ───────────────────────────────────
+
+const accessReq = (obj, { ip = "198.51.100.7", country = "IN" } = {}) =>
+  new Request("https://awos.test/api/request-access", {
+    method: "POST", body: typeof obj === "string" ? obj : JSON.stringify(obj),
+    headers: { "cf-connecting-ip": ip, "cf-ipcountry": country, "content-type": "application/json" },
+  });
+const adminGet = (q) => new Request("https://awos.test/api/request-access?" + q);
+
+test("waitlist: segment tag comes only from role + why", () => {
+  assert.equal(segmentFor("team_dev", "privacy"), "privacy_team");
+  assert.equal(segmentFor("founder", "privacy"), "privacy_team");
+  assert.equal(segmentFor("solo_dev", "privacy"), "privacy_individual");
+  assert.equal(segmentFor("solo_dev", "cost"), "cost_sensitive");
+  assert.equal(segmentFor("researcher", "offline"), "local_builder");
+  assert.equal(segmentFor("other", "curiosity"), "local_builder");
+  assert.equal(segmentFor("other", "other"), "unclassified");
+});
+
+test("waitlist: strict validation and size caps", async () => {
+  assert.ok(cleanWaitlist({ role: "solo_dev" }).error);
+  assert.ok(cleanWaitlist({ role: "ceo", why: "cost" }).error);
+  assert.ok(cleanWaitlist({ role: "solo_dev", why: "money" }).error);
+  assert.ok(cleanWaitlist({ role: ["solo_dev"], why: "cost" }).error);
+  assert.ok(cleanWaitlist({ role: "solo_dev", why: "cost", note: "x".repeat(501) }).error);
+  assert.ok(cleanWaitlist({ role: "solo_dev", why: "cost", email: "nope" }).error);
+  assert.ok(cleanWaitlist({ role: "solo_dev", why: "cost", email: "a@" + "b".repeat(260) + ".com" }).error);
+  const ok = cleanWaitlist({ role: "solo_dev", why: "cost", note: " hi\u0007 ", email: "A@B.io", extra: "dropped" });
+  assert.deepEqual(ok.rec, { form: "waitlist", segment: "cost_sensitive", role: "solo_dev", why: "cost",
+    note: "hi", email: "a@b.io", src: "" });
+  assert.equal(cleanWaitlist({ role: "solo_dev", why: "cost", src: "hn" }).rec.src, "hn");
+  assert.equal(cleanWaitlist({ role: "solo_dev", why: "cost", src: "evil.com" }).rec.src, "");
+  assert.ok(cleanWaitlist({ role: "solo_dev", why: "cost", src: 7 }).error);
+
+  const e = { ACCESS_REQUESTS: new FakeKV() };
+  const bad = await accessPost({ request: accessReq({ form: "waitlist", role: "solo_dev" }), env: e });
+  assert.equal(bad.status, 400);
+  const huge = await accessPost({ request: accessReq({ form: "waitlist", role: "solo_dev", why: "cost",
+    note: "x".repeat(5000) }), env: e });
+  assert.equal(huge.status, 413);
+  const tooBig = await accessPost({ request: accessReq("x".repeat(20000)), env: e });
+  assert.equal(tooBig.status, 413);
+  assert.equal((await accessPost({ request: accessReq("[1,2]"), env: e })).status, 400);
+  assert.equal([...e.ACCESS_REQUESTS.m.keys()].filter((k) => k.startsWith("wl:")).length, 0);
+  // honeypot: looks fine to the bot, nothing stored
+  const bot = await accessPost({ request: accessReq({ form: "waitlist", role: "solo_dev", why: "cost",
+    website: "http://spam" }), env: e });
+  assert.equal(bot.status, 200);
+  assert.equal([...e.ACCESS_REQUESTS.m.keys()].filter((k) => k.startsWith("wl:")).length, 0);
+  // KV unbound
+  assert.equal((await accessPost({ request: accessReq({ form: "waitlist", role: "solo_dev", why: "cost" }),
+    env: {} })).status, 503);
+});
+
+test("waitlist: stores a segment-tagged record; email optional; rate-limited per IP", async () => {
+  const e = { ACCESS_REQUESTS: new FakeKV(), ADMIN_TOKEN: "owner-token" };
+  const r1 = await accessPost({ request: accessReq({ form: "waitlist", role: "team_dev", why: "privacy",
+    email: "Dev@Corp.example", note: "code cannot leave the VPN" }), env: e });
+  assert.equal(r1.status, 200);
+  assert.deepEqual(await body(r1), { ok: true, segment: "privacy_team" });
+  const stored = JSON.parse(await e.ACCESS_REQUESTS.get("wl:e:dev@corp.example"));
+  assert.equal(stored.segment, "privacy_team");
+  assert.equal(stored.country, "IN");
+  assert.ok(!JSON.stringify(stored).includes("198.51.100.7"));
+  const r2 = await accessPost({ request: accessReq({ form: "waitlist", role: "solo_dev", why: "cost" },
+    { ip: "198.51.100.8" }), env: e });
+  assert.equal(r2.status, 200);
+  for (let i = 0; i < 4; i++) {
+    await accessPost({ request: accessReq({ form: "waitlist", role: "researcher", why: "offline" },
+      { ip: "198.51.100.9" }), env: e });
+  }
+  const limited = await accessPost({ request: accessReq({ form: "waitlist", role: "researcher", why: "offline" },
+    { ip: "198.51.100.9" }), env: e });
+  assert.equal(limited.status, 200);  // 5th from this IP still allowed
+  const sixth = await accessPost({ request: accessReq({ form: "waitlist", role: "researcher", why: "offline" },
+    { ip: "198.51.100.9" }), env: e });
+  assert.equal(sixth.status, 429);
+});
+
+test("waitlist admin: token-protected counts by segment and CSV export; legacy form unchanged", async () => {
+  const e = { ACCESS_REQUESTS: new FakeKV(), ADMIN_TOKEN: "owner-token" };
+  const sign = (o, ip) => accessPost({ request: accessReq({ form: "waitlist", ...o }, { ip }), env: e });
+  await sign({ role: "team_dev", why: "privacy", email: "a@x.io", src: "devindia" }, "1");
+  await sign({ role: "solo_dev", why: "cost", note: "=HYPERLINK(\"evil\")" }, "2");
+  await sign({ role: "solo_dev", why: "cost", note: "rent, food, \"tokens\"" }, "3");
+  await sign({ role: "researcher", why: "curiosity" }, "4");
+  const legacy = await accessPost({ request: accessReq({ name: "Ann", email: "ann@x.io", role: "Founder" },
+    { ip: "5" }), env: e });
+  assert.equal(legacy.status, 200);
+
+  for (const q of ["view=waitlist", "view=waitlist&token=wrong", "view=waitlist&format=csv&token="]) {
+    assert.equal((await accessGet({ request: adminGet(q), env: e })).status, 404);
+  }
+  assert.equal((await accessGet({ request: adminGet("view=waitlist&token=owner-token"),
+    env: { ACCESS_REQUESTS: e.ACCESS_REQUESTS } })).status, 404);  // no ADMIN_TOKEN set
+
+  const v = await body(await accessGet({ request: adminGet("view=waitlist&token=owner-token"), env: e }));
+  assert.equal(v.count, 4);
+  assert.deepEqual(v.by_segment, { privacy_team: 1, privacy_individual: 0, cost_sensitive: 2,
+    local_builder: 1, unclassified: 0 });
+  assert.equal(v.by_role.solo_dev, 2);
+  assert.equal(v.by_why.cost, 2);
+  assert.equal(v.by_country.IN, 4);
+  assert.equal(v.by_src.devindia, 1);
+
+  const csvRes = await accessGet({ request: adminGet("view=waitlist&format=csv&token=owner-token"), env: e });
+  assert.match(csvRes.headers.get("content-type"), /text\/csv/);
+  const csv = await csvRes.text();
+  assert.equal(csv.split("\n")[0], "ts,segment,role,why,src,country,email,note");
+  assert.ok(csv.includes(`"'=HYPERLINK(""evil"")"`));
+  assert.ok(csv.includes(`"rent, food, ""tokens"""`));
+  assert.equal(waitlistCsv([]), "ts,segment,role,why,src,country,email,note\n");
+
+  const all = await body(await accessGet({ request: adminGet("token=owner-token"), env: e }));
+  assert.equal(all.count, 1);
+  assert.equal(all.requests[0].email, "ann@x.io");
+  assert.equal(all.waitlist_count, 4);
 });
 
 // ── helpers ──────────────────────────────────────────────────────────────────

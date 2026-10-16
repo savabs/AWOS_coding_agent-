@@ -41,7 +41,8 @@ export function cleanPing(body) {
 }
 
 export async function onRequestPost({ request, env }) {
-  if (!env.USAGE) return json({ ok: false }, 503);
+  // USAGE unbound (optional KV): accept and drop, so CLIs never retry or warn.
+  if (!env.USAGE) return new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
   const raw = await readBodyCapped(request, MAX_BODY);
   let body = null;
   try { body = raw === null ? null : JSON.parse(raw); } catch { body = null; }

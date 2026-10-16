@@ -133,6 +133,9 @@ label{display:grid;gap:6px;font-size:14px;font-weight:500}
 input,select,textarea{font:15px var(--body);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px 12px;width:100%}
 textarea{min-height:96px;resize:vertical}
 .formnote{font-size:13px;color:var(--muted);margin:0}
+.waitlist{max-width:760px}
+.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.hero pre.install{margin:18px 0 8px}
 .status{font-size:14px;margin:0;min-height:1.4em}
 .status.ok{color:var(--pass)} .status.err{color:var(--fail)}
 
