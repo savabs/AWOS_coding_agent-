@@ -504,7 +504,8 @@ class TemplateLlamaServer(FakeLlamaServer):
 
     def __init__(self, replies):
         super().__init__(replies)
-        import jinja2
+        # Optional test dependency (renders the chat template); skip without it.
+        jinja2 = pytest.importorskip("jinja2")
         self.tpl = jinja2.Environment().from_string(QWEN3_LIKE_TEMPLATE)
         self.slot = ""
         self.prompts: list[str] = []
@@ -571,7 +572,7 @@ def test_think_stub_keeps_prefix_stable(tmp_path, monkeypatch):
 def test_stub_in_content_alone_is_split_off_by_the_template():
     # Why the flag uses reasoning_content and not a stub inside `content`: the
     # template splits '</think>' out of content, and an empty block is dropped.
-    import jinja2
+    jinja2 = pytest.importorskip("jinja2")
     tpl = jinja2.Environment().from_string(QWEN3_LIKE_TEMPLATE)
     msgs = [{"role": "user", "content": "t"},
             {"role": "assistant", "content": "<think>\n\n</think>\n\nA"},
