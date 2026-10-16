@@ -367,9 +367,10 @@ def test_response_cache():
     from response_cache import ResponseCache
 
     cache = ResponseCache(ttl_seconds=3)  # 3-second TTL for testing
+    t0 = {"temperature": 0}
 
-    key = cache.make_key("deepseek", "explain the worker module")
-    same_key = cache.make_key("deepseek", "  Explain the Worker Module  ")  # normalised
+    key = cache.make_key("deepseek", "explain the worker module", sampling=t0)
+    other_case = cache.make_key("deepseek", "  Explain the Worker Module  ", sampling=t0)
 
     # Miss on empty cache
     assert cache.get(key) is None
@@ -380,12 +381,17 @@ def test_response_cache():
     assert cache.get(key) == "The worker module handles..."
     print("  ✅ Cache hit after set")
 
-    # Same key after normalisation
-    assert key == same_key, "Normalisation should produce same key"
-    print("  ✅ Key normalisation works (case + whitespace insensitive)")
+    # Exact request only: case/whitespace change what the model reads
+    assert key != other_case, "Keys must not be normalised"
+    print("  ✅ No key normalisation (exact request)")
+
+    # Sampled requests are never cached
+    assert cache.make_key("deepseek", "explain the worker module",
+                          sampling={"temperature": 0.3}) is None
+    print("  ✅ temperature > 0 is not cacheable")
 
     # Different model = different key
-    other_key = cache.make_key("haiku", "explain the worker module")
+    other_key = cache.make_key("haiku", "explain the worker module", sampling=t0)
     assert other_key != key
     print("  ✅ Different model produces different key")
 

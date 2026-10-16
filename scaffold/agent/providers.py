@@ -647,6 +647,10 @@ def usage_tokens(usage: Any, timings: Any = None) -> dict:
       - Anthropic: input_tokens excludes cache_read_input_tokens and
         cache_creation_input_tokens, so they are added back;
       - llama-server: `timings.cache_n` when usage carries no cached count.
+    With speculative decoding on, llama-server's timings also carry draft_n
+    (tokens drafted) and draft_n_accepted; then the result adds "draft",
+    "draft_accepted" and "draft_acceptance" (accepted / drafted, None when
+    nothing was drafted). Those keys are absent otherwise.
     Missing fields count as 0; never raises.
     """
     out = {"input": 0, "cached": 0, "cache_write": 0, "output": 0}
@@ -666,12 +670,24 @@ def usage_tokens(usage: Any, timings: Any = None) -> dict:
             out["cached"], out["cache_write"] = read, write
         if not out["cached"] and timings is not None:
             out["cached"] = _uint(_uget(timings, "cache_n"))
+        if timings is not None and _uget(timings, "draft_n") is not None:
+            drafted = _uint(_uget(timings, "draft_n"))
+            accepted = min(_uint(_uget(timings, "draft_n_accepted")), drafted)
+            out["draft"], out["draft_accepted"] = drafted, accepted
+            out["draft_acceptance"] = draft_acceptance(drafted, accepted)
         # A provider never caches more than it was sent.
         out["cached"] = min(out["cached"], out["input"])
         out["cache_write"] = min(out["cache_write"], out["input"] - out["cached"])
     except Exception:
         pass
     return out
+
+
+def draft_acceptance(drafted: Any, accepted: Any) -> Optional[float]:
+    """Speculative-decoding acceptance rate accepted / drafted (0..1), None
+    when nothing was drafted or the counts are unusable."""
+    d, a = _uint(drafted), _uint(accepted)
+    return round(min(a, d) / d, 4) if d else None
 
 
 def usage_cache_write_1h(usage: Any) -> int:

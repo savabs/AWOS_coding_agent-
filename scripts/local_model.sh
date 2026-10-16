@@ -31,8 +31,16 @@
 #                          refused on mismatch, swapped for ngram on battery
 #   AWOS_LOCAL_SPEC_DRAFT_MAX  max drafted tokens per step, 1..64 (default 16)
 #   AWOS_LOCAL_IDLE_S      unload the model after N s without requests (default 300,
-#                          120 on battery; 0 = never); the next request reloads it
+#                          120 on battery; 0 = never); the next request reloads it.
+#                          Never set below AWOS_LOOP_CMD_TIMEOUT_S (default 120) +
+#                          AWOS_LOCAL_IDLE_MARGIN_S (default 60), so a long loop command
+#                          cannot unload the model mid-task
 #   AWOS_LOCAL_EXIT_AFTER_SLEEP_S  `watch`: exit the process after N s asleep (default 300)
+#                          `watch` never stops (or restarts) the server while a task holds
+#                          a lease ($AWOS_MODELS_DIR/leases/, local_runtime.task_lease());
+#                          on a power-source change it re-plans and restarts the server
+#                          once idle with no lease if the flags changed
+#   AWOS_LOCAL_LEASE_TTL_S a lease is live while its heartbeat is younger (default 90)
 #   AWOS_LOCAL_SLOT_SAVE   1|0 slot save/restore dir for prefix KV (default 1)
 #   AWOS_LOCAL_SLOT_DIR    slot files          (default $AWOS_MODELS_DIR/slots)
 #   AWOS_LOCAL_CACHE_RAM_MB host prompt cache  (default 2048; llama-server's own is 8192)

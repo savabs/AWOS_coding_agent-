@@ -581,8 +581,16 @@ class UnifiedAgent:
         if past_solutions:
             user_input = f"[PAST CONTEXT]\n{past_solutions}\n\n[NEW REQUEST]\n{user_input}"
 
-        # Phase 3: Check response cache before routing (free hits)
-        cache_key = self.response_cache.make_key("unified", user_input)
+        # Phase 3: Check response cache before routing (free hits). The key
+        # covers everything the handlers may send: provider/model set, session
+        # context and the full input. Those handlers sample at temperature 0.3
+        # (DeepSeek) or the API default (Haiku), so make_key returns None (not
+        # cacheable) and get/set are a miss/no-op until they run at 0.
+        cache_key = self.response_cache.make_key(
+            "deepseek-chat|claude-haiku-4-5", provider="unified-router",
+            messages=[{"role": "context", "content": session_context},
+                      {"role": "user", "content": user_input}],
+            sampling={"temperature": 0.3, "max_tokens": 2048})
         cached = self.response_cache.get(cache_key)
         if cached:
             self.token_tracker.record_cache_hit(estimated_cost_saved=0.005)

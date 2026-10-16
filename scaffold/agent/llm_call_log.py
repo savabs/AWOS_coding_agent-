@@ -12,6 +12,11 @@ alone never shows.
 
 Observability must not break execution: nothing here raises.
 
+Redaction at rest: every string in a line (error text, extra fields) goes
+through secret_scan.redact_obj before it is written, so a key format or one
+of the owner's secret env values echoed in a provider error never lands in
+the log.
+
 Env:
     AWOS_LLM_CALL_LOG=<path>  write here instead of .awos/llm_calls.jsonl
     AWOS_LLM_CALL_LOG=0       disable (also "off", "false", "")
@@ -92,6 +97,20 @@ def _provider(response: Any) -> Optional[str]:
         if isinstance(extra, dict):
             value = extra.get("provider")
     return value if isinstance(value, str) and value else None
+
+
+def _redact_line(line: dict) -> dict:
+    """secret_scan.redact_obj(line); if redaction itself is unavailable, every
+    string field is dropped (fail closed: no text written unredacted)."""
+    try:
+        try:
+            from .secret_scan import redact_obj
+        except ImportError:
+            from secret_scan import redact_obj
+        return redact_obj(line)
+    except Exception:
+        return {k: ("[REDACTED:redact_error]" if isinstance(v, str) else v)
+                for k, v in line.items()}
 
 
 def _local_mode() -> bool:
@@ -208,7 +227,9 @@ def timing_fields(response: Any) -> dict:
     tokens actually prefilled), prompt_eval_ms (prompt_ms), server_cache_n
     (cache_n, prompt tokens reused from the slot's KV), gen_tokens
     (predicted_n), gen_ms (predicted_ms), gen_tokens_per_s
-    (predicted_per_second). Anthropic: cache_read_tokens /
+    (predicted_per_second); with speculative decoding draft_tokens (draft_n),
+    draft_accepted (draft_n_accepted) and draft_acceptance (their ratio,
+    None when nothing was drafted). Anthropic: cache_read_tokens /
     cache_creation_tokens (usage.cache_read_input_tokens /
     cache_creation_input_tokens). Only the fields the response carries are
     returned; never raises."""
@@ -225,6 +246,13 @@ def timing_fields(response: Any) -> dict:
                 value = conv(timings.get(src))
                 if value is not None:
                     out[key] = round(value, 3) if isinstance(value, float) else value
+            # Speculative decoding (AWOS_LOCAL_SPEC): drafted / accepted tokens.
+            drafted = _int(timings.get("draft_n"))
+            if drafted is not None:
+                drafted = max(0, drafted)
+                accepted = max(0, min(_int(timings.get("draft_n_accepted")) or 0, drafted))
+                out["draft_tokens"], out["draft_accepted"] = drafted, accepted
+                out["draft_acceptance"] = round(accepted / drafted, 4) if drafted else None
         if not _get(response, "choices"):  # Anthropic Messages shape
             usage = _get(response, "usage")
             for key, src in (("cache_read_tokens", "cache_read_input_tokens"),
@@ -265,7 +293,8 @@ def record_call(component: str, requested_model: Optional[str], response_model: 
             "cached_tokens": cached_tokens,
             "cost_usd": cost_usd,
             "visible_chars": visible_chars,
-            "error": None if error is None else str(error)[:500],
+            # Redact before clipping: a cut key would no longer match a rule.
+            "error": None if error is None else _redact_line({"e": str(error)})["e"][:500],
         }
         for key, env in _TAG_ENV.items():
             if os.environ.get(env):
@@ -281,6 +310,9 @@ def record_call(component: str, requested_model: Optional[str], response_model: 
             line["cache_hit_ratio"] = _ratio(line["cached_tokens"], line["input_tokens"])
         if not line.get("provider") and _local_mode():
             line["provider"] = "local"
+        # default=str turns odd objects into text: stringify them first so
+        # that text is redacted too.
+        line = _redact_line(json.loads(json.dumps(line, default=str)))
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(line, default=str) + "\n")

@@ -31,6 +31,15 @@ Hook points for the agent loop (this module never edits the loop):
     # local_runtime.ensure_server() first (AWOS_LOCAL_AUTOSTART=1 makes
     # prepare_first_step do that itself) to restart a server the watchdog stopped.
 
+    # around the whole task (all steps, commands and the gate):
+    with local_runtime.task_lease(task_id):
+        run()
+    # A heartbeat file under $AWOS_MODELS_DIR/leases/ is refreshed by a daemon thread;
+    # `watch` never stops the server, and never restarts it for a power-source change,
+    # while a live lease exists. plan() also keeps --sleep-idle-seconds at or above the
+    # loop's command timeout + AWOS_LOCAL_IDLE_MARGIN_S, so llama-server's own idle
+    # unload cannot fire while a single bash command runs.
+
 Findings on this machine (2026-10-16, llama.cpp b11146, Qwen3.5-9B Q4_K_M):
 Qwen3.5 is a hybrid architecture (`qwen35`): 32 blocks, full attention every 4th block
 (8 attention layers, 4 KV heads x 256+256 dims), the other 24 are Gated-DeltaNet
@@ -49,20 +58,24 @@ server restart from 1880 prompt tokens / 8048 ms to 22 tokens / 428 ms.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 import re
 import shlex
+import socket
 import struct
 import subprocess
 import sys
+import threading
 import time
+import uuid
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Iterator, Optional
 
 MIB = 1024 * 1024
 
@@ -304,7 +317,8 @@ def battery_policy(ps: PowerState, mode: str = "restrictive",
     (16384) or when AWOS_LOCAL_BATTERY_CTX_MAX is set, because a silent context change
     would make battery and AC runs of the same experiment incomparable."""
     if mode == "ignore" or ps.source != "battery":
-        return Policy("ac" if ps.source == "ac" else "power-unknown")
+        # idle_s=0: no opinion, so the user's AWOS_LOCAL_IDLE_S (incl. 0 = never) decides
+        return Policy("ac" if ps.source == "ac" else "power-unknown", idle_s=0)
     if ps.percent is not None and ps.percent < 20:
         cap = min(16384, battery_ctx_max) if battery_ctx_max else 16384
         return Policy("battery-low", ctx_max=cap, allow_draft=False, spec_draft_max=8, idle_s=60)
@@ -327,6 +341,32 @@ def _int_env(env, key, default, lo=None, hi=None) -> int:
 
 class PlanError(Exception):
     pass
+
+
+#: Mirrors scaffold/agent/loop_executor.py (DEFAULT_CMD_TIMEOUT_S / MAX_CMD_TIMEOUT_S);
+#: this module stays stdlib-only and importable as a plain script, so it does not import
+#: the loop. tests/test_local_runtime.py asserts the two stay equal.
+DEFAULT_LOOP_CMD_TIMEOUT_S = 120
+MAX_LOOP_CMD_TIMEOUT_S = 600
+DEFAULT_IDLE_MARGIN_S = 60
+
+
+def loop_cmd_timeout_s(env: Optional[dict] = None) -> int:
+    """AWOS_LOOP_CMD_TIMEOUT_S as the loop reads it (default 120, at most 600)."""
+    env = os.environ if env is None else env
+    try:
+        val = _int_env(env, "AWOS_LOOP_CMD_TIMEOUT_S", DEFAULT_LOOP_CMD_TIMEOUT_S, lo=1)
+    except PlanError:
+        val = DEFAULT_LOOP_CMD_TIMEOUT_S
+    return min(MAX_LOOP_CMD_TIMEOUT_S, val)
+
+
+def idle_floor_s(env: Optional[dict] = None) -> int:
+    """Smallest allowed --sleep-idle-seconds: one loop command + a margin, so the model
+    is never unloaded between the call that issued a command and the call after it."""
+    env = os.environ if env is None else env
+    return loop_cmd_timeout_s(env) + _int_env(env, "AWOS_LOCAL_IDLE_MARGIN_S",
+                                              DEFAULT_IDLE_MARGIN_S, lo=0)
 
 
 SPEC_MODES = ("off", "ngram", "draft")
@@ -386,6 +426,11 @@ def plan(env: Optional[dict] = None, power: Optional[PowerState] = None,
     bmode = (env.get("AWOS_LOCAL_BATTERY_POLICY") or "restrictive").strip().lower()
     bctx = _int_env(env, "AWOS_LOCAL_BATTERY_CTX_MAX", 0, lo=0) or None
     pol = Policy.merge(user, battery_policy(power, bmode, bctx))
+    floor = idle_floor_s(env)
+    if 0 < pol.idle_s < floor:
+        notes.append(f"idle {pol.idle_s}s -> {floor}s (loop command timeout "
+                     f"{loop_cmd_timeout_s(env)}s + margin)")
+        pol.idle_s = floor
     ctx = min(want_ctx, pol.ctx_max) if pol.ctx_max else want_ctx
     if ctx < want_ctx:
         notes.append(f"context {want_ctx} -> {ctx} ({pol.name} policy)")
@@ -495,7 +540,10 @@ def slot_dir(env: Optional[dict] = None) -> Path:
     return Path(raw).expanduser() if raw else models_dir(env) / "slots"
 
 
-def _file_identity(path: str) -> str:
+def _file_identity(path: str) -> Optional[str]:
+    """name:size:sha256(first+last 4 MiB)[:16], or None when the file is unreadable."""
+    if not path:
+        return None
     p = Path(path)
     try:
         st = p.stat()
@@ -506,22 +554,62 @@ def _file_identity(path: str) -> str:
             h.update(fh.read(4 * MIB))
         return f"{p.name}:{st.st_size}:{h.hexdigest()[:16]}"
     except OSError:
-        return f"{path}:unreadable"
+        return None
 
 
-#: flags that change the saved KV/state layout (sampling, spec and idle flags do not)
-KV_FLAGS = {"-c", "--ctx-size", "-np", "--parallel", "-fa", "--flash-attn", "-ctk", "-ctv",
-            "--cache-type-k", "--cache-type-v", "--swa-full", "-kvu", "--kv-unified",
-            "-no-kvu", "--no-kv-unified"}
+#: Flags that change the saved KV/state (layout or the values in it) -> number of values
+#: they take (-1 = one optional value). Sampling, spec and idle flags do not matter.
+#: Adapters / control vectors / RoPE+YaRN scaling change every cached K/V value.
+KV_FLAG_ARITY = {
+    "--ctx-size": 1, "--parallel": 1, "--flash-attn": -1, "--cache-type-k": 1,
+    "--cache-type-v": 1, "--swa-full": 0, "--kv-unified": 0, "--no-kv-unified": 0,
+    "--lora": 1, "--lora-scaled": 2, "--lora-init-without-apply": 0,
+    "--control-vector": 1, "--control-vector-scaled": 2, "--control-vector-layer-range": 2,
+    "--rope-scaling": 1, "--rope-scale": 1, "--rope-freq-base": 1, "--rope-freq-scale": 1,
+    "--yarn-orig-ctx": 1, "--yarn-ext-factor": 1, "--yarn-attn-factor": 1,
+    "--yarn-beta-slow": 1, "--yarn-beta-fast": 1, "--override-kv": 1,
+}
+KV_FLAG_ALIASES = {"-c": "--ctx-size", "-np": "--parallel", "-fa": "--flash-attn",
+                   "-ctk": "--cache-type-k", "-ctv": "--cache-type-v", "-kvu": "--kv-unified",
+                   "-no-kvu": "--no-kv-unified"}
+KV_FLAGS = set(KV_FLAG_ARITY) | set(KV_FLAG_ALIASES)
+_FILE_VALUED = {"--lora", "--lora-scaled", "--control-vector", "--control-vector-scaled"}
+_NUM_RE = re.compile(r"^-?\d+(\.\d*)?([eE][-+]?\d+)?$")
+
+
+def _is_value(tok: str) -> bool:
+    return not tok.startswith("-") or bool(_NUM_RE.match(tok))
 
 
 def kv_flags_signature(cmd: str) -> str:
-    toks = shlex.split(cmd or "")
+    """Sorted `flag=values` for every KV-relevant flag in a llama-server command line.
+    Accepts `--flag value` and `--flag=value`, short aliases, repeated flags; adapter /
+    control-vector files are keyed by content identity as well as path."""
+    try:
+        toks = shlex.split(cmd or "")
+    except ValueError:
+        toks = (cmd or "").split()
     out = []
-    for i, t in enumerate(toks):
-        if t in KV_FLAGS:
-            nxt = toks[i + 1] if i + 1 < len(toks) and not toks[i + 1].startswith("-") else ""
-            out.append(f"{t}={nxt}")
+    i = 0
+    while i < len(toks):
+        tok = toks[i]
+        i += 1
+        inline = None
+        if tok.startswith("--") and "=" in tok:
+            tok, inline = tok.split("=", 1)
+        flag = KV_FLAG_ALIASES.get(tok, tok)
+        if flag not in KV_FLAG_ARITY:
+            continue
+        arity = KV_FLAG_ARITY[flag]
+        want = 1 if arity == -1 else arity
+        values = [inline] if inline is not None else []
+        while len(values) < want and i < len(toks) and _is_value(toks[i]):
+            values.append(toks[i])
+            i += 1
+        if flag in _FILE_VALUED and values:
+            ident = _file_identity(values[0])
+            values[0] = f"{values[0]}@{ident or 'unreadable'}"
+        out.append(f"{flag}={' '.join(values)}")
     return " ".join(sorted(out))
 
 
@@ -530,12 +618,33 @@ def server_cmd_file(env: Optional[dict] = None) -> Path:
     return models_dir(env) / f"llama-server.{env.get('AWOS_LOCAL_PORT') or 8080}.cmd"
 
 
+def degraded_props(props: dict) -> Optional[str]:
+    """Why /props cannot key a slot file (None when it can): a sleeping server, or no
+    readable model file / chat template. A key over missing fields would collide
+    across models or templates, so callers skip instead of keying on it."""
+    if not isinstance(props, dict) or not props:
+        return "no /props"
+    if props.get("is_sleeping"):
+        return "server sleeping"
+    if not props.get("model_path"):
+        return "/props has no model_path"
+    if not props.get("chat_template"):
+        return "/props has no chat_template"
+    if _file_identity(str(props["model_path"])) is None:
+        return f"model file unreadable: {props['model_path']}"
+    return None
+
+
 def prefix_key(props: dict, prefix_text: str, cmd: str = "") -> str:
-    """hash(GGUF identity, llama.cpp build, chat template, KV flags, n_ctx, prefix text)."""
+    """hash(GGUF identity, llama.cpp build, chat template, KV flags, n_ctx, prefix text).
+    Raises ValueError on degraded props (see degraded_props)."""
+    why = degraded_props(props)
+    if why:
+        raise ValueError(f"cannot key prefix cache: {why}")
     gen = props.get("default_generation_settings") or {}
     parts = [
-        "v1",
-        _file_identity(props.get("model_path", "")),
+        "v2",
+        str(_file_identity(props.get("model_path", ""))),
         str(props.get("build_info", "")),
         hashlib.sha256(str(props.get("chat_template", "")).encode()).hexdigest(),
         kv_flags_signature(cmd),
@@ -558,15 +667,104 @@ def _gc(sdir: Path, keep: int, protect: str) -> None:
                 pass
 
 
+#: Turn-start markers (special tokens) a prefix may be cut before, per template family.
+TURN_MARKERS = ("<|im_start|>", "<|start_header_id|>", "<start_of_turn>", "<|turn>",
+                "[INST]", "<|user|>", "<|system|>")
+
+
+def _tokens(base: str, http: Http, text: str) -> Optional[list]:
+    """Token ids of `text` from llama-server's /tokenize (special tokens parsed, no BOS),
+    None when the endpoint is unavailable."""
+    try:
+        st, r = http("POST", base + "/tokenize", {"content": text, "add_special": False}, 30.0)
+    except Exception:
+        return None
+    toks = r.get("tokens") if st == 200 and isinstance(r, dict) else None
+    if not isinstance(toks, list):
+        return None
+    return [t.get("id") if isinstance(t, dict) else t for t in toks]
+
+
+def _previous_boundary(text: str, end: int) -> int:
+    """Start of the last turn marker strictly before `end` (-1 when none)."""
+    if end <= 0:
+        return -1
+    return max(text.rfind(m, 0, end - 1) for m in TURN_MARKERS)
+
+
+def align_prefix(prefix_text: str, probe_text: str, base: str, http: Http,
+                 max_backoffs: int = 4) -> tuple[Optional[str], str]:
+    """(prefix, check) where tokens(prefix) is a prefix of tokens(probe_text).
+
+    A text prefix is not always a token prefix (a merge can straddle the cut), and a
+    slot holding tokens the next prompt does not start with is useless on a hybrid
+    model. Backs off to the previous turn marker up to max_backoffs times.
+    check: "ok" | "backoff:N" | "unavailable" (no /tokenize: unchecked) | "misaligned"
+    (prefix None: nothing aligned, skip caching)."""
+    if not probe_text.startswith(prefix_text):
+        return None, "misaligned"
+    full = _tokens(base, http, probe_text)
+    if full is None:
+        return prefix_text, "unavailable"
+    cand = prefix_text
+    for n in range(max_backoffs + 1):
+        toks = _tokens(base, http, cand)
+        if toks is None:
+            return prefix_text, "unavailable"
+        if toks and full[:len(toks)] == toks:
+            return cand, "ok" if n == 0 else f"backoff:{n}"
+        cut = _previous_boundary(cand, len(cand))
+        if cut <= 0:
+            break
+        cand = cand[:cut]
+    return None, "misaligned"
+
+
+def _slot_count(props: dict, env: Optional[dict] = None) -> int:
+    env = os.environ if env is None else env
+    try:
+        n = int((props or {}).get("total_slots") or 0)
+    except (TypeError, ValueError, AttributeError):
+        n = 0
+    if n <= 0:
+        try:
+            n = int((env.get("AWOS_LOCAL_SLOTS") or "1").strip())
+        except ValueError:
+            n = 1
+    return max(1, n)
+
+
+def _wake(base: str, http: Http, slot: int, multi: bool) -> dict:
+    """Wake a sleeping server with a 1-token, uncached request (it lands in the slot we
+    are about to overwrite anyway) and return fresh /props ({} on failure)."""
+    body = {"prompt": " ", "n_predict": 0, "cache_prompt": False}
+    if multi:
+        body["id_slot"] = slot
+    try:
+        http("POST", base + "/completion", body, 240.0)
+        st, props = http("GET", base + "/props", None, 30.0)
+        return props if st == 200 and isinstance(props, dict) else {}
+    except Exception:
+        return {}
+
+
 def ensure_prefix_cached(prefix_text: str, slot: int = 0, base: Optional[str] = None,
                          http: Http = http_json, sdir: Optional[Path] = None,
-                         cmd: Optional[str] = None, keep: int = 4) -> dict:
+                         cmd: Optional[str] = None, keep: int = 4,
+                         probe_text: Optional[str] = None, wake: bool = True) -> dict:
     """Make slot `slot` hold exactly `prefix_text`'s KV/state.
 
     restored  a saved file for this exact key was loaded (fast first step)
     warm      the slot already holds this prefix and nothing longer (no-op)
     saved     evaluated now (n_predict=0) and saved for the next task / restart
+    skipped   not safe to key or cut: server asleep (and wake=False or it stayed
+              asleep), /props missing model_path / chat_template, model file
+              unreadable, or the prefix is not a token prefix of `probe_text`
     unsupported  the server was started without --slot-save-path
+
+    probe_text: a full rendered prompt that starts with prefix_text (render_prefix_probe);
+    when given, /tokenize checks the cut and backs off to an earlier turn boundary.
+    id_slot is sent only when the server has more than one slot.
     """
     base = base or server_base()
     sdir = Path(sdir) if sdir else slot_dir()
@@ -574,6 +772,21 @@ def ensure_prefix_cached(prefix_text: str, slot: int = 0, base: Optional[str] = 
     st, props = http("GET", base + "/props", None, 30.0)
     if st != 200:
         return {"status": "error", "detail": f"/props HTTP {st}"}
+    multi = _slot_count(props) > 1
+    if isinstance(props, dict) and props.get("is_sleeping"):
+        if not wake:
+            return {"status": "skipped", "detail": "server sleeping"}
+        props = _wake(base, http, slot, multi)
+    why = degraded_props(props)
+    if why:
+        return {"status": "skipped", "detail": why}
+    check = "unchecked"
+    if probe_text is not None:
+        aligned, check = align_prefix(prefix_text, probe_text, base, http)
+        if aligned is None:
+            return {"status": "skipped", "detail": "prefix is not a token prefix of the "
+                    "rendered prompt", "token_check": check}
+        prefix_text = aligned
     if cmd is None:
         try:
             cmd = server_cmd_file().read_text()
@@ -593,13 +806,14 @@ def ensure_prefix_cached(prefix_text: str, slot: int = 0, base: Optional[str] = 
             if want is None or want == got:
                 os.utime(sdir / name)
                 return {"status": "restored", "key": key[:24], "n_tokens": got,
-                        "ms": round((time.monotonic() - t0) * 1000, 1)}
+                        "token_check": check, "ms": round((time.monotonic() - t0) * 1000, 1)}
         if st == 501 or "not supported" in json.dumps(r):
             return {"status": "unsupported", "detail": "start llama-server with --slot-save-path"}
         # stale/corrupt file: fall through and rebuild it
-    st, r = http("POST", base + "/completion",
-                 {"prompt": prefix_text, "n_predict": 0, "cache_prompt": True, "id_slot": slot},
-                 600.0)
+    body = {"prompt": prefix_text, "n_predict": 0, "cache_prompt": True}
+    if multi:
+        body["id_slot"] = slot
+    st, r = http("POST", base + "/completion", body, 600.0)
     if st != 200:
         return {"status": "error", "detail": f"/completion HTTP {st}"}
     n_tok = (r.get("timings") or {}).get("prompt_n")
@@ -619,7 +833,7 @@ def ensure_prefix_cached(prefix_text: str, slot: int = 0, base: Optional[str] = 
     except OSError:
         pass
     return {"status": "saved" if n_tok else "warm", "key": key[:24], "n_tokens": s.get("n_saved"),
-            "prompt_n": n_tok, "tokens": cached,
+            "prompt_n": n_tok, "tokens": cached, "token_check": check,
             "ms": round((time.monotonic() - t0) * 1000, 1)}
 
 
@@ -630,6 +844,13 @@ def render_prefix(static_messages: list, tools: Optional[list] = None,
                   base: Optional[str] = None, http: Http = http_json) -> str:
     """The server-rendered text of `static_messages`, cut at a turn boundary, so it is a
     byte-for-byte prefix of every later prompt that starts with those messages."""
+    return render_prefix_probe(static_messages, tools, base, http)[0]
+
+
+def render_prefix_probe(static_messages: list, tools: Optional[list] = None,
+                        base: Optional[str] = None, http: Http = http_json) -> tuple:
+    """(prefix, probe): render_prefix's text and one full sentinel render that starts
+    with it (for the /tokenize alignment check in ensure_prefix_cached)."""
     base = base or server_base()
     renders = []
     for s in SENTINELS:
@@ -644,7 +865,7 @@ def render_prefix(static_messages: list, tools: Optional[list] = None,
     cut = common.rfind("<|im_start|>")          # ChatML (Qwen): cut before the user turn
     if cut <= 0:
         cut = common.rfind("\n") + 1             # generic: last full line
-    return common[:cut]
+    return common[:cut], renders[0]
 
 
 def local_enabled(env: Optional[dict] = None) -> bool:
@@ -666,10 +887,12 @@ def prepare_first_step(static_messages: list, tools: Optional[list] = None,
         if (env.get("AWOS_LOCAL_AUTOSTART") or "").strip() == "1":
             if not (starter or (lambda: ensure_server(env=env, http=http)))():
                 return {"status": "error", "detail": "local server not running"}
-        prefix = render_prefix(static_messages, tools, base, http)
+        prefix, probe = render_prefix_probe(static_messages, tools, base, http)
         if not prefix:
             return {"status": "skipped", "detail": "empty prefix"}
-        return ensure_prefix_cached(prefix, base=base, http=http, sdir=slot_dir(env))
+        slot = _int_env(env, "AWOS_LOCAL_SLOT_ID", 0, lo=0)
+        return ensure_prefix_cached(prefix, slot=slot, base=base, http=http, sdir=slot_dir(env),
+                                    probe_text=probe)
     except Exception as exc:  # the cache is an optimisation; never fail a run for it
         return {"status": "error", "detail": f"{type(exc).__name__}: {exc}"}
 
@@ -690,6 +913,133 @@ def ensure_server(env: Optional[dict] = None, http: Http = http_json,
     return r.returncode == 0
 
 
+# ── B5: task lease ───────────────────────────────────────────────────────────
+LEASE_PREFIX = "task-"
+DEFAULT_LEASE_TTL_S = 90
+
+
+def lease_dir(env: Optional[dict] = None) -> Path:
+    return models_dir(env) / "leases"
+
+
+def lease_ttl_s(env: Optional[dict] = None) -> int:
+    env = os.environ if env is None else env
+    try:
+        return _int_env(env, "AWOS_LOCAL_LEASE_TTL_S", DEFAULT_LEASE_TTL_S, lo=3)
+    except PlanError:
+        return DEFAULT_LEASE_TTL_S
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except (PermissionError, OSError):
+        return True
+    return True
+
+
+class TaskLease:
+    """A heartbeat file that says "a task is using the local model". Refreshed by a
+    daemon thread every ttl/3 seconds; removed on release. Never raises: when the
+    directory cannot be written, `path` is None and the lease is a no-op."""
+
+    def __init__(self, task_id: str = "", env: Optional[dict] = None,
+                 interval: Optional[float] = None, clock=time.time) -> None:
+        self.env = dict(os.environ if env is None else env)
+        self.ttl = lease_ttl_s(self.env)
+        self.interval = interval if interval is not None else max(1.0, self.ttl / 3)
+        self.clock = clock
+        self.task_id = str(task_id or "")
+        self.started = clock()
+        self.beats = 0
+        self.path: Optional[Path] = None
+        self._stop = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        d = lease_dir(self.env)
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            self.path = d / f"{LEASE_PREFIX}{os.getpid()}-{uuid.uuid4().hex[:12]}.json"
+            self.refresh()
+        except OSError:
+            self.path = None
+
+    def refresh(self) -> None:
+        if self.path is None:
+            return
+        rec = {"pid": os.getpid(), "host": socket.gethostname(), "task": self.task_id,
+               "started": self.started, "heartbeat": self.clock(), "ttl": self.ttl}
+        tmp = self.path.with_suffix(".tmp")
+        try:
+            tmp.write_text(json.dumps(rec))
+            os.replace(tmp, self.path)
+            self.beats += 1
+        except OSError:
+            pass
+
+    def start(self) -> "TaskLease":
+        if self.path is not None and self._thread is None:
+            self._thread = threading.Thread(target=self._run, name="awos-task-lease",
+                                            daemon=True)
+            self._thread.start()
+        return self
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval):
+            self.refresh()
+
+    def release(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+        if self.path is not None:
+            for q in (self.path, self.path.with_suffix(".tmp")):
+                try:
+                    q.unlink()
+                except OSError:
+                    pass
+
+
+@contextlib.contextmanager
+def task_lease(task_id: str = "", env: Optional[dict] = None,
+               interval: Optional[float] = None) -> Iterator[TaskLease]:
+    """Hold a live lease while a task runs (see TaskLease); always released."""
+    lease = TaskLease(task_id, env, interval).start()
+    try:
+        yield lease
+    finally:
+        lease.release()
+
+
+def live_leases(env: Optional[dict] = None, now: Optional[float] = None,
+                clean: bool = True) -> list:
+    """Lease records whose heartbeat is younger than their ttl and whose process (on
+    this host) is alive. Stale files are removed when `clean`."""
+    d = lease_dir(env)
+    if not d.is_dir():
+        return []
+    now = time.time() if now is None else now
+    host = socket.gethostname()
+    out = []
+    for p in d.glob(f"{LEASE_PREFIX}*.json"):
+        try:
+            rec = json.loads(p.read_text())
+            age = now - float(rec.get("heartbeat", 0))
+            ttl = float(rec.get("ttl") or DEFAULT_LEASE_TTL_S)
+            alive = rec.get("host") != host or _pid_alive(int(rec.get("pid", 0)))
+        except (OSError, ValueError, TypeError):
+            continue   # half-written or unreadable: neither live nor safe to delete
+        if age <= ttl and alive:
+            out.append({**rec, "path": str(p), "age_s": round(age, 1)})
+        elif clean:
+            try:
+                p.unlink()
+            except OSError:
+                pass
+    return out
+
+
 # ── B5: idle watchdog ────────────────────────────────────────────────────────
 def watch_step(state: dict, asleep_since: Optional[float], now: float, exit_after_s: float,
                ) -> tuple[Optional[float], bool]:
@@ -704,26 +1054,111 @@ def watch_step(state: dict, asleep_since: Optional[float], now: float, exit_afte
     return since, (now - since) >= exit_after_s
 
 
+def _flag_value(toks: list, *names: str) -> Optional[str]:
+    for i, t in enumerate(toks):
+        for n in names:
+            if t == n and i + 1 < len(toks):
+                return toks[i + 1]
+            if t.startswith(n + "="):
+                return t.split("=", 1)[1]
+    return None
+
+
+def cmd_matches_plan(cmd: str, p: Plan) -> bool:
+    """Does a running server's command line already implement plan `p` (context,
+    idle sleep, host cache, speculative flags)? An empty/unknown cmd counts as a match
+    (nothing to compare, so no restart)."""
+    if not (cmd or "").strip():
+        return True
+    try:
+        toks = shlex.split(cmd)
+    except ValueError:
+        return True
+    if _flag_value(toks, "-c", "--ctx-size") not in (None, str(p.ctx)):
+        return False
+    if (_flag_value(toks, "--sleep-idle-seconds") or "0") != str(max(p.idle_s, 0)):
+        return False
+    if _flag_value(toks, "--cache-ram") not in (None, str(p.cache_ram_mb)):
+        return False
+    spec = " ".join(p.spec_args)
+    if spec:
+        return f" {spec} " in f" {' '.join(toks)} "
+    return "--spec-type" not in toks
+
+
+def _idle(state: dict) -> bool:
+    if state.get("state") == "sleeping":
+        return True
+    return state.get("state") == "up" and not any(
+        s.get("is_processing") for s in state.get("slots") or [])
+
+
 def watch(env: Optional[dict] = None, http: Http = http_json, stopper=None,
           clock=time.monotonic, sleep=time.sleep, interval: float = 15.0,
-          max_ticks: Optional[int] = None) -> int:
-    """Loop until the server is stopped (returns 0) or is already down (returns 1)."""
+          max_ticks: Optional[int] = None, power_fn: Optional[Callable] = None,
+          restarter: Optional[Callable] = None, plan_fn: Callable = None,
+          lease_fn: Optional[Callable] = None, cmd_fn: Optional[Callable] = None) -> int:
+    """Loop until the server is stopped (returns 0) or is already down (returns 1).
+
+    Never stops a server while a live task lease exists. When the power source changes
+    it re-runs plan(); if the running server's flags no longer match, it restarts the
+    server (local_model.sh stop + start) once the server is idle and no lease exists."""
     env = dict(os.environ if env is None else env)
     exit_after = float(_int_env(env, "AWOS_LOCAL_EXIT_AFTER_SLEEP_S", 300, lo=0))
     base = server_base(env)
-    stopper = stopper or (lambda: subprocess.run(
-        ["bash", str(repo_root() / "scripts" / "local_model.sh"), "stop"], env=env,
-        capture_output=True, text=True).returncode == 0)
+    script = str(repo_root() / "scripts" / "local_model.sh")
+
+    def _sh(action: str) -> bool:
+        return subprocess.run(["bash", script, action], env=env, capture_output=True,
+                              text=True).returncode == 0
+
+    stopper = stopper or (lambda: _sh("stop"))
+    restarter = restarter or (lambda: _sh("stop") and _sh("start"))
+    power_fn = power_fn or power_state
+    plan_fn = plan_fn or (lambda ps: plan(env, ps))
+    lease_fn = lease_fn or (lambda: live_leases(env))
+
+    def _cmd() -> str:
+        if cmd_fn is not None:
+            return cmd_fn()
+        try:
+            return server_cmd_file(env).read_text()
+        except OSError:
+            return ""
+
     since, ticks = None, 0
+    last_source: Optional[str] = None
+    pending_restart = False
     while max_ticks is None or ticks < max_ticks:
         ticks += 1
         st = server_state(base, http)
         if st["state"] == "down":
             return 1
+        leased = bool(lease_fn())
+        try:
+            source = power_fn().source
+        except Exception:
+            source = last_source
+        if last_source is not None and source != last_source:
+            try:
+                pending_restart = not cmd_matches_plan(_cmd(), plan_fn(PowerState(source or
+                                                                                  "unknown")))
+            except PlanError:
+                pending_restart = False      # the new plan is refused: keep what runs
+        last_source = source
+        if pending_restart and not leased and _idle(st):
+            # re-check: a task may have started since the probe
+            if not lease_fn() and _idle(server_state(base, http)):
+                restarter()
+                pending_restart, since = False, None
+                sleep(interval)
+                continue
         since, stop = watch_step(st, since, clock(), exit_after)
+        if leased:
+            since, stop = None, False
         if stop:
             # re-check right before stopping: a request may have woken it meanwhile
-            if server_state(base, http)["state"] == "sleeping":
+            if server_state(base, http)["state"] == "sleeping" and not lease_fn():
                 stopper()
                 return 0
             since = None

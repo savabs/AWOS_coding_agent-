@@ -3,9 +3,12 @@ doctor row. All fakes: fake pmset text, a fake llama-server HTTP API, a fake pro
 from __future__ import annotations
 
 import json
+import os
+import re
 import struct
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -104,7 +107,9 @@ def test_plan_battery_keeps_ctx_but_blocks_draft(tmp_path):
     write_gguf(tmp_path / "Qwen3.5-9B-Q4_K_M.gguf", qwen35_kv())
     env = _env(tmp_path, AWOS_LOCAL_SPEC="draft", AWOS_LOCAL_DRAFT_GGUF=str(draft))
     p = lr.plan(env, lr.parse_pmset(PMSET_BATT), ram_mb=16384)
-    assert p.ctx == 24576 and p.spec == "ngram" and p.idle_s == 120
+    # battery idle is 120 s, lifted to the loop command timeout (120) + margin (60)
+    assert p.ctx == 24576 and p.spec == "ngram" and p.idle_s == 180
+    assert any("idle 120s -> 180s" in n for n in p.notes)
     assert "--spec-type" in p.spec_args and "ngram-simple" in p.spec_args
     assert any("draft model off" in n for n in p.notes)
     ac = lr.plan(env, lr.parse_pmset(PMSET_AC), ram_mb=16384)
@@ -168,18 +173,30 @@ class FakeServer:
         self.down = False
         self.slot_tokens = 0
         self.calls = []
+        self.bodies = []
+        self.total_slots = 1
+        self.chat_template = "{{chatml}}"
+        self.stay_asleep = False
+        self.tokenizer = None          # callable(text) -> list, or None for no /tokenize
 
     def __call__(self, method, url, body, timeout):
         path = url.split("127.0.0.1:8080", 1)[1]
         self.calls.append((method, path))
+        self.bodies.append((path, body))
         if self.down:
             raise ConnectionRefusedError()
         if path == "/health":
             return 200, {"status": "ok"}
         if path == "/props":
-            return 200, {"model_path": str(self.model), "build_info": "b1-test",
-                         "chat_template": "{{chatml}}", "is_sleeping": self.sleeping,
-                         "default_generation_settings": {"n_ctx": 8192}}
+            props = {"model_path": str(self.model), "build_info": "b1-test",
+                     "chat_template": self.chat_template, "is_sleeping": self.sleeping,
+                     "total_slots": self.total_slots,
+                     "default_generation_settings": {"n_ctx": 8192}}
+            return 200, {k: v for k, v in props.items() if v is not None}
+        if path == "/tokenize":
+            if self.tokenizer is None:
+                return 404, {}
+            return 200, {"tokens": self.tokenizer(body["content"])}
         if path == "/slots":
             return 200, [{"id": 0, "is_processing": self.processing, "speculative": True}]
         if path == "/apply-template":
@@ -187,6 +204,8 @@ class FakeServer:
             text = "".join(f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>\n" for m in msgs)
             return 200, {"prompt": text + "<|im_start|>assistant\n"}
         if path == "/completion":
+            if self.sleeping and not self.stay_asleep:
+                self.sleeping = False      # any task wakes a sleeping llama-server
             n = len(body["prompt"]) // 4
             self.slot_tokens = n
             return 200, {"timings": {"prompt_n": n}, "tokens_evaluated": n}
@@ -371,3 +390,272 @@ def test_shell_cmd_reflects_plan(tmp_path):
     out = off.stdout
     assert "--sleep-idle-seconds 300" in out and "--slot-save-path" in out
     assert "--cache-ram 2048" in out and "--spec-type" not in out
+
+
+# ── B4 hardening: degraded keys, wake, token alignment, KV flags, id_slot ────
+def test_degraded_props_are_never_keyed(fake, tmp_path):
+    fake.chat_template = None
+    r = lr.ensure_prefix_cached("P" * 40, base=BASE, http=fake, sdir=fake.sdir, cmd=CMD)
+    assert r["status"] == "skipped" and "chat_template" in r["detail"]
+    fake.chat_template = "{{chatml}}"
+    fake.model = tmp_path / "missing.gguf"
+    r = lr.ensure_prefix_cached("P" * 40, base=BASE, http=fake, sdir=fake.sdir, cmd=CMD)
+    assert r["status"] == "skipped" and "unreadable" in r["detail"]
+    assert not list(fake.sdir.glob("awos-prefix-*")) if fake.sdir.exists() else True
+    with pytest.raises(ValueError):
+        lr.prefix_key({"model_path": "", "chat_template": "x"}, "P")
+    with pytest.raises(ValueError):
+        lr.prefix_key({"model_path": str(tmp_path / "nope"), "chat_template": "x"}, "P")
+
+
+def test_sleeping_server_is_woken_or_skipped(fake):
+    fake.sleeping = True
+    r = lr.ensure_prefix_cached("P" * 40, base=BASE, http=fake, sdir=fake.sdir, cmd=CMD,
+                                wake=False)
+    assert r == {"status": "skipped", "detail": "server sleeping"}
+    fake.stay_asleep = True
+    r = lr.ensure_prefix_cached("P" * 40, base=BASE, http=fake, sdir=fake.sdir, cmd=CMD)
+    assert r["status"] == "skipped" and r["detail"] == "server sleeping"
+    fake.stay_asleep = False
+    r = lr.ensure_prefix_cached("P" * 40, base=BASE, http=fake, sdir=fake.sdir, cmd=CMD)
+    assert r["status"] == "saved" and not fake.sleeping
+    wake = [b for p, b in fake.bodies if p == "/completion"][-2]
+    assert wake["cache_prompt"] is False and wake["n_predict"] == 0
+
+
+SPECIALS = re.compile(r"(<\|im_start\|>|<\|im_end\|>)")
+
+
+def toy_tokenizer(text):
+    """Specials are single tokens; "hello" merges into one token; else one per char."""
+    out = []
+    for part in SPECIALS.split(text):
+        if SPECIALS.fullmatch(part):
+            out.append(part)
+            continue
+        i = 0
+        while i < len(part):
+            if part.startswith("hello", i):
+                out.append("hello")
+                i += 5
+            else:
+                out.append(part[i])
+                i += 1
+    return out
+
+
+def test_token_alignment_backs_off_to_turn_boundary(fake):
+    fake.tokenizer = toy_tokenizer
+    head = "<|im_start|>system\nSYS<|im_end|>\n"
+    probe = head + "<|im_start|>user\nhello<|im_end|>\n"
+    bad = head + "<|im_start|>user\nhel"     # text prefix, but "hel" != the token "hello"
+    r = lr.ensure_prefix_cached(bad, base=BASE, http=fake, sdir=fake.sdir, cmd=CMD,
+                                probe_text=probe)
+    assert r["status"] == "saved" and r["token_check"] == "backoff:1"
+    saved = [b for p, b in fake.bodies if p == "/completion"][-1]["prompt"]
+    assert saved == head
+    ok = lr.ensure_prefix_cached(head, base=BASE, http=fake, sdir=fake.sdir, cmd=CMD,
+                                 probe_text=probe)
+    assert ok["token_check"] == "ok"
+    r = lr.ensure_prefix_cached("hel", base=BASE, http=fake, sdir=fake.sdir, cmd=CMD,
+                                probe_text="hello")
+    assert r["status"] == "skipped" and r["token_check"] == "misaligned"
+    fake.tokenizer = None                     # no /tokenize: proceed, marked unchecked
+    r = lr.ensure_prefix_cached(head, base=BASE, http=fake, sdir=fake.sdir, cmd=CMD,
+                                probe_text=probe)
+    assert r["status"] in ("saved", "restored") and r["token_check"] == "unavailable"
+
+
+def test_prepare_first_step_passes_probe(fake, tmp_path):
+    fake.tokenizer = toy_tokenizer
+    env = {"AWOS_LOCAL_SLOT_DIR": str(fake.sdir), "AWOS_MODELS_DIR": str(tmp_path),
+           "AWOS_PROVIDER": "local"}
+    r = lr.prepare_first_step([{"role": "system", "content": "SYS"}], env=env, http=fake)
+    assert r["status"] == "saved" and r["token_check"] == "ok"
+
+
+def test_id_slot_only_with_multiple_slots(fake):
+    lr.ensure_prefix_cached("P" * 40, base=BASE, http=fake, sdir=fake.sdir, cmd=CMD)
+    assert "id_slot" not in [b for p, b in fake.bodies if p == "/completion"][-1]
+    fake.total_slots = 2
+    lr.ensure_prefix_cached("Q" * 40, slot=1, base=BASE, http=fake, sdir=fake.sdir, cmd=CMD)
+    assert [b for p, b in fake.bodies if p == "/completion"][-1]["id_slot"] == 1
+
+
+def test_kv_flags_forms_and_new_flags(fake, tmp_path):
+    sig = lr.kv_flags_signature
+    assert sig("llama-server -c 8192 -fa on") == sig("llama-server --ctx-size=8192 --flash-attn=on")
+    assert sig("x --rope-freq-scale -1.5") == "--rope-freq-scale=-1.5"
+    assert sig("x --swa-full -c 4096") == "--ctx-size=4096 --swa-full="
+    props = fake("GET", BASE + "/props", None, 1)[1]
+    k = lr.prefix_key(props, "P", CMD)
+    lora = tmp_path / "a.gguf"
+    lora.write_bytes(b"lora-1")
+    for extra in (f"--lora {lora}", f"--lora-scaled {lora} 0.5", "--control-vector cv.gguf",
+                  "--control-vector-layer-range 2 10", "--rope-scaling yarn",
+                  "--rope-freq-base 1e6", "--yarn-orig-ctx 32768", "--yarn-ext-factor=1.0",
+                  "--override-kv a=int:1"):
+        assert lr.prefix_key(props, "P", f"{CMD} {extra}") != k, extra
+    with_lora = lr.prefix_key(props, "P", f"{CMD} --lora={lora}")
+    assert with_lora == lr.prefix_key(props, "P", f"{CMD} --lora {lora}")
+    lora.write_bytes(b"lora-2")                                   # same path, new weights
+    assert lr.prefix_key(props, "P", f"{CMD} --lora {lora}") != with_lora
+    # scaled: both values kept
+    assert sig(f"x --lora-scaled {lora} 0.5") != sig(f"x --lora-scaled {lora} 0.7")
+
+
+# ── B5: idle floor + task lease ──────────────────────────────────────────────
+def test_cmd_timeout_mirrors_loop_executor():
+    from scaffold.agent import loop_executor as lx
+    assert lr.DEFAULT_LOOP_CMD_TIMEOUT_S == lx.DEFAULT_CMD_TIMEOUT_S
+    assert lr.MAX_LOOP_CMD_TIMEOUT_S == lx.MAX_CMD_TIMEOUT_S
+
+
+def test_idle_floor_follows_command_timeout(tmp_path):
+    batt = lr.parse_pmset(PMSET_LOW)                       # battery-low policy: idle 60
+    p = lr.plan(_env(tmp_path, AWOS_LOOP_CMD_TIMEOUT_S="300"), batt, ram_mb=16384)
+    assert p.idle_s == 360 and p.policy.idle_s == 360
+    p = lr.plan(_env(tmp_path, AWOS_LOOP_CMD_TIMEOUT_S="9999", AWOS_LOCAL_IDLE_MARGIN_S="0"),
+                batt, ram_mb=16384)
+    assert p.idle_s == 600                                 # capped like the loop's max
+    p = lr.plan(_env(tmp_path, AWOS_LOCAL_IDLE_S="0", AWOS_LOCAL_BATTERY_POLICY="ignore"),
+                batt, ram_mb=16384)
+    assert p.idle_s == 0                                   # 0 = never sleep, untouched
+    p = lr.plan(_env(tmp_path, AWOS_LOCAL_IDLE_S="900"), lr.parse_pmset(PMSET_AC), ram_mb=16384)
+    assert p.idle_s == 900
+
+
+def test_task_lease_heartbeat_and_release(tmp_path):
+    env = {"AWOS_MODELS_DIR": str(tmp_path), "AWOS_LOCAL_LEASE_TTL_S": "30"}
+    assert lr.live_leases(env) == []
+    with lr.task_lease("job-1", env=env, interval=0.02) as lease:
+        assert lease.path.is_file()
+        live = lr.live_leases(env)
+        assert len(live) == 1 and live[0]["task"] == "job-1" and live[0]["pid"] == os.getpid()
+        first = json.loads(lease.path.read_text())["heartbeat"]
+        deadline = time.time() + 3
+        while lease.beats < 3 and time.time() < deadline:
+            time.sleep(0.02)
+        assert lease.beats >= 3
+        assert json.loads(lease.path.read_text())["heartbeat"] >= first
+    assert not lease.path.exists() and lr.live_leases(env) == []
+
+
+def test_stale_and_dead_leases_are_ignored_and_cleaned(tmp_path):
+    env = {"AWOS_MODELS_DIR": str(tmp_path)}
+    d = lr.lease_dir(env)
+    d.mkdir(parents=True)
+    import socket
+    host = socket.gethostname()
+    old = d / "task-1-old.json"
+    old.write_text(json.dumps({"pid": os.getpid(), "host": host, "heartbeat": time.time() - 999,
+                               "ttl": 90}))
+    dead = d / "task-2-dead.json"
+    dead.write_text(json.dumps({"pid": 2 ** 22 + 12345, "host": host,
+                                "heartbeat": time.time(), "ttl": 90}))
+    assert lr.live_leases(env) == [] and not old.exists() and not dead.exists()
+
+
+def test_task_lease_never_raises_on_unwritable_dir(tmp_path):
+    f = tmp_path / "file"
+    f.write_text("x")                          # models dir is a file: mkdir fails
+    with lr.task_lease("t", env={"AWOS_MODELS_DIR": str(f)}) as lease:
+        assert lease.path is None
+
+
+def _clock():
+    t = [0.0]
+    return t, (lambda: t[0]), (lambda s: t.__setitem__(0, t[0] + s))
+
+
+def test_watch_never_stops_while_leased(fake, tmp_path):
+    fake.sleeping = True
+    t, clock, sleep = _clock()
+    stopped = []
+    leases = [["lease"]]
+    env = {"AWOS_LOCAL_EXIT_AFTER_SLEEP_S": "30", "AWOS_MODELS_DIR": str(tmp_path)}
+    rc = lr.watch(env=env, http=fake, stopper=lambda: stopped.append(1), clock=clock,
+                  sleep=sleep, interval=15, max_ticks=10, lease_fn=lambda: leases[0])
+    assert rc == 2 and not stopped
+    leases[0] = []
+    rc = lr.watch(env=env, http=fake, stopper=lambda: stopped.append(1), clock=clock,
+                  sleep=sleep, interval=15, max_ticks=10, lease_fn=lambda: leases[0])
+    assert rc == 0 and stopped
+
+
+def test_watch_with_real_lease_file(fake, tmp_path):
+    fake.sleeping = True
+    t, clock, sleep = _clock()
+    stopped = []
+    env = {"AWOS_LOCAL_EXIT_AFTER_SLEEP_S": "0", "AWOS_MODELS_DIR": str(tmp_path)}
+    with lr.task_lease("t", env=env):
+        assert lr.watch(env=env, http=fake, stopper=lambda: stopped.append(1), clock=clock,
+                        sleep=sleep, max_ticks=3) == 2 and not stopped
+
+
+def _plan(idle, spec_args=(), ctx=8192, cache=2048):
+    return lr.Plan(ctx, "off", list(spec_args), idle, cache, lr.Policy("x"),
+                   lr.PowerState("battery"), lr.Admission(True, 0, 0, {}, ""), [])
+
+
+def test_cmd_matches_plan():
+    cmd = ("llama-server -m m.gguf -c 8192 --cache-ram 2048 --sleep-idle-seconds 300 "
+           "--spec-type ngram-simple --spec-draft-n-max 16")
+    assert lr.cmd_matches_plan(cmd, _plan(300, ["--spec-type", "ngram-simple",
+                                                "--spec-draft-n-max", "16"]))
+    assert not lr.cmd_matches_plan(cmd, _plan(180, ["--spec-type", "ngram-simple",
+                                                    "--spec-draft-n-max", "16"]))
+    assert not lr.cmd_matches_plan(cmd, _plan(300))                 # spec now off
+    assert not lr.cmd_matches_plan(cmd.replace("-c 8192", "-c 4096"),
+                                   _plan(300, ["--spec-type", "ngram-simple",
+                                               "--spec-draft-n-max", "16"]))
+    assert lr.cmd_matches_plan("", _plan(1))                        # unknown: no restart
+
+
+def test_watch_replans_on_power_change_and_restarts_only_idle_unleased(fake, tmp_path):
+    cmd = "llama-server -c 8192 --cache-ram 2048 --sleep-idle-seconds 300"
+    sources = iter(["ac", "battery"] + ["battery"] * 20)
+    leases = [["busy"]]
+    restarts, planned = [], []
+    t, clock, sleep = _clock()
+
+    def plan_fn(ps):
+        planned.append(ps.source)
+        return _plan(180 if ps.source == "battery" else 300)
+
+    kw = dict(env={"AWOS_LOCAL_EXIT_AFTER_SLEEP_S": "100000", "AWOS_MODELS_DIR": str(tmp_path)},
+              http=fake, stopper=lambda: None, clock=clock, sleep=sleep,
+              power_fn=lambda: lr.PowerState(next(sources)), restarter=lambda: restarts.append(1),
+              plan_fn=plan_fn, cmd_fn=lambda: cmd, lease_fn=lambda: leases[0])
+    fake.processing = False
+    # A lease is held: the plan changed (idle 300 -> 180) but no restart.
+    lr.watch(max_ticks=4, **kw)
+    assert planned == ["battery"] and not restarts
+    # Same watcher state can't be resumed across calls, so check the idle/lease gate
+    # in one run: lease released after tick 3, server busy until tick 5.
+    sources = iter(["ac", "battery"] + ["battery"] * 20)
+    kw["power_fn"] = lambda: lr.PowerState(next(sources))
+    ticks = [0]
+
+    def lease_fn():
+        ticks[0] += 1
+        return ["busy"] if ticks[0] <= 3 else []
+
+    fake.processing = True
+    real_sleep = kw["sleep"]
+
+    def sleep2(s):
+        real_sleep(s)
+        if ticks[0] >= 6:
+            fake.processing = False
+
+    kw.update(lease_fn=lease_fn, sleep=sleep2)
+    lr.watch(max_ticks=10, **kw)
+    assert restarts == [1]
+    # No change in flags -> never a restart.
+    restarts.clear()
+    sources = iter(["ac", "battery"] + ["battery"] * 20)
+    kw.update(power_fn=lambda: lr.PowerState(next(sources)), lease_fn=lambda: [],
+              plan_fn=lambda ps: _plan(300))
+    lr.watch(max_ticks=5, **kw)
+    assert not restarts

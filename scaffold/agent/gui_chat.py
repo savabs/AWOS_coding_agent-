@@ -496,9 +496,10 @@ class GuiChatService:
     ) -> Iterator[dict[str, Any]]:
         from scaffold.agent.escalation_engine import is_cheap_only
 
-        system, user, cache_key, prior_turns = self._build_qa_prompt(session, message)
+        system, user, _, prior_turns = self._build_qa_prompt(session, message)
         context_blob = self._qa_context_blob(session, message)
-        model = "deepseek-chat"
+        model = "deepseek-chat"   # (so the OpenCode route below always sends qwen3.7-plus)
+        cache_key = self._qa_stream_cache_key(system, user, session, model)
         t0 = time.perf_counter()
         ttfb_ms = 0.0
 
@@ -548,6 +549,7 @@ class GuiChatService:
         self._reset_usage()
         full_parts: list[str] = []
         first_token = True
+        failed = False
         # OpenCode Go first — only provider with credits
         # (served through OpenRouter when OPENROUTER_API_KEY is set)
         opencode_key = os.getenv("OPENCODE_GO_API_KEY")
@@ -583,6 +585,7 @@ class GuiChatService:
                         yield {"event": "token", "data": {"content": delta_content}}
                 model = oc_model
             except Exception as exc:
+                failed = True
                 yield {"event": "error", "data": {"error": str(exc)}}
                 model = oc_model
         elif os.getenv("DEEPSEEK_API_KEY") or is_cheap_only():
@@ -633,7 +636,8 @@ class GuiChatService:
             self._last_prompt_tokens = sum(_estimate_tokens(m["content"]) for m in msgs)
             self._last_completion_tokens = _estimate_tokens(text)
 
-        self.response_cache.set(cache_key, text, model=model)
+        if not failed and text:  # an errored or empty reply is never cached
+            self.response_cache.set(cache_key, text, model=model)
         meta = self._metrics_meta(
             mode="qa",
             model=model,
@@ -859,8 +863,10 @@ class GuiChatService:
 
     def _build_qa_prompt(
         self, session: ChatSession, message: str
-    ) -> tuple[str, str, str, int]:
-        """Returns (system, user_prompt, cache_key, prior_turn_count)."""
+    ) -> tuple[str, str, None, int]:
+        """Returns (system, user_prompt, None, prior_turn_count). The response-cache
+        key depends on the provider route, so _qa_stream_cache_key /
+        _qa_run_cache_key build it (third item kept for the tuple shape)."""
         context = self._read_project_context(message)
         soul = self._read_soul_context()
         prior = self._conversation_messages(session)
@@ -879,12 +885,49 @@ class GuiChatService:
         blocks.append(f"Question: {message}")
         user = "\n\n".join(blocks)
 
-        hist_key = "|".join(f"{m['role']}:{m['content'][:80]}" for m in prior[-6:])
-        cache_key = self.response_cache.make_key(
-            "gui-qa",
-            f"{prior_turns}::{hist_key}::{message}",
-        )
-        return system, user, cache_key, prior_turns
+        return system, user, None, prior_turns
+
+    # Response-cache keys: exactly what each route sends (provider, wire model,
+    # full message list incl. system prompt / project context / history, and
+    # sampling). These routes sample at temperature 0.3 or the API default, so
+    # ResponseCache.make_key returns None (not cacheable) until one runs at 0.
+    def _qa_stream_cache_key(self, system: str, user: str, session: ChatSession,
+                             model: Optional[str] = None) -> Optional[str]:
+        from scaffold.agent.escalation_engine import is_cheap_only
+
+        if os.getenv("OPENCODE_GO_API_KEY") or openrouter_key():
+            oc_model = model if model and model not in ("", "deepseek-chat") else "qwen3.7-plus"
+            provider = "opencode-go" if os.getenv("OPENCODE_GO_API_KEY") else "openrouter"
+            return self.response_cache.make_key(
+                oc_model, provider=provider,
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                sampling={"temperature": 0.3, "max_tokens": 3000})
+        if os.getenv("DEEPSEEK_API_KEY") or is_cheap_only():
+            return self._deepseek_cache_key(system, user, session)
+        if os.getenv("ANTHROPIC_API_KEY"):
+            return self._anthropic_cache_key(system, user, session)
+        return None
+
+    def _qa_run_cache_key(self, system: str, user: str, session: ChatSession) -> Optional[str]:
+        from scaffold.agent.escalation_engine import is_cheap_only
+
+        if openrouter_key() or os.getenv("DEEPSEEK_API_KEY") or is_cheap_only():
+            return self._deepseek_cache_key(system, user, session)
+        if os.getenv("ANTHROPIC_API_KEY"):
+            return self._anthropic_cache_key(system, user, session)
+        return None
+
+    def _deepseek_cache_key(self, system: str, user: str, session: ChatSession) -> Optional[str]:
+        return self.response_cache.make_key(
+            "deepseek-chat", provider="openrouter" if openrouter_key() else "deepseek",
+            messages=self._llm_messages(system, user, session),
+            sampling={"temperature": 0.3, "max_tokens": 2048})
+
+    def _anthropic_cache_key(self, system: str, user: str, session: ChatSession) -> Optional[str]:
+        return self.response_cache.make_key(
+            "claude-haiku-4-5", provider="anthropic", system=system,
+            messages=list(self._conversation_messages(session)) + [{"role": "user", "content": user}],
+            sampling={"temperature": None, "max_tokens": 2048})  # API default temperature
 
     def _read_project_context(self, query: str = "", max_chars: int = 12000) -> str:
         """Load canonical docs + keyword-matched source snippets."""
@@ -992,8 +1035,9 @@ class GuiChatService:
     def _run_qa(self, session: ChatSession, message: str) -> tuple[str, dict[str, Any]]:
         from scaffold.agent.escalation_engine import is_cheap_only
 
-        system, user, cache_key, prior_turns = self._build_qa_prompt(session, message)
+        system, user, _, prior_turns = self._build_qa_prompt(session, message)
         context_blob = self._qa_context_blob(session, message)
+        cache_key = self._qa_run_cache_key(system, user, session)
         cached = self.response_cache.get(cache_key)
         if cached:
             self._reset_usage()
@@ -1024,7 +1068,8 @@ class GuiChatService:
             self._last_prompt_tokens = sum(_estimate_tokens(m["content"]) for m in msgs)
             self._last_completion_tokens = _estimate_tokens(text)
 
-        self.response_cache.set(cache_key, text, model=model)
+        if text:
+            self.response_cache.set(cache_key, text, model=model)
         total_ms = (time.perf_counter() - t0) * 1000.0
         return text, self._metrics_meta(
             mode="qa",

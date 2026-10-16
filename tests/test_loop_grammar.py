@@ -334,3 +334,247 @@ def test_openai_tool_path_unchanged_when_grammar_off(monkeypatch):
     monkeypatch.setenv("AWOS_LOOP_GRAMMAR", "0")
     got = cap.capture_openai_tools()
     assert json.dumps(got) == json.dumps(_golden()["openai_tools"])
+
+
+# ── prefix drift telemetry ───────────────────────────────────────────────────
+
+
+def test_prefix_drift_formula():
+    prev = {"prompt_n": 150, "cache_n": 1050, "predicted_n": 40}
+    # the slot held 1240 tokens; the stop token (1) is never decoded into it
+    assert lg.prefix_drift(prev, {"cache_n": 1239}) == 0
+    assert lg.prefix_drift(prev, {"cache_n": 1300}) == 0
+    assert lg.prefix_drift(prev, {"cache_n": 1000}) == 239
+    assert lg.prefix_drift(prev, {}) is None and lg.prefix_drift(None, {"cache_n": 1}) is None
+
+
+def test_drift_counters_on_fake_server(tmp_path, monkeypatch):
+    # FakeLlamaServer's cache_n = prompt - 150 while prev prompt + 40 generated
+    # = prompt - 160 are in the slot: no drift.
+    ex, run, _ = _run_local(tmp_path, ["```bash\nls\n```", "```bash\npwd\n```", f"{MARK}\nok"],
+                            monkeypatch)
+    c = ex.client
+    assert isinstance(c, lg.GrammarLoopClient)
+    assert c.prefix_drift_checked == 2 and c.prefix_drift_calls == 0
+    assert c.prefix_drift_tokens == 0
+
+
+class _DriftSDK(FakeLlamaServer):
+    """cache_n far below what the previous call left in the slot."""
+
+    def _create(self, **kw):
+        r = super()._create(**kw)
+        if len(self.calls) > 1:
+            r.timings["cache_n"] = 500
+        return r
+
+
+def test_drift_counted_and_on_reply(monkeypatch):
+    monkeypatch.setenv("AWOS_PROVIDER", "local")
+    sdk = _DriftSDK(["```bash\nls\n```", "```bash\npwd\n```"])
+    c = lg.GrammarLoopClient(OpenAIToolClient(sdk, "local/q"))
+    msgs = [{"role": "user", "content": "task"}]
+    r1 = c.complete("S", msgs)
+    assert r1.prefix_drift is None                          # first call: not judged
+    msgs = msgs + [c.format_assistant_turn(r1), {"role": "user", "content": "obs"}]
+    r2 = c.complete("S", msgs)
+    # prev: prompt 1200, cache 0, predicted 40 -> expected 1239; got 500
+    assert r2.prefix_drift == 739
+    assert (c.prefix_drift_calls, c.prefix_drift_tokens, c.prefix_drift_checked) == (1, 739, 1)
+
+
+def test_rewritten_history_is_not_drift(monkeypatch):
+    sdk = _DriftSDK(["```bash\nls\n```", "```bash\npwd\n```"])
+    c = lg.GrammarLoopClient(OpenAIToolClient(sdk, "local/q"))
+    r1 = c.complete("S", [{"role": "user", "content": "task"}])
+    r2 = c.complete("S", [{"role": "user", "content": "compacted task"},
+                          c.format_assistant_turn(r1)])
+    assert r2.prefix_drift is None and c.prefix_drift_checked == 0
+
+
+def test_draft_counts_on_reply_and_in_usage_tokens():
+    from scaffold.agent import providers
+
+    class SpecSDK(FakeLlamaServer):
+        def _create(self, **kw):
+            r = super()._create(**kw)
+            r.timings.update(draft_n=48, draft_n_accepted=36)
+            return r
+
+    c = lg.GrammarLoopClient(OpenAIToolClient(SpecSDK(["```bash\nls\n```"]), "local/q"))
+    r = c.complete("S", [{"role": "user", "content": "t"}])
+    assert (r.draft_tokens, r.draft_accepted) == (48, 36)
+    tok = providers.usage_tokens({"prompt_tokens": 10, "completion_tokens": 5},
+                                 {"draft_n": 48, "draft_n_accepted": 36})
+    assert tok["draft"] == 48 and tok["draft_accepted"] == 36 and tok["draft_acceptance"] == 0.75
+    assert "draft" not in providers.usage_tokens({"prompt_tokens": 1}, {"cache_n": 0})
+    assert providers.usage_tokens({"prompt_tokens": 1}, {"draft_n": 0})["draft_acceptance"] is None
+    assert providers.usage_tokens({"prompt_tokens": 1},
+                                  {"draft_n": 4, "draft_n_accepted": 9})["draft_accepted"] == 4
+    assert providers.draft_acceptance(10, 7) == 0.7 and providers.draft_acceptance(0, 0) is None
+
+
+def test_draft_fields_in_timing_fields_and_call_log(tmp_path, monkeypatch):
+    from scaffold.agent.llm_call_log import timing_fields
+
+    class SpecSDK(FakeLlamaServer):
+        def _create(self, **kw):
+            r = super()._create(**kw)
+            r.timings.update(draft_n=20, draft_n_accepted=15)
+            return r
+
+    resp = SpecSDK(["x"])._create(model="m", messages=[])
+    t = timing_fields(resp)
+    assert t["draft_tokens"] == 20 and t["draft_accepted"] == 15 and t["draft_acceptance"] == 0.75
+    log = tmp_path / "calls.jsonl"
+    monkeypatch.setenv("AWOS_LLM_CALL_LOG", str(log))
+    monkeypatch.setenv("AWOS_PROVIDER", "local")
+    sdk = SpecSDK(["```bash\nls\n```", f"{MARK}\nok"])
+    ex = lx.LoopExecutor(OpenAIToolClient(sdk, "local/q"),
+                         lx.build_loop_registry(cap.FixedSandbox(str(tmp_path))), "g",
+                         workspace=str(tmp_path), gate=lambda f, s: {"green": True})
+    ex.run()
+    rows = [json.loads(x) for x in log.read_text().splitlines()]
+    assert rows and all(r["draft_acceptance"] == 0.75 for r in rows)
+
+
+def test_id_slot_sent_only_with_multiple_slots(monkeypatch):
+    sdk = FakeLlamaServer(["```bash\nls\n```", "```bash\nls\n```"])
+    lg.GrammarLoopClient(OpenAIToolClient(sdk, "local/q")).complete("S", [])
+    assert "id_slot" not in sdk.calls[0]["extra_body"]
+    monkeypatch.setenv("AWOS_LOCAL_SLOTS", "2")
+    monkeypatch.setenv("AWOS_LOCAL_SLOT_ID", "1")
+    lg.GrammarLoopClient(OpenAIToolClient(sdk, "local/q")).complete("S", [])
+    assert sdk.calls[1]["extra_body"]["id_slot"] == 1
+
+
+# ── Qwen3 template: does the cached prefix survive the next step? ────────────
+# A reconstruction (from the published Qwen3 chat template) of only the rules
+# that matter here: the "last real user query" scan, the assistant think-block
+# rule, tool messages as <tool_response> in a user turn, and the
+# enable_thinking=false generation prompt. Tools/tool_calls are left out (the
+# grammar mode sends none). This is NOT the Qwen3.5 GGUF's own template, which
+# could not be read here; measure prefix_drift on the real server before
+# turning AWOS_LOOP_THINK_STUB on by default.
+QWEN3_LIKE_TEMPLATE = r"""
+{%- set ns = namespace(multi_step_tool=true, last_query_index=messages|length - 1) %}
+{%- for message in messages[::-1] %}
+  {%- set index = (messages|length - 1) - loop.index0 %}
+  {%- if ns.multi_step_tool and message.role == "user" and message.content is string and not(message.content.startswith('<tool_response>') and message.content.endswith('</tool_response>')) %}
+    {%- set ns.multi_step_tool = false %}
+    {%- set ns.last_query_index = index %}
+  {%- endif %}
+{%- endfor %}
+{%- for message in messages %}
+  {%- if message.role == "user" or message.role == "system" %}
+    {{- '<|im_start|>' + message.role + '\n' + message.content + '<|im_end|>' + '\n' }}
+  {%- elif message.role == "assistant" %}
+    {%- set content = message.content %}
+    {%- set reasoning_content = '' %}
+    {%- if message.reasoning_content is defined and message.reasoning_content is not none %}
+      {%- set reasoning_content = message.reasoning_content %}
+    {%- elif '</think>' in content %}
+      {%- set reasoning_content = content.split('</think>')[0].rstrip('\n').split('<think>')[-1].lstrip('\n') %}
+      {%- set content = content.split('</think>')[-1].lstrip('\n') %}
+    {%- endif %}
+    {%- if loop.index0 > ns.last_query_index and (loop.last or reasoning_content) %}
+      {{- '<|im_start|>assistant\n<think>\n' + reasoning_content.strip('\n') + '\n</think>\n\n' + content.lstrip('\n') }}
+    {%- else %}
+      {{- '<|im_start|>assistant\n' + content }}
+    {%- endif %}
+    {{- '<|im_end|>\n' }}
+  {%- elif message.role == "tool" %}
+    {%- if loop.first or (messages[loop.index0 - 1].role != "tool") %}{{- '<|im_start|>user' }}{%- endif %}
+    {{- '\n<tool_response>\n' + message.content + '\n</tool_response>' }}
+    {%- if loop.last or (messages[loop.index0 + 1].role != "tool") %}{{- '<|im_end|>\n' }}{%- endif %}
+  {%- endif %}
+{%- endfor %}
+{%- if add_generation_prompt %}
+  {{- '<|im_start|>assistant\n' }}
+  {%- if enable_thinking is defined and enable_thinking is false %}{{- '<think>\n\n</think>\n\n' }}{%- endif %}
+{%- endif %}
+"""
+
+
+class TemplateLlamaServer(FakeLlamaServer):
+    """Renders each request through the template and models the slot: it holds
+    prompt + generated text after a call; cache_n = common prefix with the next
+    prompt (characters stand in for tokens); the stop token counts in
+    predicted_n but is not kept, as in llama-server."""
+
+    def __init__(self, replies):
+        super().__init__(replies)
+        import jinja2
+        self.tpl = jinja2.Environment().from_string(QWEN3_LIKE_TEMPLATE)
+        self.slot = ""
+        self.prompts: list[str] = []
+
+    def _create(self, **kw):
+        import os as _os
+        self.calls.append(json.loads(json.dumps(kw)))
+        kwargs = kw["extra_body"]["chat_template_kwargs"]
+        prompt = self.tpl.render(messages=kw["messages"], add_generation_prompt=True, **kwargs)
+        self.prompts.append(prompt)
+        text = self.replies.pop(0)
+        cache_n = len(_os.path.commonprefix([self.slot, prompt]))
+        self.slot = prompt + text
+        usage = SimpleNamespace(prompt_tokens=len(prompt), completion_tokens=len(text) + 1,
+                                prompt_tokens_details=SimpleNamespace(cached_tokens=cache_n))
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=text, tool_calls=None),
+                                     finish_reason="stop")],
+            usage=usage, model="qwen3",
+            timings={"cache_n": cache_n, "prompt_n": len(prompt) - cache_n,
+                     "predicted_n": len(text) + 1, "prompt_ms": 1.0, "predicted_ms": 1.0})
+
+
+THREE_STEPS = ["Look.\n```bash\nls\n```", "Read.\n```bash\ncat calc.py\n```",
+               "Fix.\n```bash\nsed -i 's/-/+/' calc.py\n```", f"{MARK}\ndone"]
+
+
+def _template_run(tmp_path, monkeypatch, stub: bool):
+    monkeypatch.setenv("AWOS_PROVIDER", "local")
+    if stub:
+        monkeypatch.setenv("AWOS_LOOP_THINK_STUB", "1")
+    else:
+        monkeypatch.delenv("AWOS_LOOP_THINK_STUB", raising=False)
+    sdk = TemplateLlamaServer(list(THREE_STEPS))
+    ex = lx.LoopExecutor(OpenAIToolClient(sdk, "local/qwen3"),
+                         lx.build_loop_registry(cap.FixedSandbox(str(tmp_path))), "Fix add()",
+                         workspace=str(tmp_path), gate=lambda f, s: {"green": True})
+    run = ex.run()
+    return ex.client, run, sdk
+
+
+def test_qwen3_template_breaks_prefix_without_stub(tmp_path, monkeypatch):
+    c, run, sdk = _template_run(tmp_path, monkeypatch, stub=False)
+    assert run.success
+    # Every later step re-renders the previous assistant turn without the empty
+    # think block the reply was generated after: drift on each judged call.
+    assert c.prefix_drift_checked == 3 and c.prefix_drift_calls == 3
+    assert "<think>" not in sdk.prompts[1].split("<|im_start|>assistant\n<think>")[0]
+    assert c.prefix_drift_tokens > 0
+
+
+def test_think_stub_keeps_prefix_stable(tmp_path, monkeypatch):
+    c, run, sdk = _template_run(tmp_path, monkeypatch, stub=True)
+    assert run.success
+    assert c.prefix_drift_checked == 3 and c.prefix_drift_calls == 0
+    for a, b in zip(sdk.prompts, sdk.prompts[1:]):
+        assert b.startswith(a)                       # each prompt extends the last
+    second = sdk.calls[1]["messages"]
+    assert second[2] == {"role": "assistant", "content": THREE_STEPS[0],
+                         "reasoning_content": "\n"}
+    assert second[3]["role"] == "tool" and second[3]["tool_call_id"] == "g1"
+
+
+def test_stub_in_content_alone_is_split_off_by_the_template():
+    # Why the flag uses reasoning_content and not a stub inside `content`: the
+    # template splits '</think>' out of content, and an empty block is dropped.
+    import jinja2
+    tpl = jinja2.Environment().from_string(QWEN3_LIKE_TEMPLATE)
+    msgs = [{"role": "user", "content": "t"},
+            {"role": "assistant", "content": "<think>\n\n</think>\n\nA"},
+            {"role": "tool", "content": "obs"}]
+    out = tpl.render(messages=msgs, add_generation_prompt=True, enable_thinking=False)
+    assert "<|im_start|>assistant\nA<|im_end|>" in out

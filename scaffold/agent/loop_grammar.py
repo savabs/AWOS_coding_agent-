@@ -42,6 +42,35 @@ user message. `chat_template_kwargs.enable_thinking=false` keeps a thinking
 model (Qwen3.x) out of a <think> block the grammar does not admit; the
 preamble is where it reasons.
 
+Prefix drift (telemetry): llama-server reports per call `timings.cache_n`
+(prompt tokens reused from the slot) and `prompt_n` / `predicted_n`. When a
+request's messages extend the previous request's messages plus the previous
+reply, everything the slot held after the previous call (prompt_n + cache_n +
+predicted_n, minus DRIFT_SLACK_TOKENS for the stop token, which is sampled but
+never decoded into the KV) should be reused. A shortfall means the server
+re-rendered earlier history differently from what it generated against:
+the client counts it in `prefix_drift_calls` / `prefix_drift_tokens` and puts
+the call's shortfall on `reply.prefix_drift` (int tokens; None when the call
+cannot be judged: first call, history rewritten/compacted, no timings).
+
+Qwen3 chat-template concern (AWOS_LOOP_THINK_STUB). With
+enable_thinking=false the generation prompt ends in an empty think block,
+`<|im_start|>assistant\n<think>\n\n</think>\n\n`, so the slot's KV holds that
+stub before each reply. When the same turn comes back as history, Qwen3's
+template renders the think block only for assistant turns after the *last
+real user query* and only when reasoning_content is non-empty (or the turn
+is the last message); a stub written into `content` is split off by the
+template itself. Observations sent as plain user messages move the "last
+query" forward every step, so every earlier assistant turn is re-rendered
+without the stub: the cached prefix breaks at the previous reply on every
+step (about one reply + one observation re-prefilled per call).
+AWOS_LOOP_THINK_STUB=1 sends observations with the `tool` role (Qwen3 renders
+them as `<tool_response>` inside a user turn, which does not count as a
+query) and gives each assistant turn reasoning_content="\n" (non-empty, so
+the block is rendered; stripped of newlines, so it is exactly the empty
+stub). Default off until measured on the real template: the Qwen3.5 GGUF's
+template has not been checked here, and prefix_drift tells the two apart.
+
 Default: on when AWOS_PROVIDER=local (providers.local_mode()) and the client
 is the OpenAI-compatible one; AWOS_LOOP_GRAMMAR=0 turns it off, =1 forces it
 for any OpenAI-compatible client whose server takes `grammar`. The Anthropic
@@ -64,6 +93,10 @@ except ImportError:  # flat sys.path import
     from edit_grammar import literal
 
 ENV_VAR = "AWOS_LOOP_GRAMMAR"
+THINK_STUB_ENV = "AWOS_LOOP_THINK_STUB"
+#: tokens of the previous call that may legitimately be missing from the next
+#: call's cache: the stop token is sampled (counted in predicted_n) but not decoded.
+DRIFT_SLACK_TOKENS = 1
 SUBMIT_MARKER = "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
 FENCE_OPEN = "```bash"
 FENCE = "```"
@@ -177,6 +210,45 @@ def _local_mode() -> bool:
     return local_mode()
 
 
+def think_stub_enabled() -> bool:
+    return os.getenv(THINK_STUB_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _slot_pin() -> Optional[int]:
+    """AWOS_LOCAL_SLOT_ID (default 0) when AWOS_LOCAL_SLOTS > 1, else None."""
+    try:
+        if int(os.getenv("AWOS_LOCAL_SLOTS", "1").strip() or 1) <= 1:
+            return None
+        return max(0, int(os.getenv("AWOS_LOCAL_SLOT_ID", "0").strip() or 0))
+    except ValueError:
+        return None
+
+
+def _tint(timings: Any, key: str) -> Optional[int]:
+    try:
+        value = timings.get(key)
+        return None if value is None or isinstance(value, bool) else max(0, int(value))
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def prefix_drift(prev_timings: Any, timings: Any, slack: int = DRIFT_SLACK_TOKENS
+                 ) -> Optional[int]:
+    """Tokens the previous call left in the slot that this call did not reuse.
+
+    expected = prev.prompt_n + prev.cache_n + prev.predicted_n - slack; drift =
+    max(0, expected - cache_n). None when either call lacks the counts. Only
+    meaningful when this request extends the previous one (caller checks)."""
+    if not isinstance(prev_timings, dict) or not isinstance(timings, dict):
+        return None
+    parts = [_tint(prev_timings, k) for k in ("prompt_n", "cache_n", "predicted_n")]
+    cache_n = _tint(timings, "cache_n")
+    if cache_n is None or parts[0] is None or parts[2] is None:
+        return None
+    expected = parts[0] + (parts[1] or 0) + parts[2] - max(0, slack)
+    return max(0, expected - cache_n)
+
+
 def enabled_for(client: Any) -> bool:
     """True when `client`'s loop replies should be grammar-constrained."""
     if isinstance(client, GrammarLoopClient):
@@ -218,14 +290,27 @@ class GrammarLoopClient:
         self.grammar = grammar
         self.parse_failures = 0
         self._calls = 0
+        #: calls whose cache_n fell short of what the previous call left in the slot
+        self.prefix_drift_calls = 0
+        self.prefix_drift_tokens = 0
+        #: calls that could be judged (request extended the previous one, timings present)
+        self.prefix_drift_checked = 0
+        self.think_stub = think_stub_enabled()
+        # With more than one server slot, pin the loop to the slot the static prefix
+        # was restored into (local_runtime.prepare_first_step, AWOS_LOCAL_SLOT_ID);
+        # with one slot nothing is sent, so the request bytes are unchanged.
+        self.id_slot = _slot_pin()
+        self._prev: Optional[tuple] = None   # (messages sent, reply text, timings)
 
     def request_kwargs(self, system: str, messages: list) -> dict:
+        extra = {"grammar": self.grammar, "chat_template_kwargs": {"enable_thinking": False}}
+        if self.id_slot is not None:
+            extra["id_slot"] = self.id_slot
         return dict(
             model=self.model,
             max_tokens=self.max_tokens,
             messages=[{"role": "system", "content": system}, *messages],
-            extra_body={"grammar": self.grammar,
-                        "chat_template_kwargs": {"enable_thinking": False}},
+            extra_body=extra,
         )
 
     def complete(self, system, messages, registry=None, tool_choice: Optional[str] = None
@@ -243,6 +328,10 @@ class GrammarLoopClient:
         self._calls += 1
         message = response.choices[0].message
         text = getattr(message, "content", "") or ""
+        timings = response_timings(response)
+        drift = self._drift(kwargs["messages"], timings)
+        # Shallow copies: the loop may edit earlier turns in place (compaction).
+        self._prev = ([dict(m) for m in kwargs["messages"]], text, timings)
         parsed = parse_reply(text)
         calls = []
         if parsed.kind == "bash":
@@ -253,7 +342,7 @@ class GrammarLoopClient:
             self.parse_failures += 1
         usage = getattr(response, "usage", None)
         counts = _usage_counts(usage, response_timings(response))
-        return ModelReply(
+        reply = ModelReply(
             text=text,
             tool_calls=calls,
             input_tokens=getattr(usage, "prompt_tokens", 0) or 0,
@@ -262,13 +351,49 @@ class GrammarLoopClient:
             cached_tokens=counts.get("cached", 0),
             cache_write_tokens=counts.get("cache_write", 0),
         )
+        # Telemetry for the loop to sum: tokens of drift on this call (None =
+        # not judged) and llama-server's speculative-draft counts when present.
+        reply.prefix_drift = drift
+        reply.draft_tokens = counts.get("draft", 0)
+        reply.draft_accepted = counts.get("draft_accepted", 0)
+        return reply
+
+    def _drift(self, messages: list, timings: Any) -> Optional[int]:
+        if self._prev is None:
+            return None
+        prev_messages, prev_text, prev_timings = self._prev
+        n = len(prev_messages)
+        # Judge only a request that extends the previous one with the previous
+        # reply as the next turn; a rewritten/compacted history is a reset.
+        if len(messages) <= n or messages[:n] != prev_messages:
+            return None
+        nxt = messages[n]
+        if nxt.get("role") != "assistant" or (nxt.get("content") or "") != prev_text:
+            return None
+        drift = prefix_drift(prev_timings, timings)
+        if drift is None:
+            return None
+        self.prefix_drift_checked += 1
+        if drift > 0:
+            self.prefix_drift_calls += 1
+            self.prefix_drift_tokens += drift
+        return drift
 
     def format_assistant_turn(self, reply: ModelReply) -> dict[str, Any]:
         # The raw text, byte for byte: what the model generated is what the
         # next prompt re-renders, so the server's KV prefix stays valid.
-        return {"role": "assistant", "content": reply.text or ""}
+        turn = {"role": "assistant", "content": reply.text or ""}
+        if self.think_stub:
+            # Non-empty so Qwen3's template renders the block; "\n".strip("\n")
+            # is empty, so it renders exactly the generation prompt's empty stub.
+            turn["reasoning_content"] = "\n"
+        return turn
 
     def format_tool_results(self, calls, results) -> list[dict[str, Any]]:
+        if self.think_stub:
+            ids = [getattr(c, "id", "") for c in (calls or [])]
+            return [{"role": "tool", "tool_call_id": ids[i] if i < len(ids) else f"g{i}",
+                     "content": _render_result(result)} for i, result in enumerate(results)]
         return [{"role": "user", "content": _render_result(result)} for result in results]
 
 
@@ -279,4 +404,5 @@ def grammar_digest(grammar: str = GRAMMAR) -> str:
 
 
 __all__ = ["GRAMMAR", "GrammarLoopClient", "ParsedReply", "build_grammar", "enabled_for",
-           "grammar_digest", "parse_reply", "wrap_for_loop"]
+           "grammar_digest", "parse_reply", "prefix_drift", "think_stub_enabled",
+           "wrap_for_loop"]
