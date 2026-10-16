@@ -103,7 +103,18 @@ ROUTING_ENV = ("AWOS_OPENROUTER_PROVIDER", "AWOS_OPENROUTER_ALLOW_FALLBACKS",
                # trick T4: fuzzy apply + edit grammar (docs/specs/edit_robustness.md)
                "AWOS_FUZZY_APPLY", "AWOS_EDIT_GRAMMAR",
                # the loop executor's knobs (arm "loop", scaffold/agent/loop_executor.py)
-               "AWOS_LOOP_MAX_STEPS", "AWOS_LOOP_GATE_RETRIES", "AWOS_LOOP_CMD_TIMEOUT_S")
+               "AWOS_LOOP_MAX_STEPS", "AWOS_LOOP_GATE_RETRIES", "AWOS_LOOP_CMD_TIMEOUT_S",
+               # B1 reply grammar (loop_grammar.py); the H2-g arms set it themselves
+               "AWOS_LOOP_GRAMMAR")
+
+# A local AWOS arm's pins (docs/specs/harness_lift_ladder.md, amendment 6):
+# PIN_ENV with every model knob on the local model (providers.local_mode() also
+# turns on from AWOS_AGENT_MODEL=local/...), plus AWOS_PROVIDER=local. AWOS_LADDER
+# keeps the pinned id: in local mode every ladder pick is served by the loaded
+# model (providers.local_model_id), so no cloud model is reachable.
+LOCAL_PIN_ENV = {**{k: (LOCAL_MINI_MODEL if k.endswith("_MODEL") else v)
+                    for k, v in PIN_ENV.items()},
+                 "AWOS_PROVIDER": "local"}
 
 
 def routing_env() -> dict:
@@ -153,7 +164,35 @@ ARM_CHILDREN: dict[str, dict] = {
     "mini-local": {"cmd": [PY, str(REPO / "scripts" / "harness_mini.py"), "{job_dir}",
                            "{project}", "--model", LOCAL_MINI_MODEL],
                    "env": {}},
+    # The local "does AWOS make local better" run (amendment 6): AWOS children on
+    # the one local llama-server, $0. Each sets AWOS_PROVIDER=local itself and
+    # pins every model knob to the local id (LOCAL_PIN_ENV), whatever the shell holds.
+    # loop-local: the default engine, reply grammar on (explicit, so a shell
+    # AWOS_LOOP_GRAMMAR=0 can't leak in).
+    "loop-local": {"cmd": [PY, "{runner}", "_child", "{job_dir}", "{project}"],
+                   "env": {"AWOS_NOTEBOOK": "0", "AWOS_EXECUTOR": "loop",
+                           "AWOS_LOOP_GRAMMAR": "1", **LOCAL_PIN_ENV}},
+    # H2-g: the same loop with the GBNF reply grammar off (B1 ablation).
+    "loop-local-nogrammar": {"cmd": [PY, "{runner}", "_child", "{job_dir}", "{project}"],
+                             "env": {"AWOS_NOTEBOOK": "0", "AWOS_EXECUTOR": "loop",
+                                     "AWOS_LOOP_GRAMMAR": "0", **LOCAL_PIN_ENV}},
+    # H2-p: AWOS's planner pipeline (the `off` arm's executor) on the local model.
+    "pipeline-local": {"cmd": [PY, "{runner}", "_child", "{job_dir}", "{project}"],
+                       "env": {"AWOS_NOTEBOOK": "0", "AWOS_EXECUTOR": "agent_loop",
+                               **LOCAL_PIN_ENV}},
 }
+
+#: The AWOS arms that run on the local server (amendment 6).
+LOCAL_AWOS_ARMS = ("loop-local", "loop-local-nogrammar", "pipeline-local")
+#: Every arm served by the local server.
+LOCAL_ARMS = ("mini-local",) + LOCAL_AWOS_ARMS
+
+
+def arm_pin_env(arm: str) -> dict:
+    """PIN_ENV as an arm's child gets it: a local arm's own pins win (its model
+    knobs name the local model); every other arm gets PIN_ENV unchanged."""
+    own = ARM_CHILDREN.get(arm, {}).get("env", {})
+    return {k: own.get(k, v) for k, v in PIN_ENV.items()}
 
 # The run sets this to the source .env; jobs read the key from there instead of
 # a per-arm copy. Old run dirs (pre-2026-10-10) still hold state/.env.
@@ -758,7 +797,8 @@ def run_child(job_dir: Path, project: Path) -> None:
         "AWOS_MAX_RUN_COST": str(child_cost_cap(float(spec.get("max_cost_usd", 1.0)))),
         "AWOS_AGENT_MAX_TURNS": str(spec.get("max_turns", 150)),
         "AWOS_SANDBOX": os.environ.get("AWOS_SANDBOX", "auto"),
-        **PIN_ENV,
+        # A local arm's pins name the local model (LOCAL_PIN_ENV), never the cloud one.
+        **arm_pin_env(os.environ.get("AWOS_SERIES_ARM", "")),
     })
     allowed = _pin_model()
     from scaffold.agent.orchestrator import Orchestrator
@@ -789,7 +829,9 @@ def run_dry_child(job_dir: Path, project: Path) -> None:
     print(f"[job_series] dry-run child cwd={Path.cwd()} project={project} "
           f"notebook={os.environ.get('AWOS_NOTEBOOK')} goal_check={os.environ.get('AWOS_GOAL_CHECK')} "
           f"executor={child_executor(os.environ.get('AWOS_SERIES_ARM', ''))} "
-          f"model={os.environ.get('AWOS_AGENT_MODEL')}", flush=True)
+          f"model={os.environ.get('AWOS_AGENT_MODEL')} "
+          f"provider={os.environ.get('AWOS_PROVIDER') or '-'} "
+          f"grammar={os.environ.get('AWOS_LOOP_GRAMMAR') or '-'}", flush=True)
     fail = os.environ.get("AWOS_SERIES_DRY_FAIL", "")
     if fail:
         arm, job, times = fail.split(":")
@@ -1748,6 +1790,13 @@ def run(series: str, arms: list[str], job_spec: str | None, dry_run: bool,
             kept = []
         print(f"[job_series] resuming {ts}: keeping {len(kept)} earlier result(s)")
 
+    if arms and all(a in LOCAL_ARMS for a in arms) \
+            and os.environ.get("AWOS_PROVIDER", "").strip().lower() != "local":
+        # An all-local run: the backend check and eval_health (routing) must see
+        # the local server, not the cloud pin.
+        print("[job_series] every arm is local: setting AWOS_PROVIDER=local for the run",
+              flush=True)
+        os.environ["AWOS_PROVIDER"] = "local"
     retries = int(os.environ.get("AWOS_SERIES_RETRIES", 2))
     try:
         _BUDGET["limit"] = (float(os.environ["AWOS_SERIES_BUDGET_USD"])

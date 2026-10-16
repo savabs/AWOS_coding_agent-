@@ -122,3 +122,52 @@ prefix and cache telemetry; B3–B5 runtime switches if merged; all recorded in 
   format-error nudges per run; expect the grammar to drive nudges to about 0.
 - **Descriptive:** seconds per step, cached-prefix fraction, tokens/s and the power state per run.
 - No run starts until the owner approves it (as of 2026-10-16 the owner has paused runs).
+
+## Amendment 6 (2026-10-16, before any local data): the four-arm local run
+
+`docs/STRATEGY.md` makes "AWOS makes a local model better" the first proof. This amendment fixes the local run
+before any of its data exists. It supersedes the run layout of amendment 5 (H2 and H2-g stay as defined there) and
+adds one exploratory comparison.
+
+- **Model and server:** Qwen3.5-9B Q4_K_M via `scripts/local_model.sh start`, one llama-server, `AWOS_LOCAL_SLOTS=1`
+  (the driver refuses a server started with more slots), on AC power, nothing else running. $0.
+- **Arms** (all `scripts/job_series.py` arms; the three AWOS ones set `AWOS_PROVIDER=local` and pin every model knob
+  to `local/<AWOS_LOCAL_MODEL>` themselves, so no cloud model is reachable; each arm's env is in its input manifest):
+
+  | arm | what it is |
+  |---|---|
+  | `loop-local` | AWOS `loop` engine (the default), reply grammar on (`AWOS_LOOP_GRAMMAR=1`) |
+  | `mini-local` | mini-swe-agent 2.4.6 on the same server (unchanged) |
+  | `loop-local-nogrammar` | `loop-local` with `AWOS_LOOP_GRAMMAR=0` |
+  | `pipeline-local` | AWOS planner pipeline (the `off` arm's executor, `agent_loop`) |
+
+- **Issues:** the same 15 as amendment 5: the first 15 sorted fresh-set names whose reference fix touches exactly one
+  source file (test files and bytecode don't count). Implemented as `scripts/local_ladder.py select`, and written to
+  `<out>/issues.txt` before the first job. On the current fresh set this is: astroid_2977, astroid_3235,
+  astroid_3286, astroid_3348, boltons_441, boltons_513, click_3777, click_3818, more-itertools_1248,
+  more-itertools_1261, pathspec_157, pyflakes_868, pyparsing_652, pyparsing_653, sqlglot_8042 (all `fresh_`-prefixed).
+- **Order and resume:** `scripts/local_ladder.py run` runs all four arms of an issue back to back, one job_series
+  call per issue × arm, with the arm order rotated per issue by a Williams Latin square (each arm takes each position,
+  and follows each other arm, once per 4 issues). Before each job it health-checks the server (restarting it through
+  `local_model.sh` if it stays down) and waits while on battery. A crash or restart resumes at the first issue × arm
+  without a result. Job limits come from each `task.json` as before (150 steps, 30 min).
+- **H2 (primary, unchanged):** `loop-local` vs `mini-local`, T1 rule `stats_audit.py combined_H2.json --a mini-local
+  --b loop-local --cost-budget 0.5`; KEEP also requires an observed Δ ≥ 15 pp.
+- **H2-g (secondary):** `loop-local` vs `loop-local-nogrammar` (`--a loop-local-nogrammar --b loop-local`), T1 rule
+  reported descriptively at n = 15.
+- **H2-p (new, exploratory, descriptive only):** `pipeline-local` vs `loop-local` (`--a loop-local --b pipeline-local`).
+  Why: the planner layers lost to the plain loop on Haiku, but planner/executor splits are designed for small models
+  (Apple's on-device planner is one example), so the local model is where they could pay off. No verdict is drawn
+  from it; a positive sign would need its own pre-registered run.
+- **Secondary metrics per arm** (`local_ladder.py combine` -> `secondary.json`): valid-reply rate (loop:
+  1 − format errors / steps; mini: executed commands / model turns; the pipeline uses tool calls, so none);
+  finished-properly rate (loop: stop reason `submitted`/`gate_red` vs `max_steps`/`format_error`/limits; mini:
+  `Submitted` vs anything else; pipeline: finished before the timeout with a result); minutes per solve (wall time);
+  Wh per solve (battery energy delta from `ioreg` when on battery; **on AC, energy is unavailable** and the run
+  records wall time plus llama-server token counters from `/metrics` instead); tokens/s (llama-server generation
+  counters, else the loop's own telemetry); cached fraction (loop telemetry, else 1 − server prompt tokens / client
+  input tokens). Power source is logged before and after each job.
+- **Exclusions:** INVALID rules as before (provider, empty-response or crashed-harness runs are dropped from every
+  arm of that issue). Arms of one issue must receive identical project trees and task files; `combine` reports any
+  mismatch as fatal.
+- No run starts until the owner approves it.
