@@ -1,0 +1,10 @@
+{
+  "corpus_id": "code_evolution_commit_3",
+  "description": "Bulk orders — 17 baseline green, 3 bulk tests red",
+  "goal_assertions": {
+    "must_still_pass": "python3 -m pytest tests/ -q --tb=no",
+    "forbidden_paths": ["tests/", "conftest.py", "golden/"],
+    "expected_pass_count": 20,
+    "baseline_must_remain_green": 17
+  }
+}
