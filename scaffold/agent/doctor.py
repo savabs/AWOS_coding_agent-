@@ -8,7 +8,9 @@ Checks (nothing here spends money; key checks use free read-only endpoints):
   required  Python >= 3.11, git on PATH, a working model provider (key_health),
             host dir writable (AWOS_HOST_DIR, default ~/.awos/host)
   info      install location / `awos` on PATH, local model server reachable,
-            current repo + its test command, host worker running
+            local runtime (server up/sleeping/down, power policy, spec mode,
+            memory admission, prefix-KV cache files), current repo + its test
+            command, host worker running
 
 Prints one line per check with a check mark or a cross, and one "fix:" line
 under each cross. Exit 0 when every required check passes, else 1. Keys are
@@ -30,10 +32,12 @@ from typing import Callable, Optional
 
 try:
     from scaffold.agent import key_health as _kh
+    from scaffold.agent import local_runtime as _lr
     from scaffold.agent import onboarding as _ob
     from scaffold.agent import paths as _paths
 except ImportError:  # pragma: no cover
     import key_health as _kh  # type: ignore
+    import local_runtime as _lr  # type: ignore
     import onboarding as _ob  # type: ignore
     import paths as _paths  # type: ignore
 
@@ -118,6 +122,26 @@ def check_provider(env: Optional[dict] = None, get=None) -> list[Check]:
                          "" if ok else "start llama-server (or Ollama) and set AWOS_LOCAL_BASE_URL",
                          required=wants_local))
     return out
+
+
+def check_local_runtime(env: Optional[dict] = None, status_fn=None) -> Check:
+    """Local llama-server runtime (local_runtime.status); informational, never required."""
+    e = _ob.known_env(env)
+    try:
+        s = (status_fn or _lr.status)(e)
+    except Exception as exc:  # pragma: no cover - defensive: doctor must not crash
+        return Check("Local runtime", False, f"status failed: {exc}", required=False)
+    if not s.get("local_mode") and s.get("server") == "down":
+        return Check("Local runtime", True, "not in use (AWOS_PROVIDER is not local)",
+                     required=False)
+    line = _lr.status_line(s)
+    if not s["plan"].get("ok"):
+        return Check("Local runtime", False, line,
+                     "fix the setting named above (scripts/local_model.sh plan)", required=False)
+    if s.get("server") == "down":
+        return Check("Local runtime", False, line, "start it: scripts/local_model.sh start",
+                     required=False)
+    return Check("Local runtime", True, line, required=False)
 
 
 #: AWOS_EXECUTOR values a coding job can run with (orchestrator.executor_choice).
@@ -219,6 +243,7 @@ def run_checks(repo: Optional[Path] = None, env: Optional[dict] = None, get=None
     repo = Path(repo) if repo else Path.cwd()
     checks = [check_python(), check_install(), check_git()]
     checks += check_provider(env=env, get=get)
+    checks.append(check_local_runtime(env=env))
     checks.append(check_executor(env=env))
     checks += check_repo(repo)
     checks.append(check_host_dir())
