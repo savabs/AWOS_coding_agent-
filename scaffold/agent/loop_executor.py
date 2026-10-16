@@ -27,6 +27,14 @@ The loop:
 
 No planner, no acceptance tests, no one-shot, no arbiter, no notebook.
 
+Local model (AWOS_PROVIDER=local): by default the replies are plain text
+under a GBNF grammar instead of tool calls (AWOS_LOOP_GRAMMAR,
+loop_grammar.py): a short preamble, then exactly one ```bash block or the
+submit line. The Anthropic path is unchanged. The history is append-only and
+the prompt bytes are fixed, so each request extends the previous one
+(prefix-cache reuse); per-call cache and speed telemetry goes to
+llm_call_log and the components.json `loop` entry (LoopRun.telemetry).
+
 Prompt text (SYSTEM_PROMPT, _INSTANCE_TEMPLATE, FORMAT_ERROR_MESSAGE,
 TRUNCATED_MESSAGE) and the observation truncation rule are adapted from
 mini-swe-agent 2.4.6 (minisweagent/config/mini.yaml), under its MIT licence:
@@ -66,12 +74,14 @@ from typing import Any, Callable, Optional
 try:
     from .agent_loop import (TRUNCATED_FINISH, WorkspaceWatch, _finish_reason, _int0,
                              estimate_cost)
-    from .llm_call_log import record_error, record_response
+    from .llm_call_log import record_error, record_response, timing_fields
+    from .loop_grammar import wrap_for_loop
     from .tools.base import Tool, ToolRegistry, ToolResult
 except ImportError:  # flat sys.path import (scaffold/agent on the path)
     from agent_loop import (TRUNCATED_FINISH, WorkspaceWatch, _finish_reason, _int0,
                             estimate_cost)
-    from llm_call_log import record_error, record_response
+    from llm_call_log import record_error, record_response, timing_fields
+    from loop_grammar import wrap_for_loop
     from tools.base import Tool, ToolRegistry, ToolResult
 
 #: The line that ends the loop (mini-swe-agent's own marker, kept so the two
@@ -315,6 +325,112 @@ TRUNCATED_MESSAGE = (
     "tool call. If you need to think more, do so briefly."
 )
 
+# Text protocol (AWOS_LOOP_GRAMMAR, loop_grammar.py: the local model under a
+# GBNF grammar, no `tools`). Same workflow and examples as _INSTANCE_TEMPLATE;
+# the reply format is the fenced envelope the grammar enforces. The task comes
+# LAST: everything before it is the same bytes for every task, so the local
+# server's prompt cache reuses the whole instruction block across tasks.
+_INSTANCE_TEMPLATE_TEXT = """You will solve a task in the repository at the current \
+working directory. The task is at the end of this message.
+
+You can execute bash commands and edit files to implement the necessary changes.
+
+## Recommended Workflow
+
+This workflow should be done step-by-step so that you can iterate on your changes and any possible problems.
+
+1. Analyze the codebase by finding and reading relevant files
+2. Create a script to reproduce the issue
+3. Edit the source code to resolve the issue
+4. Verify your fix works by running your script again
+5. Test edge cases to ensure your fix is robust
+6. Run the project's existing tests that cover the code you changed
+7. Remove any scratch scripts you created, unless the task asks for them
+8. When the task is fully done and verified, reply with `{marker}` on a line of \
+its own, followed by a short summary of what you changed.
+   <important>Only submit when you are done: submitting ends your work on this task.</important>
+
+## Command Execution Rules
+
+You are operating in an environment where
+
+1. You issue one command
+2. The system executes the command in a subshell
+3. You see the result
+4. You write your next command
+
+Each response has exactly this shape:
+
+1. Optionally, a few short lines of reasoning: your analysis and plan
+2. Then EXACTLY ONE bash code block with your command, and nothing after it:
+
+```bash
+your_command_here
+```
+
+**CRITICAL REQUIREMENTS:**
+
+- Exactly one ```bash block per response (until you submit). Join several commands with `&&` or write a script.
+- No line inside the block may start with three backticks.
+- Directory or environment variable changes are not persistent. Every action is executed in a new subshell.
+- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files
+- Commands run in a sandbox: writes are limited to the repository, and there is no network access except to localhost.
+- To finish, reply with no bash block: `{marker}` on its own line, then a short summary.
+
+<system_information>
+{system} {release} {machine}
+</system_information>
+
+## Useful command examples
+
+### Create a new file:
+
+```bash
+cat <<'EOF' > newfile.py
+import numpy as np
+hello = "world"
+print(hello)
+EOF
+```
+
+### Edit files with sed:
+{sed_note}
+```bash
+# Replace all occurrences
+sed -i{sed_arg} 's/old_string/new_string/g' filename.py
+
+# Replace only first occurrence
+sed -i{sed_arg} 's/old_string/new_string/' filename.py
+
+# Replace first occurrence on line 1
+sed -i{sed_arg} '1s/old_string/new_string/' filename.py
+
+# Replace all occurrences in lines 1-10
+sed -i{sed_arg} '1,10s/old_string/new_string/g' filename.py
+```
+
+### View file content:
+
+```bash
+# View specific lines with numbers
+nl -ba filename.py | sed -n '10,20p'
+```
+
+## The task
+
+<task>
+{goal}
+</task>
+"""
+
+FORMAT_ERROR_MESSAGE_TEXT = (
+    "Your reply had no bash block and did not submit.\n\n"
+    "Every response needs a few lines of reasoning at most, then exactly one block:\n\n"
+    "```bash\nyour_command_here\n```\n\n"
+    "If the task is fully done and verified, reply with `{marker}` on a line of its own, "
+    "then a short summary."
+)
+
 GATE_FEEDBACK_TEMPLATE = (
     "You submitted, but AWOS ran the project's tests on the final tree and these tests "
     "fail after your change (new failures; tests that already failed before your change "
@@ -325,11 +441,15 @@ GATE_FEEDBACK_TEMPLATE = (
 )
 
 
-def instance_prompt(goal: str, uname: Optional[Any] = None) -> str:
-    """The first user message: the goal verbatim plus mini's workflow and rules."""
+def instance_prompt(goal: str, uname: Optional[Any] = None, text_protocol: bool = False) -> str:
+    """The first user message: the goal verbatim plus mini's workflow and rules.
+
+    text_protocol: the fenced-envelope variant for the grammar-constrained
+    local loop (static instructions first, the goal last)."""
     u = uname or platform.uname()
     darwin = u.system == "Darwin"
-    return _INSTANCE_TEMPLATE.format(
+    template = _INSTANCE_TEMPLATE_TEXT if text_protocol else _INSTANCE_TEMPLATE
+    return template.format(
         goal=goal.strip(), marker=SUBMIT_MARKER, system=u.system, release=u.release,
         machine=u.machine,
         sed_note=("\n<important>\nYou are on MacOS. For all the below examples, you need to "
@@ -399,17 +519,47 @@ class LoopRun:
     cached_tokens: int = 0
     cache_write_tokens: int = 0
     cost_usd: float = 0.0
+    #: Text protocol under a GBNF grammar (loop_grammar.py) instead of tool calls.
+    grammar: bool = False
+    #: Replies with neither an action nor a submit (each got the nudge), and of
+    #: those, text-protocol replies the envelope parser could not read.
+    format_errors: int = 0
+    parse_failures: int = 0
+    #: llama-server `timings`, summed over the calls that reported them.
+    timed_calls: int = 0
+    prefill_ms: float = 0.0
+    prefill_tokens: int = 0
+    gen_tokens: int = 0
+    gen_ms: float = 0.0
     final_message: str = ""
     files_changed: list = field(default_factory=list)
     gate: Optional[dict] = None
     transcript: list = field(default_factory=list)
     elapsed_sec: float = 0.0
 
+    def telemetry(self) -> dict:
+        """Prompt-cache and speed summary (rea_synthesis B2): cached_fraction =
+        cached / prompt tokens over the run; mean_prefill_ms per timed call;
+        tokens_per_s = generated tokens / generation seconds (llama-server)."""
+        out = {"input_tokens": self.input_tokens, "cached_tokens": self.cached_tokens,
+               "cache_write_tokens": self.cache_write_tokens,
+               "cached_fraction": (round(self.cached_tokens / self.input_tokens, 4)
+                                   if self.input_tokens > 0 else None),
+               "grammar": self.grammar, "format_errors": self.format_errors,
+               "parse_failures": self.parse_failures}
+        if self.timed_calls:
+            out["mean_prefill_ms"] = round(self.prefill_ms / self.timed_calls, 1)
+            out["mean_prefill_tokens"] = round(self.prefill_tokens / self.timed_calls, 1)
+            out["tokens_per_s"] = (round(self.gen_tokens / (self.gen_ms / 1000.0), 2)
+                                   if self.gen_ms > 0 else None)
+        return out
+
     def component(self) -> dict:
         """The components.json entry for this run."""
         return {"status": "ran", "steps": self.steps, "submits": self.submits,
                 "gate_retries": self.gate_retries, "cost_usd": round(self.cost_usd, 6),
-                "stop_reason": self.stop_reason, "success": self.success}
+                "stop_reason": self.stop_reason, "success": self.success,
+                **self.telemetry()}
 
 
 class LoopExecutor:
@@ -433,7 +583,12 @@ class LoopExecutor:
         system_prompt: str = SYSTEM_PROMPT,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        self.client = client
+        # AWOS_LOOP_GRAMMAR (default on for AWOS_PROVIDER=local): the local
+        # OpenAI-compatible client becomes the grammar-constrained text
+        # protocol (loop_grammar.py). Anthropic and every other client pass
+        # through unchanged.
+        self.client = wrap_for_loop(client)
+        self.text_protocol = bool(getattr(self.client, "text_protocol", False))
         self.registry = registry
         self.goal = goal
         self.workspace = workspace or getattr(registry, "project_root", "") or ""
@@ -485,7 +640,16 @@ class LoopExecutor:
                         visible_chars=len(reply.text or ""),
                         input_tokens=reply.input_tokens, output_tokens=reply.output_tokens,
                         cost_usd=cost, finish_reason=_finish_reason(reply.raw).strip("?") or None,
-                        tool_calls=len(reply.tool_calls), turn=run.steps)
+                        tool_calls=len(reply.tool_calls), turn=run.steps,
+                        cached_tokens=cached or None,
+                        **({"loop_grammar": True} if self.text_protocol else {}))
+        timing = timing_fields(reply.raw)
+        if "prompt_eval_ms" in timing or "gen_ms" in timing:
+            run.timed_calls += 1
+            run.prefill_ms += float(timing.get("prompt_eval_ms") or 0.0)
+            run.prefill_tokens += int(timing.get("prompt_eval_tokens") or 0)
+            run.gen_tokens += int(timing.get("gen_tokens") or 0)
+            run.gen_ms += float(timing.get("gen_ms") or 0.0)
         run.input_tokens += reply.input_tokens
         run.output_tokens += reply.output_tokens
         run.cached_tokens += cached
@@ -516,11 +680,17 @@ class LoopExecutor:
     # -- the loop --
 
     def run(self) -> LoopRun:
-        run = LoopRun()
+        run = LoopRun(grammar=self.text_protocol)
         started = self.clock()
         watch = WorkspaceWatch(self.workspace) if self.workspace else None
         before = watch.snapshot() if watch is not None else None
-        self.messages = [{"role": "user", "content": instance_prompt(self.goal)}]
+        # History is append-only from here: no message is edited, re-rendered
+        # or dropped mid-run, so every request is the previous request plus a
+        # suffix (tests/test_prefix_stability.py).
+        self.messages = [{"role": "user", "content": instance_prompt(
+            self.goal, text_protocol=self.text_protocol)}]
+        format_message = (FORMAT_ERROR_MESSAGE_TEXT if self.text_protocol
+                          else FORMAT_ERROR_MESSAGE).format(marker=SUBMIT_MARKER)
         format_errors = truncations = 0
         try:
             while True:
@@ -586,14 +756,16 @@ class LoopExecutor:
                     continue
 
                 format_errors += 1
+                run.format_errors += 1
+                if self.text_protocol:
+                    run.parse_failures += 1  # the grammar should make this impossible
                 if format_errors >= MAX_FORMAT_ERRORS:
                     run.stop_reason = "format_error"
                     run.final_message = (reply.text or "")[:500]
                     break
                 if reply.text:
                     self.messages.append(self.client.format_assistant_turn(reply))
-                self.messages.append({"role": "user",
-                                      "content": FORMAT_ERROR_MESSAGE.format(marker=SUBMIT_MARKER)})
+                self.messages.append({"role": "user", "content": format_message})
         finally:
             run.elapsed_sec = self.clock() - started
         if run.stop_reason not in ("submitted", "gate_red"):

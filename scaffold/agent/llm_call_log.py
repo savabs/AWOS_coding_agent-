@@ -192,6 +192,51 @@ def cache_fields(response: Any) -> dict:
     return out
 
 
+def _num(value: Any) -> Optional[float]:
+    try:
+        if value is None or isinstance(value, bool):
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def timing_fields(response: Any) -> dict:
+    """Per-call speed and prompt-cache telemetry (rea_synthesis B2).
+
+    llama-server (top-level `timings`): prompt_eval_tokens (prompt_n, the
+    tokens actually prefilled), prompt_eval_ms (prompt_ms), server_cache_n
+    (cache_n, prompt tokens reused from the slot's KV), gen_tokens
+    (predicted_n), gen_ms (predicted_ms), gen_tokens_per_s
+    (predicted_per_second). Anthropic: cache_read_tokens /
+    cache_creation_tokens (usage.cache_read_input_tokens /
+    cache_creation_input_tokens). Only the fields the response carries are
+    returned; never raises."""
+    out: dict = {}
+    try:
+        timings = _extra(response, "timings")
+        if isinstance(timings, dict):
+            for key, src, conv in (("prompt_eval_tokens", "prompt_n", _int),
+                                   ("prompt_eval_ms", "prompt_ms", _num),
+                                   ("server_cache_n", "cache_n", _int),
+                                   ("gen_tokens", "predicted_n", _int),
+                                   ("gen_ms", "predicted_ms", _num),
+                                   ("gen_tokens_per_s", "predicted_per_second", _num)):
+                value = conv(timings.get(src))
+                if value is not None:
+                    out[key] = round(value, 3) if isinstance(value, float) else value
+        if not _get(response, "choices"):  # Anthropic Messages shape
+            usage = _get(response, "usage")
+            for key, src in (("cache_read_tokens", "cache_read_input_tokens"),
+                             ("cache_creation_tokens", "cache_creation_input_tokens")):
+                value = _get(usage, src)
+                if isinstance(value, int) and not isinstance(value, bool):
+                    out[key] = value
+    except Exception:
+        return {}
+    return out
+
+
 def record_call(component: str, requested_model: Optional[str], response_model: Optional[str],
                 finish_reason: Optional[str], input_tokens: Optional[int],
                 output_tokens: Optional[int], reasoning_tokens: Optional[int] = None,
@@ -254,6 +299,7 @@ def record_response(component: str, requested_model: Optional[str], response: An
             "estimate" if cost is not None else None)
         fields["cost_est_usd"] = _cache_aware_estimate(requested_model, response)
         fields.update(cache_fields(response))
+        fields.update(timing_fields(response))
         if fields["cost_usd"] is None:
             fields["cost_usd"] = cost
         for key, value in overrides.items():
