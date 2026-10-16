@@ -531,6 +531,8 @@ class LoopRun:
     prefill_tokens: int = 0
     gen_tokens: int = 0
     gen_ms: float = 0.0
+    #: local_runtime.prepare_first_step result (status, tokens restored...), or None.
+    prefix_cache: Optional[dict] = None
     final_message: str = ""
     files_changed: list = field(default_factory=list)
     gate: Optional[dict] = None
@@ -547,6 +549,8 @@ class LoopRun:
                                    if self.input_tokens > 0 else None),
                "grammar": self.grammar, "format_errors": self.format_errors,
                "parse_failures": self.parse_failures}
+        if self.prefix_cache is not None:
+            out["prefix_cache"] = self.prefix_cache.get("status")
         if self.timed_calls:
             out["mean_prefill_ms"] = round(self.prefill_ms / self.timed_calls, 1)
             out["mean_prefill_tokens"] = round(self.prefill_tokens / self.timed_calls, 1)
@@ -560,6 +564,23 @@ class LoopRun:
                 "gate_retries": self.gate_retries, "cost_usd": round(self.cost_usd, 6),
                 "stop_reason": self.stop_reason, "success": self.success,
                 **self.telemetry()}
+
+
+def _prepare_local_prefix(system_prompt: str) -> Optional[dict]:
+    """Restore the saved KV of the static system prefix on the local
+    llama-server before the first call (local_runtime.prepare_first_step,
+    rea_synthesis B4). Returns its result dict, or None when the hook is
+    unavailable. Never raises."""
+    try:
+        try:
+            from scaffold.agent import local_runtime
+        except ImportError:  # pragma: no cover - flat import
+            import local_runtime  # type: ignore
+        res = local_runtime.prepare_first_step(
+            [{"role": "system", "content": system_prompt}])
+        return res if isinstance(res, dict) else None
+    except Exception:  # noqa: BLE001 - an optimisation only; a miss costs nothing
+        return None
 
 
 class LoopExecutor:
@@ -689,6 +710,12 @@ class LoopExecutor:
         # suffix (tests/test_prefix_stability.py).
         self.messages = [{"role": "user", "content": instance_prompt(
             self.goal, text_protocol=self.text_protocol)}]
+        if self.text_protocol:
+            # Local llama-server: restore (or build) the saved KV of the static
+            # system prefix before the first call. The text protocol sends no
+            # tools, so that prefix is exactly the start of every request.
+            # No-op unless AWOS_PROVIDER=local; never raises.
+            run.prefix_cache = _prepare_local_prefix(self.system_prompt)
         format_message = (FORMAT_ERROR_MESSAGE_TEXT if self.text_protocol
                           else FORMAT_ERROR_MESSAGE).format(marker=SUBMIT_MARKER)
         format_errors = truncations = 0
