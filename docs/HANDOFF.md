@@ -54,6 +54,27 @@ Local-model reliability, items B1–B5 of the REA synthesis:
 
 Commit fcf30f0.
 
+## Built 2026-10-16 in a cloud session (branch `claude/loop-executor-tests-2i0l7p`; fakes only, nothing run on a model)
+
+REA roadmap items A6–A8, C9, C10, D13, D15. Pre-registered decision rules and defaults: `docs/specs/loop_reliability_ab.md`.
+- **A7 stuck detector** (`loop_stuck.py`, `AWOS_LOOP_STUCK=off|log|nudge`, default `log` = counts only, prompt unchanged).
+  Triggers: repeat_command, failure_rate (≥15 of last 20), failure_signature, no_progress. Never stops a run.
+- **A6 cost routing** (`loop_route.py`, `AWOS_LOOP_ROUTE="local,claude-haiku-5-5"`, default off). One-way escalation on
+  stuck / rung step allowance (`AWOS_LOOP_ROUTE_RUNG_STEPS`, 30) / format or truncation limit / model error / red gate.
+  The next rung starts a fresh conversation with a handover note on the same tree.
+  **A8:** labelled decisions go to `.awos/route_decisions.jsonl`.
+- **C9 checkpoint/resume** (`loop_checkpoint.py`). The host sets `AWOS_LOOP_CHECKPOINT_PATH` for jobs with a worktree. A killed
+  attempt resumes the same conversation (no command re-run; the cost cap counts only the new attempt).
+- **C10 compaction** (`loop_compaction.py`, `AWOS_LOOP_COMPACT=1`, default off). Summary started at 70% of the window and
+  swapped in at 85%; the goal is kept verbatim; tool pairs are never split.
+- **D13** read-only `.awos .claude .agents .codex .cursor .husky` (plus `.git`, always) in Seatbelt and docker
+  (`AWOS_SANDBOX_READONLY_PATHS`, `AWOS_SANDBOX_READONLY=0`). The Seatbelt path is untested on real macOS.
+- **D15** secret scan of the diff's added lines at hand-off and before `awos fix` pushes, fail closed
+  (`secret_scan.py`; `AWOS_SECRET_SCAN=0` is for emergencies only). The `awos:allow-secret` pragma waives only the
+  generic rule, never a key format.
+- The cloud container has Python 3.13: `aider-chat` (needs <3.13) can't be installed there; the rest of
+  `requirements.txt` installs.
+
 ## Next (each needs the owner's OK to run)
 
 1. **Laptop only (local llama-server, Qwen3.5-9B):** a 5-minute real check, then **H2** (loop vs mini-local, 15 issues) and

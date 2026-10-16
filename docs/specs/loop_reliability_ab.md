@@ -65,7 +65,8 @@ All decisions use the T1 rule (`docs/specs/stats_decision_rule.md`) unless state
   the host still succeeds. Also re-check that H1d's solve rate does not drop on the next approved run (no task in
   that set edits a protected path).
 - **S2:** planted fake secrets in a fix branch must stop the handoff, with file:line and rule name and no secret
-  value in any log; a clean branch must hand off as before.
+  value in any log; a clean branch must hand off as before; an `awos:allow-secret` pragma must not let a known key
+  format through (it waives only the generic rule). Covered by `tests/test_secret_scan.py` with fakes.
 
 ## Order
 
