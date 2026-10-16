@@ -23,19 +23,39 @@ Decision order (first match wins):
   2. WRITE_SANDBOX inside sandbox -> allow; outside -> treated as WRITE_OUTSIDE
   3. initiator UNTRUSTED and class is a sink above WRITE_SANDBOX -> deny
      (on-screen text can never trigger send/delete/pay/push/egress/write-out)
-  4. PAYMENT / CREDENTIAL / OPAQUE -> ask even with a grant (critical-point stop)
+  4. PAYMENT / CREDENTIAL / OPAQUE / DESTRUCTIVE_UI -> ask even with a grant
+     (critical-point stop; a destructive button is never auto-allowed)
   5. a matching owner grant:
        args all trusted          -> allow
        any arg UNTRUSTED         -> ask (untrusted data chose part of a sink)
   6. no grant:
        irreversible class        -> deny (default deny)
-       WRITE_OUTSIDE             -> ask
+       WRITE_OUTSIDE, UI_ACTION  -> ask
+       anything else             -> ask (a class with no rule never defaults
+                                    to allow; REA: Apple's planner defaulted
+                                    missing risk to "execute")
   7. shell commands only (decide_command): when the command's provenance is
      UNTRUSTED (initiator or any argument), an ALLOW from 1-6 also needs the
      read-only allowlist (untrusted_shell_violation); otherwise -> ask.
      A DENY from 1-6 always stands.
 
 Every decision is appended to an audit log (JSONL) when one is attached.
+
+Desktop UI actions (D16, docs/research/rea_synthesis_2026-10-16.md):
+classify_ui_action() maps a click / type / key on an AX element to a class:
+  click on a send-like control (Send, Post, Submit, ...)  -> SEND, which the
+      UI layer only performs through the two-phase broker (sends.py)
+  click on a destructive control (button role "destructive",
+      ax_compress.button_role: Delete, Discard, Don't Save, Empty Trash, ...)
+                                                       -> DESTRUCTIVE_UI (R4 ask)
+  Return/Enter -> whatever the default button does; with no default button,
+      Return (or typed text with a newline) in a text input while a send
+      control is on screen is treated as a send (chat composers send on Return)
+  a clickable with no label or no button role (unknown risk) -> OPAQUE (ask)
+  an unknown action kind                                     -> OPAQUE (ask)
+  other clicks / typing / keys                -> UI_ACTION (ask unless an
+      owner grant covers the app, target ``app:<App>/<role>:<label>``)
+  observe / scroll / hover                    -> READ
 """
 from __future__ import annotations
 
@@ -63,17 +83,22 @@ class ActionClass(str, Enum):
     PAYMENT = "payment"
     GIT_PUSH = "git_push"
     OPAQUE = "opaque_code"   # inline/stdin code the classifier cannot see into
+    UI_ACTION = "ui_action"  # a reversible click / keystroke / typing in an app
+    DESTRUCTIVE_UI = "destructive_ui"   # clicking a destructive control (Delete, Discard, ...)
 
 
 IRREVERSIBLE = {
     ActionClass.NETWORK_EGRESS, ActionClass.SEND, ActionClass.DELETE,
     ActionClass.CREDENTIAL, ActionClass.PAYMENT, ActionClass.GIT_PUSH,
-    ActionClass.OPAQUE,
+    ActionClass.OPAQUE, ActionClass.DESTRUCTIVE_UI,
 }
 #: OPAQUE code could be any sink, so it is treated like the worst one: it
 #: always confirms (never allowed silently, not even by a grant), and an
 #: untrusted initiator is denied by R3 before this applies.
-ALWAYS_ASK = {ActionClass.PAYMENT, ActionClass.CREDENTIAL, ActionClass.OPAQUE}
+#: DESTRUCTIVE_UI: a destructive button confirms every time (Apple
+#: UIIntelligence's destructive role); a standing grant never covers it.
+ALWAYS_ASK = {ActionClass.PAYMENT, ActionClass.CREDENTIAL, ActionClass.OPAQUE,
+              ActionClass.DESTRUCTIVE_UI}
 
 
 class Provenance(str, Enum):
@@ -232,11 +257,104 @@ class SinkPolicy:
         if a.cls in IRREVERSIBLE:
             return Decision(Verdict.DENY, f"{a.cls.value} not granted by owner (default deny)",
                             "R6-default-deny", a)
-        return Decision(Verdict.ASK, "write outside sandbox without a grant",
-                        "R6-write-outside", a)
+        if a.cls is ActionClass.WRITE_OUTSIDE:
+            return Decision(Verdict.ASK, "write outside sandbox without a grant",
+                            "R6-write-outside", a)
+        if a.cls is ActionClass.UI_ACTION:
+            return Decision(Verdict.ASK, "ui action without an owner grant for this app",
+                            "R6-ui-ungranted", a)
+        # a class with no rule of its own: unknown risk confirms, never runs
+        return Decision(Verdict.ASK, f"{a.cls.value} has no risk rule (unknown risk -> ask)",
+                        "R6-unknown-risk", a)
 
     def _grant(self, a: Action) -> Optional[Grant]:
         return next((g for g in self.grants if g.matches(a)), None)
+
+
+def exact_grant(cls: ActionClass, target: str, id: str = "") -> Grant:
+    """An owner grant for exactly one target (glob characters escaped)."""
+    esc = "".join(f"[{c}]" if c in "*?[" else c for c in target)
+    return Grant(cls, esc, id or f"once:{ActionClass(cls).value}:{target}"[:200])
+
+
+# ---------------------------------------------------------------------------
+# desktop UI action -> action class (D16)
+# ---------------------------------------------------------------------------
+
+#: controls whose click sends something off the machine (two-phase only)
+UI_SEND_RE = re.compile(
+    r"\b(send(?! (to back|to front|backward|forward))|post|publish|submit|tweet|upload|"
+    r"invite)\b", re.I)
+UI_READ_KINDS = {"observe", "read", "screenshot", "scroll", "hover", "move", "wait"}
+UI_CLICK_KINDS = {"click", "press", "double_click", "right_click", "select", "toggle", "pick"}
+UI_INPUT_KINDS = {"type", "set_value", "paste", "clear", "key"}
+_ENTER_RE = re.compile(r"(^|\+)(return|enter|kp_enter)$", re.I)
+_TEXT_INPUTS = {"textarea", "textfield", "combobox", "input"}
+
+
+def is_send_control(el) -> bool:
+    """A control whose click would send something off the machine."""
+    label = _ui_label(el)
+    return bool(label) and bool(UI_SEND_RE.search(label)) and \
+        getattr(el, "button_role", None) is not None
+
+
+def _ui_label(el) -> str:
+    return " ".join(str(getattr(el, "label", "") or getattr(el, "text", "") or "").split())[:80]
+
+
+def ui_target(app: str, el) -> str:
+    """Grant-matchable target: ``app:<App>/<role>:<label>``."""
+    if el is None:
+        return f"app:{app or '?'}/"
+    return f"app:{app or '?'}/{getattr(el, 'role', '?')}:{_ui_label(el)}"
+
+
+def _click_class(el, app: str) -> tuple:
+    label = _ui_label(el)
+    role = getattr(el, "button_role", None)
+    if label and UI_SEND_RE.search(label):
+        return ActionClass.SEND, ui_target(app, el), f"send-like control {label!r}"
+    if role == "destructive":
+        return ActionClass.DESTRUCTIVE_UI, ui_target(app, el), f"destructive control {label!r}"
+    if role is None or not label:
+        why = "no button role" if role is None else "no label"
+        return ActionClass.OPAQUE, ui_target(app, el), f"clickable with {why} (unknown risk)"
+    return ActionClass.UI_ACTION, ui_target(app, el), f"{role} control {label!r}"
+
+
+def classify_ui_action(kind: str, element=None, *, app: str = "", key: str = "",
+                       text: str = "", focused=None, default_button=None,
+                       send_visible: bool = False) -> tuple:
+    """(ActionClass, target, why) for one desktop UI action.
+
+    ``element`` is the AX element acted on (ax_compress.Element or anything
+    with role / label / text / button_role); ``focused`` and
+    ``default_button`` come from the latest observation and decide what a
+    Return/Enter keystroke would do; ``send_visible`` says a send control is
+    on screen (so Return in a text input may send). Missing information never makes an
+    action look safer: an unknown kind, or a clickable without a role or a
+    label, is OPAQUE (always asks)."""
+    kind = (kind or "").strip().lower()
+    if kind in UI_READ_KINDS:
+        return ActionClass.READ, ui_target(app, element), f"{kind} reads"
+    if kind in UI_CLICK_KINDS:
+        if element is None:
+            return ActionClass.OPAQUE, ui_target(app, None), "click without a known element"
+        return _click_class(element, app)
+    if kind in UI_INPUT_KINDS:
+        tgt_el = element if element is not None else focused
+        enter = kind == "key" and bool(_ENTER_RE.search((key or "").strip().replace(" ", "")))
+        if enter and default_button is not None:
+            cls, tgt, why = _click_class(default_button, app)
+            return cls, tgt, f"Return activates the default button: {why}"
+        newline = kind in ("type", "paste") and ("\n" in (text or "") or "\r" in (text or ""))
+        if ((enter or newline) and send_visible
+                and getattr(tgt_el, "role", "") in _TEXT_INPUTS):
+            return (ActionClass.SEND, ui_target(app, tgt_el),
+                    "Return in a text input next to a send control may send it")
+        return ActionClass.UI_ACTION, ui_target(app, tgt_el), f"{kind} input"
+    return ActionClass.OPAQUE, ui_target(app, element), f"unknown ui action kind {kind!r}"
 
 
 # ---------------------------------------------------------------------------
