@@ -208,3 +208,74 @@ Code: `scaffold/agent/stable_prefix.py`. Tests: `tests/test_stable_prefix.py`. W
 **Risks:**
 - Acceptance now pays for a 4× larger repository section on a miss. Per task, the shared-section effect on cost is roughly neutral, unless one_shot or best-of-N reuse it.
 - Moving the role instructions into the user message, and ranking on the goal rather than the planner's text, may change solve rate. A/B this before flipping the default.
+
+## 8. C11 — keep the Anthropic cache warm through long gates (2026-10-16)
+
+Source: `docs/research/rea_synthesis_2026-10-16.md` item 11. Code: `scaffold/agent/agent_loop.py`
+(`with_cache_breakpoints`, `AnthropicToolClient.keep_warm` / `keep_alive_ping`, `CacheKeepWarm`,
+`keepalive_ping_budget`), `scaffold/agent/providers.py` (`cache_write_1h`, `usage_cache_write_1h`),
+two lines in `scaffold/agent/loop_executor.py` (`_submit`, `_account`). Tests: `tests/test_anthropic_cache.py`.
+
+**Problem.** An Anthropic cache entry lives 5 minutes from the *start* of the last request that wrote
+or read it. After a submit, the loop's success gate runs the project's full suite; past 5 minutes the
+entry is gone, and a red gate's feedback goes into the same conversation, so the next request re-writes
+the whole prefix P at 1.25× input instead of reading it.
+
+**Facts used** (claude-api skill, prompt caching, 2026-10): `cache_control: {"type": "ephemeral"}` =
+5-minute TTL, `{"type": "ephemeral", "ttl": "1h"}` = 1-hour TTL. Writes cost 1.25× input (5 m) or 2×
+(1 h); reads ~0.1× (0.05× on Opus 5.5 and in our table for Sonnet 5.5, 0.025× on Fable 5.1). A read
+refreshes the timer for free. A `max_tokens: 0` request runs only the prefill: it bills the cache read
+(and any uncached part as a write), no output, and restarts the TTL. Longer-TTL breakpoints must come
+before shorter ones. `usage.cache_creation.ephemeral_1h_input_tokens` splits the writes by TTL.
+
+**Options and break-even** (x = input price/token, r = read factor, w5 = 1.25, w1 = 2, P = cached
+prefix, W = all tokens written over the run, W ≥ P; p = probability the long gate ends red with a
+feedback round, i.e. that a request on the prefix follows; g = seconds from the submit request's start
+to the end of the gate):
+
+| Option | Extra cost per run | Notes |
+|---|---|---|
+| A. 5 m, nothing (before C11) | p · P(w5 − r)x per gate with g > 300 s | Haiku 5.5: 1.15·P·x |
+| B. 1 h on every breakpoint | (w1 − w5)·W·x = 0.75·W·x **always**, gap or not | wins over A only if p·1.15·P > 0.75·W, i.e. p > 0.65 even when W = P; a run with no long gap pays +60 % on every write |
+| C. keep-alive pings during the gate | k · r · P · x, k = ⌈g / 270⌉ − 1 pings | wins over A while k·r < p(w5 − r); costs 0 when g < 270 s |
+| D. one 1 h "upgrade" ping at gate start | ≈ w1·P·x (re-write at 2×) | beats C only when k·r > 2, i.e. k > 20 (gate > 90 min on Haiku) — not implemented |
+
+"1 h only on the request before the gate" (an auto hint) is **not feasible**: the request that precedes
+the gate is the one whose reply decides to submit, so its TTL is fixed before a gate is known. Getting
+1 h onto that request means marking every request 1 h, which is option B.
+
+C dominates B for gates under ~36 minutes on Haiku 5.5 (k < 0.75/0.1) and costs nothing on runs without
+long gaps, so it is the default. Worked example, Haiku 5.5 ($0.10 in, read $0.01, 5 m write $0.125,
+1 h write $0.20 per MTok), P = 50k tokens, a 12-minute red gate (k = 2):
+
+- A: re-write 50k × $0.125/M = $0.00625 instead of a $0.0005 read → **+$0.00575**
+- B: ≥ 50k × $0.075/M = **+$0.00375** on every run, plus nothing saved on runs whose gate is green
+- C: 2 × $0.0005 = **+$0.001**, and $0 on any run whose gates finish within 270 s
+
+**What ships — `AWOS_ANTHROPIC_CACHE_TTL`:**
+
+- `auto` (default): breakpoints stay `{"type": "ephemeral"}` (request bodies byte-identical to before).
+  While the loop's gate runs (`LoopExecutor._submit` holds `client.keep_warm(...)` open), a daemon
+  thread re-sends the last request with `max_tokens: 0` once the last request or ping started
+  `AWOS_ANTHROPIC_KEEPALIVE_S` (270, clamped ≤ 290) seconds ago. No ping when: the gate cannot send
+  feedback any more (last feedback round spent — nothing would read the cache), caching is off
+  (`AWOS_ANTHROPIC_CACHE=0`), the last request forced a `tool_choice` (rejected with `max_tokens: 0`,
+  and changing it misses the messages cache), or the TTL mode is not `auto`. A failed ping stops the
+  pings and is logged; it never fails the gate.
+- Ping budget per gate = ⌊p(w5 − r)/r⌋ from `providers.price_table` (`keepalive_ping_budget`), with
+  p = `AWOS_ANTHROPIC_KEEPALIVE_RETRY_P` (default 0.5): Haiku 5.5 → 5 pings (gates up to 27 min),
+  Sonnet 5.5 → 12; a model without a cache discount → 0. `AWOS_ANTHROPIC_KEEPALIVE_MAX` overrides.
+  Worst case (gate green after a long run) the pings cost ≤ p·(w5 − r)·P·x, about half a miss.
+- `5m`: plain 5-minute breakpoints, no keep-alive (the pre-C11 behaviour). Unknown values read as `5m`.
+- `1h`: every breakpoint carries `"ttl": "1h"`; no keep-alive. For workloads where most runs pause
+  5–60 minutes and then continue (human review), not for the coding loop.
+
+**Accounting.** `price_table` gains `cache_write_1h` (2× input for `claude-*`, = `cache_write`
+elsewhere, overridable in `AWOS_PRICE_TABLE`). `estimate_cost_cached` / `agent_loop.estimate_cost` take
+`cache_write_1h_tokens` (a subset of the writes) and price it at that rate; `response_cost` and utility
+spend read it from `usage.cache_creation`. `ModelReply.cache_write_1h_tokens` carries it to the loop's
+`_account`. Each ping is accounted like a turn (logged under component `loop`, its cache read in
+`run.cost_usd`, `cached_tokens` and `input_tokens`), so cost caps see it.
+
+**Measure (not yet run live):** cache-read ratio of the first request after a gate longer than 5
+minutes, auto vs `5m`, on a repo whose suite takes > 5 minutes (the synthesis's primary metric).

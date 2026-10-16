@@ -31,6 +31,7 @@ import logging
 import math
 import os
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Protocol
@@ -208,7 +209,8 @@ def _price_for(model: str) -> Optional[tuple[float, float]]:
 
 
 def estimate_cost(model: str, input_tokens: int, output_tokens: int,
-                  cached_tokens: int = 0, cache_write_tokens: int = 0) -> float:
+                  cached_tokens: int = 0, cache_write_tokens: int = 0,
+                  cache_write_1h_tokens: int = 0) -> float:
     """Cost in USD for a token count, 0.0 for an unpriced or free model.
 
     `input_tokens` is the whole prompt; `cached_tokens` / `cache_write_tokens`
@@ -217,6 +219,8 @@ def estimate_cost(model: str, input_tokens: int, output_tokens: int,
     (providers.price_table, docs/specs/prompt_caching.md). With no cache
     counts — a provider that reports none — every input token is priced at
     the full rate, as before: a cap then over- rather than under-counts.
+    `cache_write_1h_tokens` (a subset of the writes) are Anthropic 1-hour-TTL
+    writes, priced at 2x input instead of 1.25x (providers.price_table).
     """
     prices = _price_for(model)
     if prices is None:
@@ -228,7 +232,8 @@ def estimate_cost(model: str, input_tokens: int, output_tokens: int,
             except ImportError:
                 from providers import estimate_cost_cached
             return estimate_cost_cached(model, input_tokens, output_tokens,
-                                        cached_tokens, cache_write_tokens)
+                                        cached_tokens, cache_write_tokens,
+                                        cache_write_1h_tokens)
         except Exception:  # pricing must never break a run
             logger.debug("cache-aware pricing failed, using full rate", exc_info=True)
     price_in, price_out = prices
@@ -250,6 +255,20 @@ def _usage_counts(usage: Any, timings: Any = None) -> dict:
         return usage_tokens(usage, timings)
     except Exception:
         return {}
+
+
+def _cache_write_1h(usage: Any) -> int:
+    """providers.usage_cache_write_1h(usage), 0 when it cannot be had."""
+    if usage is None:
+        return 0
+    try:
+        try:
+            from .providers import usage_cache_write_1h
+        except ImportError:
+            from providers import usage_cache_write_1h
+        return usage_cache_write_1h(usage)
+    except Exception:
+        return 0
 
 
 def response_timings(response: Any) -> Any:
@@ -319,6 +338,8 @@ class ModelReply:
     #: cache (0 when the provider reports none).
     cached_tokens: int = 0
     cache_write_tokens: int = 0
+    #: Part of cache_write_tokens written with Anthropic's 1-hour TTL.
+    cache_write_1h_tokens: int = 0
 
 
 class ModelClient(Protocol):
@@ -336,6 +357,42 @@ class ModelClient(Protocol):
 
 
 _EPHEMERAL = {"type": "ephemeral"}
+_EPHEMERAL_1H = {"type": "ephemeral", "ttl": "1h"}
+
+# ── Anthropic cache TTL and keep-alive (docs/specs/prompt_caching.md §8) ─────
+#
+# Anthropic's cache entries live 5 minutes from the start of the last request
+# that wrote or read them. The loop's success gate (the full test suite after a
+# submit) can run longer, and a red gate sends its feedback into the SAME
+# conversation, so the next request would re-write the whole prefix at 1.25x
+# input instead of reading it at the cache-read rate. AWOS_ANTHROPIC_CACHE_TTL:
+#   auto (default) 5-minute breakpoints, byte-identical to before, plus a
+#        keep-alive while a gate runs past AWOS_ANTHROPIC_KEEPALIVE_S (270 s):
+#        the last request re-sent with max_tokens=0, which bills one cache
+#        read and no output and restarts the 5-minute timer. Capped at a
+#        break-even ping budget (keepalive_ping_budget). A run with no gap
+#        that long sends no extra request, so it costs exactly what it did.
+#   5m   5-minute breakpoints, no keep-alive (the behaviour before C11).
+#   1h   every breakpoint carries ttl "1h" (writes at 2x input instead of
+#        1.25x, priced by providers.price_table "cache_write_1h"); no
+#        keep-alive. Only worth it when most runs have a 5-60 minute gap that
+#        is followed by another call (see the spec's break-even).
+# A per-request "1h only before the gate" is not possible: the request that
+# precedes the gate is the one whose reply decides to submit, so its TTL is
+# fixed before anyone knows a gate is coming.
+
+CACHE_TTL_ENV = "AWOS_ANTHROPIC_CACHE_TTL"
+KEEPALIVE_INTERVAL_ENV = "AWOS_ANTHROPIC_KEEPALIVE_S"
+KEEPALIVE_RETRY_P_ENV = "AWOS_ANTHROPIC_KEEPALIVE_RETRY_P"
+KEEPALIVE_MAX_ENV = "AWOS_ANTHROPIC_KEEPALIVE_MAX"
+#: Seconds from the start of the last request to a keep-alive ping: under the
+#: 300 s TTL with a 30 s margin, and late enough that a gate which ends inside
+#: the TTL anyway (the common case) never triggers one.
+DEFAULT_KEEPALIVE_S = 270.0
+#: Prior that a long gate ends red with a feedback round, i.e. that another
+#: request on the same prefix follows. Pings are only worth anything then: a
+#: green gate ends the run and the warm cache is never read.
+DEFAULT_KEEPALIVE_RETRY_P = 0.5
 
 
 def anthropic_cache_enabled() -> bool:
@@ -343,21 +400,82 @@ def anthropic_cache_enabled() -> bool:
     return os.getenv("AWOS_ANTHROPIC_CACHE", "1").strip().lower() not in ("0", "false", "no")
 
 
-def with_cache_breakpoints(system: Any, messages: list, tools: list) -> tuple[Any, list, list]:
+def anthropic_cache_ttl() -> str:
+    """AWOS_ANTHROPIC_CACHE_TTL: "auto" (default), "5m" or "1h"; anything else is "5m"."""
+    value = os.getenv(CACHE_TTL_ENV, "auto").strip().lower() or "auto"
+    return value if value in ("auto", "5m", "1h") else "5m"
+
+
+def _float_env(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, "").strip() or default)
+    except ValueError:
+        return default
+
+
+def keepalive_interval_s() -> float:
+    """AWOS_ANTHROPIC_KEEPALIVE_S (default 270, clamped to 1..290)."""
+    return min(290.0, max(1.0, _float_env(KEEPALIVE_INTERVAL_ENV, DEFAULT_KEEPALIVE_S)))
+
+
+def keepalive_ping_budget(model: str, retry_p: Optional[float] = None) -> int:
+    """Most keep-alive pings worth sending to bridge one gate for `model`.
+
+    One ping costs P * read (P = cached prefix tokens, prices per token); the
+    miss it prevents costs P * (write_5m - read) extra, but only when a
+    request on that prefix follows (probability retry_p). Pings pay while
+    k * read < retry_p * (write_5m - read), so the budget is
+    floor(retry_p * (write_5m - read) / read). Haiku 5.5 (read 0.1x, write
+    1.25x) at p=0.5: 5 pings, a gate of up to 6 * 270 s = 27 min. 0 for a
+    free or unpriced model or one without a cache discount.
+    AWOS_ANTHROPIC_KEEPALIVE_MAX overrides the result.
+    """
+    override = os.getenv(KEEPALIVE_MAX_ENV, "").strip()
+    if override:
+        try:
+            return max(0, int(override))
+        except ValueError:
+            pass
+    p = retry_p if retry_p is not None else _float_env(KEEPALIVE_RETRY_P_ENV,
+                                                       DEFAULT_KEEPALIVE_RETRY_P)
+    p = min(1.0, max(0.0, p))
+    try:
+        try:
+            from .providers import price_table
+        except ImportError:
+            from providers import price_table
+        table = price_table(model or "")
+    except Exception:
+        return 0
+    read, write = float(table.get("cache_read") or 0.0), float(table.get("cache_write") or 0.0)
+    if table.get("input", 0) <= 0 or read <= 0 or write <= read:
+        return 0
+    return int(math.floor(p * (write - read) / read + 1e-9))
+
+
+def with_cache_breakpoints(system: Any, messages: list, tools: list,
+                           ttl: Optional[str] = None) -> tuple[Any, list, list]:
     """
     Anthropic prompt caching: breakpoints on the tool list, the system prompt
     and the last message, so every turn re-reads the conversation so far at the
     cache-read price (Haiku 5.5: $0.01 vs $0.10 per MTok; prompts under the
     model's minimum are simply not cached). Works on copies; the caller's
     messages are never mutated. 3 of Anthropic's 4 allowed breakpoints.
+
+    `ttl` (default anthropic_cache_ttl()): "1h" marks every breakpoint
+    {"type": "ephemeral", "ttl": "1h"}; "5m" and "auto" send the plain
+    5-minute marker, so those requests are byte-identical to before. All
+    breakpoints share one TTL, which keeps Anthropic's rule that longer-TTL
+    entries come before shorter ones.
     """
     if not anthropic_cache_enabled():
         return system, messages, tools
+    marker = _EPHEMERAL_1H if (ttl or anthropic_cache_ttl()) == "1h" else _EPHEMERAL
     tools = [dict(t) for t in tools]
     if tools:
-        tools[-1]["cache_control"] = _EPHEMERAL
+        tools[-1]["cache_control"] = dict(marker)
     if isinstance(system, str) and system:
-        system = [{"type": "text", "text": system, "cache_control": _EPHEMERAL}]
+        system = [{"type": "text", "text": system, "cache_control": dict(marker)}]
     messages = list(messages)
     if messages and isinstance(messages[-1], dict):
         last = dict(messages[-1])
@@ -366,10 +484,62 @@ def with_cache_breakpoints(system: Any, messages: list, tools: list) -> tuple[An
             content = [{"type": "text", "text": content}]
         if isinstance(content, list) and content and isinstance(content[-1], dict):
             content = [dict(b) if isinstance(b, dict) else b for b in content]
-            content[-1]["cache_control"] = _EPHEMERAL
+            content[-1]["cache_control"] = dict(marker)
             last["content"] = content
             messages[-1] = last
     return system, messages, tools
+
+
+class CacheKeepWarm:
+    """Context manager around a long wait (the success gate): while it is open,
+    re-send the client's last request with max_tokens=0 every `interval`
+    seconds (measured from the start of the last request or ping), at most
+    `budget` times. `replies` holds one ModelReply per ping, for the caller's
+    cost accounting. A failed ping stops the pings; nothing here raises."""
+
+    def __init__(self, client: "AnthropicToolClient", interval: float, budget: int) -> None:
+        self.client = client
+        self.interval = interval
+        self.budget = budget
+        self._replies: list[ModelReply] = []
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    @property
+    def replies(self) -> list:
+        with self._lock:
+            return list(self._replies)
+
+    def __enter__(self) -> "CacheKeepWarm":
+        if self.budget > 0 and self.interval > 0:
+            self._thread = threading.Thread(target=self._run, name="awos-cache-keepalive",
+                                            daemon=True)
+            self._thread.start()
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=60)
+
+    def _run(self) -> None:
+        while True:
+            with self._lock:
+                if len(self._replies) >= self.budget:
+                    return
+            due = (getattr(self.client, "_last_request_at", None) or 0.0) + self.interval
+            if self._stop.wait(max(0.0, due - self.client._now())):
+                return
+            try:
+                reply = self.client.keep_alive_ping()
+            except Exception as exc:  # noqa: BLE001 - a lost ping costs one cache miss
+                logger.info("[cache] keep-alive ping failed, stopping: %s", exc)
+                return
+            if reply is None:
+                return
+            with self._lock:
+                self._replies.append(reply)
 
 
 def _effort_from_env(env_name: str, model: Optional[str]) -> Optional[str]:
@@ -402,6 +572,10 @@ class AnthropicToolClient:
         # AWOS_REASONING_AGENT: output_config.effort on every turn; unset (the
         # default) sends nothing, so requests are byte-for-byte as before.
         self.effort: Optional[str] = agent_effort(model)
+        # The last request body sent and when it started (for keep_warm).
+        self._last_request: Optional[dict] = None
+        self._last_request_at: Optional[float] = None
+        self._clock: Callable[[], float] = time.monotonic
 
     def with_effort_env(self, env_name: str) -> "AnthropicToolClient":
         """A copy whose effort comes from `env_name` when that is set (e.g.
@@ -418,14 +592,47 @@ class AnthropicToolClient:
             extra["output_config"] = {"effort": self.effort}
         system, messages, tools = with_cache_breakpoints(system, messages,
                                                          registry.anthropic_schemas())
-        response = self._client.messages.create(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            system=system,
-            messages=messages,
-            tools=tools,
-            **extra,
-        )
+        body = dict(model=self.model, max_tokens=self.max_tokens, system=system,
+                    messages=messages, tools=tools, **extra)
+        started = self._now()
+        response = self._client.messages.create(**body)
+        self._last_request, self._last_request_at = body, started
+        return self._reply_from(response)
+
+    def _now(self) -> float:
+        return getattr(self, "_clock", time.monotonic)()
+
+    def keep_warm(self, may_continue: bool = True) -> Any:
+        """A context manager to hold open around a long wait between two
+        requests on this conversation (the loop's success gate). Pings only
+        under AWOS_ANTHROPIC_CACHE_TTL=auto with caching on, when a request
+        on the same prefix may follow (`may_continue`: the gate can still send
+        feedback) and the last request had no forced tool_choice (which a
+        max_tokens=0 request rejects, and changing it would miss the cache)."""
+        last = getattr(self, "_last_request", None)
+        budget = 0
+        if (may_continue and last is not None and "tool_choice" not in last
+                and anthropic_cache_enabled() and anthropic_cache_ttl() == "auto"):
+            budget = keepalive_ping_budget(self.model)
+        return CacheKeepWarm(self, keepalive_interval_s(), budget)
+
+    def keep_alive_ping(self) -> Optional[ModelReply]:
+        """Re-send the last request with max_tokens=0: Anthropic runs only the
+        prefill, so the call bills the prefix as a cache read (plus any part
+        that was not cached yet as a write), no output, and restarts the
+        entries' TTL. None when there is no request to repeat."""
+        last = getattr(self, "_last_request", None)
+        if last is None:
+            return None
+        started = self._now()
+        response = self._client.messages.create(**{**last, "max_tokens": 0})
+        self._last_request_at = started
+        reply = self._reply_from(response)
+        reply.output_tokens = 0
+        reply.text, reply.tool_calls = "", []
+        return reply
+
+    def _reply_from(self, response: Any) -> ModelReply:
         text_parts, calls = [], []
         for block in response.content:
             if getattr(block, "type", None) == "text":
@@ -444,6 +651,7 @@ class AnthropicToolClient:
             raw=response,
             cached_tokens=counts.get("cached", 0),
             cache_write_tokens=counts.get("cache_write", 0),
+            cache_write_1h_tokens=_cache_write_1h(usage),
         )
 
     def format_assistant_turn(self, reply: ModelReply) -> dict[str, Any]:
@@ -695,6 +903,7 @@ class LoopOutcome:
     #: Parts of input_tokens served from / written to the prompt cache.
     cached_tokens: int = 0
     cache_write_tokens: int = 0
+    cache_write_1h_tokens: int = 0
     cost_usd: float = 0.0
     final_message: str = ""
     files_touched: list[str] = field(default_factory=list)
@@ -927,16 +1136,19 @@ class AgentLoop:
                 input_tokens=reply.input_tokens, output_tokens=reply.output_tokens,
                 cost_usd=estimate_cost(self.model_name, reply.input_tokens, reply.output_tokens,
                                        _int0(reply, "cached_tokens"),
-                                       _int0(reply, "cache_write_tokens")),
+                                       _int0(reply, "cache_write_tokens"),
+                                       _int0(reply, "cache_write_1h_tokens")),
                 finish_reason=_finish_reason(reply.raw).strip("?") or None,
                 tool_calls=len(reply.tool_calls), turn=turn)
             outcome.input_tokens += reply.input_tokens
             outcome.output_tokens += reply.output_tokens
             outcome.cached_tokens += _int0(reply, "cached_tokens")
             outcome.cache_write_tokens += _int0(reply, "cache_write_tokens")
+            outcome.cache_write_1h_tokens += _int0(reply, "cache_write_1h_tokens")
             outcome.cost_usd = estimate_cost(
                 self.model_name, outcome.input_tokens, outcome.output_tokens,
                 outcome.cached_tokens, outcome.cache_write_tokens,
+                outcome.cache_write_1h_tokens,
             )
             self._emit("turn", turn=turn, text=reply.text, calls=len(reply.tool_calls))
             if reply.text and reply.text.strip():

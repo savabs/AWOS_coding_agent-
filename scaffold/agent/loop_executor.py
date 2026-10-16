@@ -750,7 +750,7 @@ class LoopExecutor:
     def _account(self, run: LoopRun, reply: Any) -> None:
         cached, written = _int0(reply, "cached_tokens"), _int0(reply, "cache_write_tokens")
         cost = estimate_cost(self.model_name, reply.input_tokens, reply.output_tokens,
-                             cached, written)
+                             cached, written, _int0(reply, "cache_write_1h_tokens"))
         record_response(COMPONENT, self.model_name, reply.raw,
                         visible_chars=len(reply.text or ""),
                         input_tokens=reply.input_tokens, output_tokens=reply.output_tokens,
@@ -781,7 +781,20 @@ class LoopExecutor:
         run.submits += 1
         run.final_message = submission
         run.files_changed = files
-        g = self.gate(files, submission) if self.gate is not None else {"green": True}
+        if self.gate is None:
+            g = {"green": True}
+        else:
+            # The gate (the full suite) can outlast Anthropic's 5-minute cache
+            # TTL; the client keeps the prefix warm meanwhile when a feedback
+            # round could follow (AnthropicToolClient.keep_warm, C11).
+            warm = getattr(self.client, "keep_warm", None)
+            if callable(warm):
+                with warm(self._rung_gate_retries < self.max_gate_retries) as kept:
+                    g = self.gate(files, submission)
+                for ping in list(getattr(kept, "replies", None) or []):
+                    self._account(run, ping)
+            else:
+                g = self.gate(files, submission)
         g = dict(g or {})
         run.gate = g
         if g.get("retry") and self._rung_gate_retries < self.max_gate_retries:

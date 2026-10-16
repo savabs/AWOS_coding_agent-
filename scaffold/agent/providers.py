@@ -544,9 +544,14 @@ CACHE_PRICE_FACTORS: dict[str, tuple[float, float]] = {
     "claude-haiku-5-5": (0.1, 1.25),     # $0.01 read / $0.125 5-min write per M
     "claude-sonnet-5-5": (0.05, 1.25),   # $0.10 read / $2.50 write per M
 }
+#: A cache write with Anthropic's 1-hour TTL (cache_control ttl "1h") costs
+#: 2x input, against 1.25x for the default 5-minute TTL (claude-api skill,
+#: prompt caching economics, 2026-10). Applies to the claude-* families in
+#: CACHE_PRICE_FACTORS; other providers have no 1-hour tier (= cache_write).
+CACHE_WRITE_1H_FACTOR = 2.0
 #: JSON file overriding prices per model id, in USD per million tokens:
 #: {"deepseek-v4-flash": {"input": 0.09, "output": 0.18, "cache_read": 0.018,
-#:  "cache_write": 0.09}} — any key may be omitted.
+#:  "cache_write": 0.09, "cache_write_1h": 0.18}} — any key may be omitted.
 PRICE_TABLE_ENV = "AWOS_PRICE_TABLE"
 
 
@@ -569,10 +574,12 @@ def _model_keys(model: str) -> list[str]:
 
 
 def price_table(model: str) -> dict:
-    """USD per million tokens for `model`: input, output, cache_read, cache_write.
+    """USD per million tokens for `model`: input, output, cache_read,
+    cache_write (5-minute TTL) and cache_write_1h (Anthropic's 1-hour TTL).
 
     Base prices come from agent_loop.PRICES (0 for an unpriced or local model);
-    cache prices from CACHE_PRICE_FACTORS; AWOS_PRICE_TABLE overrides any of them.
+    cache prices from CACHE_PRICE_FACTORS (+ CACHE_WRITE_1H_FACTOR for Claude);
+    AWOS_PRICE_TABLE overrides any of them.
     """
     try:
         from .agent_loop import _price_for
@@ -585,8 +592,10 @@ def price_table(model: str) -> dict:
         (name for k in keys for name in CACHE_PRICE_FACTORS if k.startswith(name)), None)
     if match:
         read_f, write_f = CACHE_PRICE_FACTORS[match]
+    write_1h_f = CACHE_WRITE_1H_FACTOR if (match or "").startswith("claude-") else write_f
     table = {"input": price_in, "output": price_out,
-             "cache_read": price_in * read_f, "cache_write": price_in * write_f}
+             "cache_read": price_in * read_f, "cache_write": price_in * write_f,
+             "cache_write_1h": price_in * write_1h_f}
     if not local_mode():
         overrides = _price_overrides()
         for key in keys:
@@ -600,6 +609,8 @@ def price_table(model: str) -> dict:
                     table["cache_read"] = table["input"] * read_f
                 if "input" in entry and "cache_write" not in entry:
                     table["cache_write"] = table["input"] * write_f
+                if "input" in entry and "cache_write_1h" not in entry:
+                    table["cache_write_1h"] = table["input"] * write_1h_f
                 break
     return table
 
@@ -663,6 +674,21 @@ def usage_tokens(usage: Any, timings: Any = None) -> dict:
     return out
 
 
+def usage_cache_write_1h(usage: Any) -> int:
+    """Tokens of an Anthropic response written to cache with the 1-hour TTL
+    (usage.cache_creation.ephemeral_1h_input_tokens), at most the response's
+    cache_creation_input_tokens; 0 for any other shape. Never raises."""
+    try:
+        details = _uget(usage, "cache_creation")
+        one_hour = _uint(_uget(details, "ephemeral_1h_input_tokens"))
+        if not one_hour:
+            return 0
+        total = _uget(usage, "cache_creation_input_tokens")
+        return min(one_hour, _uint(total)) if total is not None else one_hour
+    except Exception:
+        return 0
+
+
 def cache_hit_ratio(input_tokens: Any, cached_tokens: Any) -> Optional[float]:
     """cached / input, or None when either is unknown or input is 0."""
     try:
@@ -674,20 +700,26 @@ def cache_hit_ratio(input_tokens: Any, cached_tokens: Any) -> Optional[float]:
 
 
 def estimate_cost_cached(model: str, input_tokens: int, output_tokens: int,
-                         cached_tokens: int = 0, cache_write_tokens: int = 0) -> float:
+                         cached_tokens: int = 0, cache_write_tokens: int = 0,
+                         cache_write_1h_tokens: int = 0) -> float:
     """USD cost with cached input priced at the cache-read rate.
 
     `input_tokens` is the whole prompt; `cached_tokens` and
-    `cache_write_tokens` are the parts of it read from / written to cache.
+    `cache_write_tokens` are the parts of it read from / written to cache;
+    `cache_write_1h_tokens` is the part of the writes made with Anthropic's
+    1-hour TTL (priced at cache_write_1h; the rest at the 5-minute rate).
     With no cache counts this equals agent_loop.estimate_cost.
     """
     table = price_table(model)
     total = _uint(input_tokens)
     cached = min(_uint(cached_tokens), total)
     written = min(_uint(cache_write_tokens), total - cached)
+    written_1h = min(_uint(cache_write_1h_tokens), written)
     fresh = total - cached - written
     return (fresh * table["input"] + cached * table["cache_read"]
-            + written * table["cache_write"] + _uint(output_tokens) * table["output"]) / 1_000_000
+            + (written - written_1h) * table["cache_write"]
+            + written_1h * table.get("cache_write_1h", table["cache_write"])
+            + _uint(output_tokens) * table["output"]) / 1_000_000
 
 
 def response_cost(model: str, response: Any) -> tuple[float, str]:
@@ -700,7 +732,7 @@ def response_cost(model: str, response: Any) -> tuple[float, str]:
         return float(reported), "provider"
     tok = usage_tokens(usage, _uget(response, "timings"))
     return estimate_cost_cached(model, tok["input"], tok["output"], tok["cached"],
-                                tok["cache_write"]), "estimate"
+                                tok["cache_write"], usage_cache_write_1h(usage)), "estimate"
 
 
 def _record_utility_spend(request_type: str, model: str, response: Any, tracker: Any) -> float:
@@ -716,7 +748,8 @@ def _record_utility_spend(request_type: str, model: str, response: Any, tracker:
     input_tokens, output_tokens = tok["input"], tok["output"]
     table = price_table(model)
     cost = estimate_cost_cached(model, input_tokens, output_tokens, tok["cached"],
-                                tok["cache_write"])
+                                tok["cache_write"],
+                                usage_cache_write_1h(getattr(response, "usage", None)))
     price_out = table["output"]
     input_cost = cost - output_tokens * price_out / 1_000_000
     price_in = (input_cost * 1_000_000 / input_tokens) if input_tokens else table["input"]
