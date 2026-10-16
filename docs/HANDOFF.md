@@ -19,6 +19,11 @@ results with `gh run download`. Local-model work (llama-server, Qwen) runs only 
 - Split non-colliding work across parallel agents. Pre-register every experiment (decision rule fixed before data).
 - Model: direct Anthropic `claude-haiku-5-5` (OpenRouter off).
 
+## Strategy (decided 2026-10-16): read `docs/STRATEGY.md` first
+
+AWOS is a **local-first, private agent on the user's own computer** (coding now, computer use as the goal).
+Prioritise proof that AWOS makes a *local* model better; the customer is not yet known (discovery runs alongside).
+
 ## Product direction
 
 **Self-serve tool:** `awos fix <GitHub issue/PR URL>` gives a reviewed fix branch, with a usage ping (opt-in) and
