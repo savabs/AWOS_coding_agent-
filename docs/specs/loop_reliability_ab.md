@@ -25,9 +25,11 @@ All decisions use the T1 rule (`docs/specs/stats_decision_rule.md`) unless state
 Fixed before the run. The measured commit is the head of `claude/loop-executor-tests-2i0l7p` at launch
 (1015397: A6–A8, C9, C10, D13, D15 merged with their defaults: stuck `log`, routing off, compaction off,
 read-only control paths on, secret scan on).
-- **Run:** arm `loop` alone, `claude-haiku-5-5`, the 40 fresh issues, 1 repeat, GitHub Actions macOS runners, 8 shards,
-  cap $2 (`bench-cloud/loop-r0-2026-10-16`). Compared descriptively with H1d's `loop` row (40/40, $0.0123 / run);
-  no A/B statistics (one arm, n = 40).
+- **Run:** arms `loop,mini` (the CI driver pairs two arms; the owner approved the pair), `claude-haiku-5-5`, the 40
+  fresh issues, 1 repeat, interleaved, GitHub Actions macOS runners, 8 shards, cap $2
+  (`bench-cloud/loop-r0-2026-10-16`). The PASS rule below is on the `loop` row against H1d's `loop` row (40/40,
+  $0.0123 / run). The `loop` vs `mini` pair is a replication of H1d, judged by the same T1 rule
+  (`stats_audit.py --a mini --b loop --cost-budget 0.5`) and reported next to H1d; it changes no default.
 - **PASS:** ≥ 38/40 solved AND $ / run ≤ 1.3 × $0.0123 AND 0 fatal health violations. **FAIL** otherwise. On FAIL, read
   every lost issue's transcript and attribute it (new code vs model variance) before any default changes; a loss
   traced to D13 (a write to a protected path) or D15 (a false-positive block) is fixed before anything else.
