@@ -61,6 +61,14 @@ DEFAULT_EGRESS_ALLOW = (
     "objects.githubusercontent.com",
 )
 EGRESS_ALLOW_ENV = "AWOS_SANDBOX_EGRESS_ALLOW"
+#: Optional host groups, never on by default. Selected by name with
+#: AWOS_SANDBOX_EGRESS_PRESETS=crates,yarn; they are added before the
+#: AWOS_SANDBOX_EGRESS_ALLOW edits, so "!host" can still drop one entry.
+EGRESS_PRESETS = {
+    "crates": ("crates.io", "index.crates.io", "static.crates.io"),
+    "yarn": ("registry.yarnpkg.com",),
+}
+EGRESS_PRESETS_ENV = "AWOS_SANDBOX_EGRESS_PRESETS"
 #: Plain HTTP on 80, CONNECT on 443. Anything else is refused.
 DEFAULT_PORTS = (80, 443)
 #: Never forwarded: credentials the sandboxed code (or a tool's config) put
@@ -119,6 +127,23 @@ def parse_allowlist(value: Optional[str], defaults: Iterable[str] = DEFAULT_EGRE
         elif item not in allow:
             allow.append(item)
     return allow
+
+
+def preset_hosts(value: Optional[str]) -> list[str]:
+    """Hosts of the comma-separated preset names in value, in order, without
+    duplicates. An unknown name is ignored with a warning (fail closed)."""
+    hosts: list[str] = []
+    for raw in (value or "").split(","):
+        name = raw.strip().lower()
+        if not name:
+            continue
+        group = EGRESS_PRESETS.get(name)
+        if group is None:
+            logger.warning("%s: unknown preset %r (known: %s)", EGRESS_PRESETS_ENV, raw,
+                           ", ".join(sorted(EGRESS_PRESETS)))
+            continue
+        hosts += [h for h in group if h not in hosts]
+    return hosts
 
 
 def host_allowed(host: str, allow: Iterable[str]) -> bool:
@@ -583,6 +608,34 @@ def _close(sock: socket.socket) -> None:
         pass
 
 
+def resolve_listen_host(host: str, timeout_sec: float = 15.0,
+                        resolver: Callable[..., list] = socket.getaddrinfo) -> str:
+    """An IP literal (or "") is returned as is. A name is resolved to one IPv4
+    address to bind to: the docker sidecar listens on its own network alias,
+    which docker's DNS maps to its address on the sandbox's internal network
+    only, so containers on other networks (the default bridge) cannot reach
+    the listener. Retried for a while: the alias may not resolve the instant
+    the container starts. Raises OSError when it never resolves."""
+    if not host:
+        return host
+    try:
+        ipaddress.ip_address(host)
+        return host
+    except ValueError:
+        pass
+    deadline = time.monotonic() + timeout_sec
+    while True:
+        try:
+            infos = resolver(host, None, socket.AF_INET, socket.SOCK_STREAM)
+            if infos:
+                return infos[0][4][0]
+        except OSError:
+            pass
+        if time.monotonic() >= deadline:
+            raise OSError(f"listen host {host!r} did not resolve")
+        time.sleep(0.2)
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     """Standalone entry point (the docker sidecar runs this)."""
     p = argparse.ArgumentParser(description="AWOS sandbox egress proxy")
@@ -592,6 +645,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument("--log", default=None, help="JSONL log path")
     args = p.parse_args(argv)
     bind, _, port = args.listen.rpartition(":")
+    bind = resolve_listen_host(bind)
     allow = parse_allowlist(args.allow, defaults=())
     proxy = EgressProxy(allow=allow, bind=bind or "0.0.0.0", port=int(port), log_path=args.log).start()
     done = threading.Event()

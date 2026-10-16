@@ -37,7 +37,8 @@ PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "PIP_PRO
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch):
     for key in ("AWOS_SANDBOX_EGRESS", "AWOS_SANDBOX_EGRESS_ALLOW", "AWOS_SANDBOX_EGRESS_LOG",
-                "AWOS_SANDBOX_EGRESS_IMAGE", "AWOS_SANDBOX_NETWORK", "AWOS_SANDBOX_IMAGE"):
+                "AWOS_SANDBOX_EGRESS_IMAGE", "AWOS_SANDBOX_NETWORK", "AWOS_SANDBOX_IMAGE",
+                "AWOS_SANDBOX_EGRESS_PRESETS"):
         monkeypatch.delenv(key, raising=False)
 
 
@@ -268,7 +269,9 @@ def test_docker_egress_network_sidecar_and_env(tmp_path, fake_docker, monkeypatc
     box.run("pip install requests")
     side = [a for a in fake_docker if a[:2] == ["docker", "run"]][1]
     assert side[side.index("--name") + 1] == box.egress_sidecar
-    assert side[argv_i(side, "--network")] == "bridge"
+    # Started on the internal network only, under the alias it listens on.
+    assert side[argv_i(side, "--network")] == net
+    assert side[argv_i(side, "--network-alias")] == "awos-egress-proxy"
     assert "--read-only" in side and side[argv_i(side, "--cap-drop")] == "ALL"
     assert side[argv_i(side, "--security-opt")] == "no-new-privileges"
     assert "-e" not in side and "--env" not in side            # no host env in the proxy
@@ -278,9 +281,13 @@ def test_docker_egress_network_sidecar_and_env(tmp_path, fake_docker, monkeypatc
     assert not any("target=/workspace" in m for m in mounts)   # proxy never sees the workspace
     allow = side[argv_i(side, "--allow")].split(",")
     assert "github.com" not in allow and "pypi.org" in allow
-    assert side[argv_i(side, "--listen")] == "0.0.0.0:3128"
+    # Never 0.0.0.0: the alias resolves to its internal-network address only.
+    assert side[argv_i(side, "--listen")] == "awos-egress-proxy:3128"
+    assert "0.0.0.0" not in " ".join(side)
+    # The default bridge (upstream) is attached after start.
     connect = next(a for a in fake_docker if a[:3] == ["docker", "network", "connect"])
-    assert connect == ["docker", "network", "connect", "--alias", "awos-egress-proxy", net, box.egress_sidecar]
+    assert connect == ["docker", "network", "connect", "bridge", box.egress_sidecar]
+    assert fake_docker.index(connect) > fake_docker.index(side)
     # The exec carries the proxy variables and nothing from the host.
     exec_argv = seen[0]["argv"]
     flags = [exec_argv[i + 1] for i, a in enumerate(exec_argv) if a == "-e"]

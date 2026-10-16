@@ -31,6 +31,30 @@ backends let sandboxed code read them but not write them.
   listed in DockerSandbox.unprotected rather than silently assumed safe.
 There is no third backend, so nothing runs without one of these.
 
+Host loopback services (llama-server, Ollama, the Docker API, databases):
+- Seatbelt allows outbound connections to localhost (unit tests start local
+  servers), but denies a list of sensitive local ports on top of that
+  (sensitive_local_ports(): the local model server's port, 11434, 2375,
+  2376, 5432, 3306, 6379, 27017, 9200; edited with
+  AWOS_SANDBOX_DENY_LOCAL_PORTS="1234,!5432"). Any other port a host service
+  listens on stays reachable: this is a deny-list, not an allowlist.
+- Docker: the container has its own network namespace, so the host's
+  127.0.0.1 is never reachable from it — with --network none there is no
+  interface but the container's own lo, and the egress --internal network
+  has no route out. Caveat: a host service bound to 0.0.0.0 (not 127.0.0.1)
+  may still answer on the host-side address of the internal bridge on some
+  engine versions; bind local servers to 127.0.0.1.
+
+Git in a job worktree: there `.git` is a FILE pointing at
+<repo>/.git/worktrees/<id>, which in turn names the shared common dir
+(<repo>/.git). Both are outside the workspace, so without help Seatbelt
+read-denies them and docker does not mount them, and `git status` fails.
+worktree_git_paths() resolves both; Seatbelt allows reading them (writes stay
+denied) and docker binds them read-only at the path the .git file names.
+Note: the common dir holds .git/config, whose remote URLs may carry a token;
+it becomes readable to sandboxed code. Egress is off by default, so it
+cannot be sent anywhere unless the owner opts in.
+
 Opt-in egress (AWOS_SANDBOX_EGRESS=allowlist; default off; REA synthesis
 item 14, after Claude Cowork's egress proxy): for tasks that must `pip
 install`, `npm install` or `git fetch`. An HTTP(S) forward proxy
@@ -44,14 +68,20 @@ close(). What each backend enforces:
 - Seatbelt: the proxy runs on the host at 127.0.0.1:<port>. The kernel
   profile still denies all non-loopback network, so a process that ignores
   the proxy variables is BLOCKED (it cannot reach the internet directly).
-  Loopback stays open as before (localhost:*), so the proxy port is
-  reachable; the profile also names it explicitly and admits trustd for TLS.
+  Loopback stays open as before (localhost:*) except the sensitive local
+  ports below, so the proxy port is reachable; the profile also names it
+  explicitly (after the port denies, so it always wins) and admits trustd.
 - Docker: the container runs on a per-sandbox `--internal` network (no
   route out, unlike the default bridge) instead of `--network none`; the
   proxy runs in a small sidecar container (same egress_proxy.py, no env, no
-  caps, read-only rootfs, host uid) attached to both that network and the
-  default bridge. A process that ignores the proxy variables is BLOCKED by
+  caps, read-only rootfs, host uid) started on that network and then also
+  attached to the default bridge for its upstream connections. It listens
+  only on its address on the internal network (its alias, resolved inside
+  the sidecar), never 0.0.0.0, so other containers on the default bridge
+  cannot use it. A process that ignores the proxy variables is BLOCKED by
   docker's routing: the only thing it can reach is the sidecar's port.
+Presets (AWOS_SANDBOX_EGRESS_PRESETS=crates,yarn) add named host groups
+(egress_proxy.EGRESS_PRESETS) to the allowlist; none is on by default.
 Neither backend can inspect what goes through an allowed CONNECT tunnel:
 data can be sent to an allowlisted host (e.g. a push to any GitHub repo
 with a token the code brought along). See egress_report()["enforcement"].
@@ -89,6 +119,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_EGRESS_ALLOW = _egress.DEFAULT_EGRESS_ALLOW
 EGRESS_ALLOW_ENV = _egress.EGRESS_ALLOW_ENV
+EGRESS_PRESETS = _egress.EGRESS_PRESETS
+EGRESS_PRESETS_ENV = _egress.EGRESS_PRESETS_ENV
 
 #: Per-stream cap on captured output. Enough to read a traceback or a report
 #: summary; a runaway print loop must not flood the model's context.
@@ -168,9 +200,24 @@ DOTENV_EXAMPLE_SUFFIXES = ("example", "sample", "template", "dist", "defaults")
 #: .git is not in this tuple: it is protected unconditionally (any depth,
 #: submodules included) by its own rule, because the host runs git there
 #: unsandboxed — see HOST_GIT_OPTS. AWOS_SANDBOX_READONLY=0 cannot lift it.
+#: .mcp.json (a file) and .gemini / .windsurf / .continue declare MCP
+#: servers or agent settings another tool loads later; .aws can hold a
+#: credential_process command the AWS CLI runs.
 DEFAULT_READONLY_PATHS = (
     ".awos", ".claude", ".agents", ".codex", ".cursor", ".husky",
+    ".mcp.json", ".aws", ".gemini", ".windsurf", ".continue",
 )
+#: Not on by default, but worth adding with AWOS_SANDBOX_READONLY_PATHS when
+#: the owner opens repos with these tools: .vscode (tasks.json can run on
+#: folder open), .devcontainer (commands run when a container is built),
+#: .envrc (direnv evaluates it on cd once allowed). They are ordinary project
+#: files a task may legitimately edit, hence opt-in.
+OPTIONAL_READONLY_PATHS = (".vscode", ".devcontainer", ".envrc")
+#: Known control paths that are FILES, not dirs. Docker protects a missing one
+#: with an empty read-only file placeholder instead of an empty dir.
+READONLY_FILE_PATHS = frozenset({".mcp.json", ".envrc"})
+#: Known control paths docker may create a placeholder for when missing.
+_KNOWN_CONTROL_PATHS = frozenset(DEFAULT_READONLY_PATHS) | frozenset(OPTIONAL_READONLY_PATHS)
 #: Env: comma-separated extra workspace-relative paths to protect. An entry
 #: "!name" drops a default (never .git), e.g. when the task is AWOS working on
 #: its own repo and its tests must write .awos/.
@@ -193,6 +240,15 @@ EGRESS_IMAGE_ENV = "AWOS_SANDBOX_EGRESS_IMAGE"
 EGRESS_MACH_SERVICES = ("com.apple.trustd", "com.apple.trustd.agent")
 #: Local servers a test starts must not be sent through the proxy.
 EGRESS_NO_PROXY = "localhost,127.0.0.1,::1"
+#: Env: comma-separated loopback ports Seatbelt denies on top of the defaults;
+#: "!port" removes one (same syntax as the other lists).
+DENY_LOCAL_PORTS_ENV = "AWOS_SANDBOX_DENY_LOCAL_PORTS"
+#: Host services sandboxed code must not talk to over loopback: Ollama,
+#: the Docker Engine API (plain / TLS: full control of the host), Postgres,
+#: MySQL, Redis, MongoDB, Elasticsearch. The local model server's port
+#: (llama-server, from providers.local_base_url()) is added at runtime.
+DEFAULT_DENY_LOCAL_PORTS = (11434, 2375, 2376, 5432, 3306, 6379, 27017, 9200)
+_LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1", "0.0.0.0", "[::1]")
 DOCKER_EGRESS_PORT = 3128
 DOCKER_EGRESS_ALIAS = "awos-egress-proxy"
 DOCKER_EGRESS_READY_SEC = 15.0
@@ -233,6 +289,109 @@ def readonly_control_paths(env: Optional[dict] = None) -> list[str]:
     return paths
 
 
+def _local_model_port(env) -> Optional[int]:
+    """The port of the local model server, when its URL points at loopback.
+    providers.local_base_url() is the source of truth (imported lazily and
+    only read); if providers cannot be imported, the same env vars are read
+    here. A remote URL yields None: nothing on this host to protect."""
+    from urllib.parse import urlsplit
+    url = None
+    if env is os.environ:
+        try:
+            try:
+                from . import providers as _providers
+            except ImportError:
+                import providers as _providers  # type: ignore[no-redef]
+            url = _providers.local_base_url()
+        except Exception:  # noqa: BLE001 - optional dependency, fall back
+            url = None
+    if not url:
+        url = (env.get("AWOS_LOCAL_BASE_URL", "").strip() or env.get("AWOS_BASE_URL", "").strip()
+               or "http://127.0.0.1:8080/v1")
+    try:
+        parts = urlsplit(url)
+        host = (parts.hostname or "").lower()
+        port = parts.port or {"http": 80, "https": 443}.get(parts.scheme)
+    except ValueError:
+        return None
+    if not port or not (host in _LOOPBACK_HOSTS or host.startswith("127.")):
+        return None
+    return int(port)
+
+
+def sensitive_local_ports(env: Optional[dict] = None) -> list[int]:
+    """Loopback ports the Seatbelt profile denies outbound connections to:
+    the local model server's port (if local), DEFAULT_DENY_LOCAL_PORTS, plus
+    AWOS_SANDBOX_DENY_LOCAL_PORTS additions, minus its "!port" removals."""
+    env = os.environ if env is None else env
+    ports: list[int] = []
+    llama = _local_model_port(env)
+    if llama is not None:
+        ports.append(llama)
+    ports += [p for p in DEFAULT_DENY_LOCAL_PORTS if p not in ports]
+    for raw in env.get(DENY_LOCAL_PORTS_ENV, "").split(","):
+        entry = raw.strip()
+        if not entry:
+            continue
+        drop = entry.startswith("!")
+        num = entry[1:].strip() if drop else entry
+        if not num.isdigit() or not 0 < int(num) < 65536:
+            logger.warning("%s: ignoring %r (not a port number)", DENY_LOCAL_PORTS_ENV, raw)
+            continue
+        port = int(num)
+        if drop:
+            ports = [p for p in ports if p != port]
+        elif port not in ports:
+            ports.append(port)
+    return ports
+
+
+def _read_pointer(path: Path, prefix: str = "") -> Optional[str]:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return None
+    line = text.splitlines()[0].strip() if text else ""
+    if prefix:
+        if not line.startswith(prefix):
+            return None
+        line = line[len(prefix):].strip()
+    return line or None
+
+
+@dataclass
+class WorktreeGit:
+    """Where a worktree's git data lives. *_host are real host paths;
+    *_ref are the paths as the .git file / commondir file write them
+    (absolute, or relative to the workspace / gitdir), used to place docker
+    mounts where git inside the container will look."""
+    gitdir_host: Path
+    commondir_host: Path
+    gitdir_ref: str
+    commondir_ref: str
+
+
+def worktree_git_paths(workspace: Path) -> Optional[WorktreeGit]:
+    """When workspace/.git is a file ("gitdir: <path>", as in a linked
+    worktree), resolve the per-worktree gitdir and the shared common dir
+    (the gitdir's `commondir` file, else the gitdir itself). None when .git
+    is a dir, missing, a symlink, or does not point at an existing dir."""
+    dot_git = workspace / ".git"
+    if dot_git.is_symlink() or not dot_git.is_file():
+        return None
+    ref = _read_pointer(dot_git, "gitdir:")
+    if not ref:
+        return None
+    gitdir = Path(os.path.realpath(ref if os.path.isabs(ref) else workspace / ref))
+    if not gitdir.is_dir():
+        return None
+    common_ref = _read_pointer(gitdir / "commondir") or "."
+    common = Path(os.path.realpath(common_ref if os.path.isabs(common_ref) else gitdir / common_ref))
+    if not common.is_dir():
+        common, common_ref = gitdir, "."
+    return WorktreeGit(gitdir, common, ref, common_ref)
+
+
 def egress_mode(env: Optional[dict] = None) -> str:
     """"off" or "allowlist" from AWOS_SANDBOX_EGRESS. Anything unrecognised
     is "off" (fail closed: no network), with a warning."""
@@ -247,10 +406,13 @@ def egress_mode(env: Optional[dict] = None) -> str:
 
 
 def egress_allowlist(env: Optional[dict] = None) -> list[str]:
-    """DEFAULT_EGRESS_ALLOW plus AWOS_SANDBOX_EGRESS_ALLOW additions
+    """DEFAULT_EGRESS_ALLOW plus the hosts of AWOS_SANDBOX_EGRESS_PRESETS
+    (e.g. "crates,yarn"), plus AWOS_SANDBOX_EGRESS_ALLOW additions
     ("host", "*.suffix"), minus its "!host" removals."""
     env = os.environ if env is None else env
-    return _egress.parse_allowlist(env.get(EGRESS_ALLOW_ENV, ""))
+    defaults = list(DEFAULT_EGRESS_ALLOW)
+    defaults += [h for h in _egress.preset_hosts(env.get(EGRESS_PRESETS_ENV, "")) if h not in defaults]
+    return _egress.parse_allowlist(env.get(EGRESS_ALLOW_ENV, ""), defaults=defaults)
 
 
 def egress_proxy_env(proxy_url: str) -> dict[str, str]:
@@ -439,6 +601,8 @@ def build_seatbelt_profile(
     allow_network: bool,
     readonly_paths: Optional[list[str]] = None,
     egress_proxy_port: Optional[int] = None,
+    git_read_paths: Optional[list[Path]] = None,
+    deny_local_ports: Optional[list[int]] = None,
 ) -> str:
     """Generate the SBPL profile. SBPL applies the *last* matching rule, so
     each deny is followed by the narrower allows that carve holes in it.
@@ -446,7 +610,11 @@ def build_seatbelt_profile(
     readonly_paths: workspace-relative control paths (readonly_control_paths)
     that are write-denied in addition to .git; None means none.
     egress_proxy_port: the host egress proxy's loopback port (egress mode);
-    ignored when allow_network is True."""
+    ignored when allow_network is True.
+    git_read_paths: a worktree's gitdir and common dir (worktree_git_paths),
+    readable but never writable, even under a read-denied tree.
+    deny_local_ports: loopback ports outbound connections may not reach
+    (sensitive_local_ports); the egress proxy port is always kept open."""
     q = sbpl_quote
     ws = _regex_escape(str(workspace))
     lines = [
@@ -460,9 +628,10 @@ def build_seatbelt_profile(
         + " " + " ".join(f"(literal {q(d)})" for d in WRITABLE_DEVICES)
         + " " + f"(regex {q('^/dev/fd/')})" + ")",
     ]
+    git_read = list(git_read_paths or [])
     if read_deny:
         lines.append("(deny file-read* " + " ".join(f"(subpath {q(p)})" for p in read_deny) + ")")
-        holes = [workspace, tmpdir, *read_allow]
+        holes = [workspace, tmpdir, *read_allow, *git_read]
         lines.append("(allow file-read* " + " ".join(f"(subpath {q(p)})" for p in holes) + ")")
         # Stat-only access to the parents of each hole: getcwd() and Python's
         # startup walk them. file-read-metadata does not allow listing them.
@@ -476,6 +645,12 @@ def build_seatbelt_profile(
     # (job reports, the parent session's commit): writable, it is a way out.
     git_dir = "^" + ws + r"/(.*/)?\.git(/.*)?$"
     lines.append(f"(deny file-write* (regex {q(git_dir)}))")
+    # A worktree's real git data (outside the workspace): read-only. Writes
+    # there are already denied by default; stated anyway so no later write
+    # hole can open them. Its .git/config may hold a token-bearing remote
+    # URL that is now readable — egress is off by default.
+    if git_read:
+        lines.append("(deny file-write* " + " ".join(f"(subpath {q(p)})" for p in git_read) + ")")
     # Agent control paths (DEFAULT_READONLY_PATHS): the path itself and
     # everything below it, matched by name so a path that does not exist yet
     # cannot be created either (a planted .claude/settings.json is the
@@ -514,11 +689,19 @@ def build_seatbelt_profile(
         lines.append('(allow network-bind (local ip "localhost:*"))')
         lines.append('(allow network-inbound (local ip "localhost:*"))')
         lines.append('(allow network-outbound (remote ip "localhost:*"))')
+        # Host services that must not be driven from the sandbox (model
+        # server, Ollama, Docker API, databases). After the localhost allow,
+        # so these denies win (SBPL: last match applies).
+        keep = int(egress_proxy_port) if egress else None
+        ports = [int(p) for p in (deny_local_ports or []) if int(p) != keep]
+        if ports:
+            lines.append("(deny network-outbound "
+                         + " ".join(f'(remote ip "localhost:{p}")' for p in ports) + ")")
         if egress:
             # Egress mode: the only way out is the host proxy on loopback.
-            # localhost:* above already admits it; named here so the profile
-            # states the intent, and so a later tightening of the loopback
-            # rule keeps it. Every non-loopback destination stays denied by
+            # localhost:* above already admits it; named here, after the
+            # port denies, so the profile states the intent and no deny or
+            # later tightening of the loopback rule can close it. Every non-loopback destination stays denied by
             # (deny network*), whether or not a process honours the proxy
             # variables.
             lines.append(f'(allow network-outbound (remote ip "localhost:{int(egress_proxy_port)}"))')
@@ -544,8 +727,9 @@ class SeatbeltSandbox(_EgressMixin):
     ENFORCEMENT = (
         "seatbelt: proxy on host 127.0.0.1; kernel profile denies every non-loopback "
         "connection, so a process ignoring HTTP(S)_PROXY cannot reach the internet. "
-        "Not enforced: anything listening on the host's loopback stays reachable (as "
-        "without egress, e.g. a local DNS resolver on 127.0.0.1:53); contents of allowed "
+        "Not enforced: anything listening on the host's loopback stays reachable unless its "
+        "port is on the sensitive-port deny list (e.g. a local DNS resolver on 127.0.0.1:53); "
+        "contents of allowed "
         "CONNECT tunnels are opaque; uploads to allowlisted hosts are possible."
     )
 
@@ -558,6 +742,7 @@ class SeatbeltSandbox(_EgressMixin):
         egress: Optional[str] = None,
         egress_allow: Optional[list[str]] = None,
         egress_resolver=None,
+        deny_local_ports: Optional[list[int]] = None,
     ) -> None:
         self.workspace = Path(workspace).resolve()
         if not self.workspace.is_dir():
@@ -573,6 +758,16 @@ class SeatbeltSandbox(_EgressMixin):
         self.allow_network = _network_allowed() if allow_network is None else allow_network
         self.readonly_paths = readonly_control_paths() if readonly_paths is None else list(readonly_paths)
         self.extra_read: list[Path] = []
+        self.deny_local_ports = sensitive_local_ports() if deny_local_ports is None else list(deny_local_ports)
+        wt = worktree_git_paths(self.workspace)
+        self.git_read: list[Path] = []
+        for gp in ([] if wt is None else sorted({wt.gitdir_host, wt.commondir_host})):
+            # A git dir that contains the workspace would turn the write deny
+            # into "workspace read-only": skip it (git then may fail; safe).
+            if gp == self.workspace or gp in self.workspace.parents:
+                logger.warning("worktree git dir %s contains the workspace; not opened", gp)
+                continue
+            self.git_read.append(gp)
         self._init_egress(egress, self.allow_network, egress_allow)
         self._proxy: Optional[_egress.EgressProxy] = None
         self._egress_resolver = egress_resolver  # tests map names without real DNS
@@ -583,6 +778,7 @@ class SeatbeltSandbox(_EgressMixin):
             self.workspace, self.tmpdir, _python_read_roots() + self.extra_read,
             self.read_deny, self.allow_network, self.readonly_paths,
             egress_proxy_port=self._proxy.port if self._proxy is not None else None,
+            git_read_paths=self.git_read, deny_local_ports=self.deny_local_ports,
         )
 
     def _ensure_egress(self) -> None:
@@ -818,8 +1014,9 @@ class DockerSandbox(_EgressMixin):
         "HTTP(S)_PROXY cannot reach the internet: the sidecar's port is the only reachable "
         "endpoint. Not enforced: contents of allowed CONNECT tunnels are opaque; uploads to "
         "allowlisted hosts are possible; DNS queries via docker's embedded resolver may be "
-        "forwarded upstream on older docker engines (a low-bandwidth DNS channel); the sidecar "
-        "listens on 0.0.0.0, so other containers on the default bridge could use it too."
+        "forwarded upstream on older docker engines (a low-bandwidth DNS channel). The sidecar "
+        "listens only on its internal-network address, so containers on the default bridge "
+        "cannot use it."
     )
 
     def __init__(
@@ -843,6 +1040,14 @@ class DockerSandbox(_EgressMixin):
         # exist yet, so the container cannot create them either.
         self._empty_dir = Path(tempfile.mkdtemp(prefix="awos-sbx-empty-")).resolve()
         weakref.finalize(self, shutil.rmtree, str(self._empty_dir), True)
+        # Same for missing control FILES (.mcp.json): an empty read-only file,
+        # kept in a dir of its own so _empty_dir stays empty.
+        self._empty_file_dir = Path(tempfile.mkdtemp(prefix="awos-sbx-emptyf-")).resolve()
+        weakref.finalize(self, shutil.rmtree, str(self._empty_file_dir), True)
+        self._empty_file = self._empty_file_dir / "empty"
+        self._empty_file.touch()
+        os.chmod(self._empty_file, 0o444)
+        self.git_mounts: list[str] = []
         self.unprotected: list[str] = []
         self._placeholders: list[Path] = []
         self._init_egress(egress, self.allow_network, egress_allow)
@@ -860,10 +1065,14 @@ class DockerSandbox(_EgressMixin):
 
         Docker can only protect a path by mounting over it, which differs
         from the Seatbelt rule in three ways, all handled here:
-        - a control dir that does not exist yet gets an empty read-only
-          placeholder mount (docker creates the empty mountpoint dir in the
-          workspace; close() removes it again if still empty);
-        - a missing control path that is not a default dir (an env-added
+        - a known control path (DEFAULT_READONLY_PATHS or
+          OPTIONAL_READONLY_PATHS) that does not exist yet gets an empty
+          read-only placeholder mount: an empty dir, or an empty file for
+          READONLY_FILE_PATHS such as .mcp.json. Docker creates the empty
+          mountpoint (dir or file) in the workspace; with a read-only mount on
+          it the container can neither write nor replace it, and close()
+          removes it again if it is still empty;
+        - a missing control path that is not a known one (an env-added
           entry such as CLAUDE.md, which may be a file) cannot be guessed as
           file or dir, so it is NOT protected and is listed as unprotected;
         - a symlink is never mounted: docker would follow it on the HOST and
@@ -879,18 +1088,55 @@ class DockerSandbox(_EgressMixin):
                 continue
             rel = git_path.relative_to(self.workspace).as_posix()
             mounts.append(_bind(git_path, f"{self.MOUNT}/{rel}", readonly=True))
+        self.git_mounts = self._worktree_git_mounts()
+        mounts += self.git_mounts
         for rel in self.readonly_paths:
             host = self.workspace / rel
             if host.is_symlink():
                 unprotected.append(rel)
             elif host.exists():
                 mounts.append(_bind(host, f"{self.MOUNT}/{rel}", readonly=True))
-            elif rel in DEFAULT_READONLY_PATHS:
+            elif rel in READONLY_FILE_PATHS:
+                mounts.append(_bind(self._empty_file, f"{self.MOUNT}/{rel}", readonly=True))
+                placeholders.append(host)
+            elif rel in _KNOWN_CONTROL_PATHS:
                 mounts.append(_bind(self._empty_dir, f"{self.MOUNT}/{rel}", readonly=True))
                 placeholders.append(host)
             else:
                 unprotected.append(rel)
         return mounts, placeholders, unprotected
+
+    def _worktree_git_mounts(self) -> list[str]:
+        """Read-only binds for a linked worktree's git data (worktree_git_paths),
+        placed where git in the container will look: the path the .git file
+        names (an absolute host path, or relative to /workspace), and the
+        common dir as the gitdir's `commondir` file names it. Common dir
+        first, so the gitdir (usually inside it) is layered on top. Its
+        .git/config may hold token-bearing remote URLs, which become readable;
+        egress is off by default."""
+        import posixpath
+        wt = worktree_git_paths(self.workspace)
+        if wt is None:
+            return []
+        if os.path.isabs(wt.gitdir_ref):
+            gitdir_target = posixpath.normpath(Path(wt.gitdir_ref).as_posix())
+        else:
+            gitdir_target = posixpath.normpath(f"{self.MOUNT}/{wt.gitdir_ref}")
+        if os.path.isabs(wt.commondir_ref):
+            common_target = posixpath.normpath(Path(wt.commondir_ref).as_posix())
+        else:
+            common_target = posixpath.normpath(f"{gitdir_target}/{wt.commondir_ref}")
+        out: list[str] = []
+        for host, target in ((wt.commondir_host, common_target), (wt.gitdir_host, gitdir_target)):
+            # Inside /workspace already (and a mount over /workspace itself or
+            # one of its parents would hide the workspace): nothing to add.
+            if target == "/" or target.startswith(self.MOUNT + "/") or target == self.MOUNT \
+                    or self.MOUNT.startswith(target.rstrip("/") + "/"):
+                continue
+            spec = _bind(host, target, readonly=True)
+            if spec not in out:
+                out.append(spec)
+        return out
 
     def start_argv(self) -> list[str]:
         argv = ["docker", "run", "-d", "--rm", "--name", self.name]
@@ -947,8 +1193,15 @@ class DockerSandbox(_EgressMixin):
         read-only rootfs, the host user's uid, small resource caps. Its only
         writable path is the log dir, which the sandbox container never sees."""
         image = os.environ.get(EGRESS_IMAGE_ENV) or DEFAULT_DOCKER_IMAGE
+        # Started on the internal network ONLY, under its alias, and told to
+        # listen on that alias: docker's DNS resolves it to the sidecar's
+        # address on the internal network, so the listener never binds
+        # 0.0.0.0 and containers on the default bridge cannot reach it. The
+        # bridge (for upstream connections) is attached after start.
         argv = ["docker", "run", "-d", "--rm", "--name", self.egress_sidecar,
-                "--network", "bridge", "--read-only", "--cap-drop", "ALL",
+                "--network", self.egress_network or "none",
+                "--network-alias", DOCKER_EGRESS_ALIAS,
+                "--read-only", "--cap-drop", "ALL",
                 "--security-opt", "no-new-privileges",
                 "--memory", "256m", "--cpus", "0.5", "--pids-limit", "128"]
         if hasattr(os, "getuid"):
@@ -956,7 +1209,7 @@ class DockerSandbox(_EgressMixin):
         argv += ["--mount", _bind(_EGRESS_PROXY_SRC.resolve(), "/awos/egress_proxy.py", readonly=True),
                  "--mount", _bind(log_dir, "/awos-log"),
                  image, "python3", "-I", "/awos/egress_proxy.py",
-                 "--listen", f"0.0.0.0:{DOCKER_EGRESS_PORT}",
+                 "--listen", f"{DOCKER_EGRESS_ALIAS}:{DOCKER_EGRESS_PORT}",
                  "--allow", ",".join(self.egress_allow),
                  "--log", "/awos-log/egress.jsonl"]
         return argv
@@ -968,8 +1221,9 @@ class DockerSandbox(_EgressMixin):
         return f"http://{DOCKER_EGRESS_ALIAS}:{DOCKER_EGRESS_PORT}"
 
     def _ensure_egress(self) -> None:
-        """Start the sidecar on first run() and attach it to the sandbox's
-        internal network under DOCKER_EGRESS_ALIAS. Raises RuntimeError."""
+        """Start the sidecar on first run() on the sandbox's internal network
+        (alias DOCKER_EGRESS_ALIAS), then attach it to the default bridge for
+        its upstream connections. Raises RuntimeError."""
         if self.egress != "allowlist" or self._sidecar_started:
             return
         self._new_egress_log()
@@ -985,8 +1239,7 @@ class DockerSandbox(_EgressMixin):
         self._sidecar_started = True
         try:
             conn = subprocess.run(
-                ["docker", "network", "connect", "--alias", DOCKER_EGRESS_ALIAS,
-                 self.egress_network or "", self.egress_sidecar],
+                ["docker", "network", "connect", "bridge", self.egress_sidecar],
                 capture_output=True, text=True, timeout=60, env=env)
             if conn.returncode != 0:
                 raise RuntimeError(f"egress sidecar network connect failed: {str(conn.stderr).strip()[:500]}")
@@ -1036,12 +1289,18 @@ class DockerSandbox(_EgressMixin):
             self._network_created = False
 
     def _remove_placeholders(self) -> None:
-        """Remove the empty mountpoint dirs docker created for missing control
-        dirs, so the workspace is left as it was. Non-empty means something
-        else (the host) put content there: left alone."""
+        """Remove the empty mountpoints docker created for missing control
+        paths (dirs, or empty files for READONLY_FILE_PATHS), so the
+        workspace is left as it was. Non-empty means something else (the
+        host) put content there: left alone."""
         for path in self._placeholders:
             try:
-                path.rmdir()
+                if path.is_symlink():
+                    continue
+                if path.is_dir():
+                    path.rmdir()
+                elif path.is_file() and path.stat().st_size == 0:
+                    path.unlink()
             except OSError:
                 pass
         self._placeholders = []
