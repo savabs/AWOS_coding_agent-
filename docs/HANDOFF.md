@@ -3,6 +3,14 @@
 For a new session (cloud or local) that has none of the laptop's memory. Branch: `claude/bench-run` (pushed).
 **Never push to `main`.**
 
+## If you are a cloud session (claude.ai/code)
+
+There is **no `ANTHROPIC_API_KEY` in this environment**, on purpose: environment variables are visible to anyone
+using the environment. Build and test with fakes here. Anything that calls the model (benchmarks, real `awos` runs)
+goes through **GitHub Actions**, which holds the key as the repo secret `ANTHROPIC_API_KEY`. Launch a run by pushing a
+`bench-cloud/**` branch (ladder) or `bench-cloud/harbor-**` (Terminal-Bench, after merging `harbor-h2h`), then collect
+results with `gh run download`. Local-model work (llama-server, Qwen) runs only on the owner's laptop.
+
 ## Owner's standing rules
 
 - Bootstrapped, so no infra spend. Free GitHub Actions on this public repo is fine; API spend needs explicit OK for anything over a few dollars.
