@@ -265,9 +265,16 @@ class EscalationEngine:
 
         # Hard override (capped in cheap-only mode)
         if force_level is not None:
-            spec = LEVEL_MAP[force_level]
             cap = max_allowed_level()
-            if spec.level.value > cap.value:
+            spec = LEVEL_MAP.get(force_level)
+            if spec is None:
+                # A level the enum still names (HAIKU, SONNET, ...) but that is no
+                # longer on the ladder: use the best allowed rung, not a KeyError.
+                spec = LEVEL_MAP[cap]
+                reason = f"Forced {force_level.name} is not on the ladder — using {spec.name}"
+                if is_cheap_only():
+                    reason += " [cheap-only]"
+            elif spec.level.value > cap.value:
                 spec = LEVEL_MAP[cap]
                 reason = f"Force blocked above {cap.name} — cheap-only mode"
             else:

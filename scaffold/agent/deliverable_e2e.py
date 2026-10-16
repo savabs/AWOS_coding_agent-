@@ -82,6 +82,9 @@ def _bootstrap_e2e_env() -> None:
 
     os.environ.setdefault("ANTHROPIC_API_KEY", "e2e-test-key")
     os.environ.setdefault("DEEPSEEK_API_KEY", "e2e-test-key")
+    # CheapPlanner (built in Orchestrator.__init__) needs an OpenCode/OpenRouter
+    # key, or a claude-* planner model; the plan itself comes from the mock.
+    os.environ.setdefault("OPENCODE_GO_API_KEY", "e2e-test-key")
     os.environ.setdefault("AWOS_E2E", "1")
     os.environ.setdefault("AWOS_CHEAP_ONLY", "true")
     os.environ.setdefault("AWOS_MONTHLY_BUDGET", "20.0")
@@ -176,6 +179,66 @@ def install_mock_create_executor(monkeypatch=None) -> None:
 
         mod = importlib.import_module("scaffold.agent.create_file_executor")
         mod.CreateFileExecutor.execute = _patched_execute  # type: ignore[method-assign]
+    install_mock_agent_client(monkeypatch)
+
+
+def _mock_agent_client_factory():
+    """
+    A scripted AgentLoop client: one edit_file call that creates the goal's
+    file (empty old_string), then a final answer. The orchestrator runs
+    create_file tasks through AgentLoop now, not CreateFileExecutor, so this
+    is the model boundary a mock-LLM create run has to stub.
+    """
+    from scaffold.agent.agent_loop import AnthropicToolClient, ModelReply, ToolCall
+    from scaffold.agent.plan_actions import extract_path_from_goal
+
+    def _text(messages) -> str:
+        parts: list[str] = []
+        for m in messages or []:
+            content = m.get("content") if isinstance(m, dict) else m
+            if isinstance(content, str):
+                parts.append(content)
+            elif isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and isinstance(block.get("text"), str):
+                        parts.append(block["text"])
+        return "\n".join(parts)
+
+    class _MockAgentClient(AnthropicToolClient):
+        def __init__(self, model: Optional[str] = None):
+            super().__init__(client=None, model=model or "e2e-mock")
+            self._turn = 0
+
+        def complete(self, system, messages, registry):
+            self._turn += 1
+            if self._turn > 1:
+                return ModelReply(text="Created the requested file.",
+                                  input_tokens=10, output_tokens=5)
+            prompt = _text(messages)
+            rel = extract_path_from_goal(prompt) or "docs/deliverable.md"
+            return ModelReply(
+                text="",
+                tool_calls=[ToolCall(id="e2e-1", name="edit_file", arguments={
+                    "path": rel, "old_string": "",
+                    "new_string": _mock_create_content(prompt.splitlines()[0] if prompt else rel, rel),
+                })],
+                input_tokens=10, output_tokens=5,
+            )
+
+    return lambda model=None, *a, **kw: _MockAgentClient(model)
+
+
+def install_mock_agent_client(monkeypatch=None) -> None:
+    """Patch agent_loop.build_client_from_env with the scripted client (no API)."""
+    factory = _mock_agent_client_factory()
+    target = "scaffold.agent.agent_loop.build_client_from_env"
+    if monkeypatch is not None:
+        monkeypatch.setattr(target, factory)
+    else:
+        import importlib
+
+        mod = importlib.import_module("scaffold.agent.agent_loop")
+        mod.build_client_from_env = factory  # type: ignore[assignment]
 
 
 def parse_sse(body: str) -> list[dict[str, Any]]:

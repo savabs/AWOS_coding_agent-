@@ -86,10 +86,19 @@ def test_stagnation_breaker_integration(tmp_path, monkeypatch):
     
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "test-key")  # CheapPlanner init; plan is pre-planned
     monkeypatch.setenv("AWOS_RUNTIME_SESSION", "true")
     monkeypatch.setenv("AWOS_USE_WORKTREE", "false")
     monkeypatch.setenv("AWOS_STAGNATION_THRESHOLD", "2")
+    # The mocks below are on the legacy worker path; under pytest the default
+    # executor is agent_loop, which bypassed them and called the real
+    # Anthropic API with the fake key.
+    monkeypatch.setenv("AWOS_EXECUTOR", "worker")
+    # Retries ask _cheap_call for a critique; with no utility route it returns
+    # "" instead of calling OpenCode with the fake key.
+    monkeypatch.setattr(Orchestrator, "_cheap_route", lambda self, *a, **kw: None)
     
+    (tmp_path / "test.py").write_text("x = 1\n", encoding="utf-8")  # the task's file
     orch = Orchestrator()
     store = RuntimeSessionStore()
     

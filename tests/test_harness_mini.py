@@ -303,6 +303,9 @@ def test_mini_local_talks_to_an_openai_compatible_server(tmp_path, monkeypatch, 
         assert "HIDDEN" not in (proj / "leak.txt").read_text()
     assert "The repository is your current working directory" in json.dumps(
         _FakeLLM.calls[0]["messages"])
+    assert _FakeLLM.calls[0]["model"] == "qwen3.5-9b"
+    assert "temperature" not in _FakeLLM.calls[0]
+    assert _FakeLLM.calls[0]["tools"][0]["function"]["name"] == "bash"
 
 
 def test_sandbox_profile_denies_benchmark_data_and_opens_project(tmp_path):
@@ -310,6 +313,3 @@ def test_sandbox_profile_denies_benchmark_data_and_opens_project(tmp_path):
     assert "(allow default)" in prof and ".awos-harness" in prof and r"\.env$" in prof
     assert prof.rstrip().splitlines()[-1].startswith("(allow file-read* file-write*")
     assert str((tmp_path / "series").resolve()) in prof
-    assert _FakeLLM.calls[0]["model"] == "qwen3.5-9b"
-    assert "temperature" not in _FakeLLM.calls[0]
-    assert _FakeLLM.calls[0]["tools"][0]["function"]["name"] == "bash"

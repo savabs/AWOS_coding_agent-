@@ -1,5 +1,6 @@
 """Unit tests for wedge_v1_assert.py."""
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -63,10 +64,9 @@ def test_assert_passes_on_golden_fixture(tmp_path):
 
 
 def test_forbidden_paths_ignores_pycache(tmp_path):
-    subprocess.run(
-        ["rsync", "-a", "--exclude", ".awos", "--exclude", ".git", f"{CI_FIXTURE}/", f"{tmp_path}/"],
-        check=True,
-    )
+    # Same copy as `rsync -a --exclude .awos --exclude .git`, without needing rsync.
+    shutil.copytree(CI_FIXTURE, tmp_path, dirs_exist_ok=True, symlinks=True,
+                    ignore=shutil.ignore_patterns(".awos", ".git"))
     for mod in ("auth", "billing", "inventory", "shipping", "promo"):
         subprocess.run(["cp", f"{tmp_path}/golden/{mod}.py", f"{tmp_path}/{mod}.py"], check=True)
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)

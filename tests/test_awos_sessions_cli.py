@@ -37,7 +37,9 @@ def _import_awos():
 
 
 class TestSessionsCLI:
-    def test_list_empty(self, capsys):
+    def test_list_empty(self, sessions_dir, capsys):
+        # sessions_dir chdirs into an empty tmp tree; without it this read the
+        # repo's own .awos/sessions and was "empty" only on a clean checkout.
         awos = _import_awos()
         awos.cmd_sessions_list(SimpleNamespace(json=False))
         assert "No runtime sessions" in capsys.readouterr().out

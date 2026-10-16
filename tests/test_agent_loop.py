@@ -177,7 +177,14 @@ class TestToolSchemas(unittest.TestCase):
         """Existing callers that construct tools with no root keep working."""
         from scaffold.agent.tools.filesystem import ReadFileTool
 
-        self.assertTrue(ReadFileTool()(path="requirements.txt").success)
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "requirements.txt").write_text("pytest\n", encoding="utf-8")
+            os.chdir(d)
+            try:
+                self.assertTrue(ReadFileTool()(path="requirements.txt").success)
+            finally:
+                os.chdir(old_cwd)
 
     def test_read_file_tolerates_malformed_line_ranges(self):
         """Ranges the goal-check model sent that used to raise ValueError."""

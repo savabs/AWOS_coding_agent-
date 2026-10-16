@@ -474,6 +474,10 @@ def cmd_sessions_list(args):
     status = getattr(args, "status", None)
     status_enum = SessionStatus(status) if status else None
     sessions = store.list_sessions(status=status_enum)
+    if getattr(args, "json", False):
+        limit = getattr(args, "limit", 20)
+        print(json.dumps([s.to_dict() for s in sessions[:limit]], indent=2))
+        return
     if not sessions:
         print("No runtime sessions found.")
         return
@@ -494,6 +498,19 @@ def cmd_sessions_list(args):
     print()
 
 
+def _sandbox_summary(session) -> str:
+    """One-line sandbox summary for a runtime session, or "" when it has none."""
+    sb = session.sandbox
+    if not sb.enabled:
+        return ""
+    path = sb.worktree_path or ""
+    exists = bool(path) and os.path.isdir(path)
+    return (
+        f"Sandbox:   feature_id={sb.feature_id or 'n/a'}  path={path or 'n/a'}  "
+        f"branch={sb.branch or 'n/a'}  exists={exists}"
+    )
+
+
 def cmd_sessions_show(args):
     """Show one runtime session."""
 
@@ -512,11 +529,27 @@ def cmd_sessions_show(args):
     print(f"Goal:      {s.goal}")
     print(f"Root:      {s.codebase_root}")
     print(f"Progress:  {s.progress.completed_task_ids} done / {s.progress.total_tasks} total")
-    if s.sandbox.enabled:
-        print(f"Sandbox:   worktree={s.sandbox.worktree_path or 'n/a'}  branch={s.sandbox.branch or 'n/a'}")
+    sandbox_line = _sandbox_summary(s)
+    if sandbox_line:
+        print(sandbox_line)
     if s.paused_at:
         print(f"Paused at: {s.paused_at}")
     print()
+
+
+def cmd_sessions_fork(args):
+    """Fork a runtime session: a new pending session that starts from its progress."""
+    store = _sessions_store()
+    try:
+        child = store.fork(args.session_id, new_goal=getattr(args, "goal", None))
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Cannot fork {args.session_id}: {exc}")
+        raise SystemExit(1)
+    if getattr(args, "json", False):
+        print(json.dumps(child.to_dict(), indent=2))
+        return
+    print(f"Forked {args.session_id} -> {child.session_id}")
+    print(f"Goal:      {child.goal}")
 
 
 def cmd_sessions_resume(args):
@@ -2004,6 +2037,11 @@ def build_parser() -> argparse.ArgumentParser:
     sess_list = sess_sub.add_parser("list", help="List runtime sessions")
     sess_list.add_argument("--status", choices=["pending", "running", "paused", "completed", "failed", "cancelled"])
     sess_list.add_argument("--limit", type=int, default=20)
+    sess_list.add_argument("--json", action="store_true", help="Output as JSON")
+    sess_fork = sess_sub.add_parser("fork", help="Fork a session into a new pending one")
+    sess_fork.add_argument("session_id", metavar="RS_ID")
+    sess_fork.add_argument("--goal", default=None, help="Goal for the fork (default: the parent's)")
+    sess_fork.add_argument("--json", action="store_true", help="Output as JSON")
     sess_show = sess_sub.add_parser("show", help="Show session details")
     sess_show.add_argument("session_id", metavar="RS_ID")
     sess_resume = sess_sub.add_parser("resume", help="Resume a paused session")

@@ -106,7 +106,10 @@ def mcnemar_exact(b: int, c: int) -> float:
     n = b + c
     if n == 0:
         return 1.0
-    return min(1.0, 2 * binom_cdf(min(b, c), n, 0.5))
+    # Exact at p = 0.5: integer tail over 2**n. The float log-pmf sum gave
+    # 0.9999999999999998 for (8, 7), where the capped p is exactly 1.
+    tail = sum(math.comb(n, i) for i in range(min(b, c) + 1))
+    return min(1.0, 2 * tail / 2 ** n)
 
 
 def sign_flip_p(diffs: list[float], samples: int = PERM_SAMPLES, seed: int = SEED) -> tuple[float, str]:

@@ -101,6 +101,7 @@ def startup_banner() -> None:
     print(
         f"[DEBUGGER] PID={os.getpid()} commit={commit} "
         f"python={sys.version.split()[0]} AWOS_TRACE={_TRACE_LEVEL}",
+        file=sys.stderr,  # stdout carries command output (e.g. --json)
         flush=True,
     )
 

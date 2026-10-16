@@ -27,7 +27,9 @@ class TestCheapOnlyEscalation:
             "complexity": "high",
         }
         decision = engine.decide(task, failure_count=5, budget_remaining=20.0)
-        assert decision.spec.level.value <= EscalationLevel.OPENAI.value
+        # The ladder is cheap-only by construction now (Flash, Pro); the
+        # premium tiers were removed, so the decision must be one of those.
+        assert decision.spec.level in (EscalationLevel.DEEPSEEK, EscalationLevel.OPENCODE)
 
     def test_force_sonnet_downgraded(self, cheap_env):
         from scaffold.agent.escalation_engine import EscalationEngine, EscalationLevel
@@ -35,7 +37,8 @@ class TestCheapOnlyEscalation:
         engine = EscalationEngine(monthly_budget=20.0)
         task = {"action": "fix typo", "file": "test_foo.py", "complexity": "low"}
         decision = engine.decide(task, force_level=EscalationLevel.SONNET)
-        assert decision.spec.level == EscalationLevel.OPENAI
+        # SONNET is off the ladder; the force lands on the cheap-only cap.
+        assert decision.spec.level == EscalationLevel.OPENCODE
         assert "cheap-only" in decision.reason.lower()
 
     def test_rotates_on_retry(self, cheap_env):
@@ -45,8 +48,8 @@ class TestCheapOnlyEscalation:
         task = {"action": "add helper", "file": "utils.py", "complexity": "medium"}
         d1 = engine.decide(task, failure_count=1)
         d2 = engine.decide(task, failure_count=2)
-        assert d1.spec.level in (EscalationLevel.DEEPSEEK, EscalationLevel.OPENAI)
-        assert d2.spec.level in (EscalationLevel.DEEPSEEK, EscalationLevel.OPENAI)
+        assert d1.spec.level in (EscalationLevel.DEEPSEEK, EscalationLevel.OPENCODE)
+        assert d2.spec.level in (EscalationLevel.DEEPSEEK, EscalationLevel.OPENCODE)
         assert d1.spec.level != d2.spec.level
 
     def test_user_wants_best_stays_cheap(self, cheap_env):
@@ -55,4 +58,5 @@ class TestCheapOnlyEscalation:
         engine = EscalationEngine(monthly_budget=20.0)
         task = {"action": "implement feature", "file": "main.py", "complexity": "high"}
         decision = engine.decide(task, user_wants_best=True, budget_remaining=20.0)
-        assert decision.spec.level == EscalationLevel.OPENAI
+        assert decision.spec.level == EscalationLevel.OPENCODE  # CHEAP_ONLY_MAX_LEVEL
+        assert "cheap-only" in decision.reason.lower()

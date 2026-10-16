@@ -49,11 +49,16 @@ def test_clawcode_mission_config_has_plan_and_root():
     path = Path(__file__).resolve().parent.parent / "docs" / "missions" / "stage1_phase_d_clawcode.json"
     cfg = json.loads(path.read_text(encoding="utf-8"))
     assert cfg.get("codebase_root")
-    assert Path(cfg["codebase_root"]).is_dir()
     plan = load_mission_plan(cfg)
     assert plan is not None
     assert len(plan) == 14
     assert plan[0]["path"].startswith("src/")
+    # The mission targets an external clawcode checkout at a fixed absolute
+    # path on the owner's machine; everything above is repo-local.
+    root = Path(cfg["codebase_root"])
+    if not root.is_dir():
+        pytest.skip(f"clawcode checkout not present at {root} (owner's machine only)")
+    assert root.is_dir()
 
 
 def test_ci_rescue_mission_config_has_plan_and_root():

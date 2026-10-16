@@ -194,14 +194,24 @@ def stop_worker(host: Path) -> None:
 
 def app_env(host: Path, live: bool = False) -> dict:
     env = {k: v for k, v in os.environ.items() if not k.startswith("PYTEST")}
-    env.update({"AWOS_HOST_DIR": str(host), "TERM": "xterm-256color", "AWOS_NOTIFY_MACOS": "0",
-                "AWOS_APP_POLL": "0.2", "AWOS_APP_WORKER_ARGS": "--poll 0.5", "PYTHONUNBUFFERED": "1"})
+    # AWOS_STATE_DIR: the job child's cwd, where its relative .awos/ (spend
+    # ledger budget.json, memory, traces) lands; by default that is the repo.
+    env.update({"AWOS_HOST_DIR": str(host), "AWOS_STATE_DIR": str(host / "state"),
+                "TERM": "xterm-256color", "AWOS_NOTIFY_MACOS": "0",
+                "AWOS_APP_POLL": "0.2", "AWOS_APP_WORKER_ARGS": "--poll 0.5", "PYTHONUNBUFFERED": "1",
+                # PYTEST* is stripped above, so the child does not know it runs under a
+                # test; opt out of telemetry the documented way, or onboarding stops at
+                # the one-time consent prompt (usage_ping.maybe_ask_consent).
+                "AWOS_TELEMETRY": "0"})
     env.pop("NO_COLOR", None)
     if not live:
         env.update({"AWOS_HOST_RUNNER": "scaffold.agent.app.demo_runner:run",
                     "AWOS_APP_DEMO_FIX": '{"file": "calc.py", "old": " + 1", "new": ""}',
                     "AWOS_APP_DEMO_STEP_SEC": "0.15", "AWOS_HOST_KEY_CHECK": "0",
-                    "ANTHROPIC_API_KEY": "", "AWOS_PROVIDER": "local"})
+                    "ANTHROPIC_API_KEY": "", "AWOS_PROVIDER": "local",
+                    # The host's test run needs a sandbox backend (none in CI);
+                    # the scripted demo repo is trusted, so use the unsafe opt-in.
+                    "AWOS_HOST_VERIFY_UNSANDBOXED": "1"})
     return env
 
 

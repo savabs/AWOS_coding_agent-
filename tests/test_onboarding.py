@@ -303,6 +303,14 @@ def test_doctor_host_dir_unwritable(tmp_path):
     ro.mkdir()
     ro.chmod(0o500)
     try:
+        probe = ro / ".probe"
+        try:
+            probe.touch()
+        except PermissionError:
+            pass
+        else:
+            probe.unlink()
+            pytest.skip("mode 0o500 does not stop writes here (running as root)")
         c = doctor.check_host_dir(ro / "host")
         assert not c.ok and c.fix
     finally:

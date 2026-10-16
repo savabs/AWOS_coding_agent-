@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -27,10 +28,16 @@ def _load_assertions(path: Path) -> dict:
 
 
 def _run(cmd: str, cwd: Path) -> tuple[int, str]:
+    # `python3` in these commands (ours and a goal's must_still_pass) means the
+    # interpreter running this script, which has pytest: a bare PATH lookup
+    # found a system python without it whenever this ran from a venv.
+    env = dict(os.environ)
+    env["PATH"] = os.pathsep.join([str(Path(sys.executable).parent), env.get("PATH", "")])
     result = subprocess.run(
         cmd,
         shell=True,
         cwd=cwd,
+        env=env,
         capture_output=True,
         text=True,
     )

@@ -234,13 +234,24 @@ def test_review_auto_with_unknown_task_count_runs(review_env):
     assert ir.review_mode() == "auto"
 
 
+def _join_abandoned_reviews(timeout: float = 5.0) -> None:
+    """Let a timed-out review thread finish while RECORD is still patched: it
+    otherwise woke after the test and recorded spend in the real ledger
+    (relative .awos/budget.json, wherever the cwd was by then)."""
+    for t in threading.enumerate():
+        if t.name == "integration-review":
+            t.join(timeout)
+
+
 def test_review_timeout_returns_skipped_without_raising(review_env, monkeypatch):
     monkeypatch.setenv("AWOS_REVIEW_TIMEOUT_S", "0.2")
     client = _Scripted(delay=2.0)
     start = time.monotonic()
     with patch(RECORD):
         result = _reviewer(client).review(".", LOG, agent_model="m", n_tasks=2)
-    assert time.monotonic() - start < 1.5
+        elapsed = time.monotonic() - start
+        _join_abandoned_reviews()
+    assert elapsed < 1.5
     assert result["skipped"] is True and result["skip_reason"] == "timeout"
     assert result["passed"] is True
     assert client.calls[0]["timeout"] == pytest.approx(0.2)
@@ -250,7 +261,8 @@ def test_review_timeout_thread_is_daemon(review_env, monkeypatch):
     monkeypatch.setenv("AWOS_REVIEW_TIMEOUT_S", "0.1")
     with patch(RECORD):
         _reviewer(_Scripted(delay=1.0)).review(".", LOG, agent_model="m", n_tasks=2)
-    leftovers = [t for t in threading.enumerate() if t.name == "integration-review"]
+        leftovers = [t for t in threading.enumerate() if t.name == "integration-review"]
+        _join_abandoned_reviews()
     assert all(t.daemon for t in leftovers)
 
 

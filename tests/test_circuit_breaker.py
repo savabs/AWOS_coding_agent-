@@ -126,8 +126,12 @@ class TestWorkerCircuitBreaker:
         mock_resp.usage = MagicMock(input_tokens=10, output_tokens=5)
         w.anthropic_client.messages.create.return_value = mock_resp
 
-        from scaffold.agent.escalation_engine import LADDER, EscalationLevel, LEVEL_MAP
-        anthropic_spec = LEVEL_MAP[EscalationLevel.HAIKU]
+        # Claude is no longer a default rung; AWOS_LADDER=claude-... puts it on
+        # the ladder the same way: the Flash rung with provider "anthropic".
+        from dataclasses import replace
+        from scaffold.agent.escalation_engine import LADDER
+        anthropic_spec = replace(LADDER[0], name="claude-haiku-4-5",
+                                 model_id="claude-haiku-4-5", provider="anthropic")
 
         task = {"task_id": 1, "action": "add x", "file": "foo.py", "complexity": "high"}
         with patch("scaffold.agent.worker.get_ledger") as mock_ledger:
@@ -227,5 +231,7 @@ class TestEscalationSkipsDeadProviders:
         task = {"action": "fix bug", "file": "x.py", "complexity": "low"}
 
         decision = eng.decide(task=task, dead_providers=set())
-        # Default for simple task is DeepSeek
-        assert decision.spec.provider == "deepseek"
+        # Default for a simple task is the Flash rung (served via OpenCode Go)
+        from scaffold.agent.escalation_engine import EscalationLevel
+        assert decision.spec.level == EscalationLevel.DEEPSEEK
+        assert decision.spec.provider == "opencode"
