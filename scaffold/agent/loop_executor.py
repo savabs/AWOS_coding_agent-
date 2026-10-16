@@ -647,14 +647,18 @@ def submitted_text(text: str) -> Optional[str]:
 
 
 def is_submit_command(call: Any) -> bool:
-    """`echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` as a bash call (mini's convention)."""
+    """A bash call that submits: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`
+    (mini's convention), or the bare marker as the command's first word (a
+    local Qwen put the marker inside a ```bash block, got "command not found"
+    and repeated it to max_steps). A marker elsewhere in a command still runs."""
     if getattr(call, "name", "") != "bash":
         return False
     cmd = str((getattr(call, "arguments", None) or {}).get("command", "")).strip()
     for quote in ("", "'", '"'):
         if cmd == f"echo {quote}{SUBMIT_MARKER}{quote}":
             return True
-    return False
+    first = cmd.splitlines()[0].strip() if cmd else ""
+    return first == SUBMIT_MARKER or first.startswith(SUBMIT_MARKER + " ")
 
 
 # ── the loop ────────────────────────────────────────────────────────────────

@@ -247,6 +247,19 @@ def test_echo_marker_in_bash_block_submits(tmp_path, monkeypatch):
     assert run.success and run.submits == 1
 
 
+def test_bare_marker_in_bash_block_submits(tmp_path, monkeypatch):
+    # Real local Qwen run (2026-10-16): the model put the bare marker inside a
+    # bash block, got "command not found" and repeated it until max_steps.
+    _, run, _ = _run_local(tmp_path, [f"Done.\n```bash\n{MARK}\n```"], monkeypatch)
+    assert run.success and run.submits == 1 and run.steps == 1
+
+
+def test_marker_inside_a_longer_command_still_runs(tmp_path, monkeypatch):
+    _, run, _ = _run_local(tmp_path, [f"```bash\ngrep -r {MARK} . || true\n```",
+                                      f"{MARK}\nok"], monkeypatch)
+    assert run.success and run.submits == 1 and run.steps == 2
+
+
 def test_parse_failure_falls_back_to_counted_nudge(tmp_path, monkeypatch):
     # A server that ignored the grammar: the nudge (text-protocol wording) still
     # works, and every such reply is counted.
