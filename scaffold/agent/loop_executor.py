@@ -695,6 +695,14 @@ class LoopRun:
     prefill_tokens: int = 0
     gen_tokens: int = 0
     gen_ms: float = 0.0
+    #: Local prefix-cache drift (loop_grammar: tokens that should have been
+    #: cached from the previous call but were re-read), over the calls the
+    #: client could judge; speculative decoding drafted / accepted tokens.
+    prefix_drift_checked: int = 0
+    prefix_drift_calls: int = 0
+    prefix_drift_tokens: int = 0
+    draft_tokens: int = 0
+    draft_accepted: int = 0
     #: local_runtime.prepare_first_step result (status, tokens restored...), or None.
     prefix_cache: Optional[dict] = None
     final_message: str = ""
@@ -755,6 +763,13 @@ class LoopRun:
             out["stuck"] = self.stuck
         if self.compaction is not None:
             out["compaction"] = self.compaction
+        if self.prefix_drift_checked:
+            out["prefix_drift_calls"] = self.prefix_drift_calls
+            out["prefix_drift_tokens"] = self.prefix_drift_tokens
+            out["prefix_drift_checked"] = self.prefix_drift_checked
+        if self.draft_tokens:
+            out["draft_tokens"] = self.draft_tokens
+            out["draft_acceptance"] = round(self.draft_accepted / self.draft_tokens, 4)
         if self.timed_calls:
             out["mean_prefill_ms"] = round(self.prefill_ms / self.timed_calls, 1)
             out["mean_prefill_tokens"] = round(self.prefill_tokens / self.timed_calls, 1)
@@ -810,6 +825,24 @@ def changed_since(saved: Any, snap: Optional[dict]) -> Optional[list]:
         if snap.get(f) is None or list(snap.get(f)) != list(st):
             names.add(f)
     return sorted(names)
+
+
+def _local_task_lease(executor: Any) -> Any:
+    """local_runtime.task_lease() for a run on the local model, else a no-op
+    context. Never raises."""
+    import contextlib
+
+    local = executor.text_protocol or executor.model_name.lower().startswith("local/")
+    if not local:
+        return contextlib.nullcontext()
+    try:
+        try:
+            from scaffold.agent import local_runtime
+        except ImportError:  # pragma: no cover - flat import
+            import local_runtime  # type: ignore
+        return local_runtime.task_lease(executor.goal[:60])
+    except Exception:  # noqa: BLE001 - the lease is an optimisation only
+        return contextlib.nullcontext()
 
 
 def _prepare_local_prefix(system_prompt: str) -> Optional[dict]:
@@ -996,6 +1029,16 @@ class LoopExecutor:
             run.prefill_tokens += int(timing.get("prompt_eval_tokens") or 0)
             run.gen_tokens += int(timing.get("gen_tokens") or 0)
             run.gen_ms += float(timing.get("gen_ms") or 0.0)
+        drift = getattr(reply, "prefix_drift", None)
+        if isinstance(drift, int):
+            run.prefix_drift_checked += 1
+            if drift > 0:
+                run.prefix_drift_calls += 1
+                run.prefix_drift_tokens += drift
+        drafted = getattr(reply, "draft_tokens", None)
+        if isinstance(drafted, int) and drafted > 0:
+            run.draft_tokens += drafted
+            run.draft_accepted += int(getattr(reply, "draft_accepted", 0) or 0)
         run.input_tokens += reply.input_tokens
         run.output_tokens += reply.output_tokens
         run.cached_tokens += cached
@@ -1287,6 +1330,12 @@ class LoopExecutor:
     # -- the loop --
 
     def run(self) -> LoopRun:
+        # A local model holds a task lease while the run lasts, so the power
+        # policy never unloads llama-server mid-task (local_runtime.task_lease).
+        with _local_task_lease(self):
+            return self._run()
+
+    def _run(self) -> LoopRun:
         run = LoopRun(grammar=self.text_protocol)
         started = self.clock()
         watch = WorkspaceWatch(self.workspace) if self.workspace else None

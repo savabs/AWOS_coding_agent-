@@ -578,3 +578,51 @@ def test_stub_in_content_alone_is_split_off_by_the_template():
             {"role": "tool", "content": "obs"}]
     out = tpl.render(messages=msgs, add_generation_prompt=True, enable_thinking=False)
     assert "<|im_start|>assistant\nA<|im_end|>" in out
+
+
+def test_loop_run_sums_drift_into_telemetry(tmp_path, monkeypatch):
+    monkeypatch.setenv("AWOS_PROVIDER", "local")
+    monkeypatch.setenv("AWOS_MODELS_DIR", str(tmp_path / "models"))
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    sdk = _DriftSDK(["```bash\nls\n```", "```bash\npwd\n```", f"{MARK}\nok"])
+    client = OpenAIToolClient(sdk, "local/qwen3.5-9b", max_tokens=2048)
+    ex = lx.LoopExecutor(client, lx.build_loop_registry(cap.FixedSandbox(str(ws))),
+                         "Fix add() in calc.py", workspace=str(ws),
+                         gate=lambda f, s: {"green": True})
+    run = ex.run()
+    tel = run.telemetry()
+    assert run.success and tel["prefix_drift_checked"] == 2
+    assert tel["prefix_drift_calls"] == 2 and tel["prefix_drift_tokens"] > 0
+
+
+def test_local_run_holds_a_task_lease_and_releases_it(tmp_path, monkeypatch):
+    from scaffold.agent import local_runtime
+
+    env_dir = tmp_path / "models"
+    monkeypatch.setenv("AWOS_MODELS_DIR", str(env_dir))
+    seen = []
+
+    class Watching(FakeLlamaServer):
+        def _create(self, **kw):
+            seen.append(len(local_runtime.live_leases()))
+            return super()._create(**kw)
+
+    monkeypatch.setenv("AWOS_PROVIDER", "local")
+    client = OpenAIToolClient(Watching(["```bash\nls\n```", f"{MARK}\nok"]), "local/q",
+                              max_tokens=2048)
+    ex = lx.LoopExecutor(client, lx.build_loop_registry(cap.FixedSandbox(str(tmp_path))),
+                         "Fix it", workspace=str(tmp_path), gate=lambda f, s: {"green": True})
+    assert ex.run().success
+    assert seen and all(n == 1 for n in seen)
+    assert local_runtime.live_leases() == []
+
+
+def test_cloud_run_takes_no_lease(tmp_path, monkeypatch):
+    from scaffold.agent import local_runtime
+
+    monkeypatch.setenv("AWOS_MODELS_DIR", str(tmp_path / "models"))
+    monkeypatch.delenv("AWOS_PROVIDER", raising=False)
+    ex = lx.LoopExecutor(type("C", (), {"model": "claude-haiku-5-5"})(), None, "x")
+    assert type(lx._local_task_lease(ex)).__name__ == "nullcontext"
+    assert local_runtime.live_leases() == []
