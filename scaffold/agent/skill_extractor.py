@@ -26,6 +26,15 @@ import re
 from pathlib import Path
 from typing import Callable, List, Optional
 
+
+def _redact_at_rest(obj):
+    """secret_scan.redact_obj: no key format or owner env secret is persisted."""
+    try:
+        from .secret_scan import redact_obj
+    except ImportError:
+        from secret_scan import redact_obj
+    return redact_obj(obj)
+
 logger = logging.getLogger(__name__)
 
 
@@ -160,6 +169,7 @@ Maximum 200 words. Focus on the PATTERN, not this specific task."""
         """Save skill content to .awos/skills/{title}_{key}.md"""
         skills_dir = Path(self.SKILLS_DIR)
         skills_dir.mkdir(parents=True, exist_ok=True)
+        content = _redact_at_rest(content)   # model-written skill text
 
         title_match = re.search(r'title:\s*"([^"]+)"', content)
         title = title_match.group(1) if title_match else key

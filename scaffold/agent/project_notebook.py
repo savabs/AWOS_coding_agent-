@@ -45,6 +45,15 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
+
+def _redact_at_rest(obj):
+    """secret_scan.redact_obj: no key format or owner env secret is persisted."""
+    try:
+        from .secret_scan import redact_obj
+    except ImportError:
+        from secret_scan import redact_obj
+    return redact_obj(obj)
+
 logger = logging.getLogger(__name__)
 
 STATE_DIR = ".awos"
@@ -463,10 +472,11 @@ def update_notebook(
     if reason:
         print(f"[notebook] update rejected ({reason}, ${cost:.4f}); kept {path}")
         return None
+    notebook = _redact_at_rest(notebook)   # model-written project memory
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         if old.strip():
-            path.with_suffix(".md.bak").write_text(old, encoding="utf-8")
+            path.with_suffix(".md.bak").write_text(_redact_at_rest(old), encoding="utf-8")
         tmp = path.with_suffix(".md.tmp")
         tmp.write_text(notebook, encoding="utf-8")
         os.replace(tmp, path)

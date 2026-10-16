@@ -297,15 +297,19 @@ def test_handoff_secret_only_in_unchanged_context_does_not_block(setup):
     assert res["status"] == "handed_off"
 
 
-def test_handoff_fails_closed_when_scanner_errors(setup, monkeypatch):
+@pytest.mark.parametrize("target", ["scan_diff_tokens", "key_spans", "scan_line_tokens",
+                                    "env_secret_values"])
+def test_handoff_fails_closed_when_scanner_errors(setup, monkeypatch, target):
+    """Any unexpected error in either scan layer: no branch, status error."""
     repo, ws, job = setup
     (ws / "calc.py").write_text("def add(a, b):\n    return a + b\n")
 
     def boom(*a, **k):
         raise RuntimeError("scanner broke")
-    monkeypatch.setattr(S, "scan_diff", boom)
+    monkeypatch.setattr(S, target, boom)
     res = finish(job, str(ws), {"state": "done"}, env=CLEAN_ENV)
     assert res["status"] == "error" and res["branch"] is None and _no_branch(repo)
+    assert Path(res["report_path"]).exists()
 
 
 def test_handoff_fails_closed_when_diff_cannot_be_computed(setup, monkeypatch):
@@ -441,3 +445,335 @@ def test_awos_fix_issue_pr_flow_pushes_clean_branch(clone):
     code = F.run_fix(F.FixOptions(url=ISSUE_URL, pr=True), clone, run=runner,
                      job_runner=job_runner, say=lambda _: None, which=lambda _: "/usr/bin/gh")
     assert code == 0 and len(runner.pushed()) == 2   # git push + gh pr create
+
+
+# ── new rules (one rule set) ────────────────────────────────────────────────
+import base64 as _b64
+import re as _re
+import time as _time
+
+
+def _b64url(raw: str) -> str:
+    return _b64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+
+
+BECH = "QPZRY9X8GF2TVDW0S3JN54KHCE6MUA7L"
+GITLAB = "gl" + "pat-" + BODY[:22]
+NPM = "np" + "m_" + BODY + "Kp3Z"
+HF = "h" + "f_" + BODY + "Xy"
+SENDGRID = "S" + "G." + BODY[:22] + "." + (BODY + BODY)[:43]
+TWILIO = "A" + "C" + "3f9a1c7e" + "5b2d4086" + "e1f7c9a3" + "b5d20e64"
+TWILIO_SK = "S" + "K" + "9e8d7c6b" + "5a4f3e2d" + "1c0b9a8f" + "7e6d5c4b"
+AGE = "AGE-" + "SECRET-KEY-1" + BECH + BECH[:26]
+PUTTY = "PuTTY-User-" + "Key-File-3: ssh-ed25519"
+JWT = ".".join([_b64url('{"alg":"HS256","typ":"JWT"}'),
+                _b64url('{"sub":"u-81723","role":"admin","iat":1760000000}'),
+                BODY + "_x7Qm-2Lw9"])
+URL_PW = "Zq8rT2vL" + "x9pW"
+URL_CRED = "postgres://" + "svc_app:" + URL_PW + "@db.internal:5432/app"
+BASIC_B64 = _b64.b64encode(("deploy:" + URL_PW + "4m").encode()).decode()
+BASIC = "Authorization: " + "Basic " + BASIC_B64
+AZURE_KEY = (BODY * 3)[:86] + "=="
+AZURE = "DefaultEndpointsProtocol=https;AccountName=acct;Account" + "Key=" + AZURE_KEY
+DISCORD = "M" + "TIzNDU2Nzg5MDEy" + "MzQ1Njc4OQ" + "." + "Gh7Kq2" + "." + BODY[:30]
+TELEGRAM = "1234567" + "89" + ":" + "AAH" + BODY
+
+NEW_RULES = [
+    (GITLAB, "gitlab_token"), (NPM, "npm_token"), (HF, "huggingface_token"),
+    (SENDGRID, "sendgrid_api_key"), (TWILIO, "twilio_key"), (TWILIO_SK, "twilio_key"),
+    (AGE, "age_secret_key"), (PUTTY, "putty_private_key"), (JWT, "jwt"),
+    (URL_CRED, "url_credentials"), (BASIC, "basic_auth_header"),
+    (AZURE, "azure_storage_key"), (DISCORD, "discord_bot_token"),
+    (TELEGRAM, "telegram_bot_token"),
+]
+ALL_KEY_FORMATS = NEW_RULES + [
+    (AWS, "aws_access_key"), (ANTHROPIC, "anthropic_api_key"), (OPENAI, "openai_api_key"),
+    (GH_PAT_CLASSIC, "github_token"), (GH_FINE, "github_pat"), (SLACK, "slack_token"),
+    (STRIPE, "stripe_live_key"), (GOOGLE, "google_api_key"), (PEM, "private_key"),
+]
+# the part of each sample that is secret (url/basic/azure: only the credential)
+SECRET_PART = {URL_CRED: URL_PW, BASIC: BASIC_B64, AZURE: AZURE_KEY}
+
+
+@pytest.mark.parametrize("secret,rule", NEW_RULES)
+def test_new_rules_detect_without_leaking(secret, rule):
+    found = S.scan_diff(diff_for("app/cfg.py", ["x = 1", f"V = '{secret}'"]))
+    assert [(f.line, f.rule) for f in found] == [(2, rule)]
+    part = SECRET_PART.get(secret, secret)
+    assert part not in str(found[0]) and part[4:12] not in S.describe(found)
+
+
+@pytest.mark.parametrize("line", [
+    "url = 'postgres://" + "user:password@localhost/db'",
+    "url = 'https://" + "user:${DB_PASS}@db.internal/x'",
+    "url = f'{scheme}://" + "{user}:{password}@{host}'",
+    "url = 'https://" + "admin:admin@internal.host'",
+    "url = 'https://" + "bob:" + URL_PW + "@example.com/x'",
+    "url = 'redis://" + ":changeme@cache:6379'",
+    "h = 'Authorization: " + "Basic " + _b64.b64encode(b"user:pass").decode() + "'",
+    # header-only / signature-free JWT doc samples
+    "t = '" + _b64url('{"alg":"none"}') + "." + _b64url('{"sub":"1"}') + "." + "x" * 20 + "'",
+    "TELEGRAM = '" + "123456789:" + "a" * 35 + "'",
+    "img = 'data:image/png;base64," + "iVBORw0KGgo" + AWS + "eyJhbGciOi" + "'",
+])
+def test_new_rules_skip_placeholders_and_data_uris(line):
+    assert S.scan_diff(diff_for("app/cfg.py", [line])) == []
+
+
+def test_data_uri_blanking_keeps_offsets_and_still_scans_the_rest():
+    line = f"x = 'data:application/json;base64,{_b64url('{}' * 20)}'; k = '{AWS}'"
+    blank = S.blank_data_uris(line)
+    assert len(blank) == len(line) and AWS in blank
+    assert [f.rule for f in S.scan_diff(diff_for("a.py", [line]))] == ["aws_access_key"]
+
+
+@pytest.mark.parametrize("path", ["package-lock.json", "web/yarn.lock", "poetry.lock",
+                                  "assets/logo.png", "fonts/x.woff2", "dist/app.zip"])
+def test_diff_scan_skips_binary_media_and_lock_files(path):
+    assert S.skip_path(path)
+    assert S.scan_diff(diff_for(path, [f"k = '{AWS}'"])) == []
+
+
+def test_diff_scan_still_reads_ordinary_files_named_like_locks():
+    assert not S.skip_path("src/lock.py") and not S.skip_path("docs/yarn.lock.md")
+
+
+# The two rule sets that existed before the merge. Every sample either one
+# caught must still be caught by the merged RULES (placeholders off, as in the
+# hand-off's whole-blob guard).
+_OLD_HANDOFF = [
+    r"\bsk-[A-Za-z0-9_\-]{20,}", r"\b(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9]{30,}",
+    r"\bgithub_pat_[A-Za-z0-9_]{30,}", r"\bAKIA[0-9A-Z]{16}\b",
+    r"\bxox[abpr]-[A-Za-z0-9\-]{10,}", r"\bAIza[0-9A-Za-z_\-]{35}",
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----"]
+_OLD_SCAN = [
+    r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----",
+    r"\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA)[0-9A-Z]{16}\b", r"\bsk-ant-[A-Za-z0-9_\-]{20,}",
+    r"\bsk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_\-]{20,}", r"\bgithub_pat_[A-Za-z0-9_]{22,}",
+    r"\bgh[pousr]_[A-Za-z0-9]{30,}", r"\bxox[abposre]-[A-Za-z0-9\-]{10,}",
+    r"\b(?:sk|rk)_live_[A-Za-z0-9]{16,}", r"\bAIza[0-9A-Za-z_\-]{35}"]
+_OLD_SAMPLES = [
+    "sk-" + "a" * 40, "sk-or-v1-" + "c" * 40, ANTHROPIC, OPENAI_PROJ,
+    "gh" + "p_" + "b" * 36, GH_OAUTH, GH_SERVER, "gh" + "u_" + BODY, "gh" + "r_" + BODY,
+    GH_FINE, "github" + "_pat_" + "A" * 22, AWS, "AK" + "IA" + "Q" * 16,
+    "AS" + "IA" + "Z7Q4K2LP9RM4TZ8V", "AG" + "PA" + "Z7Q4K2LP9RM4TZ8V",
+    "AI" + "DA" + "Z7Q4K2LP9RM4TZ8V", "AR" + "OA" + "Z7Q4K2LP9RM4TZ8V",
+    "AN" + "PA" + "Z7Q4K2LP9RM4TZ8V", SLACK, "xo" + "xr-" + "1234567890",
+    "xo" + "xs-" + BODY, "xo" + "xe-" + BODY, STRIPE, "rk" + "_live_" + BODY, GOOGLE,
+    PEM, "-----BEGIN " + "PRIVATE KEY-----", "-----BEGIN " + " OPENSSH  PRIVATE KEY-----",
+    "-----BEGIN " + "PGP PRIVATE KEY BLOCK-----", "-----BEGIN " + "EC2 PRIVATE KEY-----",
+]
+
+
+@pytest.mark.parametrize("sample", _OLD_SAMPLES)
+def test_merged_rules_lose_nothing_either_old_rule_set_caught(sample):
+    caught_before = any(_re.search(p, sample) for p in _OLD_HANDOFF + _OLD_SCAN)
+    assert caught_before, "sample must exercise an old rule"
+    assert S.key_spans(f"x = '{sample}'", placeholders=False)
+    assert handoff.scan_secrets(f"x = '{sample}'", {})
+    assert sample not in S.redact(f"x = '{sample}'", {})
+
+
+def test_handoff_uses_the_single_rule_set():
+    assert handoff.SECRET_PATTERNS is S.RULES
+    assert handoff.SECRET_ENV_NAME is S.SECRET_ENV_NAME
+
+
+# ── blocking claims ─────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("secret,rule", ALL_KEY_FORMATS)
+def test_pragma_can_never_waive_any_key_format(secret, rule):
+    for line in (f"K = '{secret}'  # awos:allow-secret",
+                 f"K = '{secret}'  # AWOS:ALLOW-SECRET waived by reviewer"):
+        allf = S.scan_diff(diff_for("src/a.py", [line]), include_allowed=True)
+        assert [(f.rule, f.allowed) for f in allf] == [(rule, False)]
+        assert S.blocking(allf)
+        assert SECRET_PART.get(secret, secret) not in S.redact(line, {})
+
+
+@pytest.mark.parametrize("secret,rule", NEW_RULES)
+def test_handoff_blocks_new_rules(setup, secret, rule):
+    repo, ws, job = setup
+    (ws / "conf.py").write_text(f"V = '{secret}'\n")
+    res = finish(job, str(ws), {"state": "done"}, env=CLEAN_ENV)
+    assert res["status"] == "blocked_secret" and _no_branch(repo)
+    assert SECRET_PART.get(secret, secret) not in _artifacts(res)
+
+
+def test_blob_guard_still_scans_lock_files(setup):
+    """The diff scan skips lock files; the whole-blob guard does not."""
+    repo, ws, job = setup
+    (ws / "package-lock.json").write_text('{"token": "' + GH_PAT_CLASSIC + '"}\n')
+    res = finish(job, str(ws), {"state": "done"}, env=CLEAN_ENV)
+    assert res["status"] == "blocked_secret" and _no_branch(repo)
+
+
+def test_handoff_report_scan_error_still_redacts(setup, monkeypatch):
+    repo, ws, job = setup
+    (ws / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    monkeypatch.setattr(handoff, "scan_secrets", lambda *a, **k: 1 / 0)
+    job["goal"] = f"use key {AWS}"
+    res = finish(job, str(ws), {"state": "done"}, env=CLEAN_ENV)
+    assert AWS not in _artifacts(res)
+
+
+# ── base-tree dedupe ────────────────────────────────────────────────────────
+
+def _commit_legacy(repo, ws, job, text):
+    (repo / "legacy.py").write_text(text)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "legacy")
+    job["base_commit"] = git(repo, "rev-parse", "HEAD").strip()
+
+
+def test_dedupe_reformatted_committed_key_does_not_block(setup):
+    repo, ws, job = setup
+    _commit_legacy(repo, ws, job, f"KEYS = {{'a': '{OPENAI}', 'b': 1}}\n")
+    (ws / "legacy.py").write_text(f"KEYS = {{\n    \"a\": \"{OPENAI}\",\n    \"b\": 2,\n}}\n")
+    res = finish(job, str(ws), {"state": "done"}, env=CLEAN_ENV)
+    assert res["status"] == "handed_off", res["warnings"]
+
+
+def test_dedupe_does_not_hide_a_new_key_on_a_reformatted_line(setup):
+    repo, ws, job = setup
+    _commit_legacy(repo, ws, job, f"A = '{OPENAI}'\n")
+    (ws / "legacy.py").write_text(f"A = \"{OPENAI}\"; B = \"{STRIPE}\"\n")
+    res = finish(job, str(ws), {"state": "done"}, env=CLEAN_ENV)
+    assert res["status"] == "blocked_secret" and _no_branch(repo)
+    names = {h["name"] for h in res["secret_scan"]["diff"]}
+    assert "stripe_live_key" in names and "openai_api_key" not in names
+
+
+def test_dedupe_never_hides_owner_env_value_key_shaped(setup):
+    """The committed token IS the owner's env secret: never deduped."""
+    repo, ws, job = setup
+    _commit_legacy(repo, ws, job, f"A = '{OPENAI}'\n")
+    (ws / "legacy.py").write_text(f"A = \"{OPENAI}\"  # reformatted\n")
+    res = finish(job, str(ws), {"state": "done"}, env={"OPENAI_API_KEY": OPENAI})
+    assert res["status"] == "blocked_secret" and _no_branch(repo)
+    assert OPENAI not in _artifacts(res)
+
+
+def test_dedupe_never_hides_owner_env_value_free_form(setup):
+    """A non key-shaped env secret already committed, only reformatted: blocks."""
+    repo, ws, job = setup
+    val = "own" + "Secret" + "Value42"
+    _commit_legacy(repo, ws, job, f"A = '{val}'\n")
+    (ws / "legacy.py").write_text(f"A = \"{val}\"\n")
+    res = finish(job, str(ws), {"state": "done"}, env={"MY_SERVICE_TOKEN": val})
+    assert res["status"] == "blocked_secret" and _no_branch(repo)
+    assert any(h["name"] == "MY_SERVICE_TOKEN" and h.get("where") == "added_line"
+               for h in res["secret_scan"]["diff"])
+    assert val not in _artifacts(res)
+
+
+def test_dedupe_fails_closed_when_git_grep_errors(setup, monkeypatch):
+    repo, ws, job = setup
+    _commit_legacy(repo, ws, job, f"A = '{OPENAI}'\n")
+    (ws / "legacy.py").write_text(f"A = \"{OPENAI}\"\n")
+    real_run = subprocess.run
+
+    def broken(cmd, *a, **k):
+        if cmd[:2] == ["git", "grep"]:
+            return subprocess.CompletedProcess(cmd, 128, "", "fatal: simulated")
+        return real_run(cmd, *a, **k)
+    monkeypatch.setattr(handoff.subprocess, "run", broken)
+    res = finish(job, str(ws), {"state": "done"}, env=CLEAN_ENV)
+    assert res["status"] == "blocked_secret" and _no_branch(repo)
+
+
+def test_dedupe_passes_tokens_on_stdin_never_argv(setup, monkeypatch):
+    repo, ws, job = setup
+    _commit_legacy(repo, ws, job, f"A = '{OPENAI}'\n")
+    (ws / "legacy.py").write_text(f"A = \"{OPENAI}\"\n")
+    real_run = subprocess.run
+    argvs = []
+
+    def spy(cmd, *a, **k):
+        argvs.append(list(cmd))
+        return real_run(cmd, *a, **k)
+    monkeypatch.setattr(handoff.subprocess, "run", spy)
+    finish(job, str(ws), {"state": "done"}, env=CLEAN_ENV)
+    assert any(c[:2] == ["git", "grep"] for c in argvs)
+    assert all(OPENAI not in " ".join(c) for c in argvs)
+
+
+# ── redact() ────────────────────────────────────────────────────────────────
+
+def test_redact_replaces_key_formats_with_rule_names():
+    text = f"aws {AWS} jwt {JWT} db {URL_CRED} ok"
+    out = S.redact(text, {})
+    assert AWS not in out and JWT not in out and URL_PW not in out
+    assert "[REDACTED:aws_access_key]" in out and "[REDACTED:jwt]" in out
+    assert "postgres://svc_app:[REDACTED:url_credentials]@db.internal" in out
+    assert out.startswith("aws ") and out.endswith(" ok")
+
+
+def test_redact_env_values_and_explicit_env():
+    val = "own" + "Secret" + "Value42"
+    assert S.redact(f"v={val}", {"MY_TOKEN": val}) == "v=[REDACTED:MY_TOKEN]"
+    assert S.redact(f"v={val}", {"HOME": val}) == f"v={val}"   # not a secret name
+    assert S.redact("v=short", {"MY_TOKEN": "short"}) == "v=short"
+
+
+def test_redact_defaults_to_os_environ(monkeypatch):
+    val = "env" + "Default" + "Secret99"
+    monkeypatch.setenv("AWOS_TEST_PASSWORD", val)
+    assert val not in S.redact(f"x {val} y")
+    assert "[REDACTED:AWOS_TEST_PASSWORD]" in S.redact(f"x {val} y")
+
+
+def test_redact_removes_whole_private_key_blocks():
+    body = "MIIEpAIBAAKCAQEA" + BODY + "\n" + BODY[::-1]
+    pem = PEM + "\n" + body + "\n-----END " + "RSA PRIVATE KEY-----"
+    out = S.redact("before\n" + pem + "\nafter", {})
+    assert out == "before\n[REDACTED:private_key]\nafter"
+    unterminated = S.redact(PEM + "\n" + body, {})
+    assert BODY not in unterminated
+    ppk = PUTTY + "\nPrivate-Lines: 1\n" + BODY + "\nPrivate-MAC: " + "ab12" * 8
+    assert BODY not in S.redact(ppk, {})
+
+
+def test_redact_generic_assignment_and_placeholders_off():
+    assert GENERIC_VAL not in S.redact(GENERIC_LINE, {})
+    # no placeholder heuristics: a key dressed as a demo is still redacted
+    dressed = ANTHROPIC + "-example"
+    assert ANTHROPIC not in S.redact(f"k={dressed}", {})
+
+
+def test_redact_never_raises():
+    class Bad:
+        def __str__(self):
+            raise ValueError("no")
+    assert S.redact(None) == ""
+    assert S.redact("") == ""
+    assert S.redact(12345, {}) == "12345"
+    assert S.redact(Bad()) == S.REDACT_ERROR
+    assert S.redact("x", env={"A_KEY": object()}) == "x"    # odd env value types
+
+
+def test_redact_fails_closed_on_internal_error(monkeypatch):
+    monkeypatch.setattr(S, "key_spans", lambda *a, **k: 1 / 0)
+    assert S.redact(f"k={AWS}", {}) == S.REDACT_ERROR
+
+
+def test_redact_obj_walks_structures():
+    val = "own" + "Secret" + "Value42"
+    obj = {"a": [AWS, {"b": f'q"{val}"'}], "n": 3, "t": (OPENAI,)}
+    out = S.redact_obj(obj, {"SVC_TOKEN": val})
+    flat = json.dumps(out)
+    assert AWS not in flat and val not in flat and OPENAI not in flat
+    assert out["n"] == 3 and obj["a"][0] == AWS   # input untouched
+
+
+def test_redact_is_fast_enough_per_message():
+    msg = ("Traceback: request failed for model x. " * 50 + f" key {AWS} ") * 4
+    t0 = _time.perf_counter()
+    for _ in range(100):
+        S.redact(msg, {})
+    assert (_time.perf_counter() - t0) / 100 < 0.02
+    # pathological inputs stay linear: one huge identifier run, huge base64
+    for big in ("a_" * 250_000 + "password" + " = 'x'", _b64.b64encode(os.urandom(600_000)).decode()):
+        t0 = _time.perf_counter()
+        S.redact(big, {})
+        assert _time.perf_counter() - t0 < 3.0

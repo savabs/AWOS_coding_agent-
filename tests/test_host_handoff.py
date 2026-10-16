@@ -206,7 +206,7 @@ def test_bad_repo_gives_error_and_report(tmp_path, monkeypatch):
 def test_scan_and_redact_helpers():
     txt = "a AKIAABCDEFGHIJKLMNOP b\n-----BEGIN RSA PRIVATE KEY-----"
     names = {f["name"] for f in scan_secrets(txt, {})}
-    assert names == {"aws_access_key", "private_key_block"}
+    assert names == {"aws_access_key", "private_key"}   # one rule set: secret_scan.RULES
     assert "AKIA" not in redact_secrets(txt, {})
     assert scan_secrets("API_KEY=short", {"API_KEY": "short"}) == []  # < min len ignored
 

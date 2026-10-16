@@ -38,6 +38,15 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+
+def _redact_at_rest(obj):
+    """secret_scan.redact_obj: no key format or owner env secret is persisted."""
+    try:
+        from .secret_scan import redact_obj
+    except ImportError:
+        from secret_scan import redact_obj
+    return redact_obj(obj)
+
 _DEFAULT_SKILLS_DIR = Path(".awos") / "skills"
 
 # ── Task-type signals (mirrors strategy_config, kept local to avoid circular import) ──
@@ -112,6 +121,10 @@ class SkillLibrary:
         Merges with an existing matching entry (same task_type + top keyword +
         model + strategy) to accumulate statistics, or creates a new entry.
         """
+        # Redact first: keywords are lifted from the action text.
+        task = {**task, "action": _redact_at_rest(str(task.get("action", "") or ""))}
+        model_name = _redact_at_rest(model_name)
+        strategy_name = _redact_at_rest(strategy_name)
         task_type = _classify(task)
         keywords = _extract_keywords(task.get("action", ""))
 
@@ -227,7 +240,7 @@ class SkillLibrary:
 
         skill_path = self._dir / f"{task_type}.md"
         try:
-            skill_path.write_text("\n".join(lines), encoding="utf-8")
+            skill_path.write_text(_redact_at_rest("\n".join(lines)), encoding="utf-8")
             logger.debug("[skill_library] wrote %s", skill_path)
         except OSError as exc:
             logger.warning("[skill_library] could not write skill file: %s", exc)
@@ -237,7 +250,7 @@ class SkillLibrary:
     def _save(self) -> None:
         try:
             self._index_path.write_text(
-                json.dumps([asdict(e) for e in self._entries], indent=2),
+                json.dumps(_redact_at_rest([asdict(e) for e in self._entries]), indent=2),
                 encoding="utf-8",
             )
         except OSError as exc:

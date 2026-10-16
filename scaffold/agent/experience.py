@@ -45,6 +45,15 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
+
+def _redact_at_rest(obj):
+    """secret_scan.redact_obj: no key format or owner env secret is persisted."""
+    try:
+        from .secret_scan import redact_obj
+    except ImportError:
+        from secret_scan import redact_obj
+    return redact_obj(obj)
+
 logger = logging.getLogger(__name__)
 
 EXPERIENCE_ENV = "AWOS_EXPERIENCE"
@@ -170,6 +179,7 @@ def save_record(codebase_root: str, *, goal: str, files: list, diff: str, succes
             "cost_usd": round(float(cost_usd or 0.0), 6),
             "turns": int(turns or 0),
         }
+        rec = _redact_at_rest(json.loads(json.dumps(rec, default=str)))
         path = store_path(codebase_root)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "a", encoding="utf-8") as fh:
@@ -363,6 +373,8 @@ def write_trajectory(*, goal: str, model: Optional[str], verdict: dict, files_ch
                                                     ("repeat", "AWOS_EVAL_REPEAT"))
                      if os.environ.get(e)},
         }
+        rec = _redact_at_rest(json.loads(json.dumps(rec, default=str)))
+        calls = rec["calls"]
         line = json.dumps(rec, default=str)
         if len(line) > 400_000:   # bounded record: drop the call slice first
             rec["calls"] = calls[-50:]

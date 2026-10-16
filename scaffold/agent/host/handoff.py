@@ -15,6 +15,9 @@ Contract:
   of ``scaffold/agent/secret_scan.py`` (more rules, file:line findings).
   ``AWOS_SECRET_SCAN=0`` disables the pattern layers -- EMERGENCIES ONLY;
   the owner's env secret values still block and the bypass is reported.
+  There is ONE rule set: ``secret_scan.RULES`` (this module's
+  ``SECRET_PATTERNS`` is the same tuple) and ``secret_scan`` owns the
+  env-secret and redaction logic.
 """
 from __future__ import annotations
 
@@ -46,17 +49,10 @@ EXCLUDE_GLOBS: Tuple[str, ...] = (
     ".pytest_cache/*", "*/.pytest_cache/*",
 )
 
-SECRET_PATTERNS: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
-    ("openai_like_sk", re.compile(r"\bsk-[A-Za-z0-9_\-]{20,}")),
-    ("github_token", re.compile(r"\b(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9]{30,}")),
-    ("github_pat", re.compile(r"\bgithub_pat_[A-Za-z0-9_]{30,}")),
-    ("aws_access_key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
-    ("slack_token", re.compile(r"\bxox[abpr]-[A-Za-z0-9\-]{10,}")),
-    ("google_api_key", re.compile(r"\bAIza[0-9A-Za-z_\-]{35}")),
-    ("private_key_block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
-)
-SECRET_ENV_NAME = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL", re.I)
-MIN_ENV_SECRET_LEN = 8
+#: The single rule set lives in secret_scan (kept under this name for importers).
+SECRET_PATTERNS = _secret_scan.RULES
+SECRET_ENV_NAME = _secret_scan.SECRET_ENV_NAME
+MIN_ENV_SECRET_LEN = _secret_scan.MIN_ENV_SECRET_LEN
 JOB_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
 #: A caller-chosen review branch (e.g. ``awos fix``: "awos/issue-12-crash-on-start").
 BRANCH_NAME_RE = re.compile(r"awos/[A-Za-z0-9][A-Za-z0-9._-]{0,80}")
@@ -94,24 +90,19 @@ class HandoffError(RuntimeError):
 # Credential guard
 # --------------------------------------------------------------------------- #
 def _env_secret_values(env: Optional[Dict[str, str]] = None) -> List[Tuple[str, str]]:
-    env = dict(os.environ if env is None else env)
-    out = []
-    for name, val in env.items():
-        if SECRET_ENV_NAME.search(name) and val and len(val) >= MIN_ENV_SECRET_LEN:
-            out.append((name, val))
-    return out
+    return _secret_scan.env_secret_values(env)
 
 
 def scan_secrets(text: str, env: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
     """Return findings ``{"kind", "name", "line"}`` — never the secret value.
 
+    Key formats: every ``secret_scan.RULES`` rule, no placeholder heuristics.
     Env values are matched against the whole text, so a value that contains a
     newline is found too."""
     findings: List[Dict[str, Any]] = []
     for lineno, line in enumerate(text.splitlines(), 1):
-        for name, pat in SECRET_PATTERNS:
-            if pat.search(line):
-                findings.append({"kind": "pattern", "name": name, "line": lineno})
+        for name in sorted({r for r, _, _ in _secret_scan.key_spans(line, placeholders=False)}):
+            findings.append({"kind": "pattern", "name": name, "line": lineno})
     for var, val in _env_secret_values(env):
         start = text.find(val)
         while start != -1:
@@ -123,25 +114,14 @@ def scan_secrets(text: str, env: Optional[Dict[str, str]] = None) -> List[Dict[s
 
 
 def redact_secrets(text: str, env: Optional[Dict[str, str]] = None) -> str:
-    # Longest value first: a value that is a prefix of another must not leave
-    # the longer value's suffix behind.
-    for var, val in sorted(_env_secret_values(env), key=lambda kv: -len(kv[1])):
-        text = text.replace(val, f"[REDACTED:{var}]")
-    for name, pat in SECRET_PATTERNS:
-        text = pat.sub(f"[REDACTED:{name}]", text)
-    return text
+    """``secret_scan.redact`` (env values, every key format, whole key blocks)."""
+    return _secret_scan.redact(text, env)
 
 
 def _redact_obj(obj: Any, env: Optional[Dict[str, str]] = None) -> Any:
     """Redact every string in a JSON-able structure *before* serialising, so
     secret values containing quotes or backslashes match in their raw form."""
-    if isinstance(obj, str):
-        return redact_secrets(obj, env)
-    if isinstance(obj, dict):
-        return {k: _redact_obj(v, env) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return [_redact_obj(v, env) for v in obj]
-    return obj
+    return _secret_scan.redact_obj(obj, env)
 
 
 # --------------------------------------------------------------------------- #
@@ -353,12 +333,15 @@ def _scan_bytes(data: bytes, env: Optional[Dict[str, str]],
     # Key formats are never waived (not even by the awos:allow-secret
     # pragma, which the model can write); the pragma only waives
     # secret_scan's generic assignment rule.
+    # No placeholder heuristics here: this layer is the backstop for keys the
+    # added-lines scan lets through (placeholder-looking, data: URI, lock file).
     views = _binary_text_views(data) if patterns else []
     for text in views:
-        for name, pat in SECRET_PATTERNS:
-            hits = list(pat.finditer(text))
-            if hits:
-                note(("pattern", name), len(hits), text.count("\n", 0, hits[0].start()) + 1)
+        per_rule: Dict[str, List[int]] = {}
+        for name, start, _end in _secret_scan.key_spans(text, placeholders=False):
+            per_rule.setdefault(name, []).append(start)
+        for name, starts in per_rule.items():
+            note(("pattern", name), len(starts), text.count("\n", 0, starts[0]) + 1)
     for var, val in _env_secret_values(env):
         for enc in _ENV_VALUE_ENCODINGS:
             needle = val.encode(enc)
@@ -435,15 +418,69 @@ def _scan_changes(repo: str, senv: Dict[str, str], base_entries: Dict[str, Tuple
     return findings
 
 
-def _scan_added_lines(repo: str, senv: Dict[str, str], base_tree: str,
-                      tree: str) -> List["_secret_scan.Finding"]:
-    """Added-lines scan of the hand-off diff (``secret_scan.scan_diff``).
-    A failing ``git diff-tree`` raises HandoffError: no diff, no branch."""
+def _tokens_in_tree(repo: str, senv: Dict[str, str], tree: str,
+                    tokens: List[str]) -> set:
+    """The subset of ``tokens`` that occur anywhere in ``tree`` (``git grep
+    -F``, patterns on stdin so no secret is ever put on a command line).
+    Any error returns the empty set: nothing is deduped, so the scan stays
+    fail closed."""
+    tokens = sorted({t for t in tokens if t and "\n" not in t and "\0" not in t})
+    if not tokens:
+        return set()
+    try:
+        proc = subprocess.run(
+            ["git", "grep", "-a", "-h", "-o", "-F", "--no-color", "--no-textconv", "-f", "-", tree],
+            cwd=repo, env=_git_env(senv), input="\n".join(tokens) + "\n",
+            capture_output=True, text=True, encoding="utf-8", errors="replace")
+    except Exception:
+        return set()
+    if proc.returncode != 0:   # 1 = no match, anything else = error: dedupe nothing
+        return set()
+    lines = proc.stdout.splitlines()
+    return {t for t in tokens if any(t in ln for ln in lines)}
+
+
+def _scan_added_lines(repo: str, senv: Dict[str, str], base_tree: str, tree: str,
+                      env: Optional[Dict[str, str]] = None,
+                      patterns: bool = True) -> List[Any]:
+    """Added-lines scan of the hand-off diff. Returns ``secret_scan.Finding``
+    records (key formats + the generic rule, when ``patterns``) and
+    ``{"kind": "env_value", ...}`` dicts (owner env values, always).
+    A failing ``git diff-tree`` raises HandoffError: no diff, no branch.
+
+    Base-tree dedupe: a key-format / generic finding whose exact token
+    already exists anywhere in the BASE tree is dropped. That key is already
+    committed (and already in every clone of the repo), so a line that only
+    moves or reformats it -- re-indenting, re-wrapping a dict, changing
+    quotes -- must not block the hand-off. The token never leaves the
+    process (``git grep -F -f -`` reads it on stdin). Owner env secret values
+    are NEVER deduped: the owner told us they are secret, so a committed
+    copy is a leak to fix, not permission to leak more; added lines holding
+    one always block, and a key-format token that contains (or is contained
+    in) an env value is kept even when the base tree has it."""
     patch = _git(["-c", "core.quotePath=false", "diff-tree", "-r", "-p", "-U0",
                   "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames",
                   "--src-prefix=a/", "--dst-prefix=b/", base_tree, tree],
                  cwd=repo, env=senv)
-    return _secret_scan.scan_diff(patch, include_allowed=True)
+    env_vals = _env_secret_values(env)
+    out: List[Any] = []
+    if patterns:
+        pairs = _secret_scan.scan_diff_tokens(patch, include_allowed=True)
+
+        def owner_secret(tok: str) -> bool:
+            return any(val in tok or tok in val for _, val in env_vals)
+
+        dedupable = [tok for f, tok in pairs if not f.allowed and not owner_secret(tok)]
+        committed = _tokens_in_tree(repo, senv, base_tree, dedupable)
+        out.extend(f for f, tok in pairs
+                   if f.allowed or owner_secret(tok) or tok not in committed)
+    if env_vals:
+        for path, lineno, text in _secret_scan.added_lines(patch):
+            for var, val in env_vals:
+                if val in text:
+                    out.append({"kind": "env_value", "name": var, "line": lineno,
+                                "where": "added_line", "path": path})
+    return out
 
 
 def _describe_hits(hits: List[Dict[str, Any]], limit: int = 10) -> str:
@@ -737,12 +774,18 @@ def finish(job: Dict[str, Any], workspace: str, outcome: Dict[str, Any], *,
                     "DISABLED (emergency bypass); only env secret values were checked")
             hits = _scan_changes(repo, senv, built["base_entries"], built["new_entries"],
                                  files, env, patterns=scan_on)
-            line_hits = _scan_added_lines(repo, senv, base_tree, tree) if scan_on else []
+            line_res = _scan_added_lines(repo, senv, base_tree, tree, env, patterns=scan_on)
+            env_line_hits = [h for h in line_res if isinstance(h, dict)]
+            line_hits = [f for f in line_res if not isinstance(f, dict)]
             allowed = [f for f in line_hits if f.allowed]
             line_hits = [f for f in line_hits if not f.allowed]
             hits += [{"kind": "pattern", "name": f.rule, "line": f.line,
                       "where": "added_line", "path": f.path, "preview": f.preview}
                      for f in line_hits]
+            # An env value the whole-blob guard already reported for the same
+            # file is not listed twice (it blocks either way).
+            seen_env = {(h["path"], h["name"]) for h in hits if h["kind"] == "env_value"}
+            hits += [h for h in env_line_hits if (h["path"], h["name"]) not in seen_env]
             info["secret_scan"]["diff"] = hits
             if allowed:
                 info["secret_scan"]["allowed"] = [
@@ -804,7 +847,10 @@ def finish(job: Dict[str, Any], workspace: str, outcome: Dict[str, Any], *,
             shutil.rmtree(staging_dir, ignore_errors=True)
 
     report = _render_report(job, outcome, info, diffstat, review_base)
-    rep_hits = scan_secrets(report, env)
+    try:
+        rep_hits = scan_secrets(report, env)
+    except Exception as exc:  # the scan failed: say so; redaction below still runs
+        rep_hits = [{"kind": "error", "name": type(exc).__name__, "line": 0}]
     if rep_hits:
         info["secret_scan"]["report"] = rep_hits
         info["warnings"].append("credential guard: report contained secret-like text; redacted")
