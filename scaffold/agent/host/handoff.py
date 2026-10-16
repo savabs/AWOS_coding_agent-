@@ -10,6 +10,11 @@ Contract:
 - Never pushes; no network git operation exists in this module.
 - Credential guard: a secret in the diff blocks the branch; a secret in the
   report is redacted. Findings never contain the secret value.
+  Two layers, both fail closed: the whole-blob guard below (key patterns in
+  every encoding + the owner's secret env values) and the added-lines scan
+  of ``scaffold/agent/secret_scan.py`` (more rules, file:line findings).
+  ``AWOS_SECRET_SCAN=0`` disables the pattern layers -- EMERGENCIES ONLY;
+  the owner's env secret values still block and the bypass is reported.
 """
 from __future__ import annotations
 
@@ -25,6 +30,8 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+from scaffold.agent import secret_scan as _secret_scan
 
 BRANCH_PREFIX = "awos/"
 
@@ -330,8 +337,8 @@ def _binary_text_views(data: bytes) -> List[str]:
     return views
 
 
-def _scan_bytes(data: bytes,
-                env: Optional[Dict[str, str]]) -> Dict[Tuple[str, str], Tuple[int, int]]:
+def _scan_bytes(data: bytes, env: Optional[Dict[str, str]],
+                patterns: bool = True) -> Dict[Tuple[str, str], Tuple[int, int]]:
     """Scan raw blob bytes; return ``{(kind, name): (count, first_line)}``.
 
     Key patterns run on every text view. Env secret values are matched as their
@@ -343,7 +350,11 @@ def _scan_bytes(data: bytes,
         if count > out.get(key, (0, 0))[0]:
             out[key] = (count, line)
 
-    for text in _binary_text_views(data):
+    # Key formats are never waived (not even by the awos:allow-secret
+    # pragma, which the model can write); the pragma only waives
+    # secret_scan's generic assignment rule.
+    views = _binary_text_views(data) if patterns else []
+    for text in views:
         for name, pat in SECRET_PATTERNS:
             hits = list(pat.finditer(text))
             if hits:
@@ -385,7 +396,7 @@ _BLOB_MODES = ("100644", "100755", "120000")
 
 def _scan_changes(repo: str, senv: Dict[str, str], base_entries: Dict[str, Tuple[str, str]],
                   new_entries: Dict[str, Tuple[str, str]], files: List[str],
-                  env: Optional[Dict[str, str]]) -> List[Dict[str, Any]]:
+                  env: Optional[Dict[str, str]], patterns: bool = True) -> List[Dict[str, Any]]:
     """Scan every changed path: its name (when new) and its full new content in
     every encoding view, whatever git would call the file. A content finding
     counts only when the new blob has more of it than the base blob at the same
@@ -396,6 +407,8 @@ def _scan_changes(repo: str, senv: Dict[str, str], base_entries: Dict[str, Tuple
             continue
         seen = set()
         for f in scan_secrets(path, env):
+            if not patterns and f["kind"] == "pattern":
+                continue
             if (f["kind"], f["name"]) not in seen:
                 seen.add((f["kind"], f["name"]))
                 findings.append({"kind": f["kind"], "name": f["name"], "line": 0,
@@ -412,13 +425,42 @@ def _scan_changes(repo: str, senv: Dict[str, str], base_entries: Dict[str, Tuple
         new, old = new_entries.get(path), base_entries.get(path)
         if not new or new[0] not in _BLOB_MODES:
             continue
-        hits = _scan_bytes(blobs[new[1]], env)
-        before = _scan_bytes(blobs[old[1]], env) if old and old[0] in _BLOB_MODES else {}
+        hits = _scan_bytes(blobs[new[1]], env, patterns)
+        before = (_scan_bytes(blobs[old[1]], env, patterns)
+                  if old and old[0] in _BLOB_MODES else {})
         for (kind, name), (count, line) in sorted(hits.items()):
             if count > before.get((kind, name), (0, 0))[0]:
                 findings.append({"kind": kind, "name": name, "line": line,
                                  "where": "content", "path": path})
     return findings
+
+
+def _scan_added_lines(repo: str, senv: Dict[str, str], base_tree: str,
+                      tree: str) -> List["_secret_scan.Finding"]:
+    """Added-lines scan of the hand-off diff (``secret_scan.scan_diff``).
+    A failing ``git diff-tree`` raises HandoffError: no diff, no branch."""
+    patch = _git(["-c", "core.quotePath=false", "diff-tree", "-r", "-p", "-U0",
+                  "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames",
+                  "--src-prefix=a/", "--dst-prefix=b/", base_tree, tree],
+                 cwd=repo, env=senv)
+    return _secret_scan.scan_diff(patch, include_allowed=True)
+
+
+def _describe_hits(hits: List[Dict[str, Any]], limit: int = 10) -> str:
+    """``path:line rule`` for each finding; never the value (preview <= 4 chars)."""
+    parts = []
+    for h in hits[:limit]:
+        where = h.get("path") or "?"
+        if h.get("where") == "path":
+            where += " (file name)"
+        elif h.get("line"):
+            where += f":{h['line']}"
+        part = f"{where} {h['name']}"
+        if h.get("preview"):
+            part += f" ({h['preview']})"
+        parts.append(part)
+    more = len(hits) - limit
+    return "; ".join(parts) + (f"; +{more} more" if more > 0 else "")
 
 
 def _tree_entries(repo: str, senv: Dict[str, str], tree: str) -> Dict[str, Tuple[str, str]]:
@@ -687,15 +729,35 @@ def finish(job: Dict[str, Any], workspace: str, outcome: Dict[str, Any], *,
         if tree == base_tree:
             info["status"] = "no_changes"
         else:
+            scan_on = _secret_scan.scan_enabled(env)
+            if not scan_on:
+                info["secret_scan"]["disabled"] = True
+                info["warnings"].append(
+                    f"credential guard: {_secret_scan.ENV_SWITCH}=0 -- secret pattern scan "
+                    "DISABLED (emergency bypass); only env secret values were checked")
             hits = _scan_changes(repo, senv, built["base_entries"], built["new_entries"],
-                                 files, env)
+                                 files, env, patterns=scan_on)
+            line_hits = _scan_added_lines(repo, senv, base_tree, tree) if scan_on else []
+            allowed = [f for f in line_hits if f.allowed]
+            line_hits = [f for f in line_hits if not f.allowed]
+            hits += [{"kind": "pattern", "name": f.rule, "line": f.line,
+                      "where": "added_line", "path": f.path, "preview": f.preview}
+                     for f in line_hits]
             info["secret_scan"]["diff"] = hits
+            if allowed:
+                info["secret_scan"]["allowed"] = [
+                    {"name": f.rule, "line": f.line, "path": f.path, "preview": f.preview}
+                    for f in allowed]
+                info["warnings"].append(
+                    f"credential guard: {len(allowed)} secret-like line(s) waived by the "
+                    f"{_secret_scan.PRAGMA} pragma -- review them: "
+                    + _secret_scan.describe(allowed))
             if hits:
                 info["status"] = "blocked_secret"
                 names = sorted({h["name"] for h in hits})
                 info["warnings"].append(
                     "credential guard: diff contains secret-like content ("
-                    + ", ".join(names) + "); branch NOT created")
+                    + ", ".join(names) + "); branch NOT created: " + _describe_hits(hits))
             else:
                 diffstat = _git(["diff-tree", "--stat", "--no-color", "--no-ext-diff",
                                  "--no-textconv", base_tree, tree],

@@ -141,6 +141,32 @@ value. `handoff.json` is redacted field by field before serialising, so a
 secret containing `"` or `\` is still caught (redacting the JSON text would
 miss its escaped form).
 
+**Added-lines scan (Droid Shield layer).** After the blob guard, the
+hand-off diff (`git diff-tree -p -U0 base_tree new_tree`) goes through
+`scaffold/agent/secret_scan.py:scan_diff`, which looks only at added lines
+and adds rules the blob guard lacks: `sk-ant-` (named), `sk-proj-`,
+`gho_`/`ghs_`, Stripe `sk_live_`/`rk_live_`, and a generic
+`password|secret|token|api_key = "<value>"` rule (value >= 16 chars, Shannon
+entropy >= 3.5 bits/char, letters and digits mixed; skipped under `tests/`).
+Obvious placeholders (`xxxx`, `<your-key>`, `example`, `dummy`, ...) never
+match. A hit blocks the branch (`blocked_secret`) and the warning names
+`path:line rule (prev…)` — at most a 4-char prefix, never the value. If the
+diff cannot be computed or the scanner raises, the hand-off fails closed
+(`error`, no branch). `awos fix --pr/--push` re-runs the same scan on
+`<branch>^..<branch>` right before `git push` and refuses to push on a hit or
+on a diff failure.
+
+- **Pragma:** a line containing `awos:allow-secret` waives only the generic
+  `password|secret|token|api_key = "<random>"` rule for that line. The diff's
+  author (possibly the model) can write it, so it never waives a known key
+  format (AWS, Anthropic, OpenAI, GitHub, Slack, Stripe, Google, PEM) or the
+  owner's env secret values, and waived lines are listed in the warnings for
+  the reviewer.
+- **Emergency escape hatch:** `AWOS_SECRET_SCAN=0` turns off the pattern
+  scans of both layers and the pre-push scan. EMERGENCIES ONLY (a false
+  positive blocking an urgent hand-off). The owner's env secret values still
+  block, and the bypass is recorded (`secret_scan.disabled` + a warning).
+
 Renames in the dirty-checkout check: `status --porcelain -z` emits the
 original path of a rename/copy as its own unprefixed entry; both paths count
 as dirty.

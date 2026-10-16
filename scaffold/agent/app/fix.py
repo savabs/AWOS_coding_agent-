@@ -694,6 +694,8 @@ class Fixer:
         ok = res.state == "done" and res.handoff_status == "handed_off" and bool(res.branch)
         if ok:
             if self.o.push:
+                if self.secrets_block_push(res.branch):
+                    return 1
                 out = _git(self.run, self.repo, "push", "-u", "origin", res.branch)
                 if out.returncode != 0:
                     err = (out.stderr or "").strip().splitlines()
@@ -760,7 +762,38 @@ class Fixer:
         lines.append(f"Fixes #{closes}")
         return "\n".join(lines)
 
+    def secrets_block_push(self, branch: str) -> bool:
+        """Fail-closed secret scan of the branch's added lines before a push.
+
+        The hand-off already refused to create a branch with a secret in it;
+        this re-checks what is actually about to leave the machine (the branch
+        may have been amended since). True = do not push. AWOS_SECRET_SCAN=0
+        skips it: emergencies only."""
+        from scaffold.agent import secret_scan as S
+        if not S.scan_enabled():
+            self.say(f"  WARNING: {S.ENV_SWITCH}=0 -- pushing WITHOUT the secret scan "
+                     "(emergency bypass)")
+            return False
+        out = _git(self.run, self.repo, "-c", "core.quotePath=false", "diff", "--no-color",
+                   "--no-ext-diff", "--no-textconv", "--no-renames", "-U0",
+                   "--src-prefix=a/", "--dst-prefix=b/", f"{branch}^", branch)
+        if out.returncode != 0:
+            err = (out.stderr or "").strip().splitlines()
+            self.say(f"  Not pushing: could not diff {branch} for the secret scan "
+                     f"({err[-1] if err else out.returncode}).")
+            return True
+        found = S.scan_diff(out.stdout or "")
+        if found:
+            self.say(f"  Not pushing: secret scan found {len(found)} likely secret(s) in "
+                     f"{branch}: {S.describe(found)}")
+            self.say("  Remove them (or mark a false positive with an inline "
+                     f"'{S.PRAGMA}' comment) and push by hand.")
+            return True
+        return False
+
     def open_pr(self, branch: str, base: str, title: str, body: str) -> int:
+        if self.secrets_block_push(branch):
+            return 1
         out = _git(self.run, self.repo, "push", "-u", "origin", branch)
         if out.returncode != 0:
             err = (out.stderr or "").strip().splitlines()
