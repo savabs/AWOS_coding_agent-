@@ -235,8 +235,11 @@ def estimate_cost(model: str, input_tokens: int, output_tokens: int,
     return (input_tokens * price_in + output_tokens * price_out) / 1_000_000
 
 
-def _usage_counts(usage: Any) -> dict:
-    """providers.usage_tokens(usage), or {} when it cannot be had."""
+def _usage_counts(usage: Any, timings: Any = None) -> dict:
+    """providers.usage_tokens(usage, timings), or {} when it cannot be had.
+
+    `timings` is llama-server's top-level response field: its cache_n is the
+    cached-prompt count when usage carries none (older servers)."""
     if usage is None:
         return {}
     try:
@@ -244,9 +247,23 @@ def _usage_counts(usage: Any) -> dict:
             from .providers import usage_tokens
         except ImportError:
             from providers import usage_tokens
-        return usage_tokens(usage)
+        return usage_tokens(usage, timings)
     except Exception:
         return {}
+
+
+def response_timings(response: Any) -> Any:
+    """llama-server's top-level `timings` object (the OpenAI SDK keeps unknown
+    fields in model_extra); None from any other provider."""
+    value = getattr(response, "timings", None) if not isinstance(response, dict) \
+        else response.get("timings")
+    if value is None and response is not None and not isinstance(response, dict):
+        extra = getattr(response, "model_extra", None)
+        if isinstance(extra, dict):
+            value = extra.get("timings")
+    # The server sends a JSON object (a dict once parsed); anything else
+    # (a MagicMock stand-in, a provider's own type) is not llama-server's.
+    return value if isinstance(value, dict) else None
 
 
 SYSTEM_PROMPT = """You are a coding agent working in a real repository.
@@ -508,7 +525,7 @@ class OpenAIToolClient:
                 arguments = {"__malformed__": raw_call.function.arguments}
             calls.append(ToolCall(id=raw_call.id, name=raw_call.function.name, arguments=arguments))
         usage = getattr(response, "usage", None)
-        counts = _usage_counts(usage)
+        counts = _usage_counts(usage, response_timings(response))
         return ModelReply(
             text=getattr(message, "content", "") or "",
             tool_calls=calls,

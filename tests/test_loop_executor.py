@@ -405,6 +405,9 @@ def test_anthropic_client_with_prompt_caching(tmp_path, monkeypatch):
 
 def test_local_openai_compatible_client(tmp_path, monkeypatch):
     monkeypatch.setenv("AWOS_PROVIDER", "local")
+    # The tool-call path; the grammar text protocol (default for local) is
+    # covered in tests/test_loop_grammar.py.
+    monkeypatch.setenv("AWOS_LOOP_GRAMMAR", "0")
     ws = _ws(tmp_path)
     sdk = _FakeOpenAISDK([("bash", EDIT), ("text", f"{MARK}\ndone")])
     client = OpenAIToolClient(sdk, "local/qwen3.5-9b")
