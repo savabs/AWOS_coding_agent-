@@ -588,7 +588,8 @@ def test_docker_run_uses_exec_without_host_env(tmp_path, fake_run, monkeypatch):
 
     monkeypatch.setattr(sbx, "_run_capped", capped)
     res = box.run("python -V", timeout_sec=7)
-    assert seen["argv"] == ["docker", "exec", "-w", "/workspace", "cid123", "/bin/sh", "-c", "python -V"]
+    assert seen["argv"] == ["docker", "exec", "-e", "GIT_OPTIONAL_LOCKS=0", "-w", "/workspace", "cid123",
+                            "/bin/sh", "-c", "python -V"]
     assert seen["timeout"] == 7
     assert "OPENROUTER_API_KEY" not in seen["env"]
     assert seen["kill"] == box._kill_exec
@@ -712,3 +713,206 @@ def test_docker_probe_daemon_down(monkeypatch):
         assert sbx.docker_available() is False
     with mock.patch.object(sbx.subprocess, "run", return_value=_completed([], rc=0, out=b"27.0")):
         assert sbx.docker_available() is True
+
+
+# ── read-only agent control paths (REA synthesis item 13) ────────────────────
+
+
+@pytest.fixture
+def ro_env(monkeypatch):
+    monkeypatch.delenv(sbx.READONLY_PATHS_ENV, raising=False)
+    monkeypatch.delenv(sbx.READONLY_SWITCH_ENV, raising=False)
+    return monkeypatch
+
+
+def _profile_regexes(profile: str, verb: str = "deny file-write*") -> list[str]:
+    """The regex literals of the profile's `(<verb> (regex "..."))` rules,
+    SBPL string escapes undone, ready for Python's re."""
+    import re as _re
+    out = []
+    for m in _re.finditer(r'\(' + _re.escape(verb) + r' \(regex "((?:[^"\\]|\\.)*)"\)\)', profile):
+        out.append(_re.sub(r'\\(.)', r'\1', m.group(1)))  # undo sbpl_quote
+    return out
+
+
+def test_readonly_defaults_and_git_excluded(ro_env):
+    paths = sbx.readonly_control_paths()
+    assert paths == list(sbx.DEFAULT_READONLY_PATHS)
+    for p in (".awos", ".claude", ".agents", ".codex", ".cursor", ".husky"):
+        assert p in paths
+    # Ordinary project files a task may legitimately edit stay writable.
+    for p in ("AGENTS.md", "CLAUDE.md", ".pre-commit-config.yaml", ".git"):
+        assert p not in paths
+
+
+def test_readonly_env_extends_drops_and_rejects_escapes(ro_env):
+    ro_env.setenv(sbx.READONLY_PATHS_ENV,
+                  " CLAUDE.md, .pre-commit-config.yaml ,!.awos, /etc, ../up, a/../b, ./tools/hooks/, .git, !.git, ,")
+    paths = sbx.readonly_control_paths()
+    assert "CLAUDE.md" in paths and ".pre-commit-config.yaml" in paths
+    assert "tools/hooks" in paths
+    assert ".awos" not in paths  # dropped with "!"
+    assert ".claude" in paths
+    for bad in ("/etc", "etc", "../up", "up", "a/../b", "b", ".git"):
+        assert bad not in paths
+
+
+def test_readonly_switch_off(ro_env):
+    ro_env.setenv(sbx.READONLY_SWITCH_ENV, "0")
+    ro_env.setenv(sbx.READONLY_PATHS_ENV, "CLAUDE.md")
+    assert sbx.readonly_control_paths() == []
+
+
+def test_profile_write_denies_control_paths(tmp_path):
+    import re
+    ws = Path("/w/my.repo")
+    prof = build_seatbelt_profile(ws, tmp_path, [], [], False, [".claude", ".awos", "tools/hooks"])
+    rules = _profile_regexes(prof)
+    control = [r for r in rules if "claude" in r]
+    assert len(control) == 1
+    rx = re.compile(control[0])
+    for hit in (".claude", ".claude/settings.json", ".awos/memory/x", "tools/hooks", "tools/hooks/pre"):
+        assert rx.search(f"/w/my.repo/{hit}"), hit
+    for miss in (".claudeignore", "sub/.claude/x", "tools/hooksy", "a.py", ".clauded"):
+        assert not rx.search(f"/w/my.repo/{miss}"), miss
+    # The workspace path is escaped: "my.repo" must not match "myXrepo".
+    assert not rx.search("/w/myXrepo/.claude")
+    # The control rule comes after the workspace write-allow so it wins
+    # (SBPL applies the last matching rule).
+    lines = prof.splitlines()
+    allow = next(i for i, ln in enumerate(lines) if ln.startswith("(allow file-write* (subpath"))
+    deny = next(i for i, ln in enumerate(lines) if ln.startswith("(deny file-write*") and "claude" in ln)
+    assert allow < deny
+
+
+def test_profile_keeps_git_rule_when_control_layer_off(tmp_path):
+    prof = build_seatbelt_profile(Path("/w"), tmp_path, [], [], False, [])
+    rules = _profile_regexes(prof)
+    assert any(r"\.git(/.*)?$" in r for r in rules)
+    assert not any("claude" in r for r in rules)
+    # Old call signature (no readonly_paths) still works and adds nothing.
+    assert build_seatbelt_profile(Path("/w"), tmp_path, [], [], False) == prof
+
+
+def test_seatbelt_sandbox_uses_env_config(tmp_path, ro_env):
+    ro_env.setenv(sbx.READONLY_PATHS_ENV, "CLAUDE.md,!.cursor")
+    box = SeatbeltSandbox(tmp_path, read_deny=[], allow_network=False)
+    try:
+        assert "CLAUDE\\\\.md" in box.profile  # escaped '.' inside an SBPL string
+        assert box.readonly_paths.count(".cursor") == 0
+        assert box._env()["GIT_OPTIONAL_LOCKS"] == "0"
+    finally:
+        box.close()
+    ro_env.setenv(sbx.READONLY_SWITCH_ENV, "0")
+    box = SeatbeltSandbox(tmp_path, read_deny=[], allow_network=False)
+    try:
+        assert box.readonly_paths == []
+        assert not any("claude" in r for r in _profile_regexes(box.profile))
+        assert any(r"\.git(/.*)?$" in r for r in _profile_regexes(box.profile))
+    finally:
+        box.close()
+
+
+def _mounts(argv):
+    return [argv[i + 1] for i, a in enumerate(argv) if a == "--mount"]
+
+
+def test_docker_mounts_control_paths_readonly(tmp_path, fake_run, ro_env):
+    ws = tmp_path.resolve()
+    (ws / ".git").mkdir()
+    (ws / ".claude").mkdir()
+    (ws / ".awos").mkdir()
+    (ws / "vendor" / "lib").mkdir(parents=True)
+    (ws / "vendor" / "lib" / ".git").write_text("gitdir: ../../.git/modules/lib\n")
+    box = DockerSandbox(ws)
+    mounts = _mounts(fake_run[0][0])
+    assert f"type=bind,source={ws}/.git,target=/workspace/.git,readonly" in mounts
+    assert f"type=bind,source={ws}/vendor/lib/.git,target=/workspace/vendor/lib/.git,readonly" in mounts
+    assert f"type=bind,source={ws}/.claude,target=/workspace/.claude,readonly" in mounts
+    assert f"type=bind,source={ws}/.awos,target=/workspace/.awos,readonly" in mounts
+    # Missing default dirs: an empty read-only placeholder, so the container
+    # cannot create them either.
+    for missing in (".agents", ".codex", ".cursor", ".husky"):
+        assert f"type=bind,source={box._empty_dir},target=/workspace/{missing},readonly" in mounts
+    assert box.unprotected == []
+    # The workspace mount comes first; the read-only ones are layered on top.
+    assert mounts[0] == f"type=bind,source={ws},target=/workspace"
+
+
+def test_docker_env_added_paths_and_unenforceable_cases(tmp_path, fake_run, ro_env):
+    ws = tmp_path.resolve()
+    (ws / ".pre-commit-config.yaml").write_text("repos: []\n")
+    (tmp_path.parent / "outside_target").mkdir(exist_ok=True)
+    (ws / ".claude").symlink_to(tmp_path.parent / "outside_target")
+    ro_env.setenv(sbx.READONLY_PATHS_ENV, ".pre-commit-config.yaml,CLAUDE.md")
+    box = DockerSandbox(ws)
+    mounts = _mounts(fake_run[0][0])
+    assert (f"type=bind,source={ws}/.pre-commit-config.yaml,"
+            f"target=/workspace/.pre-commit-config.yaml,readonly") in mounts
+    # A symlink is never mounted (docker would follow it on the host), and a
+    # missing env-added path cannot be guessed as file or dir: both reported.
+    assert not any("/workspace/.claude" in m for m in mounts)
+    assert not any("outside_target" in m for m in mounts)
+    assert not any("CLAUDE.md" in m for m in mounts)
+    assert sorted(box.unprotected) == [".claude", "CLAUDE.md"]
+
+
+def test_docker_switch_off_keeps_git_only(tmp_path, fake_run, ro_env):
+    ws = tmp_path.resolve()
+    (ws / ".git").mkdir()
+    (ws / ".claude").mkdir()
+    ro_env.setenv(sbx.READONLY_SWITCH_ENV, "0")
+    DockerSandbox(ws)
+    mounts = _mounts(fake_run[0][0])
+    readonly = [m for m in mounts if m.endswith(",readonly")]
+    assert readonly == [f"type=bind,source={ws}/.git,target=/workspace/.git,readonly"]
+
+
+def test_docker_removes_placeholder_mountpoints(tmp_path, fake_run, ro_env):
+    ws = tmp_path.resolve()
+    box = DockerSandbox(ws)
+    # Simulate docker having created the empty mountpoints; one got content.
+    for name in (".codex", ".cursor"):
+        (ws / name).mkdir()
+    (ws / ".cursor" / "kept").write_text("x")
+    box.close()
+    assert not (ws / ".codex").exists()
+    assert (ws / ".cursor" / "kept").exists()
+
+
+def test_docker_failed_start_removes_placeholders(tmp_path, ro_env):
+    ws = tmp_path.resolve()
+
+    def run(argv, **kw):
+        (ws / ".codex").mkdir(exist_ok=True)  # docker made the mountpoint, then failed
+        return _completed(argv, rc=125, out="", err="boom")
+
+    with mock.patch.object(sbx.subprocess, "run", side_effect=run):
+        with pytest.raises(RuntimeError, match="boom"):
+            DockerSandbox(ws)
+    assert not (ws / ".codex").exists()
+
+
+@darwin_only
+def test_control_paths_read_only_for_real(tmp_path, ro_env):
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    (ws / ".claude").mkdir()
+    (ws / ".claude" / "settings.json").write_text("{}")
+    box = SeatbeltSandbox(ws, allow_network=False)
+    try:
+        res = box.run(
+            "cat .claude/settings.json; "
+            "echo '{\"hooks\":1}' > .claude/settings.json; "
+            "mkdir -p .codex && echo x > .codex/config.toml; "
+            "mv .claude moved_claude; rm -rf .claude; "
+            "echo ok > .claudeignore && echo note > CLAUDE.md && cat .claudeignore CLAUDE.md"
+        )
+        assert res.stdout.startswith("{}")
+        assert (ws / ".claude" / "settings.json").read_text() == "{}"
+        assert not (ws / ".codex").exists()
+        assert not (ws / "moved_claude").exists()
+        # Look-alikes and CLAUDE.md (not on the default list) stay writable.
+        assert res.stdout.strip().endswith("ok\nnote")
+    finally:
+        box.close()

@@ -21,6 +21,16 @@ Two backends, one interface:
 make_sandbox() picks one; when it returns None the caller must not offer code
 execution at all — there is deliberately no "run unsandboxed" fallback.
 
+Read-only control paths (DEFAULT_READONLY_PATHS, plus .git always): both
+backends let sandboxed code read them but not write them.
+- Seatbelt: name-matched deny file-write* rules, so a path that does not
+  exist yet cannot be created either. Fully enforced by the kernel.
+- Docker: read-only bind mounts over each path. Missing default dirs get an
+  empty read-only placeholder mount; a missing env-added path that may be a
+  file, and any symlinked control path, cannot be protected and is logged and
+  listed in DockerSandbox.unprotected rather than silently assumed safe.
+There is no third backend, so nothing runs without one of these.
+
 Usage:
     sb = make_sandbox("/path/to/task/workspace")
     if sb is not None:
@@ -101,6 +111,76 @@ HOST_GIT_DIFF_OPTS = ("--no-ext-diff", "--no-textconv")
 #: `.env.<suffix>` files that hold no secrets by convention: readable in the
 #: sandbox. Every other .env / .env.* (.env.local, .env.production...) is not.
 DOTENV_EXAMPLE_SUFFIXES = ("example", "sample", "template", "dist", "defaults")
+#: Agent control paths, relative to the workspace root, that sandboxed code
+#: may read but never create, change, rename or delete (REA synthesis item
+#: 13; the Codex app protects its control dirs the same way).
+#:
+#: The test for inclusion: does the path steer an AGENT or a HOOK that runs
+#: later, outside this sandbox, with the owner's rights? Code planted there
+#: escapes the sandbox the next time the owner (or AWOS itself) opens the
+#: repo: Claude Code / Codex / Cursor load settings, hooks, MCP servers and
+#: skills from these dirs; husky points git's core.hooksPath at .husky/; and
+#: .awos/ holds AWOS's own memory, rewards and skills, which a task must never
+#: be able to grade or teach itself through.
+#:
+#: Deliberately NOT on the list: AGENTS.md, CLAUDE.md, .cursorrules,
+#: .pre-commit-config.yaml, .github/. They are ordinary tracked project files
+#: that a legitimate task may be asked to edit ("document the new command in
+#: CLAUDE.md", "add ruff to pre-commit"), and an edit to them is not silent:
+#: it lands in the diff that review and the owner read. Nor do they execute
+#: anything by themselves — .pre-commit-config.yaml only runs through a hook
+#: installed in .git/hooks, which is protected via .git. A deployment that
+#: wants them frozen too adds them with AWOS_SANDBOX_READONLY_PATHS.
+#:
+#: .git is not in this tuple: it is protected unconditionally (any depth,
+#: submodules included) by its own rule, because the host runs git there
+#: unsandboxed — see HOST_GIT_OPTS. AWOS_SANDBOX_READONLY=0 cannot lift it.
+DEFAULT_READONLY_PATHS = (
+    ".awos", ".claude", ".agents", ".codex", ".cursor", ".husky",
+)
+#: Env: comma-separated extra workspace-relative paths to protect. An entry
+#: "!name" drops a default (never .git), e.g. when the task is AWOS working on
+#: its own repo and its tests must write .awos/.
+READONLY_PATHS_ENV = "AWOS_SANDBOX_READONLY_PATHS"
+#: Env: "0" switches the control-path layer off. .git stays read-only.
+READONLY_SWITCH_ENV = "AWOS_SANDBOX_READONLY"
+#: Set inside the sandbox: git skips the optional .git/index refresh-and-
+#: write that `git status` does, which the read-only .git would refuse.
+SANDBOX_GIT_ENV = {"GIT_OPTIONAL_LOCKS": "0"}
+
+
+def _normalize_rel(entry: str) -> Optional[str]:
+    """A safe workspace-relative POSIX path, or None for an entry that is not
+    one (absolute, '..', empty): those are ignored with a warning rather than
+    letting configuration point a rule outside the workspace."""
+    s = entry.strip().replace("\\", "/").strip("/")
+    parts = [p for p in s.split("/") if p not in ("", ".")]
+    if not parts or entry.strip().startswith("/") or ".." in parts:
+        if entry.strip():
+            logger.warning("%s: ignoring %r (must be a relative path inside the workspace)",
+                           READONLY_PATHS_ENV, entry)
+        return None
+    return "/".join(parts)
+
+
+def readonly_control_paths(env: Optional[dict] = None) -> list[str]:
+    """The control paths to protect: DEFAULT_READONLY_PATHS plus
+    AWOS_SANDBOX_READONLY_PATHS additions, minus its "!name" removals; empty
+    when AWOS_SANDBOX_READONLY=0. Never contains .git (handled separately)."""
+    env = os.environ if env is None else env
+    if env.get(READONLY_SWITCH_ENV, "").strip() == "0":
+        return []
+    paths = list(DEFAULT_READONLY_PATHS)
+    for raw in env.get(READONLY_PATHS_ENV, "").split(","):
+        drop = raw.strip().startswith("!")
+        rel = _normalize_rel(raw.strip()[1:] if drop else raw)
+        if rel is None or rel == ".git" or rel.startswith(".git/"):
+            continue  # .git has its own, unconditional rule
+        if drop:
+            paths = [p for p in paths if p != rel]
+        elif rel not in paths:
+            paths.append(rel)
+    return paths
 
 
 def is_secret_dotenv(name: str) -> bool:
@@ -190,9 +270,13 @@ def build_seatbelt_profile(
     read_allow: list[Path],
     read_deny: list[Path],
     allow_network: bool,
+    readonly_paths: Optional[list[str]] = None,
 ) -> str:
     """Generate the SBPL profile. SBPL applies the *last* matching rule, so
-    each deny is followed by the narrower allows that carve holes in it."""
+    each deny is followed by the narrower allows that carve holes in it.
+
+    readonly_paths: workspace-relative control paths (readonly_control_paths)
+    that are write-denied in addition to .git; None means none."""
     q = sbpl_quote
     ws = _regex_escape(str(workspace))
     lines = [
@@ -222,6 +306,15 @@ def build_seatbelt_profile(
     # (job reports, the parent session's commit): writable, it is a way out.
     git_dir = "^" + ws + r"/(.*/)?\.git(/.*)?$"
     lines.append(f"(deny file-write* (regex {q(git_dir)}))")
+    # Agent control paths (DEFAULT_READONLY_PATHS): the path itself and
+    # everything below it, matched by name so a path that does not exist yet
+    # cannot be created either (a planted .claude/settings.json is the
+    # attack). Anchored at the workspace root: that is where agents and hook
+    # managers look for them. Reads stay allowed.
+    if readonly_paths:
+        alts = "|".join(_regex_escape(p) for p in readonly_paths)
+        control = "^" + ws + "/(" + alts + ")(/.*)?$"
+        lines.append(f"(deny file-write* (regex {q(control)}))")
     # Secrets that commonly sit inside a repo copy. Writes are denied too:
     # renaming .env to a name the read rule does not match would expose it.
     # Only the CONTENT is denied: stat() stays allowed, or pytest's collection
@@ -273,6 +366,7 @@ class SeatbeltSandbox:
         workspace: str | Path,
         read_deny: Optional[list[str | Path]] = None,
         allow_network: Optional[bool] = None,
+        readonly_paths: Optional[list[str]] = None,
     ) -> None:
         self.workspace = Path(workspace).resolve()
         if not self.workspace.is_dir():
@@ -286,13 +380,14 @@ class SeatbeltSandbox:
         deny = _default_read_deny() if read_deny is None else read_deny
         self.read_deny = [Path(os.path.realpath(p)) for p in deny]
         self.allow_network = _network_allowed() if allow_network is None else allow_network
+        self.readonly_paths = readonly_control_paths() if readonly_paths is None else list(readonly_paths)
         self.extra_read: list[Path] = []
         self._build()
 
     def _build(self) -> None:
         self.profile = build_seatbelt_profile(
             self.workspace, self.tmpdir, _python_read_roots() + self.extra_read,
-            self.read_deny, self.allow_network
+            self.read_deny, self.allow_network, self.readonly_paths,
         )
 
     def allow_read(self, paths) -> None:
@@ -316,6 +411,7 @@ class SeatbeltSandbox:
             "HOME": str(self.tmpdir),
             "TMPDIR": str(self.tmpdir),
             "PYTHONDONTWRITEBYTECODE": "1",
+            **SANDBOX_GIT_ENV,
         }
         for key in ("LANG", "LC_ALL"):
             if os.environ.get(key):
@@ -497,15 +593,63 @@ class DockerSandbox:
         workspace: str | Path,
         image: Optional[str] = None,
         allow_network: Optional[bool] = None,
+        readonly_paths: Optional[list[str]] = None,
     ) -> None:
         self.workspace = Path(workspace).resolve()
         if not self.workspace.is_dir():
             raise FileNotFoundError(f"workspace is not a directory: {self.workspace}")
         self.image = image or os.environ.get("AWOS_SANDBOX_IMAGE") or DEFAULT_DOCKER_IMAGE
         self.allow_network = _network_allowed() if allow_network is None else allow_network
+        self.readonly_paths = readonly_control_paths() if readonly_paths is None else list(readonly_paths)
         self.name = f"awos-sbx-{uuid.uuid4().hex[:12]}"
         self.container_id: Optional[str] = None
+        # Empty host dir, bind-mounted read-only over control dirs that do not
+        # exist yet, so the container cannot create them either.
+        self._empty_dir = Path(tempfile.mkdtemp(prefix="awos-sbx-empty-")).resolve()
+        weakref.finalize(self, shutil.rmtree, str(self._empty_dir), True)
+        self.unprotected: list[str] = []
+        self._placeholders: list[Path] = []
         self._start()
+
+    def _readonly_mounts(self, nested_git: list[Path]) -> tuple[list[str], list[Path], list[str]]:
+        """--mount specs that make .git and the control paths read-only.
+
+        Returns (mounts, placeholder mountpoints docker will create in the
+        workspace, control paths this backend cannot protect).
+
+        Docker can only protect a path by mounting over it, which differs
+        from the Seatbelt rule in three ways, all handled here:
+        - a control dir that does not exist yet gets an empty read-only
+          placeholder mount (docker creates the empty mountpoint dir in the
+          workspace; close() removes it again if still empty);
+        - a missing control path that is not a default dir (an env-added
+          entry such as CLAUDE.md, which may be a file) cannot be guessed as
+          file or dir, so it is NOT protected and is listed as unprotected;
+        - a symlink is never mounted: docker would follow it on the HOST and
+          expose its target. It is listed as unprotected (the Seatbelt rule
+          still covers the link itself).
+        """
+        mounts: list[str] = []
+        placeholders: list[Path] = []
+        unprotected: list[str] = []
+        # .git: top level and nested (vendored repos, submodule gitlinks).
+        for git_path in [self.workspace / ".git", *nested_git]:
+            if git_path.is_symlink() or not git_path.exists():
+                continue
+            rel = git_path.relative_to(self.workspace).as_posix()
+            mounts.append(_bind(git_path, f"{self.MOUNT}/{rel}", readonly=True))
+        for rel in self.readonly_paths:
+            host = self.workspace / rel
+            if host.is_symlink():
+                unprotected.append(rel)
+            elif host.exists():
+                mounts.append(_bind(host, f"{self.MOUNT}/{rel}", readonly=True))
+            elif rel in DEFAULT_READONLY_PATHS:
+                mounts.append(_bind(self._empty_dir, f"{self.MOUNT}/{rel}", readonly=True))
+                placeholders.append(host)
+            else:
+                unprotected.append(rel)
+        return mounts, placeholders, unprotected
 
     def start_argv(self) -> list[str]:
         argv = ["docker", "run", "-d", "--rm", "--name", self.name]
@@ -513,27 +657,48 @@ class DockerSandbox:
             argv += ["--network", "none"]
         argv += ["--memory", "2g", "--cpus", "2", "--pids-limit", "256"]
         argv += ["--mount", _bind(self.workspace, self.MOUNT)]
-        # Same two carve-outs as the Seatbelt profile: .git read-only (the
-        # host runs git there unsandboxed), each .env hidden behind /dev/null.
-        git_dir = self.workspace / ".git"
-        if git_dir.exists():
-            argv += ["--mount", _bind(git_dir, f"{self.MOUNT}/.git", readonly=True)]
-        for env_file in _dotenv_files(self.workspace):
+        # Same carve-outs as the Seatbelt profile: .git and the agent control
+        # paths read-only (mounted after the workspace, so they sit on top of
+        # it), each .env hidden behind /dev/null.
+        dotenv, nested_git = _walk_workspace(self.workspace)
+        mounts, self._placeholders, self.unprotected = self._readonly_mounts(nested_git)
+        for spec in mounts:
+            argv += ["--mount", spec]
+        for env_file in dotenv:
             rel = env_file.relative_to(self.workspace).as_posix()
             argv += ["--mount", _bind(Path("/dev/null"), f"{self.MOUNT}/{rel}", readonly=True)]
         argv += ["-w", self.MOUNT, self.image, "sleep", "infinity"]
         return argv
 
     def _start(self) -> None:
+        argv = self.start_argv()
+        if self.unprotected:
+            logger.warning("docker sandbox cannot make these control paths read-only "
+                           "(missing non-default path, or a symlink): %s", ", ".join(self.unprotected))
         # Pulling an image can take a while on first use; that is the one slow step.
-        proc = subprocess.run(self.start_argv(), capture_output=True, text=True, timeout=600, env=_docker_cli_env())
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=600, env=_docker_cli_env())
         if proc.returncode != 0:
+            self._remove_placeholders()
             raise RuntimeError(f"docker run failed: {proc.stderr.strip()[:500]}")
         self.container_id = proc.stdout.strip() or self.name
 
+    def _remove_placeholders(self) -> None:
+        """Remove the empty mountpoint dirs docker created for missing control
+        dirs, so the workspace is left as it was. Non-empty means something
+        else (the host) put content there: left alone."""
+        for path in self._placeholders:
+            try:
+                path.rmdir()
+            except OSError:
+                pass
+        self._placeholders = []
+
     def exec_argv(self, command: str) -> list[str]:
-        # No -e flags: the container sees only the image's own environment.
-        return ["docker", "exec", "-w", self.MOUNT, self.container_id or self.name, "/bin/sh", "-c", command]
+        # The only -e flags are fixed, non-secret settings (SANDBOX_GIT_ENV);
+        # the host's environment never reaches the container.
+        env_flags = [x for k, v in SANDBOX_GIT_ENV.items() for x in ("-e", f"{k}={v}")]
+        return ["docker", "exec", *env_flags, "-w", self.MOUNT, self.container_id or self.name,
+                "/bin/sh", "-c", command]
 
     def run(self, command: str, timeout_sec: int = DEFAULT_TIMEOUT_SEC) -> SandboxResult:
         return _run_capped(self.exec_argv(command), timeout_sec, kill=self._kill_exec, env=_docker_cli_env())
@@ -557,6 +722,7 @@ class DockerSandbox:
             ["docker", "rm", "-f", self.container_id], capture_output=True, timeout=30, env=_docker_cli_env()
         )
         self.container_id = None
+        self._remove_placeholders()
 
 
 #: Dirs never walked when looking for .env files to hide: large, and not
@@ -564,13 +730,23 @@ class DockerSandbox:
 _SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".tox", ".mypy_cache"}
 
 
+def _walk_workspace(workspace: Path) -> tuple[list[Path], list[Path]]:
+    """One walk, two lists: the .env / .env.* files the Seatbelt dotenv rule
+    would deny, and the nested .git entries (dirs or gitlink files) below the
+    top level, which the Seatbelt .git rule covers at any depth."""
+    dotenv, nested_git = [], []
+    for dirpath, dirnames, filenames in os.walk(workspace):
+        here = Path(dirpath)
+        if here != workspace and (".git" in dirnames or ".git" in filenames):
+            nested_git.append(here / ".git")
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+        dotenv += [here / f for f in filenames if is_secret_dotenv(f)]
+    return sorted(dotenv), sorted(nested_git)
+
+
 def _dotenv_files(workspace: Path) -> list[Path]:
     """The .env / .env.* files the Seatbelt profile's dotenv rule would deny."""
-    found = []
-    for dirpath, dirnames, filenames in os.walk(workspace):
-        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
-        found += [Path(dirpath) / f for f in filenames if is_secret_dotenv(f)]
-    return sorted(found)
+    return _walk_workspace(workspace)[0]
 
 
 def _bind(source: Path, target: str, readonly: bool = False) -> str:
