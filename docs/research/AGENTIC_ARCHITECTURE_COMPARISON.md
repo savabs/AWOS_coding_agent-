@@ -347,3 +347,8 @@ created: 2026-05-16
 ---
 
 **Next:** Review `AGENTIC_AMPLIFICATION_SPEC.md` for implementation details
+
+## Related
+
+- _(add links to related documents here)_
+

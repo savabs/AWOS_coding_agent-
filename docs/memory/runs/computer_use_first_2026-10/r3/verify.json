@@ -1,0 +1,23 @@
+{
+ "pass": true,
+ "checks": {
+  "V1": {
+   "pass": true,
+   "failures": []
+  },
+  "V2": {
+   "pass": true,
+   "failures": []
+  },
+  "V3": {
+   "pass": true,
+   "failures": []
+  },
+  "V4": {
+   "pass": true,
+   "failures": []
+  }
+ },
+ "receipts_correct": 15,
+ "receipts_total": 15
+}

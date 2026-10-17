@@ -1,0 +1,74 @@
+[
+  {
+    "timestamp": "2026-09-22T21:52:05.413466",
+    "month": "2026-09",
+    "request_type": "execution",
+    "model": "DeepSeek",
+    "input_tokens": 10,
+    "output_tokens": 5,
+    "cost": 2.8e-06
+  },
+  {
+    "timestamp": "2026-09-22T21:52:05.425463",
+    "month": "2026-09",
+    "request_type": "execution",
+    "model": "Haiku (fallback)",
+    "input_tokens": 10,
+    "output_tokens": 5,
+    "cost": 3.5e-05
+  },
+  {
+    "timestamp": "2026-09-22T21:52:05.428951",
+    "month": "2026-09",
+    "request_type": "execution",
+    "model": "Haiku (fallback)",
+    "input_tokens": 10,
+    "output_tokens": 5,
+    "cost": 3.5e-05
+  },
+  {
+    "timestamp": "2026-09-22T21:52:13.361376",
+    "month": "2026-09",
+    "request_type": "worker",
+    "model": "DeepSeek V4 Flash",
+    "input_tokens": 1000,
+    "output_tokens": 500,
+    "cost": 0.00028
+  },
+  {
+    "timestamp": "2026-09-22T21:53:05.424254",
+    "month": "2026-09",
+    "request_type": "execution",
+    "model": "DeepSeek",
+    "input_tokens": 10,
+    "output_tokens": 5,
+    "cost": 2.8e-06
+  },
+  {
+    "timestamp": "2026-09-22T21:53:05.436388",
+    "month": "2026-09",
+    "request_type": "execution",
+    "model": "Haiku (fallback)",
+    "input_tokens": 10,
+    "output_tokens": 5,
+    "cost": 3.5e-05
+  },
+  {
+    "timestamp": "2026-09-22T21:53:05.439835",
+    "month": "2026-09",
+    "request_type": "execution",
+    "model": "Haiku (fallback)",
+    "input_tokens": 10,
+    "output_tokens": 5,
+    "cost": 3.5e-05
+  },
+  {
+    "timestamp": "2026-09-22T21:53:12.976194",
+    "month": "2026-09",
+    "request_type": "worker",
+    "model": "DeepSeek V4 Flash",
+    "input_tokens": 1000,
+    "output_tokens": 500,
+    "cost": 0.00028
+  }
+]

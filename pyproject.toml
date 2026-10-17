@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "awos"
+version = "0.2.2"
+description = "AWOS: local-first runtime that turns small/local or cloud models into reliable autonomous coding work"
+readme = "docs/INSTALL.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+# Only what the quickstart imports (keys, submit, serve --worker, status).
+# Everything heavier is an extra; see [project.optional-dependencies].
+dependencies = [
+    "anthropic>=0.101.0",
+    "openai>=1.0.0",
+    "python-dotenv>=1.0",
+    "numpy>=1.24",
+    "requests>=2.31.0",
+    # The host verifies each job by running the target repo's pytest suite
+    # with AWOS's own interpreter, so pytest must be importable there.
+    "pytest>=7.4",
+]
+
+[project.optional-dependencies]
+# Tree-sitter repo maps / symbol index (cartographer, symbol_index, struct_builder).
+treesitter = [
+    "tree-sitter>=0.23",
+    "tree-sitter-python>=0.23",
+    "tree-sitter-cpp>=0.23",
+    "tree-sitter-rust>=0.23",
+    "xxhash>=4.0",
+    "watchdog>=3.0.0",
+]
+# Vector memory (`awos memory`, `awos index`).
+memory = [
+    "chromadb>=0.6.0",
+    "fastembed>=0.2.0",
+]
+# Web/agentic tools (search, fetch, GitHub, HF Hub).
+tools = [
+    "duckduckgo-search>=6.1.0",
+    "beautifulsoup4>=4.12.0",
+    "PyGithub>=2.1.0",
+    "tavily-python>=0.3.0",
+    "huggingface-hub>=0.22.0",
+]
+# Gemini planner backend.
+gemini = ["google-genai>=1.0.0"]
+# MCP server (mcp_server.py, source checkout only).
+mcp = ["mcp>=1.0.0"]
+all = ["awos[treesitter,memory,tools,gemini,mcp]"]
+dev = ["pytest>=7.4", "pytest-timeout>=2.1"]
+
+[project.scripts]
+awos = "awos:main"
+
+[tool.setuptools]
+py-modules = ["awos"]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["scaffold.agent", "scaffold.agent.*"]
+namespaces = true

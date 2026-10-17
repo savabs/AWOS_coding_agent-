@@ -1,0 +1,20 @@
+{
+  "session_id": "orch_63ed8359",
+  "goal": "G3 failure hunt \u2014 force MCTS after worker fail",
+  "status": "partial",
+  "started_at": "2026-06-18T08:34:34Z",
+  "files": [],
+  "summary": {
+    "total_files": 0,
+    "created": 0,
+    "modified": 0,
+    "deleted": 0,
+    "lines_added": 0,
+    "lines_removed": 0
+  },
+  "completed_at": "2026-06-18T08:35:21Z",
+  "tasks_completed": 0,
+  "tasks_failed": 4,
+  "total_cost_usd": 0.0,
+  "elapsed_sec": 50.25215220451355
+}

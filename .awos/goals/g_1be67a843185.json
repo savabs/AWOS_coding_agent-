@@ -1,0 +1,48 @@
+{
+  "root_id": "g_1be67a843185",
+  "nodes": {
+    "g_1be67a843185": {
+      "goal_id": "g_1be67a843185",
+      "description": "G7 verify-fail replan proof",
+      "parent_ids": [],
+      "child_ids": [
+        "g_c2b4559239b9"
+      ],
+      "tasks": [],
+      "status": "in_progress",
+      "created_at": "2026-06-21T06:25:50Z",
+      "updated_at": "2026-06-21T06:25:50Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_18cc19fe"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_c2b4559239b9": {
+      "goal_id": "g_c2b4559239b9",
+      "description": "Add comment above `_try_cheap_fallback` explaining cheap providers",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "worker.py",
+          "file": "worker.py",
+          "action": "Add comment above `_try_cheap_fallback` explaining cheap providers",
+          "complexity": "low"
+        }
+      ],
+      "status": "failed",
+      "created_at": "2026-06-21T06:25:50Z",
+      "updated_at": "2026-06-21T06:25:51Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_18cc19fe"
+      ],
+      "failure_count": 1,
+      "critique_ids": []
+    }
+  }
+}

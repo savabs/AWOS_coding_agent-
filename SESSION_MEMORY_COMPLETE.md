@@ -1,3 +1,9 @@
+---
+title: "Session Memory Implementation — Complete Summary"
+tags:
+  - doc/wiki
+---
+
 # Session Memory Implementation — Complete Summary
 
 ## 🎯 What You Asked For

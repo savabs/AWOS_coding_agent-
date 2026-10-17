@@ -1,0 +1,27 @@
+{
+  "session_id": "schema-design",
+  "strategy": "hybrid",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Message 1: Designing user permissions schema",
+      "tokens": 100,
+      "timestamp": "2026-05-16T01:06:35.390392"
+    },
+    {
+      "role": "assistant",
+      "content": "Message 2: Designing user permissions schema",
+      "tokens": 110,
+      "timestamp": "2026-05-16T01:06:35.390408"
+    },
+    {
+      "role": "user",
+      "content": "Message 3: Designing user permissions schema",
+      "tokens": 120,
+      "timestamp": "2026-05-16T01:06:35.390412"
+    }
+  ],
+  "summary": null,
+  "total_tokens": 330,
+  "message_count": 3
+}

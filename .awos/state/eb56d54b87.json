@@ -1,0 +1,18 @@
+{
+  "goal": "Add a one-line docstring to PromptEvolver.should_evolve explaining what it checks",
+  "goal_hash": "eb56d54b87",
+  "started_at": "2026-05-27T01:44:57",
+  "last_updated": "2026-05-27T01:45:26",
+  "completed_task_ids": [
+    1,
+    "2_1",
+    "2_2"
+  ],
+  "failed_task_ids": [
+    2
+  ],
+  "session_ids": [
+    "orch_6ba6875e"
+  ],
+  "status": "complete"
+}

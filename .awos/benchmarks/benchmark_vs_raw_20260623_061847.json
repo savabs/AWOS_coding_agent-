@@ -1,0 +1,79 @@
+{
+  "timestamp": "2026-06-23T06:16:48.504651+00:00",
+  "summary": {
+    "raw_pass_rate": 0.6666666666666666,
+    "awos_pass_rate": 1.0,
+    "raw_total_cost": 0.000639,
+    "awos_total_cost": 0.001021,
+    "raw_verified_per_dollar": 3129.8904538341158,
+    "awos_verified_per_dollar": 2938.2957884427033
+  },
+  "cases": [
+    {
+      "case_id": "01_off_by_one",
+      "raw": {
+        "arm": "raw",
+        "verified": true,
+        "tests_pass": true,
+        "cost_usd": 0.000171,
+        "wall_sec": 5.27,
+        "attempts": 1,
+        "error": ""
+      },
+      "awos": {
+        "arm": "awos",
+        "verified": true,
+        "tests_pass": true,
+        "cost_usd": 0.000358,
+        "wall_sec": 24.64,
+        "attempts": 1,
+        "error": ""
+      },
+      "awos_wins": false
+    },
+    {
+      "case_id": "02_wrong_logic",
+      "raw": {
+        "arm": "raw",
+        "verified": true,
+        "tests_pass": false,
+        "cost_usd": 0.00036,
+        "wall_sec": 9.48,
+        "attempts": 1,
+        "error": "verifier ok but pytest failed"
+      },
+      "awos": {
+        "arm": "awos",
+        "verified": true,
+        "tests_pass": true,
+        "cost_usd": 0.000434,
+        "wall_sec": 25.23,
+        "attempts": 1,
+        "error": ""
+      },
+      "awos_wins": true
+    },
+    {
+      "case_id": "03_simple_add",
+      "raw": {
+        "arm": "raw",
+        "verified": true,
+        "tests_pass": true,
+        "cost_usd": 0.000108,
+        "wall_sec": 2.36,
+        "attempts": 1,
+        "error": ""
+      },
+      "awos": {
+        "arm": "awos",
+        "verified": true,
+        "tests_pass": true,
+        "cost_usd": 0.000229,
+        "wall_sec": 18.68,
+        "attempts": 1,
+        "error": ""
+      },
+      "awos_wins": false
+    }
+  ]
+}

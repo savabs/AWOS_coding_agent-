@@ -25,6 +25,15 @@ from pathlib import Path
 from typing import Optional
 
 
+def _redact_at_rest(obj):
+    """secret_scan.redact_obj: no key format or owner env secret is persisted."""
+    try:
+        from .secret_scan import redact_obj
+    except ImportError:
+        from secret_scan import redact_obj
+    return redact_obj(obj)
+
+
 @dataclass
 class StoredExample:
     task_action:  str   # Original task description
@@ -129,7 +138,7 @@ class ExampleStore:
 
     def _save(self):
         try:
-            data = [asdict(e) for e in self._examples]
+            data = _redact_at_rest([asdict(e) for e in self._examples])
             self.store_path.write_text(json.dumps(data, indent=2))
         except Exception:
             pass

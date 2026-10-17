@@ -1,0 +1,69 @@
+{
+  "id": "c06_ics_event",
+  "title": "Create a calendar event file",
+  "instruction": "Create Calendar/dentist.ics: a VCALENDAR with one VEVENT 'Dentist appointment' on 2026-11-03 from 14:30 to 15:15 local time, location 'Main St Clinic'.",
+  "rung": "shell",
+  "start": {
+    "files": {
+      "Calendar/.keep": ""
+    }
+  },
+  "probes": [
+    {
+      "id": "ics_exists",
+      "getter": {
+        "type": "file_exists",
+        "path": "Calendar/dentist.ics"
+      },
+      "comparator": {
+        "op": "equals",
+        "expected": true
+      }
+    },
+    {
+      "id": "ics_summary",
+      "getter": {
+        "type": "file_content",
+        "path": "Calendar/dentist.ics"
+      },
+      "comparator": {
+        "op": "regex",
+        "expected": "^SUMMARY:Dentist appointment\\r?$"
+      }
+    },
+    {
+      "id": "ics_start",
+      "getter": {
+        "type": "file_content",
+        "path": "Calendar/dentist.ics"
+      },
+      "comparator": {
+        "op": "regex",
+        "expected": "^DTSTART:20261103T143000\\r?$"
+      }
+    },
+    {
+      "id": "ics_end",
+      "getter": {
+        "type": "file_content",
+        "path": "Calendar/dentist.ics"
+      },
+      "comparator": {
+        "op": "regex",
+        "expected": "^DTEND:20261103T151500\\r?$"
+      }
+    },
+    {
+      "id": "ics_wellformed",
+      "getter": {
+        "type": "file_content",
+        "path": "Calendar/dentist.ics"
+      },
+      "comparator": {
+        "op": "regex",
+        "expected": "\\ABEGIN:VCALENDAR[\\s\\S]*BEGIN:VEVENT[\\s\\S]*END:VEVENT[\\s\\S]*END:VCALENDAR\\Z"
+      }
+    }
+  ],
+  "invariants": []
+}

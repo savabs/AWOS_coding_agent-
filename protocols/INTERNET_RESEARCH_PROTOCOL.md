@@ -1,3 +1,9 @@
+---
+title: "Internet Research Protocol"
+tags:
+  - doc/wiki
+---
+
 # Internet Research Protocol
 
 > **Corollary: never hallucinate facts about external systems.**

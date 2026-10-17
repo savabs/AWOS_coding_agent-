@@ -1,0 +1,7 @@
+{
+  "id": "08_exclude_dir_patterns",
+  "goal": "Bug: I set `exclude = build/, *.log` (and APP_EXCLUDE in the container) to keep build output out of the backups, but every build/ folder still ends up in the archive; only `*.log` works. Like in .gitignore, a pattern ending in `/` should mean \"directories with this name\": skip any directory matching it, wherever it is in the tree, together with everything inside it, but still back up an ordinary file that happens to have that name. Globs should work there too (`cache*/`). Patterns without a trailing slash must behave exactly as they do today.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

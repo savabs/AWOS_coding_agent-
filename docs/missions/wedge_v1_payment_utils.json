@@ -1,0 +1,31 @@
+{
+  "id": "wedge_v1_payment_utils_v1",
+  "title": "Wedge v1 — Test Rescue (payment_utils demo)",
+  "updated": "2026-06-25",
+  "codebase_root": "tests/fixtures/wedge_v1/payment_utils",
+  "env": {
+    "AWOS_USE_WORKTREE": "true",
+    "AWOS_RUNTIME_SESSION": "true",
+    "AWOS_CHEAP_ONLY": "true",
+    "AWOS_PREMIUM_BUDGET": "0",
+    "AWOS_MONTHLY_BUDGET": "5",
+    "AWOS_LEARNING_DISABLE": "true"
+  },
+  "plan_file": "wedge_v1_payment_utils.plan.json",
+  "goal": "Test Rescue wedge: fix payment.py so three failing pytest tests pass. Do not edit tests/ or conftest.py. Keep all seven tests green.",
+  "goal_assertions": {
+    "must_pass": [
+      "tests/test_payment.py::test_discount_ten_percent",
+      "tests/test_payment.py::test_tax_rounds_half_up",
+      "tests/test_payment.py::test_no_refund_opened"
+    ],
+    "must_still_pass": "python3 -m pytest tests/ -q --tb=no",
+    "forbidden_paths": ["tests/", "conftest.py"],
+    "max_wall_minutes": 90
+  },
+  "success_criteria": [
+    "wedge_v1_assert.py prints WEDGE_ASSERT: SEMANTIC_PASS on worktree",
+    "payment.py changed; tests/ unchanged",
+    "Developer calendar test: would pay ₹500–₹2,000/month for this job"
+  ]
+}

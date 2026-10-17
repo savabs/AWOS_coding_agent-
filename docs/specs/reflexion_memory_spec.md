@@ -65,3 +65,8 @@ class ErrorPatternStore:
 - LLM critique call times out: log warning, fall back to static hint.
 - Critique is stale (old file version): still useful — mentions error class + approach.
 - Circular loop: critique injected but still fails → pass_rate penalises LinUCB, escalates model.
+
+## Related
+
+- _(add links to related documents here)_
+

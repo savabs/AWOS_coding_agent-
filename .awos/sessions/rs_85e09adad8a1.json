@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "session_id": "rs_85e09adad8a1",
+  "goal": "G3 failure hunt — force MCTS after worker fail",
+  "goal_hash": "ad170e4515",
+  "status": "completed",
+  "created_at": "2026-06-20T08:32:59Z",
+  "updated_at": "2026-06-20T08:33:34Z",
+  "paused_at": null,
+  "codebase_root": "/home/becmachlean/2024/projects/AWOS_coding_agent",
+  "reasoning_session_id": null,
+  "goal_graph_id": null,
+  "progress": {
+    "completed_task_ids": [
+      1
+    ],
+    "failed_task_ids": [],
+    "current_task_id": null,
+    "total_tasks": 1,
+    "decomposition_depth": 0
+  },
+  "budget": {
+    "spent_usd": 0.0
+  },
+  "sandbox": {
+    "enabled": false,
+    "feature_id": null,
+    "worktree_path": null,
+    "branch": null
+  },
+  "parent_session_id": null,
+  "cancel_requested": false
+}

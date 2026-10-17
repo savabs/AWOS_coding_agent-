@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<cost_log>
+  <metadata>
+    <description>Real-time API call cost tracking and expense log</description>
+    <version>1.0</version>
+    <currency>USD</currency>
+    <last_updated>2026-05-15</last_updated>
+  </metadata>
+  
+  <sessions>
+    <!-- Each session block contains all API calls made during that work session -->
+    <!-- Example:
+    <session date="2026-05-15" session_id="s_001" task_count="5">
+      <call id="c_001" 
+            timestamp="15:32:10" 
+            model="deepseek-chat" 
+            provider="deepseek"
+            complexity_score="3"
+            input_tokens="2048" 
+            output_tokens="512" 
+            cache_read_tokens="0"
+            cache_creation_tokens="0"
+            cost="$0.0003"
+            duration_ms="1200">
+      </call>
+      <call id="c_002" 
+            timestamp="15:33:45" 
+            model="claude-sonnet-4-6" 
+            provider="anthropic"
+            complexity_score="6"
+            input_tokens="5120" 
+            output_tokens="1024" 
+            cache_read_tokens="3000"
+            cache_creation_tokens="2120"
+            cost="$0.018"
+            duration_ms="3400">
+      </call>
+      <session_total>
+        <total_calls>2</total_calls>
+        <total_input_tokens>7168</total_input_tokens>
+        <total_output_tokens>1536</total_output_tokens>
+        <total_cost>$0.0183</total_cost>
+        <cache_savings>$0.031</cache_savings>
+      </session_total>
+    </session>
+    -->
+  </sessions>
+  
+  <totals>
+    <!-- Cumulative metrics across all sessions -->
+    <total_sessions>0</total_sessions>
+    <total_calls>0</total_calls>
+    <total_spend>$0.00</total_spend>
+    <total_cache_savings>$0.00</total_cache_savings>
+    <net_spend>$0.00</net_spend>
+    <cache_hit_rate>0.0</cache_hit_rate>
+    <average_model_tier>N/A</average_model_tier>
+  </totals>
+  
+  <budget>
+    <!-- Optional: daily/monthly budget alerts -->
+    <!-- <daily_limit>$10.00</daily_limit> -->
+    <!-- <monthly_limit>$200.00</monthly_limit> -->
+  </budget>
+</cost_log>

@@ -1,0 +1,8 @@
+{
+  "name": "timezone_report_bug",
+  "kind": "debugging",
+  "goal": "Customers in some timezones say the daily sales report shows yesterday's totals, and a few orders placed near midnight show up on the wrong day. Find out why and fix it so every report (today's report, a specific day, yesterday, multi-day breakdowns, week-to-date, and the CLI) follows the customer's own timezone, including on daylight-saving change days. Don't break customers in UTC.",
+  "max_turns": 150,
+  "max_cost_usd": 1.0,
+  "timeout_min": 30
+}

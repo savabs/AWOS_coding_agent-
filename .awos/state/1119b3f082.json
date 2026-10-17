@@ -1,0 +1,27 @@
+{
+  "goal": "Add a short docstring to the StabilityGate.should_check method explaining that it runs every N completed sessions",
+  "goal_hash": "1119b3f082",
+  "started_at": "2026-05-27T01:25:20",
+  "last_updated": "2026-05-27T01:25:20",
+  "completed_task_ids": [],
+  "failed_task_ids": [
+    1,
+    2,
+    "1_1",
+    "1_2",
+    "2_1",
+    "2_2",
+    "1_1_1",
+    "1_1_2",
+    "1_2_1",
+    "1_2_2",
+    "2_1_1",
+    "2_1_2",
+    "2_2_1",
+    "2_2_2"
+  ],
+  "session_ids": [
+    "orch_c0cb4bae"
+  ],
+  "status": "failed"
+}

@@ -1,0 +1,1891 @@
+[
+ {
+  "arm": "off",
+  "job": 1,
+  "repeat": 1,
+  "job_name": "01_missing_source_error",
+  "series": "backupd",
+  "kept": [
+   "TestSourceDirMissingOrFile::test_no_pruning_when_source_missing"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   1,
+   0
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 1,
+  "wrong": 1,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "7/7",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 2,
+  "repeat": 1,
+  "job_name": "02_list_backups",
+  "series": "backupd",
+  "kept": [
+   "TestListCommand::test_list_no_backups",
+   "TestListCommand::test_list_with_backups",
+   "TestListCommand::test_list_single_backup",
+   "TestListCommand::test_list_ignores_non_archive_files"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   4,
+   0
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 4,
+  "wrong": 4,
+  "incomplete": 0,
+  "result": "not solved",
+  "hidden": "0/8",
+  "solved": false,
+  "v1_class": "false_accept",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 3,
+  "repeat": 1,
+  "job_name": "03_cli_handlers_refactor",
+  "series": "backupd",
+  "kept": [
+   "test_each_command_has_handler",
+   "test_handler_names_follow_convention",
+   "test_main_calls_handler",
+   "test_handlers_are_module_level_functions",
+   "test_handler_signature_takes_args"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   5,
+   4
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 1,
+  "wrong": 1,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "14/14",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 5,
+  "repeat": 1,
+  "job_name": "05_partial_archive_bug",
+  "series": "backupd",
+  "kept": [
+   "test_zip_archive_writes_to_tmp_then_renames",
+   "test_tar_archive_writes_to_tmp_then_renames",
+   "test_zip_archive_failure_removes_tmp_and_raises",
+   "test_tar_archive_failure_removes_tmp_and_raises",
+   "test_existing_backup_not_touched_on_failure"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   5,
+   0
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 5,
+  "wrong": 5,
+  "incomplete": 0,
+  "result": "not solved",
+  "hidden": "2/6",
+  "solved": false,
+  "v1_class": "false_accept",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 7,
+  "repeat": 1,
+  "job_name": "07_verify_command",
+  "series": "backupd",
+  "kept": [
+   "test_verify_valid_zip_archive",
+   "test_verify_valid_tar_archive",
+   "test_verify_corrupted_zip_archive",
+   "test_verify_nonexistent_archive",
+   "test_verify_command_valid_archive",
+   "test_verify_command_missing_archive",
+   "test_verify_command_no_backups"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   7,
+   4
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 3,
+  "wrong": 3,
+  "incomplete": 0,
+  "result": "not solved",
+  "hidden": "9/10",
+  "solved": false,
+  "v1_class": "false_accept",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 8,
+  "repeat": 1,
+  "job_name": "08_exclude_dir_patterns",
+  "series": "backupd",
+  "kept": [
+   "test_directory_pattern_excludes_nested_dir",
+   "test_directory_pattern_excludes_any_depth",
+   "test_directory_pattern_keeps_same_named_file",
+   "test_glob_directory_pattern",
+   "test_non_directory_pattern_still_works",
+   "test_directory_pattern_with_other_patterns"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   6,
+   2
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 4,
+  "wrong": 4,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "6/6",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 9,
+  "repeat": 1,
+  "job_name": "09_failure_notifications",
+  "series": "backupd",
+  "kept": [
+   "test_notify_on_default_is_always",
+   "test_notify_on_accepts_valid_values_case_insensitive",
+   "test_notify_on_invalid_value_raises_config_error",
+   "test_notify_on_from_environment",
+   "test_show_config_includes_notify_on",
+   "test_failed_run_sends_failure_notification_and_still_raises"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   6,
+   5
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 1,
+  "wrong": 1,
+  "incomplete": 0,
+  "result": "not solved",
+  "hidden": "13/14",
+  "solved": false,
+  "v1_class": "false_accept",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 11,
+  "repeat": 1,
+  "job_name": "11_restore_command",
+  "series": "backupd",
+  "kept": [
+   "test_restore_expands_tilde_in_dest"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   1,
+   0
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 1,
+  "wrong": 1,
+  "incomplete": 0,
+  "result": "not solved",
+  "hidden": "8/12",
+  "solved": false,
+  "v1_class": "false_accept",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 2,
+  "repeat": 1,
+  "job_name": "02_list_backups",
+  "series": "backupd",
+  "kept": [
+   "test_list_command_no_backups",
+   "test_list_command_single_backup",
+   "test_list_command_multiple_backups_sorted",
+   "test_list_command_ignores_unrelated_files"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   4,
+   0
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 4,
+  "wrong": 4,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "8/8",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 3,
+  "repeat": 1,
+  "job_name": "03_cli_handlers_refactor",
+  "series": "backupd",
+  "kept": [
+   "test_parser_registers_handler_for_run",
+   "test_parser_registers_handler_for_status",
+   "test_parser_registers_handler_for_due",
+   "test_parser_registers_handler_for_show_config",
+   "test_parser_registers_handler_for_list",
+   "test_handlers_return_exit_codes"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   6,
+   5
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 1,
+  "wrong": 1,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "14/14",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 5,
+  "repeat": 1,
+  "job_name": "05_partial_archive_bug",
+  "series": "backupd",
+  "kept": [
+   "test_zip_archive_not_visible_until_complete",
+   "test_tar_archive_not_visible_until_complete",
+   "test_run_backup_failure_keeps_existing_backups_and_last_run"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   3,
+   2
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 1,
+  "wrong": 1,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "6/6",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 7,
+  "repeat": 1,
+  "job_name": "07_verify_command",
+  "series": "backupd",
+  "kept": [
+   "test_verify_zip_archive",
+   "test_verify_tar_archive",
+   "test_verify_latest_backup"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   3,
+   0
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 3,
+  "wrong": 3,
+  "incomplete": 0,
+  "result": "not solved",
+  "hidden": "9/10",
+  "solved": false,
+  "v1_class": "false_accept",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 8,
+  "repeat": 1,
+  "job_name": "08_exclude_dir_patterns",
+  "series": "backupd",
+  "kept": [
+   "test_directory_pattern_excludes_nested_dirs",
+   "test_directory_pattern_keeps_same_named_file",
+   "test_directory_pattern_with_glob",
+   "test_directory_pattern_excludes_root_dir",
+   "test_non_directory_pattern_still_works"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   5,
+   1
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 4,
+  "wrong": 4,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "6/6",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 9,
+  "repeat": 1,
+  "job_name": "09_failure_notifications",
+  "series": "backupd",
+  "kept": [
+   "test_notify_on_default_is_always",
+   "test_notify_on_accepts_valid_values_case_insensitive",
+   "test_notify_on_invalid_value_raises_config_error",
+   "test_notify_on_shown_in_show_config",
+   "test_failure_notification_sent_when_notify_on_failure"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   5,
+   4
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 1,
+  "wrong": 1,
+  "incomplete": 0,
+  "result": "not solved",
+  "hidden": "13/14",
+  "solved": false,
+  "v1_class": "false_accept",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 11,
+  "repeat": 1,
+  "job_name": "11_restore_command",
+  "series": "backupd",
+  "kept": [
+   "test_restore_latest_to_new_dir",
+   "test_restore_named_backup",
+   "test_restore_refuses_nonempty_dest",
+   "test_restore_refuses_unsafe_archive",
+   "test_restore_unknown_backup_fails",
+   "test_restore_damaged_archive_fails"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   6,
+   0
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 6,
+  "wrong": 6,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "12/12",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 12,
+  "repeat": 1,
+  "job_name": "12_prune_command",
+  "series": "backupd",
+  "kept": [
+   "test_prune_dry_run_prints_would_prune_and_summary",
+   "test_prune_deletes_and_prints_summary",
+   "test_prune_nothing_to_delete",
+   "test_prune_does_not_require_source_dir",
+   "test_prune_multiple_oldest_first"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   5,
+   0
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 5,
+  "wrong": 5,
+  "incomplete": 0,
+  "result": "not solved",
+  "hidden": "6/9",
+  "solved": false,
+  "v1_class": "false_accept",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 2,
+  "repeat": 1,
+  "job_name": "02_list_backups",
+  "series": "backupd",
+  "kept": [
+   "test_list_command_no_backups",
+   "test_list_command_single_backup",
+   "test_list_command_multiple_backups_oldest_first",
+   "test_list_command_ignores_non_backup_files",
+   "test_list_command_uses_backup_dir_from_settings"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   5,
+   4
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 1,
+  "wrong": 1,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "8/8",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 3,
+  "repeat": 1,
+  "job_name": "03_cli_handlers_refactor",
+  "series": "backupd",
+  "kept": [
+   "test_main_uses_handler_and_returns_its_result",
+   "test_main_still_handles_config_errors",
+   "test_main_still_handles_generic_errors"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   3,
+   0
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 3,
+  "wrong": 3,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "14/14",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 5,
+  "repeat": 1,
+  "job_name": "05_partial_archive_bug",
+  "series": "backupd",
+  "kept": [
+   "test_failed_archive_removes_temp_and_keeps_existing",
+   "test_failed_tar_archive_cleans_up",
+   "test_run_backup_failure_does_not_update_last_run",
+   "test_run_backup_failure_keeps_existing_backups"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   4,
+   2
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 2,
+  "wrong": 2,
+  "incomplete": 0,
+  "result": "not solved",
+  "hidden": "2/6",
+  "solved": false,
+  "v1_class": "false_accept",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 7,
+  "repeat": 1,
+  "job_name": "07_verify_command",
+  "series": "backupd",
+  "kept": [
+   "test_verify_archive_zip_valid",
+   "test_verify_archive_tar_valid",
+   "test_verify_archive_zip_truncated",
+   "test_verify_archive_tar_truncated",
+   "test_verify_command_latest_backup",
+   "test_verify_command_named_backup",
+   "test_verify_command_no_backups",
+   "test_verify_command_missing_backup",
+   "test_verify_cli_command",
+   "test_verify_cli_command_named",
+   "test_verify_cli_command_missing"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   11,
+   3
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": "failed",
+  "failing": 8,
+  "wrong": 7,
+  "incomplete": 1,
+  "result": "not solved",
+  "hidden": "9/10",
+  "solved": false,
+  "v1_class": "repair_failed_unsolved",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 9,
+  "repeat": 1,
+  "job_name": "09_failure_notifications",
+  "series": "backupd",
+  "kept": [
+   "test_notify_on_default_is_always",
+   "test_notify_on_env_override",
+   "test_notify_on_case_insensitive",
+   "test_notify_on_invalid_value_raises_config_error",
+   "test_failure_notification_sent_and_error_not_hidden",
+   "test_skipped_run_sends_no_notification",
+   "test_show_config_includes_notify_on"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   7,
+   5
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": "failed",
+  "failing": 2,
+  "wrong": 1,
+  "incomplete": 1,
+  "result": "not solved",
+  "hidden": "13/14",
+  "solved": false,
+  "v1_class": "repair_failed_unsolved",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 11,
+  "repeat": 1,
+  "job_name": "11_restore_command",
+  "series": "backupd",
+  "kept": [
+   "test_restore_latest_to_empty_dir",
+   "test_restore_named_archive",
+   "test_restore_refuses_nonempty_dest",
+   "test_restore_refuses_absolute_paths",
+   "test_restore_refuses_dotdot_paths",
+   "test_restore_unknown_backup_fails"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   6,
+   0
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 6,
+  "wrong": 6,
+  "incomplete": 0,
+  "result": "not solved",
+  "hidden": "9/12",
+  "solved": false,
+  "v1_class": "false_accept",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 12,
+  "repeat": 1,
+  "job_name": "12_prune_command",
+  "series": "backupd",
+  "kept": [
+   "test_prune_deletes_old_backups_and_prints",
+   "test_prune_dry_run_does_not_delete",
+   "test_prune_nothing_to_delete",
+   "test_prune_multiple_oldest_first",
+   "test_prune_works_without_source_dir"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   5,
+   0
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": "failed",
+  "failing": 5,
+  "wrong": 0,
+  "incomplete": 5,
+  "result": "SOLVED",
+  "hidden": "9/9",
+  "solved": true,
+  "v1_class": "false_repair",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 1,
+  "repeat": 1,
+  "job_name": "01_missing_source_error",
+  "series": "backupd",
+  "kept": [
+   "test_run_backup_raises_backupd_error_for_missing_source_dir",
+   "test_run_backup_raises_backupd_error_for_file_as_source_dir",
+   "test_run_backup_does_not_create_backup_dir_for_missing_source",
+   "test_run_backup_does_not_update_last_run_for_missing_source",
+   "test_cli_returns_one_for_missing_source_dir"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   5,
+   4
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 1,
+  "wrong": 1,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "7/7",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 2,
+  "repeat": 1,
+  "job_name": "02_list_backups",
+  "series": "backupd",
+  "kept": [
+   "test_list_no_backups",
+   "test_list_with_backups",
+   "test_list_ignores_non_backup_files",
+   "test_list_single_backup",
+   "test_list_oldest_first"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   5,
+   0
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 5,
+  "wrong": 5,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "8/8",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 5,
+  "repeat": 1,
+  "job_name": "05_partial_archive_bug",
+  "series": "backupd",
+  "kept": [
+   "test_zip_archive_failure_removes_partial_file_and_keeps_existing",
+   "test_tar_archive_failure_removes_partial_file_and_keeps_existing",
+   "test_runner_reports_archive_failure_without_traceback_and_keeps_last_run",
+   "test_cli_reports_archive_failure_as_single_line_and_exit_1"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   4,
+   0
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 4,
+  "wrong": 4,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "6/6",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 7,
+  "repeat": 1,
+  "job_name": "07_verify_command",
+  "series": "backupd",
+  "kept": [
+   "test_verify_latest_backup_zip",
+   "test_verify_named_backup_tar",
+   "test_verify_damaged_archive_fails",
+   "test_verify_no_backups_fails",
+   "test_verify_nonexistent_named_backup_fails",
+   "test_verify_logs_success"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   6,
+   0
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 6,
+  "wrong": 6,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "10/10",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 9,
+  "repeat": 1,
+  "job_name": "09_failure_notifications",
+  "series": "backupd",
+  "kept": [
+   "TestNotifyOnSetting::test_default_is_always",
+   "TestNotifyOnSetting::test_valid_values_case_insensitive",
+   "TestNotifyOnSetting::test_environment_variable_overrides_ini",
+   "TestNotifyOnSetting::test_show_config_includes_notify_on",
+   "TestNotifyOnBehavior::test_never_sends_no_mail_on_success",
+   "TestNotifyOnBehavior::test_failure_sends_mail_with_correct_subject_and_body",
+   "TestNotifyOnBehavior::test_always_sends_mail_on_success",
+   "TestNotifyOnBehavior::test_always_sends_mail_on_failure",
+   "TestNotifyOnBehavior::test_skipped_run_sends_nothing"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   9,
+   0
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": "failed",
+  "failing": 9,
+  "wrong": 0,
+  "incomplete": 9,
+  "result": "SOLVED",
+  "hidden": "14/14",
+  "solved": true,
+  "v1_class": "false_repair",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 11,
+  "repeat": 1,
+  "job_name": "11_restore_command",
+  "series": "backupd",
+  "kept": [
+   "test_restore_latest_to_empty_dir",
+   "test_restore_named_archive",
+   "test_restore_refuses_nonempty_dest",
+   "test_restore_refuses_absolute_paths",
+   "test_restore_refuses_dotdot_paths",
+   "test_restore_unknown_backup_fails"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   6,
+   0
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 6,
+  "wrong": 6,
+  "incomplete": 0,
+  "result": "not solved",
+  "hidden": "9/12",
+  "solved": false,
+  "v1_class": "false_accept",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 12,
+  "repeat": 1,
+  "job_name": "12_prune_command",
+  "series": "backupd",
+  "kept": [
+   "test_prune_dry_run_prints_would_prune",
+   "test_prune_actual_deletes_and_prints",
+   "test_prune_nothing_to_prune",
+   "test_prune_single_backup_message",
+   "test_prune_does_not_require_source_dir"
+  ],
+  "log": "ablB.log",
+  "check_before": [
+   5,
+   0
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 5,
+  "wrong": 5,
+  "incomplete": 0,
+  "result": "not solved",
+  "hidden": "6/9",
+  "solved": false,
+  "v1_class": "false_accept",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 2,
+  "repeat": 1,
+  "job_name": "02_list_backups",
+  "series": "backupd",
+  "kept": [
+   "test_list_no_backups",
+   "test_list_no_backups_output",
+   "test_list_single_backup",
+   "test_list_multiple_backups_oldest_first",
+   "test_list_ignores_non_backup_files",
+   "test_list_works_with_only_backup_dir_setting"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   6,
+   0
+  ],
+  "reply": "{\"test_list_no_backups\": \"WRONG_TEST\", \"test_list_no_backups_output\": \"WRONG_TEST\", \"test_list_single_backup\": \"WRONG_TEST\", \"test_list_multiple_backups_oldest_first\": \"WRONG_TEST\", \"test_list_ignores_non_backup_files\": \"WRONG_TEST\", \"test_list_works_with_only_backup_dir_setting\": \"WRONG_TEST\"}",
+  "labels": {
+   "test_list_no_backups": "WRONG_TEST",
+   "test_list_no_backups_output": "WRONG_TEST",
+   "test_list_single_backup": "WRONG_TEST",
+   "test_list_multiple_backups_oldest_first": "WRONG_TEST",
+   "test_list_ignores_non_backup_files": "WRONG_TEST",
+   "test_list_works_with_only_backup_dir_setting": "WRONG_TEST"
+  },
+  "repair": null,
+  "failing": 6,
+  "wrong": 6,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "8/8",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 3,
+  "repeat": 1,
+  "job_name": "03_cli_handlers_refactor",
+  "series": "backupd",
+  "kept": [
+   "test_each_command_has_handler",
+   "test_handler_names_follow_convention",
+   "test_main_calls_handler",
+   "test_handlers_are_module_level_functions",
+   "test_handlers_return_exit_codes"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   5,
+   4
+  ],
+  "reply": "{\"test_main_calls_handler\": \"WRONG_TEST\"}",
+  "labels": {
+   "test_main_calls_handler": "WRONG_TEST"
+  },
+  "repair": null,
+  "failing": 1,
+  "wrong": 1,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "14/14",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 4,
+  "repeat": 1,
+  "job_name": "04_min_free_space",
+  "series": "backupd",
+  "kept": [
+   "test_min_free_space_default_zero",
+   "test_min_free_space_parsed_from_ini",
+   "test_min_free_space_parsed_from_env",
+   "test_invalid_min_free_space_is_config_error",
+   "test_show_config_lists_min_free_space",
+   "test_run_stops_when_disk_full"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   6,
+   5
+  ],
+  "reply": "{\"test_run_stops_when_disk_full\": \"WRONG_TEST\"}",
+  "labels": {
+   "test_run_stops_when_disk_full": "WRONG_TEST"
+  },
+  "repair": null,
+  "failing": 1,
+  "wrong": 1,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "12/12",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 5,
+  "repeat": 1,
+  "job_name": "05_partial_archive_bug",
+  "series": "backupd",
+  "kept": [
+   "test_zip_archive_not_visible_until_complete",
+   "test_tar_archive_not_visible_until_complete",
+   "test_failed_run_keeps_existing_backups_and_last_run",
+   "test_failed_run_reports_error_and_exit_status"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   4,
+   0
+  ],
+  "reply": "{\"test_zip_archive_not_visible_until_complete\": \"WRONG_TEST\", \"test_tar_archive_not_visible_until_complete\": \"WRONG_TEST\", \"test_failed_run_keeps_existing_backups_and_last_run\": \"WRONG_TEST\", \"test_failed_run_reports_error_and_exit_status\": \"CODE_INCOMPLETE\"}",
+  "labels": {
+   "test_zip_archive_not_visible_until_complete": "WRONG_TEST",
+   "test_tar_archive_not_visible_until_complete": "WRONG_TEST",
+   "test_failed_run_keeps_existing_backups_and_last_run": "WRONG_TEST",
+   "test_failed_run_reports_error_and_exit_status": "CODE_INCOMPLETE"
+  },
+  "repair": "failed",
+  "failing": 4,
+  "wrong": 3,
+  "incomplete": 1,
+  "result": "SOLVED",
+  "hidden": "6/6",
+  "solved": true,
+  "v1_class": "false_repair",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 6,
+  "repeat": 1,
+  "job_name": "06_status_report",
+  "series": "backupd",
+  "kept": [
+   "test_status_oldest_and_total_size",
+   "test_status_oldest_none_when_no_backups",
+   "test_status_json",
+   "test_status_json_no_backups"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   4,
+   2
+  ],
+  "reply": "{\"test_status_json\": \"WRONG_TEST\", \"test_status_json_no_backups\": \"WRONG_TEST\"}",
+  "labels": {
+   "test_status_json": "WRONG_TEST",
+   "test_status_json_no_backups": "WRONG_TEST"
+  },
+  "repair": null,
+  "failing": 2,
+  "wrong": 2,
+  "incomplete": 0,
+  "result": "not solved",
+  "hidden": "6/7",
+  "solved": false,
+  "v1_class": "false_accept",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 7,
+  "repeat": 1,
+  "job_name": "07_verify_command",
+  "series": "backupd",
+  "kept": [
+   "TestVerifyCommand::test_verify_latest_backup_ok",
+   "TestVerifyCommand::test_verify_named_backup_ok",
+   "TestVerifyCommand::test_verify_nonexistent_backup_fails",
+   "TestVerifyCommand::test_verify_no_backups_fails",
+   "TestVerifyCommand::test_verify_damaged_archive_fails",
+   "TestVerifyCommand::test_verify_logs_success"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   6,
+   5
+  ],
+  "reply": "{\"TestVerifyCommand::test_verify_logs_success\": \"WRONG_TEST\"}",
+  "labels": {
+   "TestVerifyCommand::test_verify_logs_success": "WRONG_TEST"
+  },
+  "repair": null,
+  "failing": 1,
+  "wrong": 1,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "10/10",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 8,
+  "repeat": 1,
+  "job_name": "08_exclude_dir_patterns",
+  "series": "backupd",
+  "kept": [
+   "test_directory_pattern_excludes_nested_build_dirs",
+   "test_directory_pattern_excludes_top_level_build_dir",
+   "test_directory_pattern_keeps_regular_file_with_same_name",
+   "test_directory_pattern_with_glob",
+   "test_non_directory_pattern_still_works",
+   "test_directory_pattern_excludes_everything_inside"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   6,
+   2
+  ],
+  "reply": "{\"test_directory_pattern_excludes_top_level_build_dir\": \"WRONG_TEST\", \"test_directory_pattern_keeps_regular_file_with_same_name\": \"WRONG_TEST\", \"test_directory_pattern_with_glob\": \"WRONG_TEST\", \"test_non_directory_pattern_still_works\": \"WRONG_TEST\"}",
+  "labels": {
+   "test_directory_pattern_excludes_top_level_build_dir": "WRONG_TEST",
+   "test_directory_pattern_keeps_regular_file_with_same_name": "WRONG_TEST",
+   "test_directory_pattern_with_glob": "WRONG_TEST",
+   "test_non_directory_pattern_still_works": "WRONG_TEST"
+  },
+  "repair": null,
+  "failing": 4,
+  "wrong": 4,
+  "incomplete": 0,
+  "result": "not solved",
+  "hidden": "4/6",
+  "solved": false,
+  "v1_class": "false_accept",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 9,
+  "repeat": 1,
+  "job_name": "09_failure_notifications",
+  "series": "backupd",
+  "kept": [
+   "test_notify_on_default_is_always",
+   "test_notify_on_accepts_valid_values",
+   "test_notify_on_invalid_value_raises_config_error",
+   "test_notify_on_env_var",
+   "test_show_config_includes_notify_on",
+   "test_failure_sends_failure_email_and_still_fails",
+   "test_always_sends_success_email",
+   "test_never_sends_no_email"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   8,
+   6
+  ],
+  "reply": "{\"test_failure_sends_failure_email_and_still_fails\": \"CODE_INCOMPLETE\", \"test_always_sends_success_email\": \"WRONG_TEST\"}",
+  "labels": {
+   "test_failure_sends_failure_email_and_still_fails": "CODE_INCOMPLETE",
+   "test_always_sends_success_email": "WRONG_TEST"
+  },
+  "repair": "failed",
+  "failing": 2,
+  "wrong": 1,
+  "incomplete": 1,
+  "result": "not solved",
+  "hidden": "11/14",
+  "solved": false,
+  "v1_class": "repair_failed_unsolved",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 11,
+  "repeat": 1,
+  "job_name": "11_restore_command",
+  "series": "backupd",
+  "kept": [
+   "TestRestoreCommand::test_restore_latest_to_new_folder",
+   "TestRestoreCommand::test_restore_specific_name",
+   "TestRestoreCommand::test_restore_refuses_nonempty_dest",
+   "TestRestoreCommand::test_restore_refuses_archive_with_absolute_paths",
+   "TestRestoreCommand::test_restore_refuses_archive_with_dotdot",
+   "TestRestoreCommand::test_restore_unknown_backup_fails"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   6,
+   0
+  ],
+  "reply": "{\"TestRestoreCommand::test_restore_latest_to_new_folder\": \"WRONG_TEST\", \"TestRestoreCommand::test_restore_specific_name\": \"WRONG_TEST\", \"TestRestoreCommand::test_restore_refuses_nonempty_dest\": \"WRONG_TEST\", \"TestRestoreCommand::test_restore_refuses_archive_with_absolute_paths\": \"WRONG_TEST\", \"TestRestoreCommand::test_restore_refuses_archive_with_dotdot\": \"WRONG_TEST\", \"TestRestoreCommand::test_restore_unknown_backup_fails\": \"WRONG_TEST\"}",
+  "labels": {
+   "TestRestoreCommand::test_restore_latest_to_new_folder": "WRONG_TEST",
+   "TestRestoreCommand::test_restore_specific_name": "WRONG_TEST",
+   "TestRestoreCommand::test_restore_refuses_nonempty_dest": "WRONG_TEST",
+   "TestRestoreCommand::test_restore_refuses_archive_with_absolute_paths": "WRONG_TEST",
+   "TestRestoreCommand::test_restore_refuses_archive_with_dotdot": "WRONG_TEST",
+   "TestRestoreCommand::test_restore_unknown_backup_fails": "WRONG_TEST"
+  },
+  "repair": null,
+  "failing": 6,
+  "wrong": 6,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "12/12",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 12,
+  "repeat": 1,
+  "job_name": "12_prune_command",
+  "series": "backupd",
+  "kept": [
+   "test_prune_deletes_old_backups_and_prints_summary",
+   "test_prune_dry_run_does_not_delete",
+   "test_prune_nothing_to_delete",
+   "test_prune_multiple_backups_oldest_first",
+   "test_prune_uses_environment_settings"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   5,
+   0
+  ],
+  "reply": "{\"test_prune_deletes_old_backups_and_prints_summary\": \"CODE_INCOMPLETE\", \"test_prune_dry_run_does_not_delete\": \"CODE_INCOMPLETE\", \"test_prune_nothing_to_delete\": \"CODE_INCOMPLETE\", \"test_prune_multiple_backups_oldest_first\": \"CODE_INCOMPLETE\", \"test_prune_uses_environment_settings\": \"CODE_INCOMPLETE\"}",
+  "labels": {
+   "test_prune_deletes_old_backups_and_prints_summary": "CODE_INCOMPLETE",
+   "test_prune_dry_run_does_not_delete": "CODE_INCOMPLETE",
+   "test_prune_nothing_to_delete": "CODE_INCOMPLETE",
+   "test_prune_multiple_backups_oldest_first": "CODE_INCOMPLETE",
+   "test_prune_uses_environment_settings": "CODE_INCOMPLETE"
+  },
+  "repair": "failed",
+  "failing": 5,
+  "wrong": 0,
+  "incomplete": 5,
+  "result": "SOLVED",
+  "hidden": "9/9",
+  "solved": true,
+  "v1_class": "false_repair",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 2,
+  "repeat": 2,
+  "job_name": "02_list_backups",
+  "series": "backupd",
+  "kept": [
+   "test_list_no_backups",
+   "test_list_no_backups_output",
+   "test_list_single_backup",
+   "test_list_multiple_backups_oldest_first",
+   "test_list_ignores_non_backup_files",
+   "test_list_requires_only_backup_dir"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   6,
+   0
+  ],
+  "reply": "{\"test_list_no_backups\": \"CODE_INCOMPLETE\", \"test_list_no_backups_output\": \"CODE_INCOMPLETE\", \"test_list_single_backup\": \"CODE_INCOMPLETE\", \"test_list_multiple_backups_oldest_first\": \"CODE_INCOMPLETE\", \"test_list_ignores_non_backup_files\": \"CODE_INCOMPLETE\", \"test_list_requires_only_backup_dir\": \"CODE_INCOMPLETE\"}",
+  "labels": {
+   "test_list_no_backups": "CODE_INCOMPLETE",
+   "test_list_no_backups_output": "CODE_INCOMPLETE",
+   "test_list_single_backup": "CODE_INCOMPLETE",
+   "test_list_multiple_backups_oldest_first": "CODE_INCOMPLETE",
+   "test_list_ignores_non_backup_files": "CODE_INCOMPLETE",
+   "test_list_requires_only_backup_dir": "CODE_INCOMPLETE"
+  },
+  "repair": "passed",
+  "failing": 6,
+  "wrong": 0,
+  "incomplete": 6,
+  "result": "SOLVED",
+  "hidden": "8/8",
+  "solved": true,
+  "v1_class": "repair_passed_solved",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 3,
+  "repeat": 2,
+  "job_name": "03_cli_handlers_refactor",
+  "series": "backupd",
+  "kept": [
+   "test_each_command_has_handler",
+   "test_handler_names",
+   "test_main_calls_handler",
+   "test_handlers_return_exit_codes"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   4,
+   3
+  ],
+  "reply": "{\"test_main_calls_handler\": \"WRONG_TEST\"}",
+  "labels": {
+   "test_main_calls_handler": "WRONG_TEST"
+  },
+  "repair": null,
+  "failing": 1,
+  "wrong": 1,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "14/14",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 4,
+  "repeat": 2,
+  "job_name": "04_min_free_space",
+  "series": "backupd",
+  "kept": [
+   "test_min_free_space_default_zero",
+   "test_min_free_space_parsed_from_ini",
+   "test_min_free_space_parsed_from_env",
+   "test_invalid_min_free_space_is_config_error",
+   "test_show_config_lists_min_free_space",
+   "test_run_stops_when_disk_full"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   6,
+   5
+  ],
+  "reply": "{\"test_run_stops_when_disk_full\": \"WRONG_TEST\"}",
+  "labels": {
+   "test_run_stops_when_disk_full": "WRONG_TEST"
+  },
+  "repair": null,
+  "failing": 1,
+  "wrong": 1,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "12/12",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 5,
+  "repeat": 2,
+  "job_name": "05_partial_archive_bug",
+  "series": "backupd",
+  "kept": [
+   "test_archive_not_visible_while_writing",
+   "test_failed_zip_archive_removed",
+   "test_failed_tar_archive_removed",
+   "test_failed_run_keeps_existing_backups_and_last_run",
+   "test_failed_run_reports_error_and_exit_code"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   5,
+   2
+  ],
+  "reply": "{\"test_archive_not_visible_while_writing\": \"WRONG_TEST\", \"test_failed_run_keeps_existing_backups_and_last_run\": \"WRONG_TEST\", \"test_failed_run_reports_error_and_exit_code\": \"WRONG_TEST\"}",
+  "labels": {
+   "test_archive_not_visible_while_writing": "WRONG_TEST",
+   "test_failed_run_keeps_existing_backups_and_last_run": "WRONG_TEST",
+   "test_failed_run_reports_error_and_exit_code": "WRONG_TEST"
+  },
+  "repair": null,
+  "failing": 3,
+  "wrong": 3,
+  "incomplete": 0,
+  "result": "not solved",
+  "hidden": "2/6",
+  "solved": false,
+  "v1_class": "false_accept",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 6,
+  "repeat": 2,
+  "job_name": "06_status_report",
+  "series": "backupd",
+  "kept": [
+   "test_status_includes_oldest_and_total_size",
+   "test_status_oldest_and_total_size_values",
+   "test_status_json",
+   "test_status_json_with_backups"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   4,
+   3
+  ],
+  "reply": "{\"test_status_json_with_backups\": \"CODE_INCOMPLETE\"}",
+  "labels": {
+   "test_status_json_with_backups": "CODE_INCOMPLETE"
+  },
+  "repair": "failed",
+  "failing": 1,
+  "wrong": 0,
+  "incomplete": 1,
+  "result": "not solved",
+  "hidden": "2/7",
+  "solved": false,
+  "v1_class": "repair_failed_unsolved",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 7,
+  "repeat": 2,
+  "job_name": "07_verify_command",
+  "series": "backupd",
+  "kept": [
+   "test_verify_latest_backup",
+   "test_verify_named_backup",
+   "test_verify_tar_backup",
+   "test_verify_damaged_archive_fails",
+   "test_verify_missing_backup_fails",
+   "test_verify_no_backups_fails"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   6,
+   1
+  ],
+  "reply": "{\"test_verify_latest_backup\": \"WRONG_TEST\", \"test_verify_named_backup\": \"WRONG_TEST\", \"test_verify_tar_backup\": \"WRONG_TEST\", \"test_verify_damaged_archive_fails\": \"WRONG_TEST\", \"test_verify_missing_backup_fails\": \"WRONG_TEST\"}",
+  "labels": {
+   "test_verify_latest_backup": "WRONG_TEST",
+   "test_verify_named_backup": "WRONG_TEST",
+   "test_verify_tar_backup": "WRONG_TEST",
+   "test_verify_damaged_archive_fails": "WRONG_TEST",
+   "test_verify_missing_backup_fails": "WRONG_TEST"
+  },
+  "repair": null,
+  "failing": 5,
+  "wrong": 5,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "10/10",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 11,
+  "repeat": 2,
+  "job_name": "11_restore_command",
+  "series": "backupd",
+  "kept": [
+   "test_restore_latest_to_empty_dir",
+   "test_restore_named_backup",
+   "test_restore_refuses_nonempty_dest",
+   "test_restore_refuses_unsafe_archive",
+   "test_restore_unknown_backup_fails",
+   "test_restore_prints_success_message"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   6,
+   0
+  ],
+  "reply": "{\"test_restore_latest_to_empty_dir\": \"WRONG_TEST\", \"test_restore_named_backup\": \"WRONG_TEST\", \"test_restore_refuses_nonempty_dest\": \"WRONG_TEST\", \"test_restore_refuses_unsafe_archive\": \"WRONG_TEST\", \"test_restore_unknown_backup_fails\": \"WRONG_TEST\", \"test_restore_prints_success_message\": \"WRONG_TEST\"}",
+  "labels": {
+   "test_restore_latest_to_empty_dir": "WRONG_TEST",
+   "test_restore_named_backup": "WRONG_TEST",
+   "test_restore_refuses_nonempty_dest": "WRONG_TEST",
+   "test_restore_refuses_unsafe_archive": "WRONG_TEST",
+   "test_restore_unknown_backup_fails": "WRONG_TEST",
+   "test_restore_prints_success_message": "WRONG_TEST"
+  },
+  "repair": null,
+  "failing": 6,
+  "wrong": 6,
+  "incomplete": 0,
+  "result": "not solved",
+  "hidden": "11/12",
+  "solved": false,
+  "v1_class": "false_accept",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 12,
+  "repeat": 2,
+  "job_name": "12_prune_command",
+  "series": "backupd",
+  "kept": [
+   "test_prune_dry_run_nothing_to_prune",
+   "test_prune_dry_run_with_backups",
+   "test_prune_actual_deletion",
+   "test_prune_nothing_to_prune",
+   "test_prune_requires_no_source_dir"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   5,
+   2
+  ],
+  "reply": "{\"test_prune_dry_run_with_backups\": \"CODE_INCOMPLETE\", \"test_prune_actual_deletion\": \"CODE_INCOMPLETE\", \"test_prune_requires_no_source_dir\": \"CODE_INCOMPLETE\"}",
+  "labels": {
+   "test_prune_dry_run_with_backups": "CODE_INCOMPLETE",
+   "test_prune_actual_deletion": "CODE_INCOMPLETE",
+   "test_prune_requires_no_source_dir": "CODE_INCOMPLETE"
+  },
+  "repair": "failed",
+  "failing": 3,
+  "wrong": 0,
+  "incomplete": 3,
+  "result": "SOLVED",
+  "hidden": "9/9",
+  "solved": true,
+  "v1_class": "false_repair",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 1,
+  "repeat": 1,
+  "job_name": "01_ichunked_zero_n",
+  "series": "real_more-itertools_1304",
+  "kept": [
+   "test_ichunked_zero_returns_empty_on_nonempty_iterable",
+   "test_ichunked_zero_does_not_consume_source",
+   "test_ichunked_negative_raises_same_error_as_chunked"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   3,
+   1
+  ],
+  "reply": "{\"test_ichunked_zero_returns_empty_on_nonempty_iterable\": \"CODE_INCOMPLETE\", \"test_ichunked_zero_does_not_consume_source\": \"CODE_INCOMPLETE\"}",
+  "labels": {
+   "test_ichunked_zero_returns_empty_on_nonempty_iterable": "CODE_INCOMPLETE",
+   "test_ichunked_zero_does_not_consume_source": "CODE_INCOMPLETE"
+  },
+  "repair": "passed",
+  "failing": 2,
+  "wrong": 0,
+  "incomplete": 2,
+  "result": "SOLVED",
+  "hidden": "619/619",
+  "solved": true,
+  "v1_class": "repair_passed_solved",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 1,
+  "repeat": 2,
+  "job_name": "01_ichunked_zero_n",
+  "series": "real_more-itertools_1304",
+  "kept": [
+   "test_ichunked_zero_returns_empty_on_nonempty_iterable",
+   "test_ichunked_zero_does_not_consume_source",
+   "test_ichunked_zero_matches_chunked"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   3,
+   0
+  ],
+  "reply": "{\"test_ichunked_zero_returns_empty_on_nonempty_iterable\": \"CODE_INCOMPLETE\", \"test_ichunked_zero_does_not_consume_source\": \"CODE_INCOMPLETE\", \"test_ichunked_zero_matches_chunked\": \"CODE_INCOMPLETE\"}",
+  "labels": {
+   "test_ichunked_zero_returns_empty_on_nonempty_iterable": "CODE_INCOMPLETE",
+   "test_ichunked_zero_does_not_consume_source": "CODE_INCOMPLETE",
+   "test_ichunked_zero_matches_chunked": "CODE_INCOMPLETE"
+  },
+  "repair": "passed",
+  "failing": 3,
+  "wrong": 0,
+  "incomplete": 3,
+  "result": "SOLVED",
+  "hidden": "619/619",
+  "solved": true,
+  "v1_class": "repair_passed_solved",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 1,
+  "repeat": 1,
+  "job_name": "01_as_datetime_fraction_carry",
+  "series": "real_pyparsing_647",
+  "kept": [
+   "test_rounds_up_microsecond_carry_to_next_second",
+   "test_rounds_up_second_carry_to_next_minute"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   2,
+   1
+  ],
+  "reply": "{\"test_rounds_up_second_carry_to_next_minute\": \"CODE_INCOMPLETE\"}",
+  "labels": {
+   "test_rounds_up_second_carry_to_next_minute": "CODE_INCOMPLETE"
+  },
+  "repair": "failed",
+  "failing": 1,
+  "wrong": 0,
+  "incomplete": 1,
+  "result": "not solved",
+  "hidden": "1850/1856",
+  "solved": false,
+  "v1_class": "repair_failed_unsolved",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 1,
+  "repeat": 2,
+  "job_name": "01_as_datetime_fraction_carry",
+  "series": "real_pyparsing_647",
+  "kept": [
+   "test_rounds_up_fractional_seconds_to_next_second",
+   "test_rounds_up_fractional_seconds_with_seconds_carry"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   2,
+   1
+  ],
+  "reply": "{\"test_rounds_up_fractional_seconds_with_seconds_carry\": \"CODE_INCOMPLETE\"}",
+  "labels": {
+   "test_rounds_up_fractional_seconds_with_seconds_carry": "CODE_INCOMPLETE"
+  },
+  "repair": "passed",
+  "failing": 1,
+  "wrong": 0,
+  "incomplete": 1,
+  "result": "SOLVED",
+  "hidden": "1850/1850",
+  "solved": true,
+  "v1_class": "repair_passed_solved",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 1,
+  "repeat": 2,
+  "job_name": "01_compose_annotations",
+  "series": "real_toolz_634",
+  "kept": [
+   "test_compose_annotations_basic",
+   "test_compose_annotations_unannotated",
+   "test_compose_annotations_partial_curry_bound_method",
+   "test_compose_annotations_class_and_nested",
+   "test_compose_annotations_string_annotations",
+   "test_compose_annotations_wraps_and_class"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   6,
+   5
+  ],
+  "reply": "{\"test_compose_annotations_wraps_and_class\": \"WRONG_TEST\"}",
+  "labels": {
+   "test_compose_annotations_wraps_and_class": "WRONG_TEST"
+  },
+  "repair": null,
+  "failing": 1,
+  "wrong": 1,
+  "incomplete": 0,
+  "result": "not solved",
+  "hidden": "38/39",
+  "solved": false,
+  "v1_class": "false_accept",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 1,
+  "repeat": 2,
+  "job_name": "01_addlist_one_shot_iter",
+  "series": "real_boltons_458",
+  "kept": [
+   "test_addlist_with_generator_preserves_values",
+   "test_addlist_with_map_preserves_values",
+   "test_addlist_with_empty_generator_adds_nothing",
+   "test_addlist_with_reversed_preserves_values",
+   "test_addlist_with_zip_preserves_values",
+   "test_queryparamdict_addlist_with_generator"
+  ],
+  "log": "c21.log",
+  "check_before": [
+   6,
+   5
+  ],
+  "reply": "{\"test_addlist_with_empty_generator_adds_nothing\": \"CODE_INCOMPLETE\"}",
+  "labels": {
+   "test_addlist_with_empty_generator_adds_nothing": "CODE_INCOMPLETE"
+  },
+  "repair": "passed",
+  "failing": 1,
+  "wrong": 0,
+  "incomplete": 1,
+  "result": "SOLVED",
+  "hidden": "30/30",
+  "solved": true,
+  "v1_class": "repair_passed_solved",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 1,
+  "repeat": 1,
+  "job_name": "01_ichunked_zero_n",
+  "series": "real_more-itertools_1304",
+  "kept": [
+   "test_ichunked_zero_nonempty",
+   "test_ichunked_zero_does_not_consume",
+   "test_ichunked_negative_raises",
+   "test_ichunked_negative_empty"
+  ],
+  "log": "ablC2_all.log",
+  "check_before": [
+   4,
+   2
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": "passed",
+  "failing": 2,
+  "wrong": 0,
+  "incomplete": 2,
+  "result": "SOLVED",
+  "hidden": "619/619",
+  "solved": true,
+  "v1_class": "repair_passed_solved",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 1,
+  "repeat": 1,
+  "job_name": "01_decimal_floatfmt_precision",
+  "series": "real_tabulate_176",
+  "kept": [
+   "test_decimal_floatfmt_preserves_exact_digits",
+   "test_decimal_floatfmt_with_commas"
+  ],
+  "log": "ablC2_all.log",
+  "check_before": [
+   2,
+   1
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 1,
+  "wrong": 1,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "178/178",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 1,
+  "repeat": 2,
+  "job_name": "01_decimal_floatfmt_precision",
+  "series": "real_tabulate_176",
+  "kept": [
+   "TestDecimalFloatFormat::test_decimal_preserved_with_floatfmt",
+   "TestDecimalFloatFormat::test_mixed_decimal_and_float",
+   "TestDecimalFloatFormat::test_decimal_with_large_precision",
+   "TestDecimalFloatFormat::test_decimal_with_thousands_separator"
+  ],
+  "log": "ablC2_all.log",
+  "check_before": [
+   4,
+   3
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 1,
+  "wrong": 1,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "178/178",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 1,
+  "repeat": 1,
+  "job_name": "01_interpose_empty",
+  "series": "real_toolz_635",
+  "kept": [
+   "test_interpose_empty_list",
+   "test_interpose_empty_tuple",
+   "test_interpose_empty_string",
+   "test_interpose_generator_empty"
+  ],
+  "log": "ablC2_all.log",
+  "check_before": [
+   4,
+   0
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": "passed",
+  "failing": 4,
+  "wrong": 0,
+  "incomplete": 4,
+  "result": "SOLVED",
+  "hidden": "51/51",
+  "solved": true,
+  "v1_class": "repair_passed_solved",
+  "toxic_candidate": true
+ },
+ {
+  "arm": "off",
+  "job": 1,
+  "repeat": 2,
+  "job_name": "01_addlist_one_shot_iter",
+  "series": "real_boltons_458",
+  "kept": [
+   "test_addlist_with_generator",
+   "test_addlist_with_empty_generator",
+   "test_addlist_with_map",
+   "test_addlist_with_filter",
+   "test_addlist_with_reversed",
+   "test_addlist_with_zip"
+  ],
+  "log": "ablC2_all.log",
+  "check_before": [
+   6,
+   5
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": "passed",
+  "failing": 1,
+  "wrong": 0,
+  "incomplete": 1,
+  "result": "SOLVED",
+  "hidden": "30/30",
+  "solved": true,
+  "v1_class": "repair_passed_solved",
+  "toxic_candidate": false
+ },
+ {
+  "arm": "off",
+  "job": 1,
+  "repeat": 1,
+  "job_name": "01_asciidoc_alignment",
+  "series": "real_tabulate_256",
+  "kept": [
+   "test_asciidoc_column_alignment_left",
+   "test_asciidoc_column_alignment_right",
+   "test_asciidoc_column_alignment_center",
+   "test_asciidoc_headerless_table_alignment",
+   "test_asciidoc_alignment_operator_before_width"
+  ],
+  "log": "ablC2_all.log",
+  "check_before": [
+   5,
+   1
+  ],
+  "reply": "",
+  "labels": {},
+  "repair": null,
+  "failing": 4,
+  "wrong": 4,
+  "incomplete": 0,
+  "result": "SOLVED",
+  "hidden": "178/178",
+  "solved": true,
+  "v1_class": "true_accept",
+  "toxic_candidate": false
+ }
+]

@@ -495,3 +495,8 @@ result = OutputOptimizer.create_message_with_optimization(
 **Status:** Research complete, ready for implementation ✅
 
 **Next:** Implement Phase 1 (JSON + budgets + max_tokens)
+
+## Related
+
+- _(add links to related documents here)_
+

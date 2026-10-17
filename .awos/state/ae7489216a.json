@@ -1,0 +1,14 @@
+{
+  "goal": "add type hints",
+  "goal_hash": "ae7489216a",
+  "started_at": "2026-05-17T02:29:10",
+  "last_updated": "2026-05-17T02:29:10",
+  "completed_task_ids": [],
+  "failed_task_ids": [
+    1
+  ],
+  "session_ids": [
+    "orch_831fcb4d"
+  ],
+  "status": "in_progress"
+}

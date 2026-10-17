@@ -1,0 +1,112 @@
+{
+  "session_id": "orch_220479a2",
+  "goal": "create docs/planner_owned.md about uncensored agents",
+  "status": "completed",
+  "started_at": "2026-06-14T14:55:46Z",
+  "files": [
+    {
+      "path": "docs/planner_owned.md",
+      "status": "modified",
+      "lines_added": 11,
+      "lines_removed": 0,
+      "hunks": [
+        {
+          "old_start": 0,
+          "old_count": 0,
+          "new_start": 1,
+          "new_count": 11,
+          "lines": [
+            {
+              "type": "header",
+              "content": "@@ -0,0 +1,11 @@",
+              "old_line_no": null,
+              "new_line_no": null
+            },
+            {
+              "type": "add",
+              "content": "# E2E Deliverable",
+              "old_line_no": null,
+              "new_line_no": 1
+            },
+            {
+              "type": "add",
+              "content": "",
+              "old_line_no": null,
+              "new_line_no": 2
+            },
+            {
+              "type": "add",
+              "content": "**Goal:** Goal: create docs/planner_owned.md about uncensored agents",
+              "old_line_no": null,
+              "new_line_no": 3
+            },
+            {
+              "type": "add",
+              "content": "Action: create docs/planner_owned.md about uncensored agents",
+              "old_line_no": null,
+              "new_line_no": 4
+            },
+            {
+              "type": "add",
+              "content": "Output file: docs/planner_owned.md",
+              "old_line_no": null,
+              "new_line_no": 5
+            },
+            {
+              "type": "add",
+              "content": "Content guidance: create docs/planner_owned.md about uncensored agents",
+              "old_line_no": null,
+              "new_line_no": 6
+            },
+            {
+              "type": "add",
+              "content": "",
+              "old_line_no": null,
+              "new_line_no": 7
+            },
+            {
+              "type": "add",
+              "content": "**Path:** `docs/planner_owned.md`",
+              "old_line_no": null,
+              "new_line_no": 8
+            },
+            {
+              "type": "add",
+              "content": "",
+              "old_line_no": null,
+              "new_line_no": 9
+            },
+            {
+              "type": "add",
+              "content": "This file was written by the automated deliverable E2E harness (mock LLM).",
+              "old_line_no": null,
+              "new_line_no": 10
+            },
+            {
+              "type": "add",
+              "content": "Timestamp: 1781448946",
+              "old_line_no": null,
+              "new_line_no": 11
+            }
+          ]
+        }
+      ],
+      "unified_diff": "--- docs/planner_owned.md (before)\n+++ docs/planner_owned.md (after)\n@@ -0,0 +1,11 @@\n+# E2E Deliverable\n\n+\n\n+**Goal:** Goal: create docs/planner_owned.md about uncensored agents\n\n+Action: create docs/planner_owned.md about uncensored agents\n\n+Output file: docs/planner_owned.md\n\n+Content guidance: create docs/planner_owned.md about uncensored agents\n\n+\n\n+**Path:** `docs/planner_owned.md`\n\n+\n\n+This file was written by the automated deliverable E2E harness (mock LLM).\n\n+Timestamp: 1781448946\n",
+      "before_excerpt": "",
+      "after_excerpt": "# E2E Deliverable\n\n**Goal:** Goal: create docs/planner_owned.md about uncensored agents\nAction: create docs/planner_owned.md about uncensored agents\nOutput file: docs/planner_owned.md\nContent guidance: create docs/planner_owned.md about uncensored agents\n\n**Path:** `docs/planner_owned.md`\n\nThis file was written by the automated deliverable E2E harness (mock LLM).\nTimestamp: 1781448946\n"
+    }
+  ],
+  "summary": {
+    "total_files": 1,
+    "created": 0,
+    "modified": 1,
+    "deleted": 0,
+    "lines_added": 11,
+    "lines_removed": 0
+  },
+  "completed_at": "2026-06-14T14:55:47Z",
+  "tasks_completed": 1,
+  "tasks_failed": 0,
+  "total_cost_usd": 0.0,
+  "elapsed_sec": 1.4635207653045654
+}

@@ -1,3 +1,9 @@
+---
+title: "P2 Spec — Prompt Cache, Parallel Sampling, Worktree, Condensed History"
+tags:
+  - doc/spec
+---
+
 # P2 Spec — Prompt Cache, Parallel Sampling, Worktree, Condensed History
 
 **Full spec**: [docs/specs/p2_performance_spec.html](p2_performance_spec.html)  
@@ -22,3 +28,8 @@ Module-level Planner singleton for prompt caching (75% cost reduction). Parallel
 - scaffold/agent/worker.py — sampling
 - scaffold/agent/worktree.py (new) — WorktreeManager
 - tests/test_p2_improvements.py — new test file
+
+## Related
+
+- _(add links to related documents here)_
+

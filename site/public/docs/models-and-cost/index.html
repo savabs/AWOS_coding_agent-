@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Models and cost · AWOS docs</title>
+<meta name="description" content="Use Claude Haiku 5.5 in the cloud or a free local model with AWOS, set per-job dollar caps, and see what tickets cost in measured runs.">
+<link rel="canonical" href="https://awos.tirramind.com/docs/models-and-cost/">
+<meta property="og:title" content="Models and cost · AWOS docs">
+<meta property="og:description" content="Use Claude Haiku 5.5 in the cloud or a free local model with AWOS, set per-job dollar caps, and see what tickets cost in measured runs.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://awos.tirramind.com/docs/models-and-cost/">
+<meta name="robots" content="index,follow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap">
+  <a class="brand" href="/" aria-label="AWOS home">AWOS<span>.</span></a>
+  <nav class="links" aria-label="Main">
+    <a class="wide" href="/#how">How it works</a>
+    <a class="wide" href="/#results">Results</a>
+    <a href="/docs/" aria-current="page">Docs</a>
+    <a class="wide" href="/docs/security/">Security</a>
+    <a class="wide" href="/#pricing">Pricing</a>
+  </nav>
+  <a class="btn primary" href="/#waitlist">Join the waitlist</a>
+</div></header>
+<main id="main" class="wrap"><div class="docs-layout">
+<nav class="docs-side" aria-label="Docs">
+<h2>Docs</h2>
+<ul>
+<li><a href="/docs/">Overview</a></li>
+<li><a href="/docs/quickstart/">Quickstart</a></li>
+<li><a href="/docs/fix-github/">Fix a GitHub issue or PR</a></li>
+<li><a href="/docs/concepts/">Concepts</a></li>
+<li><a href="/docs/models-and-cost/" aria-current="page">Models and cost</a></li>
+<li><a href="/docs/cli/">CLI reference</a></li>
+<li><a href="/docs/security/">Security and privacy</a></li>
+<li><a href="/docs/faq/">FAQ</a></li>
+</ul>
+</nav>
+<article class="doc">
+<div class="eyebrow">Docs · Models and cost</div>
+<h1>Models and cost</h1>
+<p class="lede">You bring your own model provider and pay them directly. AWOS records the cost of every model call and stops a job at its budget.</p>
+
+<h2 id="cloud">Cloud: Claude Haiku 5.5</h2>
+<p>The default cloud model is Claude Haiku 5.5, called directly through the Anthropic API with prompt caching on. Set <code>ANTHROPIC_API_KEY</code> and check it with <code>awos keys</code>.</p>
+<table>
+  <thead><tr><th>Measured run</th><th>Result</th><th>Cost</th></tr></thead>
+  <tbody>
+    <tr><td>73 real GitHub issues from 26 Python projects, one attempt each, judged by hidden tests</td><td>72 / 73 solved</td><td>$0.0071 per issue on average</td></tr>
+    <tr><td>Finance tracker built from a README spec in an empty folder (8 features)</td><td>58 / 58 hidden tests, 8.8 min</td><td>$0.16</td></tr>
+    <tr><td>Six realistic multi-step tasks (migration, debugging, performance, features)</td><td>6 / 6 solved</td><td>$0.46 for all six</td></tr>
+  </tbody>
+</table>
+<p class="note">Runs of 2026-10-11, one run per task. These are public projects, so the model may have seen some fixes in training, and your results will vary with your codebase and tests. Costs are AWOS's own ledger at list prices.</p>
+
+<h2 id="local">Local: a free model on your machine</h2>
+<p>Run an open model on your own computer and point AWOS at it with <code>AWOS_PROVIDER=local</code>. AWOS talks to a local OpenAI-compatible server such as <code>llama-server</code>; <code>awos keys</code> reports whether it is reachable. A local job costs $0 per ticket and needs no network.</p>
+<ul>
+  <li>Measured: Qwen3.5 9B on a 16 GB MacBook solved 8 of 10 easy real issues through AWOS (2026-10).</li>
+  <li>It is slow: about 20 minutes or more per issue on that laptop, so it suits overnight queues of routine fixes.</li>
+  <li>Combine it with <code>--privacy local_only</code> to guarantee a job cannot reach a cloud model (see <a href="/docs/security/#local-only">Security</a>).</li>
+</ul>
+
+<h2 id="budgets">Budgets</h2>
+<ul>
+  <li><code>awos submit --budget USD</code> caps a job's spend. The default is 1.0; <code>0</code> means no cap.</li>
+  <li>The cap covers the whole job, including any continuation: each attempt gets what is left.</li>
+  <li>A job stops when it reaches its cap.</li>
+  <li><code>awos status --digest</code> shows today's spend, counted from AWOS's own model calls.</li>
+</ul>
+<nav class="pager" aria-label="Docs pages"><a class="prev" href="/docs/concepts/"><small>Previous</small>Concepts</a><a class="next" href="/docs/cli/"><small>Next</small>CLI reference</a></nav>
+</article>
+</div></main>
+<footer class="site"><div class="wrap">
+  <span>AWOS. A local-first coding agent. Built in India.</span>
+  <nav aria-label="Footer">
+    <a href="/docs/">Docs</a>
+    <a href="/docs/quickstart/">Quickstart</a>
+    <a href="/docs/security/">Security</a>
+    <a href="/docs/faq/">FAQ</a>
+    <a href="/#waitlist">Waitlist</a>
+    <a href="/access/">Team early access</a>
+  </nav>
+</div></footer>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "parent_version": 1,
+  "status": "candidate",
+  "evolved_guidelines": "- Do not use external LLM API calls to perform edits; directly apply the SEARCH/REPLACE patch to the file.\n- Make SEARCH blocks flexible by matching only key unique lines rather than exact surrounding context to avoid rigid match failures.\n- Before applying a SEARCH/REPLACE patch, confirm that the search text exactly exists in the target file to prevent empty search errors.",
+  "evolved_at": "2026-06-18T07:41:53Z",
+  "session_count": 10,
+  "changes_applied": 3,
+  "reason": "periodic evolution from error patterns",
+  "evidence_summary": {}
+}

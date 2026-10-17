@@ -1,0 +1,40 @@
+name = "awos"
+pages_build_output_dir = "public"
+compatibility_date = "2026-10-01"
+
+[[kv_namespaces]]
+binding = "ACCESS_REQUESTS"
+id = "7ed8feebbe6147499b5b705d0d25d19f"
+
+# USAGE and LICENSES are OPTIONAL and deliberately not bound here yet.
+# Pages rejects a deploy whose wrangler.toml names a KV id that does not exist,
+# so placeholder ids blocked every deploy. Without the bindings the functions
+# degrade safely: /api/ping answers 204 and drops the count, /api/usage is 404,
+# /api/license/* and /api/paddle/webhook answer 503 "licensing not configured",
+# /api/paddle/config stays {"enabled":false}.
+# To turn them on, create the namespaces and add these blocks back with the
+# real ids (steps: docs/launch/paddle_setup.md, section 3):
+#
+# [[kv_namespaces]]
+# binding = "USAGE"        # opt-in usage counters: functions/api/ping.js, api/usage.js
+# id = "<id from: npx wrangler kv namespace create USAGE>"
+#
+# [[kv_namespaces]]
+# binding = "LICENSES"     # AWOS Pro licences: functions/api/paddle/webhook.js, api/license/*.js
+# id = "<id from: npx wrangler kv namespace create LICENSES>"
+
+[vars]
+# sandbox -> sandbox-api.paddle.com + Paddle.Environment "sandbox"; live -> api.paddle.com.
+PADDLE_ENV = "sandbox"
+# /api/paddle/config returns enabled:false (no checkout) unless this is "1" AND
+# every secret below is set AND the client token matches PADDLE_ENV (test_/live_).
+PADDLE_CHECKOUT_ENABLED = "0"
+
+# Secrets (never in this file): `npx wrangler pages secret put NAME --project-name awos`
+#   PADDLE_API_KEY          server-side Paddle API key (claim: GET /transactions/{id})
+#   PADDLE_WEBHOOK_SECRET   the notification destination's secret (pdl_ntfset_...)
+#   PADDLE_CLIENT_TOKEN     client-side token (test_... sandbox / live_... live)
+#   PADDLE_PRICE_IDS        comma-separated AWOS Pro price ids (pri_...); others are ignored
+#   ADMIN_TOKEN             already used by /api/request-access; also guards /api/usage
+# Optional: PAST_DUE_GRACE_DAYS (default 3).
+# Full owner steps: docs/launch/paddle_setup.md

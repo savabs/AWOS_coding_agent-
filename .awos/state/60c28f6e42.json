@@ -1,0 +1,41 @@
+{
+  "goal": "Refactor scaffold/agent/worker.py: extract the prompt-building logic from execute_task() into a new private method _build_prompt(self, task, file_content, codebase_context, attempt, error_context, past_critiques, vector_chunks, examples_section, skill_section, symbol_section) -> str. _build_prompt() returns the full system prompt string. execute_task() calls _build_prompt() and passes the result directly to the LLM. All existing behaviour must be preserved.",
+  "goal_hash": "60c28f6e42",
+  "started_at": "2026-05-20T21:16:43",
+  "last_updated": "2026-05-21T22:32:32",
+  "completed_task_ids": [
+    "1_1",
+    "1_2",
+    "1_3",
+    "1_4",
+    "1_1_1",
+    "1_2_1",
+    "1_2_2",
+    "1_1_2"
+  ],
+  "failed_task_ids": [
+    1,
+    "1_3_1",
+    "1_3_2",
+    "1_4_1",
+    "1_4_2",
+    "1_1",
+    "1_1_1"
+  ],
+  "session_ids": [
+    "orch_33b5945f",
+    "orch_54bbeb73",
+    "orch_85a46b86",
+    "orch_fcafc2b0",
+    "orch_fa7ff4b3",
+    "orch_26e4523e",
+    "orch_973d4d06",
+    "orch_d595cb52",
+    "orch_89368b29",
+    "orch_eafab91e",
+    "orch_88cd6696",
+    "orch_0c3add0a",
+    "orch_3c3baa35"
+  ],
+  "status": "failed"
+}

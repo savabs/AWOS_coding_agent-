@@ -1,0 +1,49 @@
+{
+  "root_id": "g_e6d028141b52",
+  "nodes": {
+    "g_e6d028141b52": {
+      "goal_id": "g_e6d028141b52",
+      "description": "create docs/e2e_via_http_guide.md about deliverable routing",
+      "parent_ids": [],
+      "child_ids": [
+        "g_6fab60f8fb9e"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-14T14:55:48Z",
+      "updated_at": "2026-06-14T14:55:48Z",
+      "completed_at": "2026-06-14T14:55:48Z",
+      "session_ids": [
+        "orch_e5f3729d"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_6fab60f8fb9e": {
+      "goal_id": "g_6fab60f8fb9e",
+      "description": "create docs/e2e_via_http_guide.md about deliverable routing",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "create_file",
+          "path": "docs/e2e_via_http_guide.md",
+          "file": "docs/e2e_via_http_guide.md",
+          "action": "create docs/e2e_via_http_guide.md about deliverable routing",
+          "content_hint": "create docs/e2e_via_http_guide.md about deliverable routing",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-14T14:55:48Z",
+      "updated_at": "2026-06-14T14:55:48Z",
+      "completed_at": "2026-06-14T14:55:48Z",
+      "session_ids": [
+        "orch_e5f3729d"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

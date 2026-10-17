@@ -1,3 +1,10 @@
+---
+title: "AWOS SOTA Improvements — Master Task"
+tags:
+  - doc/task
+  - status/active
+---
+
 # AWOS SOTA Improvements — Master Task
 
 **Full task**: [tasks/active/sota_improvements_task.html](sota_improvements_task.html)  
@@ -24,3 +31,8 @@
 - P1: docs/specs/p1_verifier_architect_spec.html
 - P2: docs/specs/p2_performance_spec.html
 - P3: docs/specs/p3_advanced_spec.html
+
+## Related
+
+- _(add links to related documents here)_
+

@@ -1,0 +1,66 @@
+[
+  {
+    "task_id": 1,
+    "task_type": "edit_file",
+    "path": "scaffold/agent/runtime_session.py",
+    "file": "scaffold/agent/runtime_session.py",
+    "action": "Add a one-line docstring to RuntimeSessionStore.checkpoint() stating it persists progress for pause and resume",
+    "complexity": "low"
+  },
+  {
+    "task_id": 2,
+    "task_type": "edit_file",
+    "path": "scaffold/agent/plan_actions.py",
+    "file": "scaffold/agent/plan_actions.py",
+    "action": "Add a one-line docstring to replan_task_after_verify_fail() explaining it runs after verifier rejection",
+    "complexity": "low"
+  },
+  {
+    "task_id": 3,
+    "task_type": "edit_file",
+    "path": "scaffold/agent/virtual_execution_runtime.py",
+    "file": "scaffold/agent/virtual_execution_runtime.py",
+    "action": "Add a one-line docstring to finalize() noting pause keeps worktree while completed may commit",
+    "complexity": "low"
+  },
+  {
+    "task_id": 4,
+    "task_type": "edit_file",
+    "path": "scaffold/agent/verifier.py",
+    "file": "scaffold/agent/verifier.py",
+    "action": "Add a one-line comment immediately above _check_edit_fidelity explaining the fidelity gate for comment-above vs docstring edits",
+    "complexity": "low"
+  },
+  {
+    "task_id": 5,
+    "task_type": "edit_file",
+    "path": "tests/test_symbol_index_worktree.py",
+    "file": "tests/test_symbol_index_worktree.py",
+    "action": "Add a one-line module comment at the top: G1 gauntlet — SymbolIndex must index worktree paths",
+    "complexity": "low"
+  },
+  {
+    "task_id": 6,
+    "task_type": "edit_file",
+    "path": "tests/test_pause_resume_orchestrator.py",
+    "file": "tests/test_pause_resume_orchestrator.py",
+    "action": "Add one line to the module docstring: proves G2-style pause mid-plan and resume",
+    "complexity": "low"
+  },
+  {
+    "task_id": 7,
+    "task_type": "edit_file",
+    "path": "scripts/stage1_gauntlet_runner.py",
+    "file": "scripts/stage1_gauntlet_runner.py",
+    "action": "Add G7 to the module docstring usage examples (verify-fail replan gauntlet)",
+    "complexity": "low"
+  },
+  {
+    "task_id": 8,
+    "task_type": "edit_file",
+    "path": "docs/missions/README.md",
+    "file": "docs/missions/README.md",
+    "action": "Add a short Long mission paragraph mentioning awos mission start --long uses a fixed 8-task plan",
+    "complexity": "low"
+  }
+]

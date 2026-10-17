@@ -1,0 +1,78 @@
+{
+  "root_id": "g_d15ef3f9f821",
+  "nodes": {
+    "g_d15ef3f9f821": {
+      "goal_id": "g_d15ef3f9f821",
+      "description": "In scaffold/agent/orchestrator.py, modify _cheap_call() to retry up to 3 times with exponential backoff (delay: 0.5s, 1s, 2s). Only retry on network/API errors (Exception). If all retries fail, return empty string. Keep existing logging.",
+      "parent_ids": [],
+      "child_ids": [
+        "g_f02272d63860"
+      ],
+      "tasks": [],
+      "status": "in_progress",
+      "created_at": "2026-05-20T15:45:25Z",
+      "updated_at": "2026-05-20T15:45:38Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_0c0eecbf"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_f02272d63860": {
+      "goal_id": "g_f02272d63860",
+      "description": "Modify _cheap_call() to retry up to 3 times with exponential backoff (delays: 0.5s, 1s, 2s) on any Exception. If all retries are exhausted, return empty string. Preserve all existing logging. Use time.sleep for delays.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "scaffold/agent/orchestrator.py",
+          "action": "Modify _cheap_call() to retry up to 3 times with exponential backoff (delays: 0.5s, 1s, 2s) on any Exception. If all retries are exhausted, return empty string. Preserve all existing logging. Use time.sleep for delays.",
+          "complexity": "medium",
+          "function_signature": "def _cheap_call(self, prompt: str) -> str:",
+          "interface_contract": "Called internally by the orchestrator to make a low-cost LLM API call; returns the response string or empty string on total failure",
+          "constraints": [
+            "Retry exactly 3 times maximum (attempts 1, 2, 3) before giving up",
+            "Backoff delays must be 0.5s before retry 1, 1.0s before retry 2, 2.0s before retry 3",
+            "Only catch Exception (or subclasses) to trigger a retry",
+            "If all 3 retries fail, return empty string ''",
+            "All existing logging calls inside _cheap_call must remain unchanged",
+            "Add a log message (e.g. logging.warning) on each retry attempt that includes the attempt number and the exception",
+            "import time must be present at the top of the file (add if missing)"
+          ],
+          "must_not": [
+            "Must not catch BaseException or bare except",
+            "Must not raise any exception out of _cheap_call after retries are exhausted",
+            "Must not alter any other method in the file",
+            "Must not use third-party retry libraries (e.g. tenacity)",
+            "Must not change the function signature"
+          ],
+          "example_call": "result = self._cheap_call('Summarize this text')"
+        }
+      ],
+      "status": "failed",
+      "created_at": "2026-05-20T15:45:38Z",
+      "updated_at": "2026-05-21T16:52:50Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_0c0eecbf",
+        "orch_f2d2e933",
+        "orch_f2badeb9",
+        "orch_fc4c4722",
+        "orch_7bfa889f",
+        "orch_cb52e639",
+        "orch_d6ba61a2",
+        "orch_a34efe16",
+        "orch_cadca969",
+        "orch_71732400",
+        "orch_e44f6e8d",
+        "orch_079d13d4",
+        "orch_f6dd1c78",
+        "orch_46eaa82c"
+      ],
+      "failure_count": 13,
+      "critique_ids": []
+    }
+  }
+}

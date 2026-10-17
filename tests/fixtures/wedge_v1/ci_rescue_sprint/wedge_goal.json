@@ -1,0 +1,17 @@
+{
+  "corpus_id": "ci_rescue_sprint_v1",
+  "updated": "2026-06-25",
+  "description": "CI Rescue Sprint — 28 reds, 7 greens, 5 modules, 35 tests",
+  "scale": {
+    "red_count_before": 28,
+    "green_regression_count": 7,
+    "total_tests": 35,
+    "source_modules": 5,
+    "target_wall_minutes": "30-120"
+  },
+  "goal_assertions": {
+    "must_still_pass": "python3 -m pytest tests/ -q --tb=no",
+    "forbidden_paths": ["tests/", "conftest.py", "golden/"],
+    "max_wall_minutes": 120
+  }
+}

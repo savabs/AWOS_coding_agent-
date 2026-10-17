@@ -1,0 +1,19 @@
+{
+  "goal": "Add comment above _try_cheap_fallback in worker.py",
+  "goal_hash": "158ee1f824",
+  "started_at": "2026-06-21T11:55:01",
+  "last_updated": "2026-06-21T12:31:55",
+  "completed_task_ids": [
+    1,
+    "1_r1"
+  ],
+  "failed_task_ids": [
+    1
+  ],
+  "session_ids": [
+    "orch_997f83f7",
+    "orch_43330609",
+    "orch_8f35e9bf"
+  ],
+  "status": "complete"
+}

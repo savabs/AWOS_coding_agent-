@@ -1,0 +1,113 @@
+"""Where backups live on disk, and how old ones are pruned."""
+
+import logging
+import re
+import shutil
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import List, Optional
+
+from .config import DEFAULT_SETTINGS_PATH, read_parser, resolve_setting
+from .errors import BackupNotFoundError, ConfigError
+
+log = logging.getLogger("backupd.storage")
+
+BACKUP_NAME_RE = re.compile(r"^backup-(\d{8}-\d{6})\.(zip|tar)$")
+TIMESTAMP_FORMAT = "%Y%m%d-%H%M%S"
+
+
+def _read_storage_settings(settings_path=DEFAULT_SETTINGS_PATH):
+    # Storage only needs a few values; resolve them (environment first, then
+    # settings.ini) without paying for a full load_config().
+    parser = read_parser(settings_path)
+    keep_last = resolve_setting("keep_last", parser=parser)
+    if keep_last < 0:
+        raise ConfigError("setting 'keep_last' must not be negative")
+    return (
+        resolve_setting("backup_dir", parser=parser),
+        resolve_setting("retention_days", parser=parser),
+        keep_last,
+    )
+
+
+def backup_root(settings_path=DEFAULT_SETTINGS_PATH) -> Path:
+    """Directory that holds the backup archives."""
+    return _read_storage_settings(settings_path)[0]
+
+
+def retention_days(settings_path=DEFAULT_SETTINGS_PATH) -> int:
+    """How many days of backups are kept."""
+    return _read_storage_settings(settings_path)[1]
+
+
+def ensure_backup_root(settings_path=DEFAULT_SETTINGS_PATH) -> Path:
+    root = backup_root(settings_path)
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def parse_backup_time(path: Path) -> Optional[datetime]:
+    """Timestamp encoded in a backup file name, or None if not a backup."""
+    match = BACKUP_NAME_RE.match(path.name)
+    if not match:
+        return None
+    return datetime.strptime(match.group(1), TIMESTAMP_FORMAT)
+
+
+def list_backups(root: Path) -> List[Path]:
+    """Backup archives in *root*, oldest first."""
+    if not root.is_dir():
+        return []
+    found = [p for p in root.iterdir() if p.is_file() and parse_backup_time(p)]
+    return sorted(found, key=parse_backup_time)
+
+
+def find_backup(root: Path, name: Optional[str] = None) -> Path:
+    """The backup called *name* in *root* (the newest one when name is None/"latest")."""
+    backups = list_backups(root)
+    if not backups:
+        raise BackupNotFoundError(f"no backups in {root}")
+    if name in (None, "latest"):
+        return backups[-1]
+    for path in backups:
+        if path.name == name:
+            return path
+    raise BackupNotFoundError(f"no backup named {name} in {root}")
+
+
+def store_archive(archive: Path, settings_path=DEFAULT_SETTINGS_PATH) -> Path:
+    """Move a freshly built archive into the backup root."""
+    root = ensure_backup_root(settings_path)
+    target = root / archive.name
+    if archive.resolve() != target.resolve():
+        shutil.move(str(archive), str(target))
+    return target
+
+
+def backups_to_prune(now=None, settings_path=DEFAULT_SETTINGS_PATH) -> List[Path]:
+    """Backups the retention policy would delete now, oldest first.
+
+    That is every backup older than ``retention_days``, except that the newest
+    ``keep_last`` backups are always kept, however old they are.
+    """
+    now = now or datetime.now()
+    root, keep_days, keep_last = _read_storage_settings(settings_path)
+    cutoff = now - timedelta(days=keep_days)
+    backups = list_backups(root)
+    candidates = backups[: len(backups) - keep_last] if keep_last else backups
+    return [path for path in candidates if parse_backup_time(path) < cutoff]
+
+
+def prune_old_backups(now=None, settings_path=DEFAULT_SETTINGS_PATH,
+                      dry_run: bool = False) -> List[Path]:
+    """Delete what :func:`backups_to_prune` selects; return those paths.
+
+    With ``dry_run`` nothing is deleted.
+    """
+    selected = backups_to_prune(now, settings_path)
+    if dry_run:
+        return selected
+    for path in selected:
+        log.info("pruning %s", path.name)
+        path.unlink()
+    return selected

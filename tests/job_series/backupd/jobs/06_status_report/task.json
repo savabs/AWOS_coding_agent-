@@ -1,0 +1,7 @@
+{
+  "id": "06_status_report",
+  "goal": "Two things for `status`, which our monitoring polls. First, after the existing lines add `oldest:` (when the oldest backup was taken, same format as `latest`, or None) and `total_size:` (all backups together, in the size format backupd uses everywhere). Only real backup archives count. Second, add `status --json`, which prints the same report as a JSON object with the same keys and values (true/false, numbers and null as JSON types), so the monitoring can parse it. Everything else about status stays as it is, including that it only needs the backup folder to be configured.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

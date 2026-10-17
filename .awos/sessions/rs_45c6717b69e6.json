@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "session_id": "rs_45c6717b69e6",
+  "goal": "In scaffold/agent/token_tracker.py add a one-line docstring to check_guard explaining it blocks requests when the monthly budget cap is exceeded",
+  "goal_hash": "4821166f7d",
+  "status": "completed",
+  "created_at": "2026-06-18T04:17:25Z",
+  "updated_at": "2026-06-18T04:17:39Z",
+  "paused_at": null,
+  "codebase_root": ".",
+  "reasoning_session_id": "orch_1af5956d",
+  "goal_graph_id": "g_7f7a8ffd82f4",
+  "progress": {
+    "completed_task_ids": [
+      1
+    ],
+    "failed_task_ids": [],
+    "current_task_id": null,
+    "total_tasks": 1,
+    "decomposition_depth": 0
+  },
+  "budget": {
+    "spent_usd": 0.00133746
+  },
+  "sandbox": {
+    "enabled": false,
+    "feature_id": null,
+    "worktree_path": null,
+    "branch": null
+  },
+  "parent_session_id": null,
+  "cancel_requested": false
+}

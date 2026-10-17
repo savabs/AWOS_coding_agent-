@@ -1,3 +1,9 @@
+---
+title: "CLI Interface Research"
+tags:
+  - doc/research
+---
+
 # CLI Interface Research
 
 ## Existing Patterns
@@ -29,3 +35,8 @@ If it grows beyond ~300 lines, split into `scaffold/agent/cli/commands.py`.
 | `awos budget` | `BudgetLedger.get_status()` |
 | `awos index` | `CodebaseIndex.index_project()` |
 | `awos run <goal>` | `Orchestrator.execute_feature(goal)` |
+
+## Related
+
+- _(add links to related documents here)_
+

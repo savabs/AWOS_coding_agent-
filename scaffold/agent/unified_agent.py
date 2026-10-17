@@ -23,8 +23,7 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-from anthropic import Anthropic
-from openai import OpenAI
+from providers import chat_client, messages_client
 
 from chat_orchestrator import ChatOrchestrator, IntentParser
 from session_memory import SessionMemory, ChatSessionManager, MemoryStrategy
@@ -108,11 +107,11 @@ class RequestRouter:
         """Initialize semantic router"""
         # Try to initialize Anthropic client
         api_key = os.getenv("ANTHROPIC_API_KEY")
-        self.client = Anthropic(api_key=api_key) if api_key else None
+        self.client = messages_client(api_key)
         self.routing_cache = {}
         
         if not self.client:
-            print("⚠️  ANTHROPIC_API_KEY not set - using fallback regex routing")
+            print("⚠️  OPENROUTER_API_KEY / ANTHROPIC_API_KEY not set - using fallback regex routing")
             self.use_semantic = False
         else:
             self.use_semantic = True
@@ -354,11 +353,10 @@ class UnifiedAgent:
             if reason_bl:
                 logger.warning(reason_bl)
 
-        api_key = os.getenv("DEEPSEEK_API_KEY")
-        if not api_key:
+        client = chat_client(os.getenv("DEEPSEEK_API_KEY"), "https://api.deepseek.com")
+        if client is None:
             return self._call_anthropic(system_prompt, user_prompt, max_tokens)  # Fall back to Haiku
         try:
-            client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
             response = client.chat.completions.create(
                 model="deepseek-chat",
                 messages=[
@@ -583,8 +581,16 @@ class UnifiedAgent:
         if past_solutions:
             user_input = f"[PAST CONTEXT]\n{past_solutions}\n\n[NEW REQUEST]\n{user_input}"
 
-        # Phase 3: Check response cache before routing (free hits)
-        cache_key = self.response_cache.make_key("unified", user_input)
+        # Phase 3: Check response cache before routing (free hits). The key
+        # covers everything the handlers may send: provider/model set, session
+        # context and the full input. Those handlers sample at temperature 0.3
+        # (DeepSeek) or the API default (Haiku), so make_key returns None (not
+        # cacheable) and get/set are a miss/no-op until they run at 0.
+        cache_key = self.response_cache.make_key(
+            "deepseek-chat|claude-haiku-4-5", provider="unified-router",
+            messages=[{"role": "context", "content": session_context},
+                      {"role": "user", "content": user_input}],
+            sampling={"temperature": 0.3, "max_tokens": 2048})
         cached = self.response_cache.get(cache_key)
         if cached:
             self.token_tracker.record_cache_hit(estimated_cost_saved=0.005)

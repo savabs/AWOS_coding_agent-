@@ -1,0 +1,64 @@
+{
+  "suite": "stage1_risk_gauntlet",
+  "version": 2,
+  "updated": "2026-06-18",
+  "defaults": {
+    "AWOS_CHEAP_ONLY": "true",
+    "AWOS_PREMIUM_BUDGET": "0",
+    "AWOS_MONTHLY_BUDGET": "20",
+    "AWOS_RUNTIME_SESSION": "true",
+    "AWOS_MCTS_DEFAULT": "true"
+  },
+  "scenarios": [
+    {
+      "id": "G1",
+      "name": "worktree_vision",
+      "type": "awos_run",
+      "env": {"AWOS_USE_WORKTREE": "true", "AWOS_E2E": "1"},
+      "goal": "In scaffold/agent/virtual_execution_runtime.py add a one-line docstring to auto_merge_enabled explaining it reads AWOS_WORKTREE_AUTO_MERGE",
+      "pass": ["WORKTREE]", "SymbolIndex:", "files"]
+    },
+    {
+      "id": "G2",
+      "name": "pause_mid_plan",
+      "type": "orchestrator_pause_resume",
+      "description": "3-task plan; pause after task 1; resume tasks 2-3"
+    },
+    {
+      "id": "G3",
+      "name": "failure_hunt_mcts",
+      "type": "orchestrator_mcts_failure",
+      "description": "Forced worker fail → MCTS trace in mcts_traces.jsonl"
+    },
+    {
+      "id": "G3L",
+      "name": "failure_hunt_live",
+      "type": "awos_run",
+      "env": {"AWOS_E2E": "1", "AWOS_MCTS_ON_LOW": "true"},
+      "goal": "Fix the bug in tests/fixtures/gauntlet_broken_module.py: broken_add must return a+b not a-b. Run tests/fixtures/test_gauntlet_broken_module.py and ensure it passes.",
+      "pass": ["VERIFIED"],
+      "notes": "Live hunt — MCTS only if worker exhausts; pass = fix verified"
+    },
+    {
+      "id": "G4",
+      "name": "multi_file_chaos",
+      "type": "awos_run",
+      "env": {"AWOS_USE_WORKTREE": "true", "AWOS_E2E": "1"},
+      "goal": "Risky gauntlet: (1) awos.py _sandbox_summary (2) wire cmd_sessions_show (3) tests/test_awos_sessions_sandbox.py",
+      "manual_review": true
+    },
+    {
+      "id": "G6",
+      "name": "sigint_live_pause",
+      "type": "g6_sigint_live",
+      "goal": "Gauntlet G6 SIGINT: add a one-line comment to each of tests/fixtures/gauntlet_marker_a.py, tests/fixtures/gauntlet_marker_b.py, and tests/fixtures/gauntlet_marker_c.py",
+      "env": {"AWOS_E2E": "1", "AWOS_LEARNING_DISABLE": "true"}
+    },
+    {
+      "id": "G7",
+      "name": "verify_fail_replan",
+      "type": "orchestrator_verify_replan",
+      "description": "Verifier rejects wrong edit shape → [REPLAN] → revised task succeeds"
+    }
+  ]
+}

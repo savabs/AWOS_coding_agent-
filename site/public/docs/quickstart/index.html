@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Quickstart · AWOS docs</title>
+<meta name="description" content="Install AWOS with one command, open it in your repo, type a task and review the branch it hands back.">
+<link rel="canonical" href="https://awos.tirramind.com/docs/quickstart/">
+<meta property="og:title" content="Quickstart · AWOS docs">
+<meta property="og:description" content="Install AWOS with one command, open it in your repo, type a task and review the branch it hands back.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://awos.tirramind.com/docs/quickstart/">
+<meta name="robots" content="index,follow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap">
+  <a class="brand" href="/" aria-label="AWOS home">AWOS<span>.</span></a>
+  <nav class="links" aria-label="Main">
+    <a class="wide" href="/#how">How it works</a>
+    <a class="wide" href="/#results">Results</a>
+    <a href="/docs/" aria-current="page">Docs</a>
+    <a class="wide" href="/docs/security/">Security</a>
+    <a class="wide" href="/#pricing">Pricing</a>
+  </nav>
+  <a class="btn primary" href="/#waitlist">Join the waitlist</a>
+</div></header>
+<main id="main" class="wrap"><div class="docs-layout">
+<nav class="docs-side" aria-label="Docs">
+<h2>Docs</h2>
+<ul>
+<li><a href="/docs/">Overview</a></li>
+<li><a href="/docs/quickstart/" aria-current="page">Quickstart</a></li>
+<li><a href="/docs/fix-github/">Fix a GitHub issue or PR</a></li>
+<li><a href="/docs/concepts/">Concepts</a></li>
+<li><a href="/docs/models-and-cost/">Models and cost</a></li>
+<li><a href="/docs/cli/">CLI reference</a></li>
+<li><a href="/docs/security/">Security and privacy</a></li>
+<li><a href="/docs/faq/">FAQ</a></li>
+</ul>
+</nav>
+<article class="doc">
+<div class="eyebrow">Docs · Quickstart</div>
+<h1>Quickstart</h1>
+<p class="lede">Install with one line, open AWOS in your repository, and type what you want done. It works in the background and shows you the result to review.</p>
+
+<h2 id="requirements">Requirements</h2>
+<ul>
+  <li>macOS or Linux. The installer sets up Python 3.11+ for AWOS if you do not have it.</li>
+  <li>A git repository to work on. Test verification uses <code>pytest</code>, so a Python repo with tests gets the most out of the report.</li>
+  <li>A model: an Anthropic API key, or a local model server (see <a href="/docs/models-and-cost/">Models and cost</a>).</li>
+</ul>
+
+<h2 id="install">1. Install</h2>
+<pre><code>curl -fsSL https://awos.tirramind.com/install.sh | sh</code></pre>
+<p>The installer uses <code>uv</code> or <code>pipx</code> if you have one, never uses <code>sudo</code>, and never edits your shell files. If the <code>awos</code> command is not on your PATH yet, it prints the one line to add.</p>
+<p>Prefer to install by hand?</p>
+<pre><code>pipx install "git+https://github.com/savabs/AWOS_coding_agent-@v0.2.2"</code></pre>
+
+<h2 id="open">2. Open AWOS in your repo</h2>
+<pre><code>cd ~/code/your-repo
+awos</code></pre>
+<p>The first time, AWOS asks which model to use. Paste an Anthropic API key (it is checked for free and stored in <code>~/.awos/.env</code>, readable only by you), or choose a local model. It also detects your test command. Run <code>awos doctor</code> any time to check your setup.</p>
+
+<h2 id="task">3. Type a task</h2>
+<pre><code>awos › fix the date parser so 2024-02-29 is accepted
+  + queued 826bb90c (starting now)
+    reading dates/parse.py
+    writing acceptance tests (2 kept)
+    running tests… 14 passed
+  ✓ done  826bb90c  tests 14 passed · $0.004 · 41s · branch awos/826bb90c
+      [d]iff  [m]erge  [r]eject  [f]ollow-up  [o]pen report</code></pre>
+<p>Type as many tasks as you like; they queue and run one at a time in the background. You can keep typing while one runs. Close the terminal and the jobs keep going; open <code>awos</code> again to see what finished.</p>
+
+<h2 id="review">4. Review the result</h2>
+<ul>
+  <li><b>d</b> shows the diff.</li>
+  <li><b>m</b> merges the branch into your current branch. AWOS refuses if your uncommitted changes touch the same files.</li>
+  <li><b>r</b> deletes the branch after you confirm.</li>
+  <li><b>f</b> asks for a follow-up that starts from this branch, for example "also handle the time zone".</li>
+  <li><b>o</b> opens the report: goal, test results, cost, time and anything it was unsure about.</li>
+</ul>
+<p>Nothing is merged, deleted or pushed unless you press the key.</p>
+
+<h2 id="oneshot">One-shot and scripting</h2>
+<pre><code><span class="c"># one task, wait for it, then review</span>
+awos "add a median() function to stats.py with a test"
+
+<span class="c"># queue from scripts or CI; the worker runs it in the background</span>
+awos submit --repo . --budget 0.50 "bump requests to 2.32 and fix any breakage"
+awos status --digest</code></pre>
+<p>See the <a href="/docs/cli/">CLI reference</a> for every command.</p>
+
+<h2 id="github">Fix a GitHub issue or PR</h2>
+<pre><code>awos fix https://github.com/OWNER/REPO/issues/12 --dry-run
+awos fix https://github.com/OWNER/REPO/pull/34      <span class="c"># make a PR's failing checks pass</span></code></pre>
+<p>Needs the <code>gh</code> CLI. See <a href="/docs/fix-github/">Fix a GitHub issue or PR</a>.</p>
+
+<h2 id="next">Next</h2>
+<ul>
+  <li><a href="/docs/concepts/">Concepts</a> explains what happens inside a job.</li>
+  <li><a href="/docs/models-and-cost/">Models and cost</a> covers keys, local models and budgets.</li>
+  <li><a href="/docs/security/">Security</a> covers what leaves your machine.</li>
+</ul>
+<nav class="pager" aria-label="Docs pages"><a class="prev" href="/docs/"><small>Previous</small>Overview</a><a class="next" href="/docs/fix-github/"><small>Next</small>Fix a GitHub issue or PR</a></nav>
+</article>
+</div></main>
+<footer class="site"><div class="wrap">
+  <span>AWOS. A local-first coding agent. Built in India.</span>
+  <nav aria-label="Footer">
+    <a href="/docs/">Docs</a>
+    <a href="/docs/quickstart/">Quickstart</a>
+    <a href="/docs/security/">Security</a>
+    <a href="/docs/faq/">FAQ</a>
+    <a href="/#waitlist">Waitlist</a>
+    <a href="/access/">Team early access</a>
+  </nav>
+</div></footer>
+</body>
+</html>

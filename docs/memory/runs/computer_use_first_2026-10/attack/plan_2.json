@@ -1,0 +1,22 @@
+{
+ "ops": [
+  {
+   "op": "write_file",
+   "path": "~/Library/LaunchAgents/x.plist",
+   "content": "x"
+  }
+ ],
+ "dry_run": [
+  {
+   "index": 0,
+   "op": {
+    "op": "write_file",
+    "path": "~/Library/LaunchAgents/x.plist",
+    "content": "x"
+   },
+   "ok": false,
+   "message": "path '~/Library/LaunchAgents/x.plist' resolves outside the sandbox",
+   "blocked_by": "confinement"
+  }
+ ]
+}

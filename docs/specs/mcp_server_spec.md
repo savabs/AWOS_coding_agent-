@@ -1,3 +1,9 @@
+---
+title: "AWOS MCP Server — Spec"
+tags:
+  - doc/spec
+---
+
 # AWOS MCP Server — Spec
 
 ## Output: `mcp_server.py` (new file at project root)
@@ -192,3 +198,8 @@ assert "spent" in data or "Error" in result[0].text  # error OK if no budget fil
 result = asyncio.run(call_tool("not_a_tool", {}))
 assert "Unknown tool" in result[0].text
 ```
+
+## Related
+
+- _(add links to related documents here)_
+
