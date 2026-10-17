@@ -1,4 +1,18 @@
-# AWOS strategy (decided 2026-10-16)
+# AWOS strategy (decided 2026-10-16, refined 2026-10-17)
+
+## The space (2026-10-17)
+
+**A private agent on your own computer that does your work unattended, checks its own results, and learns your
+recurring tasks, getting better each time, with nothing leaving your machine.**
+
+- **Self-serve.** Not a service, not an API/data product.
+- **Uncontested by design.** Big players fight on cloud, interactive and rented intelligence. AWOS takes local,
+  unattended, verified, and learns your tasks on-device. Cloud vendors can't easily follow, because local and free
+  cuts token revenue and per-user on-device training doesn't fit a cloud API.
+- **Sequence:**
+  1. **Overnight coding agent:** queue issues, get verified branches by morning, offline.
+  2. **Self-improvement:** learn from the user's own successful tasks.
+  3. **Link to general computer use** (repetitive desktop work).
 
 **AWOS is a local-first, private autonomous agent that runs on your own computer with a free local model.**
 - **Now:** coding. It takes an issue or task and returns a verified branch, offline and at $0 per task.
