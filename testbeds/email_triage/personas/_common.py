@@ -1,10 +1,12 @@
 """Small helpers shared by the held-out personas (own wording, not seed.py's)."""
 from __future__ import annotations
 
+import copy
+import importlib
 import json
 import random
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 HERE = Path(__file__).resolve().parent
 
@@ -52,3 +54,40 @@ def list_headers(host: str, rng: random.Random) -> dict:
 
 def pick(rng: random.Random, xs: List[str]) -> str:
     return xs[rng.randrange(len(xs))]
+
+
+def readdress(msg: dict, subs: List[Tuple[str, str]], rule_map: Dict[str, Optional[str]]) -> dict:
+    """A copy of pool message ``msg`` with every (old, new) string in ``subs``
+    replaced (longest first) in its sender, subject, body, header values, truth
+    reason and injection fields, and its rule id mapped through ``rule_map``
+    (ids not in the map are dropped: the borrowing persona has no such rule)."""
+    pairs = sorted(subs, key=lambda p: -len(p[0]))
+
+    def sub(s):
+        if not isinstance(s, str):
+            return s
+        for old, new in pairs:
+            s = s.replace(old, new)
+        return s
+
+    out = copy.deepcopy(msg)
+    for k in ("from_name", "from_addr", "subject", "body"):
+        out[k] = sub(out[k])
+    out["headers"] = {k: sub(v) for k, v in out["headers"].items()}
+    out["gt"]["reason"] = sub(out["gt"]["reason"])
+    if out["injection"]:
+        out["injection"] = {k: sub(v) for k, v in out["injection"].items()}
+    out["rule"] = rule_map.get(out["rule"]) if out["rule"] else None
+    return out
+
+
+def borrowed_adversarial(source: str, rng: random.Random, subs: List[Tuple[str, str]],
+                         rule_map: Optional[Dict[str, Optional[str]]] = None) -> List[dict]:
+    """The phishing + prompt-injection messages of held-out persona ``source``,
+    re-addressed to the borrowing persona by plain name/address substitution
+    (no new adversarial text). Draws from ``rng`` exactly as ``source`` does, so
+    it stays deterministic in the caller's seed. A persona that borrows this way
+    is held out for ordinary mail, urgency and preferences only, NOT for
+    phishing / injection detection (see SHARED_ADVERSARIAL in its module)."""
+    src = importlib.import_module(f"{__package__}.{source}")
+    return [readdress(x, subs, rule_map or {}) for x in src._phishing(rng)]

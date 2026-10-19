@@ -48,6 +48,7 @@ import sys
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
+from . import personas as _personas
 from . import seed as seed_mod
 from . import score as score_mod
 from .baselines import predict as baseline_predict
@@ -247,7 +248,8 @@ def main(argv=None) -> int:
                          "report seed.scoping_case_result next to the composite")
     ap.add_argument("--persona", default=seed_mod.DEFAULT_PERSONA,
                     help="mailbox owner: sam (default) or a held-out persona "
-                         "(testbeds/email_triage/personas: clinic, photographer)")
+                         "(testbeds/email_triage/personas: "
+                         + ", ".join(_personas.HELD_OUT) + ")")
     ap.add_argument("--show-presets", action="store_true")
     a = ap.parse_args(argv)
     if a.show_presets:
