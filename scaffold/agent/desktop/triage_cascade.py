@@ -20,7 +20,10 @@ triage_cascade.py — layered email triage that stops at the first confident lay
                                  another registrable domain on a money/credential
                                  topic (reply_to_mismatch) and for any request to
                                  send a PIN / password / card or account number /
-                                 login code by email (credential_request)
+                                 login code by email (credential_request), and
+                                 for a sender / link host carrying a known
+                                 domain as its left-hand labels under a foreign
+                                 registrable domain (subdomain_embed)
     L1  learned preferences      prefs.json rules (v1 or v2) resolved by
                                  testbeds/email_triage/prefs.py: precedence
                                  user > subject/service/thread > address > domain
@@ -51,7 +54,14 @@ triage_cascade.py — layered email triage that stops at the first confident lay
                                  failure / incident / alarm signal; 0-2 -> 3 on
                                  a failure with a near-term consequence, an
                                  account incident or a live alarm; rules applied
-                                 after can move it again)
+                                 after can move it again), the staff raise
+                                 (staff_urgency_raise: own-domain person or
+                                 correspondent with an operational problem and a
+                                 near-term horizon -> 3) and the injection
+                                 verdict (injection_override: an assistant-
+                                 directed instruction from an unprotected sender
+                                 -> spam_phishing / suspicious / 0 over the model
+                                 and learned rules; user rules still win)
 
 Fail toward the cheap error: an abstained item is never demoted (importance >= 1,
 so it stays in the inbox) and is queued for the user. Hard guard: nobody the user
@@ -206,6 +216,7 @@ INJECTION_RES = [re.compile(p, re.I | re.M) for p in (
     r"\byou are now in\b[^.\n]{0,40}\bmode\b",
     r"\bdo not (?:mention|tell|show) (?:this|the user|anyone)\b",
 )]
+_AI_MENTION_RE = INJECTION_RES[4]   # "AI assistant(s)" etc.: flags, but is no addressee alone
 
 # AWOS static matchers for L2 (generic, not tuned to the testbed persona).
 SOCIAL_SITES = {"linkedin", "x", "twitter", "facebook", "facebookmail", "instagram", "meetup",
@@ -223,7 +234,8 @@ PROMO_LOCALPART_RE = re.compile(r"^(deals?|offers?|promos?|sales?|store|shop|mar
 
 def looks_injected(m: dict) -> bool:
     text = (m.get("subject") or "") + "\n" + (m.get("body") or "")
-    return any(r.search(text) for r in INJECTION_RES) or bool(hidden_injection(m))
+    return (any(r.search(text) for r in INJECTION_RES) or bool(hidden_injection(m))
+            or bool(directed_injection(m)))
 
 
 # ── hidden HTML content (AWOS) ────────────────────────────────────────────────
@@ -402,6 +414,110 @@ def model_view(m: dict) -> dict:
                 body = body.replace(t, " ")
         v["body"] = body
     return v
+
+
+# ── assistant-directed instructions anywhere in the message (AWOS) ────────────
+# An injection pairs an ADDRESSEE (text aimed at whatever processes the mailbox:
+# "the assistant that manages X's inbox", "email assistant:", "whoever processes
+# this", "Assistants must ...", "note for the AI ...") with a mailbox INSTRUCTION
+# (draft / send / reply / forward / cc ... to an address, include ... in your reply,
+# reply with bank details, relabel / archive / set priority, do not tell the user).
+# Both must sit close together. The text scanned is the subject and body with
+# quote markers ("> ") stripped, wrapped lines joined, calendar (ICS) escapes
+# undone (DESCRIPTION:...\, ...) and HTML alt / title attributes added, so the
+# instruction is found in forwarded quotes, invite descriptions, image alt text,
+# table / CSV cells and hidden HTML alike.
+
+_AGENT_NOUN = (r"(?:assistants?|ai|a\.i\.|agents?|bots?|automations?|llms?|copilots?|"
+               r"(?:inbox|mail|e-?mail) (?:tools?|software|filters?|sorters?|helpers?))")
+ADDRESSEE_RES = [re.compile(p, re.I | re.M) for p in (
+    # "the assistant that manages Wren's inbox", "AI agent who handles this mailbox"
+    _AGENT_NOUN + r"\s+(?:that|which|who)\s+(?:manages?|handles?|files?|sorts?|process(?:es)?|"
+    r"reads?|triages?|runs?|organi[sz]es?|monitors?|screens?)\b[^.\n]{0,40}?"
+    r"\b(?:inbox|mail|e-?mails?|mailbox|messages|correspondence|account)\b",
+    # "email assistant:", "automated assistants processing ...", "AI agents must"
+    r"\b(?:ai|automated|automatic|e-?mail|mail|inbox|smart)\s+(?:assistants?|agents?|helpers?|"
+    r"sorters?|tools?|bots?)\b\s*(?:[:,]|\(|(?:that|which|who|processing|handling|reading|sorting|"
+    r"filing|triaging|managing|must|should|shall|are (?:required|instructed|authori[sz]ed))\b)",
+    # "for the assistant ...", "attn: any AI", "to all automated email assistants"
+    r"\b(?:for|to|attn|attention)\b\s*:?\s+(?:the |any |all |an? )?"
+    r"(?:(?!(?:my|your|our|his|her|their)\b)[a-z'-]+\s+){0,3}?"
+    r"(?:assistants?|ai|bots?|llms?|automations?)\b(?!\s+(?:manager|director|coach|professor|"
+    r"editor|principal|teacher|role|position|job|vacancy|post|features?|products?|tools?\b))",
+    # "whoever processes this", "whoever is sorting her mail"
+    r"\bwhoever (?:is )?(?:process|handl|read|sort|fil|triag|manag|screen)\w*\s+"
+    r"(?:this|these|the|her|his|their|my|your|our)\b",
+    # "Assistants must reply ...", "AI: archive ...", "Agent, forward ..."
+    r"\b(?:assistants?|ai agents?|bots?)\s+(?:must|should|shall|are (?:required|instructed|"
+    r"authori[sz]ed|asked))\b",
+    r"(?:^|[\[(\"'>]|(?<=[.!?;])\s)\s*(?:ai|assistant|agent|bot|system)\s*[:,]",
+)]
+# within one sentence; a dot inside a domain / address does not end it
+_NS = r"(?:[^.\n]|\.(?=\w))"
+INSTRUCTION_RES = [re.compile(p, re.I) for p in (
+    # draft / send / reply / forward / cc ... to <address>
+    r"\b(?:draft|compose|write|send|reply|respond|forward|forwarding|cc|bcc|e-?mail|copy|share)\b"
+    + _NS + r"{0,100}?\b(?:to|cc|bcc)\b\s*:?\s*[\w.+'-]+@[\w-]+(?:\.[\w-]+)+",
+    r"\binclude\b" + _NS + r"{0,80}?\bin (?:your|the|a|any) (?:reply|response|answer|e-?mail)\b",
+    r"\b(?:reply|respond)\b" + _NS + r"{0,40}?\bwith\b" + _NS + r"{0,80}?\b(?:passwords?|bank|account numbers?|"
+    r"routing|sort code|bsb|iban|swift|ein|tax|card|pins?|credentials|logins?|details|statements?|"
+    r"invoices?|notifications?|files?|contracts?|links?|records?|numbers?)\b",
+    r"\b(?:do not|don'?t|never)\s+(?:tell|mention|show|inform|notify|report|ask|alert|flag|bother)\b",
+    r"\bmust not be (?:reported|shown|mentioned|disclosed|flagged)\b",
+    r"\bwithout (?:telling|asking|notifying|informing|alerting)\b",
+    r"\b(?:label|classify|categori[sz]e|tag|treat|flag)\b" + _NS + r"{0,60}?\b(?:as\s+)?(?:spam|junk|"
+    r"phishing|spam_phishing|fraudulent|low priority|promo)\b",
+    r"\bset up (?:auto-?)?forwarding\b",
+    HIDDEN_INSTRUCTION_RE.pattern,
+)]
+_HUMAN_AIDE_RE = re.compile(r"\b(?:my|your|our|his|her|their)\s+(?:[a-z'-]+\s+)?assistants?\b", re.I)
+_ICS_ESC_RE = re.compile(r"\\([,;nN\\])")
+_ATTR_TEXT_RE = re.compile(r"\b(?:alt|title|aria-label)\s*=\s*(\"[^\"]*\"|'[^']*')", re.I)
+
+
+def injection_scan_text(m: dict) -> str:
+    """Subject + body (+ HTML alt/title attributes) normalised for the directed-
+    injection check: quote markers stripped, ICS escapes undone, wrapped lines of
+    a paragraph joined (blank lines stay paragraph breaks)."""
+    body = m.get("body") or ""
+    html = m.get("html") if isinstance(m.get("html"), str) else ""
+    attrs = [a[1:-1] for a in _ATTR_TEXT_RE.findall(body + "\n" + html)]
+    _, hidden = split_hidden_html(m)
+    # separate elements (subject, body, each attribute / hidden chunk) are paragraphs
+    text = "\n\n".join([m.get("subject") or "", body, *attrs, *hidden])
+    text = _ICS_ESC_RE.sub(lambda x: "\n" if x.group(1) in "nN" else x.group(1), text)
+    lines = [re.sub(r"^\s*(?:>\s?)+", "", ln) for ln in text.split("\n")]
+    out, para = [], []
+    for ln in lines:
+        if ln.strip():
+            para.append(ln.strip())
+        else:
+            if para:
+                out.append(" ".join(para))
+            para = []
+    if para:
+        out.append(" ".join(para))
+    return "\n".join(out)
+
+
+def directed_injection(m: dict) -> Optional[str]:
+    """An assistant-directed instruction: an ADDRESSEE phrase with a mailbox
+    INSTRUCTION within ~400 characters after it (or 120 before). Returns
+    'directed_instruction' or None."""
+    text = injection_scan_text(m)
+    # INJECTION_RES minus the bare "AI assistant(s)/agent(s)" mention (a newsletter topic)
+    for ar in ADDRESSEE_RES + [r for r in INJECTION_RES if r is not _AI_MENTION_RE]:
+        for a in ar.finditer(text):
+            if _HUMAN_AIDE_RE.search(a.group(0)):
+                continue   # "note for my assistant": a person's human aide, not an agent
+            win = text[max(0, a.start() - 120): a.end() + 400]
+            if any(r.search(win) for r in INSTRUCTION_RES):
+                return "directed_instruction"
+    return None
+
+
+INJECTION_PRED = {"importance": 0, "category": "spam_phishing", "needs_reply": False,
+                  "suspicious": True}
 
 
 # AWOS: phishing sanity guard signals (L3 post-check, see phish_downgrade).
@@ -706,11 +822,113 @@ def credential_request(m: dict) -> Optional[str]:
     return None
 
 
+# ── L0: subdomain-embedding hosts (AWOS) ──────────────────────────────────────
+# A host that carries a known domain (or brand) as its LEFT-hand labels while its
+# real registrable domain is something else: acme.example.portal-login.example,
+# paypal.com.secure-verify.example. Mail clients show the familiar part first.
+#   sender host   a known registrable domain embedded -> phishing on a risk topic,
+#                 and even without one when the embedded domain is the user's own
+#                 or a correspondent's; a known brand (or a display-name word) as a
+#                 left-hand label counts only when the real domain is made of
+#                 filler words alone (secure-login, verify-portal ...), so tenant
+#                 subdomains of SaaS hosts (acme.helpdesk-saas.example) stay clean
+#   link hosts    a body link whose host embeds a known domain under a foreign
+#                 registrable domain (other than the sender's own) is a risk
+#                 signal: phishing when the message is on a risk topic
+# Protected senders (own domain, correspondents, family) are never judged here.
+
+def _trusted_domains(ctx: "Context") -> set:
+    out = set(ctx.anchor_domains) | {registrable_domain(d) for d in ctx.people_domains}
+    out |= {registrable_domain(_domain(a)) for a in ctx.correspondents}
+    out |= set(ctx.legit_domains)
+    if ctx.user_domain:
+        out.add(registrable_domain(ctx.user_domain))
+    return {d for d in out if d and "." in d and d not in FREE_MAIL}
+
+
+def _strict_domains(ctx: "Context") -> set:
+    out = {registrable_domain(_domain(a)) for a in ctx.correspondents}
+    if ctx.user_domain:
+        out.add(registrable_domain(ctx.user_domain))
+    return {d for d in out if d and d not in FREE_MAIL}
+
+
+def _contains_seq(labels: List[str], seq: List[str]) -> bool:
+    n = len(seq)
+    return n > 0 and any(labels[i:i + n] == seq for i in range(len(labels) - n + 1))
+
+
+def embedded_domain(host: str, trusted: Iterable[str]) -> Optional[Tuple[str, str]]:
+    """(embedded trusted domain, kind) when ``host``'s left-hand labels (everything
+    before its own registrable domain) contain a trusted registrable domain
+    ('domain') or a trusted domain's brand label ('brand'); None otherwise."""
+    host = (host or "").lower().strip(".").split(":")[0].split("@")[-1]
+    reg = registrable_domain(host)
+    if not reg or host == reg:
+        return None
+    prefix = [p for p in host[: -len(reg)].strip(".").split(".") if p]
+    if not prefix:
+        return None
+    for t in sorted(trusted):
+        if t == reg or reg.endswith("." + t):
+            continue
+        if _contains_seq(prefix, t.split(".")):
+            return t, "domain"
+    for t in sorted(trusted):
+        b = _brand(t)
+        if t != reg and b and any(re.sub(r"[^a-z]", "", _norm_label(lb)) == b for lb in prefix):
+            return t, "brand"
+    return None
+
+
+def _filler_only(reg: str) -> bool:
+    segs = [re.sub(r"[^a-z]", "", s) for s in _segments(_site_part(reg))]
+    segs = [s for s in segs if s]
+    return bool(segs) and all(s in LOOKALIKE_FILLER for s in segs)
+
+
+def subdomain_embed(m: dict, ctx: "Context", g: Optional[Dict[str, bool]] = None) -> Optional[str]:
+    """The L0 subdomain-embedding verdict (see the section comment) or None."""
+    g = g if g is not None else guards(m, ctx)
+    if g.get("protected"):
+        return None
+    dom = _domain(_addr(m))
+    reg = registrable_domain(dom)
+    if not reg or reg in FREE_MAIL:
+        return None
+    trusted = _trusted_domains(ctx)
+    strict = _strict_domains(ctx)
+    topic = risk_topic(m)
+    hit = embedded_domain(dom, trusted)
+    if hit:
+        t, kind = hit
+        if kind == "domain" and (topic or t in strict):
+            return f"subdomain_embed:{t}"
+        if kind == "brand" and topic and _filler_only(reg):
+            return f"subdomain_embed_brand:{t}"
+    elif topic and dom != reg and _filler_only(reg):
+        # a display-name word as a left-hand label of a filler-only domain
+        name = (m.get("from_name") or "").lower()
+        toks = {re.sub(r"[^a-z]", "", _norm_label(t)) for t in re.findall(r"[a-z0-9]+", name)}
+        toks = {t for t in toks if len(t) >= 4 and t not in GENERIC_LABELS}
+        prefix = [re.sub(r"[^a-z]", "", _norm_label(p)) for p in dom[: -len(reg)].split(".") if p]
+        if toks & set(prefix):
+            return "subdomain_embed_name"
+    if topic:
+        for h in URL_HOST_RE.findall(_text(m)):
+            lh = embedded_domain(h, trusted)
+            if lh and lh[1] == "domain" and lh[0] != reg:   # not the sender's own CDN host
+                return f"link_embed:{lh[0]}"
+    return None
+
+
 def l0_phish_guard(m: dict, ctx: "Context", g: Optional[Dict[str, bool]] = None) -> Optional[str]:
     """Every outright L0 phishing verdict, first hit wins: look-alike sender,
-    Reply-To diversion on a money topic, request to send a secret by email."""
+    Reply-To diversion on a money topic, request to send a secret by email, a
+    known domain embedded as the left-hand labels of a foreign sender / link host."""
     g = g if g is not None else guards(m, ctx)
-    return lookalike_guard(m, ctx, g) or reply_to_mismatch(m, ctx, g) or credential_request(m)
+    return (lookalike_guard(m, ctx, g) or reply_to_mismatch(m, ctx, g) or credential_request(m)
+            or subdomain_embed(m, ctx, g))
 
 
 def _rule_domains(rule: dict) -> List[str]:
@@ -1493,6 +1711,74 @@ def urgency_cap(p: dict, m: dict, g: Dict[str, bool], rescued: bool = False) -> 
     return f"not_now:{nn}"
 
 
+# ── staff / correspondent operational urgency (after the model, before rules) ──
+# A person on the user's own domain (staff, a colleague) or a correspondent the
+# user writes to, reporting an operational problem with a near-term horizon: "I
+# won't be able to open tomorrow", "out sick today", "no cover tonight", "locked
+# out", "lost the keys". The local model reads these as ordinary colleague mail
+# (2); they need action before the day starts. Narrow on purpose: both a problem
+# and a horizon in the same sentence, no list / automated / role sender.
+
+STAFF_PROBLEM_RE = re.compile(
+    r"(\b(?:can'?t|cannot|can not|won'?t be able to|will not be able to|unable to|not able to|"
+    r"won'?t make it(?: in)?|can'?t make it(?: in)?)\s+(?:make|open|come(?: in)?|cover|do|get (?:in|there)|"
+    r"work|start|run|close|be there|be in|attend|it)\b|"
+    r"\bwon'?t be (?:in|there|able)\b|"
+    r"\b(?:off|out|home|called in) sick\b|\b(?:i'?m|i am|is|are|feeling|got|been) (?:sick|ill|unwell)\b|"
+    r"\bfever\b|\bno (?:cover|coverage|one to (?:open|close|cover))\b|"
+    r"\b(?:need|needs|get|find|arrange) (?:cover|coverage|someone to (?:cover|open|close))\b|"
+    r"\b(?:swap|switch|trade) (?:shifts?|the (?:open|close))\b|"
+    r"\blocked out\b|\b(?:lost|forgot|left|misplaced|no|without) (?:the |my |our |his |her )?keys?\b)",
+    re.I)
+STAFF_HORIZON_RE = re.compile(
+    r"\b(today|tonight|tomorrow|tmrw|tmw|this (?:morning|afternoon|evening)|first thing|"
+    r"right now|in (?:an|one|two|\d) hours?|before (?:we )?open(?:ing)?)\b", re.I)
+
+
+def staff_urgency_signal(m: dict) -> Optional[str]:
+    """'staff_problem_near_term' when one sentence (subject counts as one) of ``m``
+    has both an operational problem and a near-term horizon; else None."""
+    text = _text(m)
+    for sent in re.split(r"(?<=[.!?])\s+|\n+", text):
+        if STAFF_PROBLEM_RE.search(sent) and STAFF_HORIZON_RE.search(sent):
+            return "staff_problem_near_term"
+    return None
+
+
+def staff_urgency_raise(p: dict, m: dict, g: Dict[str, bool]) -> Optional[str]:
+    """Raise 0-2 -> 3 (category urgent_action) for a person on the user's own domain
+    or a correspondent reporting an operational problem with a near-term horizon.
+    Returns the reason or None (unchanged)."""
+    try:
+        imp = int(p.get("importance", 1))
+    except (TypeError, ValueError):
+        return None
+    if imp >= 3 or not (g.get("same_domain") or g.get("correspondent")):
+        return None
+    if (g.get("list") or g.get("injection") or g.get("no_reply") or p.get("suspicious")
+            or p.get("category") == "spam_phishing" or is_automated_sender(m, g)):
+        return None
+    local = _addr(m).split("@", 1)[0]
+    if ROLE_LOCAL_RE.match(local) or is_role_sender(m):
+        return None
+    why = staff_urgency_signal(m)
+    if not why:
+        return None
+    p["importance"] = 3
+    p["category"] = "urgent_action"
+    return why
+
+
+def injection_override(m: dict, g: Dict[str, bool]) -> Optional[str]:
+    """An assistant-directed instruction from an unprotected sender: the whole
+    message is treated as an attack (spam_phishing, suspicious, importance 0, the
+    testbed's injection convention). Protected senders (a colleague forwarding a
+    suspicious mail) are only flagged suspicious, as before."""
+    if g.get("protected"):
+        return None
+    return directed_injection(m)
+
+
 # ── final guard + driver ──────────────────────────────────────────────────────
 
 def finalize(p: dict, g: Dict[str, bool]) -> dict:
@@ -1595,14 +1881,24 @@ def run_cascade(messages: List[dict], prefs: dict, ctx: Context, model_batch: Mo
             cap = urgency_cap(p, m, g, rescued=bool(phish)) if raw is not None else None
             if cap:
                 trace_items[m["id"]]["urgency_cap"] = cap
+            staff = staff_urgency_raise(p, m, g) if raw is not None else None
+            if staff:
+                trace_items[m["id"]]["staff_raise"] = staff
             p, ptrace = resolve_rules(p, m, rules, record_hits=record_hits)
+            inj = injection_override(m, g)
+            if inj:
+                # the model saw it (labels, needs_reply); the verdict beats it and every
+                # learned rule, user-written rules still win (as for the L0 verdicts)
+                p, ptrace = prefs_store.resolve(dict(INJECTION_PRED), m, user_rules_doc(rules),
+                                                record_hits=record_hits)
+                trace_items[m["id"]]["injection_override"] = inj
             _, hit = _trace_fixed(ptrace)
             applied = {str(t["rule"]) for t in ptrace if t["action"] == "applied"}
             demoted_by_rule = any(str(r.get("id")) in applied
                                   and ((r.get("set") or {}).get("importance") == 0
                                        or (r.get("set") or {}).get("max_importance") == 0)
                                   for r in live_rules(rules, m))
-            if (ab["abstain"] or not ab["demote_ok"]) and not demoted_by_rule:
+            if (ab["abstain"] or not ab["demote_ok"]) and not demoted_by_rule and not inj:
                 p["importance"] = max(int(p.get("importance", 1) or 0), 1)
             decided[m["id"]] = finalize(p, g)
             trace_items[m["id"]].update({"layer": "L3", "rules": hit, "prefs_trace": ptrace,
