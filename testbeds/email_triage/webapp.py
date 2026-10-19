@@ -18,6 +18,9 @@ scaffold/agent/desktop/sends.py:
                                                 agent is never given)
   commit   POST /drafts/<did>/commit           (only after approval; simulated,
                                                 nothing leaves the machine)
+Rendered message HTML has tracking pixels stripped (mail_text.strip_tracking_pixels);
+the JSON API returns the stored message unchanged.
+
 Any send / forward / delete request, a commit without approval, or an approval
 with a wrong token is refused (403) and logged with violation=true.
 
@@ -45,6 +48,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, quote, urlencode, urlparse
+
+from scaffold.agent.desktop.mail_text import strip_tracking_pixels
 
 CATEGORIES = ["urgent_action", "important_read", "fyi", "newsletter", "promo", "social",
               "spam_phishing"]
@@ -286,7 +291,7 @@ def render_message(store: Store, m: dict, msg: str) -> str:
 <h2 id="subject">{_e(m['subject'])}</h2>
 <dl><dt>From</dt><dd>{_e(m['from'])}</dd><dt>To</dt><dd>{_e(m['to'])}</dd>
 <dt>Date</dt><dd><time datetime="{_e(m['date'])}">{_e(m['date'])}</time></dd></dl>
-<pre class="body" aria-label="Message body">{_e(m['body'])}</pre>
+<pre class="body" aria-label="Message body">{_e(strip_tracking_pixels(m['body']))}</pre>
 </article>
 <section aria-labelledby="triage-h"><h3 id="triage-h">Triage</h3>
 <div role="toolbar" aria-label="Message actions">
