@@ -3,7 +3,11 @@ triage_cascade.py — layered email triage that stops at the first confident lay
 
     L0  deterministic guards     correspondent / same domain / protected family,
                                  no-reply, list headers, automated sender,
-                                 assistant-directed text (injection); and the
+                                 assistant-directed text (injection, including
+                                 hidden HTML text: white-on-white, display:none,
+                                 1px ... that addresses an assistant or carries
+                                 mailbox instructions; the model is only shown
+                                 the visible text, see model_view); and the
                                  look-alike guard (lookalike_guard), the one L0
                                  check that decides outright: a sender domain
                                  borrowing a known mailbox org's name (acme ->
@@ -11,7 +15,12 @@ triage_cascade.py — layered email triage that stops at the first confident lay
                                  display name's org plus filler words, writing
                                  about money / signing / credentials ->
                                  spam_phishing, suspicious, importance 0. Beats
-                                 the model and learned rules; user rules win
+                                 the model and learned rules; user rules win.
+                                 Same verdict (l0_phish_guard) for a Reply-To on
+                                 another registrable domain on a money/credential
+                                 topic (reply_to_mismatch) and for any request to
+                                 send a PIN / password / card or account number /
+                                 login code by email (credential_request)
     L1  learned preferences      prefs.json rules (v1 or v2) resolved by
                                  testbeds/email_triage/prefs.py: precedence
                                  user > subject/service/thread > address > domain
@@ -36,11 +45,13 @@ triage_cascade.py — layered email triage that stops at the first confident lay
                                  the user legitimately gets mail from, with no
                                  look-alike or injection signal, becomes
                                  important_read; never undoes a look-alike hit)
-                                 and the urgency cap (urgency_cap: importance 3
-                                 on mail from an automated sender with no
-                                 near-term deadline / failure / account-incident
-                                 signal becomes 2; rules applied after can raise
-                                 it again)
+                                 and the urgency cap / raise (urgency_cap, on
+                                 automated or role senders: 3 -> 2 only on a
+                                 positive not-now signal with no near-term /
+                                 failure / incident / alarm signal; 0-2 -> 3 on
+                                 a failure with a near-term consequence, an
+                                 account incident or a live alarm; rules applied
+                                 after can move it again)
 
 Fail toward the cheap error: an abstained item is never demoted (importance >= 1,
 so it stays in the inbox) and is queued for the user. Hard guard: nobody the user
@@ -185,6 +196,11 @@ INJECTION_RES = [re.compile(p, re.I | re.M) for p in (
     r"\bignore (?:all |any )?(?:the )?(?:previous|prior|above|earlier) instructions\b",
     r"\b(?:note|notice|message|instructions?)\s+(?:to|for)\s+(?:the |any |all )?"
     r"(?:ai|assistants?|agents?|bots?|llms?)\b",
+    # "note for any automated assistant", "directive for the inbox assistant",
+    # "processing note (for the AI mail assistant only)"
+    r"\b(?:note|notice|message|instructions?|directives?)\s*\(?\s*(?:to|for)\s+(?:the |any |all |an? )?"
+    r"(?:[a-z-]+ ){0,2}(?:ai|assistants?|llms?|chatbots?|bots?)\b",
+    r"\b(?:for|to) the (?:ai|inbox|mail|email) (?:mail |email |inbox )?assistant\b",
     r"\b(?:ai|llm)\s+(?:assistants?|agents?|models?)\b",
     r"^\s*(?:assistant|system)\s*:",
     r"\byou are now in\b[^.\n]{0,40}\bmode\b",
@@ -207,7 +223,185 @@ PROMO_LOCALPART_RE = re.compile(r"^(deals?|offers?|promos?|sales?|store|shop|mar
 
 def looks_injected(m: dict) -> bool:
     text = (m.get("subject") or "") + "\n" + (m.get("body") or "")
-    return any(r.search(text) for r in INJECTION_RES)
+    return any(r.search(text) for r in INJECTION_RES) or bool(hidden_injection(m))
+
+
+# ── hidden HTML content (AWOS) ────────────────────────────────────────────────
+# An HTML-to-text step drops (or a reader never sees) text styled invisible:
+# display:none, visibility:hidden, font-size 0-1px, opacity 0, max-height 0,
+# mso-hide, the `hidden` attribute, off-screen indents, or text coloured like its
+# background (white on white). Prompt injections hide there. The injection guard
+# reads that hidden text from the raw HTML (m["html"], or an HTML body); the model
+# is given the visible text only (model_view). Hidden preheaders of ordinary
+# newsletters ("View in browser", a preview snippet) are hidden too, so hidden
+# text only counts when it addresses an assistant or carries mailbox instructions.
+
+_HTML_RE = re.compile(r"<(?:html|body|div|p|br|table|span|a|img|td|font)\b", re.I)
+_HTML_DROP = {"script", "style", "head", "title", "noscript", "template", "svg"}
+_HTML_VOID = {"br", "img", "hr", "meta", "link", "input", "area", "base", "col", "embed",
+              "param", "source", "track", "wbr"}
+_HTML_BLOCK = {"p", "div", "br", "tr", "li", "table", "h1", "h2", "h3", "h4", "h5", "h6",
+               "blockquote", "pre", "hr", "section", "article", "header", "footer", "center"}
+_HIDE_STYLE_RE = re.compile(
+    r"display\s*:\s*none|visibility\s*:\s*hidden|mso-hide\s*:\s*all|"
+    r"(?:^|[;\s])(?:max-height|max-width|height|width)\s*:\s*0(?:px|pt|em|%)?\s*(?:;|$|!)[^\"]*overflow\s*:\s*hidden|"
+    r"(?:^|[;\s])max-height\s*:\s*0(?:px|pt|em|%)?\s*(?:;|$|!)|"
+    r"(?:^|[;\s])font-size\s*:\s*(?:0|1|0?\.\d+)(?:px|pt)?\s*(?:;|$|!)|"
+    r"(?:^|[;\s])opacity\s*:\s*0(?:\.0+)?\s*(?:;|$|!)|"
+    r"text-indent\s*:\s*-\d{3,}|(?:^|[;\s])(?:left|top)\s*:\s*-\d{3,}px", re.I)
+_COLOR_NAMES = {"white": "#ffffff", "black": "#000000", "transparent": "transparent"}
+# instructions aimed at whoever processes the mailbox (hidden text only)
+HIDDEN_INSTRUCTION_RE = re.compile(
+    r"(\b(?:re-?label|reclassify|re-?categori[sz]e)\b|"
+    r"\bforward\b[^.\n]{0,80}?(?:\bto\s+[\w.+-]+@[\w.-]+|\b(?:every|all|each)\b)|"
+    r"\breply to (?:this|the|that) (?:thread|message|email)\b[^.\n]{0,40}\bwith\b|"
+    r"\bignore (?:all |any )?(?:the )?(?:previous|prior|above|earlier|other)\b|"
+    r"\bmark (?:it|this|them|each|every|all)\b[^.\n]{0,60}?\bas\b|"
+    r"\bmark as (?:spam|read|important|safe|not spam|phishing|junk)\b|"
+    r"\bset (?:its |the |their )?(?:priority|importance|category)\b|"
+    r"\b(?:archive|delete) (?:it|this|them|every|all|each)\b|"
+    r"\b(?:priority|importance) (?:to|of) [0-3]\b)", re.I)
+
+
+def _norm_color(v: str) -> str:
+    v = (v or "").strip().lower().split("!")[0].strip()
+    v = _COLOR_NAMES.get(v, v)
+    m3 = re.fullmatch(r"#([0-9a-f])([0-9a-f])([0-9a-f])", v)
+    if m3:
+        return "#" + "".join(c * 2 for c in m3.groups())
+    mr = re.fullmatch(r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*[\d.]+)?\s*\)", v)
+    if mr:
+        return "#" + "".join(f"{min(255, int(x)):02x}" for x in mr.groups())
+    return v
+
+
+def _style_prop(style: str, prop: str) -> Optional[str]:
+    mt = re.search(r"(?:^|;)\s*" + prop + r"\s*:\s*([^;]+)", style or "", re.I)
+    return mt.group(1).strip() if mt else None
+
+
+class _HiddenSplitter:
+    """Split an HTML body into visible and hidden text (never raises)."""
+
+    def __init__(self, html_text: str):
+        from html.parser import HTMLParser  # noqa: PLC0415
+        outer = self
+        self.visible: List[str] = []
+        self.hidden: List[str] = []
+        # stack of (tag, hidden, dropped, background colour)
+        self.stack: List[Tuple[str, bool, bool, str]] = []
+
+        class P(HTMLParser):
+            def handle_starttag(self, tag, attrs):
+                outer._start(tag, {k: (v or "") for k, v in attrs})
+
+            def handle_startendtag(self, tag, attrs):
+                outer._start(tag, {k: (v or "") for k, v in attrs})
+                if tag not in _HTML_VOID:
+                    outer._end(tag)
+
+            def handle_endtag(self, tag):
+                outer._end(tag)
+
+            def handle_data(self, data):
+                outer._data(data)
+        p = P(convert_charrefs=True)
+        try:
+            p.feed(html_text)
+            p.close()
+        except Exception:  # noqa: BLE001 - malformed markup: whatever was parsed stands
+            pass
+
+    def _top(self) -> Tuple[bool, bool, str]:
+        if not self.stack:
+            return False, False, "#ffffff"
+        _, h, d, bg = self.stack[-1]
+        return h, d, bg
+
+    def _start(self, tag, a):
+        hid, drop, bg = self._top()
+        if tag in _HTML_BLOCK and not (hid or drop):
+            self.visible.append("\n")
+        if tag in _HTML_VOID:
+            return
+        style = a.get("style", "")
+        nbg = _style_prop(style, "background-color") or _style_prop(style, "background") \
+            or a.get("bgcolor")
+        if nbg:
+            nbg = _norm_color(nbg.split()[0])
+            bg = bg if nbg == "transparent" else nbg
+        color = _style_prop(style, "color") or a.get("color")
+        same = bool(color) and _norm_color(color) == bg
+        h = hid or "hidden" in a or bool(_HIDE_STYLE_RE.search(style)) or same
+        self.stack.append((tag, h, drop or tag in _HTML_DROP, bg))
+
+    def _end(self, tag):
+        for i in range(len(self.stack) - 1, -1, -1):
+            if self.stack[i][0] == tag:
+                del self.stack[i:]
+                break
+        if tag in _HTML_BLOCK and not any(self._top()[:2]):
+            self.visible.append("\n")
+
+    def _data(self, data):
+        hid, drop, _ = self._top()
+        if drop:
+            return
+        (self.hidden if hid else self.visible).append(data)
+
+
+def _html_source(m: dict) -> str:
+    h = m.get("html")
+    if isinstance(h, str) and h:
+        return h
+    b = m.get("body") or ""
+    return b if _HTML_RE.search(b) else ""
+
+
+def split_hidden_html(m: dict) -> Tuple[str, List[str]]:
+    """(visible text, hidden text chunks) of ``m``'s HTML; ('', []) if it has none."""
+    src = _html_source(m)
+    if not src:
+        return "", []
+    s = _HiddenSplitter(src)
+    vis = re.sub(r"[ \t\f\v\xa0]+", " ", "".join(s.visible))
+    vis = re.sub(r"\n\s*\n\s*\n+", "\n\n", "\n".join(ln.strip() for ln in vis.split("\n"))).strip()
+    hidden = [re.sub(r"\s+", " ", t).strip() for t in s.hidden]
+    return vis, [t for t in hidden if t]
+
+
+def hidden_injection(m: dict) -> Optional[str]:
+    """Hidden HTML text that addresses an assistant / AI / agent or carries mailbox
+    instructions (relabel, forward, reply to, ignore previous, mark as ...)."""
+    _, hidden = split_hidden_html(m)
+    if not hidden:
+        return None
+    text = " ".join(hidden)
+    if any(r.search(text) for r in INJECTION_RES) or ASSISTANT_WORDS_RE.search(text) \
+            or re.search(r"\b(?:ai|bot|agent|assistant)\b\s*[:,]", text, re.I):
+        return "hidden_assistant_text"
+    if HIDDEN_INSTRUCTION_RE.search(text):
+        return "hidden_instruction"
+    return None
+
+
+def model_view(m: dict) -> dict:
+    """What the model is shown: ``m`` itself, or, when its HTML hides text, a copy
+    with the body replaced by the visible text and the raw HTML removed (hidden
+    content never reaches the model)."""
+    vis, hidden = split_hidden_html(m)
+    if not hidden:
+        return m
+    v = {k: val for k, val in m.items() if k != "html"}
+    if _HTML_RE.search(m.get("body") or "") or not (m.get("body") or "").strip():
+        v["body"] = vis
+    else:  # a plain-text body from the HTML step may still carry the hidden text
+        body = m.get("body") or ""
+        for t in sorted(hidden, key=len, reverse=True):
+            if len(t) >= 8:
+                body = body.replace(t, " ")
+        v["body"] = body
+    return v
 
 
 # AWOS: phishing sanity guard signals (L3 post-check, see phish_downgrade).
@@ -419,6 +613,104 @@ def lookalike_guard(m: dict, ctx: Context, g: Optional[Dict[str, bool]] = None) 
 
 LOOKALIKE_PRED = {"importance": 0, "category": "spam_phishing", "needs_reply": False,
                   "suspicious": True}
+
+
+# ── L0: Reply-To mismatch and credential requests (AWOS) ──────────────────────
+# Two more outright phishing verdicts that compose with the look-alike guard
+# (same prediction, same "user rules still win", the L3 rescue never undoes them):
+#   reply_to_mismatch   the Reply-To header sends answers to a registrable domain
+#                       other than the From domain, on a money / credential topic
+#                       (bank, deposit, routing, payment, invoice, PIN, password,
+#                       gift card, wire): the classic payroll / vendor diversion
+#   credential_request  the message asks the reader to SEND a PIN, password,
+#                       passcode, full card / account number or login code by
+#                       reply or email. Genuine services never ask this, so the
+#                       sender does not matter; sentences that warn against it
+#                       ("we will never ask for your password") do not count.
+
+REPLY_TO_RISK_RE = re.compile(
+    r"\b(banks?|banking|deposits?|direct deposit|routing|account numbers?|payments?|payroll|"
+    r"invoices?|remittance|pins?|passwords?|passcodes?|gift ?cards?|wires?|wire transfer|iban|"
+    r"swift|sort code|credentials?|log ?in details)\b", re.I)
+_SECRET = (r"(?:(?:admin(?:istrator)?|account|bank(?:ing)?|online banking|email|login|log-in|"
+           r"debit|atm|card|security|verification|one[- ]time|sign[- ]?in|2fa|mfa)\s+)?"
+           r"(?:pins?|passwords?|passcodes?|pass codes?|login codes?|log-in codes?|sign[- ]?in codes?|"
+           r"verification codes?|security codes?|one[- ]time (?:pass)?codes?|otp|cvv2?|cvc|"
+           r"(?:full |complete |whole )?(?:card|credit card|debit card|bank account|account|routing)"
+           r" (?:and (?:routing|account) )?numbers?|"
+           r"(?:bank )?log ?in(?: details| credentials)?|credentials|social security number|ssn)")
+CRED_ASK_RES = [re.compile(p, re.I) for p in (
+    # reply / respond / write back ... with your PIN
+    r"\b(?:reply|respond|write back|answer)\b[^.!?\n]{0,60}?\b(?:with|including|containing|and "
+    r"(?:send|include|provide|confirm))\b[^.!?\n]{0,40}?\b" + _SECRET + r"\b",
+    # send / email / provide / confirm your PIN ... (by reply / email / to us / to this address)
+    r"\b(?:send|e-?mail|provide|share|forward|confirm|give|text)\b(?:\s+(?:us|me|back))?"
+    r"[^.!?\n]{0,30}?\b(?:your|the|our|its|practice'?s|company'?s|business'?s|firm'?s)\b"
+    r"[^.!?\n]{0,25}?\b" + _SECRET + r"\b[^.!?\n]{0,60}?\b(?:by (?:reply|return|e-?mail)|in "
+    r"(?:a |your )?reply|to (?:us|me|this (?:address|email|thread|message))|via e-?mail|back to)",
+    # include your PIN in your reply
+    r"\binclude\b[^.!?\n]{0,30}?\b" + _SECRET + r"\b[^.!?\n]{0,30}?\b(?:reply|response|e-?mail)\b",
+)]
+# a sentence warning against sharing secrets, not asking for them
+CRED_NEGATION_RE = re.compile(
+    r"(\b(?:never|not|don'?t|doesn'?t|won'?t|no one|nobody|no (?:legitimate|genuine|real))\b"
+    r"[^.!?\n]{0,40}?\b(?:ask|asks|asking|request|requests|share|send|give|e-?mail|reply|"
+    r"disclose|provide|need|needs|require)\b|\b(?:beware|scam|scams|scammers?|phishing|"
+    r"fraud(?:ulent|sters?)?|impersonat\w*)\b)", re.I)
+# a role/vendor that legitimately sends from one domain and takes replies at another
+# is not distinguishable offline; the topic gate keeps the guard to money/credential mail
+
+
+def _header(m: dict, name: str) -> str:
+    for k, v in (m.get("headers") or {}).items():
+        if str(k).lower() == name.lower():
+            return str(v or "")
+    return ""
+
+
+def reply_to_mismatch(m: dict, ctx: "Context", g: Optional[Dict[str, bool]] = None) -> Optional[str]:
+    """Reply-To on another registrable domain than From + a money / credential
+    topic. Skips protected senders, list mail (bulk senders routinely reply via
+    an ESP) and Reply-To addresses on the user's own or a correspondent's domain."""
+    g = g if g is not None else guards(m, ctx)
+    if g.get("protected") or g.get("list"):
+        return None
+    rt = re.findall(r"[\w.+'-]+@[\w.-]+", _header(m, "Reply-To"))
+    if not rt:
+        return None
+    reg_from = registrable_domain(_domain(_addr(m)))
+    safe = {registrable_domain(_domain(a)) for a in ctx.correspondents}
+    if ctx.user_domain:
+        safe.add(registrable_domain(ctx.user_domain))
+    text = ((m.get("subject") or "") + "\n" + (m.get("body") or "")).replace("_", " ")
+    for a in rt:
+        reg_rt = registrable_domain(_domain(a.lower()))
+        if not reg_rt or reg_rt == reg_from or reg_rt in safe:
+            continue
+        if REPLY_TO_RISK_RE.search(text):
+            return f"reply_to_mismatch:{reg_rt}"
+    return None
+
+
+def credential_request(m: dict) -> Optional[str]:
+    """The message asks the reader to send a PIN / password / passcode / full card
+    or account number / login code by reply or email (sentences that warn against
+    sharing them are ignored)."""
+    text = ((m.get("subject") or "") + "\n" + (m.get("body") or "")).replace("_", " ")
+    for sent in re.split(r"(?<=[.!?])\s+|\n+", text):
+        if not sent.strip() or CRED_NEGATION_RE.search(sent):
+            continue
+        for r in CRED_ASK_RES:
+            if r.search(sent):
+                return "credential_request"
+    return None
+
+
+def l0_phish_guard(m: dict, ctx: "Context", g: Optional[Dict[str, bool]] = None) -> Optional[str]:
+    """Every outright L0 phishing verdict, first hit wins: look-alike sender,
+    Reply-To diversion on a money topic, request to send a secret by email."""
+    g = g if g is not None else guards(m, ctx)
+    return lookalike_guard(m, ctx, g) or reply_to_mismatch(m, ctx, g) or credential_request(m)
 
 
 def _rule_domains(rule: dict) -> List[str]:
@@ -910,8 +1202,8 @@ def phish_downgrade(p: dict, m: dict, g: Dict[str, bool], ctx: Context) -> Optio
         return None
     if g.get("injection") or g.get("list"):
         return None
-    if lookalike_guard(m, ctx, g):
-        return None  # the rescue never undoes a look-alike verdict
+    if l0_phish_guard(m, ctx, g):
+        return None  # the rescue never undoes an L0 phishing verdict
     text = (m.get("subject") or "") + "\n" + (m.get("body") or "")
     if ASSISTANT_WORDS_RE.search(text) or lookalike_signals(m):
         return None
@@ -929,30 +1221,104 @@ def phish_downgrade(p: dict, m: dict, g: Dict[str, bool], ctx: Context) -> Optio
     return "known_sender_domain"
 
 
-# ── urgency cap for automated senders (after the model, before rules) ─────────
-# A local model over-escalates machine mail ("scheduled retirement" weeks away,
-# a dependency advisory, "payout on the way") to 3. Automated senders keep 3 only
-# when the text shows a near-term deadline, a failure, or a security incident on
-# the user's own account; otherwise 3 -> 2. Rules are applied afterwards, so a
-# user or learned rule can still raise the message back to 3.
+# ── urgency cap and raise for machine / role mail (after the model, before rules) ─
+# A local model both over- and under-calls urgency on machine mail. Two mirror
+# checks, both on positive evidence in the text (never on its absence):
+#
+#   cap    importance 3 -> 2 for an automated / role sender when the text gives a
+#          concrete NOT-NOW signal (a date more than ~5 days out, "no action
+#          required", a receipt / "payout is on the way" / summary / digest /
+#          report, a dependency advisory, a resolved notice) AND no near-term,
+#          failure, account-incident or alarm signal. A genuine alarm with no
+#          date stays 3.
+#   raise  importance 0-2 -> 3 urgent_action for non-list, non-suspicious,
+#          non-phishing automated / role mail (billing, accounts, alerts,
+#          security, support, ops, monitoring, ...) reporting a failure with a
+#          consequence or near-term deadline (declined + read-only in 48 hours),
+#          a security incident on the user's own account, or a live alarm.
+#
+# Rules are applied afterwards, so a user or learned rule can still move either.
 
 AUTOMATED_LOCAL_RE = re.compile(
     r"^(no-?reply|do-?not-?reply|donotreply|notifications?|notify|notifier|alerts?|updates?|"
     r"mailer|automated|auto|bounces?|digest|[\w.-]*-notifications?)([._+-].*)?$")
+# local-part tokens of role mailboxes whose mail can carry an operational emergency
+ROLE_TOKENS = frozenset("""
+billing bill bills accounts account accounting invoice invoices payments payment payables
+receivables ar ap finance payroll alerts alert alarm alarms security secops admin
+administrator sysadmin support helpdesk help it ops devops sre noc monitoring monitor
+status system systems service services network infra infrastructure operations
+""".split())
+# extra role mailboxes that send routine reports / bookings / studio or shop mail:
+# they count as machine mail for the not-now DEMOTION only (never for the raise)
+DEMOTE_ROLE_TOKENS = ROLE_TOKENS | frozenset("""
+reports report reporting analytics insights stats bookings booking reservations reservation
+appointments scheduling calendar studio shop store orders order receipts receipt statements
+statement hello hi info team news newsletter newsletters dispatch digest community updates
+members membership events
+""".split())
 FAILURE_RE = re.compile(
     r"\b(failed|failure|failing|declined|rejected|bounced|past due|overdue|unpaid|suspended|"
     r"suspension|locked|disabled|will stop|stopped working|outage|is down|went down|"
     r"could not (?:charge|renew|process|deliver)|unable to (?:charge|renew|process))\b", re.I)
 INCIDENT_RE = re.compile(
     r"(\bpassword (?:was|has been) (?:changed|reset)\b|\bnew (?:ssh|gpg|api) key\b|"
+    r"\b(?:ssh|gpg|api) key (?:was |has been )?(?:created|added)\b|"
     r"\bkey was added\b|\badded to your account\b|\bsecret\b[^.\n]{0,60}\b(?:detected|exposed|leaked)\b|"
-    r"\b(?:leaked|exposed|compromised|unauthori[sz]ed)\b|"
-    r"\bif (?:this|it) was(?:n't| not) you\b|\bif you did(?:n't| not) (?:add|make|do|request)\b)", re.I)
+    r"\b(?:leaked|exposed|compromised|unauthori[sz]ed)\b|\bfailed (?:password|login|sign-?in) attempts\b|"
+    r"\bif (?:this|it) was(?:n't| not) you\b|\bif (?:these|they) (?:attempts )?were(?:n't| not) (?:you|yours)\b|"
+    r"\bif you did(?:n't| not) (?:add|make|do|request)\b)", re.I)
 DEADLINE_RE = re.compile(
     r"(\b(?:today|tonight|tomorrow|end of (?:the )?day|eod|asap|immediately|right away)\b|"
     r"\bwithin (?:the next )?(?:\d{1,2}|twenty-four|forty-eight) hours?\b|"
     r"\bin (?:\d{1,2}) hours?\b|\b(?:in|within) (?:1|one|2|two) (?:business )?days?\b)", re.I)
+# a failure's near-term horizon for the raise (wider than DEADLINE_RE: "within 5 days")
+NEAR_TERM_RE = re.compile(
+    r"(\b(?:\d{1,2}|twenty-four|forty-eight|seventy-two) hours?\b|"
+    r"\b(?:in|within) (?:the next )?(?:[1-7]|one|two|three|four|five|six|seven) "
+    r"(?:business |calendar )?days?\b)", re.I)
+CONSEQUENCE_RE = re.compile(
+    r"\b(read-only|read only|will be (?:set to|suspended|disabled|locked|deactivated|cancell?ed|"
+    r"terminated|deleted|removed|shut ?down|paused|interrupted|downgraded|cut off)|"
+    r"will (?:stop|lose|expire|be cut off)|lose access|loss of access|service interruption|"
+    r"cannot|can't|can not|unable to|being rejected|are rejected|no longer|offline|unavailable)\b",
+    re.I)
+ALARM_RE = re.compile(
+    r"(\balarms?\b|\bcritical (?:alarm|alert|temperature|level|threshold|failure|error|condition)\b|"
+    r"\bout[- ]of[- ]range\b|\bout of (?:spec|tolerance)\b|"
+    r"\b(?:above|below|over|under|exceed(?:ed|s)?)\b[^.\n]{0,30}?\bfor (?:\d+|over an?|more than \d+) "
+    r"(?:minutes?|mins?|hours?|hrs?)\b|\bcurrent(?:ly)? reading\b|\bright now\b|"
+    r"\b(?:is|are) (?:now )?(?:down|offline|unreachable|not responding)\b|"
+    r"\bnow (?:above|below|reading|down|offline)\b)", re.I)
+RESOLVED_RE = re.compile(
+    r"\b(resolved|back to normal|returned to normal|back in range|back within range|recovered|"
+    r"restored|back online|back up and running|is (?:now )?(?:working|operational) again|"
+    r"(?:alarm|alert|incident) (?:has )?cleared|all clear)\b", re.I)
+NOT_NOW_RES = [(k, re.compile(p, re.I)) for k, p in (
+    ("no_action", r"\bno (?:further )?action (?:is |will be )?(?:required|needed|necessary)\b|"
+                  r"\bnothing (?:you need|for you) to do\b|\byou don'?t need to do anything\b|"
+                  r"\byou can (?:safely )?ignore this (?:e-?mail|message|notice|alert)\b"),
+    ("resolved", RESOLVED_RE.pattern),
+    ("receipt", r"\breceipts?\b|\bpayouts? (?:is |are )?on (?:the|its) way\b|\bis on (?:the|its) way\b|"
+                r"\bpayment (?:received|confirmed|successful)\b|\bthank you for your (?:payment|order)\b|"
+                r"\bhas (?:been )?(?:shipped|delivered)\b"),
+    ("report", r"\b(?:weekly|monthly|daily|quarterly|annual|yearly)\b[^.\n]{0,20}?"
+               r"\b(?:summary|digest|report|recap|statement|update|snapshot)\b|\bsummary\b|\bdigest\b|"
+               r"\brecap\b|\bsnapshot\b|\bstatement (?:is )?(?:ready|available)\b"),
+    ("booking", r"\b(?:booking|reservation|appointment) (?:is |has been )?(?:confirmed|received)\b|"
+                r"\bnew (?:booking|reservation)\b|\byou(?:'ve| have) (?:got|received) a (?:new )?booking\b"),
+    ("newsletter", r"\bnewsletter\b|\bdispatch\b|\b(?:this|the) (?:week|month)'?s (?:issue|edition|roundup)\b|"
+                   r"\bissue (?:no\.? ?|#)\d+\b|\bin this issue\b"),
+    ("advisory", r"\badvisor(?:y|ies)\b|\bvulnerabilit(?:y|ies)\b|\bdependabot\b|\bCVE-\d{4}-\d+\b|"
+                 r"\bsecurity (?:update|patch|release) (?:is )?available\b"),
+)]
 ISO_DATE_RE = re.compile(r"\b(20\d\d)-(\d\d)-(\d\d)\b")
+_MONTHS = {m: i + 1 for i, m in enumerate(
+    "jan feb mar apr may jun jul aug sep oct nov dec".split())}
+MONTH_DATE_RE = re.compile(
+    r"\b(?:(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?"
+    r"|(\d{1,2})(?:st|nd|rd|th)?\s+(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?)"
+    r"(?:,?\s+(20\d\d))?\b", re.I)
 
 
 def is_automated_sender(m: dict, g: Optional[Dict[str, bool]] = None) -> bool:
@@ -960,69 +1326,171 @@ def is_automated_sender(m: dict, g: Optional[Dict[str, bool]] = None) -> bool:
     return bool((g or {}).get("no_reply")) or bool(AUTOMATED_LOCAL_RE.match(local))
 
 
-def _near_date(m: dict, text: str, days: int = 2) -> bool:
-    """An ISO date in the text within ``days`` of the message's own date."""
+def is_role_sender(m: dict) -> bool:
+    """A role mailbox (billing@, accounts-receivable@, alerts@, it-ops@, ...)."""
+    local = _addr(m).split("@", 1)[0]
+    return any(t in ROLE_TOKENS for t in re.split(r"[._+-]+", local) if t)
+
+
+def is_demote_role_sender(m: dict) -> bool:
+    """A role mailbox for the not-now demotion: ``is_role_sender`` plus reports@,
+    bookings@, studio@, hello@, newsletter@ ... (routine report / booking mail)."""
+    local = _addr(m).split("@", 1)[0]
+    return any(t in DEMOTE_ROLE_TOKENS for t in re.split(r"[._+-]+", local) if t)
+
+
+def _msg_date(m: dict):
     from datetime import date  # noqa: PLC0415
     ms = ISO_DATE_RE.match((m.get("date") or "")[:10])
     if not ms:
-        return False
+        return None
     try:
-        d0 = date(*map(int, ms.groups()))
+        return date(*map(int, ms.groups()))
     except ValueError:
-        return False
+        return None
+
+
+def _date_deltas(m: dict, text: str) -> List[int]:
+    """Days from the message date to every concrete date in the text (ISO or
+    'December 31' / '31 Dec 2026'; a yearless date before the message date by more
+    than a month is read as next year). Empty when the message has no date."""
+    from datetime import date  # noqa: PLC0415
+    d0 = _msg_date(m)
+    if d0 is None:
+        return []
+    out = []
     for y, mo, d in ISO_DATE_RE.findall(text):
         try:
-            delta = (date(int(y), int(mo), int(d)) - d0).days
+            out.append((date(int(y), int(mo), int(d)) - d0).days)
         except ValueError:
             continue
-        if 0 <= delta <= days:
-            return True
-    return False
+    for mt in MONTH_DATE_RE.finditer(text):
+        mon = (mt.group(1) or mt.group(4) or "")[:3].lower()
+        day = int(mt.group(2) or mt.group(3))
+        yr = int(mt.group(5)) if mt.group(5) else d0.year
+        try:
+            dt = date(yr, _MONTHS[mon], day)
+        except (KeyError, ValueError):
+            continue
+        if not mt.group(5) and (dt - d0).days < -31:
+            try:
+                dt = date(yr + 1, _MONTHS[mon], day)
+            except ValueError:
+                continue
+        out.append((dt - d0).days)
+    return out
 
 
-def near_term_signal(m: dict) -> Optional[str]:
-    """Why an automated message may be urgent: failure / account incident /
-    near-term deadline; None if the text shows none."""
-    text = (m.get("subject") or "") + "\n" + (m.get("body") or "")
-    if FAILURE_RE.search(text):
-        return "failure"
-    if INCIDENT_RE.search(text):
+def _near_date(m: dict, text: str, days: int = 2) -> bool:
+    """A concrete date in the text within ``days`` of the message's own date."""
+    return any(0 <= dl <= days for dl in _date_deltas(m, text))
+
+
+def _text(m: dict) -> str:
+    return (m.get("subject") or "") + "\n" + (m.get("body") or "")
+
+
+def _benign_notice(text: str) -> bool:
+    """The notice itself says there is nothing to do ("If this was you, you can
+    ignore this email", "no action is needed") or that the problem is resolved."""
+    return bool(NOT_NOW_RES[0][1].search(text) or RESOLVED_RE.search(text))
+
+
+def keep_signal(m: dict) -> Optional[str]:
+    """Why a machine message may be urgent now: failure (unless reported resolved),
+    account incident, alarm, near-term deadline; None if the text shows none."""
+    text = _text(m)
+    benign = _benign_notice(text)
+    if INCIDENT_RE.search(text) and not benign:
         return "account_incident"
+    resolved = bool(RESOLVED_RE.search(text))
+    if FAILURE_RE.search(text) and not resolved:
+        return "failure"
+    if ALARM_RE.search(text) and not resolved:
+        return "alarm"
     if DEADLINE_RE.search(text) or _near_date(m, text):
         return "deadline"
     return None
 
 
-def urgency_cap(p: dict, m: dict, g: Dict[str, bool]) -> Optional[str]:
-    """3 -> 2 (urgent_action -> important_read) on a model label for an automated
-    sender with no near-term signal; and the mirror case, 2 -> 3 for a non-list,
-    non-suspicious automated message reporting a security event on the user's own
-    account (the strict urgency prompt makes the model under-call these). Returns
-    the reason, or None (unchanged)."""
+def near_term_signal(m: dict) -> Optional[str]:
+    """Back-compat name for ``keep_signal``."""
+    return keep_signal(m)
+
+
+def not_now_signal(m: dict) -> Optional[str]:
+    """Positive evidence that a machine message is not urgent now: a concrete
+    date more than ~5 days out (and none sooner), no action required, a receipt,
+    a summary / digest / report, a dependency advisory, a resolved notice."""
+    text = _text(m)
+    for kind, r in NOT_NOW_RES:
+        if r.search(text):
+            return kind
+    deltas = [dl for dl in _date_deltas(m, text) if dl >= 0]
+    if deltas and min(deltas) > 5:
+        return "far_date"
+    return None
+
+
+def raise_signal(m: dict) -> Optional[str]:
+    """Why machine / role mail must be urgent: an account-security incident, a
+    live alarm, or a failure with a consequence or near-term deadline. A resolved
+    notice, a report / receipt / advisory or "no action required" suppresses the
+    alarm and failure cases."""
+    text = _text(m)
+    if INCIDENT_RE.search(text) and not _benign_notice(text):
+        return "account_incident"
+    nn = not_now_signal(m)
+    if nn and nn != "far_date":
+        return None
+    if ALARM_RE.search(text):
+        return "alarm"
+    if FAILURE_RE.search(text) and (CONSEQUENCE_RE.search(text) or DEADLINE_RE.search(text)
+                                    or NEAR_TERM_RE.search(text) or _near_date(m, text)):
+        return "failure_near_term"
+    return None
+
+
+RAISE_REASON = {"account_incident": "automated_account_incident", "alarm": "machine_alarm",
+                "failure_near_term": "failure_near_term"}
+
+
+def urgency_cap(p: dict, m: dict, g: Dict[str, bool], rescued: bool = False) -> Optional[str]:
+    """Cap (3 -> 2 on a concrete not-now signal and no keep signal) or raise
+    (0-2 -> 3 urgent_action on an incident / alarm / failure with a near-term
+    consequence) the model label of automated or role mail, in place. Returns the
+    reason (``not_now:<kind>`` or a RAISE_REASON value), or None (unchanged).
+    ``rescued``: the phishing rescue relabelled the model's verdict; its importance
+    is the rescue's floor, not a model urgency estimate, so it is not raised."""
     try:
         imp = int(p.get("importance", 1))
     except (TypeError, ValueError):
         return None
-    if g.get("correspondent") or not is_automated_sender(m, g):
+    machine = is_automated_sender(m, g) or is_role_sender(m)
+    if not (machine or (imp >= 3 and is_demote_role_sender(m))):
         return None
-    if imp == 2:
-        if (g.get("list") or g.get("injection") or p.get("suspicious")
-                or p.get("category") == "spam_phishing"):
+    if imp <= 2:
+        if (rescued or g.get("list") or g.get("injection") or p.get("suspicious")
+                or p.get("category") == "spam_phishing"
+                or "punycode_or_non_ascii" in lookalike_signals(m)):
             return None
-        text = (m.get("subject") or "") + "\n" + (m.get("body") or "")
-        if not INCIDENT_RE.search(text):
+        why = raise_signal(m)
+        if not why:
             return None
         p["importance"] = 3
         p["category"] = "urgent_action"
-        return "automated_account_incident"
-    if imp < 3:
+        return RAISE_REASON[why]
+    if imp < 3 or g.get("correspondent"):
         return None
-    if near_term_signal(m):
+    if keep_signal(m):
+        return None
+    nn = not_now_signal(m)
+    if not nn:
         return None
     p["importance"] = 2
     if p.get("category") == "urgent_action":
         p["category"] = "important_read"
-    return "automated_no_near_term_signal"
+    return f"not_now:{nn}"
 
 
 # ── final guard + driver ──────────────────────────────────────────────────────
@@ -1074,13 +1542,15 @@ def run_cascade(messages: List[dict], prefs: dict, ctx: Context, model_batch: Mo
         g = guards(m, ctx)
         gmap[m["id"]] = g
         tr = {"guards": sorted(k for k, v in g.items() if v)}
-        lk = lookalike_guard(m, ctx, g)
+        lk = l0_phish_guard(m, ctx, g)
         if lk:
             # overrides the model and every learned rule; user-written rules still win
             p, ptrace = prefs_store.resolve(dict(LOOKALIKE_PRED), m, user_rules_doc(rules),
                                             record_hits=record_hits)
             decided[m["id"]] = finalize(p, g)
-            trace_items[m["id"]] = {**tr, "layer": "L0", "lookalike": lk,
+            kind = "lookalike" if lk.startswith(("lookalike_of:", "display_name_brand:")) \
+                else "l0_phish"
+            trace_items[m["id"]] = {**tr, "layer": "L0", kind: lk,
                                     "rules": _trace_fixed(ptrace)[1], "prefs_trace": ptrace}
             continue
         p, hit, ptrace = (None, [], [])
@@ -1103,7 +1573,8 @@ def run_cascade(messages: List[dict], prefs: dict, ctx: Context, model_batch: Mo
     calls = 0
     for i in range(0, len(pending), batch_size):
         batch = pending[i:i + batch_size]
-        preds, dists = model_batch(batch)
+        # hidden HTML text (white-on-white, display:none, ...) never reaches the model
+        preds, dists = model_batch([model_view(m) for m in batch])
         calls += 1
         for m in batch:
             g = gmap[m["id"]]
@@ -1121,7 +1592,7 @@ def run_cascade(messages: List[dict], prefs: dict, ctx: Context, model_batch: Mo
             phish = phish_downgrade(p, m, g, ctx) if raw is not None else None
             if phish:
                 trace_items[m["id"]]["phish_guard"] = phish
-            cap = urgency_cap(p, m, g) if raw is not None else None
+            cap = urgency_cap(p, m, g, rescued=bool(phish)) if raw is not None else None
             if cap:
                 trace_items[m["id"]]["urgency_cap"] = cap
             p, ptrace = resolve_rules(p, m, rules, record_hits=record_hits)

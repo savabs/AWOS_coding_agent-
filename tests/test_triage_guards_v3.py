@@ -253,7 +253,8 @@ def test_urgency_cap_demotes_automated_mail_without_near_term_signal():
     out, tr, _ = _cascade(msgs, {"version": 1, "rules": []}, labels)
     for m in AUTOMATED:
         assert (out[m["id"]]["importance"], out[m["id"]]["category"]) == (2, "important_read"), m["id"]
-        assert tr["items"][m["id"]]["urgency_cap"] == "automated_no_near_term_signal"
+        # the cap now needs a positive not-now signal (advisory / far date / receipt)
+        assert tr["items"][m["id"]]["urgency_cap"].startswith("not_now:")
     for m in KEEP3:
         assert out[m["id"]]["importance"] == 3, m["id"]
         assert "urgency_cap" not in tr["items"][m["id"]]
@@ -336,3 +337,14 @@ def test_lookalike_guard_precision_on_seeds_7_8_9():
             p = {"importance": 3, "category": "urgent_action"}
             if tc.urgency_cap(p, m, tc.guards(m, ctx)):
                 assert truth[m["id"]]["importance"] <= 2, (s, m["subject"])
+
+
+def test_v4_l0_guards_leave_the_v3_genuine_and_colleague_mail_alone():
+    # v4 added Reply-To / credential-request verdicts to L0; none of the v3 genuine
+    # senders (payment declined, verify your email, password changed) may trip them
+    msgs = COLLEAGUES + GENUINE + LOOKALIKES
+    ctx = tc.build_context(ME, {"rules": []}, msgs)
+    for m in COLLEAGUES + GENUINE + AUTOMATED + KEEP3 + PEOPLE:
+        assert tc.l0_phish_guard(m, ctx) is None, m["id"]
+    for m in LOOKALIKES:
+        assert tc.l0_phish_guard(m, ctx) == tc.lookalike_guard(m, ctx), m["id"]
