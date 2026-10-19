@@ -43,6 +43,13 @@ forge attributes or close the observation fence:
 ``diff(prev, cur)`` compares two observations; an empty diff after an action
 is a no-progress signal (open item G).
 
+Locator hints (WP6, opt-in): ``compress(tree, locators=True)`` sets
+``Element.locator`` on each interactive element to its best ranked,
+uniqueness-checked locator from grounding.generate_locators (e.g.
+``container=toolbar[name="Key actions"] >> role=button[name="Create key"]``);
+``render(elems, locators=True)`` appends it as ``loc=...``. Off by default,
+so the observation text is unchanged unless a caller asks for it.
+
 Identity hints for ax_observe.py: the AX identifier, a value-free label, the
 labelled-ancestor chain, and (when the nearest ancestors are an unlabelled
 row / list item) the row's content, so "Archive" in row "Invoice from Bob"
@@ -172,6 +179,7 @@ _DESTRUCTIVE_RE = re.compile(
     r"\b(delete|remove|erase|discard|don'?t save|do not save|close without saving|"
     r"empty (the )?(trash|bin)|move to (the )?(trash|bin)|format|sign out|log ?out|log off|"
     r"uninstall|wipe|reset|factory reset|revoke|deactivate|terminate|force quit|"
+    r"regenerate|rotate (all|keys?|secrets?|tokens?|credentials?|passwords?)|"
     r"overwrite|replace|revert|permanently|clear (all|history|data|everything)|"
     r"cancel (subscription|order|account|membership|plan|payment|booking|reservation)|"
     r"close account|unsubscribe|send(?! (to back|to front|backward|forward))|reply all|post|publish|submit|tweet|pay|buy|purchase|"
@@ -385,6 +393,7 @@ class Element:
     selected_text: Optional[str] = field(default=None, repr=False)
     raw_value: Optional[str] = field(default=None, repr=False)   # unredacted; never rendered
     ambiguous: bool = False               # set by ax_observe when its ID may have moved
+    locator: str = field(default="", repr=False)             # grounding locator hint (opt-in)
 
     def key(self) -> Tuple[str, str]:
         return (self.role, self.text)
@@ -393,7 +402,7 @@ class Element:
     def interactive(self) -> bool:
         return self.role in INTERACTIVE or self.button_role is not None
 
-    def render(self, value_budget: int = 60) -> str:
+    def render(self, value_budget: int = 60, locators: bool = False) -> str:
         s = f"[{self.sid or self.index}] {self.role}"
         if self.text:
             s += " " + _q(self.text, 120)
@@ -421,9 +430,17 @@ class Element:
             s += f" {self.button_role}"
         if self.ambiguous:
             s += " ambiguous"
+        if locators and self.locator:
+            s += " loc=" + _q(self.locator, 160)
         return s
 
     def to_dict(self) -> dict:
+        d = self._dict()
+        if self.locator:
+            d["locator"] = self.locator
+        return d
+
+    def _dict(self) -> dict:
         return {"i": self.index, "role": self.role, "text": self.text,
                 "center": list(self.center) if self.center else None,
                 "enabled": self.enabled, "focused": self.focused,
@@ -590,15 +607,25 @@ def collect(tree: Any, viewport: Optional[Tuple[float, float, float, float]] = N
 
 
 def compress(tree: Any, viewport: Optional[Tuple[float, float, float, float]] = None,
-             max_elements: int = 300) -> List[Element]:
+             max_elements: int = 300, locators: bool = False) -> List[Element]:
     elems = collect(tree, viewport)[0][:max_elements]
     for i, e in enumerate(elems):
         e.index = i
+    if locators:
+        add_locator_hints(tree, elems, viewport)
     return elems
 
 
-def render(elems: List[Element]) -> str:
-    return "\n".join(e.render() for e in elems)
+def add_locator_hints(tree: Any, elems: List[Element],
+                      viewport: Optional[Tuple[float, float, float, float]] = None) -> List[Element]:
+    """Set ``Element.locator`` (grounding.py's best verified locator)."""
+    from .grounding import annotate_elements   # lazy: grounding imports this module
+    annotate_elements(tree, elems, viewport)
+    return elems
+
+
+def render(elems: List[Element], locators: bool = False) -> str:
+    return "\n".join(e.render(locators=locators) for e in elems)
 
 
 def approx_tokens(text: str) -> int:
