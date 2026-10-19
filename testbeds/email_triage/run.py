@@ -12,6 +12,9 @@
     # results.json gets "scoping_case" (seed.scoping_case_result) next to the composite
     python -m testbeds.email_triage.run --work-dir /tmp/et3 --scoping-case --agent-cmd "..."
 
+    # held-out persona (different owner, mail, rules; default persona is "sam")
+    python -m testbeds.email_triage.run --dry-run --persona clinic --work-dir /tmp/et_clinic
+
     # browser path: also start the local web inbox; {url} is passed to the agent
     python -m testbeds.email_triage.run --work-dir /tmp/et2 --serve \
         --agent-cmd "python -m testbeds.email_triage.web_agent --url {url} --mailbox {mailbox} --phase {phase}"
@@ -71,10 +74,12 @@ PRESETS = {
 }
 
 
-def setup(work: Path, seed: int, scoping_case: Optional[bool] = None) -> dict:
-    """``scoping_case`` None = the AWOS_ET_SCOPING_CASE env var (seed.py)."""
+def setup(work: Path, seed: int, scoping_case: Optional[bool] = None,
+          persona: Optional[str] = None) -> dict:
+    """``scoping_case`` None = the AWOS_ET_SCOPING_CASE env var (seed.py).
+    ``persona`` None = the default persona (seed.DEFAULT_PERSONA)."""
     work = Path(work)
-    data = seed_mod.write_work_dir(work, seed, scoping_case=scoping_case)
+    data = seed_mod.write_work_dir(work, seed, scoping_case=scoping_case, persona=persona)
     (work / "logs").mkdir(exist_ok=True)
     (work / "owner").mkdir(exist_ok=True)
     for p in (work / "logs").glob("*"):
@@ -106,13 +111,14 @@ def run_cmd(template: str, work: Path, phase: str, url: str, timeout: float) -> 
 
 def run_arm(work: Path, seed: int, *, agent: Optional[str] = None, agent_cmd: Optional[str] = None,
             serve: bool = False, feedback: bool = True, feedback_style: str = "nl+hints",
-            timeout: float = 1800.0, scoping_case: Optional[bool] = None) -> dict:
+            timeout: float = 1800.0, scoping_case: Optional[bool] = None,
+            persona: Optional[str] = None) -> dict:
     """One arm on one seed. ``agent`` is a built-in scripted agent name:
     trivial | keyword | keyword_prefs | oracle | web_keyword | web_obedient.
     ``scoping_case`` appends seed.py's newsletter-vs-security-alert case; its
     result (seed.scoping_case_result) is reported as ``scoping_case``."""
     work = Path(work)
-    data = setup(work, seed, scoping_case)
+    data = setup(work, seed, scoping_case, persona)
     truth, messages = data["truth"], data["messages"]
     if agent and agent.startswith("web_"):
         serve = True
@@ -172,6 +178,8 @@ def run_arm(work: Path, seed: int, *, agent: Optional[str] = None, agent_cmd: Op
     report["arm"] = {"agent": agent, "agent_cmd": agent_cmd, "serve": serve, "feedback": feedback,
                      "feedback_style": feedback_style, "returncodes": rc, "seed": seed,
                      "scoping_case": bool(truth.get("scoping_case"))}
+    if persona and persona != seed_mod.DEFAULT_PERSONA:
+        report["arm"]["persona"] = persona
     (work / "results.json").write_text(json.dumps(report, indent=1) + "\n")
     return report
 
@@ -187,11 +195,13 @@ DRY_ARMS = [
 ]
 
 
-def dry_run(work: Path, seed: int, out: Callable[[str], None] = print) -> dict:
+def dry_run(work: Path, seed: int, out: Callable[[str], None] = print,
+            persona: Optional[str] = None) -> dict:
     work = Path(work)
+    held_out = bool(persona) and persona != seed_mod.DEFAULT_PERSONA
     results = {}
     for name, kw in DRY_ARMS:
-        r = run_arm(work / name, seed, **kw)
+        r = run_arm(work / name, seed, persona=persona, **kw)
         results[name] = r
         out(score_mod.summary_line(name, r))
     comp = {k: v["phases"]["evaluation"]["composite"] for k, v in results.items()}
@@ -206,7 +216,14 @@ def dry_run(work: Path, seed: int, out: Callable[[str], None] = print) -> dict:
                             and results["web_obedient"]["safety"]["violations"] > 0
                             and results["web_obedient"]["phases"]["evaluation"]["injection"]["handled"] == 0),
     }
-    summary = {"seed": seed, "composite_eval": comp, "checks": checks, "valid": all(checks.values())}
+    if held_out:
+        # web_agent.run_obedient only knows the default persona's injection
+        # wording, so on a held-out mailbox it obeys nothing: not a scorer check.
+        checks["obedient_caught"] = None
+    summary = {"seed": seed, "composite_eval": comp, "checks": checks,
+               "valid": all(v for v in checks.values() if v is not None)}
+    if held_out:
+        summary["persona"] = persona
     (work / "dry_run_summary.json").write_text(json.dumps(summary, indent=1) + "\n")
     out("validity checks: " + json.dumps(checks))
     out("VALID" if summary["valid"] else "INVALID")
@@ -228,6 +245,9 @@ def main(argv=None) -> int:
     ap.add_argument("--scoping-case", action="store_true", default=None,
                     help="append the newsletter-vs-security-alert scoping case (seed.py) and "
                          "report seed.scoping_case_result next to the composite")
+    ap.add_argument("--persona", default=seed_mod.DEFAULT_PERSONA,
+                    help="mailbox owner: sam (default) or a held-out persona "
+                         "(testbeds/email_triage/personas: clinic, photographer)")
     ap.add_argument("--show-presets", action="store_true")
     a = ap.parse_args(argv)
     if a.show_presets:
@@ -236,12 +256,12 @@ def main(argv=None) -> int:
         print("(templates only: the adapter is not built, and a model run needs owner approval)")
         return 0
     if a.dry_run:
-        return 0 if dry_run(Path(a.work_dir), a.seed)["valid"] else 1
+        return 0 if dry_run(Path(a.work_dir), a.seed, persona=a.persona)["valid"] else 1
     if not (a.agent or a.agent_cmd):
         ap.error("give --dry-run, --agent or --agent-cmd")
     r = run_arm(Path(a.work_dir), a.seed, agent=a.agent, agent_cmd=a.agent_cmd, serve=a.serve,
                 feedback=not a.no_feedback, feedback_style=a.feedback_style, timeout=a.timeout,
-                scoping_case=a.scoping_case)
+                scoping_case=a.scoping_case, persona=a.persona)
     print(score_mod.summary_line(a.agent or "agent_cmd", r))
     print(f"results: {Path(a.work_dir) / 'results.json'}")
     return 0 if r["useful"] else 1
