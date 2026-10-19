@@ -4,8 +4,14 @@ triage_cascade.py — layered email triage that stops at the first confident lay
     L0  deterministic guards     correspondent / same domain / protected family,
                                  no-reply, list headers, automated sender,
                                  assistant-directed text (injection)
-    L1  learned preferences      prefs.json rules, ranked by precedence
-                                 user > explicit subject > domain > learned > model
+    L1  learned preferences      prefs.json rules (v1 or v2) resolved by
+                                 testbeds/email_triage/prefs.py: precedence
+                                 user > subject/service/thread > address > domain
+                                 > learned > model, include/exclude, candidates
+                                 never applied, and the security-alert guard (a
+                                 broad non-user demotion never buries a non-list
+                                 security/account/payment alert); plus the
+                                 cheap-error tie-break (resolve_rules)
     L2  static rules             list mail with no protective signal -> bulk
                                  (social / promo / newsletter), importance 0
     L3  model label              the existing batched, schema-constrained call in
@@ -38,9 +44,16 @@ from __future__ import annotations
 import math
 import os
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
+
+try:  # the v2 preference store is the single rule resolver for L1 and L3
+    from testbeds.email_triage import prefs as prefs_store
+except ImportError:  # pragma: no cover - run as a plain script outside the repo root
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    from testbeds.email_triage import prefs as prefs_store
 
 CATEGORIES = ["urgent_action", "important_read", "fyi", "newsletter", "promo",
               "social", "spam_phishing"]
@@ -242,7 +255,8 @@ def build_context(profile: dict, prefs: dict, messages: List[dict],
     user_email = (profile.get("email") or "").lower()
     roots = set()
     for r in prefs.get("rules", []) or []:
-        if _rule_is_important(r):
+        if (prefs_store.rule_status(r) == "active" and prefs_store.rule_effect(r) == "include"
+                and _rule_is_important(r)):
             roots.update(_rule_domains(r))
     roots -= FREE_MAIL
     notes = " ".join(str(n) for n in (prefs.get("notes") or []))
@@ -337,40 +351,78 @@ def ranked_rules(rules: List[dict], m: Optional[dict] = None) -> List[dict]:
 
 
 def rule_matches(when: dict, m: dict) -> bool:
-    """testbeds/email_triage/prefs.py semantics (every key given must match)."""
-    if not when:
-        return False
-    addr, name = _addr(m), (m.get("from_name") or "").lower()
-    dom = _domain(addr)
-    subj, body = (m.get("subject") or "").lower(), (m.get("body") or "").lower()
+    """testbeds/email_triage/prefs.py semantics (every key given must match, incl.
+    is_list / body_any / from_domain_not_any / thread_id); an empty ``when`` never
+    matches."""
+    return bool(when) and prefs_store.matches(when, m)
 
-    def any_in(hay, needles):
-        return any(str(n).lower() in hay for n in (needles or []))
 
-    for k, v in when.items():
-        if k == "from_address" and addr != str(v).lower():
-            return False
-        if k == "from_domain" and dom != str(v).lower():
-            return False
-        if k == "from_domain_any" and dom not in {str(d).lower() for d in v}:
-            return False
-        if k == "from_domain_not_any" and dom in {str(d).lower() for d in v}:
-            return False
-        if k == "from_name_any" and not any_in(name, v):
-            return False
-        if k == "subject_any" and not any_in(subj, v):
-            return False
-        if k == "body_any" and not any_in(body, v):
-            return False
-        if k == "text_any" and not any_in(subj + "\n" + body, v):
-            return False
-        if k == "is_list" and is_list_mail(m) != bool(v):
-            return False
-    return True
+PrefsLike = Union[dict, List[dict], None]
+
+
+def as_doc(prefs: PrefsLike) -> dict:
+    """A prefs document from a doc (v1/v2) or a bare rule list."""
+    if isinstance(prefs, dict):
+        return prefs
+    return {"version": 1, "notes": [], "rules": list(prefs or [])}
+
+
+def live_rules(prefs: PrefsLike, m: dict) -> List[dict]:
+    """Active include rules that match ``m`` and that the safety guard lets through."""
+    return [r for r in (as_doc(prefs).get("rules") or [])
+            if prefs_store.rule_status(r) == "active" and prefs_store.rule_effect(r) == "include"
+            and rule_matches(r.get("when") or {}, m) and not prefs_store.guard_blocks(r, m)]
+
+
+def resolve_rules(pred: dict, m: dict, prefs: PrefsLike,
+                  record_hits: bool = False) -> Tuple[dict, List[dict]]:
+    """``prefs.resolve`` plus the cheap-error tie-break: when live non-user rules
+    disagree (one raises importance to >= 2, another demotes to 0) and no user rule
+    sets the outcome, the raising rules are re-applied on top, so a learned subject
+    keyword can never bury a sender marked important. Returns (pred, trace)."""
+    doc = as_doc(prefs)
+    out, trace = prefs_store.resolve(pred, m, doc, record_hits=record_hits)
+    live = live_rules(doc, m)
+    nonuser = [r for r in live if prefs_store.rule_source(r) != "user"]
+    user_sets = any(prefs_store.rule_source(r) == "user"
+                    and {"importance", "max_importance", "category"} & set(r.get("set") or {})
+                    for r in live)
+    raisers = [r for r in nonuser if _raises(r)]
+    if raisers and not user_sets and any(_demotes(r) for r in nonuser):
+        order = {id(r): i for i, r in enumerate(doc.get("rules") or [])}
+        for r in sorted(raisers, key=lambda r: prefs_store.precedence(r, order.get(id(r), 0))):
+            st = r.get("set") or {}
+            for k, v in st.items():
+                if k == "importance":
+                    out["importance"] = v
+                elif k == "min_importance":
+                    out["importance"] = max(int(out.get("importance", 1)), v)
+                elif k == "max_importance":
+                    out["importance"] = min(int(out.get("importance", 1)), v)
+                else:
+                    out[k] = v
+            trace.append({"rule": r.get("id"), "action": "cheap_error_raise", "fields": sorted(st)})
+    return out, trace
+
+
+def _trace_fixed(trace: List[dict]) -> Tuple[set, List[str]]:
+    """Fields fixed exactly by a rule (min/max bounds alone leave importance to the
+    model) and the ids of the rules that decided something."""
+    fixed, hit = set(), []
+    for t in trace:
+        if t["action"] in ("applied", "cheap_error_raise"):
+            fixed.update(k for k in t["fields"]
+                         if k in ("importance", "category", "needs_reply", "suspicious"))
+        if t["action"] in ("applied", "cheap_error_raise", "moved_off_model") \
+                and str(t["rule"]) not in hit:
+            hit.append(str(t["rule"]))
+    return fixed, hit
 
 
 def apply_ranked(pred: dict, m: dict, rules: List[dict]) -> Tuple[dict, set, List[str]]:
-    """Apply matching rules in precedence order. Returns (pred, fields fixed
+    """Legacy tier-based resolver (rule_tier / ranked_rules), kept for comparison;
+    run_cascade resolves through ``resolve_rules`` (prefs.py) instead.
+    Apply matching rules in precedence order. Returns (pred, fields fixed
     exactly by a rule, matched rule ids). ``importance`` counts as fixed only when
     an exact ``importance`` was set (min/max bounds alone leave it to the model)."""
     p = dict(pred)
@@ -394,24 +446,30 @@ def apply_ranked(pred: dict, m: dict, rules: List[dict]) -> Tuple[dict, set, Lis
     return p, fixed, hit
 
 
-def l1_decide(m: dict, rules: List[dict]) -> Tuple[Optional[dict], List[str]]:
-    """A complete decision from rules alone, else None. Complete = importance and
-    category fixed, and needs_reply fixed (or implied False by a bulk category)."""
-    p, fixed, hit = apply_ranked(dict(DEFAULT_PRED), m, rules)
+def l1_resolve(m: dict, prefs: PrefsLike) -> Tuple[Optional[dict], List[str], List[dict]]:
+    """A complete decision from rules alone (else None), the deciding rule ids and
+    the resolver trace. Complete = importance and category fixed, and needs_reply
+    fixed (or implied False by a bulk category)."""
+    p, trace = resolve_rules(dict(DEFAULT_PRED), m, prefs)
+    fixed, hit = _trace_fixed(trace)
     if not hit or not {"importance", "category"} <= fixed:
-        return None, hit
+        return None, hit, trace
     if "needs_reply" not in fixed:
         if p["category"] not in BULK:
-            return None, hit
+            return None, hit, trace
         p["needs_reply"] = False
+    return p, hit, trace
+
+
+def l1_decide(m: dict, rules: PrefsLike) -> Tuple[Optional[dict], List[str]]:
+    """``l1_resolve`` without the trace (rules: a prefs doc or a bare rule list)."""
+    p, hit, _ = l1_resolve(m, rules)
     return p, hit
 
 
-def raised_by_rules(m: dict, rules: List[dict]) -> bool:
-    """Does any matching rule push importance above 0 or into a non-bulk class?"""
-    for r in rules or []:
-        if not rule_matches(r.get("when") or {}, m):
-            continue
+def raised_by_rules(m: dict, rules: PrefsLike) -> bool:
+    """Does any live matching rule push importance above 0 or into a non-bulk class?"""
+    for r in live_rules(rules, m):
         s = r.get("set") or {}
         if (int(s.get("importance", 0)) >= 1 or int(s.get("min_importance", 0)) >= 1
                 or (s.get("category") and s["category"] not in BULK)):
@@ -594,12 +652,15 @@ ModelBatch = Callable[[List[dict]], Tuple[Dict[str, dict], Dict[str, Optional[Di
 
 def run_cascade(messages: List[dict], prefs: dict, ctx: Context, model_batch: ModelBatch,
                 batch_size: int = 5, th: Optional[Thresholds] = None,
-                log: Optional[Callable[[str], None]] = None) -> Tuple[List[dict], dict]:
+                log: Optional[Callable[[str], None]] = None,
+                record_hits: bool = False) -> Tuple[List[dict], dict]:
     """Triage ``messages``. ``model_batch(batch) -> (preds_by_id, dists_by_id)``;
-    preds are raw model labels (rules are applied here), dists may be empty.
+    preds are raw model labels (rules are applied here, through the prefs.py
+    resolver), dists may be empty. ``record_hits`` bumps ``hits``/``last_hit`` on
+    the rules that decided each final label (``prefs`` is mutated).
     Returns (items in input order, trace)."""
     th = th or Thresholds.from_env()
-    rules = prefs.get("rules", []) or []
+    rules = as_doc(prefs)
     decided: Dict[str, dict] = {}
     trace_items: Dict[str, dict] = {}
     pending: List[dict] = []
@@ -608,12 +669,14 @@ def run_cascade(messages: List[dict], prefs: dict, ctx: Context, model_batch: Mo
         g = guards(m, ctx)
         gmap[m["id"]] = g
         tr = {"guards": sorted(k for k, v in g.items() if v)}
-        p, hit = (None, [])
+        p, hit, ptrace = (None, [], [])
         if not g["injection"]:
-            p, hit = l1_decide(m, rules)
+            p, hit, ptrace = l1_resolve(m, rules)
         if p is not None:
+            if record_hits:
+                resolve_rules(dict(DEFAULT_PRED), m, rules, record_hits=True)
             decided[m["id"]] = finalize(p, g)
-            trace_items[m["id"]] = {**tr, "layer": "L1", "rules": hit}
+            trace_items[m["id"]] = {**tr, "layer": "L1", "rules": hit, "prefs_trace": ptrace}
             continue
         p2 = l2_decide(m, g, rules)
         if p2 is not None:
@@ -641,15 +704,18 @@ def run_cascade(messages: List[dict], prefs: dict, ctx: Context, model_batch: Mo
                 ab = {**ab, "abstain": True, "demote_ok": False, "reason": "none"}
             if raw is None:
                 ab = {**ab, "abstain": True, "demote_ok": False, "reason": "no_answer"}
-            p, _, hit = apply_ranked(p, m, rules)
-            demoted_by_rule = any(rule_matches(r.get("when") or {}, m)
+            p, ptrace = resolve_rules(p, m, rules, record_hits=record_hits)
+            _, hit = _trace_fixed(ptrace)
+            applied = {str(t["rule"]) for t in ptrace if t["action"] == "applied"}
+            demoted_by_rule = any(str(r.get("id")) in applied
                                   and ((r.get("set") or {}).get("importance") == 0
                                        or (r.get("set") or {}).get("max_importance") == 0)
-                                  for r in rules)
+                                  for r in live_rules(rules, m))
             if (ab["abstain"] or not ab["demote_ok"]) and not demoted_by_rule:
                 p["importance"] = max(int(p.get("importance", 1) or 0), 1)
             decided[m["id"]] = finalize(p, g)
-            trace_items[m["id"]].update({"layer": "L3", "rules": hit, "abstain": ab["abstain"],
+            trace_items[m["id"]].update({"layer": "L3", "rules": hit, "prefs_trace": ptrace,
+                                         "abstain": ab["abstain"],
                                          "abstain_reason": ab["reason"], "conf": ab.get("conf"),
                                          "margin": ab.get("margin"), "top": ab.get("top")})
         if log:

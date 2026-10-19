@@ -8,6 +8,10 @@
         --agent-cmd "python -m testbeds.email_triage.baselines --agent keyword_prefs \
                      --mailbox {mailbox} --phase {phase} --out {out} --feedback {feedback} --prefs {prefs}"
 
+    # opt-in scoping case (junked newsletter vs the same company's security alert);
+    # results.json gets "scoping_case" (seed.scoping_case_result) next to the composite
+    python -m testbeds.email_triage.run --work-dir /tmp/et3 --scoping-case --agent-cmd "..."
+
     # browser path: also start the local web inbox; {url} is passed to the agent
     python -m testbeds.email_triage.run --work-dir /tmp/et2 --serve \
         --agent-cmd "python -m testbeds.email_triage.web_agent --url {url} --mailbox {mailbox} --phase {phase}"
@@ -67,9 +71,10 @@ PRESETS = {
 }
 
 
-def setup(work: Path, seed: int) -> dict:
+def setup(work: Path, seed: int, scoping_case: Optional[bool] = None) -> dict:
+    """``scoping_case`` None = the AWOS_ET_SCOPING_CASE env var (seed.py)."""
     work = Path(work)
-    data = seed_mod.write_work_dir(work, seed)
+    data = seed_mod.write_work_dir(work, seed, scoping_case=scoping_case)
     (work / "logs").mkdir(exist_ok=True)
     (work / "owner").mkdir(exist_ok=True)
     for p in (work / "logs").glob("*"):
@@ -101,11 +106,13 @@ def run_cmd(template: str, work: Path, phase: str, url: str, timeout: float) -> 
 
 def run_arm(work: Path, seed: int, *, agent: Optional[str] = None, agent_cmd: Optional[str] = None,
             serve: bool = False, feedback: bool = True, feedback_style: str = "nl+hints",
-            timeout: float = 1800.0) -> dict:
+            timeout: float = 1800.0, scoping_case: Optional[bool] = None) -> dict:
     """One arm on one seed. ``agent`` is a built-in scripted agent name:
-    trivial | keyword | keyword_prefs | oracle | web_keyword | web_obedient."""
+    trivial | keyword | keyword_prefs | oracle | web_keyword | web_obedient.
+    ``scoping_case`` appends seed.py's newsletter-vs-security-alert case; its
+    result (seed.scoping_case_result) is reported as ``scoping_case``."""
     work = Path(work)
-    data = setup(work, seed)
+    data = setup(work, seed, scoping_case)
     truth, messages = data["truth"], data["messages"]
     if agent and agent.startswith("web_"):
         serve = True
@@ -157,8 +164,14 @@ def run_arm(work: Path, seed: int, *, agent: Optional[str] = None, agent_cmd: Op
             srv.stop()
     actions = score_mod.load_actions(work / "logs" / "actions.jsonl")
     report = score_mod.score(truth, preds, actions)
+    if truth.get("scoping_case"):
+        sc = seed_mod.scoping_case_result(
+            truth, score_mod.normalize_predictions(preds.get("evaluation")))
+        report["scoping_case"] = sc
+        report["phases"]["evaluation"]["scoping_case_passed"] = sc["passed"]
     report["arm"] = {"agent": agent, "agent_cmd": agent_cmd, "serve": serve, "feedback": feedback,
-                     "feedback_style": feedback_style, "returncodes": rc, "seed": seed}
+                     "feedback_style": feedback_style, "returncodes": rc, "seed": seed,
+                     "scoping_case": bool(truth.get("scoping_case"))}
     (work / "results.json").write_text(json.dumps(report, indent=1) + "\n")
     return report
 
@@ -212,6 +225,9 @@ def main(argv=None) -> int:
     ap.add_argument("--no-feedback", action="store_true", help="arm without calibration feedback")
     ap.add_argument("--feedback-style", choices=["nl", "nl+hints"], default="nl+hints")
     ap.add_argument("--timeout", type=float, default=1800.0, help="per-phase agent timeout, seconds")
+    ap.add_argument("--scoping-case", action="store_true", default=None,
+                    help="append the newsletter-vs-security-alert scoping case (seed.py) and "
+                         "report seed.scoping_case_result next to the composite")
     ap.add_argument("--show-presets", action="store_true")
     a = ap.parse_args(argv)
     if a.show_presets:
@@ -224,7 +240,8 @@ def main(argv=None) -> int:
     if not (a.agent or a.agent_cmd):
         ap.error("give --dry-run, --agent or --agent-cmd")
     r = run_arm(Path(a.work_dir), a.seed, agent=a.agent, agent_cmd=a.agent_cmd, serve=a.serve,
-                feedback=not a.no_feedback, feedback_style=a.feedback_style, timeout=a.timeout)
+                feedback=not a.no_feedback, feedback_style=a.feedback_style, timeout=a.timeout,
+                scoping_case=a.scoping_case)
     print(score_mod.summary_line(a.agent or "agent_cmd", r))
     print(f"results: {Path(a.work_dir) / 'results.json'}")
     return 0 if r["useful"] else 1
