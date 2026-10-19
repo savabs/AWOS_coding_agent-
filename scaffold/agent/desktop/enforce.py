@@ -41,6 +41,24 @@ change; agent_loop.py and tools/ are untouched):
   content (fetch_url output, screen/AX text) in the same turn. The `shell`
   tool path in agent_loop.COMMAND_TOOLS takes the same three lines.
 
+Secrets and effects (WP7; secrets.py, effects/). With a ``broker``:
+  * audit lines are redacted (known secret values -> their handle, every key
+    format -> [REDACTED:rule]); without one, secret_scan.redact still runs;
+  * ``fill(action, text, sink)``: policy check, then ``{{secret:name}}``
+    handles are substituted INSIDE the enforcer and only the sink callable
+    sees plaintext; its return value is redacted before it comes back;
+  * ``write_secret_field(path, fmt, field, value)``: policy check (a new
+    file location always asks), minimal-edit write, FieldEquals effect
+    verification (exactly once, collateral-loss check), own-write rollback
+    on a refuted verdict, and a redacted receipt with the closed outcome
+    enum (VERIFIED / HALTED_BEFORE_EFFECT / RECONCILIATION_REQUIRED /
+    COMPLETED_UNVERIFIED);
+  * credential-creating actions ("Create key", "Generate token") are routed
+    as CREDENTIAL (always ask, R4) -- also when they arrive as a plain
+    UI_ACTION -- and ``run_credential_create`` adds the idempotent operation
+    ledger (no duplicate key on retry; an uncertain attempt is verified,
+    never blindly retried).
+
 Live proof:  python -m scaffold.agent.desktop.enforce --demo
 """
 from __future__ import annotations
@@ -48,6 +66,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -57,9 +76,10 @@ from pathlib import Path
 from typing import Callable, Optional, Sequence, TypeVar
 
 from .policy import (
-    Action, AuditLog, Decision, Grant, Provenance, SinkPolicy, Verdict,
+    Action, ActionClass, AuditLog, Decision, Grant, Provenance, SinkPolicy, Verdict,
     classify_command, decide_command,
 )
+from .. import secret_scan
 
 MODE_ENV = "AWOS_SINK_POLICY"        # off (default) | audit | enforce
 AUDIT_ENV = "AWOS_SINK_AUDIT"        # path of the enforcement JSONL
@@ -101,14 +121,39 @@ class Enforcement:
         return self.decision.verdict
 
 
+@dataclass
+class SinkReceipt:
+    """What a secret-bearing sink did. ``record`` is redacted and safe to log
+    or show the model; it never holds a secret value."""
+    outcome: "Outcome"
+    record: dict
+    verdict: Optional["EffectVerdict"] = None
+    enforcement: Optional[Enforcement] = None
+
+    @property
+    def ok(self) -> bool:
+        return self.outcome.value == "verified"
+
+
 class Enforcer:
     def __init__(self, policy: SinkPolicy, mode: Mode = Mode.ENFORCE,
                  approver: Optional[Approver] = None,
-                 audit: Optional[AuditLog] = None):
+                 audit: Optional[AuditLog] = None, *,
+                 broker: Optional["SecretBroker"] = None):
         self.policy = policy
         self.mode = Mode(mode)
         self.approver = approver
         self.audit = audit
+        self.broker = broker
+
+    # -- redaction ----------------------------------------------------------
+    def redact(self, obj):
+        """Redact a string or JSON-able structure for logs/receipts/model."""
+        if self.broker is not None:
+            return self.broker.redact_obj(obj)
+        if isinstance(obj, str):
+            return secret_scan.redact(obj)
+        return secret_scan.redact_obj(obj)
 
     # -- checks -------------------------------------------------------------
     def check_command(self, cmd: str, initiator: Provenance = Provenance.AGENT,
@@ -117,7 +162,12 @@ class Enforcer:
 
     def check_action(self, action: Action, *, force_ask: str = "") -> Enforcement:
         """``force_ask`` (a reason) turns an ALLOW into ASK: used for apps
-        where every action needs the owner (app_policy elevated tier)."""
+        where every action needs the owner (app_policy elevated tier).
+
+        A UI action whose label creates a credential ("Create key",
+        "Generate token") is re-classified as CREDENTIAL first, so it always
+        goes to the approver (R4) and an untrusted trigger is denied (R3)."""
+        action = _route_credential(action)
         d = self.policy.decide(action)
         if force_ask and d.verdict is Verdict.ALLOW:
             d = Decision(Verdict.ASK, f"{force_ask}: every action confirms", "R4-elevated-app",
@@ -140,6 +190,131 @@ class Enforcer:
             raise PolicyBlocked(res)
         return execute()
 
+    # -- secret-bearing sinks (WP7) -------------------------------------------
+    def _need_broker(self) -> "SecretBroker":
+        if self.broker is None:
+            raise RuntimeError("this Enforcer has no SecretBroker; pass broker=...")
+        return self.broker
+
+    def fill(self, action: Action, text: str, sink: Callable[[str], T], *,
+             target: str = "", force_ask: str = "") -> T:
+        """Check ``action``; then substitute ``{{secret:name}}`` handles in
+        ``text`` and call ``sink(plaintext)``. Only the sink sees the value.
+        The sink's return value is redacted before it is returned (so a page
+        echoing the value back never reaches the caller/model in clear).
+
+        Raises PolicyBlocked (nothing ran), secrets.MissingSecret (unknown
+        handle, nothing ran) or secrets.SecretNotAllowedHere."""
+        broker = self._need_broker()
+        res = self.check_action(action, force_ask=force_ask)
+        if not res.allowed:
+            raise PolicyBlocked(res)
+        plain = broker.substitute(text, target=target or f"{action.cls.value}:{action.target}")
+        try:
+            out = sink(plain)
+        finally:
+            del plain
+        return self.redact(out) if isinstance(out, (str, dict, list, tuple)) else out
+
+    def write_secret_field(self, path: Path | str, fmt: str, field: str, value: str, *,
+                           initiator: Provenance = Provenance.AGENT,
+                           arg_sources: Sequence[Provenance] = (),
+                           create: bool = False) -> SinkReceipt:
+        """Set one .env / TOML field to ``value`` (a handle, or text holding
+        handles) at the sink, then verify the effect.
+
+        Outcome: HALTED_BEFORE_EFFECT (blocked / refused / missing secret),
+        VERIFIED (field set exactly once, rest of file unchanged), or
+        RECONCILIATION_REQUIRED (refuted / unreadable; our own write is
+        rolled back from its exact pre-image when the file is untouched since).
+        """
+        from .effects import (FieldEquals, FieldWriteRefused, FileRestore, Outcome,
+                              outcome_for, reconcile_or_escalate, write_field)
+        from .secrets import MissingSecret, SecretNotAllowedHere
+
+        broker = self._need_broker()
+        p = Path(path)
+        names = sorted(set(_handles(value)))
+        base = {"kind": "secret_write", "path": str(p), "format": fmt, "field": field,
+                "handles": [f"{{{{secret:{n}}}}}" for n in names]}
+
+        def receipt(outcome, verdict=None, enforcement=None, **extra) -> SinkReceipt:
+            rec = dict(base, outcome=outcome.value, **extra)
+            if verdict is not None:
+                rec["verdict"] = verdict.to_record()
+            rec = self.redact(rec)
+            if self.audit is not None:
+                self.audit.append_record(dict(rec, ts=round(time.time(), 3), kind="effect"))
+            return SinkReceipt(outcome, rec, verdict, enforcement)
+
+        if not names and secret_scan.key_spans(value, placeholders=False):
+            return receipt(Outcome.HALTED_BEFORE_EFFECT,
+                           reason="a literal credential was passed; use a {{secret:name}} handle")
+        new_location = not p.exists()
+        if new_location and not create:
+            return receipt(Outcome.HALTED_BEFORE_EFFECT, reason="target file does not exist")
+        act = Action(ActionClass.WRITE_SANDBOX, str(p), initiator, list(arg_sources),
+                     f"set {field} in {p.name}")
+        enf = self.check_action(act, force_ask="secret into a new file location" if new_location else "")
+        if not enf.allowed:
+            return receipt(Outcome.HALTED_BEFORE_EFFECT, enforcement=enf, reason=enf.message)
+        try:
+            plain = broker.substitute(value, target=f"file:{p}")
+        except (MissingSecret, SecretNotAllowedHere) as ex:
+            return receipt(Outcome.HALTED_BEFORE_EFFECT, enforcement=enf,
+                           reason=f"{type(ex).__name__}: {ex}")
+        eff = FieldEquals.for_value(p, fmt, field, plain)
+        before = eff.capture()
+        pre_bytes = p.read_bytes() if p.exists() else None
+        try:
+            wr = write_field(p, fmt, field, plain, create=create)
+        except FieldWriteRefused as ex:
+            return receipt(Outcome.HALTED_BEFORE_EFFECT, enforcement=enf, reason=str(ex))
+        finally:
+            del plain
+        verdict = eff.verify(before)
+        outcome = outcome_for(verdict, attempted=True)
+        extra = {"write": wr.action, "pre_sha256": wr.pre_sha256, "post_sha256": wr.post_sha256}
+        if not verdict.confirmed and wr.changed:
+            undo = FileRestore(p, pre_bytes, wr.pre_mode, wr.post_sha256)
+            comp = reconcile_or_escalate(verdict, reverify=lambda: eff.verify(before), own_write_undo=undo)
+            extra["compensation"] = comp.outcome.value
+            if comp.task is not None:
+                extra["reconciliation_task"] = comp.task.to_record()
+            outcome = comp.run_outcome
+        return receipt(outcome, verdict, enf, **extra)
+
+    def check_credential_create(self, service: str, project: str, scope: str, label: str, *,
+                                initiator: Provenance = Provenance.AGENT,
+                                arg_sources: Sequence[Provenance] = ()) -> Enforcement:
+        """Creating an API key/token is a CREDENTIAL write: always asks (R4)."""
+        return self.check_action(credential_action(service, project, scope, label,
+                                                   initiator=initiator, arg_sources=arg_sources))
+
+    def run_credential_create(self, ledger, *, service: str, project: str, scope: str, label: str,
+                              execute: Callable[[], T], verify: Optional[Callable] = None,
+                              initiator: Provenance = Provenance.AGENT) -> "OpResult":
+        """Approval-gated, idempotent "create key".
+
+        Same (service, project, scope, label) already SUCCEEDED -> nothing
+        runs and the owner is not asked again. Otherwise the owner approves
+        first (no approval -> HALTED_BEFORE_EFFECT), then effects.run_once:
+        an earlier uncertain attempt is verified before anything is retried.
+        ``execute`` must store the revealed key in the broker and return a
+        handle, never the value."""
+        from .effects import OpResult, OpState, Outcome, payload_hash, run_once
+
+        payload = {"service": service, "project": project, "scope": scope, "label": label}
+        op_id = payload_hash("create_credential", payload)
+        if ledger.get(op_id) in (OpState.SUCCEEDED, OpState.UNVERIFIED):
+            return run_once(ledger, "create_credential", payload, execute=execute, verify=verify)
+        enf = self.check_credential_create(service, project, scope, label, initiator=initiator)
+        if not enf.allowed:
+            return OpResult(op_id, Outcome.HALTED_BEFORE_EFFECT, OpState.HALTED, False, enf.message)
+        res = run_once(ledger, "create_credential", payload, execute=execute, verify=verify)
+        res.result = self.redact(res.result) if isinstance(res.result, str) else res.result
+        return res
+
     # -- internals ----------------------------------------------------------
     def _finish(self, d: Decision, subject: str) -> Enforcement:
         approved: Optional[bool] = None
@@ -156,11 +331,12 @@ class Enforcer:
                + ("" if allowed else " — not executed"))
         res = Enforcement(allowed, outcome, d, msg)
         if self.audit is not None:
+            # redact before truncating, so a cut can never leave half a key behind
             self.audit.append_record({
                 "ts": round(time.time(), 3), "kind": "enforce", "mode": self.mode.value,
-                "subject": subject[:300], "verdict": d.verdict.value, "rule": d.rule,
-                "reason": d.reason, "action_class": d.action.cls.value,
-                "target": d.action.target, "initiator": d.action.initiator.value,
+                "subject": self.redact(subject)[:300], "verdict": d.verdict.value, "rule": d.rule,
+                "reason": self.redact(d.reason), "action_class": d.action.cls.value,
+                "target": self.redact(d.action.target), "initiator": d.action.initiator.value,
                 "outcome": outcome, "approved": approved,
             })
         return res
@@ -174,15 +350,42 @@ class Enforcer:
             return False
 
 
+_HANDLE_NAME = re.compile(r"\{\{secret:([A-Za-z0-9_.\-]{1,64})\}\}")
+
+
+def _handles(text: str) -> list:
+    return _HANDLE_NAME.findall(text or "")
+
+
+def credential_action(service: str, project: str, scope: str, label: str, *,
+                      initiator: Provenance = Provenance.AGENT,
+                      arg_sources: Sequence[Provenance] = ()) -> Action:
+    """The policy Action for creating an API key / token (CREDENTIAL class)."""
+    return Action(ActionClass.CREDENTIAL, f"create_key:{service}/{project}#{scope}", initiator,
+                  list(arg_sources), f"create {scope} key {label!r} for {service}/{project}")
+
+
+def _route_credential(action: Action) -> Action:
+    """A UI action whose label creates a credential becomes CREDENTIAL."""
+    if action.cls is not ActionClass.UI_ACTION:
+        return action
+    from .secrets import is_credential_create
+    if is_credential_create(action.description) or is_credential_create(action.target):
+        return Action(ActionClass.CREDENTIAL, action.target, action.initiator,
+                      list(action.arg_sources), action.description)
+    return action
+
+
 def enforcer_from_env(sandbox: Path | str, *, grants: Sequence[Grant] = (),
                       approver: Optional[Approver] = None,
-                      audit_path: Path | str | None = None) -> Optional[Enforcer]:
+                      audit_path: Path | str | None = None,
+                      broker: Optional["SecretBroker"] = None) -> Optional[Enforcer]:
     """The opt-in entry point: None when AWOS_SINK_POLICY is unset/off."""
     mode = mode_from_env()
     if mode is Mode.OFF:
         return None
     path = audit_path or os.getenv(AUDIT_ENV, "").strip() or DEFAULT_AUDIT
-    return Enforcer(SinkPolicy(sandbox, grants), mode, approver, AuditLog(path))
+    return Enforcer(SinkPolicy(sandbox, grants), mode, approver, AuditLog(path), broker=broker)
 
 
 # ---------------------------------------------------------------------------
