@@ -22,7 +22,11 @@ per-item deciding layer and the model-call counts go in usage_<phase>.json under
 Preferences: the v2 store in testbeds/email_triage/prefs.py is the only rule
 engine (precedence, include/exclude, candidates, the security-alert guard);
 learn_prefs writes a v2 document (source "correction", scoped, with provenance),
-and an existing v1 or v2 prefs.json is loaded and kept. Per message, the
+and an existing v1 or v2 prefs.json is loaded and kept. Proposed rules are
+scoped in code before they are stored (shape_rule: transactional senders need a
+content condition, a person's raise becomes a min_importance floor, a person's
+demotion needs is_list or content words) and checked against the calibration
+labels (validate_against_labels: narrowed or dropped on a conflict). Per message, the
 store's ``hints_for`` lines go in the per-batch USER turn; the system prompt is
 a constant (prefix cache).
 
@@ -47,6 +51,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -255,16 +260,205 @@ def apply_rules(pred: dict, m: dict, prefs) -> dict:
 LEARN_SYSTEM = "You turn user feedback into precise preference rules. JSON only."
 LEARN_SCOPE_GUIDE = (
     "Scope every rule as narrowly as the corrections support:\n"
-    "- Newsletters, promos and other bulk mail: match the exact sender address (from_address), "
-    "optionally with subject words (subject_any) to pick out one service, and is_list true for "
-    "mailing-list mail. NEVER demote a whole domain (no from_domain / from_domain_any on a rule "
+    "- Newsletters, promos and other bulk (mailing-list) mail: match the exact sender address "
+    "(from_address), optionally with subject words (subject_any) to pick out one service, and "
+    "is_list true. Only these may get an address-only rule that fixes importance, category and "
+    "needs_reply together. NEVER demote a whole domain (no from_domain / from_domain_any on a rule "
     "that lowers importance or sets newsletter/promo/social): the same company also sends security "
     "alerts, receipts and account mail that must stay visible.\n"
+    "- Automated / transactional senders (notifications@, billing@, security@ ...): a correction is "
+    "about THAT message's content, so the rule MUST say why with subject_any or text_any words from "
+    "that message (e.g. 'failed', 'action required'). The same sender also sends routine mail "
+    "(receipts, summaries, 'on the way') that must not inherit the label.\n"
+    "- People: when a correction raises a person's mail, write a floor (min_importance), not an "
+    "exact importance or category; their other mail can be more urgent. Lowering a person's mail "
+    "needs subject_any/text_any words saying which mail, or is_list true.\n"
     "- People or organisations the user cares about: from_domain / from_domain_any may RAISE "
-    "importance; use from_domain_not_any to exclude look-alikes.\n"
+    "importance (as min_importance); use from_domain_not_any to exclude look-alikes.\n"
     "- body_any for words in the body only, text_any for subject or body; thread_id only for one "
     "conversation.\n"
     "Only write rules the corrections actually support.")
+
+# ── scoping the learned rules (enforced in code; the prompt is only a hint) ──
+
+ROLE_LOCAL_RE = re.compile(
+    r"^(no-?reply|do-?not-?reply|donotreply|notifications?|notify|alerts?|security|billing|"
+    r"invoices?|receipts?|orders?|payments?|payouts?|statements?|accounts?|support|help|info|"
+    r"team|hello|news|newsletters?|updates?|digest|service|services|admin|mailer(-daemon)?|"
+    r"postmaster|marketing|deals?|offers?|promos?|events?|community|system|ops|it|hr|careers|"
+    r"jobs|bounces?|feedback|contact)([._+-].*)?$")
+SENDER_RULE_KEYS = ("from_address", "from_domain", "from_domain_any")
+CONTENT_KEYS = ("subject_any", "body_any", "text_any", "thread_id")
+# subject words that say WHY a transactional message matters (or does not)
+SIGNAL_PHRASES = (
+    "action required", "action needed", "past due", "security alert", "sign-in", "new login",
+    "failed", "failure", "declined", "overdue", "unpaid", "expires", "expired", "expiring",
+    "suspended", "locked", "deadline", "urgent", "asap", "reminder", "password", "verify",
+    "verification", "dispute", "chargeback", "refund", "cancelled", "canceled", "renewal",
+    "invoice", "receipt", "summary", "digest", "newsletter", "weekly", "monthly")
+_STOP = set("""a an the and or but for from with your you our we us this that these those there
+here have has had was were are is be been being will would can could should may might not
+no yes just only into onto about over under after before next week weeks today tomorrow
+please thanks thank hello dear quick re fwd fw its it's what when where which who why how
+new update updates again some more most very""".split())
+FIELDS = ("importance", "category", "needs_reply", "suspicious")
+
+
+def _sender_kind(m: dict) -> str:
+    """bulk (mailing list) | transactional (automated / role address) | person."""
+    if prefs_mod.is_list_mail(m):
+        return "bulk"
+    local = (m.get("from_addr") or "").lower().split("@", 1)[0]
+    return "transactional" if ROLE_LOCAL_RE.match(local) else "person"
+
+
+def _rule_kind(when: dict, msgs: list) -> str:
+    """The most protective kind among the messages a rule covers (person >
+    transactional > bulk); ``unknown`` when nothing tells."""
+    kinds = {_sender_kind(m) for m in msgs}
+    for k in ("person", "transactional", "bulk"):
+        if k in kinds:
+            return k
+    if when.get("is_list") is True:
+        return "bulk"
+    if when.get("from_address"):
+        return _sender_kind({"from_addr": when["from_address"]})
+    return "unknown"
+
+
+def derive_subject_words(m: dict) -> list:
+    """subject_any words that capture why this one message was corrected: signal
+    phrases if the subject has any, else up to 3 distinctive words (not the
+    sender's own name), else the whole subject."""
+    subj = re.sub(r"^\s*((re|fwd?)\s*:\s*)+", "", (m.get("subject") or ""), flags=re.I).lower().strip()
+    if not subj:
+        return []
+    found = [p for p in SIGNAL_PHRASES
+             if re.search(r"(?<![a-z])" + re.escape(p) + r"(?![a-z])", subj)]
+    found = [p for p in found if not any(p != q and p in q for q in found)]
+    if found:
+        return found[:4]
+    own = set(re.findall(r"[a-z0-9]+", (m.get("from_name") or "").lower() + " "
+                         + (m.get("from_addr") or "").lower()))
+    out = []
+    for w in re.findall(r"[a-z0-9][a-z0-9'-]*[a-z0-9]", subj):
+        if len(w) >= 4 and w not in _STOP and w not in own and not w.isdigit() and w not in out:
+            out.append(w)
+    if out:
+        return out[:3]
+    return [subj] if len(subj) >= 4 else []
+
+
+def _raising(st: dict) -> bool:
+    return (int(st.get("importance", -1)) >= 2 or int(st.get("min_importance", -1)) >= 2
+            or st.get("category") in ("urgent_action", "important_read"))
+
+
+def _protective(st: dict) -> bool:
+    return bool(st.get("suspicious")) or st.get("category") == "spam_phishing"
+
+
+def label_conflicts(st: dict, lab: dict) -> bool:
+    """Would ``set`` contradict a known (corrected or accepted) label?"""
+    imp = lab.get("importance")
+    if isinstance(imp, int) and not isinstance(imp, bool):
+        if "importance" in st and st["importance"] != imp:
+            return True
+        if "min_importance" in st and st["min_importance"] > imp:
+            return True
+        if "max_importance" in st and st["max_importance"] < imp:
+            return True
+    return any(k in st and lab.get(k) is not None and st[k] != lab[k]
+               for k in ("category", "needs_reply", "suspicious"))
+
+
+def shape_rule(when: dict, st: dict, support: list, covered: list) -> Optional[tuple]:
+    """Enforce the scoping policy on one model-proposed rule. ``support`` = the
+    corrected messages it matches, ``covered`` = other known messages it matches
+    (only to tell the sender kind). Returns (when, set, kind, changes) or None
+    (drop: no content condition could be found where one is required).
+
+    - bulk (list) senders: unchanged; the only kind that may get an address-only
+      rule fixing importance + category + needs_reply.
+    - transactional senders: a rule fixing importance/category needs a content
+      condition; subject words from the corrected message are added if missing.
+    - people: raising -> a min_importance floor (address-only: the floor alone);
+      demoting -> needs is_list or a content condition (added if missing).
+    Rules with no sender key, and rules that flag phishing, are left alone."""
+    when, st = dict(when), dict(st)
+    changes: list = []
+    if not any(when.get(k) for k in SENDER_RULE_KEYS) or _protective(st):
+        return when, st, "general", changes
+    kind = _rule_kind(when, support or covered)
+    has_content = any(when.get(k) for k in CONTENT_KEYS)
+    anchor = support[0] if support else None
+
+    def add_content() -> bool:
+        words = derive_subject_words(anchor) if anchor else []
+        if words:
+            when["subject_any"] = words
+            changes.append("added_subject_any")
+        return bool(words)
+
+    if kind == "person":
+        if _raising(st):
+            floor = max(int(st.get("importance", 0) or 0), int(st.get("min_importance", 0) or 0),
+                        {"urgent_action": 3, "important_read": 2}.get(st.get("category"), 0))
+            if "importance" in st:
+                changes.append("importance_to_floor")
+            st.pop("importance", None)
+            st["min_importance"] = floor
+            if not has_content:
+                # a floor of 3 is the top of the scale, so "urgent" cannot be wrong
+                # for it; any lower floor leaves the category to the model
+                keep = ("category",) if floor == 3 and st.get("category") == "urgent_action" else ()
+                dropped = [k for k in ("category", "needs_reply")
+                           if k not in keep and st.pop(k, None) is not None]
+                if dropped:
+                    changes.append("floor_only")
+        elif prefs_mod.is_demoting(st) and not has_content and when.get("is_list") is not True:
+            if not add_content():
+                return None
+    elif kind == "transactional":
+        if ({"importance", "category"} & set(st) and not has_content
+                and when.get("is_list") is not True and not add_content()):
+            return None
+    return when, st, kind, changes
+
+
+def calibration_labels(feedback: dict, accepted: Optional[dict] = None) -> dict:
+    """id -> label known after calibration: the agent's accepted predictions,
+    overridden by the user's corrections."""
+    out = {}
+    for mid, p in (accepted or {}).items():
+        if isinstance(p, dict):
+            out[str(mid)] = {k: p[k] for k in FIELDS if k in p}
+    for it in feedback.get("items") or []:
+        if isinstance(it, dict) and it.get("id"):
+            lab = dict(out.get(it["id"], {}))
+            for k, v in (it.get("you_said") or {}).items():
+                if k in FIELDS:
+                    lab.setdefault(k, v)
+            lab.update({k: v for k, v in (it.get("correct") or {}).items() if k in FIELDS})
+            out[it["id"]] = lab
+    return out
+
+
+def validate_against_labels(when: dict, st: dict, support: list, labels: dict,
+                            by_id: dict) -> Optional[tuple]:
+    """Post-check a rule against every labelled calibration message it matches. On
+    a conflict, narrow it with subject words from the corrected message; if it
+    still conflicts, drop it. Returns (when, changes) or None."""
+    def bad(w):
+        return [mid for mid, lab in labels.items() if mid in by_id
+                and prefs_mod.matches(w, by_id[mid]) and label_conflicts(st, lab)]
+    if not bad(when):
+        return when, []
+    if support and not when.get("subject_any"):
+        words = derive_subject_words(support[0])
+        if words and not bad({**when, "subject_any": words}):
+            return {**when, "subject_any": words}, ["narrowed_by_labels"]
+    return None
 
 
 def _clean_rule(r: dict) -> Optional[tuple]:
@@ -302,11 +496,16 @@ def _clean_rule(r: dict) -> Optional[tuple]:
     return when, st
 
 
-def learn_prefs(feedback: dict, profile: dict, by_id: dict, base: Optional[dict] = None) -> dict:
+def learn_prefs(feedback: dict, profile: dict, by_id: dict, base: Optional[dict] = None,
+                accepted: Optional[dict] = None) -> dict:
     """Turn the user's natural-language corrections into notes + explicit rules, as a
     v2 prefs document (source "correction", scope inferred, provenance = the
     corrected messages each rule matches). ``base`` (an existing v1/v2 doc) is
-    upgraded and kept; new rules are added to it."""
+    upgraded and kept; new rules are added to it. Each proposed rule is shaped by
+    ``shape_rule`` (sender-kind scoping) and checked against the calibration labels
+    (``accepted`` = the agent's calibration predictions by id, overridden by the
+    corrections): a rule that contradicts a labelled message is narrowed or
+    dropped. Changes are recorded in the rule's provenance."""
     doc = prefs_mod.upgrade(base) if base else prefs_mod.empty_prefs(2)
     doc.setdefault("notes", [])
     doc.setdefault("rules", [])
@@ -339,6 +538,7 @@ def learn_prefs(feedback: dict, profile: dict, by_id: dict, base: Optional[dict]
     for n in out.get("notes") or []:
         if isinstance(n, str) and n and n not in doc["notes"]:
             doc["notes"].append(n)
+    labels = calibration_labels(feedback, accepted)
     for i, r in enumerate(out.get("rules") or []):
         if not isinstance(r, dict):
             continue
@@ -346,6 +546,22 @@ def learn_prefs(feedback: dict, profile: dict, by_id: dict, base: Optional[dict]
         if cleaned is None:
             continue
         when, st = cleaned
+        support_msgs = [by_id[it["id"]] for it in items if it.get("id") in by_id
+                        and prefs_mod.matches(when, by_id[it["id"]])]
+        covered = [m for m in by_id.values() if prefs_mod.matches(when, m)]
+        shaped = shape_rule(when, st, support_msgs, covered)
+        if shaped is None:
+            print(f"[triage] dropped learned rule {r.get('id')}: needs a content condition",
+                  file=sys.stderr)
+            continue
+        when, st, kind, changes = shaped
+        checked = validate_against_labels(when, st, support_msgs, labels, by_id)
+        if checked is None:
+            print(f"[triage] dropped learned rule {r.get('id')}: contradicts calibration labels",
+                  file=sys.stderr)
+            continue
+        when, more = checked
+        changes += more
         taken = {x.get("id") for x in doc["rules"]}
         rid = r.get("id") if isinstance(r.get("id"), str) and r.get("id") else f"r{i}"
         if rid in taken and prefs_mod.find_rule(doc, when, "include", "correction") is None:
@@ -355,6 +571,10 @@ def learn_prefs(feedback: dict, profile: dict, by_id: dict, base: Optional[dict]
         prov = {"message_ids": [it["id"] for it in support],
                 "feedback": " | ".join(str(it.get("feedback", "")) for it in support)[:600],
                 "signal": "learn_prefs"}
+        if kind != "general":
+            prov["sender_kind"] = kind
+        if changes:
+            prov["scoping"] = changes
         prefs_mod.add_rule(doc, when, st, source="correction", scope=prefs_mod.infer_scope(when),
                            note=str(r.get("note") or ""), rule_id=rid, provenance=prov)
     return doc
@@ -546,6 +766,19 @@ def triage_with_cascade(messages: list, profile: dict, prefs: dict,
     return run_cascade(messages, prefs, ctx, mb, batch_size=BATCH, th=th, record_hits=True)
 
 
+def _calibration_predictions(out: Path, splits: dict) -> dict:
+    """The agent's own calibration-phase predictions (predictions_calibration.json
+    next to ``out``), by id, limited to the calibration split; {} if absent."""
+    p = out.with_name("predictions_calibration.json")
+    try:
+        items = json.loads(p.read_text()).get("items") or []
+    except (OSError, ValueError, AttributeError):
+        return {}
+    calib = set(splits.get("calibration") or [])
+    return {str(it["id"]): it for it in items
+            if isinstance(it, dict) and it.get("id") and (not calib or it["id"] in calib)}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--mailbox", required=True)
@@ -569,7 +802,8 @@ def main(argv=None) -> int:
     if a.phase == "evaluation":
         fb = Path(a.feedback) if a.feedback else None
         if fb and fb.exists():
-            prefs = learn_prefs(json.loads(fb.read_text()), profile, by_id, base=base)
+            prefs = learn_prefs(json.loads(fb.read_text()), profile, by_id, base=base,
+                                accepted=_calibration_predictions(Path(a.out), splits))
             save_prefs(prefs_path, prefs)
             print(f"[triage] learned {len(prefs['rules'])} rule(s), {len(prefs['notes'])} note(s)",
                   file=sys.stderr)

@@ -435,11 +435,16 @@ def test_flag_on_evaluation_learns_then_cascades(tmp_path, monkeypatch):
     fake = FakeServer(_labels(msgs), prefs=learned)
     pred, usage = _main(tmp_path, mb, "evaluation", monkeypatch, fake)
     c = usage["cascade"]
-    assert c["model_calls_learn"] == 1 and c["model_calls_triage"] == 0 and usage["calls"] == 1
-    assert c["layers"]["L3"] == 0 and c["layers"]["L1"] == 4
-    assert json.loads((tmp_path / "prefs.json").read_text())["rules"][0]["id"] == "c"
+    # a learned (non-user) rule about people no longer decides outright: the 4
+    # personal messages go to the model with the rule as a hint, and the rule (now a
+    # floor, see shape_rule) is applied on top of the model's label
+    assert c["model_calls_learn"] == 1 and c["model_calls_triage"] == 1 and usage["calls"] == 2
+    assert c["layers"]["L3"] == 4 and c["layers"]["L1"] == 0
+    rule = json.loads((tmp_path / "prefs.json").read_text())["rules"][0]
+    assert rule["id"] == "c" and rule["set"] == {"min_importance": 3, "category": "urgent_action"}
     by = {i["id"]: i for i in pred["items"]}
     assert by["m7"]["importance"] == 3 and by["m7"]["category"] == "urgent_action"
+    assert by["m7"]["needs_reply"] is True                       # the model's label
 
 
 def test_server_rejecting_logprob_fields_falls_back(tmp_path, monkeypatch):

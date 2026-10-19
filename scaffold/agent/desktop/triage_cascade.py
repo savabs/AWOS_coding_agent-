@@ -11,14 +11,23 @@ triage_cascade.py — layered email triage that stops at the first confident lay
                                  never applied, and the security-alert guard (a
                                  broad non-user demotion never buries a non-list
                                  security/account/payment alert); plus the
-                                 cheap-error tie-break (resolve_rules)
+                                 cheap-error tie-break (resolve_rules). Only
+                                 user rules and learned list/bulk demotions
+                                 decide outright (may_decide_outright); other
+                                 learned rules go to L3 as hints and are
+                                 applied on top of the model's label
     L2  static rules             list mail with no protective signal -> bulk
                                  (social / promo / newsletter), importance 0
     L3  model label              the existing batched, schema-constrained call in
                                  email_triage_agent.py, plus an optional confidence
                                  signal from llama-server token probabilities;
                                  calibrated ABSTAIN (NONE, min confidence, dead-heat
-                                 margin, bulk classes summed before comparing)
+                                 margin, bulk classes summed before comparing),
+                                 then the phishing sanity guard (phish_downgrade:
+                                 a "phishing" label on non-list mail from a domain
+                                 the user legitimately gets mail from, with no
+                                 look-alike or injection signal, becomes
+                                 important_read)
 
 Fail toward the cheap error: an abstained item is never demoted (importance >= 1,
 so it stays in the inbox) and is queued for the user. Hard guard: nobody the user
@@ -179,6 +188,45 @@ def looks_injected(m: dict) -> bool:
     return any(r.search(text) for r in INJECTION_RES)
 
 
+# AWOS: phishing sanity guard signals (L3 post-check, see phish_downgrade).
+_MULTI_SUFFIX = {"co", "com", "org", "net", "ac", "gov", "edu", "ne", "or"}
+URL_HOST_RE = re.compile(r"https?://([^/\s\"'<>()\[\]]+)", re.I)
+ASSISTANT_WORDS_RE = re.compile(r"\b(assistants?|ai agents?|agents? processing|llms?|chatbots?)\b", re.I)
+
+
+def registrable_domain(dom: str) -> str:
+    """'news.nimbusnotes.example' -> 'nimbusnotes.example' (last two labels, three
+    for co.uk-style suffixes). Heuristic; no public-suffix list offline."""
+    parts = [p for p in (dom or "").lower().strip(".").split(".") if p]
+    if len(parts) >= 3 and parts[-2] in _MULTI_SUFFIX and len(parts[-1]) == 2:
+        return ".".join(parts[-3:])
+    return ".".join(parts[-2:])
+
+
+def lookalike_signals(m: dict) -> List[str]:
+    """Reasons this message may impersonate someone: punycode / non-ASCII sender,
+    a display name naming a brand the sender domain does not carry, links to a
+    domain other than the sender's."""
+    addr = _addr(m)
+    dom = _domain(addr)
+    reg = registrable_domain(dom)
+    out = []
+    name = (m.get("from_name") or "").lower()
+    if "xn--" in dom or not dom.isascii() or not name.isascii():
+        out.append("punycode_or_non_ascii")
+    site_flat = re.sub(r"[^a-z0-9]", "", reg.rsplit(".", 1)[0]) if reg else ""
+    tokens = [t for t in re.findall(r"[a-z0-9]+", name) if len(t) >= 4]
+    name_flat = re.sub(r"[^a-z0-9]", "", name)
+    if tokens and site_flat and not (any(t in site_flat for t in tokens)
+                                     or (len(site_flat) >= 4 and site_flat in name_flat)):
+        out.append("display_name_mismatch")
+    hosts = {registrable_domain(h.split(":")[0].split("@")[-1])
+             for h in URL_HOST_RE.findall(m.get("body") or "")}
+    if any(h and h != reg for h in hosts):
+        out.append("link_domain_mismatch")
+    return out
+
+
 @dataclass
 class Context:
     user_email: str = ""
@@ -186,6 +234,9 @@ class Context:
     important_roots: set = field(default_factory=set)  # domains marked important by prefs
     notes_text: str = ""
     people_domains: set = field(default_factory=set)   # orgs whose people (non-list, not no-reply) write in
+    # registrable domain -> ids of mailbox messages from it that look legitimate
+    # (subscribed list mail or a correspondent, no injection, no look-alike signal)
+    legit_domains: Dict[str, set] = field(default_factory=dict)
 
     @property
     def user_domain(self) -> str:
@@ -267,9 +318,18 @@ def build_context(profile: dict, prefs: dict, messages: List[dict],
         a = _addr(m)
         if a and not is_list_mail(m) and not ZERO_AUTOMATED_EMAIL_RE.search(a) and a != user_email:
             people.add(_domain(a))
+    corr = load_correspondents(mailbox_dir, messages, user_email)
+    legit: Dict[str, set] = {}
+    for m in messages:
+        a = _addr(m)
+        reg = registrable_domain(_domain(a))
+        if (not reg or reg in FREE_MAIL or a == user_email or looks_injected(m)
+                or lookalike_signals(m) or not (is_list_mail(m) or a in corr)):
+            continue
+        legit.setdefault(reg, set()).add(str(m.get("id")))
     return Context(user_email=user_email, people_domains=people - FREE_MAIL,
-                   correspondents=load_correspondents(mailbox_dir, messages, user_email),
-                   important_roots=roots, notes_text=notes.lower())
+                   correspondents=corr, important_roots=roots, notes_text=notes.lower(),
+                   legit_domains=legit)
 
 
 def guards(m: dict, ctx: Context) -> Dict[str, bool]:
@@ -446,13 +506,36 @@ def apply_ranked(pred: dict, m: dict, rules: List[dict]) -> Tuple[dict, set, Lis
     return p, fixed, hit
 
 
+def may_decide_outright(rule: dict, m: dict) -> bool:
+    """Can this rule settle ``m`` without the model? User-written rules can. A
+    learned (non-user) rule only when it files list mail as bulk (newsletter /
+    promo / social at importance <= 1); any other learned rule goes to L3 as a
+    hint and is applied on top of the model's label there."""
+    if prefs_store.rule_source(rule) == "user":
+        return True
+    if prefs_store.rule_effect(rule) == "exclude":
+        return True                       # constrains the model's value; decides nothing alone
+    st = rule.get("set") or {}
+    try:
+        return (is_list_mail(m) and st.get("category") in ("newsletter", "promo", "social")
+                and int(st.get("importance", 0)) <= 1 and int(st.get("min_importance", 0)) <= 1
+                and not st.get("needs_reply"))
+    except (TypeError, ValueError):
+        return False
+
+
 def l1_resolve(m: dict, prefs: PrefsLike) -> Tuple[Optional[dict], List[str], List[dict]]:
     """A complete decision from rules alone (else None), the deciding rule ids and
     the resolver trace. Complete = importance and category fixed, and needs_reply
-    fixed (or implied False by a bulk category)."""
+    fixed (or implied False by a bulk category), and every deciding rule may
+    decide outright (``may_decide_outright``)."""
     p, trace = resolve_rules(dict(DEFAULT_PRED), m, prefs)
     fixed, hit = _trace_fixed(trace)
     if not hit or not {"importance", "category"} <= fixed:
+        return None, hit, trace
+    deciders = {str(t["rule"]) for t in trace if t["action"] in ("applied", "cheap_error_raise")}
+    live = live_rules(prefs, m)
+    if any(not may_decide_outright(r, m) for r in live if str(r.get("id")) in deciders):
         return None, hit, trace
     if "needs_reply" not in fixed:
         if p["category"] not in BULK:
@@ -627,6 +710,35 @@ def abstain_decision(dist: Optional[Dict[str, float]], th: Thresholds) -> dict:
     return {**res, "abstain": False, "demote_ok": top == "bulk", "reason": "ok"}
 
 
+# ── phishing sanity guard (after the model) ───────────────────────────────────
+
+def phish_downgrade(p: dict, m: dict, g: Dict[str, bool], ctx: Context) -> Optional[str]:
+    """If the model called ``m`` phishing/suspicious but its sender's exact
+    registrable domain is one the user legitimately receives other mail from (and
+    nothing about ``m`` looks like impersonation or an injection), relabel it
+    important_read / not suspicious in place; importance >= 2 when it reads like a
+    security/account alert. Returns the reason, or None (unchanged)."""
+    if not (p.get("category") == "spam_phishing" or p.get("suspicious")):
+        return None
+    if g.get("injection") or g.get("list"):
+        return None
+    text = (m.get("subject") or "") + "\n" + (m.get("body") or "")
+    if ASSISTANT_WORDS_RE.search(text) or lookalike_signals(m):
+        return None
+    reg = registrable_domain(_domain(_addr(m)))
+    others = ctx.legit_domains.get(reg, set()) - {str(m.get("id"))}
+    if not reg or reg in FREE_MAIL or not others:
+        return None
+    p["category"] = "important_read"
+    p["suspicious"] = False
+    try:
+        imp = int(p.get("importance", 1))
+    except (TypeError, ValueError):
+        imp = 1
+    p["importance"] = max(imp, 2 if prefs_store.is_protected(m) else 1)
+    return "known_sender_domain"
+
+
 # ── final guard + driver ──────────────────────────────────────────────────────
 
 def finalize(p: dict, g: Dict[str, bool]) -> dict:
@@ -704,6 +816,9 @@ def run_cascade(messages: List[dict], prefs: dict, ctx: Context, model_batch: Mo
                 ab = {**ab, "abstain": True, "demote_ok": False, "reason": "none"}
             if raw is None:
                 ab = {**ab, "abstain": True, "demote_ok": False, "reason": "no_answer"}
+            phish = phish_downgrade(p, m, g, ctx) if raw is not None else None
+            if phish:
+                trace_items[m["id"]]["phish_guard"] = phish
             p, ptrace = resolve_rules(p, m, rules, record_hits=record_hits)
             _, hit = _trace_fixed(ptrace)
             applied = {str(t["rule"]) for t in ptrace if t["action"] == "applied"}

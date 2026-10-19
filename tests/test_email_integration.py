@@ -86,7 +86,8 @@ def test_learn_prefs_keeps_an_existing_v1_doc(monkeypatch):
         {"id": "acme", "when": {"from_domain": "acme.example"}, "set": {"importance": 3},
          "source": "user"}]}
     fake = FakeServer(prefs={"notes": [], "rules": [
-        {"id": "acme", "when": {"from_address": "x@y.example"}, "set": {"importance": 0}}]})
+        {"id": "acme", "when": {"from_address": "x@y.example", "is_list": True},
+         "set": {"importance": 0}}]})
     monkeypatch.setattr(eta, "_http_post", fake)
     _fresh_usage()
     doc = eta.learn_prefs({"items": [{"id": "z", "feedback": "x"}]}, ME, {}, base=base)
@@ -336,15 +337,15 @@ def test_runner_scoping_case_end_to_end_cascade_on_and_off(tmp_path, monkeypatch
         assert rep["phases"]["evaluation"]["scoping_case_passed"] is True
     saved = json.loads((w_on / "results.json").read_text())
     assert saved["scoping_case"]["passed"] and "composite" in saved["phases"]["evaluation"]
-    # the learner wrote a v2 store that includes the over-broad rule, and the guard caught it
+    # the learner wrote a v2 store WITHOUT the over-broad rule: no correction supports
+    # it and the domain also sends transactional mail (security@), so the code-side
+    # scoping drops it (it needs a content condition and there is nothing to take one
+    # from). The store guard behind it is covered by test_cascade_l1_uses_store_guard_*.
     prefs = json.loads((w_on / "agent" / "prefs.json").read_text())
     assert prefs["version"] == 2 and prefs_mod.validate(prefs) == []
-    broad = [r for r in prefs["rules"] if r["when"] == {"from_domain": NIMBUS}]
-    assert broad and broad[0]["scope"] == "domain" and broad[0]["source"] == "correction"
-    assert broad[0]["hits"] == 2                                  # the 2 eval newsletters
+    assert not [r for r in prefs["rules"] if r["when"] == {"from_domain": NIMBUS}]
     alert_id = on["scoping_case"]["alert_id"]
-    tr = u_on["cascade"]["items"][alert_id]["prefs_trace"]
-    assert any(t["action"] == "guarded" and t["rule"] == broad[0]["id"] for t in tr)
+    assert u_on["cascade"]["items"][alert_id]["layer"] == "L3"
     assert u_on["cascade"]["mail_io"] == "adapter+xml" and "cascade" not in u_off
     # fewer model calls with the cascade on
     assert u_on["calls"] < u_off["calls"], (u_on["calls"], u_off["calls"])
