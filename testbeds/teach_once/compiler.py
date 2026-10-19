@@ -26,6 +26,14 @@ What it infers, from the trace alone (no ground truth, no task-specific code):
               with identical content to the templated path, CSV rows appended
               (old rows preserved) whose fields follow the templates, files
               created that contain the templated lines, web table rows added.
+
+The skill dict is the DESCRIPTIVE form (for an agent prompt / the user). The
+EXECUTABLE form — multi-demo induction, layout profiles per item, guarded
+branches, refusals, halt -> teach versioning — is built on top of it by
+induction.py and run with zero model calls by skill_runner.py:
+
+    res = induce_skill([trace, ...])      # == induction.induce
+    res.program -> skill_runner.SkillRunner(res.program, env).run()
 """
 from __future__ import annotations
 
@@ -373,7 +381,7 @@ def compile_trace(trace: Trace) -> dict:
         dates = {k: v for k, v in {**item_vals, **vals_global}.items()
                  if params.get(k, {}).get("type") == "date"}
         plain = {k: v for k, v in {**item_vals, **vals_global}.items() if k not in dates}
-        g = {"app": s.app, "action": s.action}
+        g = {"app": s.app, "action": s.action, "step": s.i}
         if s.action in ("click", "download"):
             name = s.target.get("name", "")
             in_table = None
@@ -530,7 +538,8 @@ def compile_trace(trace: Trace) -> dict:
         "context_used": sorted({p["source"]["relation"] for p in params.values() if p["source"].get("relation")}),
         "parameters": list(params.values()),
         "items": {"count_in_demo": len(item_steps), "skipped_in_demo": len(skipped),
-                  "unselected_examples": _unselected(trace, item_steps)},
+                  "unselected_examples": _unselected(trace, item_steps),
+                  "steps": list(item_steps), "skipped_steps": list(skipped)},
         "procedure": {"setup": proc_setup, "for_each_item": proc_body, "finally": proc_tail},
         "recovery": recovery, "skip_rules": skip_rules, "aggregates": aggregates,
         "invariants": _invariants(trace),
@@ -760,7 +769,7 @@ def render_skill(skill: dict) -> str:
             if g["action"] == "switch_app":
                 L.append(f"  - switch to {g['app']}")
                 continue
-            bits = {k: v for k, v in g.items() if k not in ("app", "action")}
+            bits = {k: v for k, v in g.items() if k not in ("app", "action", "step")}
             L.append(f"  - [{g['app']}] {g['action']} {bits}")
     for r in skill["recovery"]:
         L.append(f"On error: after '{r['after_click']}', if alert {r['when_alert']!r}: {r['lesson']}")
@@ -772,3 +781,11 @@ def render_skill(skill: dict) -> str:
     L.append("Done when: " + "; ".join(c["kind"] + (f" {c.get('path') or c.get('to') or c.get('table', '')}")
                                         for c in skill["check"]))
     return "\n".join(L)
+
+
+# ============================================================ integration ==
+
+def induce_skill(traces, **kw):
+    """Executable, versioned skill program from one or more demos (see induction.induce)."""
+    from .induction import induce       # late import: induction builds on this module
+    return induce(list(traces), **kw)
