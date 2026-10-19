@@ -12,6 +12,13 @@ output constrained to a JSON schema, and learns the user's preferences:
                rules in the prompt AND apply them deterministically on top of
                the model's answer (the learned-preferences layer).
 
+Triage cascade (AWOS_TRIAGE_CASCADE=1, the default; =0 restores the original
+single-pass path): deterministic guards, learned prefs and static rules decide
+what they can, and only the rest goes to the model, whose labels can abstain on
+low confidence (llama-server token probabilities). See triage_cascade.py. The
+per-item deciding layer and the model-call counts go in usage_<phase>.json under
+"cascade"; abstained items are listed in review_queue_<phase>.json.
+
 Text inside emails is data, never instructions: anything that tries to
 instruct the assistant is flagged suspicious. Nothing is sent, forwarded or
 deleted — this module only reads and writes JSON files.
@@ -29,9 +36,19 @@ import json
 import os
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Optional
+
+try:  # package import (python -m scaffold.agent.desktop.email_triage_agent)
+    from .triage_cascade import (NONE_LABEL, Thresholds, build_context, cascade_enabled,
+                                 category_dists, normalize_token_probs, run_cascade)
+except ImportError:  # pragma: no cover - run as a plain script
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from triage_cascade import (NONE_LABEL, Thresholds, build_context,  # type: ignore
+                                cascade_enabled, category_dists, normalize_token_probs,
+                                run_cascade)
 
 CATEGORIES = ["urgent_action", "important_read", "fyi", "newsletter", "promo",
               "social", "spam_phishing"]
@@ -96,8 +113,18 @@ SYSTEM = (
 
 # ── model access ──────────────────────────────────────────────────────────────
 
-def _local_chat(messages: list, schema: dict, max_tokens: int) -> str:
-    base = os.environ.get("AWOS_LOCAL_BASE_URL", "http://127.0.0.1:8080/v1").rstrip("/")
+LOCAL_PROBS = {"ok": True}  # flips off if the server rejects the probability fields
+
+
+def _http_post(url: str, body: dict, timeout: float = 900) -> dict:
+    """POST JSON to llama-server (tests replace this with a fake)."""
+    req = urllib.request.Request(url, data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read())
+
+
+def _local_body(messages: list, schema: dict, max_tokens: int, probs: bool = False) -> dict:
     body = {
         "model": os.environ.get("AWOS_LOCAL_MODEL", "qwen3.5-9b"),
         "messages": messages, "temperature": 0.2, "max_tokens": max_tokens,
@@ -105,12 +132,33 @@ def _local_chat(messages: list, schema: dict, max_tokens: int) -> str:
                             "json_schema": {"name": "out", "schema": schema}},
         "chat_template_kwargs": {"enable_thinking": False},
     }
-    req = urllib.request.Request(base + "/chat/completions", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=900) as r:
-        data = json.loads(r.read())
+    if probs:
+        n = int(os.environ.get("AWOS_TRIAGE_NPROBS", "10"))
+        # OpenAI-style fields plus llama.cpp's native ones; post_sampling_probs
+        # reports probabilities after the grammar/sampler chain (BLUEPRINT critic 9).
+        body.update({"logprobs": True, "top_logprobs": n, "n_probs": n,
+                     "post_sampling_probs": os.environ.get("AWOS_TRIAGE_POST_SAMPLING", "1") != "0"})
+    return body
+
+
+def _local_chat_raw(messages: list, schema: dict, max_tokens: int, probs: bool = False):
+    base = os.environ.get("AWOS_LOCAL_BASE_URL", "http://127.0.0.1:8080/v1").rstrip("/")
+    probs = probs and LOCAL_PROBS["ok"]
+    try:
+        data = _http_post(base + "/chat/completions", _local_body(messages, schema, max_tokens, probs))
+    except urllib.error.HTTPError as exc:
+        if not probs or exc.code not in (400, 422, 500):
+            raise
+        LOCAL_PROBS["ok"] = False
+        print("[triage] llama-server rejected the logprob fields; continuing without confidence",
+              file=sys.stderr)
+        data = _http_post(base + "/chat/completions", _local_body(messages, schema, max_tokens))
     _log_usage(data)
-    return data["choices"][0]["message"]["content"]
+    return data["choices"][0]["message"]["content"], data
+
+
+def _local_chat(messages: list, schema: dict, max_tokens: int) -> str:
+    return _local_chat_raw(messages, schema, max_tokens)[0]
 
 
 def _anthropic_chat(messages: list, schema: dict, max_tokens: int) -> str:
@@ -139,21 +187,36 @@ def _log_usage(data: dict) -> None:
     USAGE["completion_tokens"] += int(u.get("completion_tokens") or 0)
 
 
+def _is_local() -> bool:
+    return (os.environ.get("AWOS_PROVIDER") or "").strip().lower() == "local"
+
+
 def chat_json(messages: list, schema: dict, max_tokens: int = 1500) -> Optional[dict]:
-    local = (os.environ.get("AWOS_PROVIDER") or "").strip().lower() == "local"
-    fn = _local_chat if local else _anthropic_chat
+    return chat_json_probs(messages, schema, max_tokens, probs=False)[0]
+
+
+def chat_json_probs(messages: list, schema: dict, max_tokens: int = 1500, probs: bool = True):
+    """Like chat_json, plus normalised token probabilities when the local server
+    returns them: (obj | None, tokens | None). Only the local provider has probs."""
+    local = _is_local()
+    want = probs and local and os.environ.get("AWOS_TRIAGE_LOGPROBS", "1") != "0"
+    last = None
     for _ in range(2):
         t0 = time.time()
         try:
-            out = json.loads(fn(messages, schema, max_tokens))
+            if local:
+                text, data = _local_chat_raw(messages, schema, max_tokens, probs=want)
+            else:
+                text, data = _anthropic_chat(messages, schema, max_tokens), {}
+            out = json.loads(text)
             USAGE["seconds"] += time.time() - t0
-            return out
+            return out, (normalize_token_probs(data) if want else None)
         except (ValueError, KeyError, OSError) as exc:  # retry once on a bad reply
             USAGE["seconds"] += time.time() - t0
             USAGE["parse_failures"] += 1
             last = exc
     print(f"[triage] model call failed twice: {last}", file=sys.stderr)
-    return None
+    return None, None
 
 
 # ── preferences ───────────────────────────────────────────────────────────────
@@ -235,12 +298,19 @@ def _render(m: dict) -> str:
             f"date: {m.get('date')}\nbody:\n{body}\n")
 
 
-def triage(messages: list, profile: dict, prefs: dict) -> list:
+def _triage_context(profile: dict, prefs: dict) -> str:
     context = f"The person: {json.dumps(profile)}"
     if prefs.get("notes") or prefs.get("rules"):
         context += "\nWhat they told you they care about:\n" + "\n".join(f"- {n}" for n in prefs.get("notes", []))
         for r in prefs.get("rules", []):
             context += f"\n- rule: when {json.dumps(r['when'])} then {json.dumps(r['set'])}"
+    return context
+
+
+def triage(messages: list, profile: dict, prefs: dict) -> list:
+    """Original single-pass path (AWOS_TRIAGE_CASCADE=0): every message goes to the
+    model in batches; rules are applied on top in file order."""
+    context = _triage_context(profile, prefs)
     items = []
     for i in range(0, len(messages), BATCH):
         batch = messages[i:i + BATCH]
@@ -256,6 +326,61 @@ def triage(messages: list, profile: dict, prefs: dict) -> list:
             items.append({"id": m["id"], **p})
         print(f"[triage] {min(i + BATCH, len(messages))}/{len(messages)}", file=sys.stderr, flush=True)
     return items
+
+
+# ── triage cascade (AWOS_TRIAGE_CASCADE=1, default) ───────────────────────────
+
+def _batch_schema(allow_none: bool) -> dict:
+    if not allow_none:
+        return BATCH_SCHEMA
+    item = json.loads(json.dumps(ITEM_SCHEMA))
+    item["properties"]["category"]["enum"] = CATEGORIES + [NONE_LABEL]
+    return {"type": "object", "properties": {"items": {"type": "array", "items": item}},
+            "required": ["items"]}
+
+
+SYSTEM_NONE = SYSTEM + ("\nIf you genuinely cannot tell what a message is, use category \"none\" "
+                        "(it stays in the inbox for the person to look at).")
+
+
+def model_batch(batch: list, context: str, allow_none: bool = False):
+    """One L3 call: raw model labels by id (no rules applied) and, when the local
+    server returns token probabilities, a category distribution by id."""
+    user = context + "\n\nMessages:\n\n" + "\n---\n".join(_render(m) for m in batch)
+    out, tokens = chat_json_probs(
+        [{"role": "system", "content": SYSTEM_NONE if allow_none else SYSTEM},
+         {"role": "user", "content": user}],
+        _batch_schema(allow_none), max_tokens=120 * len(batch) + 100)
+    rows = [it for it in ((out or {}).get("items") or []) if isinstance(it, dict)]
+    want = {m["id"] for m in batch}
+    preds = {str(it.get("id")): {k: it.get(k) for k in ("importance", "category", "needs_reply",
+                                                         "suspicious")}
+             for it in rows if str(it.get("id")) in want}
+    dists = {}
+    if tokens:
+        labels = CATEGORIES + ([NONE_LABEL] if allow_none else [])
+        ds = category_dists(tokens, labels)
+        if len(ds) == len(rows):  # k-th "category" value belongs to items[k]
+            dists = {str(it.get("id")): d for it, d in zip(rows, ds) if d}
+    return preds, dists
+
+
+def triage_with_cascade(messages: list, profile: dict, prefs: dict,
+                        mailbox_dir: Optional[Path] = None, all_messages: Optional[list] = None):
+    """L0 guards -> L1 prefs -> L2 static -> L3 model with calibrated abstain.
+    Returns (items, trace); see triage_cascade.run_cascade."""
+    th = Thresholds.from_env()
+    ctx = build_context(profile, prefs, all_messages or messages, mailbox_dir)
+    context = _triage_context(profile, prefs)
+    done = [0]
+
+    def mb(batch):
+        r = model_batch(batch, context, th.allow_none)
+        done[0] += len(batch)
+        print(f"[triage] model: {done[0]} item(s) so far", file=sys.stderr, flush=True)
+        return r
+
+    return run_cascade(messages, prefs, ctx, mb, batch_size=BATCH, th=th)
 
 
 def main(argv=None) -> int:
@@ -279,10 +404,27 @@ def main(argv=None) -> int:
             Path(a.prefs).write_text(json.dumps(prefs, indent=2))
             print(f"[triage] learned {len(prefs['rules'])} rule(s), {len(prefs['notes'])} note(s)",
                   file=sys.stderr)
-    items = triage([by_id[i] for i in ids if i in by_id], profile, prefs)
+    todo = [by_id[i] for i in ids if i in by_id]
+    usage = USAGE
+    if cascade_enabled():
+        learn_calls = USAGE["calls"]
+        items, trace = triage_with_cascade(todo, profile, prefs, mb, inbox["messages"])
+        trace["model_calls_learn"] = learn_calls
+        usage = {**USAGE, "cascade": trace}
+        queue = [{"id": i, **{k: trace["items"][i].get(k)
+                              for k in ("abstain_reason", "conf", "margin", "top")}}
+                 for i in trace["review_queue"]]
+        Path(a.out).with_name(f"review_queue_{a.phase}.json").write_text(json.dumps(
+            {"version": 1, "phase": a.phase,
+             "reason": "low-confidence model label: kept in the inbox for you to check",
+             "items": queue}, indent=2))
+        print(f"[triage] cascade layers {trace['layers']}, model calls {trace['model_calls_triage']}, "
+              f"abstained {trace['abstained']}", file=sys.stderr)
+    else:
+        items = triage(todo, profile, prefs)
     Path(a.out).write_text(json.dumps({"version": 1, "phase": a.phase, "items": items}, indent=2))
     usage_path = Path(a.out).with_name(f"usage_{a.phase}.json")
-    usage_path.write_text(json.dumps(USAGE, indent=2))
+    usage_path.write_text(json.dumps(usage, indent=2))
     print(f"[triage] done: {len(items)} items, usage {USAGE}", file=sys.stderr)
     return 0
 
