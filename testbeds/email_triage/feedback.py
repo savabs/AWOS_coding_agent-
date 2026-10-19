@@ -3,8 +3,13 @@
 Deterministic, from ground truth. For every calibration message the agent got
 wrong (importance, category or needs_reply, or an injection it did not flag),
 the "user" writes a correction in natural language. When a personal-context
-rule from persona.json decides the message, the correction states that rule
+rule from the persona file decides the message, the correction states that rule
 in the user's words (once per rule; later hits say "same as before").
+
+Persona-agnostic: rules, their feedback text and hints come from
+``truth["rules"]``, which seed.py fills from persona.json (default persona
+"sam") or from personas/<id>.json (held-out personas, ``--persona``), so the
+same simulated user speaks for whichever persona owns the mailbox.
 
 Styles:
   "nl"         natural-language feedback only (what a real user would type)
