@@ -133,7 +133,7 @@ class RecorderSource(Protocol):
     """Anything that pushes low-level events into Recorder.feed.
 
     Implementations: browser.Browser + demonstrate.FileActor (scripted, here);
-    a future MacRecorderSource (AXObserver + CGEventTap + FSEvents + NSWorkspace).
+    MacRecorderSource (native macOS: scaffold/agent/desktop/capture).
     """
 
     def start(self, sink: Callable[[dict], None]) -> None: ...
@@ -142,38 +142,115 @@ class RecorderSource(Protocol):
 
 
 class MacRecorderSource:
-    """PLACEHOLDER for the real recorder (not implemented; never requests permissions).
+    """The native macOS recorder as a RecorderSource (implementation: scaffold/agent/desktop/capture).
 
-    What it has to do, per event type (see the module docstring for the shapes):
-      * app        NSWorkspace.shared.notificationCenter didActivateApplicationNotification
-                   -> bundle id -> app name; ignore apps outside the task's allow-list.
+        src = MacRecorderSource(home, apps, consent={"granted": True, "notice_sha256": ...})
+        rec = Recorder(home, task=..., instance=..., kind="macos_ax_fsevents", apps=apps)
+        src.start(rec.feed)            # needs macOS + PyObjC + Accessibility + Input Monitoring
+        ...                            # the user works; src.pause() / src.resume() around a sign-in
+        src.stop(); trace = src.finish(rec)
+
+    How each low-level event (module docstring) is produced natively:
+      * app        AXFocusedApplication poll (~150 ms) -> pid -> NSRunningApplication bundle id
+                   -> app name; web apps by page URL vs the task's base_urls; apps outside the
+                   task's allow-list and the terminal running the recorder are ignored.
       * pointer    CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap,
-                   kCGEventTapOptionListenOnly, mask(leftMouseDown)) -> location ->
-                   AXUIElementCopyElementAtPosition(systemWide, x, y) -> role/title/
-                   description/AXIdentifier + ordinal among same-role siblings.
+                   kCGEventTapOptionListenOnly, leftMouseDown|keyDown) -> location ->
+                   AXUIElementCopyElementAtPosition(systemWide, x, y) -> role/subrole/title/
+                   description/AXIdentifier + ordinal among same-role elements of the web area.
+                   Events posted by other processes (source PID > 0) are dropped.
       * ax         AXObserverCreate(pid) + AXObserverAddNotification for
-                   kAXFocusedUIElementChangedNotification, kAXValueChangedNotification,
-                   kAXFocusedWindowChangedNotification, kAXTitleChangedNotification and
-                   "AXLoadComplete" (WebKit / Chrome web areas); on load, walk the web
-                   area (AXChildren) to produce page_text + tables (reuse
-                   scaffold/agent/desktop/ax_compress.collect). AXSecureTextField values
-                   are not readable and must stay {"secret": name}.
-      * fs         FSEventStreamCreate(paths=[~/Downloads, ~/Documents, ...],
-                   flags=kFSEventStreamCreateFlagFileEvents | UseCFTypes | NoDefer),
-                   map kFSEventStreamEventFlagItemCreated/Renamed/Modified/Removed/IsDir;
-                   include the inode (extended data, macOS 10.13+) so renames pair up.
-    Permissions (TCC), granted by the user in System Settings > Privacy & Security:
-      Accessibility (AXIsProcessTrustedWithOptions) for AX reads/observers;
-      Input Monitoring for the listen-only event tap; Files & Folders (Downloads,
-      Documents) or Full Disk Access for reading touched files. Screen Recording is
-      NOT needed (no pixels). Secure input mode (password fields) blinds the tap: fine.
+                   AXFocusedUIElementChanged, AXValueChanged, AXFocusedWindowChanged,
+                   AXTitleChanged and AXLoadComplete; on load the web area is walked (bounded)
+                   into page_text + tables; AXDocument gives the file a window shows. Values of
+                   AXSecureTextField / password elements are never read: {"secret": name}.
+                   AXUIElementSetMessagingTimeout bounds every AX call.
+      * fs         FSEventStreamCreate(watched home, FileEvents|UseCFTypes|NoDefer|UseExtendedData);
+                   coalesced flags are normalised against the disk (adapter.py).
+    Permissions (TCC), granted by the user in System Settings > Privacy & Security to the app
+    running Python: Accessibility and Input Monitoring. Screen Recording is NOT needed.
+    Nothing is prompted unless request_permissions=True.
     """
 
+    def __init__(self, home: Path, apps: List[dict], *, consent: Optional[dict] = None,
+                 watch: Optional[List[str]] = None, events_log: Optional[Callable[[dict], None]] = None,
+                 keep_injected: bool = False, request_permissions: bool = False, task: str = "",
+                 instance: str = ""):
+        self.home, self.apps, self.consent = Path(home), list(apps), consent
+        self.watch = list(watch or [str(home)])
+        self.events_log, self.keep_injected = events_log, keep_injected
+        self.request_permissions, self.task, self.instance = request_permissions, task, instance
+        self.adapter = None
+        self._live = None
+
     def start(self, sink: Callable[[dict], None]) -> None:
-        raise NotImplementedError("MacRecorderSource is a documented placeholder; see the class docstring")
+        from scaffold.agent.desktop.capture.adapter import NativeAdapter
+        from scaffold.agent.desktop.capture.live import MacRecorder
+        self.adapter = NativeAdapter(sink, home=self.home, apps=self.apps, log=self.events_log,
+                                     keep_injected=self.keep_injected)
+        self.adapter.feed({"src": "session", "event": "start", "consent": self.consent or {},
+                           "task": self.task, "instance": self.instance, "apps": self.apps, "watch": self.watch})
+        self._live = MacRecorder(self.adapter.feed, watch=self.watch, request_permissions=self.request_permissions)
+        self._live.start()
+
+    def pause(self) -> None:
+        if self._live is not None:
+            self._live.commands.put("pause")
+
+    def resume(self) -> None:
+        if self._live is not None:
+            self._live.commands.put("resume")
 
     def stop(self) -> None:
-        pass
+        if self._live is not None:
+            self._live.stop()
+        if self.adapter is not None:
+            self.adapter.feed({"src": "session", "event": "stop"})
+
+    def finish(self, recorder: "Recorder", web_with_text: bool = True) -> "Trace":
+        return self.adapter.finish(recorder, web_with_text=web_with_text)
+
+
+ACTIONS = ("open_url", "switch_app", "click", "type", "download", "read", "move", "mkdir", "append_rows",
+           "write_file", "edit_file", "delete")
+
+
+def validate_trace(trace: Any, secrets: tuple = ()) -> List[str]:
+    """Problems with a trace (empty list = valid): schema, step shape, secure values, leaked secrets."""
+    d = trace.to_dict() if isinstance(trace, Trace) else dict(trace)
+    problems: List[str] = []
+    if d.get("schema") != SCHEMA:
+        problems.append(f"schema is {d.get('schema')!r}, not {SCHEMA}")
+    for k in ("task", "instance"):
+        if not d.get(k):
+            problems.append(f"missing {k}")
+    if not isinstance(d.get("recorder"), dict) or not d["recorder"].get("kind"):
+        problems.append("recorder.kind missing")
+    for n, s in enumerate(d.get("steps", []), 1):
+        if s.get("i") != n:
+            problems.append(f"step {n}: i={s.get('i')}")
+        if s.get("action") not in ACTIONS:
+            problems.append(f"step {n}: unknown action {s.get('action')!r}")
+        if not isinstance(s.get("target", {}), dict) or not isinstance(s.get("app", ""), str):
+            problems.append(f"step {n}: bad target/app")
+        v = s.get("value")
+        if isinstance(v, dict) and "secret" in v and set(v) != {"secret"}:
+            problems.append(f"step {n}: secret placeholder carries more than the field name")
+        tgt = s.get("target", {})
+        if tgt.get("subrole") == "AXSecureTextField" and not (isinstance(v, dict) and "secret" in v):
+            problems.append(f"step {n}: secure field without a {{'secret': name}} value")
+        if any(k in tgt for k in ("value", "value_length")):
+            problems.append(f"step {n}: target carries a field value")
+    if secrets:
+        blob = json.dumps(d)
+        for sec in secrets:
+            if sec and sec in blob:
+                problems.append("a secret value appears in the trace")
+    try:
+        Trace.from_dict(json.loads(json.dumps(d)))
+    except Exception as exc:          # round trip through JSON and the dataclasses
+        problems.append(f"does not load: {exc}")
+    return problems
 
 
 def text_snapshot(home: Path) -> Dict[str, str]:
