@@ -234,8 +234,11 @@ def test_bulk_classes_are_summed_before_comparing():
     d = tc.abstain_decision(dist, tc.Thresholds())
     assert d["top"] == "bulk" and abs(d["conf"] - 0.66) < 1e-6
     assert not d["demote_ok"] and d["reason"] == "below_archive_conf"  # stays in inbox, queued
+    # archive_conf defaults to 0.96 (the local model's probabilities are overconfident)
     d = tc.abstain_decision({**dist, "urgent_action": 0.1, "newsletter": 0.41}, tc.Thresholds())
-    assert d["demote_ok"] and d["conf"] >= 0.75
+    assert not d["demote_ok"] and d["reason"] == "below_archive_conf" and d["conf"] >= 0.75
+    d = tc.abstain_decision({**dist, "urgent_action": 0.02, "newsletter": 0.49}, tc.Thresholds())
+    assert d["demote_ok"] and d["conf"] >= 0.96
 
 
 def test_abstain_low_conf_dead_heat_none():
@@ -300,7 +303,7 @@ def test_abstained_items_stay_in_inbox_and_are_queued():
     out, tr, _ = _run([m], {"rules": []}, labels, shaky)
     assert out["x"]["importance"] == 1 and tr["review_queue"] == ["x"]
     assert tr["items"]["x"]["abstain_reason"] == "dead_heat" and tr["items"]["x"]["disposition"] == "inbox"
-    sure = {"x": {"promo": 0.9, "newsletter": 0.05, "fyi": 0.05}}
+    sure = {"x": {"promo": 0.97, "newsletter": 0.02, "fyi": 0.01}}  # >= archive_conf 0.96
     out, tr, _ = _run([m], {"rules": []}, labels, sure)
     assert out["x"]["importance"] == 0 and tr["review_queue"] == []
     # no probabilities (e.g. Anthropic provider): model label accepted as before
@@ -340,7 +343,7 @@ def test_model_calls_drop_when_l1_l2_decide():
     labels = {m["id"]: {"importance": 2, "category": "important_read", "needs_reply": True,
                         "suspicious": False} for m in msgs}
     out, tr, calls = _run(msgs, prefs, labels)
-    assert tr["layers"] == {"L1": 5, "L2": 5, "L3": 5}
+    assert tr["layers"] == {"L0": 0, "L1": 5, "L2": 5, "L3": 5}
     assert calls == [[f"h{i}" for i in range(5)]] and tr["model_calls_triage"] == 1
     assert out["n0"]["category"] == "newsletter" and out["p0"]["category"] == "promo"
 
@@ -417,7 +420,7 @@ def test_flag_on_cli_contract_and_usage_trace(tmp_path, monkeypatch):
         assert set(it) == {"id", "importance", "category", "needs_reply", "suspicious"}
         assert it["category"] in tc.CATEGORIES and 0 <= it["importance"] <= 3
     c = usage["cascade"]
-    assert c["layers"] == {"L1": 0, "L2": 2, "L3": 4} and c["model_calls_triage"] == 1
+    assert c["layers"] == {"L0": 0, "L1": 0, "L2": 2, "L3": 4} and c["model_calls_triage"] == 1
     assert usage["calls"] == 1 and c["model_calls_learn"] == 0
     assert set(c["items"]) == {m["id"] for m in msgs[:6]}
     assert all(b.get("logprobs") and b.get("post_sampling_probs") for b in fake.calls)

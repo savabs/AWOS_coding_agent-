@@ -386,4 +386,4 @@ def test_two_messages_from_a_phishing_domain_do_not_vouch_for_each_other():
 
 def test_triage_system_prompt_is_byte_stable():
     assert hashlib.sha256(eta.SYSTEM.encode()).hexdigest() == \
-        "1853cb7e842a92cc6c6e51ea6717276aeb767c6c6990d7c33c084c3585bd2b4c"
+        "85c0a5ec456a7fd24aaf3121e0625ae03c77770fef47502492ef38ecf0d2cb10"

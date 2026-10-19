@@ -3,7 +3,15 @@ triage_cascade.py — layered email triage that stops at the first confident lay
 
     L0  deterministic guards     correspondent / same domain / protected family,
                                  no-reply, list headers, automated sender,
-                                 assistant-directed text (injection)
+                                 assistant-directed text (injection); and the
+                                 look-alike guard (lookalike_guard), the one L0
+                                 check that decides outright: a sender domain
+                                 borrowing a known mailbox org's name (acme ->
+                                 acme-billing, other TLD, homoglyphs) or the
+                                 display name's org plus filler words, writing
+                                 about money / signing / credentials ->
+                                 spam_phishing, suspicious, importance 0. Beats
+                                 the model and learned rules; user rules win
     L1  learned preferences      prefs.json rules (v1 or v2) resolved by
                                  testbeds/email_triage/prefs.py: precedence
                                  user > subject/service/thread > address > domain
@@ -27,7 +35,12 @@ triage_cascade.py — layered email triage that stops at the first confident lay
                                  a "phishing" label on non-list mail from a domain
                                  the user legitimately gets mail from, with no
                                  look-alike or injection signal, becomes
-                                 important_read)
+                                 important_read; never undoes a look-alike hit)
+                                 and the urgency cap (urgency_cap: importance 3
+                                 on mail from an automated sender with no
+                                 near-term deadline / failure / account-incident
+                                 signal becomes 2; rules applied after can raise
+                                 it again)
 
 Fail toward the cheap error: an abstained item is never demoted (importance >= 1,
 so it stays in the inbox) and is queued for the user. Hard guard: nobody the user
@@ -36,8 +49,9 @@ of an important domain is ever given importance 0 (the archive disposition).
 
 L0 and L2 decide nothing that could hide important mail: L0 only constrains
 (needs_reply off for no-reply mail, suspicious on for assistant-directed text,
-importance floor for protected senders); L2 only decides list mail that no guard,
-rule or note protects.
+importance floor for protected senders), except the look-alike guard, which only
+fires on unprotected senders on a domain the user does not correspond with; L2 only
+decides list mail that no guard, rule or note protects.
 
 This module never calls a model itself. ``run_cascade`` takes a ``model_batch``
 callback (email_triage_agent.py supplies it), so tests can pass a fake.
@@ -82,12 +96,20 @@ def cascade_enabled() -> bool:
 
 @dataclass
 class Thresholds:
-    """Abstain thresholds. Defaults are Inbox Zero's published starting points
-    (0.3 / 0.1 / 0.75); they came from cloud models and MUST be re-tuned with
-    scripts/triage_calibration_probe.py on the local model."""
-    min_conf: float = 0.3      # top bucket below this -> abstain
-    margin: float = 0.1        # top - second below this -> dead heat -> abstain
-    archive_conf: float = 0.75  # summed bulk probability needed to demote to importance 0
+    """Abstain thresholds. min_conf / margin are Inbox Zero's published starting
+    points (0.3 / 0.1). archive_conf is 0.96 since the calibration probe on the
+    local model (Qwen3.5-9B, llama-server post-sampling probabilities): 137/150
+    labels came out >= 0.95 at ~82% accuracy, i.e. the probabilities are
+    overconfident, so only near-certain bulk is archived.
+
+    Do NOT rely on min_conf / margin for abstention on the local model: with
+    probabilities that peaked they almost never trigger. They stay (env
+    overridable) for servers whose probabilities are calibrated; the abstain
+    that matters locally is the archive gate. Re-tune all three with
+    scripts/triage_calibration_probe.py when the model changes."""
+    min_conf: float = 0.3      # top bucket below this -> abstain (rarely fires locally)
+    margin: float = 0.1        # top - second below this -> dead heat -> abstain (ditto)
+    archive_conf: float = 0.96  # summed bulk probability needed to demote to importance 0
     allow_none: bool = False   # offer NONE as a label (model may say "I can't tell")
 
     @classmethod
@@ -227,6 +249,112 @@ def lookalike_signals(m: dict) -> List[str]:
     return out
 
 
+# ── L0: look-alike sender guard (AWOS) ────────────────────────────────────────
+# A sender whose registrable domain borrows a known organisation's name without
+# being that organisation's domain (acme -> acme-billing, docusign -> docusign-mail,
+# paypal -> paypa1-secure, other TLD), writing about money, documents to sign or
+# credentials. Generic: the known names come from the mailbox at run time (the
+# user's own domain, people they write to or get personal mail from, subscribed
+# lists) or from the sender's own display name; nothing here names a brand.
+
+# words a look-alike domain bolts onto a borrowed name
+LOOKALIKE_FILLER = frozenset("""
+mail email mailer mails notice notices notification notifications notify alert alerts
+billing bill bills pay payment payments payable invoice invoices finance accounts account
+secure security safe verify verification validate auth login logon signin sso id identity
+support help helpdesk service services care team desk center centre portal online web
+app apps update updates info official partners partner hr it admin docs document documents
+sign esign
+""".split())
+# labels too generic to stand for an organisation
+GENERIC_LABELS = LOOKALIKE_FILLER | frozenset(
+    "mailbox inbox news example group global home mobile cloud dev test corp company".split())
+# topics a look-alike sender uses to extract money, signatures or credentials
+RISK_TOPIC_RE = re.compile(
+    r"\b(payments?|payouts?|pay\b|invoices?|remittance|bank (?:details|account)|banking details|"
+    r"wire transfer|wire\b|iban|swift|routing number|sort code|payment release|"
+    r"sign(?:ature)?\b|e-?sign|review and sign|passwords?|passcode|credentials?|"
+    r"verify|verification|validate|re-?validate|confirm your (?:account|identity|details)|"
+    r"log ?in|sign[- ]?in|account (?:has been |is |was )?(?:limited|suspended|locked|on hold|disabled)|"
+    r"gift ?cards?|bitcoin|btc|crypto|wallet)", re.I)
+_HOMOGLYPH = str.maketrans({"0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b",
+                            "9": "g", "$": "s", "@": "a"})
+# local parts of people (not role / automated addresses), for the personal-mail anchors
+ROLE_LOCAL_RE = re.compile(
+    r"^(no-?reply|do-?not-?reply|donotreply|notifications?|notify|alerts?|security|billing|"
+    r"invoices?|receipts?|orders?|payments?|payouts?|statements?|accounts?|ap|ar|support|help|"
+    r"info|team|hello|hi|news|newsletters?|updates?|digest|service|services|admin|mailer|"
+    r"postmaster|marketing|deals?|offers?|promos?|events?|community|system|ops|it|hr|careers|"
+    r"jobs|bounces?|feedback|contact|sales|store|shop|growth|learn|tickets|partners?|"
+    r"tracking|calendar|reply|mail|office|finance)"
+    r"([._+-].*)?$")
+
+
+def _norm_label(s: str) -> str:
+    """Lowercase, digit/symbol homoglyphs folded, 'rn' -> 'm', 'vv' -> 'w'."""
+    return s.lower().translate(_HOMOGLYPH).replace("rn", "m").replace("vv", "w")
+
+
+def _site_part(reg: str) -> str:
+    """'acme-billing.example' -> 'acme-billing' (registrable domain minus its suffix)."""
+    return (reg or "").split(".", 1)[0]
+
+
+def _brand(reg: str) -> str:
+    """The organisation name a registrable domain stands for ('' if too generic)."""
+    b = re.sub(r"[^a-z]", "", _norm_label(_site_part(reg)))
+    return "" if len(b) < 4 or b in GENERIC_LABELS else b
+
+
+def _segments(label: str) -> List[str]:
+    return [s for s in re.split(r"[-_.]+", _norm_label(label)) if s]
+
+
+def _extends(label: str, brand: str) -> Optional[str]:
+    """How ``label`` (a sender domain's site part) borrows ``brand``: other_tld,
+    homoglyph, brand_plus_words or brand_plus_filler; None if it does not."""
+    if not brand:
+        return None
+    segs = _segments(label)
+    flat = re.sub(r"[^a-z]", "", "".join(segs))
+    if flat == brand:
+        return "other_tld" if label.lower() == brand else "homoglyph"
+    if len(segs) > 1 and brand in segs:
+        return "brand_plus_words"
+    for s in segs:
+        s = re.sub(r"[^a-z]", "", s)
+        if s.startswith(brand) and s[len(brand):] in LOOKALIKE_FILLER:
+            return "brand_plus_filler"
+        if s.endswith(brand) and s[:-len(brand)] in LOOKALIKE_FILLER:
+            return "brand_plus_filler"
+    return None
+
+
+def _name_brand_domain(name: str, label: str) -> Optional[str]:
+    """Display name names an organisation and the domain is that name plus filler
+    (DocuSign -> docusign-mail, PayPal -> paypa1-secure), but not the name itself."""
+    tokens = {re.sub(r"[^a-z]", "", _norm_label(t)) for t in re.findall(r"[a-z0-9]+", name.lower())}
+    tokens = {t for t in tokens if len(t) >= 4 and t not in GENERIC_LABELS}
+    if not tokens:
+        return None
+    name_flat = re.sub(r"[^a-z]", "", _norm_label(name))
+    segs = [re.sub(r"[^a-z]", "", s) for s in _segments(label)]
+    segs = [s for s in segs if s]
+    if not segs or "".join(segs) in tokens or "".join(segs) == name_flat:
+        return None
+    named = [s for s in segs if s in tokens or s == name_flat]
+    filler = [s for s in segs if s in LOOKALIKE_FILLER]
+    if len(segs) > 1 and named and filler and len(named) + len(filler) == len(segs):
+        return "name_plus_filler"
+    if len(segs) == 1:
+        for t in tokens | {name_flat}:
+            s = segs[0]
+            if (s.startswith(t) and s[len(t):] in LOOKALIKE_FILLER) or \
+                    (s.endswith(t) and s[:-len(t)] in LOOKALIKE_FILLER):
+                return "name_plus_filler"
+    return None
+
+
 @dataclass
 class Context:
     user_email: str = ""
@@ -237,11 +365,60 @@ class Context:
     # registrable domain -> ids of mailbox messages from it that look legitimate
     # (subscribed list mail or a correspondent, no injection, no look-alike signal)
     legit_domains: Dict[str, set] = field(default_factory=dict)
+    # registrable domains whose name a look-alike would borrow: the user's own,
+    # correspondents', legit_domains, and orgs whose people write personal mail
+    anchor_domains: set = field(default_factory=set)
 
     @property
     def user_domain(self) -> str:
         d = _domain(self.user_email)
         return "" if d in FREE_MAIL else d
+
+
+def risk_topic(m: dict) -> bool:
+    text = ((m.get("subject") or "") + "\n" + (m.get("body") or "")).replace("_", " ")
+    return bool(RISK_TOPIC_RE.search(text))
+
+
+def lookalike_guard(m: dict, ctx: Context, g: Optional[Dict[str, bool]] = None) -> Optional[str]:
+    """The L0 look-alike verdict for ``m`` (a reason string) or None. Fires when the
+    sender's registrable domain (a) borrows the name of a known-legit mailbox
+    domain without being it, or (b) is the display name's organisation plus filler
+    words, AND the message is about money / signing / credentials. Never fires on
+    the user's own domain, a correspondent, a subdomain of a known domain, or a
+    domain the user corresponds with (list mail does not vouch: its headers are
+    free to fake)."""
+    g = g if g is not None else guards(m, ctx)
+    if g.get("protected"):
+        return None
+    dom = _domain(_addr(m))
+    reg = registrable_domain(dom)
+    if not reg or reg in FREE_MAIL:
+        return None
+    # only correspondence vouches for a borrowed-name domain; list headers are
+    # free for a phisher to add, so subscribed-list mail does not exempt it
+    strict = {registrable_domain(_domain(a)) for a in ctx.correspondents}
+    if ctx.user_domain:
+        strict.add(registrable_domain(ctx.user_domain))
+    if reg in strict:
+        return None
+    if not risk_topic(m):
+        return None
+    label = _site_part(reg)
+    for anchor in sorted(ctx.anchor_domains):
+        if anchor == reg or anchor in FREE_MAIL:
+            continue
+        how = _extends(label, _brand(anchor))
+        if how:
+            return f"lookalike_of:{anchor}:{how}"
+    how = _name_brand_domain(m.get("from_name") or "", label)
+    if how:
+        return f"display_name_brand:{how}"
+    return None
+
+
+LOOKALIKE_PRED = {"importance": 0, "category": "spam_phishing", "needs_reply": False,
+                  "suspicious": True}
 
 
 def _rule_domains(rule: dict) -> List[str]:
@@ -327,9 +504,20 @@ def build_context(profile: dict, prefs: dict, messages: List[dict],
                 or lookalike_signals(m) or not (is_list_mail(m) or a in corr)):
             continue
         legit.setdefault(reg, set()).add(str(m.get("id")))
+    anchors = set(legit) | {registrable_domain(_domain(a)) for a in corr}
+    if user_email and _domain(user_email) not in FREE_MAIL:
+        anchors.add(registrable_domain(_domain(user_email)))
+    for m in messages:  # orgs whose people write personal (non-list, non-role) mail
+        a = _addr(m)
+        local = a.split("@", 1)[0]
+        if (not a or a == user_email or is_list_mail(m) or ROLE_LOCAL_RE.match(local)
+                or ZERO_AUTOMATED_EMAIL_RE.search(a) or looks_injected(m) or lookalike_signals(m)):
+            continue
+        anchors.add(registrable_domain(_domain(a)))
+    anchors = {d for d in anchors if d and d not in FREE_MAIL}
     return Context(user_email=user_email, people_domains=people - FREE_MAIL,
                    correspondents=corr, important_roots=roots, notes_text=notes.lower(),
-                   legit_domains=legit)
+                   legit_domains=legit, anchor_domains=anchors)
 
 
 def guards(m: dict, ctx: Context) -> Dict[str, bool]:
@@ -722,6 +910,8 @@ def phish_downgrade(p: dict, m: dict, g: Dict[str, bool], ctx: Context) -> Optio
         return None
     if g.get("injection") or g.get("list"):
         return None
+    if lookalike_guard(m, ctx, g):
+        return None  # the rescue never undoes a look-alike verdict
     text = (m.get("subject") or "") + "\n" + (m.get("body") or "")
     if ASSISTANT_WORDS_RE.search(text) or lookalike_signals(m):
         return None
@@ -737,6 +927,87 @@ def phish_downgrade(p: dict, m: dict, g: Dict[str, bool], ctx: Context) -> Optio
         imp = 1
     p["importance"] = max(imp, 2 if prefs_store.is_protected(m) else 1)
     return "known_sender_domain"
+
+
+# ── urgency cap for automated senders (after the model, before rules) ─────────
+# A local model over-escalates machine mail ("scheduled retirement" weeks away,
+# a dependency advisory, "payout on the way") to 3. Automated senders keep 3 only
+# when the text shows a near-term deadline, a failure, or a security incident on
+# the user's own account; otherwise 3 -> 2. Rules are applied afterwards, so a
+# user or learned rule can still raise the message back to 3.
+
+AUTOMATED_LOCAL_RE = re.compile(
+    r"^(no-?reply|do-?not-?reply|donotreply|notifications?|notify|notifier|alerts?|updates?|"
+    r"mailer|automated|auto|bounces?|digest|[\w.-]*-notifications?)([._+-].*)?$")
+FAILURE_RE = re.compile(
+    r"\b(failed|failure|failing|declined|rejected|bounced|past due|overdue|unpaid|suspended|"
+    r"suspension|locked|disabled|will stop|stopped working|outage|is down|went down|"
+    r"could not (?:charge|renew|process|deliver)|unable to (?:charge|renew|process))\b", re.I)
+INCIDENT_RE = re.compile(
+    r"(\bpassword (?:was|has been) (?:changed|reset)\b|\bnew (?:ssh|gpg|api) key\b|"
+    r"\bkey was added\b|\badded to your account\b|\bsecret\b[^.\n]{0,60}\b(?:detected|exposed|leaked)\b|"
+    r"\b(?:leaked|exposed|compromised|unauthori[sz]ed)\b|"
+    r"\bif (?:this|it) was(?:n't| not) you\b|\bif you did(?:n't| not) (?:add|make|do|request)\b)", re.I)
+DEADLINE_RE = re.compile(
+    r"(\b(?:today|tonight|tomorrow|end of (?:the )?day|eod|asap|immediately|right away)\b|"
+    r"\bwithin (?:the next )?(?:\d{1,2}|twenty-four|forty-eight) hours?\b|"
+    r"\bin (?:\d{1,2}) hours?\b|\b(?:in|within) (?:1|one|2|two) (?:business )?days?\b)", re.I)
+ISO_DATE_RE = re.compile(r"\b(20\d\d)-(\d\d)-(\d\d)\b")
+
+
+def is_automated_sender(m: dict, g: Optional[Dict[str, bool]] = None) -> bool:
+    local = _addr(m).split("@", 1)[0]
+    return bool((g or {}).get("no_reply")) or bool(AUTOMATED_LOCAL_RE.match(local))
+
+
+def _near_date(m: dict, text: str, days: int = 2) -> bool:
+    """An ISO date in the text within ``days`` of the message's own date."""
+    from datetime import date  # noqa: PLC0415
+    ms = ISO_DATE_RE.match((m.get("date") or "")[:10])
+    if not ms:
+        return False
+    try:
+        d0 = date(*map(int, ms.groups()))
+    except ValueError:
+        return False
+    for y, mo, d in ISO_DATE_RE.findall(text):
+        try:
+            delta = (date(int(y), int(mo), int(d)) - d0).days
+        except ValueError:
+            continue
+        if 0 <= delta <= days:
+            return True
+    return False
+
+
+def near_term_signal(m: dict) -> Optional[str]:
+    """Why an automated message may be urgent: failure / account incident /
+    near-term deadline; None if the text shows none."""
+    text = (m.get("subject") or "") + "\n" + (m.get("body") or "")
+    if FAILURE_RE.search(text):
+        return "failure"
+    if INCIDENT_RE.search(text):
+        return "account_incident"
+    if DEADLINE_RE.search(text) or _near_date(m, text):
+        return "deadline"
+    return None
+
+
+def urgency_cap(p: dict, m: dict, g: Dict[str, bool]) -> Optional[str]:
+    """3 -> 2 (urgent_action -> important_read) on a model label for an automated
+    sender with no near-term signal. Returns the reason, or None (unchanged)."""
+    try:
+        imp = int(p.get("importance", 1))
+    except (TypeError, ValueError):
+        return None
+    if imp < 3 or g.get("correspondent") or not is_automated_sender(m, g):
+        return None
+    if near_term_signal(m):
+        return None
+    p["importance"] = 2
+    if p.get("category") == "urgent_action":
+        p["category"] = "important_read"
+    return "automated_no_near_term_signal"
 
 
 # ── final guard + driver ──────────────────────────────────────────────────────
@@ -757,6 +1028,13 @@ def finalize(p: dict, g: Dict[str, bool]) -> dict:
     if g.get("protected") and p["importance"] < 1:
         p["importance"] = 1  # never auto-archive correspondents / own domain / family
     return p
+
+
+def user_rules_doc(prefs: PrefsLike) -> dict:
+    """The prefs document with only the user-written rules (they outrank L0)."""
+    doc = as_doc(prefs)
+    return {**doc, "rules": [r for r in (doc.get("rules") or [])
+                             if prefs_store.rule_source(r) == "user"]}
 
 
 ModelBatch = Callable[[List[dict]], Tuple[Dict[str, dict], Dict[str, Optional[Dict[str, float]]]]]
@@ -781,6 +1059,15 @@ def run_cascade(messages: List[dict], prefs: dict, ctx: Context, model_batch: Mo
         g = guards(m, ctx)
         gmap[m["id"]] = g
         tr = {"guards": sorted(k for k, v in g.items() if v)}
+        lk = lookalike_guard(m, ctx, g)
+        if lk:
+            # overrides the model and every learned rule; user-written rules still win
+            p, ptrace = prefs_store.resolve(dict(LOOKALIKE_PRED), m, user_rules_doc(rules),
+                                            record_hits=record_hits)
+            decided[m["id"]] = finalize(p, g)
+            trace_items[m["id"]] = {**tr, "layer": "L0", "lookalike": lk,
+                                    "rules": _trace_fixed(ptrace)[1], "prefs_trace": ptrace}
+            continue
         p, hit, ptrace = (None, [], [])
         if not g["injection"]:
             p, hit, ptrace = l1_resolve(m, rules)
@@ -819,6 +1106,9 @@ def run_cascade(messages: List[dict], prefs: dict, ctx: Context, model_batch: Mo
             phish = phish_downgrade(p, m, g, ctx) if raw is not None else None
             if phish:
                 trace_items[m["id"]]["phish_guard"] = phish
+            cap = urgency_cap(p, m, g) if raw is not None else None
+            if cap:
+                trace_items[m["id"]]["urgency_cap"] = cap
             p, ptrace = resolve_rules(p, m, rules, record_hits=record_hits)
             _, hit = _trace_fixed(ptrace)
             applied = {str(t["rule"]) for t in ptrace if t["action"] == "applied"}
@@ -837,7 +1127,7 @@ def run_cascade(messages: List[dict], prefs: dict, ctx: Context, model_batch: Mo
             log(f"[cascade] model batch {i // batch_size + 1}: {len(batch)} item(s)")
 
     items = [{"id": m["id"], **decided[m["id"]]} for m in messages]
-    layers = {"L1": 0, "L2": 0, "L3": 0}
+    layers = {"L0": 0, "L1": 0, "L2": 0, "L3": 0}
     for t in trace_items.values():
         layers[t["layer"]] += 1
     queue = [mid for mid, t in trace_items.items() if t.get("abstain")]
