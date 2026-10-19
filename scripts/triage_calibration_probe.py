@@ -25,6 +25,22 @@ probabilities after the grammar and the sampler chain (temperature sharpens
 them); --probs raw sends the model's softmax before sampling, renormalised over
 the label tokens. Run both if unsure; thresholds only need to be monotone.
 
+Uncertainty mode (--uncertainty raw|consistency|second_opinion; overrides --mode):
+measures, per signal from scaffold/agent/desktop/triage_uncertainty.py, the AUROC
+for "label wrong" (category != truth; also review bucket wrong) and a
+coverage / accuracy table over thresholds. Every run also scores the free
+deterministic-disagreement signal (d) on the same labels.
+  raw             the L3 batch call with post_sampling_probs=false; temperature
+                  fitted by NLL; score = normalised entropy (also 1 - max p)
+  consistency     + (k-1) resamples per batch at --sample-temperature, each in
+                  a different message order; score = share of samples whose
+                  review bucket / category differs from the first label
+  second_opinion  + one batched yes/no "must act within 48h?" call per batch;
+                  score = p(contradicting the first label on urgency)
+
+    python scripts/triage_calibration_probe.py --seeds 7,8,9,10,11 --split calibration \
+        --uncertainty consistency --k 3 --out /tmp/unc_consistency.json
+
 The probe reads the testbed's ground truth (it is a measurement tool, not an
 agent arm). It talks only to --base-url, which must be loopback unless
 --allow-remote. It never prints keys. No files are written except --out.
@@ -45,6 +61,7 @@ if str(REPO) not in sys.path:
 
 from scaffold.agent.desktop import email_triage_agent as eta
 from scaffold.agent.desktop import triage_cascade as tc
+from scaffold.agent.desktop import triage_uncertainty as tu
 from testbeds.email_triage import seed as seed_mod
 
 LETTERS = "ABCDEFGH"
@@ -240,6 +257,117 @@ def report(recs: list[dict], target: float, emit=print) -> dict:
     return res
 
 
+# ── uncertainty signals (triage_uncertainty.py) ───────────────────────────────
+
+def run_uncertainty(items: list[dict], prefs: dict, kind: str, k: int = 3,
+                    sample_temperature: float = 0.7,
+                    post: Callable | None = None) -> tuple[list[dict], dict]:
+    """First-pass L3 labels exactly as the cascade would get them (model_view'd,
+    batched, same context), plus the extra calls ``kind`` needs. Returns
+    (records, call counts)."""
+    xml = eta.use_adapter()
+    recs, calls = [], {"base": 0, "extra": 0}
+    for i in range(0, len(items), eta.BATCH):
+        chunk = items[i:i + eta.BATCH]
+        profile = chunk[0]["profile"]
+        context = eta._triage_context_xml(profile, prefs) if xml else eta._triage_context(profile, prefs)
+        view = [tc.model_view(r["msg"]) for r in chunk]
+        preds, dists = eta.model_batch(view, context, False, prefs=prefs, xml=xml)
+        calls["base"] += 1
+        samples: dict[str, list] = {r["msg"]["id"]: [] for r in chunk}
+        p_yes: dict = {}
+        if kind == "consistency":
+            rs = tu.make_resampler(context, prefs=prefs, xml=xml, temperature=sample_temperature, post=post)
+            for j in range(1, k):
+                got = rs(tu.permuted(view, j), j)
+                calls["extra"] += 1
+                for mid, got_list in samples.items():
+                    if got.get(mid):
+                        got_list.append(got[mid])
+        elif kind == "second_opinion":
+            p_yes = tu.make_second_opinion(context, prefs=prefs, xml=xml, post=post)(view)
+            calls["extra"] += 1
+        ctx = tc.build_context(profile, prefs, chunk[0]["all_messages"])
+        for r in chunk:
+            mid, t = r["msg"]["id"], r["truth"]
+            pred = preds.get(mid)
+            tb = tu.truth_bucket(t["category"], int(t["importance"]))
+            det = tu.deterministic_conflicts(r["msg"], pred, tc.guards(r["msg"], ctx), prefs)
+            sev = max([tu.REASONS[x][1] for x in det if tu.REASONS[x][0] != "keep"] or [0])
+            rec = {"seed": r["seed"], "id": mid, "truth": t["category"],
+                   "truth_importance": t["importance"], "truth_bucket": tb,
+                   "label": (pred or {}).get("category"), "importance": (pred or {}).get("importance"),
+                   "bucket": tu.review_bucket(pred), "wrong": (pred or {}).get("category") != t["category"],
+                   "wrong_bucket": tu.review_bucket(pred) != tb, "dist": dists.get(mid),
+                   "deterministic": det, "score_deterministic": sev / 3}
+            if kind == "consistency":
+                c = tu.consistency_score(pred, samples[mid])
+                c2 = tu.consistency_score(pred, samples[mid][:1])  # what k=2 would have seen
+                rec.update({"samples": samples[mid], "score_bucket_disagree": c["bucket_disagree"],
+                            "score_category_disagree": c["category_disagree"],
+                            "score_bucket_disagree_k2": c2["bucket_disagree"]})
+            elif kind == "second_opinion":
+                rec.update({"p_yes": p_yes.get(mid),
+                            "score_second_opinion": tu.second_opinion_score(pred, p_yes.get(mid))})
+            recs.append(rec)
+        print(f"[probe] uncertainty/{kind} {min(i + eta.BATCH, len(items))}/{len(items)}",
+              file=sys.stderr, flush=True)
+    if kind == "raw":
+        with_d = [r for r in recs if r["dist"]]
+        T = tu.fit_temperature([r["dist"] for r in with_d], [r["truth"] for r in with_d])
+        calls["temperature"] = T
+        for r in recs:
+            r["score_entropy_T1"] = tu.entropy_score(r["dist"], 1.0)
+            r["score_entropy"] = tu.entropy_score(r["dist"], T)
+            r["score_one_minus_max"] = (1 - max(r["dist"].values())) if r["dist"] else None
+    return recs, calls
+
+
+UNC_KEYS = {"raw": ["score_entropy", "score_entropy_T1", "score_one_minus_max"],
+            "consistency": ["score_bucket_disagree", "score_category_disagree",
+                            "score_bucket_disagree_k2"],
+            "second_opinion": ["score_second_opinion"]}
+
+
+def uncertainty_report(recs: list[dict], kind: str, calls: dict, target: float, emit=print) -> dict:
+    keys = UNC_KEYS[kind] + ["score_deterministic"]
+    wrong = [r["wrong"] for r in recs]
+    wrong_b = [r["wrong_bucket"] for r in recs]
+    n = len(recs)
+    base, extra = max(calls.get("base", 0), 1), calls.get("extra", 0)
+    emit(f"\n=== uncertainty: {kind}  ({n} items, label accuracy {round(1 - sum(wrong) / max(n, 1), 3)}, "
+         f"bucket accuracy {round(1 - sum(wrong_b) / max(n, 1), 3)})")
+    share = round(min(1.0, 0.3 * base / extra), 2) if extra else 1.0
+    emit(f"  model calls: base {calls.get('base', 0)}, extra {extra} (+{round(100 * extra / base)}% if "
+         f"every item is checked; at the cascade's +30% budget the paid check covers ~{share} of L3 items)")
+    if "temperature" in calls:
+        emit(f"  fitted temperature (NLL, in-sample): {calls['temperature']}")
+    res = {"kind": kind, "n": n, "calls": calls, "signals": {}}
+    for key in keys:
+        sc = [r.get(key) for r in recs]
+        have = sum(s is not None for s in sc)
+        a_lab, a_bkt = tu.auroc(sc, wrong), tu.auroc(sc, wrong_b)
+        table = tu.coverage_table(sc, wrong)
+        ok = [row for row in table if row["accuracy_kept"] is not None and row["accuracy_kept"] >= target]
+        sug = max(ok, key=lambda row: (row["coverage"], -row["threshold"])) if ok else None
+        fmt = (lambda v: None if v is None else round(v, 3))
+        emit(f"  {key}: scored {have}/{n}, AUROC label-wrong {fmt(a_lab)}, bucket-wrong {fmt(a_bkt)}")
+        emit(f"    {'thresh':>7} {'coverage':>9} {'acc_kept':>9} {'review':>7} {'caught':>7} {'recall':>7}")
+        for row in table:
+            emit(f"    {row['threshold']:>7} {row['coverage']:>9} {row['accuracy_kept']!s:>9} "
+                 f"{row['review']:>7} {row['errors_caught']:>7} {row['error_recall']!s:>7}")
+        if sug:
+            emit(f"    -> keep score <= {sug['threshold']}: accuracy {sug['accuracy_kept']} >= {target} "
+                 f"at coverage {sug['coverage']}")
+        res["signals"][key] = {"scored": have, "auroc_label": a_lab, "auroc_bucket": a_bkt,
+                               "table": table, "suggested": sug}
+    ent = res["signals"].get("score_entropy") or {}
+    if kind == "raw" and ent.get("suggested"):
+        emit(f"  env: AWOS_TRIAGE_POST_SAMPLING=0 AWOS_TRIAGE_UNC_T={calls['temperature']} "
+             f"AWOS_TRIAGE_UNC_ENTROPY={ent['suggested']['threshold']}")
+    return res
+
+
 def _check_url(url: str, allow_remote: bool) -> None:
     host = (urlparse(url).hostname or "").lower()
     if not allow_remote and host not in ("127.0.0.1", "localhost", "::1"):
@@ -261,16 +389,37 @@ def main(argv=None, post: Callable[[str, dict], dict] | None = None) -> int:
     ap.add_argument("--target", type=float, default=0.9, help="bucket accuracy the thresholds must reach")
     ap.add_argument("--out", default="", help="write records + report JSON here")
     ap.add_argument("--allow-remote", action="store_true")
+    ap.add_argument("--uncertainty", choices=["raw", "consistency", "second_opinion"], default=None,
+                    help="measure an uncertainty signal instead of --mode (see the docstring)")
+    ap.add_argument("--k", type=int, default=3, help="consistency: samples incl. the first label")
+    ap.add_argument("--sample-temperature", type=float, default=0.7,
+                    help="consistency: resample temperature")
     a = ap.parse_args(argv)
     _check_url(a.base_url, a.allow_remote)
     os.environ["AWOS_PROVIDER"] = "local"
     os.environ["AWOS_LOCAL_BASE_URL"] = a.base_url
     os.environ["AWOS_TRIAGE_LOGPROBS"] = "1"
-    os.environ["AWOS_TRIAGE_POST_SAMPLING"] = "1" if a.probs == "post" else "0"
+    raw = a.uncertainty == "raw" or a.probs == "raw"
+    os.environ["AWOS_TRIAGE_POST_SAMPLING"] = "0" if raw else "1"
     os.environ["AWOS_TRIAGE_NPROBS"] = str(a.n_probs)
     os.environ.setdefault("NO_PROXY", "127.0.0.1,localhost")
     prefs = json.loads(Path(a.prefs).read_text()) if a.prefs else {"version": 1, "notes": [], "rules": []}
     items = load_items([int(s) for s in a.seeds.split(",") if s.strip()], a.split, a.limit)
+    if a.uncertainty:
+        saved = eta._http_post
+        if post is not None:
+            eta._http_post = post  # model_batch posts through eta._http_post
+        try:
+            recs, calls = run_uncertainty(items, prefs, a.uncertainty, a.k, a.sample_temperature, post)
+        finally:
+            eta._http_post = saved
+        print(f"[probe] {len(items)} item(s), seeds {a.seeds}, split {a.split}, uncertainty "
+              f"{a.uncertainty}; model calls {eta.USAGE['calls']}, parse failures {eta.USAGE['parse_failures']}")
+        res = uncertainty_report(recs, a.uncertainty, calls, a.target)
+        if a.out:
+            Path(a.out).write_text(json.dumps({"args": vars(a), "report": res, "records": recs}, indent=1))
+            print(f"[probe] wrote {a.out}")
+        return 0
     post = post or eta._http_post
     recs: list[dict] = []
     if a.mode in ("batch", "both"):
