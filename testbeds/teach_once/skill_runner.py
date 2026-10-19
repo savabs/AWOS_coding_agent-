@@ -12,8 +12,9 @@ Healthy runs make ZERO model calls. Every step:
     default, ``ground_role_name``, is a role+name ladder over the testbed's
     stdlib accessibility browser: exact name -> taught alias -> normalized name ->
     unique token overlap (never a destructive control, never another step's
-    target). Two equally good candidates = AMBIGUOUS. WP6 replaces this with the
-    AX grounding ladder (same signature).
+    target). Two equally good candidates = AMBIGUOUS. ``wiring.wp6_ground`` puts
+    the WP6 AX grounding ladder (scaffold/agent/desktop/grounding.py) behind the
+    same signature; pick it with ``ground="wp6"`` (or ``--grounder wp6``).
   * checks its postcondition (expected page pattern, no validation alert, the
     file really moved / the rows really appended / the download really arrived).
   * HALTS on an unexpected state — unknown dialog, missing control, ambiguous
@@ -22,6 +23,15 @@ Healthy runs make ZERO model calls. Every step:
     (from halt -> teach) may fire first when their guard matches the screen.
 Effects are idempotent on resume: rows already appended, files already filed and
 reports already written identically are not done twice; conflicts halt.
+
+WP7 wiring: every side effect leaves an EffectVerdict record (``res["effects"]``;
+downloads are checked with ``FileArrival``), and the run reports the closed WP7
+outcome in ``res["outcome"]``: VERIFIED (self-check against the files passed),
+COMPLETED_UNVERIFIED (no check to run), RECONCILIATION_REQUIRED (the self-check
+refuted / could not read the result, or the run halted after it had changed
+something), HALTED_BEFORE_EFFECT (halted before any effect). When the env offers
+``redact_obj`` (wiring.BrokerEnv: secrets via the WP7 SecretBroker) the halt report
+and the step log are redacted before they leave the runner.
 
 The testbed pieces live at the bottom: TestbedEnv (browser + file actor on a
 seeded instance), DialogInjectingEnv (fault injection: an unexpected modal),
@@ -68,6 +78,7 @@ class Grounding:
     element: Optional[dict] = None
     rung: str = ""
     candidates: List[str] = field(default_factory=list)
+    refusal: str = ""                 # the grounder's own refusal reason (WP6: risk_escalation, ...)
 
 
 def ground_role_name(page: Optional[Page], target: dict, *, exclude=(), fuzzy: bool = True) -> Grounding:
@@ -109,8 +120,11 @@ def _page_lines(page: Optional[Page]) -> List[str]:
 class SkillRunner:
     def __init__(self, program: dict, env, *, ground: Callable = ground_role_name,
                  agent: Optional[Callable[[dict], dict]] = None, inputs: Optional[Dict[str, str]] = None,
-                 fuzzy: bool = True, max_handler_firings: int = 3, max_items: int = 500):
-        self.p, self.env, self.ground, self.agent = program, env, ground, agent
+                 fuzzy: bool = True, max_handler_firings: int = 3, max_items: int = 500,
+                 redact: Optional[Callable[[Any], Any]] = None):
+        self.p, self.env, self.ground, self.agent = program, env, resolve_ground(ground), agent
+        self.redact = redact or getattr(env, "redact_obj", None)
+        self.effects: List[dict] = []
         self.inputs = dict(inputs or {})
         self.fuzzy, self.max_fire, self.max_items = fuzzy, max_handler_firings, max_items
         self.params = {p["name"]: p for p in program["params"]}
@@ -152,12 +166,55 @@ class SkillRunner:
             status = "VERIFIED" if check["ok"] else "COMPLETED_UNVERIFIED"
         except Halt as h:
             status, halt = "HALTED", h.report
-        return {"status": status, "halt": halt, "model_calls": self.model_calls,
+        outcome = self._outcome(status, check)
+        log = self.log
+        if halt is not None:
+            halt["outcome"] = outcome
+            halt["effects_done"] = [e for e in self.effects if e["verdict"] == "confirmed"]
+        if self.redact is not None:          # secrets never leave the runner in a report
+            halt = self.redact(halt) if halt is not None else None
+            log = self.redact(log)
+        return {"status": status, "outcome": outcome, "halt": halt, "model_calls": self.model_calls,
                 "skill": {"task": self.p["task"], "version": self.p["version"]},
                 "items": [{k: v for k, v in it.items() if k != "src_sha256"} for it in self.items],
                 "skipped": self.skipped, "healed": self.healed, "handlers_fired": self.fired,
-                "check": check, "notes": self.notes, "steps": self.log, "completed_ops": list(self.completed),
+                "check": check, "effects": list(self.effects), "notes": self.notes, "steps": log,
+                "completed_ops": list(self.completed),
                 "actions": self.env.actions(), "seconds": round(time.monotonic() - t0, 3)}
+
+    # ------------------------------------------------------------ effects --
+    def _effect(self, op: dict, verdict) -> dict:
+        rec = dict(verdict.to_record(), op=op["id"], action=op["action"], item=(self._item or {}).get("ref"))
+        self.effects.append(rec)
+        return rec
+
+    def _confirm(self, op: dict, substrate: str, reason: str, level: str = "SYSTEM_OF_RECORD") -> None:
+        from scaffold.agent.desktop.effects.outcome import CheckLevel, confirmed
+        self._effect(op, confirmed(substrate, reason, CheckLevel[level], observed_count=1, expected_count=1))
+
+    def _refute(self, op: dict, substrate: str, reason: str, level: str = "SYSTEM_OF_RECORD") -> dict:
+        from scaffold.agent.desktop.effects.outcome import CheckLevel, refuted
+        return self._effect(op, refuted(substrate, reason, CheckLevel[level], observed_count=0, expected_count=1))
+
+    def _outcome(self, status: str, check: Optional[dict]) -> str:
+        """The closed WP7 outcome for this run (see the module docstring)."""
+        from scaffold.agent.desktop.effects.outcome import (CheckLevel, Outcome, confirmed, indeterminate,
+                                                            outcome_for, refuted)
+        if status == "HALTED":
+            changed = bool(self.effects)
+            return (Outcome.RECONCILIATION_REQUIRED if changed else Outcome.HALTED_BEFORE_EFFECT).value
+        lvl = CheckLevel.SYSTEM_OF_RECORD
+        if check is None:
+            v = None
+        elif "error" in check:
+            v = indeterminate("self_check", check["error"], lvl)
+        elif not check.get("results"):
+            v = None                          # nothing to check against: never reported as verified
+        elif check["ok"]:
+            v = confirmed("self_check", "every end-state check passed", lvl)
+        else:
+            v = refuted("self_check", "an end-state check failed", lvl)
+        return outcome_for(v, attempted=True, min_level=lvl).value
 
     # ------------------------------------------------------------- values --
     def _bind_globals(self) -> None:
@@ -269,11 +326,14 @@ class SkillRunner:
                 return g.element
             if not self._fire_handlers(app, page):
                 break
-        if op.get("optional"):
-            return None
+        if op.get("optional") and g.status == "missing":
+            return None                   # an optional step may be absent; an ambiguous / risky match still halts
         new = self._new_text(app, page)
         heads = [h for h in (page.headings if page else []) if h in new]
-        reason = "ambiguous_match" if g.status == "ambiguous" else ("unknown_dialog" if heads else "missing_control")
+        if g.refusal == "risk_escalation":
+            reason = "risk_escalation"
+        else:
+            reason = "ambiguous_match" if g.status == "ambiguous" else ("unknown_dialog" if heads else "missing_control")
         intended = None
         if op["action"] == "type" and not isinstance(op.get("value"), dict):
             try:
@@ -281,10 +341,11 @@ class SkillRunner:
             except KeyError:
                 intended = None
         self._halt(reason, op, page=page, candidates=g.candidates, intended_value=intended,
-                   expected={"target": op["target"]},
+                   expected={"target": op["target"]}, grounding={"rung": g.rung, "refusal": g.refusal},
                    message=(f"{op['action']} {op['target'].get('name')!r}: " +
                             {"ambiguous_match": f"{len(g.candidates)} equally good matches {g.candidates}",
                              "unknown_dialog": f"an unexpected screen is showing ({heads[0] if heads else ''})",
+                             "risk_escalation": f"the only match {g.candidates} is a destructive control",
                              "missing_control": "control not found on the screen"}[reason]))
 
     def _post_ok(self, post: dict, page: Optional[Page]):
@@ -370,16 +431,31 @@ class SkillRunner:
         if el is None:
             entry["skipped"] = "optional"
             return
+        download = (op.get("post") or {}).get("download")
+        arrival = before = None
+        if download:
+            from scaffold.agent.desktop.effects.file_arrival import ArrivalState, FileArrival
+            arrival = FileArrival(Path(self.env.home) / "Downloads", pattern="*", expected_count=1)
+            before = arrival.capture()
+            if not before.reachable and not (Path(self.env.home) / "Downloads").exists():
+                before = ArrivalState(True, frozenset())       # no folder yet = no files yet
         out = self.env.click(op["app"], el)
-        if (op.get("post") or {}).get("download"):
-            if not isinstance(out, Path):
-                self._halt("postcondition_failed", op, page=self.env.page(op["app"]),
-                           message=f"clicking {el.get('name')!r} did not download a file")
+        if download:
+            v = arrival.verify(before)
+            rec = self._effect(op, v)
+            if not v.confirmed or not isinstance(out, Path):
+                self._halt("postcondition_failed", op, page=self.env.page(op["app"]), effect=rec,
+                           message=f"clicking {el.get('name')!r} did not download exactly one file ({v.reason})")
             self.last_download = Path(out).relative_to(self.env.home).as_posix()
             entry["downloaded"] = self.last_download
             return
         self._observe(op["app"])
         self._check_post(op)
+        post = op.get("post") or {}
+        if el.get("role") == "button" and (post.get("url") or post.get("no_alerts")):
+            # a form submit: the app's own answer (the expected page, no validation alert) is the read-back
+            self._confirm(op, "ui_postcondition", "the app answered the submit as in the demonstration",
+                          "SAME_SCREEN")
 
     _op_download = _op_click
 
@@ -406,7 +482,11 @@ class SkillRunner:
         entry["path"] = rel
 
     def _op_mkdir(self, op, vals, entry):
-        self.env.mkdir(render(op["target"]["path"], vals))
+        rel = render(op["target"]["path"], vals)
+        existed = self.env.exists(rel)
+        self.env.mkdir(rel)
+        if not existed:
+            self._confirm(op, "folder", "folder created")
 
     def _op_move(self, op, vals, entry):
         src = render(op.get("from") or "{src_path}", vals)
@@ -422,7 +502,9 @@ class SkillRunner:
             self._halt("file_conflict", op, message=f"{dst} already exists; I never overwrite files")
         self.env.move(src, dst)
         if not self.env.exists(dst) or self.env.sha(dst) != sha or self.env.exists(src):
-            self._halt("postcondition_failed", op, message=f"move {src} -> {dst} did not take effect")
+            rec = self._refute(op, "file_move", "the moved file is not where it should be")
+            self._halt("postcondition_failed", op, effect=rec, message=f"move {src} -> {dst} did not take effect")
+        self._confirm(op, "file_move", "file present at the destination with the same sha256, source gone")
         entry.update({"from": src, "to": dst})
 
     def _op_append_rows(self, op, vals, entry):
@@ -444,7 +526,9 @@ class SkillRunner:
         self.env.append_rows(path, rows)
         after = csv_rows(self.env.read_text(path))
         if after != before + rows:
-            self._halt("postcondition_failed", op, message=f"{path}: rows not appended as expected")
+            rec = self._refute(op, "csv_append", "the sheet does not end with exactly the new rows")
+            self._halt("postcondition_failed", op, effect=rec, message=f"{path}: rows not appended as expected")
+        self._confirm(op, "csv_append", f"{len(rows)} row(s) appended exactly once, earlier rows unchanged")
         entry["rows"] = len(rows)
 
     def _op_write_file(self, op, vals, entry):
@@ -458,7 +542,9 @@ class SkillRunner:
             self._halt("file_conflict", op, message=f"{path} exists with other content; I never overwrite files")
         self.env.write(path, text)
         if self.env.read_text(path) != text:
-            self._halt("postcondition_failed", op, message=f"{path} not written")
+            rec = self._refute(op, "file_write", "the file does not hold the rendered text")
+            self._halt("postcondition_failed", op, effect=rec, message=f"{path} not written")
+        self._confirm(op, "file_write", "file holds exactly the rendered text")
         entry["path"] = path
 
     # --------------------------------------------------------------- loop --
@@ -613,7 +699,19 @@ ASK = {
     "unmatched_item": "This item doesn't look like any example. Show me how to handle it (or that it should be "
                       "left alone), or record another example.",
     "ambiguous_value": "A value on this item can be read more than one way. Record another example.",
+    "risk_escalation": "The only control that matches this step would delete or send something. Show me which "
+                       "control to use (I never pick a destructive control for a normal step).",
 }
+
+
+def resolve_ground(ground) -> Callable:
+    """A grounding function, or its name in wiring.GROUNDERS (heuristic | wp6 | wp6_strict)."""
+    if ground is None:
+        return ground_role_name
+    if isinstance(ground, str):
+        from .wiring import GROUNDERS
+        return GROUNDERS[ground]
+    return ground
 
 
 # ================================================================ testbed ==
@@ -812,13 +910,19 @@ def _verifier():
 
 
 def run_program_on(program: dict, I, urls: Dict[str, str], *, agent=None, env_wrap=None, fuzzy: bool = True,
-                   env: Any = None):
+                   env: Any = None, ground=None, broker: bool = False):
+    """``ground``: a grounding function or its name (heuristic | wp6 | wp6_strict).
+    ``broker``: resolve secrets through the WP7 SecretBroker (wiring.BrokerEnv): the runner only
+    holds ``{{secret:name}}`` handles, the value is substituted when typed, reports are redacted."""
     ctx = read_json(I.truth_path)["context"]         # 'today' only (what run.write_brief also hands an agent)
     if env is None:
         env = TestbedEnv(I.home, {a: urls[a] for a in program["web_apps"] if a in urls}, ctx)
+        if broker:
+            from .wiring import BrokerEnv
+            env = BrokerEnv(env)
         if env_wrap:
             env = env_wrap(env)
-    res = SkillRunner(program, env, agent=agent, fuzzy=fuzzy).run()
+    res = SkillRunner(program, env, agent=agent, fuzzy=fuzzy, ground=ground).run()
     if res.get("halt"):
         res["halt"]["instance"] = I.inst
     return res, env
@@ -841,13 +945,15 @@ def _brief(r: dict) -> dict:
 
 
 def testbed_gate(task: str, canary_inst: str, work_dir: Path, *, canary_wrap=None, demo_inst: str = DEMO_INSTANCE,
-                 require_canary_success: bool = False, fuzzy: bool = True) -> Callable[[dict, dict], dict]:
+                 require_canary_success: bool = False, fuzzy: bool = True, ground=None,
+                 broker: bool = False) -> Callable[[dict, dict], dict]:
     """Re-gate a taught candidate: the demo instance must still pass with 0 model calls, and the
     canary (a fresh copy of the instance that halted) must not halt at the taught point again."""
     def gate(candidate: dict, halt: dict) -> dict:
         d = Path(work_dir) / f"gate_{task}_v{candidate['version']}_{canary_inst}"
-        demo = run_instance(candidate, d, task, demo_inst, fuzzy=fuzzy)
-        can = run_instance(candidate, d, task, canary_inst, env_wrap=canary_wrap, fuzzy=fuzzy)
+        demo = run_instance(candidate, d, task, demo_inst, fuzzy=fuzzy, ground=ground, broker=broker)
+        can = run_instance(candidate, d, task, canary_inst, env_wrap=canary_wrap, fuzzy=fuzzy, ground=ground,
+                           broker=broker)
         h = can["run"].get("halt") or {}
         repeats = (can["run"]["status"] == "HALTED" and h.get("reason") == halt.get("reason")
                    and h.get("op_id") == halt.get("op_id")
@@ -923,14 +1029,15 @@ def record_fix(env, I, halt: dict) -> Trace:
 
 
 def halt_teach_live(program: dict, run_dir: Path, task: str, inst: str, *, env_wrap=None, gate_dir: Path,
-                    require_canary_success: bool = False, fuzzy: bool = True) -> dict:
+                    require_canary_success: bool = False, fuzzy: bool = True, ground=None,
+                    broker: bool = False) -> dict:
     """Run -> HALTED -> scripted fix demo (on the live halted screen) -> teach + gate -> resume live."""
     from .seed import seed_instance
     from .webapps import Servers
     I = seed_instance(Path(run_dir), task, inst)
     out: Dict[str, Any] = {"task": task, "instance": inst, "from_version": program["version"]}
     with Servers(I) as urls:
-        res, env = run_program_on(program, I, urls, env_wrap=env_wrap, fuzzy=fuzzy)
+        res, env = run_program_on(program, I, urls, env_wrap=env_wrap, fuzzy=fuzzy, ground=ground, broker=broker)
         out["first"] = {"status": res["status"], "model_calls": res["model_calls"]}
         if res["status"] != "HALTED":
             out["result"] = "no halt"
@@ -941,7 +1048,7 @@ def halt_teach_live(program: dict, run_dir: Path, task: str, inst: str, *, env_w
         fix = record_fix(env, I, halt)
         out["fix_steps"] = [f"{s.action} {s.target.get('name') or s.target.get('path') or ''}".strip() for s in fix.steps]
         gate = testbed_gate(task, inst, gate_dir, canary_wrap=env_wrap, require_canary_success=require_canary_success,
-                            fuzzy=fuzzy)
+                            fuzzy=fuzzy, ground=ground, broker=broker)
         t = teach(program, halt, fix, gate=gate)
         out["teach"] = {"status": t["status"], "reason": t.get("reason"), "change": t.get("change"),
                         "gate": t.get("gate")}
@@ -949,8 +1056,8 @@ def halt_teach_live(program: dict, run_dir: Path, task: str, inst: str, *, env_w
             out["result"] = "refused"
             return out
         new = t["program"]
-        res2, _ = run_program_on(new, I, urls, env=env, fuzzy=fuzzy)   # live resume on the same, halted instance
-        out["resume"] = {"status": res2["status"], "model_calls": res2["model_calls"],
+        res2, _ = run_program_on(new, I, urls, env=env, fuzzy=fuzzy, ground=ground)   # live resume, same instance
+        out["resume"] = {"status": res2["status"], "outcome": res2["outcome"], "model_calls": res2["model_calls"],
                          "halt": (res2.get("halt") or {}).get("reason")}
     v = _verifier().verify_instance(I.hidden, I.home)
     out["resume"]["success"] = bool(v["success"])
@@ -961,10 +1068,11 @@ def halt_teach_live(program: dict, run_dir: Path, task: str, inst: str, *, env_w
 
 # ================================================================== CLI ==
 
-def make_skill_arm(programs: Dict[str, dict], *, agent=None, fuzzy: bool = True, sink: Optional[dict] = None):
+def make_skill_arm(programs: Dict[str, dict], *, agent=None, fuzzy: bool = True, sink: Optional[dict] = None,
+                   ground=None, broker: bool = False):
     """An arm for run.run_arm: run the induced skill program of the instance's task."""
     def arm(I, urls, brief) -> dict:
-        res, _ = run_program_on(programs[I.task], I, urls, agent=agent, fuzzy=fuzzy)
+        res, _ = run_program_on(programs[I.task], I, urls, agent=agent, fuzzy=fuzzy, ground=ground, broker=broker)
         if sink is not None:
             sink[(I.task, I.inst)] = res
         return {"ok": res["status"] != "HALTED", "actions": res["actions"],
@@ -976,39 +1084,64 @@ def held_out_rates(report: dict) -> Dict[str, str]:
     return {t: f"{s['held_out_success']}/{s['held_out_n']}" for t, s in report["summary"].items() if t != "_all"}
 
 
-def evaluate(run_dir: Path, tasks=TASKS, *, fuzzy: bool = True, quiet: bool = False) -> dict:
+def arm_summary(report: dict, runs: Dict[tuple, dict]) -> dict:
+    """Held-out rates + the safety counters: model calls, wrong effects (a failed run that did not
+    HALT, or any verifier violation), and the WP7 outcome of every run."""
+    wrong, outcomes = [], {}
+    for v in report["results"]:
+        res = runs.get((v["task"], v["instance"])) or {}
+        if v["violations"] or (not v["success"] and res.get("status") != "HALTED"):
+            wrong.append(f"{v['task']}/{v['instance']}")
+        o = res.get("outcome", "crashed")
+        outcomes[o] = outcomes.get(o, 0) + 1
+    per = {t: s for t, s in report["summary"].items() if t != "_all"}
+    return {"held_out": held_out_rates(report),
+            "held_out_total": f"{sum(s['held_out_success'] for s in per.values())}/"
+                              f"{sum(s['held_out_n'] for s in per.values())}",
+            "model_calls": sum(r["model_calls"] for r in runs.values()),
+            "wrong_effects": wrong, "outcomes": outcomes,
+            "halted": {f"{k[0]}/{k[1]}": r["halt"]["reason"] for k, r in runs.items() if r["status"] == "HALTED"}}
+
+
+def evaluate(run_dir: Path, tasks=TASKS, *, fuzzy: bool = True, quiet: bool = False, ground=None,
+             broker: bool = False, traces: Optional[Dict[str, Trace]] = None, inject: bool = True) -> dict:
     """WP5 evaluation with ZERO model calls: induce v1 from the single demo, run held-out, then
-    halt -> scripted fix -> teach rounds, re-run held-out, and the injected-dialog experiment."""
+    halt -> scripted fix -> teach rounds, re-run held-out, and the injected-dialog experiment.
+
+    ``ground``: heuristic (default) | wp6 | wp6_strict | a function. ``broker``: secrets via the
+    WP7 SecretBroker. ``traces``: induce from these demo traces instead (e.g. a native-recorder
+    trace); held-out instances, briefs and the verifier stay the same."""
     from .run import prepare_demos, run_arm
     run_dir = Path(run_dir)
     demos = prepare_demos(run_dir, tasks)
     lib = SkillLibrary(run_dir / "skills")
+    kw = {"fuzzy": fuzzy, "ground": ground, "broker": broker}
     v1 = {}
     for t in tasks:
-        r = induce([Trace.load(demos[t] / "trace.json")])
+        tr = (traces or {}).get(t) or Trace.load(demos[t] / "trace.json")
+        r = induce([tr])
         if r.refused:
             raise SystemExit(f"{t}: induction refused: {r.record_next}")
         v1[t] = r.program
         lib.save(r.program)
         (demos[t] / "program.txt").write_text(render_program(r.program) + "\n", encoding="utf-8")
-    out: Dict[str, Any] = {"fuzzy": fuzzy}
+    gname = ground if isinstance(ground, str) else (getattr(ground, "__name__", "custom") if ground else "heuristic")
+    out: Dict[str, Any] = {"fuzzy": fuzzy, "grounder": gname, "broker": broker}
     runs: Dict[tuple, dict] = {}
-    rep1 = run_arm(run_dir / "v1", "skill_v1", make_skill_arm(v1, fuzzy=fuzzy, sink=runs), demos, tasks)
-    out["v1"] = {"held_out": held_out_rates(rep1),
-                 "model_calls": sum(r["model_calls"] for r in runs.values()),
-                 "halted": {f"{k[0]}/{k[1]}": r["halt"]["reason"] for k, r in runs.items() if r["status"] == "HALTED"},
-                 "healed": {f"{k[0]}/{k[1]}": [h["rung"] + ":" + str(h["used"]) for h in r["healed"]]
-                            for k, r in runs.items() if r["healed"]}}
+    rep1 = run_arm(run_dir / "v1", "skill_v1", make_skill_arm(v1, sink=runs, **kw), demos, tasks)
+    out["v1"] = arm_summary(rep1, runs)
+    out["v1"]["healed"] = {f"{k[0]}/{k[1]}": [h["rung"] + ":" + str(h["used"]) for h in r["healed"]]
+                           for k, r in runs.items() if r["healed"]}
     # ---- halt -> teach rounds on held-out halts (one scripted fix demonstration per round)
     cur = dict(v1)
     rounds = []
     for t in tasks:
         for inst in HELD_OUT:
             for _ in range(4):
-                r = run_instance(cur[t], run_dir / "probe", t, inst, fuzzy=fuzzy)
+                r = run_instance(cur[t], run_dir / "probe", t, inst, **kw)
                 if r["run"]["status"] != "HALTED":
                     break
-                lt = halt_teach_live(cur[t], run_dir / "teach", t, inst, gate_dir=run_dir / "gates", fuzzy=fuzzy)
+                lt = halt_teach_live(cur[t], run_dir / "teach", t, inst, gate_dir=run_dir / "gates", **kw)
                 rounds.append({k: v for k, v in lt.items() if k != "program"})
                 if lt.get("result") not in ("pass", "fail") or "program" not in lt:
                     break
@@ -1016,21 +1149,21 @@ def evaluate(run_dir: Path, tasks=TASKS, *, fuzzy: bool = True, quiet: bool = Fa
                 lib.save(cur[t])
     out["teach_rounds"] = rounds
     runs2: Dict[tuple, dict] = {}
-    rep2 = run_arm(run_dir / "vN", "skill_vN", make_skill_arm(cur, fuzzy=fuzzy, sink=runs2), demos, tasks)
-    out["vN"] = {"versions": {t: cur[t]["version"] for t in tasks}, "held_out": held_out_rates(rep2),
-                 "model_calls": sum(r["model_calls"] for r in runs2.values()),
-                 "halted": {f"{k[0]}/{k[1]}": r["halt"]["reason"] for k, r in runs2.items() if r["status"] == "HALTED"}}
+    rep2 = run_arm(run_dir / "vN", "skill_vN", make_skill_arm(cur, sink=runs2, **kw), demos, tasks)
+    out["vN"] = dict(arm_summary(rep2, runs2), versions={t: cur[t]["version"] for t in tasks})
     # ---- injected unexpected dialog: HALT -> one fix demo -> vN+1 passes (live + fresh canary)
     inj = []
-    for t in tasks:
+    for t in (tasks if inject else ()):
         inst = INJECTIONS[t]["instance"]
         lt = halt_teach_live(v1[t], run_dir / "inject", t, inst, env_wrap=injector(t), gate_dir=run_dir / "gates_inj",
-                             require_canary_success=True, fuzzy=fuzzy)
+                             require_canary_success=True, **kw)
         inj.append({k: v for k, v in lt.items() if k != "program"})
     out["injected_dialog"] = inj
     write_json(run_dir / "wp5_report.json", out)
+    out["programs"] = {t: cur[t] for t in tasks}
     if not quiet:
-        print(json.dumps({k: v for k, v in out.items() if k not in ("teach_rounds", "injected_dialog")}, indent=2))
+        print(json.dumps({k: v for k, v in out.items() if k not in ("teach_rounds", "injected_dialog", "programs")},
+                         indent=2))
         for r in rounds:
             print(f"teach {r['task']}/{r['instance']} v{r['from_version']}: halt={r.get('halt', {}).get('reason')} "
                   f"-> {r.get('teach', {}).get('status')} {r.get('teach', {}).get('change', {}).get('kind') if r.get('teach') else ''}"
@@ -1047,12 +1180,16 @@ def main(argv=None) -> int:
     ap.add_argument("--run-dir", default=None)
     ap.add_argument("--strict", action="store_true", help="disable the unique-token-overlap grounding rung")
     ap.add_argument("--task", action="append", choices=TASKS)
+    ap.add_argument("--grounder", default="heuristic", choices=("heuristic", "wp6", "wp6_strict"),
+                    help="heuristic role+name ladder, or the WP6 AX ladder (wiring.py)")
+    ap.add_argument("--broker", action="store_true", help="resolve secrets through the WP7 SecretBroker")
     a = ap.parse_args(argv)
     run_dir = Path(a.run_dir or tempfile.mkdtemp(prefix="teach_once_wp5_"))
     print(f"run dir: {run_dir}")
-    evaluate(run_dir, tuple(a.task or TASKS), fuzzy=not a.strict)
+    evaluate(run_dir, tuple(a.task or TASKS), fuzzy=not a.strict, ground=a.grounder, broker=a.broker)
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
