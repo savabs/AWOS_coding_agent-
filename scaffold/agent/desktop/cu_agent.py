@@ -11,6 +11,14 @@ execute_plan (postcondition per op, write-ahead undo log) -> finish.
 Every tool call is checked by the T10 sink policy through the Enforcer
 (mode enforce, no approver: ask == blocked). The model never sees the
 ground truth; success is judged by scripts/cu_verify_receipts.py.
+
+Modes (``run_mode`` / the CLI): ``receipts`` (default, the loop above) and
+``micro`` (WP8): delegates to micro_agent.py, the narrow bounded agent for
+dashboard subtasks (numbered controls, closed verbs, step/time caps,
+needs_user instead of guesses). testbeds/dev_dashboard/run.py launches it as
+
+    PYTHONPATH=<repo> python -m scaffold.agent.desktop.cu_agent micro \
+        --task {task_file} --sandbox {sandbox}
 """
 from __future__ import annotations
 
@@ -390,7 +398,24 @@ def cmd_revert(a) -> int:
     return 0 if identical else 1
 
 
+MODES = ("receipts", "micro")
+
+
+def run_mode(mode: str = "receipts", argv: Optional[List[str]] = None) -> int:
+    """Mode switch: ``micro`` hands the argv to micro_agent.main (WP8);
+    ``receipts`` is the original receipts-organizing loop (``main``)."""
+    if mode not in MODES:
+        raise ValueError(f"mode must be one of {MODES}")
+    if mode == "micro":
+        from . import micro_agent
+        return micro_agent.main(argv or [])
+    return main(argv)
+
+
 def main(argv=None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == ["micro"]:                   # mode="micro": WP8 micro-agent
+        return run_mode("micro", argv[1:])
     ap = argparse.ArgumentParser(prog="cu_agent")
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run")
@@ -398,6 +423,7 @@ def main(argv=None) -> int:
     r.add_argument("--run-dir", required=True)
     v = sub.add_parser("revert")
     v.add_argument("--run-dir", required=True)
+    sub.add_parser("micro", help="WP8 micro-agent mode (see micro_agent.py --help)")
     a = ap.parse_args(argv)
     return {"run": cmd_run, "revert": cmd_revert}[a.cmd](a)
 
