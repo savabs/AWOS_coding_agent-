@@ -11,6 +11,12 @@ Styles:
   "nl+hints"   also the rule as structured prefs (testbeds/email_triage/prefs.py
                format), so a non-LLM learner can use it; default
 The harness writes the result to <work>/agent/feedback.json.
+
+Implicit feedback (WP2): ``scaffold/agent/desktop/correction_capture.capture``
+emits the same item shape (id/from/subject/you_said/correct/feedback) with
+phase/style "implicit", plus per-item ``thread_id`` and scoped ``proposals``.
+``implicit_to_prefs`` feeds those proposals into the v2 store as evidence, so
+they pass the promotion gate (prefs.py) before they are applied.
 """
 from __future__ import annotations
 
@@ -69,11 +75,49 @@ def simulate_feedback(truth: dict, messages: List[dict], preds: Dict[str, dict],
     return out
 
 
-def prefs_from_feedback(fb: dict) -> dict:
-    """Build a prefs.json document from the structured hints in feedback."""
+def prefs_from_feedback(fb: dict, version: int = 1, now: Optional[str] = None) -> dict:
+    """Build a prefs.json document from the structured hints in feedback.
+
+    ``version=1`` (default) is byte-for-byte the pre-WP2 output. ``version=2`` adds
+    provenance: source correction, inferred scope, timestamps, and the ids of the
+    corrected messages that stated each rule."""
     rules = []
     for r in fb.get("rules", []):
         for i, h in enumerate(r["hints"]):
             rules.append({"id": f"{r['id']}_{i + 1}", "when": h["when"], "set": h["set"],
                           "source": "correction", "note": r["feedback"]})
-    return {"version": 1, "notes": [it["feedback"] for it in fb.get("items", [])], "rules": rules}
+    out = {"version": 1, "notes": [it["feedback"] for it in fb.get("items", [])], "rules": rules}
+    if version == 2:
+        from .prefs import now_iso, upgrade
+        ts = now or now_iso()
+        out = upgrade(out, ts)
+        stated_by = {}
+        for it in fb.get("items", []):
+            for r in fb.get("rules", []):
+                if it.get("feedback") == r.get("feedback"):
+                    stated_by.setdefault(r["id"], []).append(it["id"])
+        for rule in out["rules"]:
+            base = rule["id"].rsplit("_", 1)[0]
+            rule["provenance"] = {"message_ids": stated_by.get(base, []), "feedback": rule.get("note", "")}
+    return out
+
+
+def implicit_to_prefs(fb: dict, prefs: dict, model_agreed: Optional[Dict[str, bool]] = None,
+                      now: Optional[str] = None) -> List[dict]:
+    """Feed implicit corrections (correction_capture output) into a v2 prefs doc.
+
+    Every proposal becomes evidence for a learned (source "implicit") pattern; the
+    promotion gate in prefs.py decides when it turns active. ``model_agreed`` maps
+    message id -> whether the model, given the proposal as a hint, now agrees.
+    Returns the touched rules."""
+    from .prefs import record_evidence
+    touched = []
+    for it in fb.get("items", []):
+        for prop in it.get("proposals", []):
+            agreed = (model_agreed or {}).get(it["id"])
+            touched.append(record_evidence(
+                prefs, prop["when"], prop["set"], thread_id=it.get("thread_id") or it["id"],
+                message_id=it["id"], source="implicit", scope=prop.get("scope"),
+                effect=prop.get("effect", "include"), model_agreed=agreed,
+                note=it.get("feedback", ""), now=now))
+    return touched

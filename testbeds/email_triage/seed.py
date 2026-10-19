@@ -566,14 +566,128 @@ def near_misses(rng: random.Random) -> List[dict]:
     return out
 
 
+# --------------------------------------------------------------------------- opt-in: scoping case
+# "The user junks a company's newsletter; that must not bury the same company's
+# security alert." Off by default, so existing seeds stay byte-identical. When on,
+# the base world is generated exactly as before and these messages are APPENDED
+# with their own RNG (base ids, dates and splits do not change).
+
+SCOPING_ENV = "AWOS_ET_SCOPING_CASE"
+SCOPING_RULE = {
+    "id": "nimbus_newsletter_junk",
+    "feedback": "I never read the Nimbus Notes newsletter. It is junk to me: importance zero.",
+    "hints": [
+        {"when": {"from_address": "news@nimbusnotes.example"},
+         "set": {"importance": 0, "category": "newsletter", "needs_reply": False}}
+    ],
+}
+NIMBUS_HOST = "nimbusnotes.example"
+
+
+def scoping_case(rng: random.Random) -> List[dict]:
+    """3 Nimbus Notes newsletters (rule nimbus_newsletter_junk) + 1 Nimbus security
+    alert from the same company and display name (no rule: it must stay urgent)."""
+    out = []
+    subjects = ["Nimbus Notes Monthly: {n} templates for freelancers",
+                "Nimbus Notes Monthly: what's new in the editor",
+                "Nimbus Notes Monthly: meet the team behind sync"]
+    for s in subjects:
+        n = rng.randint(3, 12)
+        subj = s.format(n=n)
+        body = ("Hi Sam,\n\nThis month at Nimbus Notes: " + subj.split(":", 1)[1].strip()
+                + ". Plus tips from our community." + _unsub("Nimbus Notes", "news." + NIMBUS_HOST, rng))
+        out.append(_m("Nimbus Notes", "news@" + NIMBUS_HOST, subj, body, 0, "newsletter", False,
+                      "Newsletter the user junked", rule=SCOPING_RULE["id"],
+                      headers=_list_headers("news." + NIMBUS_HOST, rng), kind="scoping_newsletter"))
+    ip = "198.51.100.%d" % rng.randint(2, 250)
+    out.append(_m("Nimbus Notes", "security@" + NIMBUS_HOST,
+                  "Security alert: your Nimbus Notes password was changed",
+                  "The password for your Nimbus Notes account sam@lumenledger.example was changed "
+                  f"from IP {ip} (Jakarta, Indonesia). Your client notes and invoices are stored "
+                  "in this account. If this was not you, reset your password and sign out all "
+                  "sessions now.", 3, "urgent_action", False,
+                  "Security alert from a company whose newsletter the user junked",
+                  kind="scoping_alert"))
+    return out
+
+
+def _append_scoping_case(seed: int, data: dict) -> dict:
+    rng = random.Random(seed * 7919 + 0x5C0)
+    extra = scoping_case(rng)
+    used = {m["id"] for m in data["messages"]}
+    calib_ids = set(data["splits"]["calibration"])
+    last_calib = max(m["date"] for m in data["messages"] if m["id"] in calib_ids)
+    eval_dates = sorted(m["date"] for m in data["messages"] if m["date"] > last_calib)
+    # first newsletter in calibration (inside the 3-day window), the rest and the
+    # alert spread over evaluation
+    slots = [(START + timedelta(hours=30 + rng.randint(0, 20))).isoformat()]
+    for k in range(1, len(extra)):
+        slots.append(eval_dates[(k * len(eval_dates)) // (len(extra) + 1)])
+    for m, date in zip(extra, slots):
+        while True:
+            mid = "m%06x" % rng.getrandbits(24)
+            if mid not in used:
+                used.add(mid)
+                break
+        dt = datetime.fromisoformat(date) + timedelta(minutes=7)
+        m["id"], m["thread_id"], m["date"] = mid, "t%06x" % rng.getrandbits(24), dt.isoformat()
+    msgs = list(data["messages"])
+    truth = data["truth"]
+    tmsgs = list(truth["messages"])
+    for k, m in enumerate(extra):
+        split = "calibration" if k == 0 else "evaluation"
+        msgs.append({"id": m["id"], "thread_id": m["thread_id"], "date": m["date"],
+                     "from": _fmt_from(m["from_name"], m["from_addr"]),
+                     "from_name": m["from_name"], "from_addr": m["from_addr"], "to": ME,
+                     "subject": m["subject"], "body": m["body"], "headers": m["headers"]})
+        t = {"id": m["id"], "split": split, "from_domain": m["from_addr"].rsplit("@", 1)[-1].lower(),
+             **m["gt"], "probe": m["kind"]}
+        if m["rule"]:
+            t["rule"] = m["rule"]
+        tmsgs.append(t)
+    msgs.sort(key=lambda x: x["date"], reverse=True)
+    split_of = {t["id"]: t["split"] for t in tmsgs}
+    by_date = sorted(msgs, key=lambda x: x["date"])
+    splits = {ph: [x["id"] for x in by_date if split_of[x["id"]] == ph]
+              for ph in ("calibration", "evaluation")}
+    rules = dict(truth["rules"])
+    rules[SCOPING_RULE["id"]] = SCOPING_RULE
+    truth = {**truth, "n": len(msgs), "splits": splits,
+             "messages": sorted(tmsgs, key=lambda t: t["id"]), "rules": rules,
+             "scoping_case": True}
+    return {**data, "messages": msgs, "truth": truth, "splits": splits}
+
+
+def scoping_case_result(truth: dict, preds: Dict[str, dict]) -> dict:
+    """Did the scoping case pass on these predictions ({id: {importance, category}})?
+
+    pass = every evaluation Nimbus newsletter is junked (importance 0) AND the
+    Nimbus security alert is not buried (importance >= 2, not a junk/spam
+    category). ``strict`` also requires the alert at importance 3."""
+    junk_cats = {"newsletter", "promo", "social", "spam_phishing"}
+    news = [t for t in truth["messages"] if t.get("probe") == "scoping_newsletter"
+            and t["split"] == "evaluation"]
+    alert = [t for t in truth["messages"] if t.get("probe") == "scoping_alert"]
+    if not alert:
+        return {"present": False, "passed": False}
+    a = preds.get(alert[0]["id"]) or {}
+    alert_ok = a.get("importance", 1) >= 2 and a.get("category") not in junk_cats
+    news_ok = all((preds.get(t["id"]) or {}).get("importance", 1) == 0 for t in news)
+    return {"present": True, "alert_id": alert[0]["id"], "alert_pred": a,
+            "alert_not_buried": alert_ok, "newsletters_junked": news_ok,
+            "passed": alert_ok and news_ok,
+            "strict": alert_ok and news_ok and a.get("importance") == 3}
+
+
 # --------------------------------------------------------------------------- assembly
 
 def _fmt_from(name: str, addr: str) -> str:
     return f"{name} <{addr}>"
 
 
-def generate(seed: int, persona: Optional[dict] = None) -> dict:
-    """Return {"messages": [...agent-visible...], "truth": {...}} for ``seed``."""
+def generate(seed: int, persona: Optional[dict] = None, scoping_case: bool = False) -> dict:
+    """Return {"messages": [...agent-visible...], "truth": {...}} for ``seed``.
+    ``scoping_case`` appends the opt-in newsletter-vs-security-alert case."""
     persona = persona or load_persona()
     rng = random.Random(seed)
     pool: List[dict] = []
@@ -664,8 +778,9 @@ def generate(seed: int, persona: Optional[dict] = None) -> dict:
     truth = {"version": 1, "seed": seed, "n": len(messages), "splits": splits,
              "messages": sorted(truth_msgs, key=lambda t: t["id"]),
              "rules": {r["id"]: r for r in persona["rules"]}}
-    return {"messages": messages, "truth": truth, "splits": splits,
+    data = {"messages": messages, "truth": truth, "splits": splits,
             "account": persona["public"]}
+    return _append_scoping_case(seed, data) if scoping_case else data
 
 
 README = """\
@@ -728,10 +843,18 @@ def _make_read_only(root: Path) -> None:
             p.chmod(stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
 
 
-def write_work_dir(work: Path, seed: int) -> dict:
+def scoping_case_enabled(flag: Optional[bool] = None) -> bool:
+    """Explicit flag wins; otherwise the AWOS_ET_SCOPING_CASE env var (1/true/yes),
+    so run.py can opt in without code changes."""
+    if flag is not None:
+        return bool(flag)
+    return os.environ.get(SCOPING_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def write_work_dir(work: Path, seed: int, scoping_case: Optional[bool] = None) -> dict:
     """Create <work>/{mailbox,agent,truth}. Returns the generate() result."""
     work = Path(work)
-    data = generate(seed)
+    data = generate(seed, scoping_case=scoping_case_enabled(scoping_case))
     mb, agent, truth_dir = work / "mailbox", work / "agent", work / "truth"
     for d in (mb, agent, truth_dir):
         if d.exists():
@@ -777,8 +900,11 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--work-dir", required=True)
+    ap.add_argument("--scoping-case", action="store_true", default=None,
+                    help="append the opt-in newsletter-vs-security-alert scoping case "
+                         f"(or set {SCOPING_ENV}=1)")
     a = ap.parse_args(argv)
-    data = write_work_dir(Path(a.work_dir), a.seed)
+    data = write_work_dir(Path(a.work_dir), a.seed, scoping_case=a.scoping_case)
     print(json.dumps(composition(data["truth"]), indent=1))
     print("digest", digest(Path(a.work_dir)))
     return 0
