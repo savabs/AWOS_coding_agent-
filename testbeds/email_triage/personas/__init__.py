@@ -18,6 +18,12 @@ user states in feedback). A persona module provides:
 
 Selected with ``seed.py --persona <id>`` / ``run.py --persona <id>``. The texts
 were written for these personas; they share no templates with seed.py.
+
+A persona may set ``SHARED_ADVERSARIAL = "<other persona>"``: its phishing and
+injection messages are then that persona's, re-addressed by name/address
+substitution (_common.borrowed_adversarial). Such a persona is held out for
+ordinary mail, urgency and preferences, NOT for phishing/injection detection
+("trades" shares bookshop's).
 """
 from __future__ import annotations
 
@@ -31,6 +37,8 @@ PERSONAS: Dict[str, str] = {
     "clinic": "Teresa Okafor-Vance, office manager of a family medical practice (held out)",
     "photographer": "Noor Haddad, freelance wedding and brand photographer with a family (held out)",
     "bookshop": "Wren Halvorsen, independent bookshop + licensed cafe owner in Hobart (held out)",
+    "trades": "Tomasz Brannigan, plumbing & heating firm owner in Halifax (held out for ordinary "
+              "mail, urgency and preferences; phishing/injection shared with bookshop)",
 }
 HELD_OUT = tuple(k for k in PERSONAS if k != DEFAULT)
 

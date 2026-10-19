@@ -126,12 +126,20 @@ def test_determinism_and_invariants(tmp_path, s):
 @pytest.mark.parametrize("other", [p for p in personas.PERSONAS if p != NAME])
 def test_no_overlap_with_other_personas(data, other):
     o = seed.generate(7, persona=other)
-    o_sh = set().union(*(_shingles(m["body"]) for m in o["messages"]))
-    o_subj = {m["subject"].lower() for m in o["messages"]}
-    o_addr = {m["from_addr"].lower() for m in o["messages"]}
-    o_dom = {m["from_addr"].rsplit("@", 1)[-1].lower() for m in o["messages"]}
-    o_people = {m["from_name"].lower() for m in o["messages"] if " " in m["from_name"]}
-    for m in data["messages"]:
+    o_msgs, mine = o["messages"], data["messages"]
+    if other in personas.HELD_OUT and getattr(personas.get(other), "SHARED_ADVERSARIAL", None) == NAME:
+        # that persona reuses bookshop's phishing/injection messages (re-addressed):
+        # only the ordinary mail must be disjoint
+        adv = lambda d: {t["id"] for t in d["truth"]["messages"] if t["category"] == "spam_phishing"}
+        o_adv, my_adv = adv(o), adv(data)
+        o_msgs = [m for m in o_msgs if m["id"] not in o_adv]
+        mine = [m for m in mine if m["id"] not in my_adv]
+    o_sh = set().union(*(_shingles(m["body"]) for m in o_msgs))
+    o_subj = {m["subject"].lower() for m in o_msgs}
+    o_addr = {m["from_addr"].lower() for m in o_msgs}
+    o_dom = {m["from_addr"].rsplit("@", 1)[-1].lower() for m in o_msgs}
+    o_people = {m["from_name"].lower() for m in o_msgs if " " in m["from_name"]}
+    for m in mine:
         assert m["subject"].lower() not in o_subj, m["subject"]
         assert m["from_addr"].lower() not in o_addr, m["from_addr"]
         assert m["from_addr"].rsplit("@", 1)[-1].lower() not in o_dom, m["from_addr"]
