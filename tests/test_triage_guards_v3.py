@@ -265,6 +265,25 @@ def test_urgency_cap_demotes_automated_mail_without_near_term_signal():
     assert out["a3"]["importance"] == 1
 
 
+def test_account_incident_from_automated_sender_is_raised_to_3():
+    # real Qwen run: "A new SSH key was added to your account" labelled 2 under the strict prompt
+    incidents = [KEEP3[1], KEEP3[4]]
+    out, tr, _ = _cascade(incidents, {"version": 1, "rules": []},
+                          {m["id"]: IMPORTANT for m in incidents})
+    for m in incidents:
+        assert (out[m["id"]]["importance"], out[m["id"]]["category"]) == (3, "urgent_action"), m["id"]
+        assert tr["items"][m["id"]]["urgency_cap"] == "automated_account_incident"
+    # automated mail without an incident, and people, are not raised
+    out, _, _ = _cascade(AUTOMATED + PEOPLE, {"version": 1, "rules": []},
+                         {m["id"]: IMPORTANT for m in AUTOMATED + PEOPLE})
+    for m in AUTOMATED + PEOPLE:
+        assert out[m["id"]]["importance"] == 2, m["id"]
+    # a model that flags it as phishing is not overridden
+    out, _, _ = _cascade([KEEP3[1]], {"version": 1, "rules": []},
+                         {KEEP3[1]["id"]: {**IMPORTANT, "category": "spam_phishing", "suspicious": True}})
+    assert out[KEEP3[1]["id"]]["importance"] < 3
+
+
 def test_rules_can_raise_a_capped_message_back_to_3():
     m = AUTOMATED[1]
     for src in ("user", "correction"):

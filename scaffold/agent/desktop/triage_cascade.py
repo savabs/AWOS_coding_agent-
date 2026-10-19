@@ -995,12 +995,27 @@ def near_term_signal(m: dict) -> Optional[str]:
 
 def urgency_cap(p: dict, m: dict, g: Dict[str, bool]) -> Optional[str]:
     """3 -> 2 (urgent_action -> important_read) on a model label for an automated
-    sender with no near-term signal. Returns the reason, or None (unchanged)."""
+    sender with no near-term signal; and the mirror case, 2 -> 3 for a non-list,
+    non-suspicious automated message reporting a security event on the user's own
+    account (the strict urgency prompt makes the model under-call these). Returns
+    the reason, or None (unchanged)."""
     try:
         imp = int(p.get("importance", 1))
     except (TypeError, ValueError):
         return None
-    if imp < 3 or g.get("correspondent") or not is_automated_sender(m, g):
+    if g.get("correspondent") or not is_automated_sender(m, g):
+        return None
+    if imp == 2:
+        if (g.get("list") or g.get("injection") or p.get("suspicious")
+                or p.get("category") == "spam_phishing"):
+            return None
+        text = (m.get("subject") or "") + "\n" + (m.get("body") or "")
+        if not INCIDENT_RE.search(text):
+            return None
+        p["importance"] = 3
+        p["category"] = "urgent_action"
+        return "automated_account_incident"
+    if imp < 3:
         return None
     if near_term_signal(m):
         return None
