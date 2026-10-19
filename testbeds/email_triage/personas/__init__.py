@@ -30,6 +30,7 @@ PERSONAS: Dict[str, str] = {
     "sam": "Sam Rivera, solo SaaS founder and contract developer (default; seed.py)",
     "clinic": "Teresa Okafor-Vance, office manager of a family medical practice (held out)",
     "photographer": "Noor Haddad, freelance wedding and brand photographer with a family (held out)",
+    "bookshop": "Wren Halvorsen, independent bookshop + licensed cafe owner in Hobart (held out)",
 }
 HELD_OUT = tuple(k for k in PERSONAS if k != DEFAULT)
 
