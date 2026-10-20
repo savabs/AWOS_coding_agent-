@@ -68,3 +68,28 @@ held-out personas: keyword+prefs scores 55–66 and oracle scores 100.
 - **Call savings:** make the cascade save calls without learned rules (e.g. larger batches for list mail, or a cheap pre-filter), or drop that claim.
 - **Uncertainty signal** for the review queue.
 - **Scale:** more seeds or personas per arm before any public claim. This was 1 seed per arm.
+
+## Multi-seed cloud run (2026-10-20, GitHub Actions run 39394899154)
+
+- **Setup:** Qwen3.5-9B Q4_K_M on CPU llama.cpp b11146, on free ubuntu runners; nl feedback; scoping case on.
+- **Matrix:** 5 personas × seeds 7/101/102 × arm (cascade on with uncertainty consistency, vs the legacy path) = 30 jobs.
+- **Settings:** `ci/p2_email.env`; summary script: `scripts/p2_email_summary.py`.
+
+| persona | cascade on: composite (sd) | legacy: composite (sd) | useful (on / off) | calls (on / off) | prompt tok (on / off) |
+|---|---|---|---|---|---|
+| sam | 92.4 (2.1) | 80.9 (6.7) | 3/3 / 0/3 | 12 / 27 | 14.0k / 41.1k |
+| bookshop | 89.4 (1.6) | 85.1 (2.6) | 2/3 / 2/3 | 13.7 / 25 | 20.2k / 45.9k |
+| trades (benign-held-out) | 88.4 (5.9) | 84.9 (3.9) | 2/3 / 1/3 | 14.3 / 26 | 21.0k / 49.9k |
+| clinic | 87.9 (2.2) | 83.9 (1.8) | 1/3 / 0/3 | 13 / 26 | 16.5k / 44.4k |
+| photographer | 84.0 (2.7) | 78.1 (5.0) | 1/3 / 1/3 | 14.3 / 26 | 18.9k / 44.3k |
+| **all** | **88.4** | 82.6 | **9/15 / 4/15** | 13.5 / 26 | ~18k / ~45k |
+
+- **Cascade vs legacy:**
+  - The cascade beats legacy on every persona, by 3.5–11.5 composite points.
+  - It uses about 52% of the calls and about 40% of the prompt tokens.
+  - Its spread across seeds is usually smaller.
+- **Weakest persona:** photographer, with urgent recall 0.80 on average.
+- **Reliability:** "useful" in only 9/15 runs, so it is not yet reliable enough to run unattended without review.
+- **Caveats:**
+  - Personas other than trades were looked at while fixing; trades shares its adversarial mail with bookshop.
+  - CPU llama.cpp numerics differ slightly from Metal on the laptop.
