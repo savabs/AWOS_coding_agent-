@@ -135,7 +135,7 @@ jobs:
             on_nounc) export AWOS_TRIAGE_CASCADE=1 AWOS_TRIAGE_UNC_MODE=none ;;
             *) echo "unknown arm $ARM"; exit 2 ;;
           esac
-          W=out/${PERSONA}_s${SEED}_${ARM}
+          W="$PWD/out/${PERSONA}_s${SEED}_${ARM}"   # absolute: the agent runs with another cwd
           mkdir -p "$W"
           python -m testbeds.email_triage.run --persona "$PERSONA" --work-dir "$W" --seed "$SEED" \
             --feedback-style nl --scoping-case --timeout 19000 \
