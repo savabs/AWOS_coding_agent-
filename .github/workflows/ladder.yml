@@ -4,7 +4,7 @@ name: ladder
 
 on:
   push:
-    branches: ["bench-cloud/**"]
+    branches: ["bench-cloud/**", "!bench-cloud/p2-**"]
   workflow_dispatch:
 
 permissions:
