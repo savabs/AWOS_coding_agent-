@@ -1,0 +1,177 @@
+# Product #2 email-triage acceptance on the local model (Qwen3.5-9B Q4_K_M), on free
+# ubuntu runners (CPU llama.cpp) instead of the owner's laptop. One job per
+# persona x seed x arm; results are uploaded as artifacts and summarised.
+# Launch: push to a branch named bench-cloud/p2-<anything>. Settings: ci/p2_email.env.
+name: p2-email
+
+on:
+  push:
+    branches: ["bench-cloud/p2-**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p2-email-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GGUF_REPO: unsloth/Qwen3.5-9B-GGUF
+  GGUF_FILE: Qwen3.5-9B-Q4_K_M.gguf
+
+jobs:
+  config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.cfg.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: cfg
+        name: Build the matrix from ci/p2_email.env
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ci/p2_email.env
+          python3 - "$PERSONAS" "$SEEDS" "$ARMS" >> "$GITHUB_OUTPUT" <<'PY'
+          import json, sys
+          personas, seeds, arms = (s.split() for s in sys.argv[1:4])
+          inc = [{"persona": p, "seed": int(s), "arm": a} for p in personas for s in seeds for a in arms]
+          print("matrix=" + json.dumps({"include": inc}))
+          PY
+
+  model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Cache the GGUF
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/models
+          key: gguf-${{ env.GGUF_FILE }}-v1
+      - name: Download the GGUF once
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          mkdir -p ~/models
+          curl -fL --retry 5 -o ~/models/$GGUF_FILE \
+            "https://huggingface.co/$GGUF_REPO/resolve/main/$GGUF_FILE"
+          ls -lh ~/models
+
+  run:
+    needs: [config, model]
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix: ${{ fromJSON(needs.config.outputs.matrix) }}
+    env:
+      PERSONA: ${{ matrix.persona }}
+      SEED: ${{ matrix.seed }}
+      ARM: ${{ matrix.arm }}
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Python deps
+        run: pip install -r requirements.txt
+
+      - name: Restore the GGUF
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/models
+          key: gguf-${{ env.GGUF_FILE }}-v1
+          fail-on-cache-miss: true
+
+      - name: llama.cpp (official CPU build)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          source ci/p2_email.env
+          mkdir -p ~/llama && cd ~/llama
+          gh release download ${LLAMA_TAG:+"$LLAMA_TAG"} --repo ggml-org/llama.cpp --pattern '*bin-ubuntu-x64.zip' --clobber
+          unzip -q -o ./*bin-ubuntu-x64.zip
+          BIN=$(find ~/llama -name llama-server -type f | head -1)
+          chmod +x "$BIN"
+          echo "LLAMA_BIN=$BIN" >> "$GITHUB_ENV"
+          "$BIN" --version || true
+
+      - name: Start llama-server (same flags as scripts/local_model.sh, CPU)
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ci/p2_email.env
+          LD_LIBRARY_PATH="$(dirname "$LLAMA_BIN"):${LD_LIBRARY_PATH:-}" nohup "$LLAMA_BIN" \
+            -m ~/models/$GGUF_FILE --alias qwen3.5-9b --host 127.0.0.1 --port 8080 \
+            -ngl 0 -t "$(nproc)" -c "$CTX" -np 1 --jinja --reasoning off \
+            --cache-prompt --temp 0.7 --top-p 0.8 --top-k 20 --min-p 0 --metrics \
+            > ~/llama-server.log 2>&1 &
+          for i in $(seq 1 120); do
+            curl -s -m 2 http://127.0.0.1:8080/health | grep -q ok && break; sleep 5
+          done
+          curl -s http://127.0.0.1:8080/health
+
+      - name: Run the testbed
+        shell: bash
+        run: |
+          set -uo pipefail
+          source ci/p2_email.env
+          export PYTHONPATH="$PWD" AWOS_PROVIDER=local AWOS_LOCAL_MODEL=qwen3.5-9b \
+                 AWOS_LOCAL_BASE_URL=http://127.0.0.1:8080/v1
+          case "$ARM" in
+            on)  export AWOS_TRIAGE_CASCADE=1 ;;
+            off) export AWOS_TRIAGE_CASCADE=0 ;;
+            on_nounc) export AWOS_TRIAGE_CASCADE=1 AWOS_TRIAGE_UNC_MODE=none ;;
+            *) echo "unknown arm $ARM"; exit 2 ;;
+          esac
+          W=out/${PERSONA}_s${SEED}_${ARM}
+          mkdir -p "$W"
+          python -m testbeds.email_triage.run --persona "$PERSONA" --work-dir "$W" --seed "$SEED" \
+            --feedback-style nl --scoping-case --timeout 19000 \
+            --agent-cmd "python -m scaffold.agent.desktop.email_triage_agent --mailbox {mailbox} --phase {phase} --out {out} --prefs {prefs} --feedback {feedback}" \
+            2>&1 | tee "$W/run.log"
+          cp ~/llama-server.log "$W/" || true
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2-${{ matrix.persona }}-s${{ matrix.seed }}-${{ matrix.arm }}
+          path: |
+            out/*/results.json
+            out/*/run.log
+            out/*/agent/usage_*.json
+            out/*/agent/predictions_*.json
+            out/*/agent/review_queue_*.json
+            out/*/agent/prefs.json
+          if-no-files-found: warn
+
+  summary:
+    needs: run
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: p2-*
+      - name: Summarise
+        run: python3 scripts/p2_email_summary.py artifacts | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p2-summary
+          path: artifacts/summary.json
+          if-no-files-found: warn
