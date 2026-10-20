@@ -62,16 +62,16 @@ from typing import Optional
 try:  # package import (python -m scaffold.agent.desktop.email_triage_agent)
     from .triage_cascade import (NONE_LABEL, Thresholds, build_context, cascade_enabled,
                                  category_dists, normalize_token_probs, prefs_store,
-                                 run_cascade)
+                                 run_cascade, uncertainty_mode)
     from .mail_adapter import FakeMailbox
-    from .mail_text import escape_xml, message_to_xml
+    from .mail_text import _body_text, escape_xml, message_to_xml
 except ImportError:  # pragma: no cover - run as a plain script
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from triage_cascade import (NONE_LABEL, Thresholds, build_context,  # type: ignore
                                 cascade_enabled, category_dists, normalize_token_probs,
-                                prefs_store, run_cascade)
+                                prefs_store, run_cascade, uncertainty_mode)
     from mail_adapter import FakeMailbox  # type: ignore
-    from mail_text import escape_xml, message_to_xml  # type: ignore
+    from mail_text import _body_text, escape_xml, message_to_xml  # type: ignore
 
 prefs_mod = prefs_store  # testbeds/email_triage/prefs.py (the v2 preference store)
 
@@ -641,9 +641,57 @@ def _render(m: dict) -> str:
             f"date: {m.get('date')}\nbody:\n{body}\n")
 
 
-def _render_xml(m: dict, prefs: Optional[dict] = None) -> str:
+def _xml_text(text) -> str:
+    """Escape element text: & < > are enough to keep mail from opening or closing
+    a block (quotes only matter inside attributes), so ' and " stay one token."""
+    return escape_xml(text).replace("&quot;", '"').replace("&apos;", "'")
+
+
+def _addrs_of(v) -> list:
+    vals = v if isinstance(v, (list, tuple)) else [v] if v else []
+    return [str(x) for x in vals if x]
+
+
+def compact_xml(m: dict, owner: Optional[str] = None) -> str:
+    """``message_to_xml`` minus what costs tokens and tells the model nothing:
+    To/Cc entries that are just the mailbox owner, the default INBOX label, the
+    List-Unsubscribe URL (a ``<list>`` marker with the List-Id stays), seconds and
+    timezone of the date, and entity-escaped quotes in element text. Every
+    mail-controlled string is still escaped (& < >), so a body cannot open or
+    close a block. AWOS_TRIAGE_XML_COMPACT=0 restores message_to_xml."""
+    own = (owner or "").strip().lower()
+    parts = [f"<message id=\"{escape_xml(m.get('id', ''))}\">",
+             f"<from>{_xml_text(m.get('from') or m.get('from_addr') or 'Unknown')}</from>"]
+    for tag in ("to", "cc"):
+        for a in _addrs_of(m.get(tag)):
+            if own and own in a.lower() and a.count("@") == 1:
+                continue
+            parts.append(f"<{tag}>{_xml_text(a)}</{tag}>")
+    parts.append(f"<date>{_xml_text(str(m.get('date') or '')[:16])}</date>")
+    parts.append(f"<subject>{_xml_text(m.get('subject', ''))}</subject>")
+    lh = m.get("list_headers") or {k: v for k, v in (m.get("headers") or {}).items()
+                                   if k.lower() in ("list-id", "list-unsubscribe")}
+    if lh:
+        lid = next((v for k, v in lh.items() if k.lower() == "list-id"), "")
+        parts.append(f"<list>{_xml_text(lid)}</list>" if lid else "<list/>")
+    labels = [x for x in (m.get("labels") or []) if str(x).upper() != "INBOX"]
+    if labels:
+        parts.append("<labels>" + "".join(f"<label>{_xml_text(x)}</label>" for x in labels)
+                     + "</labels>")
+    parts.append(f"<body>{_xml_text(_body_text(m, trim_quotes=True, max_body_chars=BODY_CHARS))}"
+                 "</body></message>")
+    return "".join(parts)
+
+
+def _compact_on() -> bool:
+    return (os.environ.get("AWOS_TRIAGE_XML_COMPACT", "1").strip().lower()
+            not in ("0", "false", "no", "off"))
+
+
+def _render_xml(m: dict, prefs: Optional[dict] = None, owner: Optional[str] = None) -> str:
     """``id:`` line, the store's hints for this sender (escaped), then the message as
-    an escaped XML data block (mail_text.message_to_xml)."""
+    an escaped XML data block (compact_xml; mail_text.message_to_xml with
+    AWOS_TRIAGE_XML_COMPACT=0)."""
     out = f"id: {m['id']}\n"
     hints = prefs_mod.hints_for(m, prefs, k=10) if prefs and prefs.get("rules") else []
     if hints:
@@ -653,6 +701,8 @@ def _render_xml(m: dict, prefs: Optional[dict] = None) -> str:
             "- " + escape_xml(h).replace("&gt;", ">").replace("&quot;", '"').replace("&apos;", "'")
             for h in hints)
                 + "\n</preference_hints>\n")
+    if _compact_on():
+        return out + compact_xml(m, owner) + "\n"
     return out + message_to_xml(m, max_body_chars=BODY_CHARS) + "\n"
 
 
@@ -725,14 +775,15 @@ SYSTEM_NONE = SYSTEM + ("\nIf you genuinely cannot tell what a message is, use c
 
 
 def model_batch(batch: list, context: str, allow_none: bool = False,
-                prefs: Optional[dict] = None, xml: Optional[bool] = None):
+                prefs: Optional[dict] = None, xml: Optional[bool] = None,
+                owner: Optional[str] = None):
     """One L3 call: raw model labels by id (no rules applied) and, when the local
     server returns token probabilities, a category distribution by id. ``xml``
     (default: the adapter path is on) renders messages with message_to_xml plus
     per-message preference hints; otherwise the legacy plain-text rendering."""
     xml = use_adapter() if xml is None else xml
     if xml:
-        user = context + "\n\nMessages:\n\n" + "\n".join(_render_xml(m, prefs) for m in batch)
+        user = context + "\n\nMessages:\n\n" + "\n".join(_render_xml(m, prefs, owner) for m in batch)
     else:
         user = context + "\n\nMessages:\n\n" + "\n---\n".join(_render(m) for m in batch)
     out, tokens = chat_json_probs(
@@ -763,15 +814,37 @@ def triage_with_cascade(messages: list, profile: dict, prefs: dict,
     xml = use_adapter() if xml is None else xml
     ctx = build_context(profile, prefs, all_messages or messages, mailbox_dir)
     context = _triage_context_xml(profile, prefs) if xml else _triage_context(profile, prefs)
+    owner = (profile.get("email") or "").lower()
     done = [0]
 
     def mb(batch):
-        r = model_batch(batch, context, th.allow_none, prefs=prefs, xml=xml)
+        r = model_batch(batch, context, th.allow_none, prefs=prefs, xml=xml, owner=owner)
         done[0] += len(batch)
         print(f"[triage] model: {done[0]} item(s) so far", file=sys.stderr, flush=True)
         return r
 
-    return run_cascade(messages, prefs, ctx, mb, batch_size=BATCH, th=th, record_hits=True)
+    return run_cascade(messages, prefs, ctx, mb, batch_size=BATCH, th=th, record_hits=True,
+                       unc_checks=uncertainty_checks(context, prefs, xml, owner))
+
+
+def uncertainty_checks(context: str, prefs: dict, xml: bool, owner: Optional[str] = None):
+    """The ``unc_checks`` for run_cascade (triage_uncertainty), or None when the
+    mode is none. AWOS_TRIAGE_UNC_MODE = none | consistency | second_opinion;
+    default consistency (k=2, AWOS_TRIAGE_UNC_K) on the local provider, none
+    otherwise. Paid checks are capped at +30% of the L3 calls
+    (AWOS_TRIAGE_UNC_BUDGET) and go through _log_usage like every call."""
+    mode = uncertainty_mode(_is_local())
+    if mode == "none":
+        return None
+    try:
+        from . import triage_uncertainty as tu
+    except ImportError:  # pragma: no cover - plain script
+        import triage_uncertainty as tu  # type: ignore
+    return {"mode": mode,
+            "resample": (tu.make_resampler(context, prefs=prefs, xml=xml, owner=owner)
+                         if mode == "consistency" else None),
+            "second_opinion": (tu.make_second_opinion(context, prefs=prefs, xml=xml, owner=owner)
+                               if mode == "second_opinion" else None)}
 
 
 def _calibration_predictions(out: Path, splits: dict) -> dict:
@@ -831,7 +904,8 @@ def main(argv=None) -> int:
             {"version": 1, "phase": a.phase,
              "reason": "low-confidence model label: kept in the inbox for you to check",
              "items": queue}, indent=2))
-        print(f"[triage] cascade layers {trace['layers']}, model calls {trace['model_calls_triage']}, "
+        print(f"[triage] cascade layers {trace['layers']}, model calls {trace['model_calls_triage']}"
+              f" (+{trace.get('model_calls_uncertainty', 0)} uncertainty), "
               f"abstained {trace['abstained']}", file=sys.stderr)
     else:
         items = triage(todo, profile, prefs)

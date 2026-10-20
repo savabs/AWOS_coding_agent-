@@ -1282,6 +1282,86 @@ def l2_decide(m: dict, g: Dict[str, bool], rules: List[dict]) -> Optional[dict]:
     return {"importance": 0, "category": cat, "needs_reply": False, "suspicious": False}
 
 
+# ── L2 extension: routine service notices (AWOS) ──────────────────────────────
+# Non-list mail from a service / automated mailbox (no-reply@, notifications@,
+# billing@, service@, monitor@ ...) that reports something DONE or READY with no
+# sign of trouble: a receipt, a paid bill, a completed backup, an approved
+# timesheet, a merged PR, a weekly summary. The truth for these is fyi / 1 and
+# the model only adds cost (and sometimes a false "urgent"). Every condition is
+# positive evidence; anything doubtful goes to the model:
+#   - sender: unprotected, not list mail, no injection / mention / look-alike
+#     signal, local part made only of service words (imogen.ar@ is a person)
+#   - text: a done/ready signal (FYI_DONE_RE or a receipt / report / no-action /
+#     resolved / booking not-now signal) and NO trouble word (failure, alert,
+#     due, expires, verify, sign-in, password, review requested ...), no keep or
+#     raise signal, and a money / credential topic only next to a receipt-type
+#     signal
+#   - rules: no live rule matches the message (learned hints go through L3)
+# Off with AWOS_TRIAGE_L2_SERVICE=0.
+
+FYI_DONE_RE = re.compile(
+    r"\b(receipts?|paid|payment (?:received|confirmed|successful)|completed?|succeeded|successful(?:ly)?|"
+    r"approved|published|accepted|processed|shipped|delivered|on (?:the|its) way|merged|"
+    r"(?:is|are) (?:now )?(?:ready|available)|bill is ready|backup|renews? (?:on|in)|auto-renews?|"
+    r"summary|digest|recap|report|statement (?:is )?(?:ready|available)|received|confirmed|"
+    r"thank you for your (?:order|payment))\b", re.I)
+TROUBLE_RE = re.compile(
+    r"\b(fail\w*|declin\w*|reject\w*|bounc\w*|overdue|past due|unpaid|due|expir\w*|suspend\w*|lock\w*|"
+    r"disabl\w*|cancel\w*|terminat\w*|delet\w*|error\w*|problems?|issues?|warning|alert|alarm|"
+    r"critical|urgent|immediate\w*|asap|action|required|requested|request(?:ing)? (?:a |your )?review|"
+    r"verify|verification|confirm your|sign[- ]?in|log ?in|login|password|passcode|credentials?|"
+    r"unusual|suspicious|unauthori[sz]ed|compromis\w*|stopped|offline|outage|down|unreachable|"
+    r"not responding|retire\w*|deprecat\w*|end of life|migrat\w*|deadline|reminder|incomplete|missing|"
+    r"paused|on hold|limited|vulnerab\w*|breach\w*|dispute\w*|chargeback|refund\w*|wire|gift ?cards?|"
+    r"bank (?:details|account)|update your)\b", re.I)
+_SERVICE_EXTRA = frozenset("""
+no reply noreply donotreply do not notifications notification notify notifier mailer automated
+auto bounce bounces digest alerts alert accounts account security billing system mail
+""".split())
+_RECEIPT_KINDS = ("receipt", "report", "no_action", "resolved", "booking")
+
+
+def l2_service_enabled() -> bool:
+    return os.environ.get("AWOS_TRIAGE_L2_SERVICE", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def service_local(m: dict) -> bool:
+    """The sender's local part is made only of service / automated words
+    (no-reply, notifications, billing, accounts-receivable, service, monitor ...)."""
+    local = _addr(m).split("@", 1)[0]
+    toks = [t for t in re.split(r"[._+-]+", local) if t]
+    return bool(toks) and all(t in SERVICE_LOCAL_TOKENS for t in toks)
+
+
+def l2_service_fyi(m: dict, g: Dict[str, bool], prefs: PrefsLike = None) -> Optional[str]:
+    """'service_fyi:<signal>' when ``m`` is a routine done/ready notice from a
+    service mailbox that nothing protects or flags (see the section comment);
+    the label is then fyi / importance 1 / no reply / not suspicious."""
+    if (g.get("list") or g.get("protected") or g.get("injection") or g.get("mentioned")
+            or g.get("org_list")):
+        return None
+    if not service_local(m) or lookalike_signals(m):
+        return None
+    if prefs is not None and live_rules(prefs, m):
+        return None
+    text = _text(m)
+    calm = NOT_NOW_RES[0][1].sub(" ", text)     # "no action required" is not trouble
+    if TROUBLE_RE.search(calm) or keep_signal(m) or raise_signal(m) or INCIDENT_RE.search(text):
+        return None
+    nn = not_now_signal(m)
+    done = FYI_DONE_RE.search(text)
+    if not (done or nn in _RECEIPT_KINDS):
+        return None
+    if risk_topic(m) and nn not in ("receipt",) and not re.search(
+            r"\b(paid|receipts?|payment (?:received|confirmed|successful)|on (?:the|its) way)\b",
+            text, re.I):
+        return None
+    return "service_fyi:" + (nn if nn in _RECEIPT_KINDS else done.group(1).lower())
+
+
+SERVICE_FYI_PRED = {"importance": 1, "category": "fyi", "needs_reply": False, "suspicious": False}
+
+
 # ── L3: confidence from llama-server token probabilities ──────────────────────
 
 def normalize_token_probs(data: dict) -> Optional[List[Tuple[str, List[Tuple[str, float]]]]]:
@@ -1475,6 +1555,8 @@ appointments scheduling calendar studio shop store orders order receipts receipt
 statement hello hi info team news newsletter newsletters dispatch digest community updates
 members membership events
 """.split())
+# service mailboxes for the L2 routine-notice extension (l2_service_fyi)
+SERVICE_LOCAL_TOKENS = DEMOTE_ROLE_TOKENS | _SERVICE_EXTRA
 FAILURE_RE = re.compile(
     r"\b(failed|failure|failing|declined|rejected|bounced|past due|overdue|unpaid|suspended|"
     r"suspension|locked|disabled|will stop|stopped working|outage|is down|went down|"
@@ -1809,14 +1891,95 @@ def user_rules_doc(prefs: PrefsLike) -> dict:
 ModelBatch = Callable[[List[dict]], Tuple[Dict[str, dict], Dict[str, Optional[Dict[str, float]]]]]
 
 
+# ── L3 batch planning (AWOS) ──────────────────────────────────────────────────
+# Every L3 call repeats the system prompt and the per-phase context (~2k chars),
+# so fewer, fuller calls cost fewer prompt tokens. Short or machine mail
+# (automated / role / list senders) is packed up to
+# ``max_batch`` items per call within a ``batch_chars`` budget of message text;
+# person mail keeps ``batch_size``. The packed plan is used only when it needs
+# fewer calls than plain fixed-size chunking, so a run never makes more calls.
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, default))
+    except ValueError:
+        return default
+
+
+def message_cost(m: dict, body_chars: int = 1200) -> int:
+    """Rough prompt size of one rendered message (chars)."""
+    return len(m.get("subject") or "") + min(len(m.get("body") or ""), body_chars) + 160
+
+
+def is_light(m: dict, g: Optional[Dict[str, bool]] = None) -> bool:
+    """Machine mail (list, automated or role sender) that can ride in a bigger L3
+    batch; mail from people keeps the normal batch size."""
+    g = g or {}
+    return bool(g.get("list")) or is_automated_sender(m, g) or is_demote_role_sender(m)
+
+
+def plan_batches(pending: List[dict], batch_size: int = 5, max_batch: Optional[int] = None,
+                 batch_chars: Optional[int] = None,
+                 gmap: Optional[Dict[str, Dict[str, bool]]] = None) -> List[List[dict]]:
+    """L3 batches: light mail packed up to ``max_batch`` (AWOS_TRIAGE_BATCH_MAX,
+    default 8) within ``batch_chars`` (AWOS_TRIAGE_BATCH_CHARS, default 5000) of
+    message text, the rest in ``batch_size`` chunks; falls back to plain
+    chunking unless the packed plan needs fewer calls."""
+    batch_size = max(1, int(batch_size))
+    fixed = [pending[i:i + batch_size] for i in range(0, len(pending), batch_size)]
+    max_batch = max(batch_size, max_batch if max_batch is not None
+                    else _env_int("AWOS_TRIAGE_BATCH_MAX", 8))
+    budget = batch_chars if batch_chars is not None else _env_int("AWOS_TRIAGE_BATCH_CHARS", 5000)
+    if max_batch <= batch_size or len(pending) <= batch_size:
+        return fixed
+    gmap = gmap or {}
+    light = [m for m in pending if is_light(m, gmap.get(m["id"]))]
+    heavy = [m for m in pending if not is_light(m, gmap.get(m["id"]))]
+    packed: List[List[dict]] = []
+    cur: List[dict] = []
+    size = 0
+    for m in light:
+        c = message_cost(m)
+        if cur and (len(cur) >= max_batch or size + c > budget):
+            packed.append(cur)
+            cur, size = [], 0
+        cur.append(m)
+        size += c
+    if cur:
+        packed.append(cur)
+    # top up the last light batch's spare slots is not attempted: person mail
+    # keeps its own, smaller batches
+    packed += [heavy[i:i + batch_size] for i in range(0, len(heavy), batch_size)]
+    return packed if len(packed) < len(fixed) else fixed
+
+
+def uncertainty_mode(local: bool) -> str:
+    """AWOS_TRIAGE_UNC_MODE = none | consistency | second_opinion; default
+    consistency on the local provider, none otherwise."""
+    v = (os.environ.get("AWOS_TRIAGE_UNC_MODE") or "").strip().lower()
+    if v in ("none", "consistency", "second_opinion"):
+        return v
+    if v in ("0", "off", "false", "no"):
+        return "none"
+    return "consistency" if local else "none"
+
+
 def run_cascade(messages: List[dict], prefs: dict, ctx: Context, model_batch: ModelBatch,
                 batch_size: int = 5, th: Optional[Thresholds] = None,
                 log: Optional[Callable[[str], None]] = None,
-                record_hits: bool = False) -> Tuple[List[dict], dict]:
+                record_hits: bool = False, max_batch: Optional[int] = None,
+                batch_chars: Optional[int] = None,
+                unc_checks: Optional[dict] = None) -> Tuple[List[dict], dict]:
     """Triage ``messages``. ``model_batch(batch) -> (preds_by_id, dists_by_id)``;
     preds are raw model labels (rules are applied here, through the prefs.py
     resolver), dists may be empty. ``record_hits`` bumps ``hits``/``last_hit`` on
     the rules that decided each final label (``prefs`` is mutated).
+    ``max_batch`` / ``batch_chars``: L3 packing for short / machine mail
+    (plan_batches; None = env defaults, ``max_batch=batch_size`` = fixed chunks).
+    ``unc_checks``: run triage_uncertainty.assess after the L3 loop, a dict with
+    ``mode`` (none | consistency | second_opinion), ``resample`` /
+    ``second_opinion`` callables and optionally ``policy`` (ReviewPolicy);
+    None = no uncertainty pass.
     Returns (items in input order, trace)."""
     th = th or Thresholds.from_env()
     rules = as_doc(prefs)
@@ -1824,6 +1987,7 @@ def run_cascade(messages: List[dict], prefs: dict, ctx: Context, model_batch: Mo
     trace_items: Dict[str, dict] = {}
     pending: List[dict] = []
     gmap = {}
+    service_on = l2_service_enabled()
     for m in messages:
         g = guards(m, ctx)
         gmap[m["id"]] = g
@@ -1837,6 +2001,16 @@ def run_cascade(messages: List[dict], prefs: dict, ctx: Context, model_batch: Mo
             kind = "lookalike" if lk.startswith(("lookalike_of:", "display_name_brand:")) \
                 else "l0_phish"
             trace_items[m["id"]] = {**tr, "layer": "L0", kind: lk,
+                                    "rules": _trace_fixed(ptrace)[1], "prefs_trace": ptrace}
+            continue
+        inj = injection_override(m, g)
+        if inj:
+            # the injection verdict replaces the model's label wholesale (only
+            # user-written rules can move it), so the model is not asked
+            p, ptrace = prefs_store.resolve(dict(INJECTION_PRED), m, user_rules_doc(rules),
+                                            record_hits=record_hits)
+            decided[m["id"]] = finalize(p, g)
+            trace_items[m["id"]] = {**tr, "layer": "L0", "injection_override": inj,
                                     "rules": _trace_fixed(ptrace)[1], "prefs_trace": ptrace}
             continue
         p, hit, ptrace = (None, [], [])
@@ -1853,18 +2027,28 @@ def run_cascade(messages: List[dict], prefs: dict, ctx: Context, model_batch: Mo
             decided[m["id"]] = finalize(p2, g)
             trace_items[m["id"]] = {**tr, "layer": "L2"}
             continue
+        svc = l2_service_fyi(m, g, rules) if service_on else None
+        if svc:
+            decided[m["id"]] = finalize(dict(SERVICE_FYI_PRED), g)
+            trace_items[m["id"]] = {**tr, "layer": "L2", "l2_rule": svc}
+            continue
         trace_items[m["id"]] = tr
         pending.append(m)
 
     calls = 0
-    for i in range(0, len(pending), batch_size):
-        batch = pending[i:i + batch_size]
+    raw_by_id: Dict[str, Optional[dict]] = {}
+    dist_by_id: Dict[str, Optional[Dict[str, float]]] = {}
+    demoted_by: Dict[str, bool] = {}
+    batches = plan_batches(pending, batch_size, max_batch, batch_chars, gmap)
+    for bi, batch in enumerate(batches):
         # hidden HTML text (white-on-white, display:none, ...) never reaches the model
         preds, dists = model_batch([model_view(m) for m in batch])
         calls += 1
         for m in batch:
             g = gmap[m["id"]]
             raw = preds.get(m["id"])
+            raw_by_id[m["id"]] = dict(raw) if raw else None
+            dist_by_id[m["id"]] = (dists or {}).get(m["id"])
             p = dict(raw) if raw else dict(DEFAULT_PRED)
             p = {k: p.get(k, DEFAULT_PRED[k]) for k in DEFAULT_PRED}
             model_none = p.get("category") == NONE_LABEL
@@ -1885,10 +2069,8 @@ def run_cascade(messages: List[dict], prefs: dict, ctx: Context, model_batch: Mo
             if staff:
                 trace_items[m["id"]]["staff_raise"] = staff
             p, ptrace = resolve_rules(p, m, rules, record_hits=record_hits)
-            inj = injection_override(m, g)
+            inj = injection_override(m, g)   # protected senders only reach here
             if inj:
-                # the model saw it (labels, needs_reply); the verdict beats it and every
-                # learned rule, user-written rules still win (as for the L0 verdicts)
                 p, ptrace = prefs_store.resolve(dict(INJECTION_PRED), m, user_rules_doc(rules),
                                                 record_hits=record_hits)
                 trace_items[m["id"]]["injection_override"] = inj
@@ -1898,6 +2080,7 @@ def run_cascade(messages: List[dict], prefs: dict, ctx: Context, model_batch: Mo
                                   and ((r.get("set") or {}).get("importance") == 0
                                        or (r.get("set") or {}).get("max_importance") == 0)
                                   for r in live_rules(rules, m))
+            demoted_by[m["id"]] = bool(demoted_by_rule or inj)
             if (ab["abstain"] or not ab["demote_ok"]) and not demoted_by_rule and not inj:
                 p["importance"] = max(int(p.get("importance", 1) or 0), 1)
             decided[m["id"]] = finalize(p, g)
@@ -1906,7 +2089,32 @@ def run_cascade(messages: List[dict], prefs: dict, ctx: Context, model_batch: Mo
                                          "abstain_reason": ab["reason"], "conf": ab.get("conf"),
                                          "margin": ab.get("margin"), "top": ab.get("top")})
         if log:
-            log(f"[cascade] model batch {i // batch_size + 1}: {len(batch)} item(s)")
+            log(f"[cascade] model batch {bi + 1}: {len(batch)} item(s)")
+
+    unc_calls, unc_info = 0, None
+    mode = (unc_checks or {}).get("mode", "none") if unc_checks is not None else None
+    if unc_checks is not None and pending:
+        try:  # lazy: triage_uncertainty imports this module
+            from . import triage_uncertainty as tu
+        except ImportError:  # pragma: no cover - plain script
+            import triage_uncertainty as tu  # type: ignore
+        l3 = [tu.L3Item(id=m["id"], message=model_view(m), pred=raw_by_id.get(m["id"]),
+                        dist=dist_by_id.get(m["id"]), guards=gmap[m["id"]], prefs=rules)
+              for m in pending]
+        pol = unc_checks.get("policy") or tu.ReviewPolicy.from_env()
+        res = tu.assess(l3, base_calls=calls, policy=pol, mode=mode,
+                        resample=unc_checks.get("resample"),
+                        second_opinion=unc_checks.get("second_opinion"))
+        unc_calls = res.extra_calls
+        for mid, v in res.verdicts.items():
+            g = gmap[mid]
+            decided[mid] = finalize(tu.apply_verdict(decided[mid], v, demoted_by.get(mid, False)), g)
+            trace_items[mid]["uncertainty"] = v.as_trace()
+            if v.review and not trace_items[mid].get("abstain"):
+                trace_items[mid]["abstain"] = True
+                trace_items[mid]["abstain_reason"] = "uncertainty:" + ",".join(
+                    r for r in v.reasons if tu.REASONS.get(r, ("keep", 0))[0] != "keep")
+        unc_info = {"mode": mode, "budget_calls": res.budget_calls, "checked": res.checked}
 
     items = [{"id": m["id"], **decided[m["id"]]} for m in messages]
     layers = {"L0": 0, "L1": 0, "L2": 0, "L3": 0}
@@ -1916,8 +2124,12 @@ def run_cascade(messages: List[dict], prefs: dict, ctx: Context, model_batch: Mo
     for it in items:
         trace_items[it["id"]]["disposition"] = "archive" if it["importance"] == 0 else "inbox"
     trace = {"enabled": True, "layers": layers, "model_calls_triage": calls,
+             "batch_sizes": [len(b) for b in batches],
              "abstained": len(queue), "review_queue": queue,
              "thresholds": {"min_conf": th.min_conf, "margin": th.margin,
                             "archive_conf": th.archive_conf, "allow_none": th.allow_none},
              "items": trace_items}
+    if unc_checks is not None:
+        trace["model_calls_uncertainty"] = unc_calls
+        trace["uncertainty"] = unc_info or {"mode": mode, "budget_calls": 0, "checked": []}
     return items, trace

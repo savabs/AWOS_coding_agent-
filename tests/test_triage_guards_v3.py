@@ -247,7 +247,10 @@ PEOPLE = [
 ]
 
 
-def test_urgency_cap_demotes_automated_mail_without_near_term_signal():
+def test_urgency_cap_demotes_automated_mail_without_near_term_signal(monkeypatch):
+    # the cap acts on model labels; routine receipts would otherwise be settled at L2
+    # (l2_service_fyi) before the model, see tests/test_cascade_savings.py
+    monkeypatch.setenv("AWOS_TRIAGE_L2_SERVICE", "0")
     labels = {m["id"]: URGENT for m in AUTOMATED + KEEP3 + PEOPLE}
     msgs = AUTOMATED + KEEP3 + PEOPLE
     out, tr, _ = _cascade(msgs, {"version": 1, "rules": []}, labels)
@@ -266,7 +269,8 @@ def test_urgency_cap_demotes_automated_mail_without_near_term_signal():
     assert out["a3"]["importance"] == 1
 
 
-def test_account_incident_from_automated_sender_is_raised_to_3():
+def test_account_incident_from_automated_sender_is_raised_to_3(monkeypatch):
+    monkeypatch.setenv("AWOS_TRIAGE_L2_SERVICE", "0")   # model labels under test, not L2
     # real Qwen run: "A new SSH key was added to your account" labelled 2 under the strict prompt
     incidents = [KEEP3[1], KEEP3[4]]
     out, tr, _ = _cascade(incidents, {"version": 1, "rules": []},

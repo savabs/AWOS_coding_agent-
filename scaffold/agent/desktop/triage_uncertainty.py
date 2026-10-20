@@ -62,8 +62,11 @@ If more than ``max_review_frac`` of L3 items would be queued, the lowest-severit
 review verdicts are dropped (block_archive stays; severity-3 reasons are never
 dropped) so the queue stays readable.
 
-Integration (NOT wired yet; triage_cascade.py / email_triage_agent.py are owned
-elsewhere). In ``triage_cascade.run_cascade``, after the L3 loop (``for i in
+Integration (wired): ``run_cascade(unc_checks=...)``, built by
+email_triage_agent.uncertainty_checks. AWOS_TRIAGE_UNC_MODE = none | consistency |
+second_opinion (default consistency on the local provider, none otherwise); the
+trace carries ``model_calls_uncertainty``. The original notes: in
+``triage_cascade.run_cascade``, after the L3 loop (``for i in
 range(0, len(pending), batch_size)``) has filled ``decided`` / ``trace_items``
 and before the ``items = [...]`` line, add::
 
@@ -519,10 +522,13 @@ def _post(body: dict, post=None) -> dict:
     return data
 
 
-def _render_batch(batch: List[dict], context: str, prefs: Optional[dict], xml: bool) -> str:
+def _render_batch(batch: List[dict], context: str, prefs: Optional[dict], xml: bool,
+                  owner: Optional[str] = None) -> str:
+    """Rendered exactly like the first L3 call (same context, same XML)."""
     eta = _eta()
     if xml:
-        return context + "\n\nMessages:\n\n" + "\n".join(eta._render_xml(m, prefs) for m in batch)
+        return context + "\n\nMessages:\n\n" + "\n".join(eta._render_xml(m, prefs, owner)
+                                                         for m in batch)
     return context + "\n\nMessages:\n\n" + "\n---\n".join(eta._render(m) for m in batch)
 
 
@@ -536,7 +542,8 @@ def _json_items(data: dict) -> List[dict]:
 
 
 def make_resampler(context: str, prefs: Optional[dict] = None, xml: bool = True,
-                   temperature: float = 0.7, post=None) -> Resampler:
+                   temperature: float = 0.7, post=None,
+                   owner: Optional[str] = None) -> Resampler:
     """(messages, j) -> raw preds by id, one L3-shaped call at ``temperature``
     with seed j. Messages should already be model_view()-ed and permuted."""
     eta = _eta()
@@ -546,7 +553,7 @@ def make_resampler(context: str, prefs: Optional[dict] = None, xml: bool = True,
             return {}
         body = {"model": os.environ.get("AWOS_LOCAL_MODEL", "qwen3.5-9b"),
                 "messages": [{"role": "system", "content": eta.SYSTEM},
-                             {"role": "user", "content": _render_batch(batch, context, prefs, xml)}],
+                             {"role": "user", "content": _render_batch(batch, context, prefs, xml, owner)}],
                 "temperature": temperature, "seed": 1000 + j,
                 "max_tokens": 120 * len(batch) + 100,
                 "response_format": {"type": "json_schema",
@@ -565,7 +572,8 @@ def make_resampler(context: str, prefs: Optional[dict] = None, xml: bool = True,
 
 
 def make_second_opinion(context: str, prefs: Optional[dict] = None, xml: bool = True,
-                        n_probs: int = 5, post=None) -> SecondOpinion:
+                        n_probs: int = 5, post=None,
+                        owner: Optional[str] = None) -> SecondOpinion:
     """messages -> p(urgent_48h = yes) by id. Uses the token probabilities at the
     first token of each "urgent_48h" value when the server returns them (raw,
     pre-sampling), else 1.0 / 0.0 from the answer."""
@@ -576,7 +584,7 @@ def make_second_opinion(context: str, prefs: Optional[dict] = None, xml: bool = 
             return {}
         body = {"model": os.environ.get("AWOS_LOCAL_MODEL", "qwen3.5-9b"),
                 "messages": [{"role": "system", "content": SECOND_SYSTEM},
-                             {"role": "user", "content": _render_batch(batch, context, prefs, xml)}],
+                             {"role": "user", "content": _render_batch(batch, context, prefs, xml, owner)}],
                 "temperature": 0.0, "max_tokens": 40 * len(batch) + 40,
                 "response_format": {"type": "json_schema",
                                     "json_schema": {"name": "out", "schema": SECOND_SCHEMA}},
