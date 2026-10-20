@@ -202,13 +202,14 @@ def test_directed_injection_detector():
 
 def test_calendar_invite_injection_is_flagged_and_zeroed_after_the_model():
     out, tr, calls = _cascade([INVITE], {"iv": URGENT}, context_msgs=KNOWN + [INVITE])
-    assert calls == [["iv"]]                         # the model still sees it (L3)
+    # the verdict replaces the model's label wholesale, so the model is not asked (L0)
+    assert calls == [] and tr["items"]["iv"]["layer"] == "L0"
     assert _sub(out["iv"]) == PHISH0
     assert tr["items"]["iv"]["injection_override"] == "directed_instruction"
-    # a dead-heat abstain does not lift it back to importance 1
+    # no model call, so no abstain can lift it back to importance 1
     dist = {"iv": {"urgent_action": 0.5, "important_read": 0.45, "fyi": 0.05}}
     out, tr, _ = _cascade([INVITE], {"iv": URGENT}, context_msgs=KNOWN + [INVITE], dists=dist)
-    assert out["iv"]["importance"] == 0 and tr["items"]["iv"]["abstain"]
+    assert out["iv"]["importance"] == 0 and not tr["items"]["iv"].get("abstain")
 
 
 def test_protected_sender_with_quoted_injection_is_only_flagged():
@@ -373,7 +374,7 @@ def test_bookshop_misses_end_to_end_with_fake_llama_server(monkeypatch):
     out = {i["id"]: i for i in items}
     flat = [i for b in sent for i in b]
     assert _sub(out[pick["embed"]["id"]]) == PHISH0 and pick["embed"]["id"] not in flat
-    assert _sub(out[pick["invite"]["id"]]) == PHISH0 and pick["invite"]["id"] in flat
+    assert _sub(out[pick["invite"]["id"]]) == PHISH0 and pick["invite"]["id"] not in flat
     assert (out[pick["staff"]["id"]]["importance"], out[pick["staff"]["id"]]["category"]) == \
         (3, "urgent_action")
     for i, t in truth.items():

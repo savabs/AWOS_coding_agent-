@@ -96,7 +96,8 @@ SILENT = [   # automated mail with neither a not-now nor a keep signal: left to 
 ]
 
 
-def test_cap_demotes_only_on_positive_not_now_evidence():
+def test_cap_demotes_only_on_positive_not_now_evidence(monkeypatch):
+    monkeypatch.setenv("AWOS_TRIAGE_L2_SERVICE", "0")   # model labels under test, not L2
     msgs = NOT_NOW + KEEP + SILENT
     out, tr, _ = _cascade(msgs, {m["id"]: URGENT for m in msgs})
     for m in NOT_NOW:
@@ -383,6 +384,7 @@ def test_clinic_misses_end_to_end_with_fake_llama_server(monkeypatch):
     monkeypatch.setenv("AWOS_PROVIDER", "local")
     monkeypatch.setenv("AWOS_LOCAL_BASE_URL", "http://127.0.0.1:9/v1")
     monkeypatch.setenv("AWOS_TRIAGE_CASCADE", "1")
+    monkeypatch.setenv("AWOS_TRIAGE_UNC_MODE", "none")   # count triage calls only
     items, trace = eta.triage_with_cascade(d["messages"], d["account"], {"version": 1, "rules": []},
                                            all_messages=d["messages"], xml=True)
     out = {i["id"]: i for i in items}
@@ -477,7 +479,10 @@ def test_html_part_is_scanned_when_the_text_step_dropped_the_hidden_block():
         return {b["id"]: dict(URGENT) for b in batch}, {}
     items, trace = tc.run_cascade([m], {"version": 1, "rules": []}, ctx, mb, th=tc.Thresholds())
     assert items[0]["suspicious"] is True
-    assert "html" not in seen[0] and seen[0]["body"] == "Your order shipped."
+    # an assistant-directed hidden block is now decided at L0 without the model;
+    # whatever does reach the model never carries the html part
+    assert trace["items"]["im"]["layer"] == "L0" and seen == []
+    assert all("html" not in s and s["body"] == "Your order shipped." for s in seen)
 
 
 def test_model_never_sees_hidden_text():
@@ -498,7 +503,12 @@ def test_model_never_sees_hidden_text():
         return {b["id"]: dict(FYI) for b in batch}, {}
     ctx = tc.build_context(ME, {"rules": []}, [m])
     items, _ = tc.run_cascade([m], {"version": 1, "rules": []}, ctx, mb, th=tc.Thresholds())
-    assert "assistant" not in seen[0]["body"].lower() and items[0]["suspicious"] is True
+    assert all("assistant" not in s["body"].lower() for s in seen) and items[0]["suspicious"] is True
+    # a message that hides text and is NOT an injection still reaches the model visibly
+    seen.clear()
+    ctx = tc.build_context(ME, {"rules": []}, [pre])
+    tc.run_cascade([pre], {"version": 1, "rules": []}, ctx, mb, th=tc.Thresholds(), max_batch=5)
+    assert all("20% off" not in s["body"] for s in seen)
 
 
 # ── 5. report / booking / studio role senders for the not-now demotion ────────
@@ -519,7 +529,8 @@ ROLE_KEEP = [
 ]
 
 
-def test_report_booking_studio_roles_are_demoted_on_not_now_evidence():
+def test_report_booking_studio_roles_are_demoted_on_not_now_evidence(monkeypatch):
+    monkeypatch.setenv("AWOS_TRIAGE_L2_SERVICE", "0")   # model labels under test, not L2
     msgs = ROLE_NOT_NOW + ROLE_KEEP
     out, tr, _ = _cascade(msgs, {m["id"]: URGENT for m in msgs})
     for m in ROLE_NOT_NOW:

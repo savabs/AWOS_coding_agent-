@@ -214,8 +214,15 @@ def test_cli_adapter_path_reads_through_fakemailbox_and_sends_xml(tmp_path, monk
     out, usage = _main(tmp_path, mb, monkeypatch, fake)
     assert seen == [True] and usage["cascade"]["mail_io"] == "adapter+xml"
     user = fake.calls[0]["messages"][-1]["content"]
-    assert '<message id="a1">' in user and "<labels><label>INBOX</label></labels>" in user
+    # compact XML: the default INBOX label and the owner's own To: are left out
+    assert '<message id="a1">' in user and "<label>INBOX</label>" not in user
+    assert "<to>" not in user
     assert set(out) == {m["id"] for m in msgs}
+    # AWOS_TRIAGE_XML_COMPACT=0 restores the full mail_text.message_to_xml block
+    monkeypatch.setenv("AWOS_TRIAGE_XML_COMPACT", "0")
+    fake = FakeServer(_labels(msgs))
+    _main(tmp_path, mb, monkeypatch, fake)
+    assert "<labels><label>INBOX</label></labels>" in fake.calls[0]["messages"][-1]["content"]
 
 
 def test_legacy_io_env_and_cascade_off_send_plain_text(tmp_path, monkeypatch):
