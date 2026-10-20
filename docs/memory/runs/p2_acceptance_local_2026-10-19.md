@@ -51,7 +51,10 @@ held-out personas: keyword+prefs scores 55–66 and oracle scores 100.
 
    Deterministic L0 guards fix the first two classes well. On replays they produced 0 false positives on every mailbox.
 3. **Confidence is unusable for abstention.** In the probe, post-sampling probabilities were ≥ 0.95 on 137/150 items at ~82% accuracy. `archive_conf` was set to 0.96. A different uncertainty signal (raw probabilities, or self-consistency) is still needed.
-4. **The cascade's call saving does not generalise yet.** On bookshop, which had never been seen, the cascade arm used 18 calls against 13 for the old path, and its composite was lower. The savings came from rules learned for that particular mailbox. The guards are what transfer.
+4. **Correction (2026-10-20): the cascade did save calls on the never-seen bookshop mailbox.**
+   - An earlier version of this note said the opposite. I had read the usage files with the two arms swapped.
+   - The cascade made 18 calls and sent 29.4k prompt tokens; the legacy path made 25 calls and sent 40.7k (about 28% fewer for the cascade). Its composite was still lower (77.5 vs 81.8).
+   - A later change (compact XML, packing machine mail into larger batches, more decisions made without the model) brought prompt size to 0.41–0.56× legacy on all four mailboxes with no learned rules. That was measured by replaying the real labels, not by a new model run.
 5. **Persona overfitting is real.** Seeds 8 and 9 were the same messages shuffled. Each fix round improved the personas it had looked at, more than the untouched one.
    - Clinic, photographer and bookshop have all now been seen.
    - The next honest check needs a fresh persona.
