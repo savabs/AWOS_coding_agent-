@@ -9,6 +9,16 @@
                           (never installs anything)
     status                state, pending approvals, last runs (JSON)
 
+Answering the digest (scheduler/actions.py; idempotent, audited, redacted):
+    approve <id> | --all  carry out a queued archive through the mailbox adapter
+    deny <id>             drop a queued archive (nothing is written)
+    undo <run-id>:<msg-id> | --run <run-id>
+                          move archived mail back to the INBOX (read back to verify)
+    correct <msg-id> --importance N [--category C] [--needs-reply y/n] [--note "..."] [--job J]
+                          an explicit correction: a user rule in the job's prefs file
+    review [--json]       the review queue with suggested labels and commands
+    apply <file>          run the uncommented lines of an actions file (digest/actions.todo)
+
 Global: --jobs FILE (default ~/.awos/jobs.toml or $AWOS_JOBS_FILE),
         --home DIR  (default [scheduler] home or ~/.awos/scheduler or $AWOS_SCHEDULER_HOME)
 """
@@ -19,6 +29,7 @@ import json
 import sys
 from pathlib import Path
 
+from . import actions as actions_mod
 from . import digest as digest_mod
 from . import launchd
 from .jobs import JobError, load_config, slots_between
@@ -49,6 +60,11 @@ def main(argv=None) -> int:
     p.add_argument("--out", help="write the plist here (default <home>/com.awos.scheduler.plist)")
     p.add_argument("--python", help="interpreter launchd should use (default: this one)")
     sub.add_parser("status")
+    actions_mod.add_action_parsers(sub)
+    rv = sub.add_parser("review", help="list the review queue with suggested labels")
+    rv.add_argument("--json", action="store_true")
+    apl = sub.add_parser("apply", help="run the action lines of a file")
+    apl.add_argument("file")
     a = ap.parse_args(argv)
     try:
         cfg = load_config(a.jobs, a.home)
@@ -101,6 +117,37 @@ def main(argv=None) -> int:
         return 0
     if a.cmd == "status":
         print(json.dumps(sched.status(), indent=1, default=str))
+        return 0
+    if a.cmd in actions_mod.ACTION_CMDS + ("apply",):
+        acts = actions_mod.Actions(sched)
+        try:
+            res = acts.apply(Path(a.file)) if a.cmd == "apply" else actions_mod.run_action(acts, a)
+        except (actions_mod.ActionError, OSError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        for r in res:
+            print(actions_mod.format_result(r))
+        if any(j.mailbox_source[0] == "fake" for j in cfg.jobs if j.kind == "email_triage") \
+                and any(r.get("op") in ("approve", "undo") and r.get("status") == "done" for r in res):
+            print("note: a fake: mailbox keeps its state in memory; mail writes last for this "
+                  "process only (ledger, audit and learned rules are saved)")
+        return 0 if all(r.get("status") in actions_mod.OK_STATUSES for r in res) else 1
+    if a.cmd == "review":
+        rows = actions_mod.Actions(sched).review()
+        if a.json:
+            print(json.dumps(rows, indent=1))
+            return 0
+        if not rows:
+            print("review queue is empty")
+        for r in rows:
+            sug = r["suggested"]
+            print(f"- {r['subject']} | {r['from']} [id {r['id']}] ({r['reason']})")
+            print(f"    now: importance {r['current']['importance']}, {r['current']['category']}; "
+                  f"suggested: importance {sug['importance']}, {sug['category']}, "
+                  f"needs reply {'y' if sug['needs_reply'] else 'n'}")
+            for h in r.get("hints") or []:
+                print(f"    known: {h}")
+            print(f"    {r['command']}")
         return 0
     return 2
 

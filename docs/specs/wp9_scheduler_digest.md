@@ -108,6 +108,67 @@ Privacy:
 - `--notify` (or `[digest] notify = true`) runs `osascript display notification` with counts
   only, and never during the digest's quiet hours.
 
+## Acting on the digest (`scheduler/actions.py`)
+
+Tests: `tests/test_digest_actions.py`. The digest page stays offline and script-free. Every item
+shows its `id` (also the HTML `id` anchor, e.g. `approval-<id>`, `archived-<run>:<msg>`) and a
+copyable CLI command. Next to the page, `actions.todo` (and `actions-<date>.todo`) holds the same
+commands, commented out. The owner uncomments lines and runs `apply`. Nothing posts anywhere.
+
+| action | what it does | learning |
+|---|---|---|
+| `approve <id>` / `--all` | carries out a queued archive through the mailbox adapter, then reads it back | implicit evidence "this scope is junk" (candidate, `model_agreed` = true because the triage proposed it) |
+| `deny <id>` | drops a queued archive; writes nothing | implicit evidence for the exclude "never junk" (candidate, no model agreement) |
+| `undo <run-id>:<msg-id>` (or a bare msg id), `undo --run <run-id>` | moves archived mail (auto or approved) back to INBOX, read back | user rule `min_importance: 1` for the scope |
+| `correct <msg-id> --importance N [--category C] [--needs-reply y/n] [--note ..] [--job J]` | no mail write | user rule with the given labels for the scope |
+| `review [--json]` | lists the review queue with a model-free suggestion (`keyword_predict`), known rules for the sender, and a `correct` command | none |
+| `apply <file>` | runs each uncommented line; a pasted full command line is accepted | as per line |
+
+Guarantees:
+- **Idempotent.** Action ids are `approve:<approval id>`, `deny:<approval id>`,
+  `undo:<run>:<msg>` and `correct:<msg>:<hash of values+note>`.
+  - `<home>/actions/ledger.jsonl` records `intent` before a mail write, `learned` after the prefs
+    update, and `done` last.
+  - A repeated action returns `already_done` and changes nothing.
+- **Crash-safe.** If an `intent` has no `done` (killed between the write and the ledger), the next
+  attempt reads the message back and returns `reconciled`. The write is never repeated. An undo of
+  mail the owner already moved back is also `reconciled`, with no write.
+- **Write policy.** A mail write needs `approvals.writes` ≠ `deny` **and** a writable adapter.
+  Otherwise the result is `refused`, with the reason, and the action can be retried.
+  - Actions open the adapter writable for `queue` and `auto_bulk`: an owner approval is the gate
+    `queue` waits for.
+  - The overnight run itself stays read-only under `queue`.
+- **Audit.** One redacted line per attempt goes to `<home>/actions/audit.jsonl`. Ledger entries and
+  notes written into prefs are redacted too (SecretBroker).
+- **Scope.** From `correction_capture.scope_for`: the sender address for people, address + subject
+  pattern for services. Never domain-wide. User rules outrank every learned rule
+  (`prefs.precedence`) and decide at L1 when they fix importance and category.
+- **Digest.** The next digest has a "Learned from your corrections" section: rules touched by
+  actions since the last digest, with source and status. Approved archives join "Archived" with
+  their undo. Undone archives are marked "moved back". Corrected review items leave the queue.
+- **Exit codes.** `0` when every result is `done`, `already_done` or `reconciled`. `1` for
+  `refused`, `failed` or `not_found`. `2` for bad arguments.
+
+```
+S="python -m scaffold.agent.desktop.scheduler --home ~/.awos/scheduler"
+$S review
+$S approve 'inbox@20261019T0600Z:archive:m498dbf'      # or: $S approve --all
+$S deny    'inbox@20261019T0600Z:archive:m77aa01'
+$S undo    'inbox@20261019T0600Z:m498dbf'              # or: $S undo --run inbox@20261019T0600Z
+$S correct m12c0de --importance 3 --category urgent_action --needs-reply y --note "my accountant"
+$EDITOR ~/.awos/scheduler/digest/actions.todo && $S apply ~/.awos/scheduler/digest/actions.todo
+```
+
+Limits:
+- A `fake:` mailbox keeps its state in memory, so from the CLI a mail write lasts only for that
+  process. The CLI says so. The ledger, audit and learned rules are saved. Tests share one
+  FakeMailbox through `Actions(adapter_factory=...)`.
+- Implicit candidates promote only with model agreement. Denials carry none, so a deny-exclude
+  never promotes on its own; it becomes active only through `promote(model_check=...)` or an
+  explicit `correct`.
+- `approve` of a non-archive approval (a skill's `needs_user`) only records the approval and
+  prints the `run <job>` command. The runner does not read it yet.
+
 ## CLI
 
 ```
@@ -117,6 +178,12 @@ python -m scaffold.agent.desktop.scheduler run-due
 python -m scaffold.agent.desktop.scheduler digest [--notify] [--out DIR]
 python -m scaffold.agent.desktop.scheduler plist [--out FILE] [--python PATH]
 python -m scaffold.agent.desktop.scheduler status
+python -m scaffold.agent.desktop.scheduler approve <id> | --all
+python -m scaffold.agent.desktop.scheduler deny <id>
+python -m scaffold.agent.desktop.scheduler undo <run-id>:<msg-id> | --run <run-id>
+python -m scaffold.agent.desktop.scheduler correct <msg-id> --importance N [--category C] [--needs-reply y/n] [--note ".."]
+python -m scaffold.agent.desktop.scheduler review [--json]
+python -m scaffold.agent.desktop.scheduler apply <file>
 ```
 
 `plist` writes `com.awos.scheduler.plist`. Its contents:
@@ -128,9 +195,9 @@ It prints the `launchctl bootstrap` / `bootout` commands for the owner. It never
 
 ## Not done here (follow-ups)
 
-- **Applying approvals and undo.** Approving a queued item and per-item "back to inbox + learn"
-  from the digest page need a small local approve/undo command or page. The digest feeding WP2
-  corrections, from the BLUEPRINT acceptance, is also still to do.
+- **Applying approvals and undo.** Done (see "Acting on the digest"). A local page with buttons
+  was deliberately not built: it would need a listening server and scripts, and the
+  copy-a-command / `actions.todo` flow keeps the page offline.
 - **Display gate for UI jobs.** The lock-screen probe (`ioreg` `CGSSessionScreenIsLocked`) is
   best effort. An unknown state is refused (fail closed). It should be verified with a
   `probes.py` lock-screen probe on the real Mac.

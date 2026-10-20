@@ -7,6 +7,11 @@ run's triage.json, approvals.jsonl, the preference store):
   * needs-reply list
   * review queue: the cascade abstained, so the mail stayed in the inbox
   * what was archived, with the undo for each
+  * every item carries an ``id`` and a copyable CLI command (approve / deny /
+    undo / correct, scheduler/actions.py); ``actions.todo`` next to the page is
+    the same commands, commented, for ``scheduler apply <file>``
+  * "Learned from your corrections": rules the owner's actions created since the
+    last digest
   * learned-rule changes since the last digest, plus the full "what I learned"
     (testbeds/email_triage/prefs.py render_learned)
   * skills / micro-tasks that halted or need the owner (one-step fix demo)
@@ -24,11 +29,13 @@ from __future__ import annotations
 
 import html
 import json
+import re
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from . import actions as actions_mod
 from .jobs import in_window, slot_on
 from .runner import Outcome, Scheduler, iso, parse_iso, read_json, read_jsonl
 
@@ -87,8 +94,25 @@ def collect(sched: Scheduler, now: Optional[datetime] = None) -> Dict[str, Any]:
                or "injection" in (m.get("guards") or [])]
     flagged_ids = {m["id"] for m in flagged}
     needs_reply = [m for m in items if m.get("needs_reply") and m["id"] not in flagged_ids]
-    review = [m for m in items if m.get("review")]
+    acts = actions_mod.Actions(sched)
+    corrected = {r.get("target") for r in read_jsonl(acts.ledger_path)
+                 if r.get("phase") == "done" and r.get("op") == "correct"}
+    review = [m for m in items if m.get("review") and m["id"] not in corrected]
     archived = [m for m in items if (m.get("action") or {}).get("status") == "done"]
+    # archives the owner approved since the last digest (they were queued in the run)
+    tri = None
+    for r in read_jsonl(acts.ledger_path):
+        if (r.get("phase") == "done" and r.get("op") == "approve" and r.get("archived")
+                and (parse_iso(r.get("at")) or now) > since):
+            tri = tri if tri is not None else acts.triage_index()
+            it = tri.get(r.get("target")) or {"id": r.get("target")}
+            if not any(m["id"] == it["id"] and m.get("run_id") == r.get("run_id") for m in archived):
+                archived.append({**it, "run_id": r.get("run_id"), "job": r.get("job"),
+                                 "why_source": "you", "why": "you approved this archive"})
+    undone = acts.undone()
+    for m in archived:
+        m["undone"] = f"{m.get('run_id')}:{m['id']}" in undone
+    archive_runs = sorted({m.get("run_id") for m in archived if not m.get("undone")} - {None})
     # skills / micro-tasks: the latest run per job that halted or needs the owner
     halted: Dict[str, dict] = {}
     for r in runs:
@@ -116,6 +140,8 @@ def collect(sched: Scheduler, now: Optional[datetime] = None) -> Dict[str, Any]:
         "local_time": now.astimezone(sched.cfg.tz).strftime("%A %d %B %Y, %H:%M"),
         "urgent": urgent, "needs_reply": needs_reply, "review": review, "archived": archived,
         "flagged": flagged, "learned": learned, "halted": list(halted.values()),
+        "learned_from_you": acts.learned_since(dg.get("last_at")),
+        "archive_runs": archive_runs, "cmd_prefix": actions_mod.cli_prefix(sched.cfg),
         "approvals": sched.pending_approvals(),
         "runs": [{k: r.get(k) for k in ("run_id", "job", "kind", "outcome", "reason", "resumed",
                                         "missed_slots", "ended")} for r in runs],
@@ -135,6 +161,23 @@ def counts(d: dict) -> Dict[str, int]:
                                    "halted", "approvals")}
 
 
+def _cmds(d: dict, kind: str, x: Any) -> List[str]:
+    """The copyable command(s) for one digest item."""
+    pre = d.get("cmd_prefix") or actions_mod.PROG
+    q = actions_mod._q
+    if kind == "approval":
+        return [f"{pre} approve {q(x.get('id'))}", f"{pre} deny {q(x.get('id'))}"]
+    if kind == "archived":
+        return [] if x.get("undone") else [f"{pre} undo {q(str(x.get('run_id')) + ':' + str(x['id']))}"]
+    if kind == "run":
+        return [f"{pre} undo --run {q(x)}"]
+    return [actions_mod.correct_cmd(pre, x)]
+
+
+def _anchor(kind: str, ident: Any) -> str:
+    return f"{kind}-" + re.sub(r"[^A-Za-z0-9_.:@-]+", "-", str(ident))
+
+
 def render_text(d: dict) -> str:
     c = counts(d)
     L = [f"AWOS morning digest, {d['local_time']}",
@@ -149,19 +192,34 @@ def render_text(d: dict) -> str:
         for r in rows:
             L.extend("  " + x for x in fmt(r))
         L.append("")
-    sec("Urgent", d["urgent"], lambda m: [f"- {m.get('subject')} | {_who(m)}",
-                                          f"    why ({m.get('why_source')}): {m.get('why')}"])
-    sec("Needs a reply", d["needs_reply"], lambda m: [f"- {m.get('subject')} | {_who(m)}"])
+    def cmd(kind, x, label):
+        return [f"    {label}: {c_}" for c_ in _cmds(d, kind, x)]
+    sec("Urgent", d["urgent"], lambda m: [f"- {m.get('subject')} | {_who(m)} [id {m['id']}]",
+                                          f"    why ({m.get('why_source')}): {m.get('why')}"]
+        + cmd("mail", m, "if wrong"))
+    sec("Needs a reply", d["needs_reply"], lambda m: [f"- {m.get('subject')} | {_who(m)} [id {m['id']}]"]
+        + cmd("mail", m, "if wrong"))
     sec("Check these (I was not sure; left in your inbox)", d["review"],
-        lambda m: [f"- {m.get('subject')} | {_who(m)} ({m.get('review_reason')})"])
+        lambda m: [f"- {m.get('subject')} | {_who(m)} ({m.get('review_reason')}) [id {m['id']}]"]
+        + cmd("mail", m, "set label"))
     sec("Archived", d["archived"], lambda m: [
-        f"- {m.get('subject')} | {_who(m)}",
-        f"    why ({m.get('why_source')}): {m.get('why')}",
-        f"    undo: move message {m['id']} back to the Inbox (run {m.get('run_id')})"])
+        f"- {m.get('subject')} | {_who(m)} [id {m.get('run_id')}:{m['id']}]"
+        + (" (moved back to the inbox)" if m.get("undone") else ""),
+        f"    why ({m.get('why_source')}): {m.get('why')}"]
+        + ([] if m.get("undone") else
+           [f"    undo: move message {m['id']} back to the Inbox (run {m.get('run_id')})"]
+           + [f"      {c_}" for c_ in _cmds(d, "archived", m)]))
+    if d.get("archive_runs"):
+        L.extend(f"  undo everything run {r} archived: {_cmds(d, 'run', r)[0]}" for r in d["archive_runs"])
+        L.append("")
     sec("Flagged: phishing / prompt injection", d["flagged"], lambda m: [
-        f"- {m.get('subject')} | {_who(m)}", f"    why ({m.get('why_source')}): {m.get('why')}"])
+        f"- {m.get('subject')} | {_who(m)} [id {m['id']}]",
+        f"    why ({m.get('why_source')}): {m.get('why')}"] + cmd("mail", m, "if wrong"))
     sec("Waiting for your approval", d["approvals"], lambda a: [
-        f"- [{a.get('op')}] {a.get('summary')} (id {a.get('id')})"])
+        f"- [{a.get('op')}] {a.get('summary')} (id {a.get('id')})"]
+        + [f"    {c_}" for c_ in _cmds(d, "approval", a)])
+    sec("Learned from your corrections", d.get("learned_from_you", []), lambda r: [
+        f"- {r.get('text')} [{r.get('id')}, {r.get('source')}, {r.get('status')}] (from {r.get('op')})"])
     sec("Skills that stopped and need you", d["halted"], lambda r: [
         f"- {r.get('job')}: {r.get('outcome')}: {r.get('reason')}",
         "    fix: demonstrate the one step it could not do; the next run uses the taught step"])
@@ -199,7 +257,9 @@ ul{list-style:none;margin:0;padding:0}li{background:var(--card);border:1px solid
 padding:10px 12px;margin:6px 0}.s{font-weight:600;overflow-wrap:anywhere}.f{color:var(--muted);font-size:13px;
 overflow-wrap:anywhere}.why{font-size:13px;margin-top:4px}.tag{font-size:12px;border-radius:4px;padding:1px 6px;
 background:var(--chip);margin-right:4px}.urgent .s{color:var(--urgent)}.flag .s{color:var(--warn)}
-.empty{color:var(--muted);font-size:14px}code,pre{font:12px/1.45 ui-monospace,Menlo,monospace}
+.empty{color:var(--muted);font-size:14px}.cmd{margin-top:6px}
+.cmd code{display:block;user-select:all;-webkit-user-select:all;background:var(--chip);border-radius:4px;
+padding:4px 6px;overflow-wrap:anywhere;white-space:pre-wrap}code,pre{font:12px/1.45 ui-monospace,Menlo,monospace}
 pre{white-space:pre-wrap;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px}
 table{border-collapse:collapse;width:100%;font-size:13px}td,th{border-bottom:1px solid var(--line);padding:6px 4px;
 text-align:left;vertical-align:top}.ok{color:var(--ok)}.bad{color:var(--urgent)}
@@ -210,12 +270,20 @@ def _e(x: Any) -> str:
     return html.escape("" if x is None else str(x), quote=True)
 
 
-def _mail_li(m: dict, cls: str = "", extra: str = "") -> str:
+def _cmd_html(cmds: List[str]) -> str:
+    return "".join(f'<div class="cmd"><code>{_e(c)}</code></div>' for c in cmds)
+
+
+def _mail_li(m: dict, cls: str = "", extra: str = "", anchor: str = "",
+             cmds: Optional[List[str]] = None, ident: Optional[str] = None) -> str:
     why = (f'<div class="why"><span class="tag">{_e(m.get("why_source"))}</span>{_e(m.get("why"))}</div>'
            if m.get("why") else "")
-    return (f'<li class="{cls}"><div class="s">{_e(m.get("subject"))}</div>'
-            f'<div class="f">{_e(_who(m))} · {_e(m.get("date"))} · {_e(m.get("category"))}</div>'
-            f"{why}{extra}</li>")
+    idt = ident or m.get("id")
+    return (f'<li class="{cls}" id="{_e(_anchor(anchor or "mail", idt))}">'
+            f'<div class="s">{_e(m.get("subject"))}</div>'
+            f'<div class="f">{_e(_who(m))} · {_e(m.get("date"))} · {_e(m.get("category"))} · '
+            f'id <code>{_e(idt)}</code></div>'
+            f"{why}{extra}{_cmd_html(cmds or [])}</li>")
 
 
 def _section(title: str, rows: List[str], empty: str = "Nothing here.") -> str:
@@ -225,21 +293,35 @@ def _section(title: str, rows: List[str], empty: str = "Nothing here.") -> str:
 
 def render_html(d: dict) -> str:
     c = counts(d)
+    runs_undo = "".join(
+        f'<p class="f" id="{_e(_anchor("run", r))}">Undo everything run <code>{_e(r)}</code> archived:</p>'
+        + _cmd_html(_cmds(d, "run", r)) for r in d.get("archive_runs", []))
     parts = [
-        _section("Urgent", [_mail_li(m, "urgent") for m in d["urgent"]], "Nothing urgent."),
-        _section("Needs a reply", [_mail_li(m) for m in d["needs_reply"]]),
+        _section("Urgent", [_mail_li(m, "urgent", anchor="urgent", cmds=_cmds(d, "mail", m))
+                            for m in d["urgent"]], "Nothing urgent."),
+        _section("Needs a reply", [_mail_li(m, anchor="reply", cmds=_cmds(d, "mail", m))
+                                   for m in d["needs_reply"]]),
         _section("Check these (I was not sure, so they stayed in your inbox)",
-                 [_mail_li(m, extra=f'<div class="f">reason: {_e(m.get("review_reason"))}</div>')
+                 [_mail_li(m, extra=f'<div class="f">reason: {_e(m.get("review_reason"))}</div>',
+                           anchor="review", cmds=_cmds(d, "mail", m))
                   for m in d["review"]]),
         _section("Archived", [_mail_li(m, extra=(
-            f'<div class="f">undo: move message <code>{_e(m["id"])}</code> back to the Inbox '
-            f'(run <code>{_e(m.get("run_id"))}</code>)</div>')) for m in d["archived"]],
-            "Nothing was archived."),
-        _section("Flagged: phishing or prompt injection", [_mail_li(m, "flag") for m in d["flagged"]],
+            '<div class="f">moved back to the inbox</div>' if m.get("undone") else ""),
+            anchor="archived", cmds=_cmds(d, "archived", m), ident=f'{m.get("run_id")}:{m["id"]}')
+            for m in d["archived"]], "Nothing was archived.") + runs_undo,
+        _section("Flagged: phishing or prompt injection",
+                 [_mail_li(m, "flag", anchor="flagged", cmds=_cmds(d, "mail", m)) for m in d["flagged"]],
                  "Nothing suspicious."),
         _section("Waiting for your approval", [
-            f'<li><div class="s">{_e(a.get("op"))}: {_e(a.get("summary"))}</div>'
-            f'<div class="f">id <code>{_e(a.get("id"))}</code></div></li>' for a in d["approvals"]]),
+            f'<li id="{_e(_anchor("approval", a.get("id")))}"><div class="s">{_e(a.get("op"))}: '
+            f'{_e(a.get("summary"))}</div>'
+            f'<div class="f">id <code>{_e(a.get("id"))}</code></div>{_cmd_html(_cmds(d, "approval", a))}</li>'
+            for a in d["approvals"]]),
+        _section("Learned from your corrections", [
+            f'<li id="{_e(_anchor("learned", r.get("id")))}"><span class="tag">{_e(r.get("op"))}</span>'
+            f'{_e(r.get("text"))} <span class="f">[{_e(r.get("id"))}, {_e(r.get("source"))}, '
+            f'{_e(r.get("status"))}]</span></li>' for r in d.get("learned_from_you", [])],
+            "No corrections since the last digest."),
         _section("Skills that stopped and need you", [
             f'<li><div class="s">{_e(r.get("job"))}: {_e(r.get("outcome"))}</div>'
             f'<div class="why">{_e(r.get("reason"))}</div><div class="f">Fix: demonstrate the one step it '
@@ -307,8 +389,10 @@ def write_digest(sched: Scheduler, now: Optional[datetime] = None, out_dir: Opti
     html_p, txt_p = out_dir / f"digest-{stamp}.html", out_dir / f"digest-{stamp}.txt"
     text = sched.broker.redact(render_text(d))
     page = sched.broker.redact(render_html(d))
+    todo = sched.broker.redact("\n".join(actions_mod.todo_lines(d, d.get("cmd_prefix") or "")) + "\n")
+    todo_p = out_dir / f"actions-{stamp}.todo"
     for p, body in ((html_p, page), (txt_p, text), (out_dir / "latest.html", page),
-                    (out_dir / "latest.txt", text)):
+                    (out_dir / "latest.txt", text), (todo_p, todo), (out_dir / "actions.todo", todo)):
         tmp = p.with_name(p.name + ".tmp")
         tmp.write_text(body)
         tmp.chmod(0o600)
@@ -327,7 +411,8 @@ def write_digest(sched: Scheduler, now: Optional[datetime] = None, out_dir: Opti
         if slot is not None:
             dg["last_slot"] = iso(slot)
     sched.update_state(fn)
-    return {"html": str(html_p), "text": str(txt_p), "counts": c, "notified": notified,
+    return {"html": str(html_p), "text": str(txt_p), "todo": str(todo_p), "counts": c,
+            "notified": notified,
             "summary": text}
 
 
