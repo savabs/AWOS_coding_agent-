@@ -100,8 +100,8 @@ jobs:
           set -euo pipefail
           source ci/p2_email.env
           mkdir -p ~/llama && cd ~/llama
-          gh release download ${LLAMA_TAG:+"$LLAMA_TAG"} --repo ggml-org/llama.cpp --pattern '*bin-ubuntu-x64.zip' --clobber
-          unzip -q -o ./*bin-ubuntu-x64.zip
+          gh release download "$LLAMA_TAG" --repo ggml-org/llama.cpp --pattern "llama-$LLAMA_TAG-bin-ubuntu-x64.tar.gz" --clobber
+          tar -xzf "llama-$LLAMA_TAG-bin-ubuntu-x64.tar.gz"
           BIN=$(find ~/llama -name llama-server -type f | head -1)
           chmod +x "$BIN"
           echo "LLAMA_BIN=$BIN" >> "$GITHUB_ENV"
