@@ -42,6 +42,15 @@ Hard rules enforced in code, not in the prompt:
   * success (VERIFIED) only when the page showed the subtask's explicit
     acknowledgement after the last write AND the effect check passes;
     ``done`` without both -> COMPLETED_UNVERIFIED;
+  * repeats (small local models loop on a step that worked): a secret
+    captured in this run is shown as captured, dropped from the grammar and
+    the "may copy into" list, and the prompt says done is next; an identical
+    copy / fill / select that already succeeded is not executed again (clear
+    SKIPPED message; 3 such repeats -> NEEDS_USER). If the model repeats a
+    step while the success condition already holds, the subtask closes
+    through the same ack + effect check as ``done`` (event ``auto_done``);
+  * every prompt names the current page and what it is for (heading, form
+    fields, dialog, hidden value) plus the pages visited so far;
   * page text is data: instructions addressed to AI agents are flagged as
     prompt injection, reported in ``flags`` and shown to the model only as
     quoted untrusted text.
@@ -680,21 +689,71 @@ class MicroAgent:
             self.log(f"[{res.subtask}] FLAG prompt_injection on {path} (ignored)")
         return hits
 
+    @staticmethod
+    def _page_purpose(p: Page, captured_here: Dict[int, str]) -> str:
+        """One plain line: which page this is and what it is for, so a small
+        model does not have to infer it from the control list (generic: built
+        from the title, main heading, dialog, forms and hidden values)."""
+        path = re.sub(r"^https?://[^/]+", "", p.url) or "/"
+        bits = [f"Current page: \"{mask_secrets(p.title)[:80]}\" (path {path})"]
+        if p.headings and p.headings[0].strip().lower() != p.title.strip().lower():
+            bits.append(f"main heading \"{mask_secrets(p.headings[0])[:80]}\"")
+        if p.dialog:
+            bits.append(f"a dialog is open: \"{mask_secrets(p.dialog)[:120]}\"")
+        labels = []
+        for i, f in enumerate(p.forms):
+            fields = [c.name for c in p.controls if c.form == i and c.role in
+                      ("textbox", "password", "radiogroup", "combobox", "checkbox")]
+            if fields:
+                labels.append(f"\"{mask_secrets(f.label or 'form')[:60]}\" (fields: "
+                              + ", ".join(mask_secrets(x)[:40] for x in fields[:6]) + ")")
+        if labels:
+            bits.append("form to fill: " + "; ".join(labels[:3]))
+        hidden = [c for c in p.controls if c.role == "secret_text"]
+        for c in hidden:
+            if c.n in captured_here:
+                bits.append(f"its hidden value [{c.n}] is ALREADY SAVED as {{{{secret:{captured_here[c.n]}}}}}")
+            else:
+                bits.append(f"it shows a new hidden value [{c.n}] to save with copy_to_secret")
+        if not labels and not hidden and not p.dialog:
+            if any(c.role in ("link", "button") for c in p.controls):
+                bits.append("navigation page (no form here); click the link or button that leads toward the goal")
+        return "; ".join(bits) + "."
+
     def _prompt(self, st: Subtask, p: Page, step: int, history: List[str], window: int, injected: bool,
-                fmt: str) -> str:
+                fmt: str, captured: Optional[Dict[str, dict]] = None, visited: Sequence[str] = (),
+                complete: bool = False) -> str:
+        captured = captured or {}
         out = [f"Goal: {st.goal}", f"Step {step} of {st.max_steps}."]
         if st.secrets_in:
             out.append("Secret handles you may fill: " + ", ".join("{{secret:%s}}" % s for s in st.secrets_in))
-        if st.secrets_out:
-            out.append("Names you may copy_to_secret into: " + ", ".join(st.secrets_out))
+        remaining = [s for s in st.secrets_out if s not in captured]
+        if remaining:
+            out.append("Names you may copy_to_secret into: " + ", ".join(remaining))
+        if captured:
+            out.append("Already captured (saved in the secret store; do NOT copy again): "
+                       + ", ".join("{{secret:%s}} (step %d)" % (k, v["step"]) for k, v in captured.items()))
         if st.pinned:
             out.append("Required values (enforced): " + (st.pinned_hint or "; ".join(
                 f"{k} must match /{v}/" for k, v in st.pinned.items())))
+        if len(visited) > 1:
+            out.append("Pages so far: " + " -> ".join(f"\"{mask_secrets(t)[:50]}\"" for t in visited[-6:]))
+        here = {v["n"]: k for k, v in captured.items() if v.get("url") == p.url}
+        out.append(self._page_purpose(p, here))
+        if complete:
+            out.append("STATUS: the goal's success condition is met (the page confirmed it"
+                       + (" and " + ", ".join("{{secret:%s}}" % s for s in st.secrets_out) + " is saved"
+                          if st.secrets_out else "")
+                       + "). Your next reply must be done(\"summary\").")
         if history:
             hist = "\n".join(history[-6:])
             masker = getattr(self.store, "mask_observation", None)
             out.append("Your previous actions and results:\n" + (masker(hist) if masker else hist))
         obs = web_tools.outline(p, window, WINDOW)
+        for n, name in here.items():                 # a captured value is no longer "to copy"
+            obs = re.sub(r"^(\[%d\] secret_text .*?)= «hidden; use copy_to_secret»" % n,
+                         lambda m, name=name: m.group(1) + f"= «already saved as {{{{secret:{name}}}}}; "
+                                                           "do not copy again»", obs, flags=re.M)
         masker = getattr(self.store, "mask_observation", None)
         if masker is not None:                       # WP7 broker masking on top of web_tools'
             obs = masker(obs)
@@ -757,12 +816,38 @@ class MicroAgent:
         approved = st.approval is None
         ack_seen = False
         mfa_answered = False
+        captured: Dict[str, dict] = {}       # secret name -> {"step", "url", "n"} captured in THIS run
+        done_here: Dict[tuple, int] = {}     # fill/select already applied on the current page -> step
+        duplicates = 0
+        visited: List[str] = []
 
         def finish(outcome: Outcome, reason: str = "", summary: str = "") -> MicroResult:
             res.outcome, res.reason, res.summary = outcome, reason, summary
             res.seconds = self.clock() - t0
             self.log(f"[{st.name}] END {outcome.value}: {reason or summary}")
             return res
+
+        def ack_ok(p: Page) -> bool:
+            return ack_seen or (self._ack(st, p) and (res.writes > 0 or not st.allow_writes))
+
+        def complete(p: Page) -> bool:
+            """The subtask's success condition, as far as the agent can see it:
+            the page acknowledged the goal (after the last write) and every
+            secret the subtask must capture was captured in this run. Only
+            meaningful for subtasks that change something (a write or a capture)."""
+            if not (st.secrets_out or res.writes > 0):
+                return False
+            return ack_ok(p) and all(s in captured for s in st.secrets_out)
+
+        def verify_done(p: Page, ev: dict, summary: str) -> MicroResult:
+            """The one success rule: explicit acknowledgement + effect check."""
+            if not ack_ok(p):
+                return finish(Outcome.UNVERIFIED, "done() without an explicit acknowledgement on the page", summary)
+            eff = st.effect() if st.effect else EffectResult(True, "no effect check")
+            ev["effect"] = eff.detail
+            if not eff.ok:
+                return finish(Outcome.UNVERIFIED, f"effect check failed: {eff.detail}", summary)
+            return finish(Outcome.VERIFIED, eff.detail, summary)
 
         try:
             page = self.br.open(st.start) if st.start else (self.br.page or self.br.open("/"))
@@ -797,11 +882,16 @@ class MicroAgent:
             if self._ack(st, page) and (res.writes > 0 or not st.allow_writes):
                 ack_seen = True
 
+            if not visited or visited[-1] != page.title:
+                visited.append(page.title)
             res.steps += 1
             sub = Subtask(**{**st.__dict__, "secrets_in": secrets_in})
             fmt = getattr(self.model, "output_format", "gbnf")
-            prompt = self._prompt(sub, page, res.steps, history, window, injected, fmt)
-            grammar = build_grammar(len(page.controls), secrets_in, st.secrets_out) if fmt == "gbnf" else None
+            prompt = self._prompt(sub, page, res.steps, history, window, injected, fmt,
+                                  captured=captured, visited=visited, complete=complete(page))
+            # a name captured in this run is no longer offered: a small model cannot even emit the repeat
+            out_left = [s for s in st.secrets_out if s not in captured]
+            grammar = build_grammar(len(page.controls), secrets_in, out_left) if fmt == "gbnf" else None
             try:
                 raw = self.model.decide(SYSTEM, prompt, grammar)
             except Exception as e:                       # model down / timeout: stop, do not guess
@@ -821,6 +911,25 @@ class MicroAgent:
             self.log(f"[{st.name}] step {res.steps}: {act.show()}")
             ev = {"step": res.steps, "action": act.show()}
             res.events.append(ev)
+            dup = self._duplicate_of(act, page, captured, done_here)
+            if dup is not None:
+                ev["duplicate_of"] = dup
+                if complete(page):
+                    # the model is repeating a finished step: the success condition already
+                    # holds, so close the subtask through the same ack + effect check as done()
+                    ev["auto_done"] = True
+                    self.log(f"[{st.name}]   duplicate of step {dup}; success condition met -> auto done")
+                    return verify_done(page, ev, f"auto-completed after step {dup} (model repeated "
+                                                 f"{act.verb.value}; acknowledgement + effect checked)")
+                duplicates += 1
+                msg = (f"already done at step {dup}; not repeated. "
+                       + self._next_hint(st, act, captured))
+                ev["rejected"] = msg
+                history.append(f"{res.steps}. {act.show()} -> SKIPPED: {msg}")
+                self.log(f"[{st.name}]   skipped duplicate: {msg}")
+                if duplicates >= MAX_INVALID:
+                    return finish(Outcome.NEEDS_USER, "model kept repeating an action that already succeeded")
+                continue
             err, page_after, stop = self._execute(st, act, page, secrets_in, res, approved, ev)
             if stop is not None:
                 return finish(*stop)
@@ -829,15 +938,7 @@ class MicroAgent:
                 if window >= len(page.controls):
                     window = max(0, len(page.controls) - WINDOW)
             if act.verb is Verb.DONE:
-                ack_now = self._ack(st, page) and (res.writes > 0 or not st.allow_writes)
-                if not (ack_seen or ack_now):
-                    return finish(Outcome.UNVERIFIED, "done() without an explicit acknowledgement on the page",
-                                  act.text)
-                eff = st.effect() if st.effect else EffectResult(True, "no effect check")
-                ev["effect"] = eff.detail
-                if not eff.ok:
-                    return finish(Outcome.UNVERIFIED, f"effect check failed: {eff.detail}", act.text)
-                return finish(Outcome.VERIFIED, eff.detail, act.text)
+                return verify_done(page, ev, act.text)
             if err:
                 invalid += 1
                 ev["rejected"] = err
@@ -850,13 +951,57 @@ class MicroAgent:
                 approved = True
             if page_after is not page:
                 window = 0
+                done_here.clear()
                 if ev.get("write"):
                     ack_seen = False
+            elif act.verb in (Verb.FILL, Verb.SELECT):
+                done_here[self._action_key(act)] = res.steps
             page = page_after
             if self._ack(st, page) and (res.writes > 0 or not st.allow_writes):
                 ack_seen = True
+            if act.verb is Verb.COPY and ev.get("captured"):
+                captured[act.name] = {"step": res.steps, "url": page.url, "n": act.n}
+                line = (f"{res.steps}. {act.show()} -> ok; CAPTURED: the hidden value is now saved as "
+                        f"{{{{secret:{act.name}}}}}. Do not copy it again.")
+                line += (" The goal's success condition is met: reply done(\"summary\") next."
+                         if complete(page) else " " + self._next_hint(st, act, captured))
+                history.append(line)
+                continue
             history.append(f"{res.steps}. {act.show()} -> ok; now on \"{page.title}\""
                            + (f" ({page.live_text()[:160]})" if page.live_text() else ""))
+
+    # -- repeat detection (small models loop on a step that already worked) -------
+    @staticmethod
+    def _action_key(act: MicroAction) -> tuple:
+        if act.verb is Verb.FILL:
+            return ("fill", act.n, act.value or "")
+        if act.verb is Verb.SELECT:
+            return ("select", act.n, (act.option or "").strip().lower())
+        return (act.verb.value, act.n)
+
+    def _duplicate_of(self, act: MicroAction, page: Page, captured: Dict[str, dict],
+                      done_here: Dict[tuple, int]) -> Optional[int]:
+        """Step number of an identical action that already succeeded, else None.
+        copy_to_secret: the same secret name was captured earlier in this run
+        (the value is in the store; reading it again changes nothing). fill /
+        select: the same control got the same value on this same page (any
+        page change clears this). Clicks are never treated as duplicates: the
+        same number on a new page is a different control."""
+        if act.verb is Verb.COPY and act.name in captured:
+            return captured[act.name]["step"]
+        if act.verb in (Verb.FILL, Verb.SELECT):
+            return done_here.get(self._action_key(act))
+        return None
+
+    @staticmethod
+    def _next_hint(st: Subtask, act: MicroAction, captured: Dict[str, dict]) -> str:
+        left = [s for s in st.secrets_out if s not in captured]
+        if act.verb is Verb.COPY:
+            if left:
+                return "Still to capture: " + ", ".join(left) + "."
+            return ("Every secret this goal needs is saved. If the page confirms the goal, reply "
+                    "done(\"summary\"); otherwise continue with the goal.")
+        return "Continue with the next field or control the goal needs."
 
     def _execute(self, st: Subtask, act: MicroAction, page: Page, secrets_in: List[str], res: MicroResult,
                  approved: bool, ev: dict):
