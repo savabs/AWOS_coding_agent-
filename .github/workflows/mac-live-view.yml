@@ -1,8 +1,9 @@
 # Watch AWOS computer use LIVE on a free GitHub macOS runner (a disposable macOS VM).
-# The runner turns on Screen Sharing, serves a noVNC web viewer, and opens a temporary
-# Cloudflare quick tunnel. The viewer link is printed in the log and as a run annotation;
-# access needs LIVE_VIEW_PASSWORD (repo secret set by the owner; VNC uses its first 8 chars).
-# Then the live demos run while you watch, and the runner stays up HOLD_MIN extra minutes.
+# The runner streams its own screen (screencapture -> MJPEG, view-only) from a tiny server
+# (scripts/live_screen_server.py) behind HTTP Basic auth (user "viewer", password =
+# LIVE_VIEW_PASSWORD repo secret), exposed through a temporary Cloudflare quick tunnel.
+# The link is published as a commit status (context "live-view"). Demos then run while you
+# watch, and the runner stays up HOLD_MIN extra minutes.
 # Launch: push to a branch named bench-cloud/mac-view-<anything>. Settings: ci/mac_live_view.env.
 name: mac-live-view
 
@@ -22,7 +23,6 @@ jobs:
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       CLOUDFLARED_VERSION: "2026.9.3"
-      NOVNC_TAG: "v1.7.0"
     steps:
       - uses: actions/checkout@v4
 
@@ -42,60 +42,42 @@ jobs:
       - name: Deps
         run: |
           pip install -q -r requirements.txt pyobjc-framework-ApplicationServices pyobjc-framework-Quartz \
-            pyobjc-framework-Cocoa pyobjc-framework-FSEvents keyring websockify==0.12.0
+            pyobjc-framework-Cocoa pyobjc-framework-FSEvents keyring
 
-      - name: Screen Sharing (VNC) with the owner's password
+      - name: Live screen stream + tunnel
         env:
-          PW: ${{ secrets.LIVE_VIEW_PASSWORD }}
-        run: |
-          set +e
-          K=/System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart
-          # macOS offers Apple (ARD) auth to web VNC clients: user name + account password.
-          # Changing the runner account's password fails on hosted runners, so create a separate
-          # throwaway account "viewer" with the owner's password and allow only it to screen-share.
-          # (It sees the console screen, i.e. the runner's desktop where the agent works.)
-          sudo sysadminctl -addUser viewer -fullName "Live viewer" -password "$PW" >/dev/null 2>&1
-          sudo dscl . -passwd /Users/viewer "$PW" >/dev/null 2>&1
-          dscl /Local/Default -authonly viewer "$PW" && echo "viewer account auth OK" \
-            || { echo "::error::could not create the viewer account"; exit 1; }
-          sudo $K -activate -configure -allowAccessFor -specifiedUsers >/dev/null 2>&1
-          sudo $K -configure -users viewer -access -on -privs -all >/dev/null 2>&1
-          sudo $K -configure -clientopts -setvnclegacy -vnclegacy yes -setvncpw -vncpw "${PW:0:8}" >/dev/null 2>&1
-          sudo $K -restart -agent -console >/dev/null 2>&1
-          echo "kickstart exit=$?"
-          for i in $(seq 1 20); do nc -z localhost 5900 && break; sleep 1; done
-          nc -z localhost 5900 && echo "VNC listening on 5900" || { echo "::error::VNC did not start"; exit 1; }
-
-      - name: Web viewer + tunnel
+          LIVE_VIEW_PASSWORD: ${{ secrets.LIVE_VIEW_PASSWORD }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -e
-          git clone -q --depth 1 --branch "$NOVNC_TAG" https://github.com/novnc/noVNC.git "$HOME/novnc"
-          # websocket bridge; the VNC password still guards the screen itself
-          nohup websockify --web "$HOME/novnc" 6080 localhost:5900 > "$HOME/websockify.log" 2>&1 &
+          nohup python scripts/live_screen_server.py --port 6080 --interval 1 > "$HOME/screen.log" 2>&1 &
+          for i in $(seq 1 30); do nc -z 127.0.0.1 6080 && break; sleep 1; done
+          nc -z 127.0.0.1 6080 || { cat "$HOME/screen.log"; echo "::error::screen server did not start"; exit 1; }
+          # self-test: page comes back with the password, 401 without
+          code=$(curl -s -o /dev/null -w '%{http_code}' -u "viewer:$LIVE_VIEW_PASSWORD" http://127.0.0.1:6080/)
+          noauth=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:6080/)
+          echo "self-test: with password=$code without=$noauth"
+          [ "$code" = 200 ] && [ "$noauth" = 401 ] || { echo "::error::auth self-test failed"; exit 1; }
           curl -fsSL -o /tmp/cf.tgz \
             "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-darwin-arm64.tgz"
           tar -xzf /tmp/cf.tgz -C /tmp
-          nohup /tmp/cloudflared tunnel --no-autoupdate --url http://localhost:6080 > "$HOME/cf.log" 2>&1 &
+          nohup /tmp/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:6080 > "$HOME/cf.log" 2>&1 &
           URL=""
           for i in $(seq 1 60); do
             URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$HOME/cf.log" | head -1 || true)
             [ -n "$URL" ] && break; sleep 2
           done
           [ -n "$URL" ] || { cat "$HOME/cf.log"; echo "::error::tunnel did not come up"; exit 1; }
-          VIEW="$URL/vnc.html?autoconnect=1&resize=scale&view_only=1"
-          echo "LIVE VIEW: $VIEW"
-          echo "::notice title=LIVE VIEW (user viewer, password LIVE_VIEW_PASSWORD)::$VIEW"
-          echo "## Live view: $VIEW (user: viewer)" >> "$GITHUB_STEP_SUMMARY"
+          echo "LIVE VIEW: $URL  (user viewer)"
+          echo "## Live view: $URL (user viewer)" >> "$GITHUB_STEP_SUMMARY"
           gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" -f state=pending \
-            -f context="live-view" -f description="user: viewer, password: LIVE_VIEW_PASSWORD" -f target_url="$VIEW" >/dev/null \
+            -f context="live-view" -f description="user: viewer, password: LIVE_VIEW_PASSWORD" -f target_url="$URL" >/dev/null \
             && echo "published live-view status"
-        env:
-          PW: ${{ secrets.LIVE_VIEW_PASSWORD }}
-          GH_TOKEN: ${{ github.token }}
 
       - name: Give the viewer time to connect
         run: |
           source ci/mac_live_view.env
+          open -a Clock 2>/dev/null || true   # something moving on screen while waiting
           echo "waiting ${WAIT_BEFORE_S}s before the demos start"; sleep "$WAIT_BEFORE_S"
 
       - name: Live demos (watch them in the viewer)
