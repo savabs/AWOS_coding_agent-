@@ -350,8 +350,14 @@ def to_micro_page(snap: Snapshot, view: Optional[WebView] = None) -> Page:
                        for f in v.forms],
                 alerts=[mask_secrets(x) for x in v.alerts], statuses=[mask_secrets(x) for x in v.statuses],
                 regions=[mask_secrets(x) for x in v.regions], dialog=mask_secrets(v.dialog), text=text, _raw=raw)
-    page._live = {"snap": snap, "paths": paths, "options": options}  # type: ignore[attr-defined]
+    page._live = {"snap": snap, "paths": paths, "options": options,  # type: ignore[attr-defined]
+                  "truncated": bool(snap.truncated), "settled": True}
     return page
+
+
+def _same_path(url: Optional[str], path: str) -> bool:
+    got = urllib.parse.urlsplit(url or "").path.rstrip("/") or "/"
+    return got == (urllib.parse.urlsplit(path).path.rstrip("/") or "/")
 
 
 class MacBrowserBackend:
@@ -380,28 +386,72 @@ class MacBrowserBackend:
         base = self.page.url if self.page and self.page.url.startswith("http") else self.base + "/"
         return check_loopback(urllib.parse.urljoin(base, path_or_url))
 
-    def _snap(self) -> Snapshot:
+    def _snap(self, timeout: Optional[float] = None) -> Snapshot:
         return snapshot_element(self.rt, self.window, app=self.app, max_nodes=self.actor.max_nodes,
-                                timeout=self.actor.timeout)
+                                timeout=timeout or self.actor.timeout)
 
-    def _load(self) -> Page:
-        """Re-observe until two consecutive reads agree (page settled), then build the Page."""
-        t_end = self.rt.now() + self.load_timeout
+    def _web_ready(self, snap: Snapshot) -> bool:
+        """The web area exists, is fully read (not truncated), has content, and WebKit does
+        not say it is still loading (AXLoaded False). Real Safari updates AXURL at commit,
+        before the new document's AX tree is built, and under load an AX walk can hit its
+        time budget; neither state may be read as 'the page'."""
+        if not snap.ok or not snap.web_paths or snap.truncated:
+            return False
+        wp = snap.web_paths[0]
+        if not (snap.node(wp) or {}).get("children"):
+            return False
+        try:
+            loaded = self.rt.read(snap.element(wp), ("AXLoaded",)).get("AXLoaded")
+        except Exception:                            # attribute not supported: no signal
+            loaded = None
+        return loaded is None or bool(loaded)
+
+    def _load(self, expect_path: Optional[str] = None, timeout: Optional[float] = None) -> Page:
+        """Re-observe until the page is ready and two consecutive reads agree (settled), then
+        build the Page. ``expect_path``: also wait until the web area shows that path (a
+        redirect elsewhere is accepted once the wait runs out). A snapshot truncated by the
+        AX time budget is retried with a larger budget. If the wait runs out the last read is
+        returned marked ``_live["settled"] = False`` (and ``truncated`` when partial) so
+        readers that certify effects can refuse it."""
+        t_end = self.rt.now() + (self.load_timeout if timeout is None else timeout)
         prev = None
-        snap = self._snap()
+        budget = self.actor.timeout
+        snap = self._snap(budget)
+        settled = False
         while True:
             sig = (snap.url, snap.render(400)) if snap.ok else None
-            if sig is not None and sig == prev and snap.web_paths:
+            at = expect_path is None or _same_path(snap.url, expect_path)
+            if sig is not None and sig == prev and self._web_ready(snap) and at:
+                settled = True
                 break
             if self.rt.now() >= t_end:
                 break
+            if snap.truncated and snap.reason == "timeout":
+                budget = min(budget * 2, 30.0)
             prev = sig
             self.rt.sleep(self.actor.poll)
-            snap = self._snap()
+            snap = self._snap(budget)
         if not snap.ok or not snap.web_paths:
             raise WebError("the Safari window has no web page (closed or not loaded)")
         self.page = to_micro_page(snap)
+        self.page._live["settled"] = settled  # type: ignore[attr-defined]
         return self.page
+
+    def wait_for(self, pred: Callable[[Page], bool], timeout: Optional[float] = None) -> Optional[Page]:
+        """Re-read the CURRENT page (no navigation, no action) until ``pred(page)`` holds;
+        None when it never does within ``timeout``. For readers that know what a complete
+        page must contain (e.g. the API-key table) and must not certify a half-built one."""
+        t_end = self.rt.now() + (self.load_timeout if timeout is None else timeout)
+        while True:
+            try:
+                p = self._load(timeout=max(0.0, min(self.load_timeout, t_end - self.rt.now())))
+            except WebError:
+                p = None
+            if p is not None and pred(p):
+                return p
+            if self.rt.now() >= t_end:
+                return None
+            self.rt.sleep(self.actor.poll)
 
     def _live(self, page: Page, n: int) -> Tuple[Control, Snapshot, Tuple[int, ...]]:
         c = page.control(n)
@@ -426,7 +476,8 @@ class MacBrowserBackend:
             raise WebError(f"open refused: {r.reason}")
         if r.outcome is Outcome.UNVERIFIED:
             self.unverified.append(r.to_dict())
-        return self._load()
+        redirected = bool((getattr(r, "detail", None) or {}).get("redirected_to"))
+        return self._load(expect_path=None if redirected else path)
 
     def click(self, page: Page, n: int) -> Page:
         c, snap, path = self._live(page, n)

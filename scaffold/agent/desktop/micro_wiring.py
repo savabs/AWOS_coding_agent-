@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import os
 import re
+import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -291,31 +292,81 @@ class FieldEqualsCheck:
 # ---------------------------------------------------------------------------
 # key creation: plan_key_creation + run_once
 # ---------------------------------------------------------------------------
-def read_key_rows(br: LoopbackBrowser, project: str) -> Optional[List[Dict[str, str]]]:
-    """The project's API-key table as rows {name, status, scope, last4}; None
-    when the page cannot be read (not signed in, HTTP error, no table)."""
-    try:
-        p = br.open(f"/projects/{project}/keys")
-    except WebError:
+KEY_TABLE_WAIT_S = 10.0                     # live Safari: how long to wait for the key table
+
+
+def _keys_path(project: str) -> str:
+    return f"/projects/{project}/keys"
+
+
+def parse_key_rows(page: Page, project: Optional[str] = None) -> Optional[List[Dict[str, str]]]:
+    """The API-key table of an already-open page as rows {name, status, scope, last4}; None
+    when this page cannot certify the list: HTTP error, a different page (path is not this
+    project's keys page), a partial read (live AX snapshot truncated / never settled), or no
+    table whose header names ``name`` and ``status``.
+
+    Tolerant of how live Safari flattens the AX table: the header is found by content (not
+    "first ` | ` line"), an empty trailing Actions cell is fine, the key column is masked
+    (``fk_live_…abcd`` or ``...abcd``; last4 left empty when not shown)."""
+    if page is None or page.status >= 400:
         return None
-    if p.status >= 400:
-        return None
-    lines = [ln for ln in p.text.splitlines() if " | " in ln]
-    if not lines:
-        return None
-    head = [h.strip().lower() for h in lines[0].split("|")]
-    if "name" not in head or "status" not in head:
+    if project is not None and page.url.startswith("http"):
+        got = urllib.parse.urlsplit(page.url).path.rstrip("/")
+        if got != _keys_path(project):
+            return None
+    live = getattr(page, "_live", None)
+    if isinstance(live, dict) and (live.get("truncated") or live.get("settled") is False):
+        return None                                  # half a table must never read as "absent"
+    lines = [ln for ln in page.text.splitlines() if " | " in ln or ln.rstrip().endswith(" |")]
+    head: List[str] = []
+    hi = -1
+    for i, ln in enumerate(lines):
+        cells = [h.strip().lower() for h in ln.split("|")]
+        if "name" in cells and "status" in cells:
+            head, hi = cells, i
+            break
+    if hi < 0:
         return None
     rows: List[Dict[str, str]] = []
-    for ln in lines[1:]:
+    for ln in lines[hi + 1:]:
         cells = [x.strip() for x in ln.split("|")]
+        if [c.lower() for c in cells] == head:       # a repeated header (AX header container)
+            continue
         if len(cells) < len(head) - 1:
             continue
         rec = {h: (cells[i] if i < len(cells) else "") for i, h in enumerate(head)}
-        m = re.search(r"…\s*([A-Za-z0-9]{4})\b", rec.get("key", ""))
+        m = re.search(r"(?:…|\.\.\.)\s*([A-Za-z0-9]{4})\b", rec.get("key", ""))
         rows.append({"name": rec.get("name", ""), "status": rec.get("status", "").lower(),
                      "scope": rec.get("scope", ""), "last4": m.group(1) if m else ""})
     return rows
+
+
+def read_key_rows(br: LoopbackBrowser, project: str,
+                  wait_s: float = KEY_TABLE_WAIT_S) -> Optional[List[Dict[str, str]]]:
+    """The project's API-key table as rows {name, status, scope, last4}; None when the page
+    cannot be read (not signed in, HTTP error, no table, or only part of it).
+
+    Always navigates explicitly to /projects/<id>/keys (never trusts whatever page the
+    agent left the browser on). On a live browser (``br.wait_for``) a page that does not
+    yet show the full table is re-read in place until it does, then re-opened once; the
+    loopback HTTP client gets complete pages, so it reads once."""
+    path = _keys_path(project)
+    live = callable(getattr(br, "wait_for", None))
+    for _attempt in range(2 if live else 1):
+        try:
+            p = br.open(path)
+        except WebError:
+            continue
+        rows = parse_key_rows(p, project)
+        if rows is not None:
+            return rows
+        if p.status >= 400:
+            return None                              # 404 / 403: waiting will not help
+        if live:
+            got = br.wait_for(lambda q: parse_key_rows(q, project) is not None, wait_s)
+            if got is not None:
+                return parse_key_rows(got, project)
+    return None
 
 
 def key_verdict(br: LoopbackBrowser, project: str, label: str, store: BrokerSecretStore,
@@ -369,7 +420,11 @@ def create_key_once(agent: Any, subtask: Any, *, br: LoopbackBrowser, store: Bro
        first write (approval binds the pinned name + scope)."""
     from .micro_agent import MicroResult, Outcome
     rows = read_key_rows(br, project)
-    kp = plan_key_creation(rows or [], label, store.broker, secret)
+    if rows is None:                                  # cannot see what exists -> do not create blind
+        return KeyCreation(MicroResult(subtask.name, Outcome.NEEDS_USER,
+                                       reason=f"could not read the key list of {project} before creating "
+                                              "(not risking a duplicate)"), "needs_user")
+    kp = plan_key_creation(rows, label, store.broker, secret)
     if kp.action == "needs_user":
         return KeyCreation(MicroResult(subtask.name, Outcome.NEEDS_USER,
                                        reason=f"{kp.reason} (not creating a duplicate)"), "needs_user")
