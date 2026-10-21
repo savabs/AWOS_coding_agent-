@@ -53,9 +53,13 @@ jobs:
           # macOS offers Apple (ARD) auth to web VNC clients: user name + account password.
           # Give the throwaway runner account the owner's password so "runner" + LIVE_VIEW_PASSWORD works.
           sudo dscl . -passwd "/Users/$USER" "$PW" && echo "account password set for $USER"
-          sudo $K -activate -configure -access -on -clientopts -setvnclegacy -vnclegacy yes \
-            -clientopts -setvncpw -vncpw "${PW:0:8}" -restart -agent -privs -all >/dev/null 2>&1
+          sudo $K -activate -configure -allowAccessFor -specifiedUsers >/dev/null 2>&1
+          sudo $K -configure -users "$USER" -access -on -privs -all >/dev/null 2>&1
+          sudo $K -configure -clientopts -setvnclegacy -vnclegacy yes -setvncpw -vncpw "${PW:0:8}" >/dev/null 2>&1
+          sudo $K -restart -agent -console >/dev/null 2>&1
           echo "kickstart exit=$?"
+          # sanity: the account password really is the owner's password
+          dscl /Local/Default -authonly "$USER" "$PW" && echo "account auth OK for $USER" || echo "::warning::account auth check failed"
           for i in $(seq 1 20); do nc -z localhost 5900 && break; sleep 1; done
           nc -z localhost 5900 && echo "VNC listening on 5900" || { echo "::error::VNC did not start"; exit 1; }
 
