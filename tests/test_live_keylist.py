@@ -218,7 +218,9 @@ def test_dd_c_local_like_run_passes_when_keys_page_builds_late(tmp_path, monkeyp
     assert res["pass"], (res.get("reasons"), res.get("error"), lines[-25:])
     assert res["report_status"] == "done"
     assert [s["outcome"] for s in res["subtasks"]] == ["verified", "verified"]
-    assert res["subtasks"][1]["steps"] == 12
+    # with the repeat fix merged, the duplicate copies are skipped and the subtask
+    # auto-completes once the success condition holds -> fewer than the 12 live steps
+    assert res["subtasks"][1]["steps"] < 12
     actions = [json.loads(x) for x in (tmp_path / "dd/harness/actions.jsonl").read_text().splitlines()]
     assert sum(a["action"] == "create_key" for a in actions) == 1         # exactly one key made
     assert not re.search(r"fk_live_[A-Za-z0-9]{32}", "\n".join(lines))
