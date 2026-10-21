@@ -1,0 +1,125 @@
+# MacArena (arXiv 2606.06560, github.com/MacPaw/MacArena) tasks run DIRECTLY on free GitHub-hosted
+# macOS runners. Each runner is itself a disposable macOS VM (kern.hv_vmm_present=1; no nested
+# virtualization), so tasks run on the runner instead of inside MacArena's UTM VM.
+# Harness: scripts/macarena/ (ours, MIT). MacArena is fetched at a pinned commit into $RUNNER_TEMP
+# and never committed: macarena/ tasks MIT, macosworld/ tasks CC BY-NC 4.0 (non-commercial),
+# osworld/ Apache-2.0. Results reference tasks by id only.
+# Launch: push a branch named bench-cloud/mac-arena-<n>. Agents: AWOS_MACARENA_AGENT below
+# (noop = evaluator false-pass baseline; awos-scripted-oracle only where a task ships a reference
+# solution; awos-micro needs a loopback model, AWOS_LOCAL_BASE_URL / AWOS_LOCAL_MODEL). No paid APIs.
+name: mac-arena
+
+on:
+  push:
+    branches: ["bench-cloud/mac-arena-**"]
+  workflow_dispatch:
+    inputs:
+      agent:
+        description: "comma-separated: noop, awos-scripted-oracle, awos-micro"
+        default: "noop,awos-scripted-oracle"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mac-arena-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  MACARENA_REPO: https://github.com/MacPaw/MacArena.git
+  MACARENA_COMMIT: dcdc7d366da12641578ab90f085d69db91651c58
+  N_SHARDS: "10"
+  AWOS_MACARENA_AGENT: ${{ inputs.agent || 'noop,awos-scripted-oracle' }}
+  AWOS_MACARENA_TASK_SECONDS: "600"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  run:
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Deps (live AX driver only when awos-micro runs)
+        if: contains(env.AWOS_MACARENA_AGENT, 'awos-micro')
+        run: |
+          pip install -q -r requirements.txt pyobjc-framework-ApplicationServices pyobjc-framework-Quartz \
+            pyobjc-framework-Cocoa
+
+      - name: Fetch MacArena (pinned, outside the workspace; data only)
+        shell: bash
+        run: |
+          set -e
+          D="$RUNNER_TEMP/MacArena"
+          git init -q "$D"
+          git -C "$D" fetch -q --depth 1 "$MACARENA_REPO" "$MACARENA_COMMIT"
+          git -C "$D" checkout -q FETCH_HEAD
+          echo "MacArena at $(git -C "$D" rev-parse HEAD)"
+          echo "MACARENA_DIR=$D" >> "$GITHUB_ENV"
+
+      - name: Machine facts
+        shell: bash
+        run: |
+          set +e
+          mkdir -p out
+          {
+            sw_vers; uname -m; echo "hv_vmm_present=$(sysctl -n kern.hv_vmm_present)"; whoami; echo "HOME=$HOME"
+            echo "ImageOS=$ImageOS ImageVersion=$ImageVersion"
+            echo "--- /Applications"; ls /Applications
+            echo "--- /System/Applications"; ls /System/Applications /System/Applications/Utilities
+            echo "--- TCC (system)"
+            sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+              "select service, client, auth_value from access;" 2>&1 | head -80
+            echo "--- TCC (user)"
+            sqlite3 "$HOME/Library/Application Support/com.apple.TCC/TCC.db" \
+              "select service, client, auth_value from access;" 2>&1 | head -80
+            echo "--- volume"; osascript -e 'get volume settings' 2>&1
+            echo "--- accent"; defaults read -g AppleAccentColor 2>&1
+          } > "out/machine_shard${{ matrix.shard }}.txt" 2>&1
+          cat "out/machine_shard${{ matrix.shard }}.txt" | head -60
+
+      - name: Dry run (shard plan)
+        run: python scripts/macarena/run_tasks.py --macarena "$MACARENA_DIR" --shard ${{ matrix.shard }}/$N_SHARDS --dry-run
+
+      - name: Run shard
+        shell: bash
+        run: |
+          set +e
+          python scripts/macarena/run_tasks.py --macarena "$MACARENA_DIR" \
+            --shard ${{ matrix.shard }}/$N_SHARDS --agent "$AWOS_MACARENA_AGENT" --out out 2>&1 | tee out/run_shard${{ matrix.shard }}.log
+          echo "runner exit=${PIPESTATUS[0]}"
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-arena-shard-${{ matrix.shard }}
+          path: out/
+          if-no-files-found: warn
+
+  summary:
+    needs: run
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: mac-arena-shard-*
+          path: results
+      - name: Table
+        run: python3 scripts/macarena/summarize.py results --json summary.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-arena-summary
+          path: summary.json

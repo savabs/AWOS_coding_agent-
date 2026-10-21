@@ -1,0 +1,26 @@
+{
+  "macarena_commit": "dcdc7d366da12641578ab90f085d69db91651c58",
+  "why": "Pilot subset runnable on a stock GitHub macos-15 runner: built-in apps (plus Xcode/VS Code on the image), no accounts, no VM fixture files (~/Benchmark_Backup), no /Users/admin-only state. IDs only; task files are fetched at run time, never committed.",
+  "tasks": [
+    {"id": "a13331ed-680f-4ec6-85f1-172ed6ca8ec5", "family": "macarena", "app": "TextEdit", "check": "file cmp"},
+    {"id": "f2031b4e-3098-4eae-8b57-9153189b81ba", "family": "macarena", "app": "Safari", "check": "file exists (network: example.com)"},
+    {"id": "385645e8-b520-4611-ad07-9a6173af2bfc", "family": "macarena", "app": "System Settings", "check": "System Events wallpaper"},
+    {"id": "92ee67c9-550e-4548-9943-63fbee8aabd5", "family": "macarena", "app": "System Settings", "check": "System Events login items"},
+    {"id": "2c38b942-edac-4eee-8f9d-5a60413b3a75", "family": "macarena", "app": "Automator", "check": "file list"},
+    {"id": "e889968b-c6a6-4d45-a5de-3cd4285dcac1", "family": "macarena", "app": "Visual Studio Code", "check": "file content"},
+    {"id": "4f0d1950-473a-4aa8-b2e1-8bfe4a944e5c", "family": "macarena", "app": "Notes", "check": "AppleEvents to Notes (TCC probe)"},
+    {"id": "ce71ae98-6947-6c18-87ac-cdecb1750e5a", "family": "macosworld", "app": "System Settings", "check": "defaults AppleInterfaceStyle"},
+    {"id": "4fe32b2b-7f05-cbc6-47e5-b8a1bbad5bc2", "family": "macosworld", "app": "System Settings", "check": "defaults dock autohide"},
+    {"id": "694e8aa5-9106-dc74-86c1-2dd71435c093", "family": "macosworld", "app": "System Settings", "check": "defaults dock mineffect"},
+    {"id": "94cab5ba-eb70-f363-fe46-7289274309cb", "family": "macosworld", "app": "System Settings", "check": "defaults KeyRepeat"},
+    {"id": "23c1acf7-94fd-cdd0-b10e-abc5fce48237", "family": "macosworld", "app": "System Settings", "check": "defaults AppleAccentColor (no reset: false-pass probe)"},
+    {"id": "259bcb80-aa2b-8291-1d11-6ff4ae36f8cb", "family": "macosworld", "app": "Calculator", "check": "defaults LastResultValue"},
+    {"id": "152a753b-7258-6630-a0c6-b6ed38a9926c", "family": "macosworld", "app": "Calculator", "check": "defaults LastResultValue"},
+    {"id": "1ef109cd-fea2-d2d5-b4e4-fbbad6689b2a", "family": "macosworld", "app": "Chess", "check": "frontmost process"},
+    {"id": "96786064-5d99-e102-8ec1-48024916bb85", "family": "macosworld", "app": "Activity Monitor", "check": "frontmost process"},
+    {"id": "a3373cf7-70ed-c145-3981-6ef84395530e", "family": "macosworld", "app": "(volume)", "check": "output muted (false-pass probe on a VM without audio)"},
+    {"id": "5a219d2f-1c42-1bec-a7a2-2ef80e41c657", "family": "macosworld", "app": "Script Editor", "check": "System Events UI value"},
+    {"id": "858e1ef5-3c42-4f8b-1ebf-5ade12c8e5fc", "family": "macosworld", "app": "Spotlight", "check": "defaults userHasMovedWindow"},
+    {"id": "4a89fe83-8a93-ecd4-7841-c0bb470571c2", "family": "macosworld", "app": "Reminders", "check": "AppleEvents to Reminders (TCC probe)"}
+  ]
+}
