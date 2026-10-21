@@ -22,24 +22,24 @@ concurrency:
 env:
   LLAMA_TAG: b11146          # same llama.cpp as the laptop's Homebrew build and the Linux CI
   REPS: "5"
-  CTX: "16384"
 
 jobs:
   run:
     strategy:
       fail-fast: false
-      max-parallel: 20
+      # at most 3 of the account's 5 free macOS slots, so the owner always has 2 for live sessions
+      max-parallel: 3
       matrix:
         os: [macos-15]
-        model: [q35-2b, q35-4b, q3-4b-2507, q35-9b]
+        # Qwen3.5-2B was dropped after runs 1-2: it fails sign-in identically on every rep (macos-14/15)
+        model: [q35-4b, q3-4b-2507, q35-9b]
         variant: [a, b, c]
         include:
-          - {model: q35-2b, repo: unsloth/Qwen3.5-2B-GGUF, file: Qwen3.5-2B-Q4_K_M.gguf}
           - {model: q35-4b, repo: unsloth/Qwen3.5-4B-GGUF, file: Qwen3.5-4B-Q4_K_M.gguf}
           - {model: q3-4b-2507, repo: unsloth/Qwen3-4B-Instruct-2507-GGUF, file: Qwen3-4B-Instruct-2507-Q4_K_M.gguf}
-          - {model: q35-9b, repo: unsloth/Qwen3.5-9B-GGUF, file: Qwen3.5-9B-Q4_K_M.gguf}
-          # macos-14: one cheap cell for the Metal / tok/s comparison
-          - {os: macos-14, model: q35-2b, variant: a, repo: unsloth/Qwen3.5-2B-GGUF, file: Qwen3.5-2B-Q4_K_M.gguf}
+          # 9B: 5.7 GB of weights in a 7 GB VM. Run 2: the Metal attempt never finished (7 min cap) and
+          # left the CPU at 0.1-0.3 tok/s (paging); so CPU only, smaller context.
+          - {model: q35-9b, repo: unsloth/Qwen3.5-9B-GGUF, file: Qwen3.5-9B-Q4_K_M.gguf, metal: "0", ctx: "8192"}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 330
     env:
@@ -49,6 +49,8 @@ jobs:
       GGUF_REPO: ${{ matrix.repo }}
       GGUF_FILE: ${{ matrix.file }}
       OS_LABEL: ${{ matrix.os }}
+      TRY_METAL: ${{ matrix.metal || '1' }}
+      CTX: ${{ matrix.ctx || '16384' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -126,7 +128,8 @@ jobs:
           # Raw throughput per device, no server: llama-bench pp256 / tg16, 3 threads, 7 min cap each.
           # Metal in a paravirtualized VM may be missing, slow or hang, so measure and keep the faster.
           LB=$(dirname "$LLAMA_BIN")/llama-bench
-          for N in 99 0; do
+          DEVS="0"; [ "$TRY_METAL" = "1" ] && DEVS="99 0"
+          for N in $DEVS; do
             perl -e 'alarm shift; exec @ARGV' 420 "$LB" -m "models/$GGUF_FILE" -ngl $N -t 3 -p 256 -n 16 -r 1 \
               -o json > out/llama-bench-ngl$N.json 2> out/llama-bench-ngl$N.err
             echo "llama-bench -ngl $N exit=$?"
