@@ -13,9 +13,12 @@ Every action:
      app_policy.AppPolicy tier for the action kind, element enabled, and the destructive
      gate: ax_compress.button_role(node) == "destructive" needs ``approve(request)`` to
      return True (no callback -> REFUSED);
-  2. acts the least invasive way: AXPress before a CGEvent click at the element's visible
-     centre (only when the point really belongs to the target app); AXValue before focus +
-     typed keystrokes (CGEventKeyboardSetUnicodeString, posted to the app's pid only);
+  2. acts the least invasive way that actually works: AXPress before a CGEvent click at the
+     element's visible centre (only when the point really belongs to the target app and
+     window); for text the strategy is picked up front (see ``set_value``): native text
+     fields take AXValue first, web text fields (inside an AXWebArea) are focused and typed
+     (CGEventKeyboardSetUnicodeString, posted to the app's pid only) because WebKit reports
+     AXValue success while the value reads back empty;
   3. re-observes and verifies the expected change (value equals, focus moved, URL
      changed / equals, element appeared / disappeared, selection, any change). Nothing
      observed changing -> UNVERIFIED, never VERIFIED.
@@ -52,7 +55,9 @@ LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 TEXT_ROLES = {"textfield", "textarea", "searchfield", "combobox", "securetextfield"}
 MAX_TEXT = 5000
 KEY_RETURN, KEY_A, KEY_N = 36, 0, 45
+KEY_DELETE, KEY_RIGHT = 51, 124
 FLAG_CMD = 1 << 20
+FOCUS_WAIT_S = 1.0
 
 
 class Outcome(str, Enum):
@@ -286,6 +291,13 @@ class Actor:
             return None
         return f["x"] + f["w"] / 2, f["y"] + f["h"] / 2
 
+    def _hit_in_window(self, snap: Snapshot, hit: Any) -> bool:
+        """The hit element's window is ours (when AX tells; unknown counts as ours)."""
+        if snap.window is None:
+            return True
+        w = self.rt.read(hit, ("AXWindow",)).get("AXWindow")
+        return w is None or self.rt.same(w, snap.window)
+
     def _cg_click(self, snap: Snapshot, node: dict, el: Any = None) -> Tuple[bool, str]:
         if not self.use_events or not self.rt.can_post_events():
             return False, "synthetic events unavailable"
@@ -304,6 +316,8 @@ class Actor:
                 hit = self.rt.element_at_point(*c) if c else None
         if c is None or hit is None or self.rt.pid(hit) != snap.pid:
             return False, "the click point belongs to another app (occluded)"
+        if not self._hit_in_window(snap, hit):
+            return False, "the click point belongs to another window of the app (occluded)"
         self.rt.activate(snap.pid)
         return self.rt.post_click(*c), ""
 
@@ -352,8 +366,34 @@ class Actor:
             return None, "", "value too long"
         return value, f"<{len(value)} chars>", ""
 
+    @staticmethod
+    def in_web_area(snap: Snapshot, path: Sequence[int]) -> bool:
+        """The element at path lives inside a web page (has an AXWebArea ancestor)."""
+        path = tuple(path)
+        for wp in snap.web_paths or ():
+            wp = tuple(wp)
+            if len(wp) < len(path) and path[:len(wp)] == wp:
+                return True
+        for i in range(1, len(path)):
+            n = snap.node(path[:i])
+            if n is not None and n.get("role") == "AXWebArea":
+                return True
+        return False
+
     def set_value(self, snap: Snapshot, target: Union[Target, Sequence[int]], value: str,
                   expect: Optional[Expect] = None, *, allow_typing: bool = True) -> ActionResult:
+        """Put text into a text field, picking the strategy up front:
+
+        * native text field: AXValue (verified); keystrokes only if that does not stick;
+        * web text field (inside an AXWebArea): focus via AXFocused (verified), select-all
+          (verified) and type. WebKit answers AXValue with success but the value reads back
+          empty (and no input events fire), so AXValue would only cost a failed attempt. It
+          stays the fallback when synthetic events are unavailable or typing did not verify;
+        * secure field: only a broker handle / ``Revealed`` value (see _resolve_value). A web
+          secure field still takes AXValue first: that is proven on Safari password fields and
+          keeps the secret off the session-wide keyboard event stream; keystrokes are the
+          fallback.
+        """
         path, err = self.locate(snap, target)
         if path is None:
             return self._refuse("set_value", err)
@@ -370,31 +410,133 @@ class Actor:
         secure = bool(node.get("secure")) or is_secure_node(node, role)
         if expect is None or expect.empty():
             expect = Expect(value_len=len(plain)) if secure else Expect(value=plain)
-        detail = {"role": role, "name": node.get("title", ""), "value": shown, "secure": secure}
+        web = self.in_web_area(snap, path)
+        can_type = allow_typing and self.use_events and self.rt.can_post_events()
+        type_first = web and not secure and can_type
+        detail = {"role": role, "name": node.get("title", ""), "value": shown, "secure": secure,
+                  "web": web, "strategy": "keystrokes_first" if type_first else "ax_value_first"}
         try:
+            if type_first:
+                r = self._type_into(snap, el, node, plain, expect, detail, secure=secure)
+                if r.outcome is not Outcome.UNVERIFIED or not self.rt.settable(el, "AXValue"):
+                    return r                       # VERIFIED, or REFUSED (occluded etc.) stays refused
+                if self.rt.set_attr(el, "AXValue", plain):
+                    r2 = self._verify("set_value", "ax_value", snap, el, expect,
+                                      dict(detail, tried=f"keystrokes: {r.reason}"))
+                    if r2.ok:
+                        return r2
+                return r
             if self.rt.settable(el, "AXValue") and self.rt.set_attr(el, "AXValue", plain):
                 r = self._verify("set_value", "ax_value", snap, el, expect, detail)
                 if r.ok or not allow_typing:
                     return r
+                detail = dict(detail, tried=f"ax_value: {r.reason}")
             if not allow_typing:
                 return self._refuse("set_value", "AXValue not settable", **detail)
-            return self._type_into(snap, el, node, plain, expect, detail)
+            return self._type_into(snap, el, node, plain, expect, detail, secure=secure)
         finally:
             del plain
 
-    def _type_into(self, snap: Snapshot, el, node: dict, plain: str, expect: Expect, detail: dict
-                   ) -> ActionResult:
-        if not self.use_events or not self.rt.can_post_events():
-            return self._refuse("set_value", "AXValue failed and synthetic keystrokes are unavailable", **detail)
-        self.rt.set_attr(el, "AXFocused", True)
-        if self._read_el(el).get("AXFocused") is not True:
+    # -- typing helpers ---------------------------------------------------------
+    def _wait_until(self, pred: Callable[[], bool], timeout: float = FOCUS_WAIT_S) -> bool:
+        t_end = self.rt.now() + min(timeout, self.settle)
+        while True:
+            if pred():
+                return True
+            if self.rt.now() >= t_end:
+                return False
+            self.rt.sleep(self.poll)
+
+    def _is_focused(self, snap: Snapshot, el) -> bool:
+        if self._read_el(el, ("AXFocused",)).get("AXFocused") is True:
+            return True
+        if snap.pid is None:
+            return False
+        f = self.rt.read(self.rt.app_element(snap.pid), ("AXFocusedUIElement",)).get("AXFocusedUIElement")
+        return f is not None and self.rt.same(f, el)
+
+    def _key_window_ok(self, snap: Snapshot) -> bool:
+        """Keystrokes land in the app's key window: it must be ours (unknown counts as ours)."""
+        if snap.window is None or snap.pid is None:
+            return True
+        f = self.rt.read(self.rt.app_element(snap.pid), ("AXFocusedWindow",)).get("AXFocusedWindow")
+        return f is None or self.rt.same(f, snap.window)
+
+    def _focus_for_typing(self, snap: Snapshot, el, node: dict) -> Tuple[bool, str]:
+        """AXFocused (verified), then a CGEvent click. When the field is occluded (or our window
+        is not the key window), raise the window + activate the app and retry ONCE; anything
+        still covering it -> refuse."""
+        why = ""
+        for attempt in range(2):
+            if attempt or not self._key_window_ok(snap):
+                self.raise_window(snap)                 # activate + AXMain + AXRaise
+                self.rt.sleep(self.poll)
+            if not self._key_window_ok(snap):
+                why = "our window is not the key window (refusing to type into another window)"
+                continue
+            self.rt.set_attr(el, "AXFocused", True)
+            if self._wait_until(lambda: self._is_focused(snap, el)):
+                return True, "ax_focused_after_raise" if attempt else "ax_focused"
             ok, why = self._cg_click(snap, node, el)
-            if not ok or self._read_el(el).get("AXFocused") is not True:
-                return self._refuse("set_value", f"could not focus the field ({why or 'focus did not move'})",
-                                    **detail)
-        self.rt.post_key(snap.pid, KEY_A, FLAG_CMD)          # replace the current content
+            if ok and self._wait_until(lambda: self._is_focused(snap, el)):
+                return True, "cg_click_after_raise" if attempt else "cg_click"
+            why = why or "focus did not move"
+            if "occluded" not in why:
+                break                                   # only an occlusion is worth a raise + retry
+        return False, why
+
+    def _text_len(self, el, secure: bool) -> Optional[int]:
+        live = self._read_el(el, ("AXValue", "AXNumberOfCharacters"))
+        n = live.get("AXNumberOfCharacters")
+        if isinstance(n, int) and not isinstance(n, bool):
+            return n
+        v = live.get("AXValue")
+        return len(v) if isinstance(v, str) and not secure else None
+
+    def _all_selected(self, el, n: int, secure: bool) -> bool:
+        live = self._read_el(el, ("AXSelectedTextRange", "AXSelectedText"))
+        r = live.get("AXSelectedTextRange")
+        if isinstance(r, (tuple, list)) and len(r) == 2:
+            return r[0] == 0 and r[1] >= n
+        t = live.get("AXSelectedText")
+        return not secure and isinstance(t, str) and len(t) == n
+
+    def _clear_field(self, snap: Snapshot, el, secure: bool) -> Tuple[bool, str]:
+        """Existing text is replaced, never appended to: select-all (verified through the
+        selection range), else caret to the end + delete n characters (verified empty)."""
+        n = self._text_len(el, secure)
+        if n == 0:
+            return True, "empty"
+        self.rt.post_key(snap.pid, KEY_A, FLAG_CMD)
+        if n is None:
+            return True, "select_all_unverified"        # the final value check still guards
+        if self._wait_until(lambda: self._all_selected(el, n, secure)):
+            return True, "select_all"
+        if n > MAX_TEXT:
+            return False, "could not select the existing text (refusing to type over it)"
+        self.rt.post_key(snap.pid, KEY_RIGHT, FLAG_CMD)
+        for _ in range(n):
+            self.rt.post_key(snap.pid, KEY_DELETE)
+        if self._wait_until(lambda: self._text_len(el, secure) == 0):
+            return True, "deleted"
+        return False, "could not clear the existing text (refusing to type over it)"
+
+    def _type_into(self, snap: Snapshot, el, node: dict, plain: str, expect: Expect, detail: dict,
+                   *, secure: bool = False, action: str = "set_value") -> ActionResult:
+        if not self.use_events or not self.rt.can_post_events():
+            return self._refuse(action, "AXValue failed and synthetic keystrokes are unavailable", **detail)
+        ok, how = self._focus_for_typing(snap, el, node)
+        if not ok:
+            return self._refuse(action, f"could not focus the field ({how})", **detail)
+        detail = dict(detail, focus=how)
+        ok, how = self._clear_field(snap, el, secure)
+        if not ok:
+            return self._refuse(action, how, **detail)
+        detail["clear"] = how
+        if not self._is_focused(snap, el) or not self._key_window_ok(snap):
+            return self._refuse(action, "focus left the field before typing", **detail)
         self.rt.post_text(snap.pid, plain)
-        return self._verify("set_value", "keystrokes", snap, el, expect, detail)
+        return self._verify(action, "keystrokes", snap, el, expect, detail)
 
     def type_text(self, snap: Snapshot, target: Union[Target, Sequence[int]], value: str,
                   expect: Optional[Expect] = None) -> ActionResult:
@@ -409,10 +551,15 @@ class Actor:
         plain, shown, err = self._resolve_value(value, node, snap.app)
         if plain is None:
             return self._refuse("type", err)
-        secure = bool(node.get("secure"))
+        secure = bool(node.get("secure")) or is_secure_node(node, norm_role(node.get("role")))
         if expect is None or expect.empty():
             expect = Expect(value_len=len(plain)) if secure else Expect(value=plain)
-        return self._type_into(snap, el, node, plain, expect, {"name": node.get("title", ""), "value": shown})
+        try:
+            return self._type_into(snap, el, node, plain, expect,
+                                   {"name": node.get("title", ""), "value": shown, "secure": secure},
+                                   secure=secure, action="type")
+        finally:
+            del plain
 
     # -------------------------------------------------------------- select --
     def select_option(self, snap: Snapshot, target: Union[Target, Sequence[int]], option: str) -> ActionResult:
@@ -564,7 +711,10 @@ class Actor:
             self.rt.sleep(self.poll)
 
     def open_url(self, url: str, *, app: str = "Safari", bundle: str = SAFARI,
-                 timeout: float = 15.0) -> ActionResult:
+                 timeout: float = 15.0, launch_timeout: float = 45.0) -> ActionResult:
+        """``launch_timeout``: budget when Safari has to be started first. Live (sandbox VM):
+        a cold Safari shows its window ~5s after ``open`` and exposes the web area's URL only
+        ~10s in, more under load -- 15s gave intermittent 'page did not load' halts."""
         ok, why = url_allowed(url, self.allow_urls)
         if not ok:
             return self._refuse("open_url", why, url=url)
@@ -604,7 +754,7 @@ class Actor:
                 return self._done(ActionResult(Outcome.UNVERIFIED, "open_url", "Safari did not start", "open"))
             host = urllib.parse.urlsplit(url).netloc.lower()
             w = self._wait_window(info["pid"], lambda w: urllib.parse.urlsplit(
-                self._web_url(w, info) or "").netloc.lower() == host, timeout)
+                self._web_url(w, info) or "").netloc.lower() == host, max(timeout, launch_timeout))
             if w is None:
                 return self._done(ActionResult(Outcome.UNVERIFIED, "open_url", "page did not load", "open",
                                                {"url": url}))
@@ -636,6 +786,30 @@ class Actor:
         hits = snap.find(is_addr)
         return hits[0] if hits else None
 
+    def _addr_text(self, el) -> Optional[str]:
+        try:
+            v = self.rt.read(el, ("AXValue",)).get("AXValue")
+        except Exception:
+            return None
+        return v if isinstance(v, str) else None
+
+    @staticmethod
+    def _addr_holds(text: Optional[str], url: str) -> bool:
+        t = (text or "").strip()
+        if not t:
+            return False
+        return norm_url(t) == norm_url(url) or t == url.split("://", 1)[-1]
+
+    def _addr_wait(self, el, url: str, tries: int = 3) -> bool:
+        """Does the address field hold exactly ``url``? Re-read briefly (AX applies a set
+        value asynchronously in Safari)."""
+        for i in range(tries):
+            if self._addr_holds(self._addr_text(el), url):
+                return True
+            if i + 1 < tries:
+                self.rt.sleep(min(self.poll, 0.15))
+        return False
+
     def navigate(self, window: Any, url: str, *, app: Optional[Dict[str, Any]] = None,
                  timeout: float = 15.0) -> ActionResult:
         """Load url in THIS Safari window through its address field."""
@@ -661,9 +835,27 @@ class Actor:
             return self._refuse("navigate", "our window is not the key window (refusing to type)")
         self.rt.set_attr(el, "AXFocused", True)
         set_ok = self.rt.set_attr(el, "AXValue", url)
-        if not set_ok and self.use_events and self.rt.can_post_events():
-            self.rt.post_key(app["pid"], KEY_A, FLAG_CMD)
-            self.rt.post_text(app["pid"], url)
+        # Real Safari: setting AXValue on the address field can report failure although the
+        # value WAS applied; typing then appended a second copy ("/keyshttp://.../keys" -> 404).
+        # So decide from what the field holds, never from the setter's return value.
+        held = self._addr_wait(el, url)
+        if not held and self.use_events and self.rt.can_post_events():
+            for _attempt in range(2):
+                self.rt.post_key(app["pid"], KEY_A, FLAG_CMD)
+                self.rt.post_text(app["pid"], url)
+                held = self._addr_wait(el, url)
+                if held:
+                    break
+                self.rt.set_attr(el, "AXValue", url)          # repair a mangled field, then re-check
+                held = self._addr_wait(el, url)
+                if held:
+                    break
+        cur = self._addr_text(el)
+        if not held and cur and cur.strip():
+            return self._refuse("navigate", "the address field does not hold the requested URL "
+                                            "(refusing to load whatever it contains)", url=url)
+        if not held and not set_ok and not (self.use_events and self.rt.can_post_events()):
+            return self._refuse("navigate", "cannot set the address field")
         if "AXConfirm" in self.rt.actions(el):
             self.rt.perform(el, "AXConfirm")
         elif self.use_events and self.rt.can_post_events():

@@ -185,6 +185,64 @@ def probe(app: str = "Safari", *, max_nodes: int = 800, as_json: bool = False, r
     return code
 
 
+# ------------------------------------------------------------- guest hygiene --
+
+# Stray windows occlude CGEvent click points (seen live: "the click point belongs to another app
+# (occluded)" while focusing a web field) and an old Safari window can sit on top of ours. Before
+# a demo, in the GUEST only: close Safari's windows then quit it (so nothing is restored on the next
+# launch and the demo's first window comes from `open -a Safari <url>`), close Finder windows, and
+# quit System Settings (left open after granting the helper Accessibility).
+HYGIENE_SCRIPTS = (
+    ("safari", 'if application "Safari" is running then tell application "Safari"\n'
+               '  close every window\n  quit\nend tell'),
+    ("finder", 'tell application "Finder" to close every window'),
+    ("settings", 'if application "System Settings" is running then tell application "System Settings" to quit'),
+)
+
+
+def vm_hygiene(*, runner: Callable[..., Any] = subprocess.run, vm_check: Optional[Callable[[], bool]] = None,
+               out: Callable[[str], None] = print, wait: float = 10.0, poll: float = 0.5,
+               sleep: Callable[[float], None] = time.sleep) -> Dict[str, Any]:
+    """Pre-demo cleanup inside the guest VM (osascript). Never runs on the host. Failures (e.g. no
+    Automation permission for the helper yet) are reported, not fatal. -> {"ran", "errors",
+    "safari_quit"}"""
+    res: Dict[str, Any] = {"ran": [], "errors": [], "safari_quit": False}
+    if not (vm_check or in_guest_vm)():
+        res["errors"].append("refused: not in the guest VM")
+        return res
+    for name, script in HYGIENE_SCRIPTS:
+        try:
+            p = runner(["osascript", "-e", script], capture_output=True, text=True, timeout=20)
+            res["ran"].append(name)
+            if getattr(p, "returncode", 0) != 0:
+                res["errors"].append(f"{name}: {(getattr(p, 'stderr', '') or '').strip()[:200]}")
+        except Exception as e:                               # osascript missing / timed out
+            res["errors"].append(f"{name}: {type(e).__name__}: {e}"[:200])
+    waited, budget, killed = 0.0, wait, False
+    while True:
+        try:
+            alive = runner(["pgrep", "-x", "Safari"], capture_output=True, text=True, timeout=10).returncode == 0
+        except Exception:
+            alive = False
+        if not alive:
+            res["safari_quit"] = True
+            break
+        if waited >= budget:
+            if killed:
+                res["errors"].append("safari: still running after quit and killall")
+                break
+            try:                                             # quit was ignored (e.g. a sheet is open)
+                runner(["killall", "Safari"], capture_output=True, text=True, timeout=10)
+            except Exception:
+                pass
+            killed, budget = True, waited + 3.0
+        sleep(poll)
+        waited += poll
+    out(f"hygiene: ran {res['ran']} safari_quit={res['safari_quit']}"
+        + (f" errors={res['errors']}" if res["errors"] else ""))
+    return res
+
+
 # ---------------------------------------------------------------------- demos --
 
 def _actor(runtime, vm_check, log, approve=None):
@@ -294,16 +352,9 @@ def demo_teach_t3(instance: str = "i03", root: Optional[Path] = None, *, runtime
             if env is not None:
                 res["unverified"] = env.unverified
                 res["ui_actions"] = env.ui_actions
+                res["env_notes"] = list(env.notes)
                 if not keep_window:
-                    for w in list(env.windows.values()):
-                        try:
-                            from .observe import snapshot_element
-                            s = snapshot_element(env.rt, w, app=env.app_info)
-                            hits = s.find(lambda x: x.get("subrole") == "AXCloseButton")
-                            if hits:
-                                env.rt.perform(s.element(hits[0]), "AXPress")
-                        except Exception:
-                            pass
+                    res["windows_closed"] = env.close()      # ours only (close buttons)
     v = verifier.verify_instance(I.hidden, I.home)
     res.update({"pass": bool(v["success"]), "violations": v.get("violations")})
     for ln in lines:
@@ -315,11 +366,21 @@ def demo_teach_t3(instance: str = "i03", root: Optional[Path] = None, *, runtime
 
 def demo(target: str, *, variant: str = "a", seed: int = 7, instance: str = "i03", root: Optional[str] = None,
          out_dir: Optional[str] = None, keep_window: bool = False, runtime: Any = None, provider: str = "scripted",
-         vm_check: Optional[Callable[[], bool]] = None, out: Callable[[str], None] = print) -> int:
+         vm_check: Optional[Callable[[], bool]] = None, out: Callable[[str], None] = print,
+         hygiene: Optional[bool] = None, runner: Callable[..., Any] = subprocess.run) -> int:
+    """hygiene (default: on for a real run, off on a fake runtime): before the demo quit Safari
+    and close Finder / System Settings windows in the guest so stray windows cannot occlude
+    the targets; the demos close their own windows afterwards (unless keep_window)."""
     pf = preflight(runtime, vm_check)
     if not pf["ok"]:
         out(pf["error"] or "refused")
         return 2
+    if target not in ("dd", "teach_t3"):
+        out(f"unknown target {target!r}")
+        return 3
+    hyg = None
+    if hygiene if hygiene is not None else runtime is None:
+        hyg = vm_hygiene(runner=runner, vm_check=vm_check, out=out)
     try:
         if target == "dd":
             res = demo_dd(variant, seed, Path(root) if root else None, runtime=runtime, vm_check=vm_check,
@@ -333,6 +394,8 @@ def demo(target: str, *, variant: str = "a", seed: int = 7, instance: str = "i03
     except Exception as e:
         out(f"ERROR {type(e).__name__}: {e}")
         return 3
+    if hyg is not None:
+        res["hygiene"] = hyg
     p = _save_result(res, Path(out_dir) if out_dir else None)
     out(f"result: {p}")
     return 0 if res.get("pass") else 1

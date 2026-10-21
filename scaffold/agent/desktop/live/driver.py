@@ -350,8 +350,14 @@ def to_micro_page(snap: Snapshot, view: Optional[WebView] = None) -> Page:
                        for f in v.forms],
                 alerts=[mask_secrets(x) for x in v.alerts], statuses=[mask_secrets(x) for x in v.statuses],
                 regions=[mask_secrets(x) for x in v.regions], dialog=mask_secrets(v.dialog), text=text, _raw=raw)
-    page._live = {"snap": snap, "paths": paths, "options": options}  # type: ignore[attr-defined]
+    page._live = {"snap": snap, "paths": paths, "options": options,  # type: ignore[attr-defined]
+                  "truncated": bool(snap.truncated), "settled": True}
     return page
+
+
+def _same_path(url: Optional[str], path: str) -> bool:
+    got = urllib.parse.urlsplit(url or "").path.rstrip("/") or "/"
+    return got == (urllib.parse.urlsplit(path).path.rstrip("/") or "/")
 
 
 class MacBrowserBackend:
@@ -380,28 +386,72 @@ class MacBrowserBackend:
         base = self.page.url if self.page and self.page.url.startswith("http") else self.base + "/"
         return check_loopback(urllib.parse.urljoin(base, path_or_url))
 
-    def _snap(self) -> Snapshot:
+    def _snap(self, timeout: Optional[float] = None) -> Snapshot:
         return snapshot_element(self.rt, self.window, app=self.app, max_nodes=self.actor.max_nodes,
-                                timeout=self.actor.timeout)
+                                timeout=timeout or self.actor.timeout)
 
-    def _load(self) -> Page:
-        """Re-observe until two consecutive reads agree (page settled), then build the Page."""
-        t_end = self.rt.now() + self.load_timeout
+    def _web_ready(self, snap: Snapshot) -> bool:
+        """The web area exists, is fully read (not truncated), has content, and WebKit does
+        not say it is still loading (AXLoaded False). Real Safari updates AXURL at commit,
+        before the new document's AX tree is built, and under load an AX walk can hit its
+        time budget; neither state may be read as 'the page'."""
+        if not snap.ok or not snap.web_paths or snap.truncated:
+            return False
+        wp = snap.web_paths[0]
+        if not (snap.node(wp) or {}).get("children"):
+            return False
+        try:
+            loaded = self.rt.read(snap.element(wp), ("AXLoaded",)).get("AXLoaded")
+        except Exception:                            # attribute not supported: no signal
+            loaded = None
+        return loaded is None or bool(loaded)
+
+    def _load(self, expect_path: Optional[str] = None, timeout: Optional[float] = None) -> Page:
+        """Re-observe until the page is ready and two consecutive reads agree (settled), then
+        build the Page. ``expect_path``: also wait until the web area shows that path (a
+        redirect elsewhere is accepted once the wait runs out). A snapshot truncated by the
+        AX time budget is retried with a larger budget. If the wait runs out the last read is
+        returned marked ``_live["settled"] = False`` (and ``truncated`` when partial) so
+        readers that certify effects can refuse it."""
+        t_end = self.rt.now() + (self.load_timeout if timeout is None else timeout)
         prev = None
-        snap = self._snap()
+        budget = self.actor.timeout
+        snap = self._snap(budget)
+        settled = False
         while True:
             sig = (snap.url, snap.render(400)) if snap.ok else None
-            if sig is not None and sig == prev and snap.web_paths:
+            at = expect_path is None or _same_path(snap.url, expect_path)
+            if sig is not None and sig == prev and self._web_ready(snap) and at:
+                settled = True
                 break
             if self.rt.now() >= t_end:
                 break
+            if snap.truncated and snap.reason == "timeout":
+                budget = min(budget * 2, 30.0)
             prev = sig
             self.rt.sleep(self.actor.poll)
-            snap = self._snap()
+            snap = self._snap(budget)
         if not snap.ok or not snap.web_paths:
             raise WebError("the Safari window has no web page (closed or not loaded)")
         self.page = to_micro_page(snap)
+        self.page._live["settled"] = settled  # type: ignore[attr-defined]
         return self.page
+
+    def wait_for(self, pred: Callable[[Page], bool], timeout: Optional[float] = None) -> Optional[Page]:
+        """Re-read the CURRENT page (no navigation, no action) until ``pred(page)`` holds;
+        None when it never does within ``timeout``. For readers that know what a complete
+        page must contain (e.g. the API-key table) and must not certify a half-built one."""
+        t_end = self.rt.now() + (self.load_timeout if timeout is None else timeout)
+        while True:
+            try:
+                p = self._load(timeout=max(0.0, min(self.load_timeout, t_end - self.rt.now())))
+            except WebError:
+                p = None
+            if p is not None and pred(p):
+                return p
+            if self.rt.now() >= t_end:
+                return None
+            self.rt.sleep(self.actor.poll)
 
     def _live(self, page: Page, n: int) -> Tuple[Control, Snapshot, Tuple[int, ...]]:
         c = page.control(n)
@@ -426,7 +476,8 @@ class MacBrowserBackend:
             raise WebError(f"open refused: {r.reason}")
         if r.outcome is Outcome.UNVERIFIED:
             self.unverified.append(r.to_dict())
-        return self._load()
+        redirected = bool((getattr(r, "detail", None) or {}).get("redirected_to"))
+        return self._load(expect_path=None if redirected else path)
 
     def click(self, page: Page, n: int) -> Page:
         c, snap, path = self._live(page, n)
@@ -557,15 +608,33 @@ def to_teach_page(snap: Snapshot, view: Optional[WebView] = None):
     return p
 
 
+_FOCUS_MARK = re.compile(r" focused\b")
+
+
 class MacEnv:
     """teach-once env over live Safari: one window per web app, file ops delegated to ``base``.
 
     ``broker`` (a secrets.SecretBroker): ``secret(name)`` returns a handle and the value is
-    substituted by the actor at the moment of typing (the runner never holds it)."""
+    substituted by the actor at the moment of typing (the runner never holds it).
+
+    Real-Safari behaviour this class allows for (from the first VM runs):
+      * AXPress returns before the page navigates, and the press itself changes the tree
+        (focus ring, values typed since the cached reading), so the press "verifies" against
+        the OLD page and two identical reads of the old page look settled. ``click`` takes a
+        fresh pre-click signature and waits for the page to differ before settling (as
+        MacBrowserBackend does).
+      * activation and AXRaise land asynchronously: right after a raise, AXFocusedWindow is
+        still the other Safari window, so ``navigate`` refuses and keystrokes (the fallback
+        when AXValue on a web field reads back empty) would go to the wrong window.
+        ``switch_window`` raises only when needed and waits until our window is the key
+        window; ``type`` refuses rather than type into a window that is not.
+      * a window that went away (closed, Safari relaunched) is replaced by a new window
+        instead of failing on a dead element; ``close`` closes only our windows."""
 
     def __init__(self, base: Any, urls: Dict[str, str], *, actor: Optional[Actor] = None, runtime: Any = None,
                  broker: Any = None, approve: Optional[Callable[[dict], bool]] = None,
-                 load_timeout: float = 15.0, log: Optional[Callable[[str], None]] = None):
+                 load_timeout: float = 15.0, log: Optional[Callable[[str], None]] = None,
+                 change_timeout: float = 5.0, focus_timeout: float = 3.0):
         self.base = base
         self.urls = {a: check_loopback(u).rstrip("/") for a, u in urls.items()}
         if actor is None:
@@ -582,11 +651,13 @@ class MacEnv:
             actor.secrets = broker
         self.actor, self.rt, self.broker = actor, actor.rt, broker
         self.load_timeout = load_timeout
+        self.change_timeout, self.focus_timeout = change_timeout, focus_timeout
         self.windows: Dict[str, Any] = {}
         self.app_info: Dict[str, Any] = {}
         self.pages: Dict[str, Any] = {}
         self.ui_actions = 0
         self.unverified: List[dict] = []
+        self.notes: List[str] = []                   # timing / recovery notes (never values)
 
     def __getattr__(self, k):
         if k == "redact_obj":
@@ -603,13 +674,19 @@ class MacEnv:
         return snapshot_element(self.rt, self.windows[app], app=self.app_info, max_nodes=self.actor.max_nodes,
                                 timeout=self.actor.timeout)
 
+    @staticmethod
+    def _sig(snap: Snapshot):
+        """URL + content, ignoring focus: WebKit focuses the pressed link / button at once, long
+        before the next page arrives, so a focus move must not count as 'the page changed'."""
+        return (snap.url, _FOCUS_MARK.sub("", snap.render(400))) if snap.ok else None
+
     def page(self, app: str):
         if app not in self.windows:
             return None
         t_end = self.rt.now() + self.load_timeout
         prev, snap = None, self._snap(app)
         while True:
-            sig = (snap.url, snap.render(400)) if snap.ok else None
+            sig = self._sig(snap)
             if (sig is not None and sig == prev and snap.web_paths) or self.rt.now() >= t_end:
                 break
             prev = sig
@@ -621,6 +698,19 @@ class MacEnv:
         self.pages[app] = p
         return p
 
+    def _wait_change(self, app: str, before) -> bool:
+        """After a press: wait until the window's page differs from the pre-click page, so the
+        old page is never read as 'settled'. A click that changes nothing just times out."""
+        if before is None:
+            return False
+        t_end = self.rt.now() + min(self.change_timeout, self.load_timeout)
+        while self.rt.now() < t_end:
+            s = self._snap(app)
+            if s.ok and self._sig(s) != before:
+                return True
+            self.rt.sleep(self.actor.poll)
+        return False
+
     def _note(self, r) -> None:
         self.ui_actions += 1
         if r.outcome is Outcome.UNVERIFIED:
@@ -628,10 +718,31 @@ class MacEnv:
         if r.outcome is Outcome.REFUSED:
             raise RuntimeError(f"{r.action} refused: {r.reason}")
 
+    def _alive(self, app: str) -> bool:
+        """Our window for ``app`` is still one of Safari's windows."""
+        w = self.windows.get(app)
+        if w is None:
+            return False
+        pid = self.app_info.get("pid")
+        if not pid:
+            return True
+        try:
+            from .observe import window_list
+            return any(self.rt.same(w, k) for k in window_list(self.rt, pid))
+        except Exception:
+            return True
+
+    def _forget(self, app: str) -> None:
+        self.windows.pop(app, None)
+        self.pages.pop(app, None)
+
     def open(self, app: str, path: str):
         if app not in self.urls:
             raise ValueError(f"refusing non-task app {app!r}")
         url = check_loopback(urllib.parse.urljoin(self.urls[app] + "/", path))
+        if app in self.windows and not self._alive(app):
+            self.notes.append(f"{app}: window went away; opening a new one")
+            self._forget(app)
         if app not in self.windows:
             r = self.actor.open_url(url)
             if r.window is not None:
@@ -641,41 +752,73 @@ class MacEnv:
             self.switch_window(app)
             r = self.actor.navigate(self.windows[app], url, app=self.app_info)
         self._note(r)
+        if app not in self.windows:
+            raise RuntimeError(f"{app}: no Safari window for {urllib.parse.urlsplit(url).path}")
         return self.page(app)
 
-    def switch_window(self, app: str) -> None:
-        snap = self._snap(app)
-        self.actor.raise_window(snap)
+    def _is_key(self, app: str) -> bool:
+        pid = self.app_info.get("pid")
+        if not pid or (self.rt.frontmost() or {}).get("pid") != pid:
+            return False
+        got = self.rt.read(self.rt.app_element(pid), ("AXFocusedWindow", "AXMainWindow"))
+        w = got.get("AXFocusedWindow") or got.get("AXMainWindow")
+        return w is not None and self.rt.same(w, self.windows[app])
+
+    def switch_window(self, app: str) -> bool:
+        """Bring our window for ``app`` to the front and wait until it IS the key window
+        (activation and AXRaise land asynchronously). True when it is."""
+        if self._is_key(app):
+            return True
+        self.actor.raise_window(self._snap(app))
+        t_end = self.rt.now() + self.focus_timeout
+        while not self._is_key(app):
+            if self.rt.now() >= t_end:
+                self.notes.append(f"{app}: window did not become key within {self.focus_timeout}s")
+                return False
+            self.rt.sleep(self.actor.poll)
+        return True
 
     def switch(self, app: str):
-        if app not in self.windows:
+        if app not in self.windows or not self._alive(app):
+            self._forget(app)
             return self.open(app, "/")
         self.switch_window(app)
         return self.page(app)
 
+    @staticmethod
+    def _same_el(e: dict, el: dict) -> bool:
+        return e["role"] == el.get("role") and e.get("name") == el.get("name") and \
+            (el.get("ordinal") is None or e["ordinal"] == el.get("ordinal"))
+
     def _path_for(self, app: str, el: dict) -> Tuple[Snapshot, Tuple[int, ...]]:
-        cur = self.pages.get(app)
-        if cur is not None and el.get("snap") == getattr(cur, "snap_id", None) and el.get("ax_path"):
-            return cur._snap, tuple(el["ax_path"])
+        """A FRESH reading and the element's path in it. The cached page may predate typing
+        (its values, and so its signature, are stale), so it is only used to name the control."""
         fresh = self.page(app)
         if fresh is None:
             raise RuntimeError(f"{app}: no page")
+        path = tuple(el.get("ax_path") or ())
+        for e in fresh.elements:                      # the recorded path, if it still holds that control
+            if path and tuple(e["ax_path"]) == path and self._same_el(e, el):
+                return fresh._snap, path
         for e in fresh.elements:
-            if e["role"] == el.get("role") and e.get("name") == el.get("name") and \
-                    (el.get("ordinal") is None or e["ordinal"] == el.get("ordinal")):
+            if self._same_el(e, el):
                 return fresh._snap, tuple(e["ax_path"])
         from testbeds.teach_once.browser import ElementNotFound
         raise ElementNotFound(f"{el.get('role')} {el.get('name')!r} not on the live page")
 
     def click(self, app: str, el: dict):
-        self.switch_window(app)
-        snap, path = self._path_for(app, el)
+        self.switch_window(app)                       # AXPress works in a background window; the CG
+        snap, path = self._path_for(app, el)          # click fallback needs ours on top
+        before = self._sig(snap)
         r = self.actor.press(snap, path, Expect(any_change=True))
         self._note(r)
+        if not self._wait_change(app, before):
+            self.notes.append(f"{app}: no page change after clicking {el.get('role')} {el.get('name')!r}")
         return self.page(app)
 
     def type(self, app: str, el: dict, value: str):
-        self.switch_window(app)
+        if not self.switch_window(app):
+            raise RuntimeError(f"{app}: our Safari window is not the key window (refusing to type)")
         snap, path = self._path_for(app, el)
         node = snap.node(path) or {}
         from ..secrets import handles_in
@@ -686,6 +829,22 @@ class MacEnv:
         self._note(r)
         el["value"] = "" if el.get("secure") else value
         return el
+
+    def close(self) -> int:
+        """Close OUR windows (their close buttons), never another window. -> how many closed."""
+        n = 0
+        for app, w in list(self.windows.items()):
+            try:
+                if self._alive(app):
+                    s = snapshot_element(self.rt, w, app=self.app_info, max_nodes=self.actor.max_nodes,
+                                         timeout=self.actor.timeout)
+                    hits = s.find(lambda x: x.get("subrole") == "AXCloseButton")
+                    if hits and self.rt.perform(s.element(hits[0]), "AXPress"):
+                        n += 1
+            except Exception:
+                pass
+            self._forget(app)
+        return n
 
     # -- secrets ----------------------------------------------------------------
     def secret(self, name: str) -> Optional[str]:
