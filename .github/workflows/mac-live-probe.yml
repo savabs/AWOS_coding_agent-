@@ -2,7 +2,7 @@
 # Checks: VM flag, Accessibility / Input Monitoring / event posting for our Python, TCC grants,
 # then the scripted live dev_dashboard demos (variants a, b, c) and teach_t3 in real Safari.
 # Screenshots + results (incl. every interruption dismissed, see live/interrupts.py) uploaded.
-# Launch: push to a branch named bench-cloud/mac-<anything>.
+# Launch: push to a branch named bench-cloud/mac-<anything> (except mac-arena-*, see mac-arena.yml).
 name: mac-live-probe
 
 on:
