@@ -783,6 +783,30 @@ class Actor:
         hits = snap.find(is_addr)
         return hits[0] if hits else None
 
+    def _addr_text(self, el) -> Optional[str]:
+        try:
+            v = self.rt.read(el, ("AXValue",)).get("AXValue")
+        except Exception:
+            return None
+        return v if isinstance(v, str) else None
+
+    @staticmethod
+    def _addr_holds(text: Optional[str], url: str) -> bool:
+        t = (text or "").strip()
+        if not t:
+            return False
+        return norm_url(t) == norm_url(url) or t == url.split("://", 1)[-1]
+
+    def _addr_wait(self, el, url: str, tries: int = 3) -> bool:
+        """Does the address field hold exactly ``url``? Re-read briefly (AX applies a set
+        value asynchronously in Safari)."""
+        for i in range(tries):
+            if self._addr_holds(self._addr_text(el), url):
+                return True
+            if i + 1 < tries:
+                self.rt.sleep(min(self.poll, 0.15))
+        return False
+
     def navigate(self, window: Any, url: str, *, app: Optional[Dict[str, Any]] = None,
                  timeout: float = 15.0) -> ActionResult:
         """Load url in THIS Safari window through its address field."""
@@ -808,9 +832,27 @@ class Actor:
             return self._refuse("navigate", "our window is not the key window (refusing to type)")
         self.rt.set_attr(el, "AXFocused", True)
         set_ok = self.rt.set_attr(el, "AXValue", url)
-        if not set_ok and self.use_events and self.rt.can_post_events():
-            self.rt.post_key(app["pid"], KEY_A, FLAG_CMD)
-            self.rt.post_text(app["pid"], url)
+        # Real Safari: setting AXValue on the address field can report failure although the
+        # value WAS applied; typing then appended a second copy ("/keyshttp://.../keys" -> 404).
+        # So decide from what the field holds, never from the setter's return value.
+        held = self._addr_wait(el, url)
+        if not held and self.use_events and self.rt.can_post_events():
+            for _attempt in range(2):
+                self.rt.post_key(app["pid"], KEY_A, FLAG_CMD)
+                self.rt.post_text(app["pid"], url)
+                held = self._addr_wait(el, url)
+                if held:
+                    break
+                self.rt.set_attr(el, "AXValue", url)          # repair a mangled field, then re-check
+                held = self._addr_wait(el, url)
+                if held:
+                    break
+        cur = self._addr_text(el)
+        if not held and cur and cur.strip():
+            return self._refuse("navigate", "the address field does not hold the requested URL "
+                                            "(refusing to load whatever it contains)", url=url)
+        if not held and not set_ok and not (self.use_events and self.rt.can_post_events()):
+            return self._refuse("navigate", "cannot set the address field")
         if "AXConfirm" in self.rt.actions(el):
             self.rt.perform(el, "AXConfirm")
         elif self.use_events and self.rt.can_post_events():
