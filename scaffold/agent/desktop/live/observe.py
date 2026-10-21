@@ -22,6 +22,7 @@ fake with the same surface, so nothing here needs PyObjC or permissions in tests
     children(el) -> [el]           same(a, b) -> bool          pid(el) -> int | None
     app_element(pid)               frontmost() -> {"pid","bundle_id","name"} | None
     running_apps() -> [{"pid","bundle_id","name"}]             enable_web_accessibility(pid)
+    all_apps() (optional) -> running_apps() including agents / system alert processes
     set_attr(el, name, value) -> bool          settable(el, name) -> bool
     actions(el) -> [str]           perform(el, action) -> bool
     activate(pid) -> bool          open_with(app_name, target) -> bool   (``open -a``)
@@ -387,6 +388,18 @@ class MacRuntime(AXRuntime):
             for a in self.appkit.NSWorkspace.sharedWorkspace().runningApplications():
                 if int(a.activationPolicy()) != 0:          # regular apps only
                     continue
+                out.append({"pid": int(a.processIdentifier()), "bundle_id": str(a.bundleIdentifier() or ""),
+                            "name": str(a.localizedName() or "")})
+        except Exception:
+            pass
+        return out
+
+    def all_apps(self) -> List[Dict[str, Any]]:
+        """Every running process with a bundle, agents included (UserNotificationCenter,
+        SecurityAgent): interrupts.py looks for system alerts over our window here."""
+        out = []
+        try:
+            for a in self.appkit.NSWorkspace.sharedWorkspace().runningApplications():
                 out.append({"pid": int(a.processIdentifier()), "bundle_id": str(a.bundleIdentifier() or ""),
                             "name": str(a.localizedName() or "")})
         except Exception:

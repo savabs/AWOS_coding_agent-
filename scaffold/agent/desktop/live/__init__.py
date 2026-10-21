@@ -4,6 +4,9 @@ scaffold.agent.desktop.live — real macOS computer use over the AX tree.
     observe.py   bounded AX snapshots (grounding / ax_compress compatible) + MacRuntime (PyObjC)
     actions.py   verified actions: press, set value / type, select, menu pick, scroll,
                  activate, open URL in a new Safari window -> VERIFIED / UNVERIFIED / REFUSED
+    interrupts.py  known benign system / Safari dialogs over our window (save password, notification
+                 and Local Network prompts) dismissed with their SAFE button only; anything else
+                 -> needs_user, nothing clicked
     driver.py    MacBrowserBackend (micro_agent's browser interface over live Safari) and
                  MacEnv (teach-once skill_runner's env interface over live Safari)
     probe.py     permission status, frontmost app, compressed tree; the dd / teach_t3 demos;

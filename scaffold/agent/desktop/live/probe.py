@@ -238,8 +238,50 @@ def vm_hygiene(*, runner: Callable[..., Any] = subprocess.run, vm_check: Optiona
             killed, budget = True, waited + 3.0
         sleep(poll)
         waited += poll
-    out(f"hygiene: ran {res['ran']} safari_quit={res['safari_quit']}"
+    res["prefs"] = safari_prefs(runner=runner)
+    out(f"hygiene: ran {res['ran']} safari_quit={res['safari_quit']} "
+        f"prefs_verified={len(res['prefs']['verified'])}/{len(SAFARI_PREFS) * len(safari_pref_domains())}"
         + (f" errors={res['errors']}" if res["errors"] else ""))
+    return res
+
+
+# Guest-only Safari settings that stop prompts which cover our window (live: Safari's "Save
+# Password?" sheet after the dashboard login). Safari is sandboxed, so its real prefs live in
+# its container; both domains are written and read back. Best effort: a failure (e.g. the
+# container is protected without Full Disk Access) is reported, and interrupts.py still
+# dismisses the sheet with "Not Now" if it appears.
+SAFARI_PREFS = (("AutoFillPasswords", "false"), ("CanPromptForPushNotifications", "false"))
+
+
+def safari_pref_domains() -> List[str]:
+    return ["com.apple.Safari",
+            str(Path.home() / "Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari")]
+
+
+def safari_prefs(*, runner: Callable[..., Any] = subprocess.run, vm_check: Optional[Callable[[], bool]] = None
+                 ) -> Dict[str, Any]:
+    """defaults write + read back each of SAFARI_PREFS in both Safari domains, in the GUEST only
+    (vm_hygiene gates it; vm_check here is a second guard). -> {"set", "verified", "errors"}"""
+    res: Dict[str, Any] = {"set": [], "verified": [], "errors": []}
+    if vm_check is not None and not vm_check():
+        res["errors"].append("refused: not in the guest VM")
+        return res
+    for dom in safari_pref_domains():
+        tag = "container" if "/Containers/" in dom else "domain"
+        for key, val in SAFARI_PREFS:
+            name = f"{tag}:{key}"
+            try:
+                p = runner(["defaults", "write", dom, key, "-bool", val], capture_output=True, text=True, timeout=10)
+                if getattr(p, "returncode", 0) != 0:
+                    res["errors"].append(f"{name}: {(getattr(p, 'stderr', '') or '').strip()[:160]}")
+                    continue
+                res["set"].append(name)
+                r = runner(["defaults", "read", dom, key], capture_output=True, text=True, timeout=10)
+                got = (getattr(r, "stdout", "") or "").strip()
+                if getattr(r, "returncode", 0) == 0 and got == ("1" if val == "true" else "0"):
+                    res["verified"].append(name)
+            except Exception as e:                           # defaults missing / timed out
+                res["errors"].append(f"{name}: {type(e).__name__}: {e}"[:160])
     return res
 
 
@@ -293,6 +335,7 @@ def demo_dd(variant: str = "a", seed: int = 7, root: Optional[Path] = None, *, r
         for b in backends:
             res.setdefault("ui_log", []).extend(b.log)
             res.setdefault("unverified", []).extend(b.unverified)
+            res.setdefault("interruptions", []).extend(b.interruptions)   # every dismissal / needs_user
             if not keep_window:
                 try:
                     b.close()
@@ -353,6 +396,7 @@ def demo_teach_t3(instance: str = "i03", root: Optional[Path] = None, *, runtime
                 res["unverified"] = env.unverified
                 res["ui_actions"] = env.ui_actions
                 res["env_notes"] = list(env.notes)
+                res["interruptions"] = list(env.actor.interruptions)       # every dismissal / needs_user
                 if not keep_window:
                     res["windows_closed"] = env.close()      # ours only (close buttons)
     v = verifier.verify_instance(I.hidden, I.home)

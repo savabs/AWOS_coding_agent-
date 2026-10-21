@@ -28,6 +28,13 @@ secrets broker at the moment of typing) or a ``Revealed`` value a trusted sink a
 resolved. Plain text into a secure field is REFUSED. Results and logs carry the handle
 or ``<secret>``, never the value; plain values are reported by length only.
 
+Interruptions (interrupts.py): before acting on our window, when it is not the key / front
+window (or a sheet hangs off it), known benign system / Safari dialogs over it (Safari's
+"Save Password?" sheet, notification and Local Network permission alerts) are dismissed with
+their SAFE button only, every dismissal is logged in ``interruptions``, and our window is
+re-verified key before continuing. An unrecognised dialog, or one offering only unsafe
+choices, makes the action REFUSED with a reason starting ``needs_user:``; nothing is clicked.
+
 URLs: open_url only opens http(s) on 127.0.0.1 / localhost / ::1 and file:// unless the
 URL starts with one of ``allow_urls``. Safari pages always open in a NEW window
 (File > New Window via AX, Cmd-N as fallback) or by ``open -a Safari`` when Safari is not
@@ -45,6 +52,7 @@ from ..app_policy import AppIdentity, AppPolicy
 from ..ax_compress import button_role, diff, is_secure_node, norm_role
 from ..grounding import Target, ground
 from ..secrets import HANDLE_RE, handles_in
+from .interrupts import InterruptHandler
 from .observe import (DEFAULT_MAX_NODES, DEFAULT_TIMEOUT_S, Snapshot, observe, snapshot_element,
                       window_list)
 
@@ -58,6 +66,7 @@ KEY_RETURN, KEY_A, KEY_N = 36, 0, 45
 KEY_DELETE, KEY_RIGHT = 51, 124
 FLAG_CMD = 1 << 20
 FOCUS_WAIT_S = 1.0
+NEEDS_USER = "needs_user:"
 
 
 class Outcome(str, Enum):
@@ -151,7 +160,8 @@ class Actor:
                  allow_urls: Iterable[str] = (), settle: float = 4.0, poll: float = 0.15,
                  max_nodes: int = DEFAULT_MAX_NODES, timeout: float = DEFAULT_TIMEOUT_S,
                  use_events: bool = True, log: Optional[Callable[[str], None]] = None,
-                 vm_check: Optional[Callable[[], bool]] = None):
+                 vm_check: Optional[Callable[[], bool]] = None,
+                 interrupts: Optional[InterruptHandler] = None):
         from . import in_guest_vm
         self.rt = rt
         self.approve = approve
@@ -165,6 +175,8 @@ class Actor:
         self._log = log
         self.vm_check = vm_check if vm_check is not None else in_guest_vm
         self.history: List[dict] = []
+        self.interrupts = interrupts if interrupts is not None else InterruptHandler(rt, poll=poll, log=log)
+        self.interruptions: List[dict] = []          # every dismissal / needs_user, for the run report
 
     # ------------------------------------------------------------- helpers --
     def log(self, msg: str) -> None:
@@ -198,6 +210,37 @@ class Actor:
 
     def _refuse(self, action: str, reason: str, **detail) -> ActionResult:
         return self._done(ActionResult(Outcome.REFUSED, action, reason, detail=detail))
+
+    # -------------------------------------------------------- interruptions --
+    def _front_clear(self, snap: Snapshot) -> bool:
+        """Our window is the app's key window, the app is frontmost and no sheet hangs off it
+        (unknown counts as clear)."""
+        if snap is None or snap.window is None or snap.pid is None:
+            return True
+        for k in self.rt.children(snap.window):
+            if self.rt.read(k, ("AXRole",)).get("AXRole") == "AXSheet":
+                return False
+        if not self._key_window_ok(snap):
+            return False
+        f = self.rt.frontmost() or {}
+        return f.get("pid") in (None, snap.pid)
+
+    def clear_interruptions(self, snap: Snapshot, action: str) -> Optional[ActionResult]:
+        """When our window is not clear, dismiss KNOWN benign interruptions with their safe
+        button (interrupts.py) and re-verify focus. -> a REFUSED ``needs_user:`` result when a
+        human has to look; None to carry on (the caller's own focus checks still apply)."""
+        if self._front_clear(snap) or not self.vm_check():
+            return None
+        rep = self.interrupts.handle(snap, refocus=lambda: self.raise_window(snap),
+                                     key_ok=lambda: self._front_clear(snap))
+        for h in rep.handled:
+            self.interruptions.append(dict(h, action=action))
+        if rep.needs_user:
+            if not rep.handled or rep.handled[-1]["outcome"] == "dismissed":     # an unknown dialog
+                self.interruptions.append({"outcome": "needs_user", "action": action, "reason": rep.needs_user,
+                                           "dialog": rep.unknown})
+            return self._refuse(action, f"{NEEDS_USER} {rep.needs_user}", interruption=rep.unknown)
+        return None
 
     def _gate(self, action: str, kind: str, app: Dict[str, Any], node: Optional[dict] = None
               ) -> Optional[ActionResult]:
@@ -328,7 +371,7 @@ class Actor:
         if path is None:
             return self._refuse("press", err)
         node, el = snap.node(path), snap.element(path)
-        g = self._gate("press", "click", snap.app, node)
+        g = self._gate("press", "click", snap.app, node) or self.clear_interruptions(snap, "press")
         if g:
             return g
         expect = expect if expect is not None and not expect.empty() else Expect(any_change=True)
@@ -336,6 +379,11 @@ class Actor:
         if "AXPress" in self.rt.actions(el) and self.rt.perform(el, "AXPress"):
             return self._verify("press", "ax_press", snap, el, expect, detail)
         ok, why = self._cg_click(snap, node, el)
+        if not ok and "occluded" in why:
+            g = self.clear_interruptions(snap, "press")
+            if g:
+                return g
+            ok, why = self._cg_click(snap, node, el)
         if not ok:
             return self._refuse("press", f"AXPress unavailable and CGEvent click refused: {why}", **detail)
         return self._verify("press", "cg_click", snap, el, expect, detail)
@@ -401,7 +449,7 @@ class Actor:
         role = norm_role(node.get("role"))
         if role not in TEXT_ROLES:
             return self._refuse("set_value", f"{role} is not a text field")
-        g = self._gate("set_value", "set_value", snap.app, node)
+        g = self._gate("set_value", "set_value", snap.app, node) or self.clear_interruptions(snap, "set_value")
         if g:
             return g
         plain, shown, err = self._resolve_value(value, node, snap.app)
@@ -468,6 +516,10 @@ class Actor:
         still covering it -> refuse."""
         why = ""
         for attempt in range(2):
+            if not self._front_clear(snap):
+                g = self.clear_interruptions(snap, "focus")
+                if g is not None:
+                    return False, g.reason
             if attempt or not self._key_window_ok(snap):
                 self.raise_window(snap)                 # activate + AXMain + AXRaise
                 self.rt.sleep(self.poll)
@@ -527,6 +579,8 @@ class Actor:
             return self._refuse(action, "AXValue failed and synthetic keystrokes are unavailable", **detail)
         ok, how = self._focus_for_typing(snap, el, node)
         if not ok:
+            if how.startswith(NEEDS_USER):
+                return self._refuse(action, how, **detail)
             return self._refuse(action, f"could not focus the field ({how})", **detail)
         detail = dict(detail, focus=how)
         ok, how = self._clear_field(snap, el, secure)
@@ -545,7 +599,7 @@ class Actor:
         if path is None:
             return self._refuse("type", err)
         node, el = snap.node(path), snap.element(path)
-        g = self._gate("type", "type", snap.app, node)
+        g = self._gate("type", "type", snap.app, node) or self.clear_interruptions(snap, "type")
         if g:
             return g
         plain, shown, err = self._resolve_value(value, node, snap.app)
@@ -828,6 +882,9 @@ class Actor:
         if p is None:
             return self._refuse("navigate", "no address field in the window")
         el = snap.element(p)
+        g = self.clear_interruptions(snap, "navigate")
+        if g:
+            return g
         self.raise_window(snap)
         focused = (self.rt.read(app and self.rt.app_element(app["pid"]), ("AXFocusedWindow",))
                    .get("AXFocusedWindow"))

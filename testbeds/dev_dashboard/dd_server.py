@@ -469,6 +469,9 @@ class DashboardServers:
     def __init__(self, state_path: Path, host: str = "127.0.0.1"):
         if host not in ("127.0.0.1", "localhost"):
             raise ValueError("testbed servers bind to loopback only")
+        # Always the IPv4 loopback literal: "localhost" may resolve to ::1 (or another
+        # address), and anything but loopback can raise macOS's Local Network privacy alert.
+        host = "127.0.0.1"
         self.world = World(Path(state_path))
         self.dash = ThreadingHTTPServer((host, 0), make_dashboard_handler(self.world))
         self.desk = ThreadingHTTPServer((host, 0), make_approval_handler(self.world))

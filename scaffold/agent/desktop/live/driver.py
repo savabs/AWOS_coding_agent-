@@ -35,8 +35,9 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 from ..ax_compress import norm_role
-from ..web_tools import _SECRET_LABEL, _SECRETISH, Control, Form, Page, WebError, check_loopback, mask_secrets
-from .actions import SAFARI, Actor, Expect, Outcome, Revealed, norm_url
+from ..web_tools import (_SECRET_LABEL, _SECRETISH, Control, Form, Page, UserNeeded, WebError, check_loopback,
+                         mask_secrets)
+from .actions import NEEDS_USER, SAFARI, Actor, Expect, Outcome, Revealed, norm_url
 from .observe import Snapshot, snapshot_element
 
 INPUT_ROLES = {"textfield", "textarea", "searchfield", "combobox", "securetextfield", "radiogroup",
@@ -382,6 +383,21 @@ class MacBrowserBackend:
         self.unverified: List[dict] = []
 
     # -- plumbing -----------------------------------------------------------
+    @property
+    def interruptions(self) -> List[dict]:
+        """Every system / Safari interruption dismissed (or handed to the user) in this run."""
+        return self.actor.interruptions
+
+    def _refused(self, what: str, r) -> WebError:
+        if r.reason.startswith(NEEDS_USER):
+            return UserNeeded(f"{what} refused: {r.reason}")
+        return WebError(f"{what} refused: {r.reason}")
+
+    def _note_interrupts(self, n0: int) -> None:
+        for h in self.actor.interruptions[n0:]:
+            self.log.append(f"INTERRUPT {h.get('rule', 'unknown')} -> {h.get('button', '-')} "
+                            f"({h.get('outcome')})")
+
     def _url(self, path_or_url: str) -> str:
         base = self.page.url if self.page and self.page.url.startswith("http") else self.base + "/"
         return check_loopback(urllib.parse.urljoin(base, path_or_url))
@@ -463,6 +479,7 @@ class MacBrowserBackend:
     # -- the interface --------------------------------------------------------
     def open(self, path_or_url: str = "/") -> Page:
         url = self._url(path_or_url)
+        n0 = len(self.actor.interruptions)
         if self.window is None:
             r = self.actor.open_url(url)
             if r.window is not None:
@@ -471,9 +488,10 @@ class MacBrowserBackend:
         else:
             r = self.actor.navigate(self.window, url, app=self.app)
         path = urllib.parse.urlsplit(url).path
+        self._note_interrupts(n0)
         self.log.append(f"GET {path} -> {r.outcome.value}")
         if r.outcome is Outcome.REFUSED or self.window is None:
-            raise WebError(f"open refused: {r.reason}")
+            raise self._refused("open", r)
         if r.outcome is Outcome.UNVERIFIED:
             self.unverified.append(r.to_dict())
         redirected = bool((getattr(r, "detail", None) or {}).get("redirected_to"))
@@ -484,10 +502,12 @@ class MacBrowserBackend:
         if c.role not in ("link", "button"):
             raise WebError(f"control {n} ({c.role}) is not clickable")
         before = (snap.url, snap.render(400)) if snap.ok else None
+        n0 = len(self.actor.interruptions)
         r = self.actor.press(snap, path, Expect(any_change=True))
+        self._note_interrupts(n0)
         self.log.append(f"CLICK {c.role} -> {r.outcome.value}")
         if r.outcome is Outcome.REFUSED:
-            raise WebError(f"click refused: {r.reason}")
+            raise self._refused("click", r)
         if r.outcome is Outcome.UNVERIFIED:
             self.unverified.append(r.to_dict())
         self._wait_change(before)
@@ -512,10 +532,12 @@ class MacBrowserBackend:
             raise WebError(f"control {n} is not a text input")
         v = Revealed(value) if c.role == "password" or (self.actor.secrets is None and _SECRETISH.search(value)) \
             else value
+        n0 = len(self.actor.interruptions)
         r = self.actor.set_value(snap, path, v)
+        self._note_interrupts(n0)
         self.log.append(f"FILL {c.role} -> {r.outcome.value}")
         if r.outcome is Outcome.REFUSED:
-            raise WebError(f"fill refused: {r.reason}")
+            raise self._refused("fill", r)
         if r.outcome is Outcome.UNVERIFIED:
             self.unverified.append(r.to_dict())
         page.values[n] = value
@@ -535,7 +557,7 @@ class MacBrowserBackend:
             r = self.actor.select_option(snap, path, option)
         self.log.append(f"SELECT {c.role} -> {r.outcome.value}")
         if r.outcome is Outcome.REFUSED:
-            raise WebError(f"select refused: {r.reason}")
+            raise self._refused("select", r)
         if r.outcome is Outcome.UNVERIFIED:
             self.unverified.append(r.to_dict())
         canon = c.options[[o.lower() for o in c.options].index(option.lower())]
@@ -769,7 +791,14 @@ class MacEnv:
         (activation and AXRaise land asynchronously). True when it is."""
         if self._is_key(app):
             return True
-        self.actor.raise_window(self._snap(app))
+        snap = self._snap(app)
+        g = self.actor.clear_interruptions(snap, "switch_window")
+        if g is not None:
+            self.notes.append(f"{app}: {g.reason}")
+            return False
+        if self._is_key(app):
+            return True
+        self.actor.raise_window(snap)
         t_end = self.rt.now() + self.focus_timeout
         while not self._is_key(app):
             if self.rt.now() >= t_end:
@@ -817,8 +846,10 @@ class MacEnv:
         return self.page(app)
 
     def type(self, app: str, el: dict, value: str):
+        n0 = len(self.notes)
         if not self.switch_window(app):
-            raise RuntimeError(f"{app}: our Safari window is not the key window (refusing to type)")
+            why = next((n for n in self.notes[n0:] if NEEDS_USER in n), "")
+            raise RuntimeError(why or f"{app}: our Safari window is not the key window (refusing to type)")
         snap, path = self._path_for(app, el)
         node = snap.node(path) or {}
         from ..secrets import handles_in

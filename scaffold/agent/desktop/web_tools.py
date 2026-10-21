@@ -62,6 +62,12 @@ class WebError(RuntimeError):
     pass
 
 
+class UserNeeded(WebError):
+    """The browser refused BEFORE acting because a human has to look (e.g. an unrecognised
+    system dialog over the window). Nothing was clicked or typed, so this is needs_user,
+    never an uncertain write."""
+
+
 def mask_secrets(text: str) -> str:
     """Replace credential-looking tokens with a fixed placeholder."""
     return _SECRETISH.sub(lambda m: f"«masked {len(m.group(0))} chars»", text)

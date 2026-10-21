@@ -91,7 +91,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Protocol, Sequence, runtime_checkable
 
 from . import web_tools
-from .web_tools import Control, LoopbackBrowser, Page, WebError, mask_secrets
+from .web_tools import Control, LoopbackBrowser, Page, UserNeeded, WebError, mask_secrets
 
 MAX_STEPS = 12
 MAX_SECONDS = 120.0                  # default wall-clock cap per subtask
@@ -935,7 +935,11 @@ class MicroAgent:
                 if duplicates >= MAX_INVALID:
                     return finish(Outcome.NEEDS_USER, "model kept repeating an action that already succeeded")
                 continue
-            err, page_after, stop = self._execute(st, act, page, secrets_in, res, approved, ev)
+            try:
+                err, page_after, stop = self._execute(st, act, page, secrets_in, res, approved, ev)
+            except UserNeeded as e:                      # refused before acting: nothing was done
+                ev["needs_user"] = str(e)
+                return finish(Outcome.NEEDS_USER, str(e))
             if stop is not None:
                 return finish(*stop)
             if act.verb is Verb.SCROLL and err is None:
@@ -1056,6 +1060,8 @@ class MicroAgent:
                     ev["approved"] = True
             try:
                 new = self.br.click(page, c.n)
+            except UserNeeded:
+                raise
             except WebError as e:
                 if write:
                     return None, page, (Outcome.HALTED, f"write outcome uncertain ({e}); not retried")
