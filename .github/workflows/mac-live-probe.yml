@@ -1,0 +1,81 @@
+# Can a free GitHub-hosted macOS runner (itself a disposable VM) host AWOS live computer use?
+# Checks: VM flag, Accessibility / Input Monitoring / event posting for our Python, TCC grants,
+# then the scripted live dev_dashboard demo in real Safari. Screenshots + results uploaded.
+# Launch: push to a branch named bench-cloud/mac-<anything>.
+name: mac-live-probe
+
+on:
+  push:
+    branches: ["bench-cloud/mac-**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Deps
+        run: |
+          pip install -q -r requirements.txt pyobjc-framework-ApplicationServices pyobjc-framework-Quartz \
+            pyobjc-framework-Cocoa pyobjc-framework-FSEvents keyring
+
+      - name: Machine facts
+        shell: bash
+        run: |
+          set +e
+          sw_vers; uname -m; sysctl -n hw.ncpu hw.memsize kern.hv_vmm_present
+          csrutil status
+          echo "--- TCC (system) Accessibility / ListenEvent / PostEvent / ScreenCapture clients"
+          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+            "select service, client, auth_value from access where service in ('kTCCServiceAccessibility','kTCCServiceListenEvent','kTCCServicePostEvent','kTCCServiceScreenCapture');" || true
+          echo "--- python path"; which python; python -c "import sys; print(sys.executable)"
+
+      - name: Permission check (our Python, as a child of the runner's bash)
+        shell: bash
+        run: |
+          set +e
+          PYTHONPATH=$PWD python -m scaffold.agent.desktop.capture check; echo "capture check exit=$?"
+          PYTHONPATH=$PWD python -m scaffold.agent.desktop.live probe --app Finder; echo "live probe exit=$?"
+
+      - name: Live scripted demo (dev_dashboard variant a, real Safari)
+        shell: bash
+        run: |
+          set +e
+          mkdir -p out
+          osascript -e 'quit app "Safari"' 2>/dev/null; sleep 1
+          PYTHONPATH=$PWD python -m scaffold.agent.desktop.live demo --target dd --variant a --out out \
+            2>&1 | tee out/demo_dd_a.log
+          echo "demo exit=${PIPESTATUS[0]}"
+          screencapture -x out/screen_after.png || echo "screencapture failed"
+
+      - name: Live scripted demo (teach_t3)
+        shell: bash
+        run: |
+          set +e
+          osascript -e 'quit app "Safari"' 2>/dev/null; sleep 1
+          PYTHONPATH=$PWD python -m scaffold.agent.desktop.live demo --target teach_t3 --out out \
+            2>&1 | tee out/demo_teach_t3.log
+          echo "demo exit=${PIPESTATUS[0]}"
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-live-probe-${{ matrix.os }}
+          path: out/
+          if-no-files-found: warn
