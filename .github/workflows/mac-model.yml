@@ -168,20 +168,20 @@ jobs:
           for R in $(seq 1 "$REPS"); do
             osascript -e 'quit app "Safari"' 2>/dev/null; sleep 1
             mkdir -p out/rep$R
-            if [ "$R" = 1 ]; then   # one screen recording per job (first rep, capped at 15 min)
-              # background jobs of a non-interactive bash ignore SIGINT; reset it so kill -INT stops
-              # the recording cleanly (otherwise screencapture runs its full -V time)
-              python3 -c 'import os,signal,sys; signal.signal(signal.SIGINT, signal.SIG_DFL); os.execvp(sys.argv[1], sys.argv[1:])' \
-                screencapture -v -V 900 -x out/video_${MODEL}_${VARIANT}.mov & REC=$!
+            if [ "$R" = 1 ]; then   # one screen recording per job: the first ~7 min (about one 4B rep)
+              # Fixed length, never signalled: SIGINT is ignored by background jobs of a non-interactive
+              # bash (run 1: recorder ran its full -V), and with SIGINT reset to default screencapture
+              # dies without writing the movie (run 3). It finishes on its own; waited for after the reps.
+              screencapture -v -V "${REC_S:-420}" -x out/video_${MODEL}_${VARIANT}.mov & REC=$!
               sleep 2
             fi
             python -m scaffold.agent.desktop.live demo --target dd --variant "$VARIANT" --provider local \
               --out out/rep$R 2>&1 | tee out/rep$R/demo.log
             echo "rep $R exit=${PIPESTATUS[0]}"
-            if [ "$R" = 1 ]; then sleep 2; kill -INT $REC 2>/dev/null; wait $REC 2>/dev/null; fi
             screencapture -x out/rep$R/screen_after.png 2>/dev/null
             curl -s http://127.0.0.1:8080/health >/dev/null || echo "llama-server down after rep $R"
           done
+          wait $REC 2>/dev/null
           cp out/llama-server-ngl$NGL.log out/llama-server.log 2>/dev/null
           vm_stat | head -6 > out/vm_stat_end.txt
 
