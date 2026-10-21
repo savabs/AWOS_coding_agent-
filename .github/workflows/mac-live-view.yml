@@ -51,15 +51,18 @@ jobs:
           set +e
           K=/System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart
           # macOS offers Apple (ARD) auth to web VNC clients: user name + account password.
-          # Give the throwaway runner account the owner's password so "runner" + LIVE_VIEW_PASSWORD works.
-          sudo dscl . -passwd "/Users/$USER" "$PW" && echo "account password set for $USER"
+          # Changing the runner account's password fails on hosted runners, so create a separate
+          # throwaway account "viewer" with the owner's password and allow only it to screen-share.
+          # (It sees the console screen, i.e. the runner's desktop where the agent works.)
+          sudo sysadminctl -addUser viewer -fullName "Live viewer" -password "$PW" >/dev/null 2>&1
+          sudo dscl . -passwd /Users/viewer "$PW" >/dev/null 2>&1
+          dscl /Local/Default -authonly viewer "$PW" && echo "viewer account auth OK" \
+            || { echo "::error::could not create the viewer account"; exit 1; }
           sudo $K -activate -configure -allowAccessFor -specifiedUsers >/dev/null 2>&1
-          sudo $K -configure -users "$USER" -access -on -privs -all >/dev/null 2>&1
+          sudo $K -configure -users viewer -access -on -privs -all >/dev/null 2>&1
           sudo $K -configure -clientopts -setvnclegacy -vnclegacy yes -setvncpw -vncpw "${PW:0:8}" >/dev/null 2>&1
           sudo $K -restart -agent -console >/dev/null 2>&1
           echo "kickstart exit=$?"
-          # sanity: the account password really is the owner's password
-          dscl /Local/Default -authonly "$USER" "$PW" && echo "account auth OK for $USER" || echo "::warning::account auth check failed"
           for i in $(seq 1 20); do nc -z localhost 5900 && break; sleep 1; done
           nc -z localhost 5900 && echo "VNC listening on 5900" || { echo "::error::VNC did not start"; exit 1; }
 
@@ -81,10 +84,10 @@ jobs:
           [ -n "$URL" ] || { cat "$HOME/cf.log"; echo "::error::tunnel did not come up"; exit 1; }
           VIEW="$URL/vnc.html?autoconnect=1&resize=scale&view_only=1"
           echo "LIVE VIEW: $VIEW"
-          echo "::notice title=LIVE VIEW (password = LIVE_VIEW_PASSWORD, first 8 chars)::$VIEW"
-          echo "## Live view: $VIEW (user: $USER)" >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=LIVE VIEW (user viewer, password LIVE_VIEW_PASSWORD)::$VIEW"
+          echo "## Live view: $VIEW (user: viewer)" >> "$GITHUB_STEP_SUMMARY"
           gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" -f state=pending \
-            -f context="live-view" -f description="user: $USER, password: LIVE_VIEW_PASSWORD" -f target_url="$VIEW" >/dev/null \
+            -f context="live-view" -f description="user: viewer, password: LIVE_VIEW_PASSWORD" -f target_url="$VIEW" >/dev/null \
             && echo "published live-view status"
         env:
           PW: ${{ secrets.LIVE_VIEW_PASSWORD }}
