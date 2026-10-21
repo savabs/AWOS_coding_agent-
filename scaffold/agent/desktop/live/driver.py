@@ -432,13 +432,28 @@ class MacBrowserBackend:
         c, snap, path = self._live(page, n)
         if c.role not in ("link", "button"):
             raise WebError(f"control {n} ({c.role}) is not clickable")
+        before = (snap.url, snap.render(400)) if snap.ok else None
         r = self.actor.press(snap, path, Expect(any_change=True))
         self.log.append(f"CLICK {c.role} -> {r.outcome.value}")
         if r.outcome is Outcome.REFUSED:
             raise WebError(f"click refused: {r.reason}")
         if r.outcome is Outcome.UNVERIFIED:
             self.unverified.append(r.to_dict())
+        self._wait_change(before)
         return self._load()
+
+    def _wait_change(self, before, timeout: float = 5.0) -> None:
+        """After a press, wait until the page differs from the pre-click page (navigation
+        or in-page update) before settling, so the old page is not read as 'settled'.
+        Clicks that change nothing just time out and fall through to _load()."""
+        if before is None:
+            return
+        t_end = self.rt.now() + min(timeout, self.load_timeout)
+        while self.rt.now() < t_end:
+            s = self._snap()
+            if s.ok and (s.url, s.render(400)) != before:
+                return
+            self.rt.sleep(self.actor.poll)
 
     def fill(self, page: Page, n: int, value: str) -> Page:
         c, snap, path = self._live(page, n)

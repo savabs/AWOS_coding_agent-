@@ -269,7 +269,11 @@ def snapshot_element(rt, root, *, app: Optional[Dict[str, Any]] = None,
             if state["url"] is None and node.get("url"):
                 state["url"] = node["url"]
         kids = []
-        for i, c in enumerate(rt.children(el)):
+        # Safari/WebKit tables expose every cell twice: under AXRow and again under AXColumn.
+        # Walking both makes each link look like two identical controls (grounding then
+        # refuses as ambiguous), so column subtrees are not descended.
+        children = [] if node["role"] == "AXColumn" else rt.children(el)
+        for i, c in enumerate(children):
             k = visit(c, path + (len(kids),))
             if k is None:
                 break
@@ -489,4 +493,11 @@ class MacRuntime(AXRuntime):
         return time.monotonic()
 
     def sleep(self, s: float) -> None:
-        time.sleep(max(0.0, s))
+        # Spin the run loop, not time.sleep: NSWorkspace.runningApplications (and AX
+        # notifications) only refresh while the run loop runs, so a CLI process that just
+        # sleeps never sees an app it launched.
+        try:
+            self.appkit.NSRunLoop.currentRunLoop().runUntilDate_(
+                self.appkit.NSDate.dateWithTimeIntervalSinceNow_(max(0.0, s)))
+        except Exception:
+            time.sleep(max(0.0, s))

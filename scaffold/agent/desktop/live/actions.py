@@ -230,7 +230,8 @@ class Actor:
         if expect.value is not None:
             v = live.get("AXValue")
             if v is None or str(v) != expect.value:
-                return False, "value differs"
+                got = "unreadable" if v is None else f"len {len(str(v))}"
+                return False, f"value differs ({got}, want len {len(expect.value)})"
         if expect.value_len is not None:
             n = live.get("AXNumberOfCharacters")
             if n is None:
@@ -285,7 +286,7 @@ class Actor:
             return None
         return f["x"] + f["w"] / 2, f["y"] + f["h"] / 2
 
-    def _cg_click(self, snap: Snapshot, node: dict) -> Tuple[bool, str]:
+    def _cg_click(self, snap: Snapshot, node: dict, el: Any = None) -> Tuple[bool, str]:
         if not self.use_events or not self.rt.can_post_events():
             return False, "synthetic events unavailable"
         c = self._center(node)
@@ -293,6 +294,15 @@ class Actor:
             return False, "element has no visible frame"
         hit = self.rt.element_at_point(*c)
         if hit is None or self.rt.pid(hit) != snap.pid:
+            # Often the element is just scrolled out of view (point lands on the desktop/Dock):
+            # ask AX to scroll it visible, re-measure, and hit-test again before refusing.
+            if el is not None and "AXScrollToVisible" in self.rt.actions(el):
+                self.rt.perform(el, "AXScrollToVisible")
+                self.rt.sleep(0.4)
+                from .observe import NODE_ATTRS, make_node  # noqa: PLC0415
+                c = self._center(make_node(self.rt, el, self.rt.read(el, NODE_ATTRS)))
+                hit = self.rt.element_at_point(*c) if c else None
+        if c is None or hit is None or self.rt.pid(hit) != snap.pid:
             return False, "the click point belongs to another app (occluded)"
         self.rt.activate(snap.pid)
         return self.rt.post_click(*c), ""
@@ -311,7 +321,7 @@ class Actor:
         detail = {"role": norm_role(node.get("role")), "name": node.get("title", "")}
         if "AXPress" in self.rt.actions(el) and self.rt.perform(el, "AXPress"):
             return self._verify("press", "ax_press", snap, el, expect, detail)
-        ok, why = self._cg_click(snap, node)
+        ok, why = self._cg_click(snap, node, el)
         if not ok:
             return self._refuse("press", f"AXPress unavailable and CGEvent click refused: {why}", **detail)
         return self._verify("press", "cg_click", snap, el, expect, detail)
@@ -378,7 +388,7 @@ class Actor:
             return self._refuse("set_value", "AXValue failed and synthetic keystrokes are unavailable", **detail)
         self.rt.set_attr(el, "AXFocused", True)
         if self._read_el(el).get("AXFocused") is not True:
-            ok, why = self._cg_click(snap, node)
+            ok, why = self._cg_click(snap, node, el)
             if not ok or self._read_el(el).get("AXFocused") is not True:
                 return self._refuse("set_value", f"could not focus the field ({why or 'focus did not move'})",
                                     **detail)
