@@ -711,7 +711,10 @@ class Actor:
             self.rt.sleep(self.poll)
 
     def open_url(self, url: str, *, app: str = "Safari", bundle: str = SAFARI,
-                 timeout: float = 15.0) -> ActionResult:
+                 timeout: float = 15.0, launch_timeout: float = 45.0) -> ActionResult:
+        """``launch_timeout``: budget when Safari has to be started first. Live (sandbox VM):
+        a cold Safari shows its window ~5s after ``open`` and exposes the web area's URL only
+        ~10s in, more under load -- 15s gave intermittent 'page did not load' halts."""
         ok, why = url_allowed(url, self.allow_urls)
         if not ok:
             return self._refuse("open_url", why, url=url)
@@ -751,7 +754,7 @@ class Actor:
                 return self._done(ActionResult(Outcome.UNVERIFIED, "open_url", "Safari did not start", "open"))
             host = urllib.parse.urlsplit(url).netloc.lower()
             w = self._wait_window(info["pid"], lambda w: urllib.parse.urlsplit(
-                self._web_url(w, info) or "").netloc.lower() == host, timeout)
+                self._web_url(w, info) or "").netloc.lower() == host, max(timeout, launch_timeout))
             if w is None:
                 return self._done(ActionResult(Outcome.UNVERIFIED, "open_url", "page did not load", "open",
                                                {"url": url}))

@@ -106,3 +106,30 @@ def test_typing_path_still_works_when_select_all_works(tmp_path):
         assert saf.loads[-1] == url + "/page2"
     finally:
         srv.shutdown()
+
+
+def test_cold_safari_launch_waits_past_15s(tmp_path):
+    """Live: a cold Safari exposes the new window's web URL only ~10s+ after `open`."""
+    from tests.test_live_driver import SAFARI_PID
+    rt = FakeRuntime()
+    saf = FakeSafari(rt, running=False)
+    srv, url = _tiny_server(tmp_path)
+    state = {}
+
+    def open_with(app, target):
+        rt.add_app(SAFARI_PID, A.SAFARI, "Safari", saf.app)
+        state["at"], state["url"] = rt.now() + 20.0, target       # page shows up 20s later
+        return True
+
+    real_read = rt.read
+
+    def read(el, names):
+        if "at" in state and rt.now() >= state["at"] and not saf.windows:
+            saf.new_window(state["url"])
+        return real_read(el, names)
+    rt.open_with, rt.read = open_with, read
+    try:
+        r = actor(rt).open_url(url + "/")
+        assert r.outcome is A.Outcome.VERIFIED, r
+    finally:
+        srv.shutdown()
