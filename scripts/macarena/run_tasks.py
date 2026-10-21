@@ -95,22 +95,30 @@ def quit_apps(apps: List[str]) -> None:
 class Recorder:
     def __init__(self, path: Path, max_s: int):
         self.path, self.proc = path, None
+        self.logf = open(path.with_suffix(".log"), "w")
         try:
             self.proc = subprocess.Popen(["screencapture", "-v", "-V", str(max_s), "-x", str(path)],
-                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            time.sleep(1.5)
-        except OSError:
+                                         stdin=subprocess.DEVNULL, stdout=self.logf, stderr=subprocess.STDOUT)
+            time.sleep(2.0)
+        except OSError as e:
+            self.logf.write(f"spawn failed: {e!r}\n")
             self.proc = None
 
     def stop(self) -> Optional[str]:
         if self.proc is None:
             return None
-        if self.proc.poll() is None:
+        early = self.proc.poll()
+        if early is None:
             self.proc.send_signal(signal.SIGINT)
             try:
-                self.proc.wait(timeout=20)
+                self.proc.wait(timeout=60)
             except subprocess.TimeoutExpired:
                 self.proc.kill()
+                self.logf.write("killed after 60 s\n")
+        else:
+            self.logf.write(f"screencapture had already exited rc={early}\n")
+        self.logf.write(f"rc={self.proc.returncode}\n")
+        self.logf.close()
         return self.path.name if self.path.exists() else None
 
 
