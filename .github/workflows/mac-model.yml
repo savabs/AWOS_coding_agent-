@@ -1,0 +1,213 @@
+# Model-driven AWOS computer use on free GitHub-hosted macOS runners (each a disposable VM).
+# llama.cpp (official macOS arm64 build) serves a small local GGUF on 127.0.0.1; the micro-agent
+# (--provider local, per-step GBNF grammar) drives real Safari through the live AX driver on
+# dev_dashboard variants a/b/c, K reps per (model, variant). No paid API is ever called.
+# Records pass/fail, outcome, steps, model calls, wall time, tok/s, injection flag, UNSAFE effects;
+# one screen recording per job. The summary job prints pass@1 / pass^K / pass@K per (model, variant).
+# Launch: push to a branch named bench-cloud/mac-model-<n>.
+name: mac-model
+
+on:
+  push:
+    branches: ["bench-cloud/mac-model-**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mac-model-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  LLAMA_TAG: b11146          # same llama.cpp as the laptop's Homebrew build and the Linux CI
+  REPS: "5"
+
+jobs:
+  run:
+    strategy:
+      fail-fast: false
+      # at most 3 of the account's 5 free macOS slots, so the owner always has 2 for live sessions
+      max-parallel: 3
+      matrix:
+        os: [macos-15]
+        # Qwen3.5-2B was dropped after runs 1-2: it fails sign-in identically on every rep (macos-14/15)
+        model: [q35-4b, q3-4b-2507, q35-9b]
+        variant: [a, b, c]
+        include:
+          - {model: q35-4b, repo: unsloth/Qwen3.5-4B-GGUF, file: Qwen3.5-4B-Q4_K_M.gguf}
+          - {model: q3-4b-2507, repo: unsloth/Qwen3-4B-Instruct-2507-GGUF, file: Qwen3-4B-Instruct-2507-Q4_K_M.gguf}
+          # 9B: 5.7 GB of weights in a 7 GB VM. Run 2: the Metal attempt never finished (7 min cap) and
+          # left the CPU at 0.1-0.3 tok/s (paging); so CPU only, smaller context.
+          - {model: q35-9b, repo: unsloth/Qwen3.5-9B-GGUF, file: Qwen3.5-9B-Q4_K_M.gguf, metal: "0", ctx: "8192"}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 330
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      MODEL: ${{ matrix.model }}
+      VARIANT: ${{ matrix.variant }}
+      GGUF_REPO: ${{ matrix.repo }}
+      GGUF_FILE: ${{ matrix.file }}
+      OS_LABEL: ${{ matrix.os }}
+      TRY_METAL: ${{ matrix.metal || '1' }}
+      CTX: ${{ matrix.ctx || '16384' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Deps
+        run: |
+          pip install -q -r requirements.txt pyobjc-framework-ApplicationServices pyobjc-framework-Quartz \
+            pyobjc-framework-Cocoa pyobjc-framework-FSEvents keyring
+
+      - name: Machine facts
+        shell: bash
+        run: |
+          set +e
+          mkdir -p out
+          { sw_vers; uname -m; sysctl -n hw.ncpu hw.memsize kern.hv_vmm_present machdep.cpu.brand_string
+            system_profiler SPDisplaysDataType 2>/dev/null | head -20; vm_stat | head -6; } | tee out/machine.txt
+
+      - name: Cache the GGUF
+        id: gguf
+        uses: actions/cache@v4
+        with:
+          path: models/${{ matrix.file }}
+          key: gguf-mac-${{ matrix.file }}-v1
+
+      - name: Download the GGUF (cache miss)
+        if: steps.gguf.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          mkdir -p models
+          curl -fL --retry 5 -o "models/$GGUF_FILE" "https://huggingface.co/$GGUF_REPO/resolve/main/$GGUF_FILE"
+          ls -lh models
+
+      - name: llama.cpp (official macOS arm64 build)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/llama && cd ~/llama
+          gh release download "$LLAMA_TAG" --repo ggml-org/llama.cpp --pattern "llama-$LLAMA_TAG-bin-macos-arm64.tar.gz" --clobber
+          tar -xzf "llama-$LLAMA_TAG-bin-macos-arm64.tar.gz"
+          BIN=$(find ~/llama -name llama-server -type f | head -1)
+          chmod +x "$BIN"; xattr -dr com.apple.quarantine ~/llama 2>/dev/null || true
+          echo "LLAMA_BIN=$BIN" >> "$GITHUB_ENV"
+          "$BIN" --version 2>&1 | tee -a "$GITHUB_WORKSPACE/out/machine.txt"
+          echo "--- llama-server --list-devices (is a Metal device visible in this VM?)" | tee -a "$GITHUB_WORKSPACE/out/machine.txt"
+          "$BIN" --list-devices 2>&1 | tee -a "$GITHUB_WORKSPACE/out/machine.txt" || true
+
+      - name: Start llama-server (scripts/local_model.sh flags; Metal if it works, else CPU)
+        shell: bash
+        run: |
+          set +e
+          stop() {   # a hung server can ignore SIGTERM (seen run 1): escalate, then wait for the port
+            pkill -f llama-server 2>/dev/null
+            for i in $(seq 1 10); do pgrep -f llama-server >/dev/null || break; sleep 1; done
+            pkill -9 -f llama-server 2>/dev/null
+            for i in $(seq 1 15); do curl -s -m 1 http://127.0.0.1:8080/health >/dev/null || return 0; sleep 1; done
+          }
+          start() {   # $1 = -ngl
+            stop
+            nohup "$LLAMA_BIN" -m "models/$GGUF_FILE" --alias "$MODEL" --host 127.0.0.1 --port 8080 \
+              -ngl "$1" -c "$CTX" -np 1 -fa on --jinja --reasoning off --cache-prompt --cache-reuse 256 \
+              --cache-ram 512 --temp 0.7 --top-p 0.8 --top-k 20 --min-p 0 --metrics \
+              > "out/llama-server-ngl$1.log" 2>&1 &
+            for i in $(seq 1 150); do
+              curl -s -m 2 http://127.0.0.1:8080/health | grep -q ok && return 0
+              kill -0 $! 2>/dev/null || return 1
+              sleep 2
+            done
+            return 1
+          }
+          # Raw throughput per device, no server: llama-bench pp256 / tg16, 3 threads, 7 min cap each.
+          # Metal in a paravirtualized VM may be missing, slow or hang, so measure and keep the faster.
+          LB=$(dirname "$LLAMA_BIN")/llama-bench
+          DEVS="0"; [ "$TRY_METAL" = "1" ] && DEVS="99 0"
+          for N in $DEVS; do
+            perl -e 'alarm shift; exec @ARGV' 420 "$LB" -m "models/$GGUF_FILE" -ngl $N -t 3 -p 256 -n 16 -r 1 \
+              -o json > out/llama-bench-ngl$N.json 2> out/llama-bench-ngl$N.err
+            echo "llama-bench -ngl $N exit=$?"
+            grep -i -E "metal|MTL|gpu|device|error" out/llama-bench-ngl$N.err | head -15
+            python3 scripts/mac_model_bench.py --from-llama-bench out/llama-bench-ngl$N.json | tee out/bench-ngl$N.json
+          done
+          NGL=$(python3 scripts/mac_model_bench.py --pick out/bench-ngl99.json out/bench-ngl0.json)
+          echo "chosen -ngl $NGL"
+          start $NGL || { echo "llama-server failed to start"; tail -40 out/llama-server-ngl$NGL.log; }
+          head -40 out/llama-server-ngl$NGL.log
+          # one server-side request for the record (5 min cap; not used for the choice)
+          python3 scripts/mac_model_bench.py http://127.0.0.1:8080 "$MODEL" --timeout 300 | tee out/server-bench.json
+          echo "NGL=$NGL" >> "$GITHUB_ENV"
+
+      - name: Guest hygiene (suppress Safari save-password / notification prompts)
+        shell: bash
+        run: |
+          set +e
+          osascript -e 'quit app "Safari"' 2>/dev/null; sleep 1
+          C="$HOME/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari"
+          for D in com.apple.Safari "$C"; do
+            for K in AutoFillPasswords CanPromptForPushNotifications; do
+              defaults write "$D" "$K" -bool false
+            done
+          done
+
+      - name: Live model-driven runs (dev_dashboard, real Safari, K reps)
+        shell: bash
+        run: |
+          set +e
+          export PYTHONPATH=$PWD AWOS_PROVIDER=local AWOS_LOCAL_MODEL="$MODEL" \
+                 AWOS_LOCAL_BASE_URL=http://127.0.0.1:8080/v1 \
+                 AWOS_MICRO_MAX_SECONDS=1500 AWOS_LOCAL_TIMEOUT_S=600
+          python3 scripts/mac_model_bench.py --meta "$MODEL" "$VARIANT" "$OS_LABEL" "$NGL" "$GGUF_FILE" \
+            out/llama-server-ngl$NGL.log out/bench-ngl$NGL.json out/bench-ngl$((99 - NGL)).json > out/meta.json
+          for R in $(seq 1 "$REPS"); do
+            osascript -e 'quit app "Safari"' 2>/dev/null; sleep 1
+            mkdir -p out/rep$R
+            if [ "$R" = 1 ]; then   # one screen recording per job: the first ~7 min (about one 4B rep)
+              # Fixed length, never signalled: SIGINT is ignored by background jobs of a non-interactive
+              # bash (run 1: recorder ran its full -V), and with SIGINT reset to default screencapture
+              # dies without writing the movie (run 3). It finishes on its own; waited for after the reps.
+              screencapture -v -V "${REC_S:-420}" -x out/video_${MODEL}_${VARIANT}.mov & REC=$!
+              sleep 2
+            fi
+            python -m scaffold.agent.desktop.live demo --target dd --variant "$VARIANT" --provider local \
+              --out out/rep$R 2>&1 | tee out/rep$R/demo.log
+            echo "rep $R exit=${PIPESTATUS[0]}"
+            screencapture -x out/rep$R/screen_after.png 2>/dev/null
+            curl -s http://127.0.0.1:8080/health >/dev/null || echo "llama-server down after rep $R"
+          done
+          wait $REC 2>/dev/null
+          cp out/llama-server-ngl$NGL.log out/llama-server.log 2>/dev/null
+          vm_stat | head -6 > out/vm_stat_end.txt
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mm-${{ matrix.os }}-${{ matrix.model }}-${{ matrix.variant }}
+          path: out/
+          if-no-files-found: warn
+
+  summary:
+    needs: run
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: mm-*
+      - name: Summarise
+        run: python3 scripts/mac_model_summary.py artifacts --reps "$REPS" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mm-summary
+          path: artifacts/summary.json
+          if-no-files-found: warn

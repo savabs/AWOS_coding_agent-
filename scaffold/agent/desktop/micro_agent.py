@@ -1135,8 +1135,14 @@ class LocalGBNFModel:
         self.base = (base or os.environ.get("AWOS_LOCAL_BASE_URL") or "http://127.0.0.1:8080/v1").rstrip("/")
         web_tools.check_loopback(self.base)
         self.model = model or os.environ.get("AWOS_LOCAL_MODEL", "qwen3.5-9b")
+        try:                                   # slow CPU runners need longer than the default
+            timeout = float(os.environ.get("AWOS_LOCAL_TIMEOUT_S") or timeout)
+        except ValueError:
+            pass
         self.timeout = timeout
-        self.usage = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0}
+        self.usage = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0,
+                      "prompt_ms": 0.0, "predicted_ms": 0.0, "prompt_n": 0, "predicted_n": 0,
+                      "cached_tokens": 0}
 
     def decide(self, system: str, user: str, grammar: Optional[str] = None) -> str:
         body = {"model": self.model, "temperature": 0, "max_tokens": 200,
@@ -1153,6 +1159,12 @@ class LocalGBNFModel:
         self.usage["calls"] += 1
         self.usage["prompt_tokens"] += int(u.get("prompt_tokens") or 0)
         self.usage["completion_tokens"] += int(u.get("completion_tokens") or 0)
+        t = data.get("timings") or {}           # llama-server per-request timings (tok/s)
+        self.usage["prompt_ms"] += float(t.get("prompt_ms") or 0.0)
+        self.usage["predicted_ms"] += float(t.get("predicted_ms") or 0.0)
+        self.usage["prompt_n"] += int(t.get("prompt_n") or 0)          # evaluated (not cached)
+        self.usage["predicted_n"] += int(t.get("predicted_n") or 0)
+        self.usage["cached_tokens"] += int(t.get("cache_n") or 0)
         return data["choices"][0]["message"]["content"]
 
 
