@@ -97,8 +97,12 @@ class Recorder:
         self.path, self.proc = path, None
         self.logf = open(path.with_suffix(".log"), "w")
         try:
+            # screencapture finalises the movie from a SIGINT dispatch source, which only works when
+            # SIGINT is ignored (as for a bash background job); with the default action it just dies
+            # (rc=-2, no file; run 2).
             self.proc = subprocess.Popen(["screencapture", "-v", "-V", str(max_s), "-x", str(path)],
-                                         stdin=subprocess.DEVNULL, stdout=self.logf, stderr=subprocess.STDOUT)
+                                         stdin=subprocess.DEVNULL, stdout=self.logf, stderr=subprocess.STDOUT,
+                                         preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_IGN))
             time.sleep(2.0)
         except OSError as e:
             self.logf.write(f"spawn failed: {e!r}\n")

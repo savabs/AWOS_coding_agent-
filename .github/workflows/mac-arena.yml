@@ -100,15 +100,10 @@ jobs:
         shell: bash
         run: |
           set +e
-          # whole-shard screen recording from bash (TCC ScreenCapture is granted to /bin/bash);
-          # the runner also tries a per-task recording (video.mov) from python.
-          screencapture -v -V 2400 -x out/shard${{ matrix.shard }}.mov & REC=$!
-          sleep 2
           python scripts/macarena/run_tasks.py --macarena "$MACARENA_DIR" \
             --shard ${{ matrix.shard }}/$N_SHARDS --agent "$AWOS_MACARENA_AGENT" --out out 2>&1 | tee out/run_shard${{ matrix.shard }}.log
           echo "runner exit=${PIPESTATUS[0]}"
-          sleep 2; kill -INT $REC 2>/dev/null; wait $REC 2>/dev/null
-          ls -la out/*.mov out/*/*/*.mov out/*/*/video.log 2>/dev/null; cat out/*/*/video.log 2>/dev/null | head -20
+          ls -la out/*/*/*.mov 2>/dev/null; cat out/*/*/video.log 2>/dev/null | head -20
 
       - name: Upload
         if: always()
