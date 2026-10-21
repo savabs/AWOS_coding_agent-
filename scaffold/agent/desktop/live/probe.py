@@ -196,8 +196,9 @@ def _actor(runtime, vm_check, log, approve=None):
 
 def demo_dd(variant: str = "a", seed: int = 7, root: Optional[Path] = None, *, runtime: Any = None,
             vm_check: Optional[Callable[[], bool]] = None, out: Callable[[str], None] = print,
-            keep_window: bool = False, settle: Optional[float] = None) -> dict:
-    """dev_dashboard on 127.0.0.1 -> new Safari window -> scripted micro-agent -> verify.py."""
+            keep_window: bool = False, settle: Optional[float] = None, provider: str = "scripted") -> dict:
+    """dev_dashboard on 127.0.0.1 -> new Safari window -> micro-agent -> verify.py.
+    provider: "scripted" (fixed plan, no model) | "local" (llama-server at AWOS_LOCAL_BASE_URL) | "cloud"."""
     from .. import micro_agent as ma
     from .driver import MacBrowserBackend, micro_browser
     tb = REPO / "testbeds" / "dev_dashboard"
@@ -218,8 +219,9 @@ def demo_dd(variant: str = "a", seed: int = 7, root: Optional[Path] = None, *, r
         backends.append(b)
         return b
 
-    model = ma._MultiScript(DD_SCRIPTS[variant])
-    res: Dict[str, Any] = {"target": "dd", "variant": variant, "seed": seed, "root": str(root)}
+    model = ma._MultiScript(DD_SCRIPTS[variant]) if provider == "scripted" else ma.make_model(provider)
+    res: Dict[str, Any] = {"target": "dd", "variant": variant, "seed": seed, "root": str(root),
+                           "provider": provider}
     try:
         with micro_browser(factory):
             rep = ma.run_dev_dashboard(root / "sandbox", model, out=lines.append)
@@ -312,7 +314,7 @@ def demo_teach_t3(instance: str = "i03", root: Optional[Path] = None, *, runtime
 
 
 def demo(target: str, *, variant: str = "a", seed: int = 7, instance: str = "i03", root: Optional[str] = None,
-         out_dir: Optional[str] = None, keep_window: bool = False, runtime: Any = None,
+         out_dir: Optional[str] = None, keep_window: bool = False, runtime: Any = None, provider: str = "scripted",
          vm_check: Optional[Callable[[], bool]] = None, out: Callable[[str], None] = print) -> int:
     pf = preflight(runtime, vm_check)
     if not pf["ok"]:
@@ -321,7 +323,7 @@ def demo(target: str, *, variant: str = "a", seed: int = 7, instance: str = "i03
     try:
         if target == "dd":
             res = demo_dd(variant, seed, Path(root) if root else None, runtime=runtime, vm_check=vm_check,
-                          out=out, keep_window=keep_window)
+                          out=out, keep_window=keep_window, provider=provider)
         elif target == "teach_t3":
             res = demo_teach_t3(instance, Path(root) if root else None, runtime=runtime, vm_check=vm_check,
                                 out=out, keep_window=keep_window)

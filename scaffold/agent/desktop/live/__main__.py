@@ -26,6 +26,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     d.add_argument("--root")
     d.add_argument("--out")
     d.add_argument("--keep-window", action="store_true")
+    d.add_argument("--provider", default="scripted", choices=("scripted", "local", "cloud"),
+                   help="who decides each step (dd only): fixed script, local llama-server, or cloud")
     v = sub.add_parser("vm-run", help="host side: run a live command inside the Tart guest over ssh")
     v.add_argument("--vm", help="tart VM name (default $AWOS_VM or awos-guest)")
     v.add_argument("--ip", help="guest IP (skips `tart ip`)")
@@ -46,7 +48,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return P.probe(a.app, max_nodes=a.max_nodes, as_json=a.json)
     if a.cmd == "demo":
         return P.demo(a.target, variant=a.variant, seed=a.seed, instance=a.instance, root=a.root, out_dir=a.out,
-                      keep_window=a.keep_window)
+                      keep_window=a.keep_window, provider=a.provider)
     if a.cmd == "vm-run":
         cmd = list(a.command[1:]) if a.command[:1] == ["--"] else list(a.command)
         return P.vm_run(cmd, vm=a.vm, ip=a.ip, dry_run=a.dry_run, user=a.user, guest_dir=a.guest_dir,
