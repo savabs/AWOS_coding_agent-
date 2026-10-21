@@ -7,7 +7,7 @@ name: mac-live-probe
 
 on:
   push:
-    branches: ["bench-cloud/mac-**"]
+    branches: ["bench-cloud/mac-**", "!bench-cloud/mac-model-**"]   # mac-model.yml owns those
   workflow_dispatch:
 
 permissions:
