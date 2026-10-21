@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write   # publish the live-view link as a commit status (readable immediately)
 
 jobs:
   live:
@@ -49,6 +50,9 @@ jobs:
         run: |
           set +e
           K=/System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart
+          # macOS offers Apple (ARD) auth to web VNC clients: user name + account password.
+          # Give the throwaway runner account the owner's password so "runner" + LIVE_VIEW_PASSWORD works.
+          sudo dscl . -passwd "/Users/$USER" "$PW" && echo "account password set for $USER"
           sudo $K -activate -configure -access -on -clientopts -setvnclegacy -vnclegacy yes \
             -clientopts -setvncpw -vncpw "${PW:0:8}" -restart -agent -privs -all >/dev/null 2>&1
           echo "kickstart exit=$?"
@@ -56,8 +60,6 @@ jobs:
           nc -z localhost 5900 && echo "VNC listening on 5900" || { echo "::error::VNC did not start"; exit 1; }
 
       - name: Web viewer + tunnel
-        env:
-          PW: ${{ secrets.LIVE_VIEW_PASSWORD }}
         run: |
           set -e
           git clone -q --depth 1 --branch "$NOVNC_TAG" https://github.com/novnc/noVNC.git "$HOME/novnc"
@@ -76,7 +78,13 @@ jobs:
           VIEW="$URL/vnc.html?autoconnect=1&resize=scale&view_only=1"
           echo "LIVE VIEW: $VIEW"
           echo "::notice title=LIVE VIEW (password = LIVE_VIEW_PASSWORD, first 8 chars)::$VIEW"
-          echo "## Live view: $VIEW" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Live view: $VIEW (user: $USER)" >> "$GITHUB_STEP_SUMMARY"
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" -f state=pending \
+            -f context="live-view" -f description="user: $USER, password: LIVE_VIEW_PASSWORD" -f target_url="$VIEW" >/dev/null \
+            && echo "published live-view status"
+        env:
+          PW: ${{ secrets.LIVE_VIEW_PASSWORD }}
+          GH_TOKEN: ${{ github.token }}
 
       - name: Give the viewer time to connect
         run: |
