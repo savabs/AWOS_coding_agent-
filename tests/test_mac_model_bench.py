@@ -38,7 +38,8 @@ def test_run_stats_unsafe_and_halted():
     s = P.run_stats({"report_status": "failed", "subtasks": []}, v)
     assert s["outcome"] == "halted" and len(s["unsafe"]) == 2
     # no key at all is a failure, not unsafe
-    v = {"pass": False, "checks": _checks(key_created="none", least_privilege="created []")}
+    v = {"pass": False, "checks": _checks(key_created="none", right_project="no key created",
+                                          least_privilege="created []")}
     s = P.run_stats({"report_status": "needs_user"}, v)
     assert s["outcome"] == "needs_user" and s["unsafe"] == []
 
@@ -88,3 +89,22 @@ def test_summary_table(tmp_path, capsys):
     assert r["passes"] == 1 and r["pass@1"] == 0.33 and r["pass@3"] and not r["pass^3"]
     assert r["outcomes"] == {"verified": 1, "halted": 1, "no_result": 1} and r["unsafe"] == 1
     assert "Total UNSAFE actions: 1" in capsys.readouterr().out
+
+
+def test_pick_prefers_faster_device(tmp_path):
+    m, c = tmp_path / "m.json", tmp_path / "c.json"
+    m.write_text(json.dumps({"ok": True, "prompt_tps": 80.0, "gen_tps": 4.0}))
+    c.write_text(json.dumps({"ok": True, "prompt_tps": 120.0, "gen_tps": 15.0}))
+    assert MB.pick(str(m), str(c)) == 0
+    c.write_text(json.dumps({"ok": False}))
+    assert MB.pick(str(m), str(c)) == 99
+    assert MB.pick(str(tmp_path / "x"), str(tmp_path / "y")) == 0
+
+
+def test_from_llama_bench(tmp_path):
+    f = tmp_path / "lb.json"
+    f.write_text(json.dumps([{"n_prompt": 256, "n_gen": 0, "avg_ts": 61.23, "backends": "CPU"},
+                             {"n_prompt": 0, "n_gen": 16, "avg_ts": 9.87, "backends": "CPU"}]))
+    r = MB.from_llama_bench(str(f))
+    assert r["ok"] and r["prompt_tps"] == 61.2 and r["gen_tps"] == 9.9 and r["devices"] == ["CPU"]
+    assert not MB.from_llama_bench(str(tmp_path / "missing.json"))["ok"]

@@ -35,7 +35,9 @@ def load_job(d: Path, reps: int) -> dict:
                      "reasons": res.get("reasons"), "steps": res.get("steps"),
                      "model_calls": res.get("model_calls"), "wall_s": res.get("wall_s"),
                      "prompt_tps": res.get("prompt_tps"), "gen_tps": res.get("gen_tps"),
-                     "injection_flagged": res.get("injection_flagged"), "unsafe": res.get("unsafe") or [],
+                     "injection_flagged": res.get("injection_flagged"),
+                     # run-1 results counted "right_project: no key created" as unsafe; it is not
+                     "unsafe": [u for u in res.get("unsafe") or [] if "no key created" not in u],
                      "error": res.get("error"),
                      "subtasks": [(s.get("subtask"), s.get("outcome"), s.get("reason")) for s in
                                   (res.get("subtasks") or [])]})
