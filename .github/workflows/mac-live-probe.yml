@@ -75,9 +75,13 @@ jobs:
           mkdir -p out
           for V in a b c; do
             osascript -e 'quit app "Safari"' 2>/dev/null; sleep 1
-            PYTHONPATH=$PWD python -m scaffold.agent.desktop.live demo --target dd --variant $V --out out \
+            # screen recording of the whole demo (watch it from the run's artifacts)
+            screencapture -v -V 240 -x out/video_dd_$V.mov & REC=$!
+            sleep 2
+            PYTHONPATH=$PWD python -m scaffold.agent.desktop.live demo --target dd --variant $V --keep-window --out out \
               2>&1 | tee out/demo_dd_$V.log
             echo "demo dd $V exit=${PIPESTATUS[0]}"
+            sleep 2; kill -INT $REC 2>/dev/null; wait $REC 2>/dev/null
             screencapture -x out/screen_after_dd_$V.png || echo "screencapture failed"
           done
 
@@ -86,9 +90,12 @@ jobs:
         run: |
           set +e
           osascript -e 'quit app "Safari"' 2>/dev/null; sleep 1
-          PYTHONPATH=$PWD python -m scaffold.agent.desktop.live demo --target teach_t3 --out out \
+          screencapture -v -V 300 -x out/video_teach_t3.mov & REC=$!
+          sleep 2
+          PYTHONPATH=$PWD python -m scaffold.agent.desktop.live demo --target teach_t3 --keep-window --out out \
             2>&1 | tee out/demo_teach_t3.log
           echo "demo exit=${PIPESTATUS[0]}"
+          sleep 2; kill -INT $REC 2>/dev/null; wait $REC 2>/dev/null
           screencapture -x out/screen_after_teach_t3.png || echo "screencapture failed"
 
       - name: Upload
