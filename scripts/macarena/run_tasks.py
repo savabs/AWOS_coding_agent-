@@ -23,7 +23,6 @@ import argparse
 import json
 import os
 import platform
-import signal
 import subprocess
 import sys
 import time
@@ -93,17 +92,20 @@ def quit_apps(apps: List[str]) -> None:
 
 
 class Recorder:
-    def __init__(self, path: Path, max_s: int):
-        self.path, self.proc = path, None
+    """Fixed-length ``screencapture -v -V <secs>`` that is left to finish on its own.
+
+    On the paravirtual GitHub runner display a signal does not finalise the movie: SIGINT with the
+    default action kills it with no file (run 2), SIGINT ignored is simply ignored (run 3). The
+    mac-live-probe videos came from the -V limit expiring. So the length is planned up front and
+    stop() waits for the natural end."""
+
+    def __init__(self, path: Path, seconds: int):
+        self.path, self.proc, self.seconds = path, None, max(5, int(seconds))
+        self.t0 = time.time()
         self.logf = open(path.with_suffix(".log"), "w")
         try:
-            # screencapture finalises the movie from a SIGINT dispatch source, which only works when
-            # SIGINT is ignored (as for a bash background job); with the default action it just dies
-            # (rc=-2, no file; run 2).
-            self.proc = subprocess.Popen(["screencapture", "-v", "-V", str(max_s), "-x", str(path)],
-                                         stdin=subprocess.DEVNULL, stdout=self.logf, stderr=subprocess.STDOUT,
-                                         preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_IGN))
-            time.sleep(2.0)
+            self.proc = subprocess.Popen(["screencapture", "-v", "-V", str(self.seconds), "-x", str(path)],
+                                         stdin=subprocess.DEVNULL, stdout=self.logf, stderr=subprocess.STDOUT)
         except OSError as e:
             self.logf.write(f"spawn failed: {e!r}\n")
             self.proc = None
@@ -111,17 +113,12 @@ class Recorder:
     def stop(self) -> Optional[str]:
         if self.proc is None:
             return None
-        early = self.proc.poll()
-        if early is None:
-            self.proc.send_signal(signal.SIGINT)
-            try:
-                self.proc.wait(timeout=60)
-            except subprocess.TimeoutExpired:
-                self.proc.kill()
-                self.logf.write("killed after 60 s\n")
-        else:
-            self.logf.write(f"screencapture had already exited rc={early}\n")
-        self.logf.write(f"rc={self.proc.returncode}\n")
+        try:
+            self.proc.wait(timeout=max(1.0, self.t0 + self.seconds + 45 - time.time()))
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+            self.logf.write("killed: did not finish after its -V length + 45 s\n")
+        self.logf.write(f"rc={self.proc.returncode} planned={self.seconds}s\n")
         self.logf.close()
         return self.path.name if self.path.exists() else None
 
@@ -149,11 +146,13 @@ def run_one(task: T.Task, agent, out: Path, *, budget_s: float, max_grading_dela
         res["status"] = "skipped_no_reference"
         return res
     quit_apps(apps)
-    rec = Recorder(tdir / "video.mov", int(budget_s + 120)) if record else None
     ph = res["phases"]
     s = time.time()
     res["pre"] = T.run_pre_command(task.pre_command)
     ph["pre_s"] = round(time.time() - s, 2)
+    agent_s = 5 if agent.name in ("noop", "awos-scripted-oracle") else budget_s
+    planned = min(task.before_action_delay, 20) + agent_s + min(task.before_grading_delay, max_grading_delay) + 15
+    rec = Recorder(tdir / "video.mov", int(planned)) if record else None
     time.sleep(min(task.before_action_delay, 20))
     s = time.time()
     ctx = A.Ctx(out_dir=tdir, deadline=time.time() + budget_s)

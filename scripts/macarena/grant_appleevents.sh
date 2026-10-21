@@ -1,5 +1,6 @@
 #!/bin/bash
-# GitHub macOS runner ONLY (disposable VM): pre-grant Apple Events (Automation) from the runner's
+# GitHub macOS runner ONLY (disposable VM): pre-grant Apple Events (Automation) + Reminders/Calendar/
+# Contacts data access from the runner's
 # processes to the apps MacArena's setup/evaluator scripts drive with osascript. MacArena's own VM
 # image has these consents already; on a stock runner the first `tell application "Notes"` raises a
 # "hosted-compute-agent wants access to control Notes" prompt and the script hangs (seen in run 1).
@@ -19,6 +20,13 @@ SQL=""
 for c in $CLIENTS; do
   for t in $TARGETS; do
     SQL+="INSERT OR REPLACE INTO access VALUES('kTCCServiceAppleEvents','$c',1,2,3,1,NULL,NULL,0,'$t',NULL,NULL,$NOW,NULL,NULL,'UNUSED',$NOW);"
+  done
+done
+# Data-access consent (run 3: "hosted-compute-agent would like to access your reminders" blocked
+# the Reminders evaluator even with Apple Events granted).
+for c in $CLIENTS; do
+  for svc in kTCCServiceReminders kTCCServiceCalendar kTCCServiceAddressBook; do
+    SQL+="INSERT OR REPLACE INTO access VALUES('$svc','$c',1,2,3,1,NULL,NULL,NULL,'UNUSED',NULL,0,$NOW,NULL,NULL,'UNUSED',$NOW);"
   done
 done
 for DB in "$HOME/Library/Application Support/com.apple.TCC/TCC.db" "/Library/Application Support/com.apple.TCC/TCC.db"; do
