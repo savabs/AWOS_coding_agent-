@@ -299,6 +299,30 @@ def _keys_path(project: str) -> str:
     return f"/projects/{project}/keys"
 
 
+def key_rows_why(page: Optional[Page], project: Optional[str] = None) -> str:
+    """Why ``parse_key_rows`` refuses this page (diagnostic only: path, status, flags and
+    shape -- never cell values). Empty string when the page parses."""
+    if page is None:
+        return "no page"
+    if page.status >= 400:
+        return f"http {page.status}"
+    if project is not None and page.url.startswith("http"):
+        got = urllib.parse.urlsplit(page.url).path.rstrip("/")
+        if got != _keys_path(project):
+            return f"on {got or '/'} not {_keys_path(project)}"
+    live = getattr(page, "_live", None)
+    if isinstance(live, dict):
+        if live.get("truncated"):
+            snap = live.get("snap")
+            return f"AX read truncated ({getattr(snap, 'reason', '') or '?'})"
+        if live.get("settled") is False:
+            return "page never settled"
+    piped = sum(1 for ln in page.text.splitlines() if " | " in ln or ln.rstrip().endswith(" |"))
+    if parse_key_rows(page, project) is None:
+        return f"no key table header (lines={len(page.text.splitlines())}, table lines={piped})"
+    return ""
+
+
 def parse_key_rows(page: Page, project: Optional[str] = None) -> Optional[List[Dict[str, str]]]:
     """The API-key table of an already-open page as rows {name, status, scope, last4}; None
     when this page cannot certify the list: HTTP error, a different page (path is not this
@@ -350,23 +374,33 @@ def read_key_rows(br: LoopbackBrowser, project: str,
     agent left the browser on). On a live browser (``br.wait_for``) a page that does not
     yet show the full table is re-read in place until it does, then re-opened once; the
     loopback HTTP client gets complete pages, so it reads once."""
+    global LAST_KEY_READ_WHY
     path = _keys_path(project)
     live = callable(getattr(br, "wait_for", None))
+    LAST_KEY_READ_WHY = ""
     for _attempt in range(2 if live else 1):
         try:
             p = br.open(path)
-        except WebError:
+        except WebError as e:
+            LAST_KEY_READ_WHY = f"open failed: {e}"
             continue
         rows = parse_key_rows(p, project)
         if rows is not None:
             return rows
+        LAST_KEY_READ_WHY = key_rows_why(p, project)
         if p.status >= 400:
             return None                              # 404 / 403: waiting will not help
         if live:
             got = br.wait_for(lambda q: parse_key_rows(q, project) is not None, wait_s)
             if got is not None:
                 return parse_key_rows(got, project)
+            cur = getattr(br, "page", None)
+            if isinstance(cur, Page):
+                LAST_KEY_READ_WHY = key_rows_why(cur, project) + f" after {wait_s:g}s"
     return None
+
+
+LAST_KEY_READ_WHY = ""                      # diagnostic of the last failed read_key_rows (no values)
 
 
 def key_verdict(br: LoopbackBrowser, project: str, label: str, store: BrokerSecretStore,
@@ -376,7 +410,8 @@ def key_verdict(br: LoopbackBrowser, project: str, label: str, store: BrokerSecr
     sub, lvl = "dashboard_keys", CheckLevel.REOPENED
     rows = read_key_rows(br, project)
     if rows is None:
-        return indeterminate(sub, f"could not read the key list of {project}", lvl)
+        why = f" ({LAST_KEY_READ_WHY})" if LAST_KEY_READ_WHY else ""
+        return indeterminate(sub, f"could not read the key list of {project}{why}", lvl)
     active = [r for r in rows if r["name"] == label and r["status"] == "active"]
     if not active:
         return refuted(sub, f"no active key {label!r} in {project}", lvl, observed_count=0,
@@ -423,7 +458,8 @@ def create_key_once(agent: Any, subtask: Any, *, br: LoopbackBrowser, store: Bro
     if rows is None:                                  # cannot see what exists -> do not create blind
         return KeyCreation(MicroResult(subtask.name, Outcome.NEEDS_USER,
                                        reason=f"could not read the key list of {project} before creating "
-                                              "(not risking a duplicate)"), "needs_user")
+                                              f"(not risking a duplicate){'; ' + LAST_KEY_READ_WHY if LAST_KEY_READ_WHY else ''}"),
+                            "needs_user")
     kp = plan_key_creation(rows, label, store.broker, secret)
     if kp.action == "needs_user":
         return KeyCreation(MicroResult(subtask.name, Outcome.NEEDS_USER,

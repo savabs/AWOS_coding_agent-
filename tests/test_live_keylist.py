@@ -248,3 +248,21 @@ def test_dd_c_pre_create_list_unreadable_needs_user_creates_nothing(tmp_path, mo
     assert res["subtasks"][1]["outcome"] == "needs_user"
     assert "could not read the key list" in res["subtasks"][1]["reason"]
     assert not saf.created and not any("/keys/new" in u for u, _f in saf.posts)
+
+
+def test_key_rows_why_names_the_reason_without_values():
+    assert mw.key_rows_why(_page(TABLE, truncated=False, settled=True), "storefront-web") == ""
+    assert mw.key_rows_why(_page(TABLE, status=404), "storefront-web") == "http 404"
+    assert "not /projects/storefront-web/keys" in mw.key_rows_why(
+        _page(TABLE, url="http://127.0.0.1:1/projects/storefront-web/keys/new"), "storefront-web")
+    assert mw.key_rows_why(_page(TABLE, truncated=False, settled=False), "storefront-web") == "page never settled"
+    why = mw.key_rows_why(_page("Key created\nfk_live_…Ab12"), "storefront-web")
+    assert why.startswith("no key table header") and "Ab12" not in why
+
+
+def test_pre_create_needs_user_reason_carries_diagnostic(tmp_path, monkeypatch):
+    rt, saf = _world(lag=None, mode="partial")
+    res, lines = _demo(tmp_path, monkeypatch, rt)
+    assert res["report_status"] == "needs_user"
+    reason = res["subtasks"][1]["reason"]
+    assert "could not read the key list" in reason and "not risking a duplicate); " in reason
