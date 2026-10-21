@@ -700,6 +700,11 @@ class MicroAgent:
             bits.append(f"main heading \"{mask_secrets(p.headings[0])[:80]}\"")
         if p.dialog:
             bits.append(f"a dialog is open: \"{mask_secrets(p.dialog)[:120]}\"")
+            # Name the dialog's own controls by number: live Safari flattens the dialog text
+            # WITHOUT its button labels, and a small model then picked "Cancel" for "confirm".
+            dbtn = [c for c in p.controls if c.in_dialog and c.role in ("button", "link")]
+            if dbtn:
+                bits.append("its buttons: " + ", ".join(f"[{c.n}] \"{mask_secrets(c.name)[:40]}\"" for c in dbtn[:6]))
         labels = []
         for i, f in enumerate(p.forms):
             fields = [c.name for c in p.controls if c.form == i and c.role in

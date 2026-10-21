@@ -292,3 +292,19 @@ def test_fake_safari_local_repeater_finishes_before_cap(tmp_path, variant, monke
     assert ck["outcome"] == "verified" and ck["steps"] == len(P.DD_SCRIPTS[variant]["create_key"]) < 12
     assert rep_models and rep_models[0].repeats_sent == 0
     assert sum("copy_to_secret(" in ln for ln in lines if "] step " in ln) == 1
+
+
+def test_page_purpose_names_dialog_buttons_when_dialog_text_lacks_them():
+    """Live Safari flattens the alertdialog text WITHOUT its button labels; local Qwen then
+    pressed [5] "Cancel" for "confirm if asked" (dd b, 2026-10-21, 2/2 live runs). The page
+    line now lists the dialog's own controls by number."""
+    from scaffold.agent.desktop.micro_agent import MicroAgent
+    from scaffold.agent.desktop.web_tools import Control, Page
+    ctl = [Control(1, "link", "Projects"), Control(2, "link", "Billing"), Control(3, "link", "Sign out"),
+           Control(4, "button", "Create key", in_dialog=True), Control(5, "button", "Cancel", in_dialog=True)]
+    p = Page(url="http://127.0.0.1:1/projects/ml-pipeline/keys/new", status=200,
+             title="Confirm new key · FakeService", headings=["Confirm new key"], controls=ctl, forms=[],
+             alerts=[], statuses=[], regions=[], text="",
+             dialog="Confirm new key This key grants write access to ml-pipeline — create?")
+    line = MicroAgent._page_purpose(p, {})
+    assert 'its buttons: [4] "Create key", [5] "Cancel"' in line
