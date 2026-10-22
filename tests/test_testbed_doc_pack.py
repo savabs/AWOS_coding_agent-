@@ -41,6 +41,8 @@ dp_run = _load("dp_run", "run")
 assert dp_run.dp_verify is dp_verify
 
 HAVE_QUARTZ = dp_pdf.backend() == "quartz"
+# Seeding renders ~24 PDFs; the first CoreText use on a cold CI runner takes >10 s (font cache).
+pytestmark = pytest.mark.timeout(120)
 NO_PROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 

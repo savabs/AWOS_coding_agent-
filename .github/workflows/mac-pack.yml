@@ -60,6 +60,7 @@ jobs:
           python -m pytest tests/test_testbed_doc_pack.py -q 2>&1 | tee out/pytest_$V.txt
 
       - name: HTTP-level dry run (oracle + bad solutions, all variants)
+        if: always()
         shell: bash
         run: |
           set -o pipefail
@@ -68,6 +69,7 @@ jobs:
 
       # The runner is a disposable VM; these settings only touch it.
       - name: Guest hygiene (Safari prompts, no auto-open of downloaded PDFs)
+        if: always()
         shell: bash
         run: |
           set +e
@@ -87,6 +89,7 @@ jobs:
           true
 
       - name: Oracle in real Safari (variant ${{ matrix.variant }})
+        if: always()
         shell: bash
         run: |
           set +e
