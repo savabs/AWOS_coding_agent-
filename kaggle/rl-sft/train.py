@@ -85,6 +85,9 @@ def ensure_deps(mode: str) -> None:
         pass
     log("pip install", *PINS)
     subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", *PINS])
+    # Kaggle's image ships a torchao that peft 0.21 rejects: its LoRA dispatcher raises
+    # ImportError in get_peft_model (trial 1, 2026-10-22). We don't use torchao; remove it.
+    subprocess.call([sys.executable, "-m", "pip", "uninstall", "-y", "-q", "torchao"])
 
 
 def block_fla() -> None:
