@@ -95,7 +95,7 @@ jobs:
     timeout-minutes: 350
     strategy:
       fail-fast: false
-      max-parallel: 20
+      max-parallel: 16      # the free account limit is 20 jobs (macOS included): keep 4 for other work
       matrix: ${{ fromJSON(needs.config.outputs.matrix) }}
     env:
       MODEL: ${{ matrix.model }}

@@ -91,5 +91,5 @@ def test_workflow_yaml_valid():
     assert set(on["workflow_dispatch"]["inputs"]) == {"models", "sources", "split", "n"}
     run = wf["jobs"]["run"]
     assert run["runs-on"] == "ubuntu-latest"
-    assert run["strategy"]["max-parallel"] == 20
+    assert run["strategy"]["max-parallel"] == 16
     assert "secrets." not in (ROOT / ".github" / "workflows" / "rl-eval.yml").read_text()
