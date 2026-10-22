@@ -374,7 +374,7 @@ class ChromiumBackend:
 
     def click(self, page: Page, n: int) -> Page:
         c, snap, path, backend = self._live(page, n)
-        if c.role not in ("link", "button"):
+        if c.role not in ("link", "button", "checkbox"):
             raise WebError(f"control {n} ({c.role}) is not clickable")
         rec = self._time("click")
         t0 = time.monotonic()

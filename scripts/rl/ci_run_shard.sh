@@ -38,7 +38,7 @@ elif [ "$SHARD" != "1" ]; then
   echo '{"skipped": "harness has no --shard"}' > "$OUT/run_meta.json"
   exit 0
 fi
-grep -q -- "--parallel" <<<"$HELP" && ARGS+=(--parallel "$NP")
+ARGS+=(--workers "$NP")
 
 python3 - "$OUT/run_meta.json" <<PY
 import json, os, sys, time

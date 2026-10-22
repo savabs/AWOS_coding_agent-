@@ -108,9 +108,17 @@ class Control:
             bits.append("options=" + "|".join(self.options))
         if self.role in ("textbox", "password") and self.value:
             bits.append(f"= \"{self.value}\"")
+        if self.role == "checkbox":
+            bits.append("= checked" if checkbox_on(self.value) else "= unchecked")
         if self.role == "secret_text":
             bits.append("= «hidden; use copy_to_secret»")
         return " ".join(bits)
+
+
+def checkbox_on(value: str) -> bool:
+    """A checkbox Control's value is its state: "1" checked, "0"/"" unchecked (HTML path,
+    and the AX value of AXCheckBox on live Safari / Chromium)."""
+    return str(value).strip().lower() in ("1", "true", "on", "checked")
 
 
 @dataclass
@@ -269,6 +277,7 @@ class _Parser(HTMLParser):
         self.items.append({"role": role, "id": a.get("id", ""), "aria": a.get("aria-label", ""),
                            "placeholder": a.get("placeholder", ""), "field": a.get("name", ""),
                            "value": a.get("value", ""), "type": t, "form": self.form_idx,
+                           "checked": "checked" in a,
                            "context": self._context(), "dlg": self._dialog_depth > 0,
                            "autocomplete": a.get("autocomplete", ""), "inputmode": a.get("inputmode", "")})
 
@@ -388,9 +397,14 @@ def parse_page(url: str, status: int, html_text: str) -> Page:
                     or it.get("field") or "")
             val = it.get("value", "")
             shown = ("•" * 8 if val else "") if role == "password" else mask_secrets(val)
-            controls.append(Control(0, role, " ".join(name.split()), it.get("context", ""), it.get("dlg", False),
-                                    it.get("type", ""), shown, form=it.get("form"), field=it.get("field", ""),
-                                    autocomplete=it.get("autocomplete", ""), inputmode=it.get("inputmode", "")))
+            if role == "checkbox":                       # value = state; the form value is kept aside
+                shown = "1" if it.get("checked") else "0"
+            c = Control(0, role, " ".join(name.split()), it.get("context", ""), it.get("dlg", False),
+                        it.get("type", ""), shown, form=it.get("form"), field=it.get("field", ""),
+                        autocomplete=it.get("autocomplete", ""), inputmode=it.get("inputmode", ""))
+            if role == "checkbox":
+                c._on_value = val or "on"  # type: ignore[attr-defined]
+            controls.append(c)
         elif role in ("radiogroup", "combobox"):
             c = Control(0, role, it["name"], it.get("context", ""), it.get("dlg", False),
                         options=list(it["options"]), form=it.get("form"), field=it.get("field", ""))
@@ -468,6 +482,9 @@ class LoopbackBrowser:
             return self._request(self._url(c.href, page))
         if c.role == "button" and c.form is not None:
             return self._submit(page, c)
+        if c.role == "checkbox":                         # toggles locally, sent with the next submit
+            c.value = "0" if checkbox_on(c.value) else "1"
+            return page
         raise WebError(f"control {n} ({c.role}) is not clickable")
 
     def _submit(self, page: Page, button: Control) -> Page:
@@ -476,7 +493,10 @@ class LoopbackBrowser:
         for c in page.controls:
             if c.form != button.form or not c.field:
                 continue
-            if c.n in page.values:
+            if c.role == "checkbox":
+                if checkbox_on(c.value):
+                    fields[c.field] = getattr(c, "_on_value", "on")
+            elif c.n in page.values:
                 fields[c.field] = page.values[c.n]
             elif c.role in ("textbox", "password"):
                 fields.setdefault(c.field, "")

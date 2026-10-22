@@ -151,7 +151,7 @@ def run(source_name: str, out: Path, *, model: str = "oracle", split: Optional[s
         samples: int = 1, workers: int = 1, guards: str = "product", source_kw: Optional[dict] = None,
         temperature: float = 0.0, top_p: Optional[float] = None, seed: Optional[int] = None,
         model_label: Optional[str] = None, task_ids: Optional[List[str]] = None,
-        log=print) -> Dict[str, Any]:
+        shard: Optional[str] = None, log=print) -> Dict[str, Any]:
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     path = out / "trajectories.jsonl"
@@ -161,11 +161,16 @@ def run(source_name: str, out: Path, *, model: str = "oracle", split: Optional[s
         tasks = [t for t in tasks if t.id in set(task_ids)]
     if n:
         tasks = tasks[:n]
+    if shard:                                   # "K/N", 1-based, round-robin over the selected tasks
+        k, m = (int(x) for x in shard.split("/"))
+        if not 1 <= k <= m:
+            raise ValueError(f"bad shard {shard!r}")
+        tasks = tasks[k - 1::m]
     have = done_keys(path)
     jobs = [(t.to_dict(), j) for t in tasks for j in range(max(1, samples)) if (t.id, j) not in have]
     args = {"model": model, "guards": guards, "temperature": temperature, "top_p": top_p, "seed": seed,
             "model_label": model_label}
-    meta = {"source": source_name, "split": split, "model": model, "model_label": model_label, "samples": samples,
+    meta = {"source": source_name, "split": split, "shard": shard, "model": model, "model_label": model_label, "samples": samples,
             "guards": guards, "temperature": temperature, "top_p": top_p, "seed": seed, "tasks": len(tasks)}
     (out / "run.json").write_text(json.dumps(meta, indent=2) + "\n")
     log(f"{len(tasks)} tasks x {samples} samples: {len(jobs)} to run ({len(have)} already done) -> {path}")
@@ -387,6 +392,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     r.add_argument("--model-label", default=None)
     r.add_argument("--n", type=int, default=0, help="first N tasks (0 = all)")
     r.add_argument("--task", action="append", default=None, help="only this task id (repeatable)")
+    r.add_argument("--shard", default=None, help="K/N: every N-th selected task starting at K (1-based)")
     r.add_argument("--samples", type=int, default=1, help="samples per task (k for pass^k / RFT)")
     r.add_argument("--workers", type=int, default=1)
     r.add_argument("--guards", default="product", choices=["product", "raw"])
@@ -410,7 +416,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     if a.cmd == "run":
         summ = run(a.source, Path(a.out), model=a.model, split=a.split, n=a.n, samples=a.samples,
                    workers=a.workers, guards=a.guards, source_kw=_kv(a.source_arg), temperature=a.temperature,
-                   top_p=a.top_p, seed=a.seed, model_label=a.model_label, task_ids=a.task)
+                   top_p=a.top_p, seed=a.seed, model_label=a.model_label, task_ids=a.task,
+                   shard=a.shard)
         print(to_markdown(summ))
         return 0
     if a.cmd == "summarize":
