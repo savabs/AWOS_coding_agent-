@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   auth:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest   # separate free pool from the busy Linux runners
     timeout-minutes: 10
     env:
       KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}

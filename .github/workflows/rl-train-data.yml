@@ -9,6 +9,9 @@
 name: rl-train-data
 
 on:
+  # Push to bench-cloud/rl-train-data-<anything>: settings come from ci/rl_train.env.
+  push:
+    branches: ["bench-cloud/rl-train-data-**"]
   workflow_dispatch:
     inputs:
       collect_runs:
@@ -46,7 +49,8 @@ permissions:
 
 jobs:
   data:
-    runs-on: ubuntu-latest
+    # macOS pool: separate free concurrency (5) from the Linux pool that rl-eval fills (20).
+    runs-on: macos-latest
     timeout-minutes: 90
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
@@ -56,25 +60,50 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Settings (dispatch inputs, or ci/rl_train.env on push)
+        id: cfg
+        shell: bash
+        env:
+          I_COLLECT_RUNS: ${{ inputs.collect_runs }}
+          I_ORACLE: ${{ inputs.oracle }}
+          I_ORACLE_WEIGHT: ${{ inputs.oracle_weight }}
+          I_MAX_PER_TASK: ${{ inputs.max_per_task }}
+          I_SIZE: ${{ inputs.size }}
+          I_CONFIG: ${{ inputs.config }}
+          I_PUSH: ${{ inputs.push }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            source ci/rl_train.env
+          else
+            COLLECT_RUNS="$I_COLLECT_RUNS"; ORACLE="$I_ORACLE"; ORACLE_WEIGHT="$I_ORACLE_WEIGHT"
+            MAX_PER_TASK="$I_MAX_PER_TASK"; SIZE="$I_SIZE"; CONFIG="$I_CONFIG"; PUSH="$I_PUSH"
+          fi
+          {
+            echo "collect_runs=${COLLECT_RUNS:-}"; echo "oracle=${ORACLE:-true}"
+            echo "oracle_weight=${ORACLE_WEIGHT:-1}"; echo "max_per_task=${MAX_PER_TASK:-4}"
+            echo "size=${SIZE:-4B}"; echo "config=${CONFIG:-}"; echo "push=${PUSH:-false}"
+          } | tee -a "$GITHUB_OUTPUT"
+
       - name: Playwright Chromium (oracle demos)
-        if: inputs.oracle
+        if: steps.cfg.outputs.oracle == 'true'
         run: |
           pip install -q playwright==1.64.0
           python -m playwright install --with-deps chromium
 
       - name: MiniWoB++ html (pinned commit, cached)
-        if: inputs.oracle
+        if: steps.cfg.outputs.oracle == 'true'
         id: miniwob
         uses: actions/cache@v4
         with:
           path: ~/.cache/awos-rl/miniwob
           key: miniwob-a7658beb68e1d3572329e06734c5822bd284ddc8
       - name: Fetch MiniWoB++ (cache miss)
-        if: inputs.oracle && steps.miniwob.outputs.cache-hit != 'true'
+        if: steps.cfg.outputs.oracle == 'true' && steps.miniwob.outputs.cache-hit != 'true'
         run: bash scripts/rl/fetch_miniwob.sh
 
       - name: Oracle demos on the TRAIN splits only
-        if: inputs.oracle
+        if: steps.cfg.outputs.oracle == 'true'
         run: |
           set -uo pipefail
           for src in factory miniwob; do
@@ -84,10 +113,10 @@ jobs:
           ls -la runs/rl/
 
       - name: Download collection-run artifacts
-        if: inputs.collect_runs != ''
+        if: steps.cfg.outputs.collect_runs != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          RUNS: ${{ inputs.collect_runs }}
+          RUNS: ${{ steps.cfg.outputs.collect_runs }}
         run: |
           set -euo pipefail
           for id in $RUNS; do
@@ -97,9 +126,9 @@ jobs:
 
       - name: Build the SFT set (python -m scaffold.rl.train.dataset)
         env:
-          RUNS: ${{ inputs.collect_runs }}
-          OW: ${{ inputs.oracle_weight }}
-          CAP: ${{ inputs.max_per_task }}
+          RUNS: ${{ steps.cfg.outputs.collect_runs }}
+          OW: ${{ steps.cfg.outputs.oracle_weight }}
+          CAP: ${{ steps.cfg.outputs.max_per_task }}
         run: |
           set -euo pipefail
           ARGS=()
@@ -110,8 +139,8 @@ jobs:
 
       - name: Stage the Kaggle dataset + kernel
         env:
-          SIZE: ${{ inputs.size }}
-          CFG: ${{ inputs.config }}
+          SIZE: ${{ steps.cfg.outputs.size }}
+          CFG: ${{ steps.cfg.outputs.config }}
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
         run: |
           set -euo pipefail
@@ -129,7 +158,7 @@ jobs:
           retention-days: 30
 
       - name: Push to Kaggle and start training
-        if: inputs.push
+        if: steps.cfg.outputs.push == 'true'
         env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
           KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
