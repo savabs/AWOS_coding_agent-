@@ -87,3 +87,15 @@ def test_kernel_template_matches_train_defaults():
     d = ast.literal_eval(defaults.value)
     assert d["base_model"] == kd.SIZES["4B"]["base_model"] and d["base_revision"] == kd.SIZES["4B"]["base_revision"]
     assert "linear_attn" in d["target_regex"] and d["gdn_impl"] == "torch"
+
+
+def test_access_token_in_kaggle_key_is_passed_as_api_token(monkeypatch):
+    from scaffold.rl.train import kaggle_driver as kd
+    monkeypatch.setenv("KAGGLE_USERNAME", "someone")
+    monkeypatch.delenv("KAGGLE_API_TOKEN", raising=False)
+    monkeypatch.setenv("KAGGLE_KEY", "KGAT_" + "x" * 32)          # newer access-token format
+    env = kd._kaggle_env()
+    assert env["KAGGLE_API_TOKEN"].startswith("KGAT_") and "KAGGLE_KEY" not in env
+    monkeypatch.setenv("KAGGLE_KEY", "0123456789abcdef" * 2)      # legacy 32-hex key stays
+    env = kd._kaggle_env()
+    assert env["KAGGLE_KEY"] == "0123456789abcdef" * 2 and "KAGGLE_API_TOKEN" not in env

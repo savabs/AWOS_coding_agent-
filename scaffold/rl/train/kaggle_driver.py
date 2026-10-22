@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -102,6 +103,11 @@ def _kaggle_env() -> dict:
     env = dict(os.environ)
     if not env.get("KAGGLE_USERNAME") or not (env.get("KAGGLE_KEY") or env.get("KAGGLE_API_TOKEN")):
         raise SystemExit("Kaggle credentials missing: set KAGGLE_USERNAME and KAGGLE_KEY (or KAGGLE_API_TOKEN)")
+    # Legacy API keys are 32 hex chars; a newer Kaggle access token stored in KAGGLE_KEY is
+    # rejected there by the CLI and must be passed as KAGGLE_API_TOKEN instead.
+    key = env.get("KAGGLE_KEY") or ""
+    if key and not env.get("KAGGLE_API_TOKEN") and not re.fullmatch(r"[0-9a-f]{32}", key):
+        env["KAGGLE_API_TOKEN"] = env.pop("KAGGLE_KEY")
     return env
 
 

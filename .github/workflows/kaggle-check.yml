@@ -28,6 +28,11 @@ jobs:
           [ -n "$KAGGLE_USERNAME" ] || { echo "KAGGLE_USERNAME secret is empty"; exit 1; }
           [ -n "$KAGGLE_KEY" ] || { echo "KAGGLE_KEY secret is empty"; exit 1; }
           echo "username length: ${#KAGGLE_USERNAME}, key length: ${#KAGGLE_KEY}"
+          # Legacy API keys are 32 hex chars; newer Kaggle access tokens are passed as KAGGLE_API_TOKEN.
+          if ! [[ "$KAGGLE_KEY" =~ ^[0-9a-f]{32}$ ]]; then
+            echo "key is an access token: using KAGGLE_API_TOKEN"
+            export KAGGLE_API_TOKEN="$KAGGLE_KEY"; unset KAGGLE_KEY
+          fi
           pip install -q kaggle
           kaggle --version
           echo "--- my kernels ---";  kaggle kernels list --mine --page-size 5
