@@ -288,6 +288,11 @@ def read_web(snap: Snapshot, web_path: Optional[Tuple[int, ...]] = None) -> WebV
         elif r == "checkbox":
             add("checkbox", value=str(n.get("value", "")))
             return
+        elif r == "radiobutton" and n.get("subrole") == "AXTabButton":
+            # WebKit exposes role=tab as a radio button with subrole AXTabButton (inside an
+            # AXTabGroup, not an AXRadioGroup): a clickable tab, value 1 when selected.
+            add("tab", value="1" if n.get("value") in (1, True, "1") or n.get("selected") else "0")
+            return
         elif _secret_leaf(n):
             raw = text_of(n) if n.get("children") else _leaf_text(n)
             c = add("secret_text", raw=raw)
@@ -499,7 +504,7 @@ class MacBrowserBackend:
 
     def click(self, page: Page, n: int) -> Page:
         c, snap, path = self._live(page, n)
-        if c.role not in ("link", "button", "checkbox"):
+        if c.role not in ("link", "button", "checkbox", "tab"):
             raise WebError(f"control {n} ({c.role}) is not clickable")
         before = (snap.url, snap.render(400)) if snap.ok else None
         n0 = len(self.actor.interruptions)

@@ -39,3 +39,16 @@ def test_ax_value_forms():
     assert checkbox_on("1") and checkbox_on(1) and not checkbox_on("0") and not checkbox_on("")
     assert "checkbox toggles" in __import__("scaffold.agent.desktop.micro_agent", fromlist=["SYSTEM"]).SYSTEM
     assert web_tools.Control(1, "checkbox", "X", value="1").line().endswith("= checked")
+
+
+def test_tab_is_a_clickable_control():
+    """WebKit exposes role=tab as AXRadioButton/AXTabButton inside an AXTabGroup."""
+    from scaffold.agent.desktop.live.driver import read_web
+    from scaffold.agent.desktop.live.observe import Snapshot
+    tabs = [{"role": "AXRadioButton", "subrole": "AXTabButton", "title": f"Tab #{i}", "value": int(i == 1)}
+            for i in (1, 2)]
+    web = {"role": "AXWebArea", "title": "T", "children": [{"role": "AXTabGroup", "children": tabs}]}
+    win = {"role": "AXWindow", "title": "T", "children": [web]}
+    view = read_web(Snapshot(tree=win, truncated=False, app={}, url="http://127.0.0.1:1/", web_paths=[(0,)]))
+    assert [(c.kind, c.name, c.value) for c in view.controls] == [("tab", "Tab #1", "1"), ("tab", "Tab #2", "0")]
+    assert web_tools.Control(1, "tab", "Tab #1", value="1").line() == '[1] tab "Tab #1" (selected)'

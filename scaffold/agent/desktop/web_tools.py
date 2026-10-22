@@ -110,6 +110,8 @@ class Control:
             bits.append(f"= \"{self.value}\"")
         if self.role == "checkbox":
             bits.append("= checked" if checkbox_on(self.value) else "= unchecked")
+        if self.role == "tab" and checkbox_on(self.value):
+            bits.append("(selected)")
         if self.role == "secret_text":
             bits.append("= «hidden; use copy_to_secret»")
         return " ".join(bits)

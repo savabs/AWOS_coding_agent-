@@ -27,7 +27,7 @@ ROLE_ALIASES = {
     "button": ("button",), "link": ("link",), "textbox": ("textbox", "password"),
     "password": ("password",), "combobox": ("combobox",), "select": ("combobox",),
     "radiogroup": ("radiogroup",), "radio": ("radiogroup",), "checkbox": ("checkbox",),
-    "secret_text": ("secret_text",), "clickable": ("button", "link"), "any": None,
+    "secret_text": ("secret_text",), "tab": ("tab",), "clickable": ("button", "link", "tab"), "any": None,
 }
 _SHOWING = re.compile(r"^Controls \((\d+) total, showing (\d+)-(\d+)\):", re.M)
 

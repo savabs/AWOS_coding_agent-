@@ -1033,7 +1033,7 @@ class MicroAgent:
         ev["control"] = f"{c.role} \"{mask_secrets(c.name)}\""
 
         if act.verb is Verb.CLICK:
-            if c.role not in ("link", "button", "checkbox"):
+            if c.role not in ("link", "button", "checkbox", "tab"):
                 return f"control {c.n} is a {c.role}, not clickable (use fill/select)", page, None
             if is_destructive(c):
                 if c.name not in st.allow_destructive:

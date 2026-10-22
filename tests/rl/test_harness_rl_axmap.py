@@ -63,7 +63,8 @@ def test_controls_match_product_reading(widgets):
         ("button", "Sign in", "Sign in", False), ("textbox", "Search projects", "", False),
         ("button", "Go", "", False), ("secret_text", "New API key value", "New API key", False),
         ("button", "Create key", "Create key", True), ("button", "Cancel", "Cancel", True),
-        ("button", "Revoke", "Revoke key ci-readonly", False), ("button", "Create key", "", False)]
+        ("button", "Revoke", "Revoke key ci-readonly", False), ("tab", "Overview", "", False),
+        ("tab", "Usage", "", False), ("button", "Create key", "", False)]
     c = {x.n: x for x in p.controls}
     assert c[3].value == "ada@example.com" and c[4].value == ""
     assert c[6].options == ["India", "France", "Japan"] and c[6].value == "France"
@@ -85,11 +86,12 @@ def test_live_regions_dialog_table_and_secret(widgets):
     assert p._raw[sec.raw_ref] == "fk_live_abcdefghijklmnop1234XYZ"
 
 
-def test_hidden_and_tabs_not_controls(widgets):
+def test_hidden_not_controls_tabs_are(widgets):
     _, p = widgets
     names = [c.name for c in p.controls]
     assert "Hidden button" not in names and "Hidden link" not in names
-    assert "Overview" not in names                      # WebKit tabs: AXRadioButton outside a radio group
+    tabs = [c for c in p.controls if c.role == "tab"]     # WebKit tabs: AXRadioButton/AXTabButton
+    assert [c.name for c in tabs] == ["Overview", "Usage"]
 
 
 def test_every_control_has_a_dom_handle(widgets):
