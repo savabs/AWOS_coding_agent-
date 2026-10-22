@@ -1,0 +1,46 @@
+# Waits for the Kaggle training kernel (awos-rl-sft) to finish, then fetches its output
+# (training log, metrics.json, adapter) as an artifact. Read-only on Kaggle.
+# Launch: push to a branch named bench-cloud/rl-kaggle-watch-<anything>.
+name: kaggle-watch
+
+on:
+  push:
+    branches: ["bench-cloud/rl-kaggle-watch-**"]
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    runs-on: macos-latest   # separate from the Linux runners rl-eval fills
+    timeout-minutes: 350
+    env:
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Wait for the kernel
+        shell: bash
+        run: |
+          set -uo pipefail
+          pip install -q kaggle==2.2.4
+          python -m scaffold.rl.train.kaggle_driver wait --kernel "$KAGGLE_USERNAME/awos-rl-sft" --timeout-min 330
+      - name: Fetch the output (log, metrics, adapter)
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          python -m scaffold.rl.train.kaggle_driver fetch --kernel "$KAGGLE_USERNAME/awos-rl-sft" --out kaggle_out || true
+          ls -la kaggle_out || true
+          [ -f kaggle_out/metrics.json ] && cat kaggle_out/metrics.json
+          find kaggle_out -maxdepth 2 -name "*.log" -exec tail -n 80 {} \; || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kaggle-out
+          path: kaggle_out/
+          retention-days: 30
