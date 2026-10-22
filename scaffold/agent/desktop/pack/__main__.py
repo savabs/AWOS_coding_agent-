@@ -4,6 +4,14 @@
     run [--month 2026-10] [--source ID] [--force] [--runner module:function]
                                       collect the month (default: last month); re-runs retry only
                                       missing / failed / needs_you sources (--force: all)
+                                      --live: the live Safari runner (pack/runner.py, guest VM only);
+                                      --wait-for-human [--human-timeout S]: at a login / OTP /
+                                      captcha, notify inside the VM and wait for the owner
+    teach --source ID [--demo-month M] [--from-trace F] [--yes]
+                                      record the owner doing the job once in the VM's Safari (or take
+                                      a saved demo trace) and store a replayable skill under
+                                      ~/.awos/pack/skills/<ID>/vN (pack/teach.py)
+    skills [--source ID]              list taught skills (version, demo month, period bound)
     report [--month M]                write report.html/.txt/.json into Pack/M/ and print the text
     zip [--month M] [--out FILE]      write the accountant's zip (report + documents not set aside)
     status [--month M]                JSON: per-month totals (or one month's sources)
@@ -39,6 +47,53 @@ def resolve_runner(spec: Optional[str]) -> Optional[Callable]:
     return getattr(importlib.import_module(mod), fn)
 
 
+def cmd_teach(cfg, a) -> int:
+    from .teach import TeachRefused, teach
+    try:
+        src = cfg.source(a.source)
+    except ConfigError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    month = a.demo_month or previous_month()
+    if not MONTH_RE.match(month):
+        print(f"--demo-month must look like 2026-10, got {month!r}", file=sys.stderr)
+        return 2
+    try:
+        out = teach(src, demo_month=month, trace=a.from_trace, yes=a.yes,
+                    skills_root=Path(a.skills).expanduser() if a.skills else None)
+    except TeachRefused as e:
+        print("not taught -- " + "; ".join(e.reasons), file=sys.stderr)
+        return 4
+    except RuntimeError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    p = out["program"]
+    print(f"taught {src.id} v{p['version']}: {out['path']}")
+    print(f"  steps: {len(p['setup'])}, handlers: {len(p['handlers'])}, "
+          f"sign-in / OTP / captcha steps left to you: {p['pack']['dropped_steps']}, "
+          f"month bound: {p['pack']['period_bound']}")
+    for t in p["pack"]["period_templates"]:
+        print(f"  {t['where']}: {t['template']}")
+    for w in out["warnings"]:
+        print(f"  note: {w}")
+    return 0
+
+
+def cmd_skills(cfg, a) -> int:
+    from .teach import load_skill, skills_dir
+    root = Path(a.skills).expanduser() if a.skills else skills_dir()
+    rows = {}
+    for s in cfg.sources:
+        if a.source and s.id != a.source:
+            continue
+        p = load_skill(s, root)
+        rows[s.id] = None if p is None else {
+            "version": p["version"], "demo_month": (p.get("pack") or {}).get("demo_period"),
+            "period_bound": (p.get("pack") or {}).get("period_bound"), "steps": len(p.get("setup", []))}
+    print(json.dumps(rows, indent=1, sort_keys=True))
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m scaffold.agent.desktop.pack",
                                  description="Month-end document pack")
@@ -53,6 +108,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     r.add_argument("--force", action="store_true")
     r.add_argument("--runner")
     r.add_argument("--quiet", action="store_true")
+    r.add_argument("--live", action="store_true", help="replay taught skills in the VM's Safari")
+    r.add_argument("--wait-for-human", action="store_true")
+    r.add_argument("--human-timeout", type=float, default=600.0)
+    t = sub.add_parser("teach")
+    t.add_argument("--source", required=True)
+    t.add_argument("--demo-month", help="the month you will download in the demonstration (default: last month)")
+    t.add_argument("--from-trace", help="build the skill from a saved awos.demo_trace/1 file instead of recording")
+    t.add_argument("--yes", action="store_true", help="consent to recording without the prompt")
+    t.add_argument("--skills", help="skills folder (default ~/.awos/pack/skills)")
+    k = sub.add_parser("skills")
+    k.add_argument("--source")
+    k.add_argument("--skills")
     for name in ("report", "zip", "status"):
         p = sub.add_parser(name)
         p.add_argument("--month")
@@ -82,9 +149,17 @@ def main(argv: Optional[List[str]] = None) -> int:
         for w in cfg.warnings:
             print(f"  warning: {w}")
         return 0
+    if a.cmd == "teach":
+        return cmd_teach(cfg, a)
+    if a.cmd == "skills":
+        return cmd_skills(cfg, a)
     if a.cmd == "run":
         try:
-            runner = resolve_runner(a.runner)
+            if a.live:
+                from .runner import LiveRunner
+                runner = LiveRunner(wait_for_human=a.wait_for_human, human_timeout_s=a.human_timeout)
+            else:
+                runner = resolve_runner(a.runner)
         except (ImportError, AttributeError) as e:
             print(f"cannot load runner: {e}", file=sys.stderr)
             return 2

@@ -1,9 +1,14 @@
-# Month-end Document Pack v0.1 testbed (testbeds/doc_pack) on free GitHub-hosted macOS runners
+# Month-end Document Pack v0.1 on free GitHub-hosted macOS runners
 # (each runner is itself a disposable macOS VM, kern.hv_vmm_present=1).
-#   1. unit tests + the HTTP-level dry run (oracle PASSES every variant, every bad solution FAILS)
-#   2. the same oracle in REAL Safari through the live AX driver (scaffold/agent/desktop/live),
-#      per variant, with a screen recording + screenshots
-# No model calls, no secrets, no paid APIs. Logs, results, screenshots and videos are uploaded.
+#   1. unit tests: testbed + the pack runner / teach suites (fake AX runtime, real 127.0.0.1 portals)
+#   2. the HTTP-level dry run (oracle PASSES every variant, every bad solution FAILS)
+#   3. LIVE mode in real Safari, per variant (baseline / traps / drift):
+#        teach  a scripted owner demonstrates each mock portal once (2026-08) -> pack/teach.py skills
+#        run    pack core + the live runner (pack/runner.py, --wait-for-human) for 2026-09; the scripted
+#               owner signs in / hands captcha + OTP to the human desk when the runner pauses
+#        check  pack report + zip, doc_pack verify.py
+#      with a fixed-length screen recording, screenshots and the pack reports uploaded.
+# No model calls, no secrets, no paid APIs.
 # Launch: push a branch named bench-cloud/mac-pack-<anything>.
 name: mac-pack
 
@@ -25,9 +30,9 @@ jobs:
       fail-fast: false
       max-parallel: 2          # keep the other free macOS slots for the owner
       matrix:
-        variant: [a, b, c]
+        variant: [baseline, traps, drift]
     runs-on: macos-15
-    timeout-minutes: 40
+    timeout-minutes: 45
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       V: ${{ matrix.variant }}
@@ -40,8 +45,8 @@ jobs:
 
       - name: Deps
         run: |
-          pip install -q -r requirements.txt pytest pyobjc-framework-ApplicationServices pyobjc-framework-Quartz \
-            pyobjc-framework-Cocoa
+          pip install -q -r requirements.txt pytest pytest-timeout pyobjc-framework-ApplicationServices \
+            pyobjc-framework-Quartz pyobjc-framework-Cocoa
 
       - name: Machine facts
         shell: bash
@@ -53,23 +58,23 @@ jobs:
             python -c "import sys; sys.path.insert(0, 'testbeds/doc_pack'); import dp_pdf; print('pdf backend', dp_pdf.backend())"
           } 2>&1 | tee out/machine_$V.txt
 
-      - name: Unit tests (testbed)
+      - name: Unit tests (testbed + pack runner / teach)
         shell: bash
         run: |
           set -o pipefail
-          python -m pytest tests/test_testbed_doc_pack.py -q 2>&1 | tee out/pytest_$V.txt
+          python -m pytest tests/test_testbed_doc_pack.py tests/test_pack_runner.py tests/test_pack_core.py \
+            tests/test_pack_policy.py tests/test_live_checkpoint.py -q -p no:cacheprovider 2>&1 | tee out/pytest_$V.txt
 
       - name: HTTP-level dry run (oracle + bad solutions, all variants)
-        if: always()
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           set -o pipefail
           python testbeds/doc_pack/run.py --dry-run --root "$RUNNER_TEMP/dp_dry" 2>&1 | tee out/dry_run_$V.txt
-          cp "$RUNNER_TEMP/dp_dry/dry_run.json" out/dry_run_$V.json
 
       # The runner is a disposable VM; these settings only touch it.
-      - name: Guest hygiene (Safari prompts, no auto-open of downloaded PDFs)
-        if: always()
+      - name: Guest hygiene (Safari prompts, no auto-open of downloaded files)
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           set +e
@@ -81,33 +86,33 @@ jobs:
             done
           done
           mkdir -p "$HOME/Downloads"
-          echo "--- Safari per-site preferences (schema, for the download-permission question)"
-          for DB in "$HOME/Library/Safari/PerSitePreferences.db" \
-                    "$HOME/Library/Containers/com.apple.Safari/Data/Library/Safari/PerSitePreferences.db"; do
-            [ -f "$DB" ] && { echo "$DB"; sqlite3 "$DB" ".tables" "select * from default_preferences;" 2>&1 | head -40; }
-          done
           true
 
-      - name: Oracle in real Safari (variant ${{ matrix.variant }})
-        if: always()
+      - name: Pack live mode in real Safari (${{ matrix.variant }})
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           set +e
-          screencapture -v -V 420 -x out/video_pack_$V.mov & REC=$!
+          screencapture -v -V 1500 -x out/video_pack_$V.mov & REC=$!
           sleep 2
-          python testbeds/doc_pack/run.py safari --variant $V --root "$RUNNER_TEMP/dp_safari_$V" --out out \
-            2>&1 | tee out/safari_$V.log
-          echo "safari exit=${PIPESTATUS[0]}" | tee -a out/safari_$V.log
+          python testbeds/doc_pack/run.py live --variant $V --root "$RUNNER_TEMP/dp_live_$V" --out out \
+            2>&1 | tee out/live_$V.log
+          RC=${PIPESTATUS[0]}
+          echo "live exit=$RC" | tee -a out/live_$V.log
           sleep 2; kill -INT $REC 2>/dev/null; wait $REC 2>/dev/null
           screencapture -x out/screen_after_$V.png || echo "screencapture failed"
-          H="$RUNNER_TEMP/dp_safari_$V/harness"
-          mkdir -p out/harness_$V
-          cp "$H"/requests.jsonl "$H"/transcript.txt "$H"/truth.json "$H"/phone_sms.txt out/harness_$V/ 2>/dev/null
-          ls -lR "$RUNNER_TEMP/dp_safari_$V/sandbox/outbox" > out/harness_$V/outbox_listing.txt 2>&1
-          true
+          R="$RUNNER_TEMP/dp_live_$V"
+          mkdir -p out/harness_$V out/skills_$V out/pack_$V
+          cp "$R"/run/harness/requests.jsonl "$R"/run/harness/transcript.txt "$R"/run/harness/truth.json out/harness_$V/ 2>/dev/null
+          cp -R "$R"/skills/. out/skills_$V/ 2>/dev/null
+          cp "$R"/teach/demo_*.json out/skills_$V/ 2>/dev/null
+          cp "$R"/run/Pack/*_document_pack.zip out/pack_$V/ 2>/dev/null
+          ls -lR "$R/run/sandbox/outbox" "$R/run/Pack" > out/pack_$V/listing.txt 2>&1
+          grep '^SUMMARY' out/live_$V.log >> "$GITHUB_STEP_SUMMARY"
+          exit $RC
 
       - name: Upload
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: mac-pack-${{ matrix.variant }}
