@@ -543,6 +543,7 @@ _PASSKEY_RE = re.compile(r"\b(passkey|security key|touch id|face id)\b", re.I)
 #: controls never clicked implicitly (Critic 8: revoke-active, rotate, delete, billing)
 _DESTRUCTIVE_RE = re.compile(
     r"\b(delete|remove|revoke|rotate|regenerate|roll|reset|wipe|destroy|erase|purge|deactivate|disable|"
+    r"empty|permanently|discard|clear all|"          # "Empty trash" went through in the RL baseline
     r"terminate|suspend|upgrade|downgrade|purchase|buy|pay|transfer|close account|cancel (plan|subscription)|"
     r"sign out|log ?out|leave)\b", re.I)
 
