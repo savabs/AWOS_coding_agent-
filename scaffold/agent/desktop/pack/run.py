@@ -109,6 +109,21 @@ def default_policy_factory() -> Callable[[Source], Callable[[str, str], bool]]:
         return domain_policy
     if hasattr(pol, "for_source"):
         return pol.for_source
+    if hasattr(pol, "SourceConfig") and hasattr(pol, "allowed"):
+        # pack/policy.py: allowed(url, action, SourceConfig) -> Decision. Exact hosts from the
+        # config become its domains (subdomain-matching there, exact-host here: both must pass);
+        # loopback test hosts are handled by its allow_loopback, not listed as domains.
+        def factory(source: Source) -> Callable[[str, str], bool]:
+            base = domain_policy(source)
+            hosts = [h[2:] if h.startswith("*.") else h for h in source.allowed_domains
+                     if h not in ("127.0.0.1", "localhost", "::1")]
+            try:
+                cfg = pol.SourceConfig(name=source.name, domains=tuple(hosts), allow_loopback=True)
+            except Exception:
+                return lambda url, action="navigate": False       # unusable config: refuse all
+            return lambda url, action="navigate": (base(url, action)
+                                                   and bool(pol.allowed(url, action, cfg).ok))
+        return factory
     if hasattr(pol, "allowed"):
         def factory(source: Source) -> Callable[[str, str], bool]:
             base = domain_policy(source)
@@ -122,7 +137,22 @@ def default_check() -> Callable[[Path, Source, Period], Any]:
         from . import verify  # type: ignore[attr-defined]
     except ImportError:
         return stub_check
-    return getattr(verify, "check", stub_check)
+    vcheck = getattr(verify, "check", None)
+    if vcheck is None:
+        return stub_check
+    # pack/verify.py returns its own Verdict (lower-case statuses, `fields`); map it onto ours.
+    status_map = {"verified": VERIFIED, "unverified": UNVERIFIED, "locked": UNVERIFIED,
+                  "wrong_period": MISMATCH, "duplicate": MISMATCH,
+                  "corrupt": SUSPICIOUS, "suspicious": SUSPICIOUS}
+
+    def check(path: Path, source: Source, period: Period) -> Verdict:
+        spec = {"name": source.name, "doc_type": source.kind, "vendor": source.name}
+        v = vcheck(path, spec, getattr(period, "label", str(period)))
+        status = getattr(v, "status", "unverified")
+        facts = {k: (str(x) if x is not None else None)
+                 for k, x in (getattr(v, "fields", None) or {}).items()}
+        return Verdict(status_map.get(str(status), UNVERIFIED), list(getattr(v, "reasons", []) or []), facts)
+    return check
 
 
 def unwired_runner(source: Source, period: Period, ctx: RunContext) -> RunnerResult:
