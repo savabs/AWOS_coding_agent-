@@ -27,7 +27,7 @@ holdout + live testbeds). Machinery: `.github/workflows/rl-eval.yml`, settings i
 **Sources and splits (evaluation only, never trained on):**
 
 1. **MiniWoB++ holdout.** Upstream pinned at `a7658beb68e1d3572329e06734c5822bd284ddc8`
-   (tag v1.1). 75 of 130 task types are operable with our verbs; 53 are excluded with a
+   (tag v1.1). 75 of 130 task types are operable with our verbs; 55 are excluded with a
    reason each (`scaffold/rl/miniwob/catalog.py`). Holdout = 15 types (20%), chosen by
    whole families in sha256 order (`data/holdout.json`): click-tab ×5, copy-paste ×2,
    enter-password, odd-or-even, order-food, social-media ×3, use-autocomplete ×2.
