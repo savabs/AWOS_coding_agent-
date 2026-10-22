@@ -190,6 +190,9 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
+          # Collection runs (RFT data) set SAMPLES / TEMPERATURE / SEED in ci/rl_eval.env; eval runs leave them unset.
+          eval "$(grep -E '^(SAMPLES|TEMPERATURE|SEED)=' ci/rl_eval.env || true)"
+          export SAMPLES="${SAMPLES:-}" TEMPERATURE="${TEMPERATURE:-}" SEED="${SEED:-}"
           bash scripts/rl/ci_run_shard.sh
           RC=$?
           NAME="${MODEL}__${SOURCE}__${SPLIT}__shard${SHARD}of${SHARDS}"

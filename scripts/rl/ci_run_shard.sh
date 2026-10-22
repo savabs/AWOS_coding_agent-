@@ -36,6 +36,9 @@ export PYTHONPATH="${PYTHONPATH:-$PWD}"
 HELP="$(python -m scaffold.rl.harness run --help 2>&1 || true)"
 ARGS=(run --source "$SOURCE" --model local --split "$SPLIT" --out "$OUT/")
 [ -n "$N" ] && ARGS+=(--n "$N")
+# Data collection (RFT): several sampled tries per task. Sample j uses seed SEED+j.
+[ -n "${SAMPLES:-}" ] && ARGS+=(--samples "$SAMPLES")
+[ -n "${TEMPERATURE:-}" ] && ARGS+=(--temperature "$TEMPERATURE" --seed "${SEED:-1000}")
 if grep -q -- "--shard" <<<"$HELP"; then
   ARGS+=(--shard "${SHARD}/${SHARDS}")
 elif [ "$SHARD" != "1" ]; then
@@ -48,7 +51,8 @@ ARGS+=(--workers "$NP")
 python3 - "$OUT/run_meta.json" <<PY
 import json, os, sys, time
 meta = {k.lower(): os.environ.get(k, "") for k in
-        ("MODEL", "SOURCE", "SPLIT", "SHARD", "SHARDS", "N", "NP", "GGUF_REPO", "GGUF_FILE", "GGUF_REV",
+        ("MODEL", "SOURCE", "SPLIT", "SHARD", "SHARDS", "N", "NP", "SAMPLES", "TEMPERATURE", "SEED",
+         "GGUF_REPO", "GGUF_FILE", "GGUF_REV",
          "LLAMA_TAG", "GITHUB_RUN_ID", "GITHUB_SHA")}
 meta["started"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 meta["harness_args"] = "${ARGS[*]}"

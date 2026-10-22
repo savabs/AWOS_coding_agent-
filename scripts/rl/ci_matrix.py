@@ -62,9 +62,10 @@ def build(env: dict, models: str = "", sources: str = "", split: str = "", n: st
         mods.append({k: s[k] for k in ("model", "repo", "file", "rev", "sha256", "bytes")})
         for src in sources.split():
             sp = EVAL_SPLIT.get(src, "eval") if split == "eval" else split
-            for k in range(1, s["shards"] + 1):
+            shards = int(env.get("SHARDS_OVERRIDE") or s["shards"])   # collection runs are bigger
+            for k in range(1, shards + 1):
                 include.append({**{k2: s[k2] for k2 in ("model", "repo", "file", "rev", "sha256", "bytes")},
-                                "source": src, "split": sp, "shard": k, "shards": s["shards"], "n": n})
+                                "source": src, "split": sp, "shard": k, "shards": shards, "n": n})
     if not include:
         raise SystemExit("empty matrix")
     if len(include) > 256:
