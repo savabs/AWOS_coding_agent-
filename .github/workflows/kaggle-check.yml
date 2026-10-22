@@ -1,0 +1,35 @@
+# Checks that the KAGGLE_USERNAME / KAGGLE_KEY repo secrets authenticate with the Kaggle API.
+# Read-only (lists your own kernels/datasets); never prints the key.
+# Launch: push to a branch named bench-cloud/rl-kaggle-check-<anything>.
+name: kaggle-check
+
+on:
+  push:
+    branches: ["bench-cloud/rl-kaggle-check-**"]
+
+permissions:
+  contents: read
+
+jobs:
+  auth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Kaggle API auth (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "$KAGGLE_USERNAME" ] || { echo "KAGGLE_USERNAME secret is empty"; exit 1; }
+          [ -n "$KAGGLE_KEY" ] || { echo "KAGGLE_KEY secret is empty"; exit 1; }
+          echo "username length: ${#KAGGLE_USERNAME}, key length: ${#KAGGLE_KEY}"
+          pip install -q kaggle
+          kaggle --version
+          echo "--- my kernels ---";  kaggle kernels list --mine --page-size 5
+          echo "--- my datasets ---"; kaggle datasets list --mine --page-size 5
+          echo "AUTH OK"
