@@ -207,6 +207,29 @@ def make_ground(values: Dict[str, str], base: Callable = ground_role_name) -> Ca
     return ground
 
 
+def select_by_typing(actor: Any, snap, path, option: str) -> bool:
+    """Fallback for a web pop-up whose items AX does not list: focus it in OUR key window, type the
+    option's text (type-ahead), read the value back. Only after the policy verdict passed (the
+    caller went through PackActor.select_option first). -> True when it now shows ``option``."""
+    rt = actor.rt
+    el = snap.element(path)
+    if el is None or not actor.vm_check() or not rt.can_post_events():
+        return False
+    try:
+        actor.raise_window(snap)
+        if snap.pid:
+            rt.activate(snap.pid)
+        rt.set_attr(el, "AXFocused", True)
+        rt.sleep(0.3)
+        rt.post_text(snap.pid, option)
+        rt.sleep(0.6)
+        v = rt.read(el, ("AXValue", "AXTitle"))
+    except Exception:  # noqa: BLE001
+        return False
+    got = " ".join(str(v.get("AXValue") or v.get("AXTitle") or "").split()).lower()
+    return got == " ".join(option.split()).lower()
+
+
 class _Base:
     """What SkillRunner wants of the file side: a tiny scratch home, no file actions."""
 
@@ -422,6 +445,13 @@ class PackEnv(MacEnv):
         self.switch_window(app)
         snap, path = self._path_for(app, el)
         r = self.actor.select_option(snap, path, option)
+        if (r.outcome is Outcome.REFUSED and ("no option" in r.reason or "pop-up" in r.reason)
+                and not (r.detail or {}).get("needs_you")):
+            # WebKit pop-ups may not expose their menu items to AX: pick by type-ahead instead
+            snap, path = self._path_for(app, el)
+            if select_by_typing(self.actor, snap, path, option):
+                self.ui_actions += 1
+                return self.page(app)
         self._note(r)
         return self.page(app)
 

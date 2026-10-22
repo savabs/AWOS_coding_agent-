@@ -281,14 +281,64 @@ class RecordingBrowser:
     def select(self, page, n, option):
         c = page.control(n)
         before = self._win(page)
-        out = self.b.select(page, n, option)
+        if option.lower() in [o.lower() for o in c.options]:
+            out = self.b.select(page, n, option)
+        else:                         # real WebKit pop-ups do not list their items until opened
+            from scaffold.agent.desktop.live.actions import Outcome
+            from scaffold.agent.desktop.pack.runner import select_by_typing
+            mb = self.b.b
+            _c, snap, path = mb._live(page, n)
+            r = mb.actor.select_option(snap, path, option)
+            if r.outcome is Outcome.REFUSED and not select_by_typing(mb.actor, mb._snap(), path, option):
+                from scaffold.agent.desktop.web_tools import WebError
+                raise WebError(f"could not pick {option!r}: {r.reason}")
+            out = mb._load()
         self._add("select", {"role": "AXPopUpButton", "name": c.name}, option, before, {})
         return out
 
+    def _download_click(self, page, n):
+        """Press a download control and wait for the file WITHOUT re-reading the page first: Safari's
+        "allow downloads on 127.0.0.1?" sheet hides the web area until it is answered (the
+        harness's allow rule answers it in clear_interruptions)."""
+        from scaffold.agent.desktop.live.actions import Expect
+        from scaffold.agent.desktop.web_tools import parse_page
+        mb = self.b.b
+        _c, snap, path = mb._live(page, n)
+        before = {p.name for p in self.b.downloads.glob("*")}
+        mb.actor.press(snap, path, Expect(any_change=True))
+        t_end = time.time() + self.b.wait_s
+        while time.time() < t_end:
+            try:
+                mb.actor.clear_interruptions(mb._snap(), "download")
+            except Exception:
+                pass
+            new = sorted(p for p in self.b.downloads.glob("*")
+                         if p.name not in before and p.is_file() and not p.name.endswith((".download", ".crdownload",
+                                                                                          ".part")))
+            if new:
+                time.sleep(0.6)
+                f = new[0]
+                data = f.read_bytes()
+                f.unlink()
+                self.b.got.append(f.name)
+                stub = parse_page(page.url, 200, f"<title>Downloaded</title><p>Downloaded {f.name}</p>")
+                stub.download = (f.name, data)  # type: ignore[attr-defined]
+                try:
+                    mb._load(timeout=5)                # the window is back on its page
+                except Exception:
+                    pass
+                return stub
+            time.sleep(0.5)
+        return mb._load()
+
     def click(self, page, n):
+        import safari_oracle
         c = page.control(n)
         before = self._win(page)
-        p = self.b.click(page, n)
+        if safari_oracle.DOWNLOADISH.search(c.name or ""):
+            p = self._download_click(page, n)
+        else:
+            p = self.b.click(page, n)
         tgt = {"role": self.ROLE.get(c.role, "AXButton"), "name": c.name}
         if getattr(p, "download", None):
             self._add("download", tgt, None, before, {},
