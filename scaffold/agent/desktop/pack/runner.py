@@ -207,27 +207,169 @@ def make_ground(values: Dict[str, str], base: Callable = ground_role_name) -> Ca
     return ground
 
 
+KEY_RETURN, KEY_ESCAPE = 36, 53
+
+
+def _norm(s: Any) -> str:
+    return " ".join(str(s or "").split()).lower()
+
+
+def _find(rt, root, pred, *, max_nodes: int = 3000, skip_web: bool = True, skip_roles=()):
+    """Breadth-first AX search under ``root`` (web areas skipped unless asked)."""
+    out, queue, n = [], [root], 0
+    while queue and n < max_nodes:
+        e = queue.pop(0)
+        n += 1
+        try:
+            r = rt.read(e, ("AXRole", "AXSubrole", "AXTitle", "AXDescription", "AXValue"))
+        except Exception:  # noqa: BLE001
+            continue
+        if pred(r):
+            out.append((e, r))
+        if (skip_web and r.get("AXRole") == "AXWebArea") or (e is not root and r.get("AXRole") in skip_roles):
+            continue
+        try:
+            queue.extend(rt.children(e))
+        except Exception:  # noqa: BLE001
+            pass
+    return out
+
+
 def select_by_typing(actor: Any, snap, path, option: str) -> bool:
-    """Fallback for a web pop-up whose items AX does not list: focus it in OUR key window, type the
-    option's text (type-ahead), read the value back. Only after the policy verdict passed (the
-    caller went through PackActor.select_option first). -> True when it now shows ``option``."""
+    """Fallback for a web pop-up whose items AX does not list under it (WebKit opens a native menu
+    that hangs off the APPLICATION element): open it, press the item found under the app, else
+    type the option's text + Return into the open menu, then read the value back. Only after the
+    policy verdict passed (the caller went through PackActor.select_option first)."""
     rt = actor.rt
     el = snap.element(path)
-    if el is None or not actor.vm_check() or not rt.can_post_events():
+    if el is None or not actor.vm_check():
         return False
+    want = _norm(option)
     try:
         actor.raise_window(snap)
         if snap.pid:
             rt.activate(snap.pid)
-        rt.set_attr(el, "AXFocused", True)
-        rt.sleep(0.3)
-        rt.post_text(snap.pid, option)
-        rt.sleep(0.6)
-        v = rt.read(el, ("AXValue", "AXTitle"))
+        if "AXPress" in rt.actions(el):
+            rt.perform(el, "AXPress")
+            rt.sleep(0.5)
+        is_item = lambda r: r.get("AXRole") == "AXMenuItem" and _norm(r.get("AXTitle")) == want  # noqa: E731
+        items = _find(rt, el, is_item, max_nodes=300)
+        if not items and snap.pid:          # an open menu hangs off the application, not the window
+            items = _find(rt, rt.app_element(snap.pid), is_item, max_nodes=800,
+                          skip_roles=("AXWindow", "AXMenuBar"))
+        if items:
+            rt.perform(items[0][0], "AXPress")
+        elif rt.can_post_events():
+            rt.post_text(snap.pid, option)
+            rt.sleep(0.3)
+            rt.post_key(snap.pid, KEY_RETURN)
+        else:
+            rt.perform(el, "AXCancel")
+            return False
+        for _ in range(6):
+            rt.sleep(0.4)
+            v = rt.read(el, ("AXValue", "AXTitle", "AXDescription"))
+            if want in {_norm(v.get(k)) for k in ("AXValue", "AXTitle", "AXDescription")}:
+                return True
     except Exception:  # noqa: BLE001
         return False
-    got = " ".join(str(v.get("AXValue") or v.get("AXTitle") or "").split()).lower()
-    return got == " ".join(option.split()).lower()
+    return False
+
+
+DOWNLOAD_PROMPT_RE = re.compile(r"allow downloads|download (files|this file)|wants to download", re.I)
+
+
+def _is_prompt_text(r: dict) -> bool:
+    return any(isinstance(r.get(k), str) and DOWNLOAD_PROMPT_RE.search(r[k]) for k in ("AXValue", "AXTitle",
+                                                                                        "AXDescription"))
+
+
+def _is_allow(r: dict) -> bool:
+    return r.get("AXRole") == "AXButton" and _norm(r.get("AXTitle") or r.get("AXDescription")) == "allow"
+
+
+def download_prompt(rt, window, pid: Optional[int] = None) -> Optional[Tuple[Any, str]]:
+    """Safari's "Do you want to allow downloads on <site>?" prompt, wherever AX puts it: a sheet or
+    panel in OUR window (outside, then inside the content view), another Safari window / panel, or
+    the container of the focused element. -> (the Allow button, its text) or None."""
+    def hit(root, skip_web: bool, max_nodes: int = 3000):
+        texts = _find(rt, root, _is_prompt_text, skip_web=skip_web, max_nodes=max_nodes)
+        if not texts:
+            return None
+        allow = _find(rt, root, _is_allow, skip_web=skip_web, max_nodes=max_nodes)
+        if not allow:
+            return None
+        t = texts[0][1]
+        return allow[0][0], str(t.get("AXValue") or t.get("AXTitle") or t.get("AXDescription") or "")
+    roots: List[Tuple[Any, bool]] = []
+    if window is not None:
+        roots += [(window, True), (window, False)]
+    app_el = None
+    if pid:
+        try:
+            app_el = rt.app_element(pid)
+            for w in rt.read(app_el, ("AXWindows",)).get("AXWindows") or []:
+                if window is None or not rt.same(w, window):
+                    roots.append((w, True))
+        except Exception:  # noqa: BLE001
+            app_el = None
+    for root, skip in roots:
+        found = hit(root, skip, 3000 if skip else 1500)
+        if found:
+            return found
+    if app_el is not None:                   # an alert focuses one of its own buttons
+        try:
+            e = rt.read(app_el, ("AXFocusedUIElement",)).get("AXFocusedUIElement")
+            for _ in range(5):
+                if e is None:
+                    break
+                found = hit(e, True, 300)
+                if found:
+                    return found
+                e = rt.read(e, ("AXParent",)).get("AXParent")
+        except Exception:  # noqa: BLE001
+            pass
+    return None
+
+
+def press_el(rt, el) -> bool:
+    """AXPress, else a synthetic click at the element's centre (harness use: Safari's own prompt)."""
+    try:
+        if "AXPress" in rt.actions(el) and rt.perform(el, "AXPress"):
+            return True
+        f = rt.read(el, ("AXPosition", "AXSize"))
+        (x, y), (w, h) = f.get("AXPosition"), f.get("AXSize")
+        return bool(rt.can_post_events() and rt.post_click(x + w / 2, y + h / 2))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def ax_outline(rt, window, *, max_nodes: int = 400, pid: Optional[int] = None) -> List[str]:
+    """Roles / titles of OUR window outside its web area, the app's other windows and the focused
+    element's ancestry (diagnostics when a download stalls)."""
+    def fmt(r: dict) -> str:
+        t = r.get("AXTitle") or r.get("AXDescription") or (r.get("AXValue") if isinstance(r.get("AXValue"), str)
+                                                            else "")
+        return f"{r.get('AXRole')}/{r.get('AXSubrole') or ''} {str(t)[:60]!r}"
+    lines = [fmt(r) for _e, r in _find(rt, window, lambda r: True, max_nodes=max_nodes)] if window is not None else []
+    if pid:
+        try:
+            app_el = rt.app_element(pid)
+            for w in rt.read(app_el, ("AXWindows",)).get("AXWindows") or []:
+                if window is None or not rt.same(w, window):
+                    lines.append("OTHER WINDOW: " + " / ".join(fmt(r) for _e, r in _find(rt, w, lambda r: True,
+                                                                                       max_nodes=40)))
+            e = rt.read(app_el, ("AXFocusedUIElement",)).get("AXFocusedUIElement")
+            chain = []
+            for _ in range(6):
+                if e is None:
+                    break
+                chain.append(fmt(rt.read(e, ("AXRole", "AXSubrole", "AXTitle", "AXDescription", "AXValue"))))
+                e = rt.read(e, ("AXParent",)).get("AXParent")
+            lines.append("FOCUS: " + " < ".join(chain))
+        except Exception as ex:  # noqa: BLE001
+            lines.append(f"outline error {type(ex).__name__}")
+    return lines[-160:]
 
 
 class _Base:
@@ -265,6 +407,7 @@ class PackEnv(MacEnv):
         self.pin = (u.hostname or "").lower(), u.port or (443 if u.scheme == "https" else 80)
         self.got: List[str] = []
         self.dialogs: List[dict] = []
+        self.allow_downloads = False            # testbed harness only: answer Safari's download prompt
 
     # -- policy ---------------------------------------------------------------
     def url_ok(self, url: str) -> Tuple[bool, str]:
@@ -385,6 +528,33 @@ class PackEnv(MacEnv):
                 self.handle(snap, det)
 
     # -- dialogs ----------------------------------------------------------------
+    def _download_prompt(self, app: str) -> None:
+        """Safari asks once per site whether it may download. The owner's call (needs_you /
+        wait), unless the run was started with ``allow_downloads`` (the local testbed harness)."""
+        pid = self.app_info.get("pid")
+        found = download_prompt(self.rt, self.windows.get(app), pid)
+        if found is None:
+            return
+        button, text = found
+        host = P.url_host(self.urls.get(app)) or "?"
+        self.dialogs.append({"prompt": text[:120], "allowed": self.allow_downloads})
+        if self.allow_downloads:
+            press_el(self.rt, button)
+            self.rt.sleep(0.5)
+            return
+        hn = CK.HumanNeeded("consent", self.source.name, host, "Safari asks to allow downloads")
+        if not self.waiting:
+            raise CheckpointStop("consent", f"AWOS needs you: Safari asks whether {host} may download files; "
+                                 "click Allow in the AWOS window, then re-run", host)
+        self.checkpoint.announce(hn)
+        t_end = self.rt.now() + self.checkpoint.timeout_s
+        while self.rt.now() < t_end:
+            self.rt.sleep(self.checkpoint.poll_s)
+            if download_prompt(self.rt, self.windows.get(app), pid) is None:
+                self.checkpoint.events.append(dict(hn.to_dict(), outcome="resumed"))
+                return
+        raise CheckpointStop("consent", "AWOS needs you: the Safari download prompt was not answered", host)
+
     def _clear_dialogs(self, app: str) -> None:
         snap = self._snap(app)
         r = self.actor.clear_interruptions(snap, "download")
@@ -427,9 +597,13 @@ class PackEnv(MacEnv):
                 self.got.append(name)
                 return self.downloads / name
             if self.rt.now() >= t_end:
+                self.notes.append("download did not arrive; window outline: " + " | ".join(
+                    ax_outline(self.rt, self.windows.get(app), pid=self.app_info.get("pid"))))
                 return None
-            if self.rt.now() - last_dlg >= 1.5:
+            if self.rt.now() - last_dlg >= 1.5 or prev is None:
                 last_dlg = self.rt.now()
+                if not cur and not partials:
+                    self._download_prompt(app)
                 self._clear_dialogs(app)
             if not cur and not partials:
                 s = self._snap(app)
@@ -568,7 +742,7 @@ class LiveRunner:
                  interrupt_rules: Sequence[Any] = (), notify: Optional[Callable[[str, str], Any]] = None,
                  human: Optional[Callable[["PackEnv", CK.HumanNeeded], None]] = None, keep_window: bool = False,
                  load_timeout: float = 20.0, settle: Optional[float] = None, home: Optional[Path] = None,
-                 hygiene_fn: Optional[Callable[..., Any]] = None):
+                 hygiene_fn: Optional[Callable[..., Any]] = None, allow_downloads: bool = False):
         from ..live import in_guest_vm
         self.wait_for_human, self.human_timeout_s, self.poll_s = wait_for_human, human_timeout_s, poll_s
         self.pace, self.skills_root, self.max_restarts = pace, skills_root, max_restarts
@@ -578,6 +752,7 @@ class LiveRunner:
         self.notify, self.human, self.keep_window = notify, human, keep_window
         self.load_timeout, self.settle, self.home = load_timeout, settle, home
         self.hygiene_fn = hygiene_fn
+        self.allow_downloads = allow_downloads
         self.last: Dict[str, Any] = {}
 
     # -- plumbing ---------------------------------------------------------------
@@ -617,6 +792,7 @@ class LiveRunner:
         home = Path(self.home or tempfile.mkdtemp(prefix="awos_pack_run_"))
         env = PackEnv(source, ctx, actor=pa, checkpoint=cp, home=home, waiting=waiting,
                       download_wait_s=self.download_wait_s, load_timeout=self.load_timeout, log=log)
+        env.allow_downloads = self.allow_downloads
         if self.human is not None:
             cp.on_human = lambda hn: self.human(env, hn)
         return env
@@ -699,6 +875,7 @@ class LiveRunner:
             detail["unverified"] = len(env.unverified)
             detail["ui_actions"] = env.ui_actions
             detail["dialogs"] = list(env.dialogs)
+            detail["notes"] = list(env.notes)[-10:]
             if not keep:
                 try:
                     env.close()

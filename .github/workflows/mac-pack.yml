@@ -66,7 +66,7 @@ jobs:
             tests/test_pack_policy.py tests/test_live_checkpoint.py -q -p no:cacheprovider 2>&1 | tee out/pytest_$V.txt
 
       - name: HTTP-level dry run (oracle + bad solutions, all variants)
-        if: always()
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           set -o pipefail
@@ -74,7 +74,7 @@ jobs:
 
       # The runner is a disposable VM; these settings only touch it.
       - name: Guest hygiene (Safari prompts, no auto-open of downloaded files)
-        if: always()
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           set +e
@@ -89,7 +89,7 @@ jobs:
           true
 
       - name: Pack live mode in real Safari (${{ matrix.variant }})
-        if: always()
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           set +e
@@ -112,7 +112,7 @@ jobs:
           exit $RC
 
       - name: Upload
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: mac-pack-${{ matrix.variant }}

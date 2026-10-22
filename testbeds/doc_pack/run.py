@@ -250,6 +250,7 @@ class RecordingBrowser:
     def __init__(self, inner):
         self.b = inner
         self.steps: list = []
+        self.notes: list = []
 
     @property
     def log(self):
@@ -301,17 +302,33 @@ class RecordingBrowser:
         "allow downloads on 127.0.0.1?" sheet hides the web area until it is answered (the
         harness's allow rule answers it in clear_interruptions)."""
         from scaffold.agent.desktop.live.actions import Expect
-        from scaffold.agent.desktop.web_tools import parse_page
+        from scaffold.agent.desktop.pack.runner import ax_outline, download_prompt, press_el
+        from scaffold.agent.desktop.web_tools import WebError, parse_page
         mb = self.b.b
         _c, snap, path = mb._live(page, n)
+        pid = (mb.app or {}).get("pid") or snap.pid
         before = {p.name for p in self.b.downloads.glob("*")}
         mb.actor.press(snap, path, Expect(any_change=True))
         t_end = time.time() + self.b.wait_s
+        first = True
         while time.time() < t_end:
             try:
-                mb.actor.clear_interruptions(mb._snap(), "download")
-            except Exception:
-                pass
+                if not any(p.name not in before for p in self.b.downloads.glob("*")):
+                    found = download_prompt(mb.rt, mb.window, pid)   # harness opt-in: allow loopback downloads
+                    if found is not None:
+                        ok = press_el(mb.rt, found[0])
+                        self.notes.append(f"allowed the download prompt ({ok}): {found[1][:80]}")
+                        time.sleep(0.8)
+                    s = mb._snap()
+                    r = mb.actor.clear_interruptions(s, "download")
+                    rep = mb.actor.interrupts.handle(s)                  # also when the window looks clear
+                    if first or rep.handled or rep.needs_user or r is not None:
+                        self.notes.append(f"interrupts: handled={[h.get('rule') for h in rep.handled]} "
+                                          f"needs_user={rep.needs_user[:160]!r} unknown={rep.unknown} "
+                                          f"clear={getattr(r, 'reason', None)!r}"[:600])
+                    first = False
+            except Exception as ex:
+                self.notes.append(f"prompt/interruptions: {type(ex).__name__}: {ex}"[:200])
             new = sorted(p for p in self.b.downloads.glob("*")
                          if p.name not in before and p.is_file() and not p.name.endswith((".download", ".crdownload",
                                                                                           ".part")))
@@ -329,7 +346,13 @@ class RecordingBrowser:
                     pass
                 return stub
             time.sleep(0.5)
-        return mb._load()
+        outline = ax_outline(mb.rt, mb.window, pid=pid)
+        self.notes.append("no download; window outline: " + " | ".join(outline[:80]))
+        try:
+            return mb._load(timeout=8)                  # e.g. the session expired: the login page
+        except WebError as ex:
+            raise WebError(f"{ex}; no download within {self.b.wait_s:.0f} s; window: "
+                           + " | ".join(outline[:40])) from None
 
     def click(self, page, n):
         import safari_oracle
@@ -521,13 +544,20 @@ def teach_portals(root: Path, *, demo_month: str, variant: str = "a", seed: int 
                                "demo_steps": len(tr.steps)}
                 log(f"taught {portal} v{prog['version']}: {out[portal]['steps']}")
             except Exception as ex:                       # report and carry on with the other portals
-                out[portal] = {"error": f"{type(ex).__name__}: {ex}"[:400]}
+                out[portal] = {"error": f"{type(ex).__name__}: {ex}"[:3000],
+                               "demo_steps": [f"{s.action} {s.target.get('name') or s.target.get('url_path') or ''}"
+                                              for s in (rec["b"].steps if rec.get("b") else [])],
+                               "transcript": orc.lines[-12:]}
                 log(f"TEACH {portal} FAILED: {out[portal]['error']}")
             finally:
                 try:
                     rec.get("b") and rec["b"].close()
                 except Exception:
                     pass
+            if rec.get("b") is not None:
+                out[portal]["notes"] = rec["b"].notes[-8:]
+                for ln in rec["b"].notes[-8:]:
+                    log(f"  {portal}: {ln[:1500]}")
     finally:
         srv.stop()
     return out
@@ -584,6 +614,7 @@ def live_variant(variant: str, *, root: Path, seed: int = 7, months=None, teach_
     runner = R.LiveRunner(wait_for_human=wait, human_timeout_s=human_timeout_s, poll_s=poll_s, pace=pace,
                           skills_root=skills, hygiene=False, runtime=runtime, vm_check=vm,
                           interrupt_rules=(allow_dl,), human=owner if wait else None, download_wait_s=download_wait_s,
+                          allow_downloads=True,
                           notify=lambda t, m: log(f"NOTIFY {t}: {m}"))
     details: dict = {}
 

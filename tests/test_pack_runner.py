@@ -498,6 +498,55 @@ def test_loopback_portal_is_pinned_to_its_port(tmp_path):
     assert not env.url_ok("https://evil.example/")[0]
 
 
+def _prompt_window(rt, saf, *, where="sheet"):
+    w = saf.new_window()
+    pressed = []
+    holder = L.El("AXSheet") if where == "sheet" else L.El("AXGroup")
+    holder.add(L.El("AXStaticText", AXValue="Do you want to allow downloads on “127.0.0.1”?"))
+    holder.add(L.El("AXButton", AXTitle="Cancel"))
+    allow = holder.add(L.El("AXButton", AXTitle="Allow"))
+    allow.acts["AXPress"] = lambda: pressed.append(True)
+    if where == "other_window":
+        win2 = L.El("AXWindow", AXTitle="")
+        win2.add(holder)
+        saf.windows.append(win2)
+    else:
+        w.add(holder)
+    return w, pressed
+
+
+@pytest.mark.parametrize("where", ["sheet", "group", "other_window"])
+def test_download_prompt_is_found_and_answered(where):
+    rt = L.FakeRuntime()
+    saf = L.FakeSafari(rt)
+    w, pressed = _prompt_window(rt, saf, where=where)
+    found = R.download_prompt(rt, w, L.SAFARI_PID)
+    assert found is not None and "allow downloads" in found[1]
+    assert R.press_el(rt, found[0]) and pressed == [True]
+    w2 = saf.new_window()
+    assert R.download_prompt(rt, w2, None) is None                 # a plain window: no prompt
+
+
+def test_download_prompt_without_harness_opt_in_is_needs_you(tmp_path):
+    rt, saf, dl = mk_rt(tmp_path)
+    teach_acme(tmp_path)
+    src = source()
+    real = saf.load
+
+    def load(w, url, data=None):            # the first document click: Safari asks instead of downloading
+        if "/inv/" in url:
+            sheet = w.add(L.El("AXSheet"))
+            sheet.add(L.El("AXStaticText", AXValue="Do you want to allow downloads on “billing.acme.test”?"))
+            sheet.add(L.El("AXButton", AXTitle="Cancel"))
+            sheet.add(L.El("AXButton", AXTitle="Allow"))
+            return
+        return real(w, url, data)
+    saf.load = load
+    res = live(rt, tmp_path)(src, SEP, ctx_for(src, dl))
+    assert res.status == RUN_NEEDS_YOU and res.checkpoint.kind == "consent" and "Allow" in res.reason
+    assert not list(dl.iterdir())
+
+
 # ===================================== the doc_pack mock portals end to end (fake Safari) ==
 
 class DocPackSafari(L.FakeSafari):
