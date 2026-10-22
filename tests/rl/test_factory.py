@@ -242,8 +242,8 @@ def test_guard_blocked_destructive_counts_as_trap(src):
 
 
 def test_no_oracle_step_needs_a_verbless_control():
-    """MicroAgent: click -> link/button, fill -> textbox/password, select -> combobox/radiogroup."""
-    ok = {"click": {"link", "button"}, "fill": {"textbox", "password"}, "select": {"combobox", "radiogroup"}}
+    """MicroAgent: click -> link/button/checkbox, fill -> textbox/password, select -> combobox/radiogroup."""
+    ok = {"click": {"link", "button", "checkbox"}, "fill": {"textbox", "password"}, "select": {"combobox", "radiogroup"}}
     for t in _SRC.tasks():
         for s in _SRC.oracle(t):
             if s["op"] in ok:

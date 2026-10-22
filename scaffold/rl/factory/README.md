@@ -13,34 +13,39 @@ python -m scaffold.rl.factory check              # replay every oracle over HTTP
 
 ## Counts (v0, `stats`)
 
-**Admission:** 566 tasks generated and all 566 admitted. The oracle admission rate is 100% both in process and over real HTTP. Building the catalog takes about 1.6 s.
+**Admission:** 559 tasks generated, 559 admitted.
+- In process: all 559 oracles reach success.
+- Over HTTP (`check`): 559/559.
+- In real Chromium through the product observation and action path (`python -m scaffold.rl.harness admit --source factory`, guards=product): **559/559**.
+
+Building the catalog takes about 1.6 s.
 
 **Splits and task kinds:**
 
 | Split | Total | act | answer | pause |
 |---|---|---|---|---|
-| train | 464 | 318 | 101 | 45 |
-| ood | 102 (18%) | 79 | 19 | 4 |
+| train | 460 | 314 | 101 | 45 |
+| ood | 99 (18%) | 74 | 21 | 4 |
 
 **Tags:**
 
 | Tag | Tasks | Share |
 |---|---|---|
-| trap | 82 | 14.5% |
-| injection | 81 | 14.3% |
-| checkpoint | 49 | 8.7% |
+| trap | 75 | 13.4% |
+| injection | 81 | 14.5% |
+| checkpoint | 49 | 8.8% |
 | popup | 75 | |
-| aria_poor | 357 | |
+| aria_poor | 352 | |
 
 **ARIA levels:**
 
 | Level | Tasks |
 |---|---|
-| good | 209 |
-| missing_labels | 90 |
-| div_buttons | 86 |
-| duplicated_names | 92 |
-| icon_only | 89 |
+| good | 207 |
+| missing_labels | 87 |
+| div_buttons | 85 |
+| duplicated_names | 90 |
+| icon_only | 90 |
 
 **Families:** 11 in total. The 8 train families:
 
@@ -52,16 +57,26 @@ python -m scaffold.rl.factory check              # replay every oracle over HTTP
 | docs_hub | structure | 82 |
 | assign | flows | 47 |
 | mail | domain | 56 |
-| shop | domain | 42 |
+| shop | domain | 38 |
 | checkpoints | checkpoint | 58 |
 
 The 3 OOD families:
 
 | Family | Group | Tasks |
 |---|---|---|
-| wizard | flows | 35 |
+| wizard | flows | 33 |
 | files_tree | structure | 35 |
-| calendar | domain | 32 |
+| calendar | domain | 31 |
+
+**Product-path rules built into admission** (in `catalog.product_guard`; all learned from the Chromium run):
+- **Destructive words.** A click is refused when the control's name OR its context matches `micro_agent._DESTRUCTIVE_RE`. That is why the "Leave" policy topic became "Time off".
+- **Guarded pages.** Pages that look like a CAPTCHA, an MFA prompt or a password prompt end the run, except in pause tasks. A ticket subject containing "two-factor code" was enough to trigger this, so it was removed.
+- **Credential-looking strings.** Fill values and answers that look like credentials (`web_tools._SECRETISH`, 20+ characters of letters and digits) are masked by the product.
+- **Step cap.** Oracles may use at most 12 steps.
+
+**Retired templates** (count 0):
+- `calendar/delete_event` and `shop/remove_item`: the goal asks for a delete or remove, but the harness never sets `Subtask.allow_destructive`.
+- `wizard/back_edit`: it needs 13 steps.
 
 **Component types:** 68 declared names. Some of them overlap, for example `select`/`combobox`. The shell adds two more for every family: the cookie banner and the newsletter popup.
 
@@ -100,6 +115,7 @@ The 3 OOD families:
   - While a popup is open, the server ignores every other POST (logged as `blocked`) and shows an alert.
 - **Named containers:** `<section role="region" aria-label>` and `<div role="form" aria-label>`. These give `Control.context`. The main content always sits inside a region named after the page title.
 - **Tables:** `<table><caption>`, then `<tr>` rows of `<th>`/`<td>`. The browser inserts `<tbody>`. Row actions always include the row's id or name, for example "Archive INV-1003".
+- **Checkboxes:** these are real `<input type=checkbox>` elements, which the product's `click(n)` toggles. `B.checkbox(native=False)` instead renders a toggle button named "<label> (checked|not checked)" for agents without a checkbox verb.
 - **Field types:**
   - There is no `<input type=number>`, because Chromium exposes it as a spin button. Numeric fields are text inputs with `inputmode=numeric`.
   - Dates are text fields with a "Format: YYYY-MM-DD" hint.
@@ -142,11 +158,12 @@ The 3 OOD families:
 
 ## Known gaps (v0)
 
-- **Not verified in Chromium.** Names, roles and contexts come from my own HTML parser, which approximates Chromium. The harness must confirm them through the real AX tree and `read_web`. The riskiest mappings:
-  - `<select>` becomes popupbutton/combobox;
-  - `role=region` and `role=form` become AXLandmark*;
-  - `<tbody>` rows;
-  - `aria-hidden` icon spans.
+- **Two oracles, two speeds.** The pure-Python `htmldriver` only approximates Chromium's accessible names. It is the fast gate, used in unit tests and at catalog build. The real gate is the harness admission in Chromium, which all 559 tasks pass. Re-run it after any change to a family:
+
+  ```
+  PYTHONPATH=. <harness venv>/bin/python -m scaffold.rl.harness admit --source factory
+  ```
+
 - **Components left out because the action language cannot drive them:**
   - drag-to-reorder (not built);
   - range sliders (rendered as a number field with +/- buttons);
@@ -155,7 +172,7 @@ The 3 OOD families:
   - virtualised or infinite scroll;
   - file pickers.
 
-  Toggles are checkboxes, not `role=switch`.
+  Toggles are checkboxes, not `role=switch`. Tabs are links.
 - **Not varied yet:** timing, spinners and stale-state noise.
 - **Single-app tasks only:** there is no composition across apps.
 - **Not multilingual.**

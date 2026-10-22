@@ -76,7 +76,7 @@ MAX_ORACLE_STEPS = 12                          # MicroAgent.MAX_STEPS: the harne
 def product_guard(view, c=None, pause: bool = False) -> Optional[str]:
     """Why MicroAgent (guards="product") would refuse this page / click, else None.
     Mirrors micro_agent.is_destructive (name OR context) and guard_page (captcha / MFA)."""
-    if _DESTRUCTIVE_RE is not None and c is not None and c.role in ("button", "link") and \
+    if _DESTRUCTIVE_RE is not None and c is not None and c.role in ("button", "link", "checkbox") and \
             (_DESTRUCTIVE_RE.search(c.name) or _DESTRUCTIVE_RE.search(c.context)):
         return f"product guard refuses destructive control {c.name!r} (context {c.context!r})"
     if not pause and _CAPTCHA_RE is not None:

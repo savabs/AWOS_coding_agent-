@@ -273,12 +273,12 @@ class B:
         self.w("</div>")
 
     def checkbox(self, field: str, label: str, checked: bool = False, *,
-                 autosubmit: Optional[str] = None, native: bool = False) -> None:
-        """A boolean field. The product's action language has no verb for a checkbox, so by
-        default it is a TOGGLE BUTTON named "<label> (checked)" / "<label> (not checked)"
-        (ctl ``__toggle:<field>``), carrying its value in a hidden input; ``autosubmit`` then
-        names the family ctl App runs right after the toggle (auto-save). ``native=True``
-        renders a real <input type=checkbox> — only for controls no oracle step touches."""
+                 autosubmit: Optional[str] = None, native: bool = True) -> None:
+        """A boolean field: a real <input type=checkbox> (the product's click(n) toggles it and
+        shows "= checked"/"= unchecked"); ``autosubmit`` submits on change (auto-save).
+        ``native=False`` renders a TOGGLE BUTTON named "<label> (checked)" / "(not checked)"
+        (ctl ``__toggle:<field>``, value in a hidden input, App runs ``autosubmit`` after the
+        toggle) for agents whose action language has no checkbox verb."""
         self.checkboxes.append(field)
         if not native:
             self.hidden(field, "on" if checked else "")
