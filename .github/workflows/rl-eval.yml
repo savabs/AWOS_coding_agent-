@@ -124,11 +124,24 @@ jobs:
           python -m playwright install --with-deps chromium
 
       - name: Restore the GGUF
+        id: gguf
         uses: actions/cache/restore@v4
         with:
           path: ~/models/${{ matrix.file }}
           key: gguf-${{ matrix.file }}-${{ matrix.rev }}
-          fail-on-cache-miss: true
+
+      # The repo cache holds 10 GB and the four GGUFs are ~15.5 GB, so an entry can be
+      # evicted between the model job and this one: download it here then (same pin + sha256).
+      - name: Download the GGUF on a cache miss (pinned revision, sha256-checked)
+        if: steps.gguf.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          SHA: ${{ matrix.sha256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/models
+          curl -fL --retry 5 -o ~/models/"$GGUF_FILE" "https://huggingface.co/$GGUF_REPO/resolve/$GGUF_REV/$GGUF_FILE"
+          echo "$SHA  $HOME/models/$GGUF_FILE" | sha256sum -c -
 
       - name: MiniWoB++ html (pinned commit, cached)
         id: miniwob

@@ -107,4 +107,13 @@ same seeds and tasks, on the LoRA→GGUF model):
 
 ## 5. Amendments
 
-(none yet)
+**A1 (2026-10-22, after run 39806603137 "baseline1", before any gate was evaluated).**
+Evaluation episodes run with `AWOS_MICRO_MAX_SECONDS=3600` instead of the product's 120 s
+per-subtask wall clock; the step cap (`task.max_steps`) is unchanged.
+- **Why:** on 4 vCPU runners a model step took 13 s (2B) to 96 s (9B). In baseline1, "time cap 120s reached"
+  ended 43/95 failed 2B, 79/81 4B and 85/89 9B factory-OOD episodes, so the run measured runner speed, not
+  the policy. On the target hardware (laptop GPU, ~1–3 s/step) 12 steps fit inside 120 s.
+- **Also:** the MiMo jobs in baseline1 failed before running (GGUF evicted from the 10 GB Actions
+  cache); the run job now re-downloads on a cache miss (same pin + sha256). 9B shards go 6 → 10.
+- **Status of baseline1:** kept as a time-capped reference only. The baseline of record is the first
+  complete run under A1.

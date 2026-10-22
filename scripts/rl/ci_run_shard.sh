@@ -26,6 +26,11 @@ mkdir -p "$OUT"
 export AWOS_LOCAL_BASE_URL="${AWOS_LOCAL_BASE_URL:-http://127.0.0.1:8080/v1}"
 export AWOS_LOCAL_MODEL="$MODEL"
 export AWOS_LOCAL_TIMEOUT_S="${AWOS_LOCAL_TIMEOUT_S:-600}"
+# The product's 120 s per-subtask wall clock is sized for a laptop GPU (~1-3 s/step); a
+# CPU runner takes 13-96 s per step, so under it baseline1 measured runner speed, not
+# skill (85/89 9B factory failures were "time cap 120s reached"). Evaluation is bounded
+# by the step cap (task.max_steps) instead; 3600 is the product's ceiling.
+export AWOS_MICRO_MAX_SECONDS="${AWOS_MICRO_MAX_SECONDS:-3600}"
 export PYTHONPATH="${PYTHONPATH:-$PWD}"
 
 HELP="$(python -m scaffold.rl.harness run --help 2>&1 || true)"
