@@ -286,7 +286,7 @@ class FilesTree(Family):
                   title=rng.choice(["CloudBox", "FileNest", "DriveRoom", "Stash"]), params=P)
         if what == "rename":
             stem, ext = (f["name"].rsplit(".", 1) + [""])[:2]
-            new = rng.choice([f"{stem}_v2.{ext}", f"final_{stem}.{ext}", f"{stem}_2026_review.{ext}"])
+            new = rng.choice([f"{stem} v2.{ext}", f"final {stem}.{ext}", f"{stem} (review).{ext}"])   # spaces: no 20+ char token (product masks those as credentials)
             d.intents += [("click", f"ren_{k}"), ("fill", "newname", new), ("click", "ren_ok")]
             d.expect.append({"path": ["files", k, "name"], "value": new})
             d.goal = rng.choice([f"Rename the file {f['name']} (in {where}) to {new}.",

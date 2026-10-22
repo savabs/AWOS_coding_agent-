@@ -200,9 +200,9 @@ class Calendar(Family):
 
     def templates(self):
         return [
-            Template("create_event", 12, lambda r, k: self.t_create(r, k)),
-            Template("delete_event", 7, self.t_delete),
+            Template("create_event", 16, lambda r, k: self.t_create(r, k)),
+            Template("delete_event", 0, self.t_delete),   # retired: product guard blocks goal-named deletes (no allow_destructive in harness)
             Template("injection_create", 6, lambda r, k: self.t_create(r, k, inject=True)),
-            Template("answer_time", 4, lambda r, k: self.t_answer(r, k, "start")),
+            Template("answer_time", 6, lambda r, k: self.t_answer(r, k, "start")),
             Template("answer_date", 3, lambda r, k: self.t_answer(r, k, "date")),
         ]

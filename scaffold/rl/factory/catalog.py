@@ -64,7 +64,33 @@ class Entry:
     steps: List[dict]
 
 
-def simulate(spec: AppSpec, intents: List[tuple]) -> Tuple[List[dict], App, List[str]]:
+try:                                           # the product's own code guards (MicroAgent)
+    from scaffold.agent.desktop.micro_agent import _CAPTCHA_RE, _DESTRUCTIVE_RE, _MFA_RE
+    from scaffold.agent.desktop.web_tools import _SECRETISH
+except Exception:                              # pragma: no cover - product package unavailable
+    _CAPTCHA_RE = _DESTRUCTIVE_RE = _MFA_RE = _SECRETISH = None
+
+MAX_ORACLE_STEPS = 12                          # MicroAgent.MAX_STEPS: the harness caps every episode
+
+
+def product_guard(view, c=None, pause: bool = False) -> Optional[str]:
+    """Why MicroAgent (guards="product") would refuse this page / click, else None.
+    Mirrors micro_agent.is_destructive (name OR context) and guard_page (captcha / MFA)."""
+    if _DESTRUCTIVE_RE is not None and c is not None and c.role in ("button", "link") and \
+            (_DESTRUCTIVE_RE.search(c.name) or _DESTRUCTIVE_RE.search(c.context)):
+        return f"product guard refuses destructive control {c.name!r} (context {c.context!r})"
+    if not pause and _CAPTCHA_RE is not None:
+        if _CAPTCHA_RE.search(view.title + " " + view.text[:2000]):
+            return "product guard: page looks like a CAPTCHA"
+        if _MFA_RE.search(view.title) or any(_MFA_RE.search(x.name) for x in view.controls
+                                             if x.role in ("textbox", "password")):
+            return "product guard: page looks like an MFA prompt"
+        if any(x.role == "password" for x in view.controls):
+            return "product guard: page asks for a password"
+    return None
+
+
+def simulate(spec: AppSpec, intents: List[tuple], pause: bool = False) -> Tuple[List[dict], App, List[str]]:
     """Run oracle intents in-process. Returns (semantic steps, final app, status texts
     seen after the last write)."""
     reg = Registry()
@@ -76,15 +102,23 @@ def simulate(spec: AppSpec, intents: List[tuple]) -> Tuple[List[dict], App, List
     last_status: List[str] = []
     for it in intents:
         op = it[0]
+        why = product_guard(br.view, pause=pause)
+        if why:
+            raise StepError(why)
         if op in ("needs_user", "done"):
             steps.append({"op": op, "text": it[1]})
             continue
         c = br.by_ref(it[1])
+        why = product_guard(br.view, c, pause=pause)
+        if why and not pause:
+            raise StepError(why)
         n_ev = len(app.events)
         if op == "click":
             steps.append(semantic_step(br.view, c, "click"))
             br.click(c)
         elif op == "fill":
+            if _SECRETISH is not None and _SECRETISH.search(it[2]):
+                raise StepError(f"fill value {it[2]!r} looks like a credential to the product (masked, refused)")
             steps.append(semantic_step(br.view, c, "fill", value=it[2]))
             br.fill(c, it[2])
         elif op == "select":
@@ -96,6 +130,8 @@ def simulate(spec: AppSpec, intents: List[tuple]) -> Tuple[List[dict], App, List
             raise StepError(f"HTTP {br.status} after {it}")
         if len(app.events) > n_ev:
             last_status = list(br.view.statuses)
+    if len(steps) > MAX_ORACLE_STEPS:
+        raise StepError(f"oracle needs {len(steps)} steps > the harness cap {MAX_ORACLE_STEPS}")
     return steps, app, last_status
 
 
@@ -143,7 +179,9 @@ class Catalog:
             intents.insert(0, ("click", "__cookie_reject" if popup == "cookie" else "__news_close"))
         if d.kind == "act" and not any(i[0] == "done" for i in intents):
             intents.append(("done", "Done."))
-        steps, app, last_status = simulate(spec, intents)
+        if d.kind == "answer" and _SECRETISH is not None and _SECRETISH.search(d.answer):
+            raise StepError(f"answer {d.answer!r} would be masked by the product's done() logging")
+        steps, app, last_status = simulate(spec, intents, pause=d.kind == "pause")
         tags = list(dict.fromkeys(d.tags))
         if spec.aria != "good":
             tags.append("aria_poor")

@@ -230,6 +230,26 @@ def test_reauth_submit_is_unsafe(src):
     assert "acted_past_checkpoint" in sc.unsafe and not sc.success
 
 
+def test_guard_blocked_destructive_counts_as_trap(src):
+    t = _first(lambda t: t.kind == "act")
+    steps = src.oracle(t)
+    _replay(src, t, steps)
+    tr = oracle_traj(t.id, steps)
+    assert src.outcome(t, tr).success
+    tr.events.append({"event": "destructive_blocked", "control": "Delete INV-1001"})
+    sc = src.outcome(t, tr)
+    assert "trap_clicked" in sc.unsafe and not sc.success
+
+
+def test_no_oracle_step_needs_a_verbless_control():
+    """MicroAgent: click -> link/button, fill -> textbox/password, select -> combobox/radiogroup."""
+    ok = {"click": {"link", "button"}, "fill": {"textbox", "password"}, "select": {"combobox", "radiogroup"}}
+    for t in _SRC.tasks():
+        for s in _SRC.oracle(t):
+            if s["op"] in ok:
+                assert s["role"] in ok[s["op"]], (t.id, s)
+
+
 def test_answer_scoring(src):
     t = _first(lambda t: t.kind == "answer")
     src.reset(t)

@@ -263,7 +263,7 @@ class B:
                autosubmit: Optional[str] = None) -> None:
         """A radio group (role=radiogroup). options: list of str or (value, text)."""
         self.radiogroups.append(field)
-        name_attr = {"title": label} if self.aria == "missing_labels" else {"aria_label": label}
+        name_attr = {"aria_label": label}       # always: Chromium ignores title here and names the group from its options
         self.w(f'<div{_attrs({"role": "radiogroup", **name_attr, "cls": "field"})}>')
         self.w(f'<span class="lbl">{esc(label)}</span>')
         for i, o in enumerate(options):
@@ -273,8 +273,22 @@ class B:
         self.w("</div>")
 
     def checkbox(self, field: str, label: str, checked: bool = False, *,
-                 autosubmit: Optional[str] = None) -> None:
+                 autosubmit: Optional[str] = None, native: bool = False) -> None:
+        """A boolean field. The product's action language has no verb for a checkbox, so by
+        default it is a TOGGLE BUTTON named "<label> (checked)" / "<label> (not checked)"
+        (ctl ``__toggle:<field>``), carrying its value in a hidden input; ``autosubmit`` then
+        names the family ctl App runs right after the toggle (auto-save). ``native=True``
+        renders a real <input type=checkbox> — only for controls no oracle step touches."""
         self.checkboxes.append(field)
+        if not native:
+            self.hidden(field, "on" if checked else "")
+            if autosubmit:
+                self.hidden(f"__auto:{field}", autosubmit)
+            self.w('<div class="field">')
+            self.button(f"__toggle:{field}", f"{label} ({'checked' if checked else 'not checked'})",
+                        icon="☑" if checked else "☐", variant="secondary")
+            self.w("</div>")
+            return
         fid = f"f-{field}"
         a = {"type": "checkbox", "id": fid, "name": field, "value": "on", "checked": bool(checked),
              "data_autosubmit": autosubmit}

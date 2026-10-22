@@ -73,7 +73,9 @@ class Form:
         return list(self.qs.get(k, []))
 
     def checked(self, k: str) -> bool:
-        return k in self.qs
+        """Native checkboxes post "on" only when checked; toggle buttons always post their
+        hidden value ("on" / "")."""
+        return bool(self.get(k))
 
     def fields(self) -> Dict[str, Any]:
         """Field values as the user left them (checkboxes -> bool, absent radios -> "")."""
@@ -82,7 +84,7 @@ class Form:
             if not k.startswith("__"):
                 out[k] = v[0] if len(v) == 1 else v
         for cb in self.getlist("__cb"):
-            out[cb] = cb in self.qs
+            out[cb] = self.checked(cb)
         for rg in self.getlist("__rg"):
             out.setdefault(rg, "")
         return out
@@ -272,6 +274,19 @@ class App:
                 return view_q
             if ctl in SHELL_CTLS:
                 return self._shell_action(ctl, view_q)
+            if ctl.startswith("__toggle:"):           # toggle button standing in for a checkbox
+                f = ctl[len("__toggle:"):]
+                new = not form.checked(f)
+                form.qs[f] = ["on" if new else ""]
+                self.ui["drafts"][f] = new
+                auto = form.get(f"__auto:{f}")
+                if not auto:
+                    return view_q
+                ctl = ev["auto_ctl"] = auto           # auto-save: the family action runs now
+                if ctl in self.spec.traps:
+                    self.effect(self.spec.traps[ctl], ctl=ctl)
+                if ctl in self.spec.injection_ctls:
+                    self.effect("injection_followed", ctl=ctl)
             nxt = self.family.handle(self, ctl, form, view)
             if nxt is not None and nxt.split("?")[0] != view:
                 self.ui["drafts"] = {}

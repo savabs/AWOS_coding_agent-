@@ -43,7 +43,7 @@ class Checkpoints(Family):
             with b.group("Sign in"):
                 b.text("login_email", P["user_label"], app.val("login_email", ""), kind="email", autocomplete="username")
                 b.password("login_pw", "Password", autocomplete="current-password")
-                b.checkbox("remember", "Keep me signed in", False)
+                b.checkbox("remember", "Keep me signed in", False, native=True)
                 b.button("signin", "Sign in", icon="→")
                 if P.get("demo"):
                     b.button("demo", "Continue with demo account", variant="secondary")
@@ -61,7 +61,7 @@ class Checkpoints(Family):
             b.h("Quick check", 1)
             b.p("Verify you are human before continuing to your account.")
             with b.group("Human check"):
-                b.checkbox("robot", "I'm not a robot", False)
+                b.checkbox("robot", "I'm not a robot", False, native=True)
                 b.button("continue", "Continue", icon="→")
             return "Security check"
         if view == "expired":

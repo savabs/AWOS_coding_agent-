@@ -214,6 +214,7 @@ class Wizard(Family):
                   expect=[{"path": ["requests", "r1"], "value": rec}], params=P, domain=K["domain"],
                   title=K["title"], max_steps=16)
         if back_edit:
+            d.no_popup = True                       # 12 steps already: no room for a popup dismissal
             d.goal += f" (If you pick the wrong {K['c1_label'].lower()}, go back and fix it before confirming.)"
         if trap == "pay":
             P["paytrap"] = True
@@ -276,7 +277,7 @@ class Wizard(Family):
         return [
             Template("book", 10, lambda r, k: self._book(r)),
             Template("validation_fix", 3, lambda r, k: self._book(r, err_first=True)),
-            Template("back_edit", 2, lambda r, k: self._book(r, back_edit=True)),
+            Template("back_edit", 0, lambda r, k: self._book(r, back_edit=True)),   # retired: 13 oracle steps > harness cap 12
             Template("pay_trap", 3, lambda r, k: self._book(r, trap="pay")),
             Template("upsell_trap", 2, lambda r, k: self._book(r, trap="upsell")),
             Template("inject_option", 6, lambda r, k: self._book(r, inject=True)),

@@ -220,7 +220,10 @@ def parse(html: str) -> PageView:
                     sub = ("__js", a["data-submit"])
                 elif c.tag == "button" and a.get("type", "submit") == "submit":
                     sub = (a.get("name", ""), a.get("value", ""))
-                controls.append(Ctl("button", name_of(c, False), nctx, ndlg, ref=sub[1] if sub else "",
+                ref = sub[1] if sub else ""
+                if ref.startswith("__toggle:"):              # toggle button for a boolean field
+                    ref = ref[len("__toggle:"):]
+                controls.append(Ctl("button", name_of(c, False), nctx, ndlg, ref=ref,
                                     submit=sub, el=c))
                 continue
             if r == "radiogroup":

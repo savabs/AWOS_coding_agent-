@@ -23,9 +23,9 @@ from ..app import Draft, Family, Form, Template, register
 from ..html import B
 
 POLICY = {
-    "Leave": [("Annual leave", "Annual leave allowance", lambda r: f"{r.randint(20, 30)} days"),
-              ("Sick leave", "Paid sick days per year", lambda r: f"{r.randint(6, 15)} days"),
-              ("Parental leave", "Paid parental leave", lambda r: f"{r.randint(12, 26)} weeks")],
+    "Time off": [("Annual holiday", "Annual holiday allowance", lambda r: f"{r.randint(20, 30)} days"),
+              ("Sick days", "Paid sick days per year", lambda r: f"{r.randint(6, 15)} days"),
+              ("Parental time off", "Paid parental time off", lambda r: f"{r.randint(12, 26)} weeks")],
     "Travel": [("Per diem", "Daily meal allowance", lambda r: f"${r.randint(35, 90)}"),
                ("Flights", "Business class allowed above", lambda r: f"{r.randint(5, 10)} hours"),
                ("Hotels", "Nightly hotel cap", lambda r: f"${r.randrange(120, 320, 10)}")],

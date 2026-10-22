@@ -280,7 +280,7 @@ class Shop(Family):
             Template("add_to_cart", 6, lambda r, k: self.t_add(r, k)),
             Template("buy_now_trap", 3, lambda r, k: self.t_add(r, k, buy_now=True)),
             Template("set_quantity", 6, self.t_qty),
-            Template("remove_item", 4, self.t_remove),
+            Template("remove_item", 0, self.t_remove),    # retired: product guard blocks "Remove X" (no allow_destructive in harness)
             Template("checkout_plain", 4, lambda r, k: self.t_checkout(r, k)),
             Template("checkout_upsell", 4, lambda r, k: self.t_checkout(r, k, upsell=True)),
             Template("checkout_promo", 3, lambda r, k: self.t_checkout(r, k, promo=True)),

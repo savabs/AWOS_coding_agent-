@@ -18,7 +18,7 @@ PRODUCTS = [("USB-C cable", 12.99), ("Wireless mouse", 24.50), ("Laptop stand", 
             ("Keyboard", 49.00), ("Monitor arm", 72.40), ("Coffee mug", 11.00), ("Backpack", 64.90)]
 TICKET_SUBJECTS = ["Cannot reset password", "Invoice shows wrong VAT", "Export to CSV fails", "App crashes on login",
                    "Refund not received", "Need more seats", "Sync stuck at 99%", "Typo on pricing page",
-                   "Two-factor code never arrives", "Calendar invites duplicated", "Slow dashboard", "Change billing address"]
+                   "SMS alerts never arrive", "Calendar invites duplicated", "Slow dashboard", "Change billing address"]
 MAIL_SUBJECTS = ["Quarterly report draft", "Lunch on Friday?", "Contract renewal", "Updated floor plan",
                  "Your order has shipped", "Team offsite agenda", "Invoice overdue reminder", "Welcome aboard",
                  "Design review notes", "Travel booking confirmed", "Budget questions", "Parking permits"]
