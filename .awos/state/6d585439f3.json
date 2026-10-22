@@ -2,7 +2,7 @@
   "goal": "create docs/planner_owned.md about uncensored agents",
   "goal_hash": "6d585439f3",
   "started_at": "2026-06-14T13:44:44",
-  "last_updated": "2026-06-21T12:31:35",
+  "last_updated": "2026-10-14T15:02:53",
   "completed_task_ids": [
     1
   ],
@@ -19,7 +19,17 @@
     "orch_2946ea3b",
     "orch_bcdae78d",
     "orch_220479a2",
-    "orch_548a496b"
+    "orch_548a496b",
+    "orch_31022895",
+    "orch_bf826345",
+    "orch_8e22bd95",
+    "orch_2b516a71",
+    "orch_7543614f",
+    "orch_78a30c68",
+    "orch_e758b4a8",
+    "orch_da2a643d",
+    "orch_b2952671",
+    "orch_1a2fcd9a"
   ],
   "status": "failed"
 }

@@ -1,9 +1,16 @@
 # AWOS Skills: new_feature
 
-Auto-generated from successful task outcomes. Last updated: 2026-06-25.
+Auto-generated from successful task outcomes. Last updated: 2026-10-14.
 Do not edit manually — this file is overwritten on each new success.
 
-## Summary (121 pattern(s))
+## Summary (123 pattern(s))
+
+### Pattern: _try_cheap_fallback, explaining, alternate, providers
+- **Model**: DeepSeek V4 Flash
+- **Strategy**: step_by_step
+- **Win rate**: 100% (81/81)
+- **Avg attempts**: 3.0
+- **Last seen**: 2026-10-11
 
 ### Pattern: complete, function, computes, median
 - **Model**: DeepSeek V4 Flash
@@ -137,10 +144,3 @@ Do not edit manually — this file is overwritten on each new success.
 - **Win rate**: 100% (12/12)
 - **Avg attempts**: 3.0
 - **Last seen**: 2026-05-25
-
-### Pattern: docstring, detailed, function, prepare
-- **Model**: DeepSeek V4 Flash
-- **Strategy**: direct
-- **Win rate**: 100% (11/11)
-- **Avg attempts**: 3.0
-- **Last seen**: 2026-05-26

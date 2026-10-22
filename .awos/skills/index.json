@@ -2563,10 +2563,10 @@
     ],
     "model_used": "DeepSeek V4 Flash",
     "strategy_used": "step_by_step",
-    "attempts": 27,
-    "success_count": 9,
-    "total_count": 9,
-    "last_seen": "2026-06-21"
+    "attempts": 243,
+    "success_count": 81,
+    "total_count": 81,
+    "last_seen": "2026-10-11"
   },
   {
     "task_type": "bug_fix",
@@ -3917,5 +3917,37 @@
     "success_count": 2,
     "total_count": 2,
     "last_seen": "2026-06-26"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "_try_cheap_fallback",
+      "immediately",
+      "explaining",
+      "providers",
+      "docstring"
+    ],
+    "model_used": "DeepSeek V4 Pro",
+    "strategy_used": "step_by_step",
+    "attempts": 6,
+    "success_count": 2,
+    "total_count": 2,
+    "last_seen": "2026-10-14"
+  },
+  {
+    "task_type": "new_feature",
+    "keywords": [
+      "_try_cheap_fallback",
+      "immediately",
+      "explaining",
+      "providers",
+      "docstring"
+    ],
+    "model_used": "DeepSeek V4 Pro",
+    "strategy_used": "direct",
+    "attempts": 3,
+    "success_count": 1,
+    "total_count": 1,
+    "last_seen": "2026-10-14"
   }
 ]

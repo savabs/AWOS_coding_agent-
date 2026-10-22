@@ -69,11 +69,6 @@
     "status": "in_progress",
     "updated_at": "2026-05-24T09:44:33Z"
   },
-  "g_295ec392abe4": {
-    "description": "Add a docstring to the _cheap_call method in scaffold/agent/orchestrator.py explaining it retries up to 3 times with exponential backoff",
-    "status": "completed",
-    "updated_at": "2026-06-16T08:19:15Z"
-  },
   "g_25a8097a766f": {
     "description": "Add a comment above the Orchestrator class in scaffold/agent/orchestrator.py saying AWOS v2",
     "status": "in_progress",
@@ -89,11 +84,6 @@
     "status": "in_progress",
     "updated_at": "2026-05-26T20:14:57Z"
   },
-  "g_688b4187585c": {
-    "description": "Add a one-line docstring to the _extract_context method in worker.py",
-    "status": "completed",
-    "updated_at": "2026-05-27T08:22:50Z"
-  },
   "g_edb451c624a9": {
     "description": "Add docstrings to _check_syntax and _check_contract_compliance methods in scaffold/agent/verifier.py",
     "status": "in_progress",
@@ -104,245 +94,10 @@
     "status": "in_progress",
     "updated_at": "2026-05-27T08:26:23Z"
   },
-  "g_8608910e6b80": {
-    "description": "Add a concise module-level docstring to scaffold/agent/usage_record.py if one is missing or too short",
-    "status": "completed",
-    "updated_at": "2026-06-12T07:42:32Z"
-  },
-  "g_1036f35268f7": {
-    "description": "Add a one-line docstring to is_cheap_only() in escalation_engine.py explaining it returns True when premium models are halted",
-    "status": "completed",
-    "updated_at": "2026-06-16T08:16:43Z"
-  },
-  "g_427b72e56d48": {
-    "description": "In file scaffold/agent/budget_ledger.py add a one-line comment above get_status explaining it returns month-to-date budget status",
-    "status": "completed",
-    "updated_at": "2026-06-12T07:43:42Z"
-  },
-  "g_910f571afe02": {
-    "description": "In scaffold/agent/worker.py add a short comment above _try_cheap_fallback explaining it tries alternate cheap providers",
-    "status": "completed",
-    "updated_at": "2026-06-12T08:13:48Z"
-  },
-  "g_be35d615ccc4": {
-    "description": "In scaffold/agent/worker.py add a short # comment above _try_cheap_fallback explaining it tries alternate cheap providers",
-    "status": "completed",
-    "updated_at": "2026-06-12T08:35:35Z"
-  },
-  "g_26e28a14f709": {
-    "description": "In scaffold/agent/worker.py add a short # comment above _try_cheap_fallback explaining it tries alternate cheap providers",
-    "status": "completed",
-    "updated_at": "2026-06-12T08:36:53Z"
-  },
-  "g_0e7e8e16b423": {
-    "description": "In scaffold/agent/worker.py add a short # comment above _try_cheap_fallback explaining it tries alternate cheap providers",
-    "status": "completed",
-    "updated_at": "2026-06-12T08:38:20Z"
-  },
-  "g_420cd557b631": {
-    "description": "In scaffold/agent/worker.py add a short # comment above _try_cheap_fallback explaining it tries alternate cheap providers",
-    "status": "completed",
-    "updated_at": "2026-06-12T08:38:55Z"
-  },
-  "g_36690e37b7d1": {
-    "description": "In scaffold/agent/worker.py add a short # comment above _try_cheap_fallback explaining it tries alternate cheap providers",
-    "status": "completed",
-    "updated_at": "2026-06-12T08:39:43Z"
-  },
-  "g_82b32c51eca3": {
-    "description": "explain this repo to me",
-    "status": "completed",
-    "updated_at": "2026-06-12T09:01:18Z"
-  },
-  "g_f47827fd407f": {
-    "description": "you can create e .md file regarding making a uncensored agent",
-    "status": "completed",
-    "updated_at": "2026-06-12T10:45:22Z"
-  },
-  "g_9793b516b3cb": {
-    "description": "can you write me this rather than just giving me back in chat",
-    "status": "completed",
-    "updated_at": "2026-06-12T22:05:00Z"
-  },
   "g_dab9da1d03ed": {
     "description": "create me  .MD FILE ,write how to make hardware fast",
     "status": "in_progress",
     "updated_at": "2026-06-13T21:12:29Z"
-  },
-  "g_3d36e14ea2ac": {
-    "description": "create docs/http_only_test.md about automated checks",
-    "status": "completed",
-    "updated_at": "2026-06-14T08:40:47Z"
-  },
-  "g_d175aa91cf15": {
-    "description": "create docs/e2e_uncensored_agent_guide.md about uncensored local agents",
-    "status": "completed",
-    "updated_at": "2026-06-14T08:40:44Z"
-  },
-  "g_0005846e882a": {
-    "description": "create docs/e2e_uncensored_agent_guide.md about uncensored local agents",
-    "status": "completed",
-    "updated_at": "2026-06-14T08:40:46Z"
-  },
-  "g_2e3a4c92d5e4": {
-    "description": "create docs/http_only_test.md about automated checks",
-    "status": "completed",
-    "updated_at": "2026-06-14T08:40:48Z"
-  },
-  "g_27df7475bcd5": {
-    "description": "create docs/e2e_uncensored_agent_guide.md about uncensored local agents",
-    "status": "completed",
-    "updated_at": "2026-06-14T08:41:03Z"
-  },
-  "g_4fd74f01dbbe": {
-    "description": "create docs/e2e_via_http_guide.md about deliverable routing",
-    "status": "completed",
-    "updated_at": "2026-06-14T08:41:04Z"
-  },
-  "g_bfb1012eaa79": {
-    "description": "create docs/example_uncensored_agent_guide.md about building uncensored local LLM agents with Ollama and open weights",
-    "status": "completed",
-    "updated_at": "2026-06-14T12:18:57Z"
-  },
-  "g_cd654d97e71b": {
-    "description": "create docs/example_uncensored_agent_guide.md about building uncensored local LLM agents with Ollama and open weights",
-    "status": "completed",
-    "updated_at": "2026-06-14T14:55:46Z"
-  },
-  "g_e52af3145134": {
-    "description": "create a .md file reagrding how to code a advance self learning agent",
-    "status": "completed",
-    "updated_at": "2026-06-14T12:23:07Z"
-  },
-  "g_6db9053d18b5": {
-    "description": "create docs/e2e_uncensored_agent_guide.md about uncensored local agents",
-    "status": "completed",
-    "updated_at": "2026-06-14T14:55:48Z"
-  },
-  "g_e6d028141b52": {
-    "description": "create docs/e2e_via_http_guide.md about deliverable routing",
-    "status": "completed",
-    "updated_at": "2026-06-14T14:55:48Z"
-  },
-  "g_a2b2811d6080": {
-    "description": "create docs/http_only_test.md about automated checks",
-    "status": "completed",
-    "updated_at": "2026-06-14T14:55:50Z"
-  },
-  "g_7e72f8e02ed5": {
-    "description": "create docs/e2e_uncensored_agent_guide.md about uncensored local agents",
-    "status": "completed",
-    "updated_at": "2026-06-15T12:52:02Z"
-  },
-  "g_ba35d13120cc": {
-    "description": "create docs/e2e_via_http_guide.md about deliverable routing",
-    "status": "completed",
-    "updated_at": "2026-06-15T12:52:04Z"
-  },
-  "g_a18754a6bad5": {
-    "description": "create docs/http_only_test.md about automated checks",
-    "status": "completed",
-    "updated_at": "2026-06-15T12:52:05Z"
-  },
-  "g_599624993953": {
-    "description": "lets create a file that gives us intsruction on how to code a GPU kernel",
-    "status": "completed",
-    "updated_at": "2026-06-15T14:18:58Z"
-  },
-  "g_d67e0cde840c": {
-    "description": "In scaffold/agent/run_diagnostics.py add a short # comment above print_visual_diff explaining it shows the applied patch in the terminal",
-    "status": "completed",
-    "updated_at": "2026-06-16T08:17:00Z"
-  },
-  "g_f223410a310c": {
-    "description": "In scaffold/agent/verifier.py add a one-line docstring to _check_edit_fidelity explaining it rejects edits that miss comment-above or symbol-placement goals",
-    "status": "completed",
-    "updated_at": "2026-06-16T08:17:22Z"
-  },
-  "g_bf3f4cc6f89a": {
-    "description": "In scaffold/agent/usage_record.py add a short # comment above merge_result_usage explaining it merges worker API usage into a task accumulator",
-    "status": "completed",
-    "updated_at": "2026-06-16T08:18:08Z"
-  },
-  "g_bdbc5f755277": {
-    "description": "In scaffold/agent/run_diagnostics.py add a one-line docstring to TaskDiagnostic.record explaining it appends a stage entry to the diagnostic trace",
-    "status": "completed",
-    "updated_at": "2026-06-16T08:18:26Z"
-  },
-  "g_36cebbf16280": {
-    "description": "In scaffold/agent/cheap_planner.py add a short # comment above _normalize_plan_paths explaining it fixes bare filenames to scaffold/agent paths",
-    "status": "completed",
-    "updated_at": "2026-06-16T08:18:43Z"
-  },
-  "g_a2249edfa787": {
-    "description": "In scaffold/agent/integration_reviewer.py add a one-line docstring to _is_cheap_only explaining it reads AWOS_CHEAP_ONLY from the environment",
-    "status": "completed",
-    "updated_at": "2026-06-16T08:18:58Z"
-  },
-  "g_e8c49fe23301": {
-    "description": "In scaffold/agent/pei_report.py add a short module-level docstring explaining PEI uses tokens as the primary cost measure",
-    "status": "completed",
-    "updated_at": "2026-06-16T08:19:34Z"
-  },
-  "g_138086a76cc1": {
-    "description": "In scaffold/agent/prompt_evolver.py add a one-line docstring to should_evolve explaining it triggers prompt evolution every N sessions",
-    "status": "completed",
-    "updated_at": "2026-06-16T08:19:48Z"
-  },
-  "g_3bdb37d9b06a": {
-    "description": "In scaffold/agent/stability_gate.py add a one-line docstring to should_check explaining it gates scaffold evolution checks by session count",
-    "status": "completed",
-    "updated_at": "2026-06-16T08:20:05Z"
-  },
-  "g_1f93cbb6cf19": {
-    "description": "In scaffold/agent/escalation_engine.py add a short # comment above max_allowed_level explaining it caps the model ladder in cheap-only mode",
-    "status": "completed",
-    "updated_at": "2026-06-16T08:20:22Z"
-  },
-  "g_097846a24e65": {
-    "description": "In scaffold/agent/prompt_evolver.py add a one-line docstring to should_evolve explaining it triggers prompt evolution every N sessions",
-    "status": "completed",
-    "updated_at": "2026-06-17T10:53:31Z"
-  },
-  "g_a52c0da8a52c": {
-    "description": "In scaffold/agent/stability_gate.py add a one-line docstring to should_check explaining it gates scaffold evolution checks by session count",
-    "status": "completed",
-    "updated_at": "2026-06-17T10:53:42Z"
-  },
-  "g_6a256b8dd998": {
-    "description": "In scaffold/agent/escalation_engine.py add a short # comment above max_allowed_level explaining it caps the model ladder in cheap-only mode",
-    "status": "completed",
-    "updated_at": "2026-06-17T10:53:53Z"
-  },
-  "g_c63699026a84": {
-    "description": "In scaffold/agent/runtime_session.py add a one-line docstring to RuntimeSessionStore.list_sessions explaining it returns durable sessions sorted by updated time",
-    "status": "completed",
-    "updated_at": "2026-06-18T04:16:36Z"
-  },
-  "g_70a3a72e3573": {
-    "description": "In scaffold/agent/learning_policy.py add a one-line docstring to apply_kernel_defaults explaining it enables runtime sessions, learning, and MCTS unless opted out",
-    "status": "completed",
-    "updated_at": "2026-06-18T04:16:51Z"
-  },
-  "g_fa68f7e5336b": {
-    "description": "In scaffold/agent/mcts_policy.py add a one-line docstring to mcts_enabled explaining it controls whether MCTS fallback runs after worker failure",
-    "status": "completed",
-    "updated_at": "2026-06-18T04:17:05Z"
-  },
-  "g_d43f632f9fef": {
-    "description": "In scaffold/agent/worktree.py add a one-line docstring to register_worktree explaining it reattaches a persisted worktree path for session resume",
-    "status": "completed",
-    "updated_at": "2026-06-18T04:17:20Z"
-  },
-  "g_7f7a8ffd82f4": {
-    "description": "In scaffold/agent/token_tracker.py add a one-line docstring to check_guard explaining it blocks requests when the monthly budget cap is exceeded",
-    "status": "completed",
-    "updated_at": "2026-06-18T04:17:33Z"
-  },
-  "g_b189def7d24f": {
-    "description": "In scaffold/agent/virtual_execution_runtime.py add a one-line docstring to worktree_enabled explaining it returns True when AWOS_USE_WORKTREE is enabled",
-    "status": "completed",
-    "updated_at": "2026-06-19T13:16:37Z"
   },
   "g_14e700a93d00": {
     "description": "Risky Stage 1 gauntlet — three tasks, one file each: (1) In awos.py add function _sandbox_summary(session) returning a one-line string with feature_id, worktree_path, branch, and whether the worktree directory exists when session.sandbox.enabled else empty string. (2) In cmd_sessions_show call _sandbox_summary and print Sandbox line when non-empty. (3) Add tests/test_awos_sessions_sandbox.py with two pytest tests for enabled and disabled sandbox on a mock RuntimeSession.",
@@ -353,16 +108,6 @@
     "description": "Gauntlet G2 pause-mid-plan proof",
     "status": "in_progress",
     "updated_at": "2026-06-18T08:31:03Z"
-  },
-  "g_123112247ec3": {
-    "description": "Fix the bug in tests/fixtures/gauntlet_broken_module.py: broken_add must return a+b not a-b. Ensure tests/fixtures/test_gauntlet_broken_module.py passes.",
-    "status": "completed",
-    "updated_at": "2026-06-18T08:32:15Z"
-  },
-  "g_0698716db92b": {
-    "description": "G3 failure hunt — force MCTS after worker fail",
-    "status": "completed",
-    "updated_at": "2026-06-18T08:52:54Z"
   },
   "g_8efdfd3394a4": {
     "description": "g3",
@@ -378,41 +123,6 @@
     "description": "g3",
     "status": "in_progress",
     "updated_at": "2026-06-18T08:48:45Z"
-  },
-  "g_b6ee4f74fa35": {
-    "description": "Gauntlet G6 SIGINT: add a one-line comment to each of tests/fixtures/gauntlet_marker_a.py, tests/fixtures/gauntlet_marker_b.py, and tests/fixtures/gauntlet_marker_c.py",
-    "status": "completed",
-    "updated_at": "2026-06-18T16:06:13Z"
-  },
-  "g_74c5e59e5392": {
-    "description": "Stage 1 real workload mission (worktree, multi-step): (1) scaffold/agent/mcts_policy.py — expand module docstring with when MCTS runs (2) scripts/install-awos-cli.sh — add echo line showing awos version path (3) tests/test_mcts_trace_store.py — add test that empty store count is 0 (already exists, ensure green) (4) awos.py cmd_sessions_show — print Sandbox line when worktree enabled (5) docs/missions/README.md — one paragraph mission playbook",
-    "status": "completed",
-    "updated_at": "2026-06-19T08:42:45Z"
-  },
-  "g_bd022d12fa82": {
-    "description": "Stage 1 real workload mission (worktree, multi-step): (1) scaffold/agent/mcts_policy.py — expand module docstring with when MCTS runs (2) scripts/install-awos-cli.sh — add echo line showing awos version path (3) tests/test_mcts_trace_store.py — add test that empty store count is 0 (already exists, ensure green) (4) awos.py cmd_sessions_show — print Sandbox line when worktree enabled (5) docs/missions/README.md — one paragraph mission playbook",
-    "status": "completed",
-    "updated_at": "2026-06-19T09:19:33Z"
-  },
-  "g_8a0c5cedc1c0": {
-    "description": "In scaffold/agent/virtual_execution_runtime.py add a one-line docstring to auto_merge_enabled explaining it reads AWOS_WORKTREE_AUTO_MERGE",
-    "status": "completed",
-    "updated_at": "2026-06-20T07:31:39Z"
-  },
-  "g_43653fba0b61": {
-    "description": "Gauntlet G6 SIGINT: add a one-line comment to each of tests/fixtures/gauntlet_marker_a.py, tests/fixtures/gauntlet_marker_b.py, and tests/fixtures/gauntlet_marker_c.py",
-    "status": "completed",
-    "updated_at": "2026-06-20T08:27:20Z"
-  },
-  "g_d1fb8f26a5ba": {
-    "description": "G3 failure hunt — force MCTS after worker fail",
-    "status": "completed",
-    "updated_at": "2026-06-20T08:33:13Z"
-  },
-  "g_568959cdb4b1": {
-    "description": "Add comment above _try_cheap_fallback in worker.py",
-    "status": "completed",
-    "updated_at": "2026-06-21T06:25:03Z"
   },
   "g_98bcc19a1059": {
     "description": "Add comment above _try_cheap_fallback in worker.py",
@@ -434,69 +144,434 @@
     "status": "in_progress",
     "updated_at": "2026-06-21T07:01:23Z"
   },
-  "g_5e83574cf4c1": {
-    "description": "Stage 1 long workload mission: eight docstring/comment edits in worktree sandbox (one file per task). Uses fixed plan — planner skipped.",
-    "status": "completed",
-    "updated_at": "2026-06-24T15:13:39Z"
+  "g_0cf81fec4198": {
+    "description": "stagnation test",
+    "status": "in_progress",
+    "updated_at": "2026-09-22T22:15:48Z"
   },
-  "g_423494e305e6": {
-    "description": "Fix off-by-one bugs: find_max loop should include the last index; sum_range should use range(start, end + 1).",
-    "status": "completed",
-    "updated_at": "2026-06-23T06:17:30Z"
+  "g_4e685385ceec": {
+    "description": "stagnation test",
+    "status": "in_progress",
+    "updated_at": "2026-09-23T04:38:56Z"
   },
-  "g_2d59452ade4d": {
-    "description": "Fix Cache.set to evict oldest key (use iter(self._store) not reversed). Fix is_palindrome to compare cleaned to cleaned[::-1].",
-    "status": "completed",
-    "updated_at": "2026-06-23T06:18:05Z"
+  "g_59cc72d2df79": {
+    "description": "stagnation test",
+    "status": "in_progress",
+    "updated_at": "2026-09-23T04:48:32Z"
   },
-  "g_2b267415bf1d": {
-    "description": "Fix broken_add to return a + b instead of a - b",
-    "status": "completed",
-    "updated_at": "2026-06-23T06:18:31Z"
+  "g_0eef0f439602": {
+    "description": "stagnation test",
+    "status": "in_progress",
+    "updated_at": "2026-09-23T04:49:06Z"
   },
-  "g_06c2001d1430": {
-    "description": "add a comment to tests/test_cache_telemetry.py explaining what it tests",
-    "status": "completed",
-    "updated_at": "2026-06-24T15:09:06Z"
+  "g_b3179fa20025": {
+    "description": "stagnation test",
+    "status": "in_progress",
+    "updated_at": "2026-09-23T05:22:07Z"
   },
-  "g_7bc068942cef": {
-    "description": "add a comment to tests/test_cache_telemetry.py explaining what the file tests",
-    "status": "completed",
-    "updated_at": "2026-06-24T15:16:39Z"
+  "g_cddd3172c4f4": {
+    "description": "stagnation test",
+    "status": "in_progress",
+    "updated_at": "2026-09-23T05:22:35Z"
   },
-  "g_bdd1a337ae19": {
-    "description": "Stage 1 long workload mission: eight docstring/comment edits in worktree sandbox (one file per task). Uses fixed plan — planner skipped.",
+  "g_97394d5153c4": {
+    "description": "retry_budget() must use the retry limit the project defines, not its own number.",
     "status": "completed",
-    "updated_at": "2026-06-24T15:18:13Z"
+    "updated_at": "2026-09-23T06:32:42Z"
   },
-  "g_14a52840e6ae": {
-    "description": "Phase D real-repo proof on clawcode: fourteen low-risk docstring and README edits in worktree sandbox (one file per task). Uses fixed plan — planner skipped. Keep all tests green.",
+  "g_b82e7f6f99bb": {
+    "description": "retry_budget() must use the retry limit the project defines, not its own number.",
     "status": "completed",
-    "updated_at": "2026-06-25T06:47:03Z"
+    "updated_at": "2026-09-23T06:42:59Z"
   },
-  "g_0c2f16295449": {
-    "description": "CI Rescue Sprint: fix auth.py, billing.py, inventory.py, shipping.py, and promo.py so all 35 pytest tests pass. Do not edit tests/, conftest.py, or golden/. Keep 7 regression tests green.",
+  "g_fd3c35b3b39d": {
+    "description": "resolve() mishandles paths. The project already has a helper that does this correctly.",
     "status": "completed",
-    "updated_at": "2026-06-25T14:07:44Z"
+    "updated_at": "2026-09-23T06:43:38Z"
   },
-  "g_82ece9bf6140": {
-    "description": "CI Rescue Sprint: fix auth.py, billing.py, inventory.py, shipping.py, and promo.py so all 35 pytest tests pass. Do not edit tests/, conftest.py, or golden/. Keep 7 regression tests green.",
+  "g_bd1d005f1358": {
+    "description": "paginate() drops the last item on every page. Fix the slice.",
     "status": "completed",
-    "updated_at": "2026-06-26T04:33:17Z"
+    "updated_at": "2026-09-23T08:19:17Z"
   },
-  "g_06da5ab67035": {
-    "description": "CI Rescue Sprint: fix auth.py, billing.py, inventory.py, shipping.py, and promo.py so all 35 pytest tests pass. Do not edit tests/, conftest.py, or golden/. Keep 7 regression tests green.",
+  "g_269336ea630c": {
+    "description": "collect() leaks state between calls. Fix it.",
     "status": "completed",
-    "updated_at": "2026-06-26T04:35:11Z"
+    "updated_at": "2026-09-23T08:19:40Z"
   },
-  "g_fd78613304e4": {
-    "description": "CI Rescue on clawcode: fix all 12 failing tests in tests/test_porting_workspace.py. Edit only src/ files. Do not modify tests/ or test files. Restore correct behavior for port manifest, query engine, commands, tools, subsystems, setup, remote modes, and bootstrap prompt output.",
+  "g_d207c9baa114": {
+    "description": "midpoint() must return an integer index, not a float.",
     "status": "completed",
-    "updated_at": "2026-06-26T05:56:39Z"
+    "updated_at": "2026-09-23T08:19:59Z"
   },
-  "g_601d8ab97015": {
-    "description": "CI Rescue on clawcode: fix all 12 failing tests in tests/test_porting_workspace.py. Edit only src/ files. Do not modify tests/ or test files. Restore correct behavior for port manifest, query engine, commands, tools, subsystems, setup, remote modes, and bootstrap prompt output.",
+  "g_30ffc5875304": {
+    "description": "average() raises ZeroDivisionError on an empty sequence. It should return 0.0.",
     "status": "completed",
-    "updated_at": "2026-06-26T06:04:45Z"
+    "updated_at": "2026-09-23T08:20:23Z"
+  },
+  "g_c9f2aedbe5d3": {
+    "description": "retry_budget() must use the retry limit the project defines, not its own number.",
+    "status": "completed",
+    "updated_at": "2026-09-23T08:20:50Z"
+  },
+  "g_0a14f30002d5": {
+    "description": "serialize() reads a field name that no longer exists on the model. Use the current name.",
+    "status": "completed",
+    "updated_at": "2026-09-23T08:21:19Z"
+  },
+  "g_8a383195d12e": {
+    "description": "parse() is called with a keyword argument it does not accept. Support it.",
+    "status": "completed",
+    "updated_at": "2026-09-23T08:21:43Z"
+  },
+  "g_24d7cb5a8b98": {
+    "description": "describe() has no branch for every status the project defines. Cover them all.",
+    "status": "completed",
+    "updated_at": "2026-09-23T08:22:07Z"
+  },
+  "g_fa4f70ffe898": {
+    "description": "resolve() mishandles paths. The project already has a helper that does this correctly.",
+    "status": "completed",
+    "updated_at": "2026-09-23T08:22:28Z"
+  },
+  "g_0123c040d881": {
+    "description": "check_age() raises a bare ValueError. It must use the project's error type.",
+    "status": "completed",
+    "updated_at": "2026-09-23T08:23:05Z"
+  },
+  "g_2fd183a739a9": {
+    "description": "format_duration() returns the wrong shape. Make it match what the tests require.",
+    "status": "completed",
+    "updated_at": "2026-09-23T08:23:30Z"
+  },
+  "g_6c7d8b0376ba": {
+    "description": "slugify() produces bad slugs for some inputs. Find where the defect actually is.",
+    "status": "completed",
+    "updated_at": "2026-09-23T08:24:32Z"
+  },
+  "g_2dd14ec46953": {
+    "description": "paginate() drops the last item on every page. Fix the slice.",
+    "status": "completed",
+    "updated_at": "2026-09-23T08:25:54Z"
+  },
+  "g_08a44903f7c6": {
+    "description": "paginate() drops the last item on every page. Fix the slice.",
+    "status": "completed",
+    "updated_at": "2026-09-23T08:26:57Z"
+  },
+  "g_4e17f7cd21d7": {
+    "description": "collect() leaks state between calls. Fix it.",
+    "status": "completed",
+    "updated_at": "2026-09-23T08:27:22Z"
+  },
+  "g_f9ca625f0639": {
+    "description": "midpoint() must return an integer index, not a float.",
+    "status": "completed",
+    "updated_at": "2026-09-23T08:27:43Z"
+  },
+  "g_5d0637f8147d": {
+    "description": "average() raises ZeroDivisionError on an empty sequence. It should return 0.0.",
+    "status": "completed",
+    "updated_at": "2026-09-23T08:27:58Z"
+  },
+  "g_096ca8191e6e": {
+    "description": "retry_budget() must use the retry limit the project defines, not its own number.",
+    "status": "completed",
+    "updated_at": "2026-09-23T08:28:20Z"
+  },
+  "g_aa62d3927234": {
+    "description": "serialize() reads a field name that no longer exists on the model. Use the current name.",
+    "status": "completed",
+    "updated_at": "2026-09-23T08:28:44Z"
+  },
+  "g_0822fa606984": {
+    "description": "parse() is called with a keyword argument it does not accept. Support it.",
+    "status": "completed",
+    "updated_at": "2026-09-23T08:29:05Z"
+  },
+  "g_55d6ededcc2c": {
+    "description": "describe() has no branch for every status the project defines. Cover them all.",
+    "status": "completed",
+    "updated_at": "2026-09-23T08:29:32Z"
+  },
+  "g_3112d3bf3333": {
+    "description": "resolve() mishandles paths. The project already has a helper that does this correctly.",
+    "status": "completed",
+    "updated_at": "2026-09-23T08:29:59Z"
+  },
+  "g_19141d967060": {
+    "description": "check_age() raises a bare ValueError. It must use the project's error type.",
+    "status": "completed",
+    "updated_at": "2026-09-23T08:30:24Z"
+  },
+  "g_1e4a29a48e78": {
+    "description": "format_duration() returns the wrong shape. Make it match what the tests require.",
+    "status": "completed",
+    "updated_at": "2026-09-23T08:30:54Z"
+  },
+  "g_2b3f2cfd80fd": {
+    "description": "slugify() produces bad slugs for some inputs. Find where the defect actually is.",
+    "status": "completed",
+    "updated_at": "2026-09-23T08:31:39Z"
+  },
+  "g_86468b51d6f9": {
+    "description": "retry_budget() must use the retry limit the project defines, not its own number.",
+    "status": "completed",
+    "updated_at": "2026-09-23T12:29:26Z"
+  },
+  "g_6f2ed9fad30a": {
+    "description": "paginate() drops the last item on every page. Fix the slice.",
+    "status": "in_progress",
+    "updated_at": "2026-09-23T12:30:11Z"
+  },
+  "g_765a76d5200e": {
+    "description": "collect() leaks state between calls. Fix it.",
+    "status": "completed",
+    "updated_at": "2026-09-23T12:52:12Z"
+  },
+  "g_063ed52610da": {
+    "description": "midpoint() must return an integer index, not a float.",
+    "status": "completed",
+    "updated_at": "2026-09-23T12:53:05Z"
+  },
+  "g_fb0f6ccff747": {
+    "description": "average() raises ZeroDivisionError on an empty sequence. It should return 0.0.",
+    "status": "completed",
+    "updated_at": "2026-09-23T12:53:53Z"
+  },
+  "g_31b6550bf09f": {
+    "description": "retry_budget() must use the retry limit the project defines, not its own number.",
+    "status": "completed",
+    "updated_at": "2026-09-23T13:47:21Z"
+  },
+  "g_62d3fb7e906b": {
+    "description": "serialize() reads a field name that no longer exists on the model. Use the current name.",
+    "status": "completed",
+    "updated_at": "2026-09-23T13:00:05Z"
+  },
+  "g_acfb04be0f28": {
+    "description": "parse() is called with a keyword argument it does not accept. Support it.",
+    "status": "in_progress",
+    "updated_at": "2026-09-23T13:00:42Z"
+  },
+  "g_9c85943dbd31": {
+    "description": "describe() has no branch for every status the project defines. Cover them all.",
+    "status": "in_progress",
+    "updated_at": "2026-09-23T13:03:31Z"
+  },
+  "g_82ac31de1cc8": {
+    "description": "resolve() mishandles paths. The project already has a helper that does this correctly.",
+    "status": "in_progress",
+    "updated_at": "2026-09-23T13:06:54Z"
+  },
+  "g_ab75acf79f65": {
+    "description": "check_age() raises a bare ValueError. It must use the project's error type.",
+    "status": "completed",
+    "updated_at": "2026-09-23T13:17:28Z"
+  },
+  "g_5b94e7316b45": {
+    "description": "format_duration() returns the wrong shape. Make it match what the tests require.",
+    "status": "completed",
+    "updated_at": "2026-09-23T13:19:21Z"
+  },
+  "g_b93c05a14705": {
+    "description": "slugify() produces bad slugs for some inputs. Find where the defect actually is.",
+    "status": "completed",
+    "updated_at": "2026-09-23T13:51:43Z"
+  },
+  "g_d51ba97b5d2e": {
+    "description": "collect() leaks state between calls. Fix it.",
+    "status": "completed",
+    "updated_at": "2026-09-23T13:45:54Z"
+  },
+  "g_7de883b22685": {
+    "description": "midpoint() must return an integer index, not a float.",
+    "status": "completed",
+    "updated_at": "2026-09-23T13:46:24Z"
+  },
+  "g_ca5929c51877": {
+    "description": "average() raises ZeroDivisionError on an empty sequence. It should return 0.0.",
+    "status": "completed",
+    "updated_at": "2026-09-23T13:46:49Z"
+  },
+  "g_9f18ab00fb5d": {
+    "description": "serialize() reads a field name that no longer exists on the model. Use the current name.",
+    "status": "completed",
+    "updated_at": "2026-09-23T13:47:54Z"
+  },
+  "g_88b8521a4e2a": {
+    "description": "check_age() raises a bare ValueError. It must use the project's error type.",
+    "status": "completed",
+    "updated_at": "2026-09-23T13:50:07Z"
+  },
+  "g_0224d4666761": {
+    "description": "format_duration() returns the wrong shape. Make it match what the tests require.",
+    "status": "completed",
+    "updated_at": "2026-09-23T13:50:51Z"
+  },
+  "g_f71d4006dc0d": {
+    "description": "We're deploying backupd to containers, so move our settings from the settings.ini file to environment variables with the prefix APP_ (each setting becomes APP_ plus its key name in upper case, e.g. interval_minutes -> APP_INTERVAL_MINUTES). Every setting must be configurable from the environment with the same types as today (numbers stay ints, compress stays a bool accepting true/1/yes, exclude stays a comma-separated list, optional values stay optional). Old installs that still have settings.ini must keep working, and if a setting is in both places the environment variable wins. A missing required setting must give a clear ConfigError naming the setting. Make sure every part of the app picks up the new variables, not just the config module. Document the new variables in the README.",
+    "status": "completed",
+    "updated_at": "2026-09-23T15:06:45Z"
+  },
+  "g_d51ba7421ef7": {
+    "description": "Here are three months of invoice exports from our billing system (the data/ folder, June to August 2026). Give me reports/top_customers.csv with our 10 biggest customers by total billed in EUR, and reports/duplicate_invoices.csv listing invoices that were billed twice (or more). The exports aren't perfectly clean. README.md describes the columns, the currency-rate file and exactly what the two reports should look like.",
+    "status": "in_progress",
+    "updated_at": "2026-09-23T14:20:45Z"
+  },
+  "g_d1124619bc64": {
+    "description": "Add filtering by date range and order status to the orders CSV export (`python -m ordertool export`), and expose it on the CLI as --from, --to and --status. Dates are YYYY-MM-DD and both ends of the range are inclusive (an order placed late on the --to day is included). The filters combine and also apply when writing with --output. Invalid dates or an unknown status should give a clear error message and a non-zero exit, not a traceback. Running export with no filters must produce exactly the same output as before.",
+    "status": "completed",
+    "updated_at": "2026-09-23T14:43:14Z"
+  },
+  "g_f86ad6f3f05c": {
+    "description": "Customers in some timezones say the daily sales report shows yesterday's totals, and a few orders placed near midnight show up on the wrong day. Find out why and fix it so every report (today's report, a specific day, yesterday, multi-day breakdowns, week-to-date, and the CLI) follows the customer's own timezone, including on daylight-saving change days. Don't break customers in UTC.",
+    "status": "completed",
+    "updated_at": "2026-09-23T21:48:28Z"
+  },
+  "g_fef350fee35b": {
+    "description": "The monthly account summary takes forever for our big accounts (try `python -m ledger demo --size large`). Make it at least 5x faster on large accounts without changing any of the numbers it produces. Keep the existing functions, classes and CLI working the same way, and keep the tests passing.",
+    "status": "completed",
+    "updated_at": "2026-09-23T14:54:24Z"
+  },
+  "g_4011c048d99c": {
+    "description": "The monthly account summary takes forever for our big accounts (try `python -m ledger demo --size large`). Make it at least 5x faster on large accounts without changing any of the numbers it produces. Keep the existing functions, classes and CLI working the same way, and keep the tests passing.",
+    "status": "in_progress",
+    "updated_at": "2026-09-23T21:30:15Z"
+  },
+  "g_0a18da951496": {
+    "description": "Add filtering by date range and order status to the orders CSV export (`python -m ordertool export`), and expose it on the CLI as --from, --to and --status. Dates are YYYY-MM-DD and both ends of the range are inclusive (an order placed late on the --to day is included). The filters combine and also apply when writing with --output. Invalid dates or an unknown status should give a clear error message and a non-zero exit, not a traceback. Running export with no filters must produce exactly the same output as before.",
+    "status": "completed",
+    "updated_at": "2026-09-23T15:18:06Z"
+  },
+  "g_f80014933365": {
+    "description": "retry_budget() must use the retry limit the project defines, not its own number.",
+    "status": "completed",
+    "updated_at": "2026-09-23T20:24:41Z"
+  },
+  "g_9cb791c32202": {
+    "description": "We're deploying backupd to containers, so move our settings from the settings.ini file to environment variables with the prefix APP_ (each setting becomes APP_ plus its key name in upper case, e.g. interval_minutes -> APP_INTERVAL_MINUTES). Every setting must be configurable from the environment with the same types as today (numbers stay ints, compress stays a bool accepting true/1/yes, exclude stays a comma-separated list, optional values stay optional). Old installs that still have settings.ini must keep working, and if a setting is in both places the environment variable wins. A missing required setting must give a clear ConfigError naming the setting. Make sure every part of the app picks up the new variables, not just the config module. Document the new variables in the README.",
+    "status": "completed",
+    "updated_at": "2026-09-24T14:59:50Z"
+  },
+  "g_4255dd0743e0": {
+    "description": "Add filtering by date range and order status to the orders CSV export (`python -m ordertool export`), and expose it on the CLI as --from, --to and --status. Dates are YYYY-MM-DD and both ends of the range are inclusive (an order placed late on the --to day is included). The filters combine and also apply when writing with --output. Invalid dates or an unknown status should give a clear error message and a non-zero exit, not a traceback. Running export with no filters must produce exactly the same output as before.",
+    "status": "completed",
+    "updated_at": "2026-09-23T21:40:19Z"
+  },
+  "g_0d0f6dca1f1e": {
+    "description": "Add filtering by date range and order status to the orders CSV export (`python -m ordertool export`), and expose it on the CLI as --from, --to and --status. Dates are YYYY-MM-DD and both ends of the range are inclusive (an order placed late on the --to day is included). The filters combine and also apply when writing with --output. Invalid dates or an unknown status should give a clear error message and a non-zero exit, not a traceback. Running export with no filters must produce exactly the same output as before.",
+    "status": "completed",
+    "updated_at": "2026-09-24T15:30:36Z"
+  },
+  "g_c70155e6a993": {
+    "description": "Customers in some timezones say the daily sales report shows yesterday's totals, and a few orders placed near midnight show up on the wrong day. Find out why and fix it so every report (today's report, a specific day, yesterday, multi-day breakdowns, week-to-date, and the CLI) follows the customer's own timezone, including on daylight-saving change days. Don't break customers in UTC.",
+    "status": "completed",
+    "updated_at": "2026-09-24T15:54:28Z"
+  },
+  "g_b05b1128a4a4": {
+    "description": "We're deploying backupd to containers, so move our settings from the settings.ini file to environment variables with the prefix APP_ (each setting becomes APP_ plus its key name in upper case, e.g. interval_minutes -> APP_INTERVAL_MINUTES). Every setting must be configurable from the environment with the same types as today (numbers stay ints, compress stays a bool accepting true/1/yes, exclude stays a comma-separated list, optional values stay optional). Old installs that still have settings.ini must keep working, and if a setting is in both places the environment variable wins. A missing required setting must give a clear ConfigError naming the setting. Make sure every part of the app picks up the new variables, not just the config module. Document the new variables in the README.",
+    "status": "completed",
+    "updated_at": "2026-09-24T18:59:21Z"
+  },
+  "g_c482c9ba8cdb": {
+    "description": "Add filtering by date range and order status to the orders CSV export (`python -m ordertool export`), and expose it on the CLI as --from, --to and --status. Dates are YYYY-MM-DD and both ends of the range are inclusive (an order placed late on the --to day is included). The filters combine and also apply when writing with --output. Invalid dates or an unknown status should give a clear error message and a non-zero exit, not a traceback. Running export with no filters must produce exactly the same output as before.",
+    "status": "completed",
+    "updated_at": "2026-09-25T17:01:05Z"
+  },
+  "g_c9842d90fee5": {
+    "description": "Customers in some timezones say the daily sales report shows yesterday's totals, and a few orders placed near midnight show up on the wrong day. Find out why and fix it so every report (today's report, a specific day, yesterday, multi-day breakdowns, week-to-date, and the CLI) follows the customer's own timezone, including on daylight-saving change days. Don't break customers in UTC.",
+    "status": "completed",
+    "updated_at": "2026-09-25T14:32:42Z"
+  },
+  "g_ac7e92e0d3fe": {
+    "description": "We're deploying backupd to containers, so move our settings from the settings.ini file to environment variables with the prefix APP_ (each setting becomes APP_ plus its key name in upper case, e.g. interval_minutes -> APP_INTERVAL_MINUTES). Every setting must be configurable from the environment with the same types as today (numbers stay ints, compress stays a bool accepting true/1/yes, exclude stays a comma-separated list, optional values stay optional). Old installs that still have settings.ini must keep working, and if a setting is in both places the environment variable wins. A missing required setting must give a clear ConfigError naming the setting. Make sure every part of the app picks up the new variables, not just the config module. Document the new variables in the README.",
+    "status": "completed",
+    "updated_at": "2026-09-25T13:24:52Z"
+  },
+  "g_bb5e196f3c8b": {
+    "description": "We're deploying backupd to containers, so move our settings from the settings.ini file to environment variables with the prefix APP_ (each setting becomes APP_ plus its key name in upper case, e.g. interval_minutes -> APP_INTERVAL_MINUTES). Every setting must be configurable from the environment with the same types as today (numbers stay ints, compress stays a bool accepting true/1/yes, exclude stays a comma-separated list, optional values stay optional). Old installs that still have settings.ini must keep working, and if a setting is in both places the environment variable wins. A missing required setting must give a clear ConfigError naming the setting. Make sure every part of the app picks up the new variables, not just the config module. Document the new variables in the README.",
+    "status": "completed",
+    "updated_at": "2026-09-25T16:29:55Z"
+  },
+  "g_7b3a976e6f48": {
+    "description": "Customers in some timezones say the daily sales report shows yesterday's totals, and a few orders placed near midnight show up on the wrong day. Find out why and fix it so every report (today's report, a specific day, yesterday, multi-day breakdowns, week-to-date, and the CLI) follows the customer's own timezone, including on daylight-saving change days. Don't break customers in UTC.",
+    "status": "in_progress",
+    "updated_at": "2026-09-25T17:05:00Z"
+  },
+  "g_632c8853c6d8": {
+    "description": "Fix slugify in textutil.py so all tests in test_textutil.py pass: lowercase, drop punctuation, collapse runs of whitespace into single hyphens, and strip leading/trailing hyphens. Run pytest to confirm.",
+    "status": "completed",
+    "updated_at": "2026-10-10T13:04:46Z"
+  },
+  "g_c79bec268a28": {
+    "description": "Fix slugify in textutil.py so all tests in test_textutil.py pass: lowercase, drop punctuation, collapse runs of whitespace into single hyphens, and strip leading/trailing hyphens. Run pytest to confirm.",
+    "status": "completed",
+    "updated_at": "2026-10-10T13:15:01Z"
+  },
+  "g_5b039b15eef6": {
+    "description": "Fix slugify in textutil.py so all tests in test_textutil.py pass: lowercase, drop punctuation, collapse runs of whitespace into single hyphens, and strip leading/trailing hyphens. Run pytest to confirm.",
+    "status": "completed",
+    "updated_at": "2026-10-11T06:13:54Z"
+  },
+  "g_60aafce7ad0f": {
+    "description": "Fix slugify in textutil.py so all tests in test_textutil.py pass: lowercase, drop punctuation, collapse runs of whitespace into single hyphens, and strip leading/trailing hyphens. Run pytest to confirm.",
+    "status": "completed",
+    "updated_at": "2026-10-11T06:39:58Z"
+  },
+  "g_3889891ba47d": {
+    "description": "Fix slugify in textutil.py so all tests in test_textutil.py pass: lowercase, drop punctuation, collapse runs of whitespace into single hyphens, and strip leading/trailing hyphens. Run pytest to confirm.",
+    "status": "completed",
+    "updated_at": "2026-10-11T06:41:55Z"
+  },
+  "g_59c9dfc2bb40": {
+    "description": "Fix slugify in textutil.py so all tests in test_textutil.py pass: lowercase, drop punctuation, collapse runs of whitespace into single hyphens, and strip leading/trailing hyphens. Run pytest to confirm.",
+    "status": "completed",
+    "updated_at": "2026-10-11T07:04:52Z"
+  },
+  "g_4be8a9a3e33f": {
+    "description": "Fix slugify in textutil.py so all tests in test_textutil.py pass: lowercase, drop punctuation, collapse runs of whitespace into single hyphens, and strip leading/trailing hyphens. Run pytest to confirm.",
+    "status": "completed",
+    "updated_at": "2026-10-11T07:08:35Z"
+  },
+  "g_386018c4e4c6": {
+    "description": "We're deploying backupd to containers, so move our settings from the settings.ini file to environment variables with the prefix APP_ (each setting becomes APP_ plus its key name in upper case, e.g. interval_minutes -> APP_INTERVAL_MINUTES). Every setting must be configurable from the environment with the same types as today (numbers stay ints, compress stays a bool accepting true/1/yes, exclude stays a comma-separated list, optional values stay optional). Old installs that still have settings.ini must keep working, and if a setting is in both places the environment variable wins. A missing required setting must give a clear ConfigError naming the setting. Make sure every part of the app picks up the new variables, not just the config module. Document the new variables in the README.",
+    "status": "completed",
+    "updated_at": "2026-10-11T10:33:56Z"
+  },
+  "g_02b7137fa89c": {
+    "description": "Add filtering by date range and order status to the orders CSV export (`python -m ordertool export`), and expose it on the CLI as --from, --to and --status. Dates are YYYY-MM-DD and both ends of the range are inclusive (an order placed late on the --to day is included). The filters combine and also apply when writing with --output. Invalid dates or an unknown status should give a clear error message and a non-zero exit, not a traceback. Running export with no filters must produce exactly the same output as before.",
+    "status": "completed",
+    "updated_at": "2026-10-11T11:01:16Z"
+  },
+  "g_a05f99babba4": {
+    "description": "Build the finance tracker described in README.md from scratch in the fintrack/ package: importing both bank CSV formats, duplicate detection, rule-based categorization, SQLite storage, monthly reports, budgets, export and the python -m fintrack command line. README.md is the full spec - follow its module names, function signatures, output formats and exit codes exactly, use only the standard library, and add tests as you go.",
+    "status": "completed",
+    "updated_at": "2026-10-11T11:07:54Z"
+  },
+  "g_ff0694cfb190": {
+    "description": "stagnation test",
+    "status": "in_progress",
+    "updated_at": "2026-10-14T09:30:52Z"
+  },
+  "g_622ae677bbf6": {
+    "description": "stagnation test",
+    "status": "in_progress",
+    "updated_at": "2026-10-14T09:36:17Z"
+  },
+  "g_2656b6b7284e": {
+    "description": "Fix GitHub issue #639: get(doc_id='1') works but update/remove with doc_ids=['1'] silently no-op\n\nIssue description:\n### Description\n\n`Table.get` coerces IDs with `str(...)` when looking up storage keys:\n\n```python\nraw_doc = table.get(str(doc_id), None)\n# and for doc_ids:\ndoc_ids_set = set(str(doc_id) for doc_id in doc_ids)\n```\n\n(`tinydb/table.py`)\n\n`Table.update` / `Table.remove` with `doc_ids=` test membership against the in-memory table dict, whose keys are `document_id_class` values (ints by default) — **without** the same coercion:\n\n```python\nupdated_ids.extend(\n    doc_id for doc_id in requested_ids if doc_id in table\n)\n```\n\nSo `get(doc_id='1')` finds a document, but `update(..., doc_ids=['1'])` / `remove(doc_ids=['1'])` return `[]` and change nothing.\n\nVerified on current `master` (`4aa5311`, TinyDB 4.9.0).\n\n### Minimal reproduction\n\n```python\nfrom tinydb import TinyDB\nfrom tinydb.storages import MemoryStorage\n\ndb = TinyDB(storage=MemoryStorage)\ndb.insert({'x': 1})\n\nprint(db.get(doc_id='1'))\n# {'x': 1}\n\nprint(db.update({'x': 2}, doc_ids=['1']))\n# []\nprint(db.all())\n# [{'x': 1}]  — unchanged\n\nprint(db.remove(doc_ids=['1']))\n# []\nprint(len(db))\n# 1  — still there\n\n# int IDs work as expected:\nprint(db.update({'x': 2}, doc_ids=[1]))\n# [1]\n```\n\n### Expected behavior (for discussion)\n\nPossible directions:\n\n1. Coerce `doc_ids` in `update`/`remove` the same way `get` does (via `document_id_class` / consistent key form)\n2. Reject non-`document_id_class` values with a clear error\n3. Document that `get` accepts stringified IDs but `update`/`remove` require int IDs\n\nSilent no-op on writes while reads succeed is the surprising part.\n\n### Suggested tests\n\n- After insert, `get(doc_id='1')` vs `update(..., doc_ids=['1'])` / `remove(doc_ids=['1'])` — assert consistent success or consistent rejection per chosen option\n- Keep existing int-ID and missing-ID (#591) behavior\n\nHappy to open a PR once the preferred behavior is clear.\n\n### Environment\n\n- TinyDB 4.9.0 / `master` @ `4aa5311`\n- Related consistency work: #591 (missing int IDs)\n\nRelevant comments:\n- @msiemens: Thanks for the bug report! I think (1) is the right solution\n\nMake the smallest change that resolves the issue, add or update a test that covers it, and keep the existing tests passing.\n\nIssue: https://github.com/msiemens/tinydb/issues/639\n",
+    "status": "completed",
+    "updated_at": "2026-10-14T22:01:02Z"
+  },
+  "g_820d85843681": {
+    "description": "Fix GitHub issue #639: get(doc_id='1') works but update/remove with doc_ids=['1'] silently no-op\n\nIssue description:\n### Description\n\n`Table.get` coerces IDs with `str(...)` when looking up storage keys:\n\n```python\nraw_doc = table.get(str(doc_id), None)\n# and for doc_ids:\ndoc_ids_set = set(str(doc_id) for doc_id in doc_ids)\n```\n\n(`tinydb/table.py`)\n\n`Table.update` / `Table.remove` with `doc_ids=` test membership against the in-memory table dict, whose keys are `document_id_class` values (ints by default) — **without** the same coercion:\n\n```python\nupdated_ids.extend(\n    doc_id for doc_id in requested_ids if doc_id in table\n)\n```\n\nSo `get(doc_id='1')` finds a document, but `update(..., doc_ids=['1'])` / `remove(doc_ids=['1'])` return `[]` and change nothing.\n\nVerified on current `master` (`4aa5311`, TinyDB 4.9.0).\n\n### Minimal reproduction\n\n```python\nfrom tinydb import TinyDB\nfrom tinydb.storages import MemoryStorage\n\ndb = TinyDB(storage=MemoryStorage)\ndb.insert({'x': 1})\n\nprint(db.get(doc_id='1'))\n# {'x': 1}\n\nprint(db.update({'x': 2}, doc_ids=['1']))\n# []\nprint(db.all())\n# [{'x': 1}]  — unchanged\n\nprint(db.remove(doc_ids=['1']))\n# []\nprint(len(db))\n# 1  — still there\n\n# int IDs work as expected:\nprint(db.update({'x': 2}, doc_ids=[1]))\n# [1]\n```\n\n### Expected behavior (for discussion)\n\nPossible directions:\n\n1. Coerce `doc_ids` in `update`/`remove` the same way `get` does (via `document_id_class` / consistent key form)\n2. Reject non-`document_id_class` values with a clear error\n3. Document that `get` accepts stringified IDs but `update`/`remove` require int IDs\n\nSilent no-op on writes while reads succeed is the surprising part.\n\n### Suggested tests\n\n- After insert, `get(doc_id='1')` vs `update(..., doc_ids=['1'])` / `remove(doc_ids=['1'])` — assert consistent success or consistent rejection per chosen option\n- Keep existing int-ID and missing-ID (#591) behavior\n\nHappy to open a PR once the preferred behavior is clear.\n\n### Environment\n\n- TinyDB 4.9.0 / `master` @ `4aa5311`\n- Related consistency work: #591 (missing int IDs)\n\nRelevant comments:\n- @msiemens: Thanks for the bug report! I think (1) is the right solution\n\nMake the smallest change that resolves the issue, add or update a test that covers it, and keep the existing tests passing.\n\nIssue: https://github.com/msiemens/tinydb/issues/639\n",
+    "status": "completed",
+    "updated_at": "2026-10-15T14:10:41Z"
+  },
+  "g_6fa4043adaec": {
+    "description": "parse_duration in durations.py rejects combined durations like '1h30m', '2m15s' and '1h2m3s'; they should be summed (1h30m = 5400 seconds). Fix it so the tests in tests/ pass, and keep rejecting garbage input.",
+    "status": "completed",
+    "updated_at": "2026-10-16T13:22:49Z"
   }
 }

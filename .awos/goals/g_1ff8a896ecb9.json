@@ -35,14 +35,18 @@
           "complexity": "low"
         }
       ],
-      "status": "pending",
+      "status": "failed",
       "created_at": "2026-06-21T07:01:23Z",
-      "updated_at": "2026-06-21T07:01:23Z",
+      "updated_at": "2026-10-14T09:32:51Z",
       "completed_at": null,
       "session_ids": [
-        "orch_0f9b0e16"
+        "orch_0f9b0e16",
+        "orch_488dd290",
+        "orch_b2952671",
+        "orch_25f65765",
+        "orch_1a2fcd9a"
       ],
-      "failure_count": 0,
+      "failure_count": 4,
       "critique_ids": []
     }
   }
