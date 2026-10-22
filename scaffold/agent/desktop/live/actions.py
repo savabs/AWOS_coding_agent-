@@ -36,7 +36,9 @@ re-verified key before continuing. An unrecognised dialog, or one offering only 
 choices, makes the action REFUSED with a reason starting ``needs_user:``; nothing is clicked.
 
 URLs: open_url only opens http(s) on 127.0.0.1 / localhost / ::1 and file:// unless the
-URL starts with one of ``allow_urls``. Safari pages always open in a NEW window
+URL starts with one of ``allow_urls`` or the optional ``url_policy`` hook allows it (the
+document pack's per-source https allowlist, pack/policy.py); with a hook, a navigation that
+lands outside it is REFUSED ``needs_user:``. Safari pages always open in a NEW window
 (File > New Window via AX, Cmd-N as fallback) or by ``open -a Safari`` when Safari is not
 running; an existing window's page is never navigated away.
 """
@@ -130,7 +132,11 @@ def norm_url(u: Optional[str]) -> str:
     return urllib.parse.urlunsplit((p.scheme.lower(), p.netloc.lower(), path, p.query, ""))
 
 
-def url_allowed(url: str, allow_urls: Iterable[str] = ()) -> Tuple[bool, str]:
+def url_allowed(url: str, allow_urls: Iterable[str] = (),
+                url_policy: Optional[Callable[[str], Tuple[bool, str]]] = None) -> Tuple[bool, str]:
+    """Loopback / file:// / an ``allow_urls`` prefix as before; anything else only when the
+    optional ``url_policy`` hook (e.g. pack.policy.url_hook(source): https on the source's
+    exact domains) says so. The hook only ever adds URLs; it never removes the checks above."""
     if any(url.startswith(a) for a in allow_urls if a):
         return True, "explicitly allowed"
     p = urllib.parse.urlsplit(url)
@@ -138,6 +144,14 @@ def url_allowed(url: str, allow_urls: Iterable[str] = ()) -> Tuple[bool, str]:
         return True, "local file"
     if p.scheme in ("http", "https") and (p.hostname or "") in LOCAL_HOSTS:
         return True, "loopback"
+    if url_policy is not None:
+        try:
+            ok, why = url_policy(url)
+        except Exception as e:  # noqa: BLE001 -- a broken hook refuses
+            ok, why = False, f"url policy failed ({type(e).__name__})"
+        if ok:
+            return True, f"url policy: {why}"
+        return False, f"url policy: {why}"
     return False, f"only 127.0.0.1 / localhost / file:// URLs may be opened (got {p.scheme}://{p.hostname})"
 
 
@@ -161,7 +175,8 @@ class Actor:
                  max_nodes: int = DEFAULT_MAX_NODES, timeout: float = DEFAULT_TIMEOUT_S,
                  use_events: bool = True, log: Optional[Callable[[str], None]] = None,
                  vm_check: Optional[Callable[[], bool]] = None,
-                 interrupts: Optional[InterruptHandler] = None):
+                 interrupts: Optional[InterruptHandler] = None,
+                 url_policy: Optional[Callable[[str], Tuple[bool, str]]] = None):
         from . import in_guest_vm
         self.rt = rt
         self.approve = approve
@@ -169,6 +184,7 @@ class Actor:
         self.allow_apps = frozenset(allow_apps)
         self.policy = policy if policy is not None else AppPolicy()
         self.allow_urls = tuple(allow_urls)
+        self.url_policy = url_policy                  # extra URLs (pack.policy.url_hook); None = loopback only
         self.settle, self.poll = settle, poll
         self.max_nodes, self.timeout = max_nodes, timeout
         self.use_events = use_events
@@ -769,7 +785,7 @@ class Actor:
         """``launch_timeout``: budget when Safari has to be started first. Live (sandbox VM):
         a cold Safari shows its window ~5s after ``open`` and exposes the web area's URL only
         ~10s in, more under load -- 15s gave intermittent 'page did not load' halts."""
-        ok, why = url_allowed(url, self.allow_urls)
+        ok, why = url_allowed(url, self.allow_urls, self.url_policy)
         if not ok:
             return self._refuse("open_url", why, url=url)
         if not self.vm_check():
@@ -867,7 +883,7 @@ class Actor:
     def navigate(self, window: Any, url: str, *, app: Optional[Dict[str, Any]] = None,
                  timeout: float = 15.0) -> ActionResult:
         """Load url in THIS Safari window through its address field."""
-        ok, why = url_allowed(url, self.allow_urls)
+        ok, why = url_allowed(url, self.allow_urls, self.url_policy)
         if not ok:
             return self._refuse("navigate", why, url=url)
         app = app or self._app(SAFARI) or {}
@@ -925,6 +941,12 @@ class Actor:
                              window)
             if r.after is not None and norm_url(r.after.url) != norm_url(url):
                 r.detail["redirected_to"] = urllib.parse.urlsplit(r.after.url or "").path
+                if self.url_policy is not None and r.after.url and \
+                        not url_allowed(r.after.url, self.allow_urls, self.url_policy)[0]:
+                    host = urllib.parse.urlsplit(r.after.url).hostname or ""
+                    return self._done(ActionResult(
+                        Outcome.REFUSED, "navigate", f"{NEEDS_USER} redirected to {host}, outside the URL allowlist",
+                        "address_field", {"url": url, "landed_host": host}, r.after, window))
             return r
         finally:
             self.settle = old
