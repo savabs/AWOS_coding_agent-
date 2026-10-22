@@ -12,7 +12,7 @@ name: rl-export
 
 on:
   push:
-    branches: ["bench-cloud/rl-train-**"]
+    branches: ["bench-cloud/rl-train-smoke-**"]   # not rl-train-data-** (that is rl-train-data.yml)
   workflow_dispatch:
     inputs:
       mode:
