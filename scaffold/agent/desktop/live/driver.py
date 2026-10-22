@@ -499,7 +499,7 @@ class MacBrowserBackend:
 
     def click(self, page: Page, n: int) -> Page:
         c, snap, path = self._live(page, n)
-        if c.role not in ("link", "button"):
+        if c.role not in ("link", "button", "checkbox"):
             raise WebError(f"control {n} ({c.role}) is not clickable")
         before = (snap.url, snap.render(400)) if snap.ok else None
         n0 = len(self.actor.interruptions)
