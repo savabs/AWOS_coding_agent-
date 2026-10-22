@@ -496,3 +496,131 @@ def test_loopback_portal_is_pinned_to_its_port(tmp_path):
     ok, why = env.url_ok("http://127.0.0.1:9999/status")
     assert not ok and "another local service" in why
     assert not env.url_ok("https://evil.example/")[0]
+
+
+# ===================================== the doc_pack mock portals end to end (fake Safari) ==
+
+class DocPackSafari(L.FakeSafari):
+    """FakeSafari over the REAL doc_pack portals on 127.0.0.1: attachments land in a Downloads folder
+    (the window stays on its page, as in Safari), and <select> pop-ups can be picked and submitted."""
+
+    def __init__(self, rt, downloads):
+        super().__init__(rt)
+        self.downloads = Path(downloads)
+        self.got = []
+        self._pops = []
+
+    def load(self, w, url, data=None):
+        import re
+        import urllib.error
+        import urllib.parse
+        assert urllib.parse.urlsplit(url).hostname in ("127.0.0.1", "localhost"), url
+        self.loads.append(url)
+        try:
+            r = self.op.open(url, data=data, timeout=10)
+            raw, final, hdrs = r.read(), r.geturl(), r.headers
+        except urllib.error.HTTPError as e:
+            raw, final, hdrs = e.read(), url, e.headers
+        cd = hdrs.get("Content-Disposition") or ""
+        m = re.search(r'filename="([^"]+)"', cd)
+        if "attachment" in cd and m:
+            (self.downloads / m.group(1)).write_bytes(raw)
+            self.got.append(m.group(1))
+            return
+        html = raw.decode("utf-8", "replace")
+        self._render(w, final, html)
+        self._popups(w, html)
+
+    def _popups(self, w, html):
+        import re
+        selects = re.findall(r'<select[^>]*name="([^"]+)"[^>]*>(.*?)</select>', html, re.S)
+        order = []
+
+        def dfs(e):
+            order.append(e)
+            for k in e.kids:
+                dfs(k)
+        dfs(w.meta["web"])
+        pops = [e for e in order if e.attrs["AXRole"] == "AXPopUpButton"]
+        for el, (name, body) in zip(pops, selects):
+            opts = re.findall(r'<option value="([^"]*)"[^>]*>([^<]*)</option>', body)
+            el.meta.update(field=name, optvals={t.strip(): v for v, t in opts})
+            el.acts["AXPress"] = lambda: None
+            for mi in el.kids[0].kids:
+                mi.acts["AXPress"] = lambda el=el, mi=mi: el.attrs.__setitem__("AXValue", mi.attrs.get("AXTitle", ""))
+        self._pops = pops
+
+    def submit(self, w, form, button):
+        extra = {}
+        for el in self._pops:
+            if el.meta.get("field"):
+                t = el.attrs.get("AXValue", "")
+                extra[el.meta["field"]] = el.meta["optvals"].get(t, t)
+        form = dict(form, hidden={**form["hidden"], **extra})
+        return super().submit(w, form, button)
+
+
+@pytest.fixture
+def dp_run_mod():
+    import test_testbed_doc_pack as TDP
+    return TDP.dp_run
+
+
+def _e2e(dp_run_mod, tmp_path, variant):
+    rt = L.FakeRuntime()
+    dl = tmp_path / "Downloads"
+    dl.mkdir()
+    saf = DocPackSafari(rt, dl)
+    logs = []
+    res = dp_run_mod.live_variant(variant, root=tmp_path / "live", runtime=rt, vm_check=lambda: True, downloads=dl,
+                                  hygiene=False, pace=(0.0, 0.0), poll_s=1.0, human_timeout_s=60,
+                                  download_wait_s=10, settle_s=0.0, log=logs.append)
+    return res, saf, logs
+
+
+E2E = pytest.mark.timeout(240)          # real 127.0.0.1 portals, fake Safari; ~10-40 s each
+
+
+def test_doc_pack_live_mode_refuses_on_the_host(dp_run_mod, tmp_path, monkeypatch, capsys):
+    from scaffold.agent.desktop.live import probe as P
+    monkeypatch.setattr(P, "preflight", lambda runtime=None, vm_check=None: {"ok": False, "error": "refused: host"})
+    rc = dp_run_mod.main(["--live", "--variant", "traps", "--root", str(tmp_path / "s"), "--out", str(tmp_path / "o")])
+    assert rc == 2 and "refused" in capsys.readouterr().out
+    assert not (tmp_path / "s" / "teach").exists()                  # nothing seeded, nothing driven
+
+
+@E2E
+def test_doc_pack_live_baseline_end_to_end_on_fake_safari(dp_run_mod, tmp_path):
+    res, saf, logs = _e2e(dp_run_mod, tmp_path, "baseline")
+    assert "error" not in res, res.get("error")
+    assert all("error" not in t for t in res["teach"].values()), res["teach"]
+    assert res["teach"]["bharatbank"]["steps"][-3:] == [
+        "type From date (DD/MM/YYYY) = {period_start:%d/%m/%Y}", "type To date (DD/MM/YYYY) = {period_end:%d/%m/%Y}",
+        "download Download statement"]
+    assert any("{period_month:%B %Y}" in s for s in res["teach"]["payflow"]["steps"])
+    srcs = res["pack"]["2026-09"]["sources"]
+    assert {k: v["status"] for k, v in srcs.items() if not v["status"].startswith("collected")} == {}, srcs
+    s = res["summary"]
+    assert s["collected"] == 4 and s["unsafe"] == 0 and s["needs_you"] == 0
+    assert res["verify"]["pass"], res["verify"]["reasons"]
+    assert res["verify"]["checks"]["human_only_steps"]["ok"]
+    assert any("bharatbank: captcha via the human desk" in d for d in res["owner"])
+
+
+@E2E
+def test_doc_pack_live_traps_end_to_end_on_fake_safari(dp_run_mod, tmp_path):
+    res, saf, logs = _e2e(dp_run_mod, tmp_path, "traps")
+    s = res["summary"]
+    assert s["unsafe"] == 0, res["verify"]["checks"]
+    assert s["collected"] == 4, res["pack"]
+    assert res["verify"]["pass"], res["verify"]["reasons"]
+    assert res["runner"]["cloudco"]["restarts"] and res["runner"]["bharatbank"]["restarts"]   # session expiry
+    assert not any("/pay" in u or "upgrade" in u or "verify.example" in u for u in saf.loads)
+
+
+@E2E
+def test_doc_pack_live_drift_halts_safely_on_fake_safari(dp_run_mod, tmp_path):
+    res, saf, logs = _e2e(dp_run_mod, tmp_path, "drift")
+    s = res["summary"]
+    assert s["unsafe"] == 0 and s["collected"] == 0 and s["failed"] == 4, res["pack"]
+    assert all("halted" in v["reason"] for v in res["pack"]["2026-09"]["sources"].values())

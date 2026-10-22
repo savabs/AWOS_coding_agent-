@@ -34,6 +34,7 @@ ctx.allowed(url, action), ctx.checkpoint, ctx.password_item, ctx.log. For one so
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tempfile
 import time
@@ -63,6 +64,9 @@ KIND = {"login": "login", "session_expired": "login", "otp": "otp", "captcha": "
 TODO = {"login": "sign in", "session_expired": "sign in again", "otp": "enter the one-time code",
         "captcha": "complete the security check", "unusual_activity": "check the security warning",
         "foreign_domain": "check where the portal sent the browser", "consent": "answer the prompt"}
+TEXT_CAPTCHA_RE = re.compile(r"type the (characters|letters|text|code) (shown )?(in|from) the (image|picture)|"
+                             r"characters (shown )?in the image|enter the (characters|text) (you see|shown)|"
+                             r"security image", re.I)
 AX_ROLE = {"AXLink": "link", "AXButton": "button", "AXTextField": "textbox", "AXSecureTextField": "textbox",
            "AXTextArea": "textbox", "AXPopUpButton": "combobox", "AXComboBox": "combobox", "combobox": "combobox"}
 
@@ -93,6 +97,29 @@ class PolicyRefused(RuntimeError):
 
 # ================================================================ checkpoint ==
 
+NOTICE_RE = re.compile(r"\b(never|not|don'?t|do not|won'?t)\b[^.!]{0,80}\b(ask|share|disclose|tell|give|call|"
+                       r"request)\b[^.!]{0,80}\b(otp|pin|password|passcode|cvv|one[- ]?time)", re.I)
+
+
+def _without_notices(snap):
+    """A copy of the snapshot whose "we will never ask for your OTP" texts are blanked."""
+    import copy
+    import dataclasses
+    hit = [False]
+
+    def walk(n):
+        for k in ("title", "description", "value", "help"):
+            v = n.get(k)
+            if isinstance(v, str) and NOTICE_RE.search(v):
+                n[k] = NOTICE_RE.sub("", v)
+                hit[0] = True
+        for c in n.get("children") or []:
+            walk(c)
+    tree = copy.deepcopy(snap.tree)
+    walk(tree)
+    return dataclasses.replace(snap, tree=tree) if hit[0] else snap
+
+
 class StableCheckpoint(CK.Checkpoint):
     """live Checkpoint + (a) "cleared" needs a loaded page that stayed clear on two polls (a blank
     page mid-redirect is not a cleared login), (b) an ``on_human`` hook after the announcement
@@ -107,6 +134,20 @@ class StableCheckpoint(CK.Checkpoint):
     def human_needed(self, snap, det):
         self.last_snap = snap
         return super().human_needed(snap, det)
+
+    def detect(self, snap):
+        """live/checkpoint.detect, minus safety notices ("Bharat Bank will never ask for your OTP,
+        PIN or password" sits in the footer of every netbanking page and is not an OTP prompt),
+        plus text captchas that never say "captcha" ("Type the characters shown in the image")."""
+        if snap is None or not snap.ok:
+            return super().detect(snap)
+        snap = _without_notices(snap)
+        det = super().detect(snap)
+        if det is not None:
+            return det
+        text = " ".join(t for t, _k in read_web(snap).lines) + " " + (snap.window_title or "")
+        m = TEXT_CAPTCHA_RE.search(text)
+        return CK.Detection("captcha", m.group(0)) if m else None
 
     def cleared(self, snap) -> bool:
         ok = super().cleared(snap) and bool(snap.web_paths) and bool((snap.node(snap.web_paths[0]) or {}).get("children"))
@@ -540,7 +581,7 @@ class LiveRunner:
         waiting = self.wait_for_human
         notify = (self.notify or (lambda t, m: CK.mac_notify(t, m, vm_check=self.vm_check))) if waiting \
             else (lambda t, m: None)
-        cp = StableCheckpoint(psrc, notify=notify, digest=log, poll_s=self.poll_s,
+        cp = StableCheckpoint(psrc, notify=notify, digest=None, poll_s=self.poll_s,
                               timeout_s=self.human_timeout_s if waiting else 0.0, clock=rt, log=log)
         pa = CK.PackActor(actor, psrc, checkpoint=cp, pacer=CK.Pacer(*self.pace, clock=rt))
         home = Path(self.home or tempfile.mkdtemp(prefix="awos_pack_run_"))
@@ -619,7 +660,9 @@ class LiveRunner:
         except CheckpointStop as cs:
             keep = True                                          # the owner works in this window
             detail["checkpoint"] = {"kind": cs.kind, "host": cs.host}
-            return self._needs(source, period, cs.kind, cs.notice, cs.host, cs.waited_s)
+            res = self._needs(source, period, cs.kind, cs.notice, cs.host, cs.waited_s)
+            res.detail = detail
+            return res
         finally:
             detail["checkpoint_events"] = list(env.checkpoint.events)
             detail["interruptions"] = list(env.actor.interruptions)
