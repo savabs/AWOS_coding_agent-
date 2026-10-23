@@ -137,7 +137,11 @@ jobs:
           for d in runs/rl/oracle_*_train; do [ -d "$d" ] && ARGS+=(--input "$(basename "$d")=$d:$OW"); done
           for id in $RUNS; do ARGS+=(--input "model-$id=artifacts/collect-$id"); done
           [ ${#ARGS[@]} -gt 0 ] || { echo "::error::no inputs"; exit 1; }
-          python -m scaffold.rl.train.dataset "${ARGS[@]}" --out sft --val-frac 0.1 --max-per-task "$CAP" | tee -a "$GITHUB_STEP_SUMMARY"
+          # optional BOOST_TASKS (ci/rl_train.env): repeat train examples of listed task ids BOOST_FACTOR times
+          eval "$(grep -E '^(BOOST_TASKS|BOOST_FACTOR)=' ci/rl_train.env || true)"
+          BOOST=(); [ -n "${BOOST_TASKS:-}" ] && BOOST=(--boost-tasks "$BOOST_TASKS" --boost-factor "${BOOST_FACTOR:-3}")
+          python -m scaffold.rl.train.dataset "${ARGS[@]}" --out sft --val-frac 0.1 --max-per-task "$CAP" \
+            ${BOOST[@]+"${BOOST[@]}"} | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Stage the Kaggle dataset + kernel
         env:

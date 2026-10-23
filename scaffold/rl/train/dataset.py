@@ -175,10 +175,14 @@ def task_is_val(task_id: str, frac: float, seed: int) -> bool:
 # ------------------------------------------------------------------- build --
 
 def build(sources: List[Source], *, val_frac: float = 0.1, seed: int = 0, max_per_task: int = 0,
-          max_examples: int = 0) -> Tuple[List[Example], List[Example], Dict[str, Any]]:
-    """-> (train, valid, stats)."""
+          max_examples: int = 0, boost_tasks: Optional[set] = None,
+          boost_factor: int = 1) -> Tuple[List[Example], List[Example], Dict[str, Any]]:
+    """-> (train, valid, stats). ``boost_tasks``: train examples of these task ids are written
+    ``boost_factor`` times (e.g. tasks the small model gave up on or looped on)."""
     rng = random.Random(seed)
-    stats: Dict[str, Any] = {"sources": {}, "val_frac": val_frac, "seed": seed, "max_per_task": max_per_task}
+    boost_tasks = boost_tasks or set()
+    stats: Dict[str, Any] = {"sources": {}, "val_frac": val_frac, "seed": seed, "max_per_task": max_per_task,
+                             "boost_tasks": len(boost_tasks), "boost_factor": boost_factor}
     seen: set = set()
     train: List[Example] = []
     valid: List[Example] = []
@@ -224,6 +228,8 @@ def build(sources: List[Source], *, val_frac: float = 0.1, seed: int = 0, max_pe
                         "sample": int(rec.get("sample", 0)), "step": int(s.get("i", 0)),
                         "model": rec["trajectory"].get("model"), "action": s.get("action", "")})
                     copies = 1 if is_val else int(src.weight) + (1 if rng.random() < src.weight % 1 else 0)
+                    if not is_val and task["id"] in boost_tasks:
+                        copies *= max(1, boost_factor)
                     for _ in range(copies):
                         (valid if is_val else train).append(ex)
                         if not is_val:
@@ -273,11 +279,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--max-per-task", type=int, default=0, help="cap kept episodes per (source, task); 0 = no cap")
     ap.add_argument("--max-examples", type=int, default=0, help="cap train examples after shuffling (smoke runs)")
+    ap.add_argument("--boost-tasks", type=Path, default=None,
+                    help="file of task ids (one per line, # comments) whose train examples are repeated")
+    ap.add_argument("--boost-factor", type=int, default=3)
     a = ap.parse_args(argv)
     sources = [parse_input(s) for s in a.input]
+    boost = set()
+    if a.boost_tasks:
+        boost = {ln.strip() for ln in a.boost_tasks.read_text().splitlines() if ln.strip() and not ln.startswith("#")}
     try:
         train, valid, stats = build(sources, val_frac=a.val_frac, seed=a.seed, max_per_task=a.max_per_task,
-                                    max_examples=a.max_examples)
+                                    max_examples=a.max_examples, boost_tasks=boost, boost_factor=a.boost_factor)
     except EvalSplitError as e:
         print(f"REFUSING: {e}", file=sys.stderr)
         return 2
