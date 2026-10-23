@@ -80,6 +80,33 @@ def test_supervisor_passes_a_clean_exit(tmp_path):
     assert not (tmp_path / "adapter").exists()
 
 
+def test_mem_info_and_ram_line(tmp_path):
+    f = tmp_path / "meminfo"
+    f.write_text("MemTotal:       32879092 kB\nMemFree:  1 kB\nMemAvailable:    9437184 kB\n")
+    m = T.mem_info(str(f))
+    assert m == {"avail_gb": 9.0, "total_gb": 31.36}
+    assert T.mem_info(str(tmp_path / "missing")) == {}
+    line = T.ram_line({**m, "procs": [{"pid": 1, "rss_gb": 10.2}, {"pid": 2, "rss_gb": 10.4}]})
+    assert line == "RAM free 9.0/31 GB (ranks 10.2+10.4)"
+    p = {"step": 5, "total": 10, "pct": 50, "ram": {**m, "procs": []}}
+    assert T.progress_line(p).endswith("RAM free 9.0/31 GB")
+
+
+def test_supervisor_low_ram_asks_for_a_clean_stop(tmp_path):
+    """Below ram_low_gb the supervisor writes STOP_LOCAL (the ranks stop + save at the next check) and
+    logs RAM; it only kills if RAM stays critical after the grace period."""
+    import json
+    import sys
+    seq = iter([{"avail_gb": 8.0, "total_gb": 31.0}] + [{"avail_gb": 1.0, "total_gb": 31.0}] * 100)
+    cfg = {**T.DEFAULTS, "ntfy_topic": "", "watch_poll_s": 0.1, "ram_grace_s": 0.3, "hang_minutes": 99,
+           "stack_dump_wait_s": 0.1, "_mem_fn": lambda: dict(next(seq))}
+    rc = T.supervise([sys.executable, "-c", "import time; time.sleep(30)"], tmp_path, cfg)
+    assert (tmp_path / "STOP_LOCAL").read_text().startswith("low RAM: 1.0 GB")
+    rows = [json.loads(x) for x in (tmp_path / "ram.jsonl").read_text().splitlines()]
+    assert rows[0]["avail_gb"] == 8.0 and rows[-1]["avail_gb"] == 1.0
+    assert rc != 0 or (tmp_path / "adapter").exists()          # killed after grace (no checkpoint here)
+
+
 def test_defaults_are_one_epoch_with_stop_switch():
     assert T.DEFAULTS["epochs"] == 1.0
     assert T.DEFAULTS["stop_url"].endswith("/rl-control/kaggle/STOP")

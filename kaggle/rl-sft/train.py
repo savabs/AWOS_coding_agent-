@@ -78,6 +78,9 @@ DEFAULTS = {
     # save_steps 50: a LoRA checkpoint is small, and a hang/crash then loses at most ~25 min (recover_adapter)
     "gradient_checkpointing": True, "seed": 0, "logging_steps": 10, "eval_steps": 200, "save_steps": 50,
     "hang_minutes": 25, "startup_grace_min": 45,
+    # host RAM (2026-10-23: a rank was OOM-killed at step ~158 twice): stop + save below ram_low_gb free,
+    # kill + recover if still below ram_critical_gb ram_grace_s later; hygiene every mem_gc_steps
+    "ram_low_gb": 3.0, "ram_critical_gb": 1.2, "ram_grace_s": 360, "mem_gc_steps": 25, "malloc_arena_max": 2,
     "eval_rows": 200, "preflight_rows": 16, "template_check_rows": 32,
     "gdn_impl": "torch",          # "torch" (blocks fla) | "auto" (use fla if installed)
     "dtype": "auto",              # auto: bf16 if supported, else fp16 on CUDA, fp32 on CPU | fp16 | bf16 | fp32
@@ -269,6 +272,8 @@ def progress_line(p: dict) -> str:
     if g:
         bits.append("GPU " + " ".join(f"{x['util']}%" for x in g)
                     + f" {max(x['mem_used'] for x in g) / 1024:.1f}/{g[0]['mem_total'] / 1024:.1f} GB")
+    if ram_line(p.get("ram") or {}):
+        bits.append(ram_line(p["ram"]))
     return " | ".join(bits)
 
 
@@ -307,6 +312,52 @@ def gpu_sample() -> list:
         except ValueError:
             pass
     return rows
+
+
+def mem_info(path: str = "/proc/meminfo") -> dict:
+    """Machine RAM (GB) from /proc/meminfo: {"avail_gb", "total_gb"}; {} where unavailable (not Linux)."""
+    try:
+        kv = {}
+        for ln in Path(path).read_text().splitlines():
+            k, _, v = ln.partition(":")
+            kv[k.strip()] = int(v.split()[0]) / 1024 / 1024          # kB -> GB
+        return {"avail_gb": round(kv["MemAvailable"], 2), "total_gb": round(kv["MemTotal"], 2)}
+    except (OSError, KeyError, ValueError, IndexError):
+        return {}
+
+
+def group_rss_gb(pgid: int, proc: str = "/proc") -> list:
+    """Resident memory (GB) of every process in a process group: [{"pid", "rss_gb"}] (the training ranks)."""
+    rows = []
+    for d in Path(proc).glob("[0-9]*"):
+        try:
+            stat = (d / "stat").read_text()
+            fields = stat[stat.rindex(")") + 2:].split()          # after "(comm) "
+            if int(fields[2]) != pgid:                             # field 5 of stat = pgrp
+                continue
+            rss = next(ln for ln in (d / "status").read_text().splitlines() if ln.startswith("VmRSS:"))
+            gb = int(rss.split()[1]) / 1024 / 1024
+            if gb > 0.5:                                           # skip shells / small helpers
+                rows.append({"pid": int(d.name), "rss_gb": round(gb, 2)})
+        except (OSError, ValueError, StopIteration, IndexError):
+            continue
+    return sorted(rows, key=lambda r: -r["rss_gb"])
+
+
+def ram_line(r: dict) -> str:
+    if not r.get("total_gb"):
+        return ""
+    procs = "+".join(f"{x['rss_gb']:.1f}" for x in (r.get("procs") or [])[:3])
+    return f"RAM free {r['avail_gb']:.1f}/{r['total_gb']:.0f} GB" + (f" (ranks {procs})" if procs else "")
+
+
+def malloc_trim() -> None:
+    """Return freed heap pages to the OS (glibc): counters the slow RSS growth from fragmentation."""
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
 
 
 def latest_checkpoint(out: Path):
@@ -358,13 +409,38 @@ def supervise(cmd: list, out: Path, cfg: dict) -> int:
     import signal
     t0 = time.time()
     prog = out / "progress.json"
-    p = subprocess.Popen(cmd, start_new_session=True)
+    env = dict(os.environ)
+    # glibc malloc arenas fragment with multi-threaded torch: the 2026-10-23 runs grew host RAM until the OS
+    # killed a rank at step ~158-168. Fewer arenas + periodic malloc_trim (MemHygiene) keep RSS flat.
+    env.setdefault("MALLOC_ARENA_MAX", str(cfg.get("malloc_arena_max", 2)))
+    p = subprocess.Popen(cmd, start_new_session=True, env=env)
     reason = None
+    low_since = None
+    stop_file = out / "STOP_LOCAL"
     while p.poll() is None:
         time.sleep(cfg.get("watch_poll_s", 30))
         now = time.time()
+        # RAM watch: log machine + per-rank memory; ask the ranks to stop and save before the OS kills one
+        mem = cfg.get("_mem_fn", mem_info)()
+        if mem:
+            mem["procs"] = group_rss_gb(p.pid)
+            mem["t"] = round(now - _START, 1)
+            with (out / "ram.jsonl").open("a") as fh:
+                fh.write(json.dumps(mem) + "\n")
+            (out / "ram.json").write_text(json.dumps(mem) + "\n")
+            if mem["avail_gb"] < cfg["ram_low_gb"] and not stop_file.exists():
+                stop_file.write_text(f"low RAM: {mem['avail_gb']:.1f} GB free\n")
+                low_since = now
+                log(f"watchdog: {ram_line(mem)} < {cfg['ram_low_gb']} GB: asking the run to stop and save")
+                ntfy(cfg, f"{ram_line(mem)}: stopping cleanly and saving before memory runs out",
+                     title="AWOS training low RAM", priority="high", tags="warning")
+            if (low_since and mem["avail_gb"] < cfg["ram_critical_gb"]
+                    and now - low_since > cfg.get("ram_grace_s", 360)):
+                reason = f"RAM still critical ({mem['avail_gb']:.1f} GB free) after the stop request"
         last = prog.stat().st_mtime if prog.exists() else t0
-        if now - _START > cfg["max_hours"] * 3600 + 900:          # the in-process stop had 15 min to act
+        if reason:
+            pass
+        elif now - _START > cfg["max_hours"] * 3600 + 900:        # the in-process stop had 15 min to act
             reason = f"max_hours {cfg['max_hours']} passed"
         elif now - t0 > cfg["startup_grace_min"] * 60 and now - last > cfg["hang_minutes"] * 60:
             reason = f"no progress for {(now - last) / 60:.0f} min"
@@ -693,16 +769,28 @@ def main(argv=None) -> int:
                 return control
             why = 0
             if main_proc:
-                why = 1 if time.time() > deadline else 2 if remote_stop() else 0
+                why = (1 if time.time() > deadline else 3 if (out / "STOP_LOCAL").exists()
+                       else 2 if remote_stop() else 0)
             if world > 1 and torch.distributed.is_initialized():
                 t = torch.tensor([why], device=dev)
                 torch.distributed.broadcast(t, src=0)
                 why = int(t.item())
             if why:
-                stop_reason["why"] = "max_hours" if why == 1 else "remote_stop"
+                stop_reason["why"] = {1: "max_hours", 2: "remote_stop", 3: "low_ram"}[why]
                 if main_proc:
                     log(f"{stop_reason['why']} at step {state.global_step}: stopping and saving")
                 control.should_training_stop = True
+            return control
+
+    class MemHygiene(TrainerCallback):
+        """Every mem_gc_steps: collect garbage, drop cached CUDA blocks, return freed heap to the OS."""
+        def on_step_end(self, args, state, control, **kw):
+            if cfg.get("mem_gc_steps") and state.global_step % cfg["mem_gc_steps"] == 0:
+                import gc
+                gc.collect()
+                if cuda:
+                    torch.cuda.empty_cache()
+                malloc_trim()
             return control
 
     gpu_last: list = []
@@ -792,6 +880,10 @@ def main(argv=None) -> int:
                  "s_per_step": round(sps, 2) if sps else None,
                  "eta_s": round(sps * (total - step)) if sps else None,
                  "gpu": list(gpu_last), **self.last_eval}
+            try:                                     # the supervisor's latest RAM sample (both ranks)
+                p["ram"] = json.loads((out / "ram.json").read_text())
+            except (OSError, ValueError):
+                pass
             if dpo_mode and kind == "train":
                 p.update({k: logs.get(k) for k in ("dpo_loss", "sft_loss", "reward_margin", "pref_acc",
                                                    "policy_pref")})
@@ -807,7 +899,7 @@ def main(argv=None) -> int:
     trainer = (DPOTrainer if dpo_mode else SFTTrainer)(
         model=model, args=targs, train_dataset=SeqDataset(train_ex),
         eval_dataset=SeqDataset(valid_ex) if valid_ex and not dpo_mode else None,
-        data_collator=collate_pair if dpo_mode else collate, callbacks=[StopControl(), Progress()])
+        data_collator=collate_pair if dpo_mode else collate, callbacks=[StopControl(), MemHygiene(), Progress()])
     t1 = time.time()
     res = trainer.train()
     train_s = time.time() - t1
