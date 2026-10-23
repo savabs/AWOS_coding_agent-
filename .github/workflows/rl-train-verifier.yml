@@ -1,0 +1,132 @@
+# G5 "verifier" (docs/research/rl_cua_2026-10-22/VERIFIER.md): LoRA-SFT Qwen3.5-4B to judge, from the final
+# page, whether a chore truly succeeded (VERIFIED / NOT_DONE / UNSAFE).
+#   train-split episodes of rl-eval runs -> scaffold.rl.train.verifier_data train -> train.jsonl / valid.jsonl
+#   baseline exam run (ood / holdout)    -> scaffold.rl.train.verifier_data exam  -> eval.jsonl (never trained on)
+#   trivial baselines on eval.jsonl (scripts/rl/eval_verifier.py, no model) -> step summary
+#   -> artifact rl-verifier-data -> (push) Kaggle dataset + kernel awos-rl-sft-g5-verifier (GPU T4 x2)
+# Afterwards: rl-export.yml mode=export kernel=<user>/awos-rl-sft-g5-verifier, then eval_verifier.py --server.
+#
+#   git push origin HEAD:bench-cloud/rl-train-verifier-g5          (settings: ci/rl_train_verifier.env)
+#   gh workflow run rl-train-verifier.yml --ref <branch> -f push=false
+name: rl-train-verifier
+
+on:
+  push:
+    branches: ["bench-cloud/rl-train-verifier-**"]
+  workflow_dispatch:
+    inputs:
+      push:
+        description: "Upload to Kaggle and start the training kernel (needs KAGGLE_* secrets)"
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  data:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Settings (ci/rl_train_verifier.env)
+        id: cfg
+        shell: bash
+        env:
+          I_PUSH: ${{ inputs.push }}
+        run: |
+          set -euo pipefail
+          source ci/rl_train_verifier.env
+          if [ "$GITHUB_EVENT_NAME" != "push" ]; then PUSH="$I_PUSH"; fi
+          {
+            echo "train_runs=$TRAIN_RUNS"; echo "exam_run=$EXAM_RUN"; echo "max_train=${MAX_TRAIN:-2600}"
+            echo "size=${SIZE:-4B}"; echo "config=${CONFIG:-}"; echo "push=${PUSH:-false}"
+            echo "kernel_slug=$KERNEL_SLUG"; echo "dataset_slug=$DATASET_SLUG"
+          } | tee -a "$GITHUB_OUTPUT"
+
+      - name: Tests (verifier data)
+        run: |
+          pip install -q pytest==8.4.2 jinja2==3.1.6
+          PYTHONPATH=. python -m pytest -q tests/rl/test_verifier_data.py
+
+      - name: Download artifacts (train splits of the collection runs, ood/holdout of the exam run)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNS: ${{ steps.cfg.outputs.train_runs }}
+          EXAM: ${{ steps.cfg.outputs.exam_run }}
+        run: |
+          set -euo pipefail
+          for id in $RUNS; do
+            gh run download "$id" --repo "$GITHUB_REPOSITORY" --pattern 'rl-*-train-*' --dir "artifacts/collect-$id"
+          done
+          gh run download "$EXAM" --repo "$GITHUB_REPOSITORY" --pattern 'rl-*-ood-*' --pattern 'rl-*-holdout-*' \
+            --dir "artifacts/exam-$EXAM"
+          find artifacts -name trajectories.jsonl | wc -l
+
+      - name: Build train / valid (train splits only; eval splits abort) and the exam file
+        env:
+          RUNS: ${{ steps.cfg.outputs.train_runs }}
+          EXAM: ${{ steps.cfg.outputs.exam_run }}
+          MAXT: ${{ steps.cfg.outputs.max_train }}
+        run: |
+          set -euo pipefail
+          ARGS=(); for id in $RUNS; do ARGS+=(--input "run-$id=artifacts/collect-$id"); done
+          { echo '### G5 verifier data'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          python -m scaffold.rl.train.verifier_data train "${ARGS[@]}" --out verifier --max-train "$MAXT" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          python -m scaffold.rl.train.verifier_data exam --input "exam-$EXAM=artifacts/exam-$EXAM" --out verifier \
+            --train-stats verifier/stats.json | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Trivial baselines on the exam file (what the model must beat)
+        run: |
+          set -euo pipefail
+          { echo '### Trivial baselines (eval.jsonl)'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          python scripts/rl/eval_verifier.py --rows verifier/eval.jsonl --out verifier/baselines.json \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stage the Kaggle dataset + kernel
+        env:
+          SIZE: ${{ steps.cfg.outputs.size }}
+          CFG: ${{ steps.cfg.outputs.config }}
+          KSLUG: ${{ steps.cfg.outputs.kernel_slug }}
+          DSLUG: ${{ steps.cfg.outputs.dataset_slug }}
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+        run: |
+          set -euo pipefail
+          SETS=(); for kv in $CFG; do SETS+=(--set "$kv"); done
+          # stage copies train.jsonl / valid.jsonl only (eval.jsonl stays in the GitHub artifact)
+          python -m scaffold.rl.train.kaggle_driver stage --data verifier --out stage --size "$SIZE" \
+            --kernel-slug "$KSLUG" --dataset-slug "$DSLUG" \
+            --user "${KAGGLE_USERNAME:-KAGGLE_USER}" ${SETS[@]+"${SETS[@]}"}
+          test ! -e stage/dataset/eval.jsonl
+          python -m scaffold.rl.train.kaggle_driver push --stage stage --dry-run
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rl-verifier-data
+          path: |
+            verifier/
+            stage/
+          retention-days: 30
+
+      - name: Push to Kaggle and start training
+        if: steps.cfg.outputs.push == 'true'
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KAGGLE_USERNAME" ]; then echo "::error::KAGGLE_USERNAME secret not set"; exit 1; fi
+          pip install -q kaggle==2.2.4
+          python -m scaffold.rl.train.kaggle_driver push --stage stage --message "G5 verifier run $GITHUB_RUN_ID"
+          echo "Kernel started: https://www.kaggle.com/code/$KAGGLE_USERNAME/${{ steps.cfg.outputs.kernel_slug }}" >> "$GITHUB_STEP_SUMMARY"
