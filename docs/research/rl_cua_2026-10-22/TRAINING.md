@@ -269,3 +269,14 @@ Notes from the abandoned MLX attempt (mlx 0.32.4, mlx-lm 0.32.2):
   to NaN on real activations; a blocked forward substitution was correct.
 - mlx-lm's own `fuse` must not feed `convert_hf_to_gguf`. It saves the mlx layout: RMSNorm weights
   +1, conv1d transposed, no MTP.
+
+## Kaggle trial results (2026-10-22/23)
+
+- **Trial 1** (rl-train-data run 39864341520): 2x Tesla T4, torch 2.11.0+cu128, transformers 5.19.0, peft 0.21.2;
+  Qwen3.5-4B loaded, fp16 preflight completion loss 0.70 (finite), GDN on the torch reference path
+  (fla / causal_conv1d not installed). Failed in `get_peft_model`: peft's torchao dispatcher rejected Kaggle's
+  torchao -> fix c35a752 uninstalls torchao.
+- **Trial 2** (run 39872285593, watched by kaggle-watch 39874569044): **30 steps OK**. Oracle demos only
+  (1,419 train / 183 valid rows, ~1.1k tokens each). 42.0 s/step (2 GPUs x grad_accum 8 = 16 rows/step),
+  peak 11.2 GB/GPU, train loss 0.70 -> 0.087, eval loss 0.119 at epoch 0.34. Kernel wall time ~16 min.
+  => ~89 steps (~62 min) per epoch of this set; the 12 h kernel cap fits roughly 10x this data per epoch.
