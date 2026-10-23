@@ -13,6 +13,12 @@ Self-contained on purpose (Kaggle pushes one code file). Inputs, produced by
                                 ending "<|im_start|>assistant\\n<think>\\n\\n</think>\\n\\n") and
                                 "completion" (reply + "<|im_end|>"), plus "messages"
     train_config.json           hyper-parameters (see DEFAULTS)
+objective=dpo (goal G4, data from `python -m scaffold.rl.train.pairs`): rows also carry "chosen" / "rejected"
+(the prompt is checked against the template the same way; "completion" == chosen). Loss per pair =
+sft_weight * CE(chosen) - logsigmoid(beta * ((pi_c - ref_c) - (pi_r - ref_r))), logps summed over completion
+tokens, reference = the same model with the LoRA adapter disabled (no grad). progress.jsonl adds dpo_loss,
+sft_loss, reward_margin, pref_acc; evals (rank 0, every eval_steps) add eval_pref_acc / eval_margin on held-out
+pairs. DPO_DEFAULTS size the run for ~3 h on T4 x2.
 Outputs (in --out, /kaggle/working on Kaggle -> `kaggle kernels output`):
     adapter/                    PEFT LoRA adapter (adapter_model.safetensors + adapter_config.json)
     metrics.json                versions, GPUs, preflight + final losses, step timings, data stats
@@ -83,6 +89,21 @@ DEFAULTS = {
     "gpu_sample_s": 30,
     "ntfy_topic": "awos-rl-be26ddc76649",   # live progress: https://ntfy.sh/awos-rl-be26ddc76649 ("" = off)
     "run_name": "",                         # label on every ping when several runs share the topic
+    # "sft": completion CE on prompt -> completion rows (Stage A). "dpo": preference pairs (goal G4):
+    # sft_weight * CE(chosen) - logsigmoid(beta * ((pi_c - ref_c) - (pi_r - ref_r))), logps summed over
+    # completion tokens, reference = the same model with the LoRA adapter disabled.
+    "objective": "sft",
+    "beta": 0.1, "sft_weight": 1.0,
+}
+#: defaults that change with objective=dpo (train_config.json still wins). Sized for ~3 h on T4 x2: a pair
+#: costs 2 policy forward+backward + 2 no-grad reference forwards (~11 s per pair per GPU at ~1.1k-token
+#: prompts, from SFT's ~4.4 s per sequence), so 4 pairs/GPU/step ~45 s: 1.3k train pairs ~2 h, plus ~15 min
+#: of evals and ~15 min of start-up. max_hours stops (and saves) a slower run in time.
+DPO_DEFAULTS = {
+    "learning_rate": 2e-5, "warmup_ratio": 0.1, "epochs": 1.0, "grad_accum": 4,
+    "logging_steps": 5, "eval_steps": 40, "save_steps": 20, "max_hours": 3.0,
+    "eval_rows": 32,              # valid pairs scored at each eval (pref_acc, margin): 4 no-grad forwards each
+    "eval_gen_rows": 16,          # greedy action accuracy against the chosen reply (rank 0)
 }
 
 
@@ -155,6 +176,33 @@ def encode(tok, rows: list, max_len: int) -> tuple:
     return out, dropped
 
 
+def encode_pairs(tok, rows: list, max_len: int) -> tuple:
+    """Preference rows -> {"input_ids": prompt+chosen, "prompt_len", "completion", "rej_ids": prompt+rejected}.
+    The chosen side keeps the SFT field names, so the SFT loss, preflight and action accuracy reuse it."""
+    out, dropped = [], 0
+    for r in rows:
+        p = tok.encode(r["prompt"], add_special_tokens=False)
+        c = tok.encode(r["chosen"], add_special_tokens=False)
+        j = tok.encode(r["rejected"], add_special_tokens=False)
+        if len(p) + max(len(c), len(j)) > max_len:
+            dropped += 1
+            continue
+        out.append({"input_ids": p + c, "prompt_len": len(p), "completion": r["chosen"], "rej_ids": p + j,
+                    "safety": bool((r.get("meta") or {}).get("safety"))})
+    return out, dropped
+
+
+def check_pair_rows(rows: list) -> None:
+    for i, r in enumerate(rows):
+        for k in ("prompt", "chosen", "rejected", "messages"):
+            if not r.get(k):
+                raise SystemExit(f"objective=dpo: row {i} has no {k!r} (build the data with scaffold.rl.train.pairs)")
+        if not (r["chosen"].endswith("<|im_end|>") and r["rejected"].endswith("<|im_end|>")):
+            raise SystemExit(f"objective=dpo: row {i}: chosen/rejected must end with <|im_end|>")
+        if r["chosen"] == r["rejected"]:
+            raise SystemExit(f"objective=dpo: row {i}: chosen == rejected")
+
+
 def stats(ex: list) -> dict:
     if not ex:
         return {}
@@ -203,6 +251,12 @@ def fmt_dur(s: float) -> str:
 def progress_line(p: dict) -> str:
     bits = [f"step {p['step']}/{p['total']} {p['pct']:.0f}%"]
     for k, f in (("loss", "loss {:.3f}"), ("eval_loss", "eval {:.3f}")):
+        if p.get(k) is not None:
+            bits.append(f.format(p[k]))
+    # objective=dpo only (SFT rows carry none of these keys, so the SFT line is unchanged)
+    for k, f in (("dpo_loss", "dpo {:.3f}"), ("sft_loss", "sft {:.3f}"), ("pref_acc", "pref {:.0%}"),
+                 ("reward_margin", "margin {:+.2f}"), ("eval_pref_acc", "eval pref {:.0%}"),
+                 ("eval_margin", "eval margin {:+.2f}")):
         if p.get(k) is not None:
             bits.append(f.format(p[k]))
     if p.get("action_acc") is not None:
@@ -351,6 +405,44 @@ def completion_loss(model, input_ids, prompt_len):
     return F.cross_entropy(logits.reshape(-1, logits.shape[-1]), targets.reshape(-1))
 
 
+def completion_logps(model, input_ids, prompt_len):
+    """(SUM of log p over the completion tokens of ONE sequence, number of completion tokens), with the
+    same logits_to_keep trick as completion_loss (fp32 log-softmax over the kept positions only)."""
+    import torch.nn.functional as F
+    T = input_ids.shape[1]
+    keep = T - prompt_len + 1
+    out = model(input_ids=input_ids, logits_to_keep=keep, use_cache=False)
+    logits = out.logits[:, :-1].float()
+    targets = input_ids[:, prompt_len:]
+    lp = -F.cross_entropy(logits.reshape(-1, logits.shape[-1]), targets.reshape(-1), reduction="sum")
+    return lp, targets.numel()
+
+
+def dpo_terms(pi_c, pi_r, ref_c, ref_r, beta: float):
+    """-> (DPO loss, z) with z = beta * ((pi_c - ref_c) - (pi_r - ref_r)) the implicit reward margin."""
+    import torch.nn.functional as F
+    z = beta * ((pi_c - ref_c) - (pi_r - ref_r))
+    return -F.logsigmoid(z), z
+
+
+def dpo_pair_loss(model, ref_model, chosen_ids, rejected_ids, prompt_len, beta: float, sft_weight: float):
+    """Loss of ONE preference pair: sft_weight * mean CE(chosen) + DPO. `model` gets the gradient (the DDP
+    wrapper on multi-GPU); `ref_model` is the bare PeftModel, run with its adapter disabled and no grad,
+    BEFORE the policy forwards (no autograd graph is alive during it). Returns (loss, float metrics)."""
+    import torch
+    with torch.no_grad(), ref_model.disable_adapter():
+        ref_c, _ = completion_logps(ref_model, chosen_ids, prompt_len)
+        ref_r, _ = completion_logps(ref_model, rejected_ids, prompt_len)
+    pi_c, n_c = completion_logps(model, chosen_ids, prompt_len)
+    pi_r, _ = completion_logps(model, rejected_ids, prompt_len)
+    sft = -pi_c / max(1, n_c)
+    dpo, z = dpo_terms(pi_c, pi_r, ref_c.detach(), ref_r.detach(), beta)
+    loss = dpo + sft_weight * sft if sft_weight else dpo
+    zf = float(z.detach())
+    return loss, {"dpo_loss": float(dpo.detach()), "sft_loss": float(sft.detach()), "reward_margin": zf,
+                  "pref_acc": float(zf > 0), "policy_pref": float(float(pi_c.detach()) > float(pi_r.detach()))}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None, help="train_config.json (default: found under /kaggle/input)")
@@ -361,7 +453,11 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
 
     cfg_path = Path(a.config) if a.config else find_input("train_config.json", None) / "train_config.json"
-    cfg = {**DEFAULTS, **json.loads(cfg_path.read_text())}
+    file_cfg = json.loads(cfg_path.read_text())
+    cfg = {**DEFAULTS, **(DPO_DEFAULTS if file_cfg.get("objective") == "dpo" else {}), **file_cfg}
+    if cfg["objective"] not in ("sft", "dpo"):
+        raise SystemExit(f"objective must be 'sft' or 'dpo', got {cfg['objective']!r}")
+    dpo_mode = cfg["objective"] == "dpo"
     if a.base_model:
         cfg["base_model"], cfg["base_revision"] = a.base_model, None
     if a.max_steps is not None:
@@ -417,13 +513,21 @@ def main(argv=None) -> int:
 
     tok = AutoTokenizer.from_pretrained(cfg["base_model"], revision=cfg["base_revision"])
     train_rows, valid_rows = read_rows(data / "train.jsonl"), read_rows(data / "valid.jsonl")
+    if dpo_mode:
+        check_pair_rows(train_rows + valid_rows)
     n_checked = check_template(tok, train_rows + valid_rows, cfg["template_check_rows"], cfg["seed"])
-    train_ex, d1 = encode(tok, train_rows, cfg["max_seq_len"])
-    valid_ex, d2 = encode(tok, valid_rows, cfg["max_seq_len"])
+    enc = encode_pairs if dpo_mode else encode
+    train_ex, d1 = enc(tok, train_rows, cfg["max_seq_len"])
+    valid_ex, d2 = enc(tok, valid_rows, cfg["max_seq_len"])
     random.Random(cfg["seed"]).shuffle(valid_ex)
     valid_ex = valid_ex[: cfg["eval_rows"]]
     data_stats = {"train": stats(train_ex), "valid": stats(valid_ex), "dropped_too_long": d1 + d2,
                   "template_checked": n_checked}
+    if dpo_mode:
+        data_stats.update({"objective": "dpo", "train_pairs": len(train_ex), "valid_pairs": len(valid_ex),
+                           "train_safety_pairs": sum(e["safety"] for e in train_ex),
+                           "rejected_completion_mean": round(sum(len(e["rej_ids"]) - e["prompt_len"]
+                                                                 for e in train_ex) / max(1, len(train_ex)), 2)})
     if main_proc:
         log("data", json.dumps(data_stats))
 
@@ -467,6 +571,40 @@ def main(argv=None) -> int:
     if not any("linear_attn" in t for t in targets):
         raise SystemExit("no GatedDeltaNet projections matched target_regex")
 
+    def dpo_eval(m, rows) -> dict:
+        """Preference metrics on held-out pairs: pref_acc = fraction where the implicit reward prefers the
+        chosen reply ((pi_c - ref_c) > (pi_r - ref_r)), the mean beta-scaled margin, the DPO loss, and
+        eval_loss = CE on the chosen completion (same number as SFT's eval loss)."""
+        if not rows:
+            return {}
+        was_training = m.training
+        m.eval()
+        sums: dict = {}
+        try:
+            with torch.no_grad(), torch.autocast(dev.type, dtype=dtype, enabled=cuda and dtype != torch.float32):
+                for e in rows:
+                    c = torch.tensor([e["input_ids"]], device=dev)
+                    r = torch.tensor([e["rej_ids"]], device=dev)
+                    _, mt = dpo_pair_loss(m, m, c, r, e["prompt_len"], cfg["beta"], cfg["sft_weight"])
+                    for k, v in mt.items():
+                        sums[k] = sums.get(k, 0.0) + v
+        finally:
+            m.train(was_training)
+        n = len(rows)
+        return {"eval_pref_acc": round(sums["pref_acc"] / n, 4), "eval_margin": round(sums["reward_margin"] / n, 4),
+                "eval_dpo_loss": round(sums["dpo_loss"] / n, 4), "eval_loss": round(sums["sft_loss"] / n, 4),
+                "eval_policy_pref": round(sums["policy_pref"] / n, 4), "eval_pairs": n}
+
+    if dpo_mode:
+        # LoRA B starts at 0: the policy IS the reference, so the margin must be ~0 and the DPO loss log 2.
+        # A real margin here means disable_adapter() is not giving the base model: abort before training.
+        chk = dpo_eval(model, (valid_ex or train_ex)[:2])
+        if main_proc:
+            log(f"dpo preflight: margin {chk['eval_margin']:+.5f} (want 0), dpo loss {chk['eval_dpo_loss']:.4f} "
+                f"(want {math.log(2):.4f}), policy prefers chosen on {chk['eval_policy_pref']:.0%}")
+        if not math.isfinite(chk["eval_dpo_loss"]) or abs(chk["eval_margin"]) > 0.05:
+            raise SystemExit(f"dpo preflight failed: {chk}")
+
     class SeqDataset(torch.utils.data.Dataset):
         def __init__(self, ex):
             self.ex = ex
@@ -480,6 +618,35 @@ def main(argv=None) -> int:
     def collate(batch):
         (e,) = batch
         return {"input_ids": torch.tensor([e["input_ids"]]), "prompt_len": e["prompt_len"]}
+
+    def collate_pair(batch):
+        (e,) = batch
+        return {"input_ids": torch.tensor([e["input_ids"]]), "rej_ids": torch.tensor([e["rej_ids"]]),
+                "prompt_len": e["prompt_len"]}
+
+    class DPOTrainer(Trainer):
+        """One preference pair per device per micro-step; the window means of the DPO metrics are added to
+        every logged "loss" (rank 0's own pairs)."""
+        _acc: dict = {}
+
+        def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+            ref = self.accelerator.unwrap_model(model)
+            loss, mt = dpo_pair_loss(model, ref, inputs["input_ids"], inputs["rej_ids"], inputs["prompt_len"],
+                                     cfg["beta"], cfg["sft_weight"])
+            for k, v in mt.items():
+                self._acc.setdefault(k, []).append(v)
+            return (loss, None) if return_outputs else loss
+
+        def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
+            with torch.no_grad():
+                loss = completion_loss(model, inputs["input_ids"].to(model.device), inputs["prompt_len"])
+            return loss.detach(), None, None
+
+        def log(self, logs, *args, **kwargs):
+            if "loss" in logs and self._acc:
+                logs = {**logs, **{k: round(sum(v) / len(v), 4) for k, v in self._acc.items()}}
+                self._acc = {}
+            return super().log(logs, *args, **kwargs)
 
     class SFTTrainer(Trainer):
         def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
@@ -499,7 +666,7 @@ def main(argv=None) -> int:
             cfg["max_steps"] if cfg["max_steps"] > 0 else steps_per_epoch * cfg["epochs"]))),
         lr_scheduler_type=cfg["lr_scheduler"], weight_decay=cfg["weight_decay"],
         fp16=cuda and dtype == torch.float16, bf16=cuda and dtype == torch.bfloat16,
-        logging_steps=cfg["logging_steps"], eval_strategy="steps" if valid_ex else "no",
+        logging_steps=cfg["logging_steps"], eval_strategy="steps" if valid_ex and not dpo_mode else "no",
         eval_steps=cfg["eval_steps"], save_strategy="steps", save_steps=cfg["save_steps"], save_total_limit=2,
         report_to=[], remove_unused_columns=False, dataloader_num_workers=0, seed=cfg["seed"],
         ddp_find_unused_parameters=False, gradient_checkpointing=False, use_cpu=not cuda,
@@ -597,6 +764,19 @@ def main(argv=None) -> int:
                     log(f"action accuracy skipped: {type(ex).__name__}: {ex}")
             self._emit(state, kind="eval")
 
+        def on_step_end(self, args, state, control, model=None, **kw):
+            # objective=dpo: Trainer eval is off; rank 0 scores the held-out pairs itself every eval_steps
+            # (rank 1 waits in the next all-reduce, as it does during action_accuracy)
+            if not (dpo_mode and main_proc and valid_ex) or state.global_step % max(1, cfg["eval_steps"]):
+                return
+            try:
+                self.last_eval = dpo_eval(model, valid_ex)
+                if cfg["eval_gen_rows"]:
+                    self.last_eval.update(action_accuracy(model))
+            except Exception as ex:                         # a metric must never kill the run
+                log(f"dpo eval skipped: {type(ex).__name__}: {ex}")
+            self._emit(state, kind="eval")
+
         def on_log(self, args, state, control, logs=None, **kw):
             if main_proc and logs and "loss" in logs:
                 self._emit(state, kind="train", logs=logs)
@@ -612,6 +792,9 @@ def main(argv=None) -> int:
                  "s_per_step": round(sps, 2) if sps else None,
                  "eta_s": round(sps * (total - step)) if sps else None,
                  "gpu": list(gpu_last), **self.last_eval}
+            if dpo_mode and kind == "train":
+                p.update({k: logs.get(k) for k in ("dpo_loss", "sft_loss", "reward_margin", "pref_acc",
+                                                   "policy_pref")})
             if kind == "train" and p["loss"] is None:
                 return
             log(progress_line(p))
@@ -621,9 +804,10 @@ def main(argv=None) -> int:
                 fh.write(json.dumps(p) + "\n")
             (out / "progress.json").write_text(json.dumps(p, indent=1) + "\n")
 
-    trainer = SFTTrainer(model=model, args=targs, train_dataset=SeqDataset(train_ex),
-                         eval_dataset=SeqDataset(valid_ex) if valid_ex else None, data_collator=collate,
-                         callbacks=[StopControl(), Progress()])
+    trainer = (DPOTrainer if dpo_mode else SFTTrainer)(
+        model=model, args=targs, train_dataset=SeqDataset(train_ex),
+        eval_dataset=SeqDataset(valid_ex) if valid_ex and not dpo_mode else None,
+        data_collator=collate_pair if dpo_mode else collate, callbacks=[StopControl(), Progress()])
     t1 = time.time()
     res = trainer.train()
     train_s = time.time() - t1
@@ -642,9 +826,13 @@ def main(argv=None) -> int:
                "trainable_params": n_train, "lora_targets": targets, "stopped_by": stop_reason["why"],
                "final_action_accuracy": action_accuracy(model) if cfg["eval_gen_rows"] else None,
                "peak_mem_gb": round(torch.cuda.max_memory_allocated() / 1e9, 2) if cuda else None}
+    if dpo_mode:
+        metrics["final_dpo"] = dpo_eval(model, valid_ex)
     (out / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
     acc = (metrics.get("final_action_accuracy") or {}).get("action_acc")
+    fd = metrics.get("final_dpo") or {}
     ntfy(cfg, f"done: {metrics['global_steps']} steps in {fmt_dur(metrics['train_s'])}; loss {pre:.3f} -> {post:.3f}"
+              + (f"; held-out pref {fd['eval_pref_acc'] * 100:.0f}% margin {fd['eval_margin']:+.2f}" if fd else "")
               + (f"; held-out action accuracy {acc * 100:.0f}%" if acc is not None else "")
               + (f"; stopped by {metrics['stopped_by']}" if metrics.get("stopped_by") else ""),
          title="AWOS training finished", tags="white_check_mark")
