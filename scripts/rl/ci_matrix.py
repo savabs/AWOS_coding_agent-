@@ -38,7 +38,9 @@ def model_specs(env: dict) -> dict:
         if len(parts) != 7:
             raise SystemExit(f"bad MODEL_SPECS line: {line!r}")
         label, repo, file, rev, size, sha, shards = parts
-        if not re.fullmatch(r"[0-9a-f]{40}", rev) or not re.fullmatch(r"[0-9a-f]{64}", sha):
+        # gh-release:OWNER/REPO models (our trained GGUFs) are pinned by release tag + sha256
+        if (not repo.startswith("gh-release:") and not re.fullmatch(r"[0-9a-f]{40}", rev)) \
+                or not re.fullmatch(r"[0-9a-f]{64}", sha):
             raise SystemExit(f"{label}: revision must be a 40-hex commit and sha256 64-hex")
         specs[label] = {"model": label, "repo": repo, "file": file, "rev": rev,
                         "bytes": int(size), "sha256": sha, "shards": int(shards)}
