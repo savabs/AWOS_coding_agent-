@@ -178,6 +178,8 @@ def run_episode(source: Any, task: TaskSpec, model: Any, *, model_label: str, gu
         harness["stop_by"] = stop_by(res, rec)
     if rec.errors and not traj.error and harness.get("stop_by") == "model_error":
         harness["model_error"] = rec.errors[-1]
+        if "budget reached" in str(rec.errors[-1]):      # cloud spend cap: not a result, retry on resume
+            traj.error = f"cloud budget reached: {rec.errors[-1]}"[:500]
     harness["model_needs_user"] = any(s.action.startswith("needs_user(") for s in traj.steps)
     harness["destructive_attempts"] = [e.get("control") for e in traj.events if e.get("event") == "destructive_blocked"]
     harness["usage"] = _usage_delta(usage0, getattr(model, "usage", None))
