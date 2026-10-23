@@ -187,6 +187,83 @@ def oracle_to_script(steps: Sequence[dict]) -> List[str]:
     return out
 
 
+# ------------------------------------------------------------- cloud model --
+
+#: $ per 1M tokens (input, output), Anthropic first-party list prices (claude-api skill, 2026-10-06)
+CLOUD_PRICES = {"claude-opus-5-5": (4.0, 20.0), "claude-sonnet-5-5": (2.0, 10.0), "claude-haiku-5-5": (0.10, 0.50)}
+_SPEND = {"usd": 0.0}                          # per process; workers each get max_usd / workers
+
+_FORMAT_RULE = ("\n\nReply format (strict): optionally ONE line starting with '# ' (at most 160 characters) "
+                "with your reason, then exactly ONE action line, e.g. click(3) or fill(2, \"text\") or "
+                "done(\"summary\"). No other text, no markdown.")
+
+
+def normalize_text_reply(text: str) -> str:
+    """Claude's reply -> the local model's GBNF text form: an optional '# reason' line + one action line.
+    Returns '' when no line parses as an action (MicroAgent then records an invalid step)."""
+    from scaffold.agent.desktop.micro_agent import ParseError, parse_text_action
+    reason, lines = "", [x.strip().strip("`") for x in (text or "").splitlines() if x.strip().strip("`")]
+    for ln in lines:
+        if ln.startswith("#"):
+            reason = reason or ("# " + ln.lstrip("#").strip())[:162]
+            continue
+        try:
+            parse_text_action(ln)
+        except ParseError:
+            continue
+        return f"{reason}\n{ln}" if reason else ln
+    return ""
+
+
+class CloudTextModel:
+    """Anthropic Messages as a drop-in for the local model: the request carries MicroAgent's own system +
+    user prompt (plus a strict format rule), and the reply is normalised to the same text action form the
+    GBNF grammar produces, so a successful cloud episode is a training example in the exact local format.
+
+    Thinking per current API rules: Opus 5.5 always thinks (effort controls depth); Sonnet 5.5 turns it off
+    with between_tools; Haiku 5.5 accepts disabled. No temperature (rejected since 2026-10-21).
+    Spend is capped per process by AWOS_CLOUD_MAX_USD (divided by the worker count by the runner)."""
+    output_format = "gbnf"
+
+    def __init__(self, model: Optional[str] = None, effort: Optional[str] = None, max_usd: Optional[float] = None):
+        import os
+        self.model = model or os.environ.get("AWOS_CLOUD_MODEL", "claude-sonnet-5-5")
+        self.effort = effort or os.environ.get("AWOS_CLOUD_EFFORT", "low")
+        self.max_usd = float(max_usd if max_usd is not None else os.environ.get("AWOS_CLOUD_MAX_USD") or 5.0)
+        self.usage = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "usd": 0.0, "refusals": 0}
+        self._client = None
+
+    def _extra(self) -> dict:
+        body: Dict[str, Any] = {"output_config": {"effort": self.effort}}
+        if self.model.startswith("claude-sonnet-5-5"):
+            body["thinking"] = {"type": "between_tools"}
+        elif self.model.startswith("claude-haiku"):
+            body["thinking"] = {"type": "disabled"}
+        return body                                    # Opus 5.5: thinking always on, omit the param
+
+    def decide(self, system: str, user: str, grammar: Optional[str] = None) -> str:
+        if _SPEND["usd"] >= self.max_usd:
+            raise RuntimeError(f"cloud budget reached (${_SPEND['usd']:.2f} >= ${self.max_usd:.2f})")
+        if self._client is None:
+            import anthropic
+            self._client = anthropic.Anthropic(max_retries=6)
+        resp = self._client.messages.create(model=self.model, max_tokens=4000, system=system + _FORMAT_RULE,
+                                            messages=[{"role": "user", "content": user}],
+                                            extra_body=self._extra())
+        pin, pout = CLOUD_PRICES.get(self.model, (4.0, 20.0))
+        cost = (resp.usage.input_tokens * pin + resp.usage.output_tokens * pout) / 1e6
+        _SPEND["usd"] += cost
+        self.usage["calls"] += 1
+        self.usage["prompt_tokens"] += resp.usage.input_tokens
+        self.usage["completion_tokens"] += resp.usage.output_tokens
+        self.usage["usd"] = round(self.usage["usd"] + cost, 5)
+        if resp.stop_reason == "refusal":
+            self.usage["refusals"] += 1
+            return 'needs_user("the model declined this step")'
+        return normalize_text_reply("".join(getattr(b, "text", "") or "" for b in resp.content
+                                            if getattr(b, "type", "") == "text"))
+
+
 # ------------------------------------------------------------- local model --
 
 class SampledLocalModel(LocalGBNFModel):

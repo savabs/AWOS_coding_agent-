@@ -65,6 +65,13 @@ def make_model(kind: str, source: Any, task: TaskSpec, sample: int, args: dict) 
         m = SampledLocalModel(temperature=float(args.get("temperature") or 0.0), top_p=args.get("top_p"),
                               seed=(None if seed is None else int(seed) + sample))
         return m, args.get("model_label") or m.model
+    if kind == "cloud":
+        import os
+        from .models import CloudTextModel
+        workers = max(1, int(args.get("workers") or 1))
+        total = float(os.environ.get("AWOS_CLOUD_MAX_USD") or 5.0)
+        m = CloudTextModel(max_usd=total / workers)      # each worker process gets its share of the cap
+        return m, args.get("model_label") or m.model
     raise SystemExit(f"unknown model {kind!r}")
 
 
@@ -169,7 +176,7 @@ def run(source_name: str, out: Path, *, model: str = "oracle", split: Optional[s
     have = done_keys(path)
     jobs = [(t.to_dict(), j) for t in tasks for j in range(max(1, samples)) if (t.id, j) not in have]
     args = {"model": model, "guards": guards, "temperature": temperature, "top_p": top_p, "seed": seed,
-            "model_label": model_label}
+            "model_label": model_label, "workers": workers}
     meta = {"source": source_name, "split": split, "shard": shard, "model": model, "model_label": model_label, "samples": samples,
             "guards": guards, "temperature": temperature, "top_p": top_p, "seed": seed, "tasks": len(tasks)}
     (out / "run.json").write_text(json.dumps(meta, indent=2) + "\n")
@@ -388,7 +395,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     r.add_argument("--source", required=True)
     r.add_argument("--source-arg", action="append", default=[], help="key=value passed to the source constructor")
     r.add_argument("--split", default=None)
-    r.add_argument("--model", default="oracle", choices=["oracle", "scripted", "local"])
+    r.add_argument("--model", default="oracle", choices=["oracle", "scripted", "local", "cloud"])
     r.add_argument("--model-label", default=None)
     r.add_argument("--n", type=int, default=0, help="first N tasks (0 = all)")
     r.add_argument("--task", action="append", default=None, help="only this task id (repeatable)")

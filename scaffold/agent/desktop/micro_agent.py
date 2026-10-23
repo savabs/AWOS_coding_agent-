@@ -1180,8 +1180,15 @@ class CloudJSONModel:
 
     def decide(self, system: str, user: str, grammar: Optional[str] = None) -> str:
         import anthropic  # noqa: PLC0415 - optional dependency
+        # No temperature (the API rejects sampling params since 2026-10-21). Current models think by
+        # default: keep it cheap (effort low; off where the model allows it) and leave room in max_tokens.
+        extra: Dict[str, Any] = {"output_config": {"effort": "low"}}
+        if self.model.startswith("claude-sonnet-5-5"):
+            extra["thinking"] = {"type": "between_tools"}
+        elif self.model.startswith("claude-haiku"):
+            extra["thinking"] = {"type": "disabled"}
         resp = anthropic.Anthropic().messages.create(
-            model=self.model, max_tokens=300, temperature=0, system=system,
+            model=self.model, max_tokens=4000, system=system, extra_body=extra,
             messages=[{"role": "user", "content": user + "\n\nJSON schema: " + json.dumps(ACTION_SCHEMA)}])
         self.usage["calls"] += 1
         self.usage["prompt_tokens"] += resp.usage.input_tokens
