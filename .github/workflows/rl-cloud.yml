@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  actions: read            # PRIOR_RUN: download the earlier run's artifacts to resume from
 
 jobs:
   config:
@@ -31,10 +32,12 @@ jobs:
           import json, sys
           inc = []
           for ln in sys.argv[1].strip().splitlines():
-              name, model, source, split, shards, cap = ln.split()
-              for k in range(1, int(shards) + 1):
+              # optional 7th column: which shards to run (e.g. "1" or "1,2"); the cap is split across them
+              name, model, source, split, shards, cap, *only = ln.split()
+              run = [int(x) for x in only[0].split(",")] if only else list(range(1, int(shards) + 1))
+              for k in run:
                   inc.append({"name": name, "model": model, "source": source, "split": split,
-                              "shard": k, "shards": int(shards), "cap": round(float(cap) / int(shards), 3)})
+                              "shard": k, "shards": int(shards), "cap": round(float(cap) / len(run), 3)})
           print("matrix=" + json.dumps({"include": inc}))
           PY
 
@@ -76,6 +79,39 @@ jobs:
         if: steps.miniwob.outputs.cache-hit != 'true'
         run: bash scripts/rl/fetch_miniwob.sh
 
+      # PRIOR_RUN (ci/rl_cloud.env): start from that run's results for the same shard, so only episodes
+      # that did not complete (spend cap, account usage limit, rate limit) are run again - nothing twice.
+      - name: Seed from the prior run (resume)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ART: rl-cloud-${{ matrix.name }}-${{ matrix.source }}-${{ matrix.split }}-s${{ matrix.shard }}of${{ matrix.shards }}
+          NAME: ${{ matrix.name }}__${{ matrix.source }}__${{ matrix.split }}__shard${{ matrix.shard }}of${{ matrix.shards }}
+        run: |
+          set -euo pipefail
+          eval "$(grep -E '^PRIOR_RUN=' ci/rl_cloud.env || true)"
+          mkdir -p runs/rl
+          if [ -n "${PRIOR_RUN:-}" ] && gh run download "$PRIOR_RUN" --repo "$GITHUB_REPOSITORY" -n "$ART" -D runs/rl 2>/dev/null; then
+            F="runs/rl/$NAME/trajectories.jsonl"
+            python3 - "$F" <<'PY'
+          import json, sys
+          rows, n = [], 0
+          for ln in open(sys.argv[1]):
+              r = json.loads(ln)
+              h = next((e for e in r["trajectory"].get("events", []) if e.get("event") == "harness"), {})
+              err = str(h.get("model_error") or "")
+              if not r["trajectory"].get("error") and any(s in err for s in ("usage limits", "budget reached", "RateLimitError", "overloaded")):
+                  r["trajectory"]["error"] = "not run: " + err[:200]       # retried by the harness resume
+                  n += 1
+              rows.append(json.dumps(r))
+          open(sys.argv[1], "w").write("\n".join(rows) + "\n")
+          print(f"seeded {len(rows)} prior episodes; {n} marked to retry")
+          PY
+            wc -l < "$F" > "runs/rl/$NAME/.prior_lines"
+          else
+            echo "no prior results for $ART"
+          fi
+
       - name: Run the shard (scaffold.rl.harness --model cloud)
         shell: bash
         env:
@@ -86,17 +122,18 @@ jobs:
           eval "$(grep -E '^(WORKERS|AWOS_CLOUD_EFFORT)=' ci/rl_cloud.env)"
           export AWOS_CLOUD_EFFORT
           OUT="runs/rl/$NAME"; mkdir -p "$OUT"
+          PRIOR=$(cat "$OUT/.prior_lines" 2>/dev/null || echo 0)
           PYTHONPATH=$PWD python -m scaffold.rl.harness run --source "${{ matrix.source }}" --split "${{ matrix.split }}" \
             --model cloud --model-label "${{ matrix.model }}" --workers "$WORKERS" \
             --shard "${{ matrix.shard }}/${{ matrix.shards }}" --out "$OUT/" 2>&1 | tee "$OUT/harness.log" | grep -E "tasks x|PASS|fail|error" | tail -40
           RC=${PIPESTATUS[0]}
           PYTHONPATH=$PWD python -m scaffold.rl.harness summarize "$OUT/" > "$OUT/summary.txt" 2>&1 || true
           head -30 "$OUT/summary.txt" >> "$GITHUB_STEP_SUMMARY" || true
-          # spend from the recorded usage of every episode (the cap is enforced in-process)
-          python3 - "$OUT/trajectories.jsonl" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          # spend of THIS run only (rows appended after the seeded prior rows; the cap is enforced in-process)
+          python3 - "$OUT/trajectories.jsonl" "$PRIOR" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
           import json, sys
           usd = calls = 0
-          for ln in open(sys.argv[1]):
+          for ln in open(sys.argv[1]).readlines()[int(sys.argv[2]):]:
               ev = [e for e in json.loads(ln)["trajectory"].get("events", []) if e.get("event") == "harness"]
               u = (ev[0].get("usage") if ev else None) or {}
               usd += float(u.get("usd") or 0); calls += int(u.get("calls") or 0)
