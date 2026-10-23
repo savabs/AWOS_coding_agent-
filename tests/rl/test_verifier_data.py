@@ -217,7 +217,15 @@ def test_eval_verifier_against_a_fake_llama_server(tmp_path):
         def log_message(self, *a):
             pass
 
-    srv = HTTPServer(("127.0.0.1", 0), H)
+    class _Srv(HTTPServer):
+        # HTTPServer.server_bind calls socket.getfqdn() -> a reverse-DNS lookup that took >10 s on the
+        # GitHub macOS runner (the verifier data job failed on it on 2026-10-23); we only need the port.
+        def server_bind(self):
+            import socketserver
+            socketserver.TCPServer.server_bind(self)
+            self.server_name, self.server_port = "127.0.0.1", self.server_address[1]
+
+    srv = _Srv(("127.0.0.1", 0), H)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     d = write(tmp_path, "ev", [rec("f1", split="ood"), rec("f2", split="ood", success=False, notes="x")])
     exs, _ = vd.build_eval([ds.parse_input(f"e={d}")])
