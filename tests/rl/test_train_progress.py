@@ -65,7 +65,7 @@ def test_recover_adapter_promotes_newest_checkpoint(tmp_path):
 def test_supervisor_kills_a_hung_run_and_recovers(tmp_path):
     import sys
     _ckpt(tmp_path, 150)
-    cfg = {**T.DEFAULTS, "hang_minutes": 0.02, "startup_grace_min": 0, "watch_poll_s": 0.3,
+    cfg = {**T.DEFAULTS, "ntfy_topic": "", "hang_minutes": 0.02, "startup_grace_min": 0, "watch_poll_s": 0.3,
            "stack_dump_wait_s": 0.2}
     t0 = time.time()
     rc = T.supervise([sys.executable, "-c", "import time; time.sleep(60)"], tmp_path, cfg)
@@ -75,7 +75,7 @@ def test_supervisor_kills_a_hung_run_and_recovers(tmp_path):
 
 def test_supervisor_passes_a_clean_exit(tmp_path):
     import sys
-    cfg = {**T.DEFAULTS, "watch_poll_s": 0.1}
+    cfg = {**T.DEFAULTS, "ntfy_topic": "", "watch_poll_s": 0.1}
     assert T.supervise([sys.executable, "-c", "pass"], tmp_path, cfg) == 0
     assert not (tmp_path / "adapter").exists()
 
