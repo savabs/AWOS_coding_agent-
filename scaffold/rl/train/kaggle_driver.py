@@ -149,7 +149,12 @@ def push(stage_dir: Path, dry: bool = False, message: str = "awos rl-sft data", 
         if time.time() - t0 > wait_s:
             raise SystemExit(f"dataset {info['dataset']} not ready after {wait_s}s (status {st!r})")
         time.sleep(15)
-    run(["kaggle", "kernels", "push", "-p", kn], dry)
+    p = run(["kaggle", "kernels", "push", "-p", kn], dry)
+    # the CLI exits 0 even when Kaggle refuses the push (e.g. "Kernel push error: Maximum batch GPU session
+    # count of 2 reached." on 2026-10-23), so a refused start looked like a success: fail loudly instead
+    out = (p.stdout or "") + (p.stderr or "")
+    if not dry and ("push error" in out.lower() or "successfully pushed" not in out.lower()):
+        raise SystemExit(f"Kaggle refused the kernel push: {out.strip()[:300]}")
     return {"dataset": info["dataset"], "kernel": info["kernel"], "dry_run": dry}
 
 

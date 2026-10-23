@@ -53,7 +53,7 @@ jobs:
 
       - name: Tests (verifier data)
         run: |
-          pip install -q pytest==8.4.2 jinja2==3.1.6
+          pip install -q pytest==8.4.2 pytest-timeout jinja2==3.1.6   # pytest.ini passes --timeout
           PYTHONPATH=. python -m pytest -q tests/rl/test_verifier_data.py
 
       - name: Download artifacts (train splits of the collection runs, ood/holdout of the exam run)
