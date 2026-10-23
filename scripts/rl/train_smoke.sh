@@ -20,7 +20,8 @@ echo "=== dataset"
 python3 -m scaffold.rl.train.dataset --input "oracle=$TRAJ" --out "$W/data" --val-frac 0.1 --max-examples 24 | tail -3
 echo "=== kaggle stage + push --dry-run"
 python3 -m scaffold.rl.train.kaggle_driver stage --data "$W/data" --out "$W/stage" --size 2B --user smoke \
-  --set max_steps=3 --set grad_accum=2 --set eval_steps=2 --set eval_rows=4 --set preflight_rows=2 --set logging_steps=1 >/dev/null
+  --set max_steps=3 --set grad_accum=2 --set eval_steps=2 --set eval_rows=4 --set preflight_rows=2 --set logging_steps=1 \
+  --set eval_gen_rows=4 --set stop_check_steps=1 --set gpu_sample_s=5 >/dev/null
 python3 -m scaffold.rl.train.kaggle_driver push --stage "$W/stage" --dry-run
 T1=$(ts)
 
@@ -29,7 +30,15 @@ echo "=== tiny Qwen3.5 + train.py on CPU"
 AWOS_NO_TORCHRUN=1 "$TRAIN_PY" "$W/stage/kernel/train.py" --config "$W/stage/dataset/train_config.json" \
   --data "$W/stage/dataset" --out "$W/kout" --base-model "$W/tiny" 2>&1 | grep -E "^\[|Error|error" || true
 test -f "$W/kout/adapter/adapter_model.safetensors"
-python3 -c "import json,sys; m=json.load(open(sys.argv[1])); print({k: m[k] for k in ('preflight_loss','final_loss','global_steps','lora_targets')})" "$W/kout/metrics.json"
+python3 -c "import json,sys; m=json.load(open(sys.argv[1])); print({k: m[k] for k in ('preflight_loss','final_loss','global_steps','lora_targets','final_action_accuracy','stopped_by')})" "$W/kout/metrics.json"
+# progress rows: one per log step, and an eval row carrying the action accuracy
+python3 -c "
+import json, sys
+rows = [json.loads(x) for x in open(sys.argv[1])]
+ev = [r for r in rows if r['kind'] == 'eval']
+assert rows and ev and 'action_acc' in ev[-1] and ev[-1]['total'] == 3, rows
+print('progress rows', len(rows), 'last eval', {k: ev[-1].get(k) for k in ('step', 'eval_loss', 'action_acc')})
+" "$W/kout/progress.jsonl"
 T2=$(ts)
 
 echo "=== export"

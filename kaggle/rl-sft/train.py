@@ -17,6 +17,18 @@ Outputs (in --out, /kaggle/working on Kaggle -> `kaggle kernels output`):
     adapter/                    PEFT LoRA adapter (adapter_model.safetensors + adapter_config.json)
     metrics.json                versions, GPUs, preflight + final losses, step timings, data stats
     train_log.jsonl             Trainer log history
+    progress.jsonl              one row per log/eval step: step/total, %, loss, eval loss, action accuracy
+                                (greedy replies on held-out rows), lr, grad norm, s/step, ETA, GPU util/memory
+    progress.json               the latest progress row (a snapshot)
+    gpu.jsonl                   nvidia-smi samples (utilization %, memory) every gpu_sample_s seconds
+
+Progress: every log step prints one line to the kernel log, e.g.
+    [12:03:41] step 120/370 32% | loss 0.214 | eval 0.119 | acc 71% | 41.8 s/step | ETA 2h54m | GPU 87% 87% 11.1/15.1 GB
+
+Remote stop: every stop_check_steps steps rank 0 reads stop_url (a file on the repo's `rl-control`
+branch, written by scripts/rl/kaggle_stop.sh). If it holds a UTC timestamp later than this run's start, all
+ranks stop together, the adapter and metrics are saved and the kernel ends normally, so its output is kept
+(a cancelled Kaggle run keeps nothing). The same synchronised check enforces max_hours.
 
 Design notes
   * GatedDeltaNet: transformers' Qwen3.5 uses flash-linear-attention (fla) Triton kernels when the
@@ -55,13 +67,18 @@ DEFAULTS = {
     "target_regex": (r"model\.language_model\.layers\.\d+\.(self_attn\.(q_proj|k_proj|v_proj|o_proj)"
                      r"|linear_attn\.(in_proj_qkv|in_proj_z|out_proj)|mlp\.(gate_proj|up_proj|down_proj))"),
     "learning_rate": 1e-4, "warmup_ratio": 0.05, "lr_scheduler": "cosine", "weight_decay": 0.0,
-    "epochs": 2.0, "max_steps": -1, "grad_accum": 8, "max_seq_len": 4096,
+    # 1 epoch by default: the first full run (2 epochs, 5.9k rows) needed ~9 h of the 12 h session
+    "epochs": 1.0, "max_steps": -1, "grad_accum": 8, "max_seq_len": 4096,
     "gradient_checkpointing": True, "seed": 0, "logging_steps": 10, "eval_steps": 200, "save_steps": 200,
     "eval_rows": 200, "preflight_rows": 16, "template_check_rows": 32,
     "gdn_impl": "torch",          # "torch" (blocks fla) | "auto" (use fla if installed)
     "dtype": "auto",              # auto: bf16 if supported, else fp16 on CUDA, fp32 on CPU | fp16 | bf16 | fp32
     "pip_install": "auto",        # auto: install PINS on Kaggle when versions differ
     "max_hours": 10.5,            # stop + save before Kaggle's 12 h session limit kills the run
+    "stop_url": "https://raw.githubusercontent.com/savabs/AWOS_coding_agent-/rl-control/kaggle/STOP",
+    "stop_check_steps": 5,        # ~3.5 min at 42 s/step; also the granularity of max_hours
+    "eval_gen_rows": 48,          # held-out rows answered greedily at each eval -> action accuracy (0 = off)
+    "gpu_sample_s": 30,
 }
 
 
@@ -130,7 +147,7 @@ def encode(tok, rows: list, max_len: int) -> tuple:
         if len(p) + len(c) > max_len:
             dropped += 1
             continue
-        out.append({"input_ids": p + c, "prompt_len": len(p)})
+        out.append({"input_ids": p + c, "prompt_len": len(p), "completion": r["completion"]})
     return out, dropped
 
 
@@ -141,6 +158,76 @@ def stats(ex: list) -> dict:
     comp = [len(e["input_ids"]) - e["prompt_len"] for e in ex]
     return {"n": len(xs), "p50": xs[len(xs) // 2], "p99": xs[int(0.99 * (len(xs) - 1))], "max": xs[-1],
             "tokens": sum(xs), "completion_mean": round(sum(comp) / len(comp), 2), "completion_max": max(comp)}
+
+
+def action_line(text: str) -> str:
+    """The action of a MicroAgent reply: drop '# reason' lines and the end token, keep the first line."""
+    text = text.split("<|im_end|>", 1)[0]
+    lines = [x.strip() for x in text.strip().splitlines() if x.strip() and not x.strip().startswith("#")]
+    return lines[0] if lines else ""
+
+
+def action_match(pred: str, gold: str) -> tuple:
+    """(exact action match, same verb) between a generated reply and the training target."""
+    p, g = action_line(pred), action_line(gold)
+    verb = lambda s: s.split("(", 1)[0]          # noqa: E731
+    return p == g and bool(g), bool(g) and verb(p) == verb(g)
+
+
+def stop_requested(body: str, run_start: float) -> bool:
+    """The stop file holds a UTC timestamp (ISO 8601 or epoch seconds); only a stop written after this
+    run started counts, so a stale file never stops the next run."""
+    s = (body or "").strip().splitlines()[0].strip() if (body or "").strip() else ""
+    if not s:
+        return False
+    try:
+        t = float(s)
+    except ValueError:
+        try:
+            from datetime import datetime, timezone
+            t = datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(timezone.utc).timestamp()
+        except ValueError:
+            return False
+    return t > run_start
+
+
+def fmt_dur(s: float) -> str:
+    s = max(0, int(s))
+    return f"{s // 3600}h{s % 3600 // 60:02d}m" if s >= 3600 else f"{s // 60}m{s % 60:02d}s"
+
+
+def progress_line(p: dict) -> str:
+    bits = [f"step {p['step']}/{p['total']} {p['pct']:.0f}%"]
+    for k, f in (("loss", "loss {:.3f}"), ("eval_loss", "eval {:.3f}")):
+        if p.get(k) is not None:
+            bits.append(f.format(p[k]))
+    if p.get("action_acc") is not None:
+        bits.append(f"acc {p['action_acc'] * 100:.0f}%")
+    if p.get("s_per_step"):
+        bits.append(f"{p['s_per_step']:.1f} s/step")
+    if p.get("eta_s") is not None:
+        bits.append(f"ETA {fmt_dur(p['eta_s'])}")
+    g = p.get("gpu") or []
+    if g:
+        bits.append("GPU " + " ".join(f"{x['util']}%" for x in g)
+                    + f" {max(x['mem_used'] for x in g) / 1024:.1f}/{g[0]['mem_total'] / 1024:.1f} GB")
+    return " | ".join(bits)
+
+
+def gpu_sample() -> list:
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-gpu=index,utilization.gpu,memory.used,memory.total",
+                              "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        return []
+    rows = []
+    for ln in out.strip().splitlines():
+        try:
+            i, u, m, t = (int(float(x)) for x in ln.split(","))
+            rows.append({"gpu": i, "util": u, "mem_used": m, "mem_total": t})
+        except ValueError:
+            pass
+    return rows
 
 
 def completion_loss(model, input_ids, prompt_len):
@@ -298,19 +385,126 @@ def main(argv=None) -> int:
         logging_steps=cfg["logging_steps"], eval_strategy="steps" if valid_ex else "no",
         eval_steps=cfg["eval_steps"], save_strategy="steps", save_steps=cfg["save_steps"], save_total_limit=2,
         report_to=[], remove_unused_columns=False, dataloader_num_workers=0, seed=cfg["seed"],
-        ddp_find_unused_parameters=False, gradient_checkpointing=False, use_cpu=not cuda)
+        ddp_find_unused_parameters=False, gradient_checkpointing=False, use_cpu=not cuda,
+        # rank 0 answers eval_gen_rows prompts after each eval while rank 1 waits in the next all-reduce
+        ddp_timeout=7200)
     deadline = _START + cfg["max_hours"] * 3600          # wall clock since the script started
+    stop_reason = {"why": None}
 
-    class Deadline(TrainerCallback):
+    def remote_stop() -> bool:
+        if not cfg.get("stop_url"):
+            return False
+        try:
+            import urllib.request
+            with urllib.request.urlopen(f"{cfg['stop_url']}?t={int(time.time())}", timeout=10) as r:
+                return stop_requested(r.read().decode("utf-8", "replace"), _START)
+        except Exception:                                # 404 = no stop file; network errors never stop a run
+            return False
+
+    class StopControl(TrainerCallback):
+        """max_hours and the remote stop switch, decided by rank 0 and broadcast so every rank stops at
+        the same step (ranks deciding on their own clocks could stop one step apart and hang DDP)."""
         def on_step_end(self, args, state, control, **kw):
-            if time.time() > deadline:
-                log(f"max_hours={cfg['max_hours']} reached at step {state.global_step}: stopping and saving")
+            if state.global_step % max(1, cfg["stop_check_steps"]):
+                return control
+            why = 0
+            if main_proc:
+                why = 1 if time.time() > deadline else 2 if remote_stop() else 0
+            if world > 1 and torch.distributed.is_initialized():
+                t = torch.tensor([why], device=dev)
+                torch.distributed.broadcast(t, src=0)
+                why = int(t.item())
+            if why:
+                stop_reason["why"] = "max_hours" if why == 1 else "remote_stop"
+                if main_proc:
+                    log(f"{stop_reason['why']} at step {state.global_step}: stopping and saving")
                 control.should_training_stop = True
             return control
 
+    gpu_last: list = []
+
+    def gpu_loop():
+        while True:
+            rows = gpu_sample()
+            if rows:
+                gpu_last[:] = rows
+                with (out / "gpu.jsonl").open("a") as fh:
+                    fh.write(json.dumps({"t": round(time.time() - _START, 1), "gpus": rows}) + "\n")
+            time.sleep(max(5, cfg["gpu_sample_s"]))
+
+    if main_proc and cuda:
+        import threading
+        threading.Thread(target=gpu_loop, daemon=True).start()
+
+    def action_accuracy(m) -> dict:
+        """Greedy replies for held-out prompts vs the training targets: the number that matters (does
+        it pick the right action?), which the loss only hints at."""
+        rows = valid_ex[: cfg["eval_gen_rows"]]
+        if not rows:
+            return {}
+        im_end = tok.convert_tokens_to_ids("<|im_end|>")
+        exact = verb = 0
+        was_training = m.training
+        m.eval()
+        try:
+            with torch.no_grad(), torch.autocast(dev.type, dtype=dtype, enabled=cuda and dtype != torch.float32):
+                for e in rows:
+                    ids = torch.tensor([e["input_ids"][: e["prompt_len"]]], device=dev)
+                    gen = m.generate(input_ids=ids, max_new_tokens=64, do_sample=False, eos_token_id=im_end,
+                                     pad_token_id=im_end, use_cache=True)
+                    text = tok.decode(gen[0, ids.shape[1]:], skip_special_tokens=False)
+                    x, v = action_match(text, e["completion"])
+                    exact += x
+                    verb += v
+        finally:
+            m.train(was_training)
+        return {"action_acc": round(exact / len(rows), 4), "verb_acc": round(verb / len(rows), 4),
+                "acc_rows": len(rows)}
+
+    class Progress(TrainerCallback):
+        """One readable line per log step in the kernel log, plus progress.jsonl / progress.json."""
+        t_train = None
+        last_eval: dict = {}
+
+        def on_train_begin(self, args, state, control, **kw):
+            self.t_train = time.time()
+
+        def on_evaluate(self, args, state, control, metrics=None, model=None, **kw):
+            if not main_proc:
+                return
+            self.last_eval = {"eval_loss": (metrics or {}).get("eval_loss")}
+            if cfg["eval_gen_rows"] and model is not None:
+                try:
+                    self.last_eval.update(action_accuracy(model))
+                except Exception as ex:                     # a metric must never kill the run
+                    log(f"action accuracy skipped: {type(ex).__name__}: {ex}")
+            self._emit(state, kind="eval")
+
+        def on_log(self, args, state, control, logs=None, **kw):
+            if main_proc and logs and "loss" in logs:
+                self._emit(state, kind="train", logs=logs)
+
+        def _emit(self, state, kind, logs=None):
+            logs = logs or {}
+            step, total = state.global_step, max(1, state.max_steps)
+            el = time.time() - (self.t_train or _START)
+            sps = el / step if step else None
+            p = {"kind": kind, "t": round(time.time() - _START, 1), "step": step, "total": total,
+                 "pct": round(100 * step / total, 1), "epoch": round(state.epoch or 0, 3),
+                 "loss": logs.get("loss"), "lr": logs.get("learning_rate"), "grad_norm": logs.get("grad_norm"),
+                 "s_per_step": round(sps, 2) if sps else None,
+                 "eta_s": round(sps * (total - step)) if sps else None,
+                 "gpu": list(gpu_last), **self.last_eval}
+            if kind == "train" and p["loss"] is None:
+                return
+            log(progress_line(p))
+            with (out / "progress.jsonl").open("a") as fh:
+                fh.write(json.dumps(p) + "\n")
+            (out / "progress.json").write_text(json.dumps(p, indent=1) + "\n")
+
     trainer = SFTTrainer(model=model, args=targs, train_dataset=SeqDataset(train_ex),
                          eval_dataset=SeqDataset(valid_ex) if valid_ex else None, data_collator=collate,
-                         callbacks=[Deadline()])
+                         callbacks=[StopControl(), Progress()])
     t1 = time.time()
     res = trainer.train()
     train_s = time.time() - t1
@@ -326,11 +520,13 @@ def main(argv=None) -> int:
                "tokens_per_s": round(res.global_step * cfg["grad_accum"] * world / max(1e-9, train_s)
                                      * data_stats["train"]["tokens"] / max(1, data_stats["train"]["n"]), 1),
                "preflight_loss": pre, "final_loss": post, "train_loss": res.training_loss,
-               "trainable_params": n_train, "lora_targets": targets,
+               "trainable_params": n_train, "lora_targets": targets, "stopped_by": stop_reason["why"],
+               "final_action_accuracy": action_accuracy(model) if cfg["eval_gen_rows"] else None,
                "peak_mem_gb": round(torch.cuda.max_memory_allocated() / 1e9, 2) if cuda else None}
     (out / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
     log("done", json.dumps({k: metrics[k] for k in ("train_s", "global_steps", "s_per_step", "preflight_loss",
-                                                     "final_loss", "peak_mem_gb")}))
+                                                     "final_loss", "final_action_accuracy", "stopped_by",
+                                                     "peak_mem_gb")}))
     return 0
 
 
