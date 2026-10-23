@@ -81,6 +81,7 @@ DEFAULTS = {
     "stop_check_steps": 5,        # ~3.5 min at 42 s/step; also the granularity of max_hours
     "eval_gen_rows": 48,          # held-out rows answered greedily at each eval -> action accuracy (0 = off)
     "gpu_sample_s": 30,
+    "ntfy_topic": "awos-rl-be26ddc76649",   # live progress: https://ntfy.sh/awos-rl-be26ddc76649 ("" = off)
 }
 
 
@@ -216,6 +217,25 @@ def progress_line(p: dict) -> str:
     return " | ".join(bits)
 
 
+def ntfy(cfg: dict, message: str, title: str = "", priority: str = "default", tags: str = "") -> None:
+    """Live progress ping to https://ntfy.sh/<ntfy_topic> (phone app or browser; the GitHub watcher reads the
+    same topic). Only training numbers are sent. Never raises, never blocks more than a few seconds."""
+    topic = cfg.get("ntfy_topic")
+    if not topic:
+        return
+    try:
+        import urllib.request
+        req = urllib.request.Request(f"https://ntfy.sh/{topic}", data=message.encode("utf-8"), method="POST")
+        if title:
+            req.add_header("Title", title)
+        req.add_header("Priority", priority)
+        if tags:
+            req.add_header("Tags", tags)
+        urllib.request.urlopen(req, timeout=5).read()
+    except Exception:
+        pass
+
+
 def gpu_sample() -> list:
     try:
         out = subprocess.run(["nvidia-smi", "--query-gpu=index,utilization.gpu,memory.used,memory.total",
@@ -293,6 +313,8 @@ def supervise(cmd: list, out: Path, cfg: dict) -> int:
             reason = f"no progress for {(now - last) / 60:.0f} min"
         if reason:
             log(f"watchdog: {reason}; dumping stacks and stopping the run")
+            ntfy(cfg, f"watchdog: {reason}. Stopping and recovering the newest checkpoint.",
+                 title="AWOS training STALLED", priority="high", tags="warning")
             try:
                 os.killpg(p.pid, signal.SIGUSR1)
                 time.sleep(cfg.get("stack_dump_wait_s", 20))
@@ -307,7 +329,12 @@ def supervise(cmd: list, out: Path, cfg: dict) -> int:
     rc = p.wait()
     if rc == 0 and reason is None:
         return 0
-    return 0 if recover_adapter(out, reason or f"training exited with code {rc}") else (rc or 1)
+    ok = recover_adapter(out, reason or f"training exited with code {rc}")
+    best = latest_checkpoint(out)
+    ntfy(cfg, (f"recovered the adapter from step {best[0]}" if ok and best else "NO checkpoint to recover")
+         + f" ({reason or f'exit code {rc}'})", title="AWOS training ended early",
+         priority="high", tags="warning" if ok else "rotating_light")
+    return 0 if ok else (rc or 1)
 
 
 def completion_loss(model, input_ids, prompt_len):
@@ -416,6 +443,9 @@ def main(argv=None) -> int:
     pre = eval_loss(model, valid_ex[: cfg["preflight_rows"]] or train_ex[: cfg["preflight_rows"]])
     if main_proc:
         log(f"preflight: base completion loss {pre:.4f} in {dtype} ({load_s:.0f}s load)")
+        ntfy(cfg, f"model loaded on {len(env['gpus'])} GPU(s) {env['gpus'][:1]}; base loss {pre:.3f}; "
+                  f"{data_stats['train'].get('n', 0)} train rows; starting", title="AWOS training started",
+             tags="rocket")
     if not math.isfinite(pre):
         raise SystemExit(f"base model loss is {pre} in {dtype}: fp16 overflow? use dtype=fp32 with the 2B "
                          "(fits a T4), or a GPU with bf16")
@@ -582,6 +612,8 @@ def main(argv=None) -> int:
             if kind == "train" and p["loss"] is None:
                 return
             log(progress_line(p))
+            ntfy(cfg, progress_line(p), title="AWOS eval" if kind == "eval" else "AWOS training",
+                 tags="bar_chart" if kind == "eval" else "")
             with (out / "progress.jsonl").open("a") as fh:
                 fh.write(json.dumps(p) + "\n")
             (out / "progress.json").write_text(json.dumps(p, indent=1) + "\n")
@@ -608,6 +640,11 @@ def main(argv=None) -> int:
                "final_action_accuracy": action_accuracy(model) if cfg["eval_gen_rows"] else None,
                "peak_mem_gb": round(torch.cuda.max_memory_allocated() / 1e9, 2) if cuda else None}
     (out / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
+    acc = (metrics.get("final_action_accuracy") or {}).get("action_acc")
+    ntfy(cfg, f"done: {metrics['global_steps']} steps in {fmt_dur(metrics['train_s'])}; loss {pre:.3f} -> {post:.3f}"
+              + (f"; held-out action accuracy {acc * 100:.0f}%" if acc is not None else "")
+              + (f"; stopped by {metrics['stopped_by']}" if metrics.get("stopped_by") else ""),
+         title="AWOS training finished", tags="white_check_mark")
     log("done", json.dumps({k: metrics[k] for k in ("train_s", "global_steps", "s_per_step", "preflight_loss",
                                                      "final_loss", "final_action_accuracy", "stopped_by",
                                                      "peak_mem_gb")}))

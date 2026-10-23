@@ -31,7 +31,11 @@ jobs:
           pip install -q kaggle==2.2.4
           # A GitHub job lives at most ~6 h; a kernel can run 10.5 h. "timeout" = still running, not a failure:
           # push to a new bench-cloud/rl-kaggle-watch-* branch to keep watching.
-          S=$(python -m scaffold.rl.train.kaggle_driver wait --kernel "$KAGGLE_USERNAME/awos-rl-sft" --timeout-min 330 | tail -1)
+          # live progress: the run pings https://ntfy.sh/<topic>; each minute's line shows the latest ping
+          TOPIC=$(python3 -c "import ast,re;s=open('kaggle/rl-sft/train.py').read();print(re.search(r'\"ntfy_topic\": \"([^\"]*)\"',s).group(1))")
+          python -m scaffold.rl.train.kaggle_driver wait --kernel "$KAGGLE_USERNAME/awos-rl-sft" --timeout-min 330 \
+            --ntfy-topic "$TOPIC" | tee wait.log
+          S=$(tail -1 wait.log)
           echo "status=$S" >> "$GITHUB_OUTPUT"
           echo "### Kaggle kernel status: \`$S\`" >> "$GITHUB_STEP_SUMMARY"
           [ "$S" = "timeout" ] && echo "Still running after 5.5 h of watching; relaunch the watcher." >> "$GITHUB_STEP_SUMMARY"

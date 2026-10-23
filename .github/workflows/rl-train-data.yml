@@ -120,7 +120,7 @@ jobs:
         run: |
           set -euo pipefail
           for id in $RUNS; do
-            gh run download "$id" --repo "$GITHUB_REPOSITORY" --pattern 'rl-*' --dir "artifacts/collect-$id"
+            gh run download "$id" --repo "$GITHUB_REPOSITORY" --pattern 'rl-*-train-*' --dir "artifacts/collect-$id"   # train splits only (eval artifacts would abort the build)
           done
           find artifacts -name trajectories.jsonl | head -50
 

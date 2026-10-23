@@ -165,11 +165,40 @@ def kernel_status(kernel: str, dry: bool = False) -> str:
     return "unknown"
 
 
-def wait(kernel: str, timeout_min: float, poll_s: int = 60, dry: bool = False) -> str:
+def last_ping(topic: str, since: str = "12h") -> Optional[dict]:
+    """Newest message on the ntfy topic the training run pings (None if none / unreachable)."""
+    if not topic:
+        return None
+    try:
+        import urllib.request
+        with urllib.request.urlopen(f"https://ntfy.sh/{topic}/json?poll=1&since={since}", timeout=15) as r:
+            msgs = [json.loads(x) for x in r.read().decode("utf-8", "replace").splitlines() if x.strip()]
+        msgs = [m for m in msgs if m.get("event") == "message"]
+        return msgs[-1] if msgs else None
+    except Exception:
+        return None
+
+
+def wait(kernel: str, timeout_min: float, poll_s: int = 60, dry: bool = False, topic: str = "",
+         stall_min: float = 20) -> str:
+    """Poll the kernel status; with an ntfy topic also print the run's latest progress ping each minute and
+    warn when pings stop while Kaggle still says "running" (a frozen kernel still reports running)."""
     t0 = time.time()
+    warned = False
     while True:
         s = kernel_status(kernel, dry)
-        print(f"[{(time.time() - t0) / 60:.0f} min] {kernel}: {s}", flush=True)
+        line = f"[{(time.time() - t0) / 60:.0f} min] {kernel}: {s}"
+        ping = last_ping(topic) if topic and not dry else None
+        if ping:
+            age = (time.time() - float(ping.get("time", time.time()))) / 60
+            line += f" | {ping.get('title', '')}: {ping.get('message', '')} ({age:.0f} min ago)"
+            if s == "running" and age > stall_min and not warned:
+                print(f"::warning::no progress ping for {age:.0f} min while Kaggle says running "
+                      f"(the in-kernel watchdog stops a hung run after hang_minutes)", flush=True)
+                warned = True
+            elif age <= stall_min:
+                warned = False
+        print(line, flush=True)
         if s in ("complete", "error", "cancel"):
             return s
         if time.time() - t0 > timeout_min * 60:
@@ -206,6 +235,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     w.add_argument("--kernel", required=True)
     w.add_argument("--timeout-min", type=float, default=330)
     w.add_argument("--dry-run", action="store_true")
+    w.add_argument("--ntfy-topic", default="", help="print the run's live progress pings and warn on a stall")
     f = sub.add_parser("fetch")
     f.add_argument("--kernel", required=True)
     f.add_argument("--out", required=True, type=Path)
@@ -217,7 +247,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     elif a.cmd == "push":
         print(json.dumps(push(a.stage, a.dry_run, a.message)))
     elif a.cmd == "wait":
-        s = wait(a.kernel, a.timeout_min, dry=a.dry_run)
+        s = wait(a.kernel, a.timeout_min, dry=a.dry_run, topic=a.ntfy_topic)
         print(s)
         return 0 if s == "complete" else 1
     elif a.cmd == "fetch":

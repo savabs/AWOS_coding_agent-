@@ -21,7 +21,7 @@ python3 -m scaffold.rl.train.dataset --input "oracle=$TRAJ" --out "$W/data" --va
 echo "=== kaggle stage + push --dry-run"
 python3 -m scaffold.rl.train.kaggle_driver stage --data "$W/data" --out "$W/stage" --size 2B --user smoke \
   --set max_steps=3 --set grad_accum=2 --set eval_steps=2 --set eval_rows=4 --set preflight_rows=2 --set logging_steps=1 \
-  --set eval_gen_rows=4 --set stop_check_steps=1 --set gpu_sample_s=5 >/dev/null
+  --set eval_gen_rows=4 --set stop_check_steps=1 --set gpu_sample_s=5 --set 'ntfy_topic=""' >/dev/null
 python3 -m scaffold.rl.train.kaggle_driver push --stage "$W/stage" --dry-run
 T1=$(ts)
 
