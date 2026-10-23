@@ -69,7 +69,9 @@ DEFAULTS = {
     "learning_rate": 1e-4, "warmup_ratio": 0.05, "lr_scheduler": "cosine", "weight_decay": 0.0,
     # 1 epoch by default: the first full run (2 epochs, 5.9k rows) needed ~9 h of the 12 h session
     "epochs": 1.0, "max_steps": -1, "grad_accum": 8, "max_seq_len": 4096,
-    "gradient_checkpointing": True, "seed": 0, "logging_steps": 10, "eval_steps": 200, "save_steps": 200,
+    # save_steps 50: a LoRA checkpoint is small, and a hang/crash then loses at most ~25 min (recover_adapter)
+    "gradient_checkpointing": True, "seed": 0, "logging_steps": 10, "eval_steps": 200, "save_steps": 50,
+    "hang_minutes": 25, "startup_grace_min": 45,
     "eval_rows": 200, "preflight_rows": 16, "template_check_rows": 32,
     "gdn_impl": "torch",          # "torch" (blocks fla) | "auto" (use fla if installed)
     "dtype": "auto",              # auto: bf16 if supported, else fp16 on CUDA, fp32 on CPU | fp16 | bf16 | fp32
@@ -230,6 +232,84 @@ def gpu_sample() -> list:
     return rows
 
 
+def latest_checkpoint(out: Path):
+    """Newest Trainer checkpoint holding a PEFT adapter, or None."""
+    best = None
+    for d in (out / "checkpoints").glob("checkpoint-*"):
+        try:
+            step = int(d.name.rsplit("-", 1)[1])
+        except ValueError:
+            continue
+        if (d / "adapter_model.safetensors").exists() and (best is None or step > best[0]):
+            best = (step, d)
+    return best
+
+
+def recover_adapter(out: Path, reason: str) -> bool:
+    """After a hung or crashed run: promote the newest checkpoint to out/adapter (+ metrics, log history),
+    so the kernel can end normally and Kaggle keeps the output. Returns True when an adapter is in place."""
+    import shutil
+    if (out / "adapter" / "adapter_model.safetensors").exists():
+        return True
+    best = latest_checkpoint(out)
+    if best is None:
+        log(f"no checkpoint to recover ({reason})")
+        return False
+    step, d = best
+    (out / "adapter").mkdir(parents=True, exist_ok=True)
+    for f in ("adapter_model.safetensors", "adapter_config.json"):
+        if (d / f).exists():
+            shutil.copy2(d / f, out / "adapter" / f)
+    hist = []
+    if (d / "trainer_state.json").exists():
+        hist = json.loads((d / "trainer_state.json").read_text()).get("log_history", [])
+        (out / "train_log.jsonl").write_text("".join(json.dumps(x) + "\n" for x in hist))
+    if not (out / "metrics.json").exists():
+        (out / "metrics.json").write_text(json.dumps({"status": "recovered_from_checkpoint", "reason": reason,
+                                                      "global_steps": step, "log_history_rows": len(hist)},
+                                                     indent=2) + "\n")
+    log(f"recovered the adapter from {d.name} ({reason})")
+    return True
+
+
+def supervise(cmd: list, out: Path, cfg: dict) -> int:
+    """Run torchrun under a watchdog that lives OUTSIDE the training processes (the first full run froze
+    silently at step 168 for 10 h: a DDP deadlock leaves in-process callbacks no chance to act).
+    Kills the run when progress.json has not changed for hang_minutes (after a start-up grace period) or
+    when max_hours passes, dumping every rank's stacks first; then recovers the newest checkpoint and
+    returns 0 so the kernel completes and its output is kept."""
+    import signal
+    t0 = time.time()
+    prog = out / "progress.json"
+    p = subprocess.Popen(cmd, start_new_session=True)
+    reason = None
+    while p.poll() is None:
+        time.sleep(cfg.get("watch_poll_s", 30))
+        now = time.time()
+        last = prog.stat().st_mtime if prog.exists() else t0
+        if now - _START > cfg["max_hours"] * 3600 + 900:          # the in-process stop had 15 min to act
+            reason = f"max_hours {cfg['max_hours']} passed"
+        elif now - t0 > cfg["startup_grace_min"] * 60 and now - last > cfg["hang_minutes"] * 60:
+            reason = f"no progress for {(now - last) / 60:.0f} min"
+        if reason:
+            log(f"watchdog: {reason}; dumping stacks and stopping the run")
+            try:
+                os.killpg(p.pid, signal.SIGUSR1)
+                time.sleep(cfg.get("stack_dump_wait_s", 20))
+                os.killpg(p.pid, signal.SIGTERM)
+                p.wait(timeout=120)
+            except Exception:
+                try:
+                    os.killpg(p.pid, signal.SIGKILL)
+                except Exception:
+                    pass
+            break
+    rc = p.wait()
+    if rc == 0 and reason is None:
+        return 0
+    return 0 if recover_adapter(out, reason or f"training exited with code {rc}") else (rc or 1)
+
+
 def completion_loss(model, input_ids, prompt_len):
     """Mean CE over completion tokens of ONE sequence, projecting only the needed positions."""
     import torch.nn.functional as F
@@ -273,7 +353,11 @@ def main(argv=None) -> int:
                 cmd += ["--base-model", a.base_model]
             if a.max_steps is not None:
                 cmd += ["--max-steps", str(a.max_steps)]
-            return subprocess.call(cmd)
+            return supervise(cmd, out, cfg)
+    # every rank dumps all thread stacks on SIGUSR1 (the supervisor sends it before killing a hung run)
+    import faulthandler
+    import signal
+    faulthandler.register(signal.SIGUSR1, all_threads=True)
     if cfg["gdn_impl"] == "torch":
         block_fla()
 

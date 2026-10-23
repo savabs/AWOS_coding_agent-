@@ -43,6 +43,43 @@ def test_progress_line_reads_well():
     assert T.fmt_dur(95) == "1m35s"
 
 
+def _ckpt(out, step, body=b"w"):
+    d = out / "checkpoints" / f"checkpoint-{step}"
+    d.mkdir(parents=True)
+    (d / "adapter_model.safetensors").write_bytes(body)
+    (d / "adapter_config.json").write_text("{}")
+    (d / "trainer_state.json").write_text('{"log_history": [{"loss": 0.3, "step": %d}]}' % step)
+
+
+def test_recover_adapter_promotes_newest_checkpoint(tmp_path):
+    import json
+    assert T.recover_adapter(tmp_path, "test") is False
+    _ckpt(tmp_path, 50, b"old")
+    _ckpt(tmp_path, 100, b"new")
+    assert T.recover_adapter(tmp_path, "hung")
+    assert (tmp_path / "adapter" / "adapter_model.safetensors").read_bytes() == b"new"
+    m = json.loads((tmp_path / "metrics.json").read_text())
+    assert m["status"] == "recovered_from_checkpoint" and m["global_steps"] == 100 and m["reason"] == "hung"
+
+
+def test_supervisor_kills_a_hung_run_and_recovers(tmp_path):
+    import sys
+    _ckpt(tmp_path, 150)
+    cfg = {**T.DEFAULTS, "hang_minutes": 0.02, "startup_grace_min": 0, "watch_poll_s": 0.3,
+           "stack_dump_wait_s": 0.2}
+    t0 = time.time()
+    rc = T.supervise([sys.executable, "-c", "import time; time.sleep(60)"], tmp_path, cfg)
+    assert rc == 0 and time.time() - t0 < 20                     # killed, not waited out
+    assert (tmp_path / "adapter" / "adapter_model.safetensors").exists()
+
+
+def test_supervisor_passes_a_clean_exit(tmp_path):
+    import sys
+    cfg = {**T.DEFAULTS, "watch_poll_s": 0.1}
+    assert T.supervise([sys.executable, "-c", "pass"], tmp_path, cfg) == 0
+    assert not (tmp_path / "adapter").exists()
+
+
 def test_defaults_are_one_epoch_with_stop_switch():
     assert T.DEFAULTS["epochs"] == 1.0
     assert T.DEFAULTS["stop_url"].endswith("/rl-control/kaggle/STOP")
