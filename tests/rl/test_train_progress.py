@@ -22,10 +22,13 @@ def test_action_line_and_match():
 @pytest.mark.parametrize("body,expect", [
     ("", False), ("not a time", False),
     ("2099-01-01T00:00:00Z", True), ("2000-01-01T00:00:00Z", False),
-    (str(time.time() + 60), True), (str(time.time() - 3600), False),
+    ("+60", True), ("-3600", False),                     # epoch seconds relative to the run start
 ])
 def test_stop_requested_only_after_run_start(body, expect):
-    assert T.stop_requested(body, time.time()) is expect
+    start = time.time()
+    if body[:1] in "+-" and body:
+        body = str(start + float(body))                  # computed at run time, not at collection
+    assert T.stop_requested(body, start) is expect
 
 
 def test_progress_line_reads_well():
