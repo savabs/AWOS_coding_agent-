@@ -146,7 +146,7 @@ jobs:
           set -euo pipefail
           SETS=(); for kv in $CFG; do SETS+=(--set "$kv"); done
           python -m scaffold.rl.train.kaggle_driver stage --data sft --out stage --size "$SIZE" \
-            --user "${KAGGLE_USERNAME:-KAGGLE_USER}" "${SETS[@]}"
+            --user "${KAGGLE_USERNAME:-KAGGLE_USER}" ${SETS[@]+"${SETS[@]}"}   # macOS bash 3.2: empty array + set -u
           python -m scaffold.rl.train.kaggle_driver push --stage stage --dry-run
 
       - uses: actions/upload-artifact@v4
