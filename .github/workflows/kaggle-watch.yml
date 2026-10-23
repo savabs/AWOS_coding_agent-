@@ -24,13 +24,20 @@ jobs:
         with:
           python-version: "3.12"
       - name: Wait for the kernel
+        id: wait
         shell: bash
         run: |
           set -uo pipefail
           pip install -q kaggle==2.2.4
-          python -m scaffold.rl.train.kaggle_driver wait --kernel "$KAGGLE_USERNAME/awos-rl-sft" --timeout-min 330
+          # A GitHub job lives at most ~6 h; a kernel can run 10.5 h. "timeout" = still running, not a failure:
+          # push to a new bench-cloud/rl-kaggle-watch-* branch to keep watching.
+          S=$(python -m scaffold.rl.train.kaggle_driver wait --kernel "$KAGGLE_USERNAME/awos-rl-sft" --timeout-min 330 | tail -1)
+          echo "status=$S" >> "$GITHUB_OUTPUT"
+          echo "### Kaggle kernel status: \`$S\`" >> "$GITHUB_STEP_SUMMARY"
+          [ "$S" = "timeout" ] && echo "Still running after 5.5 h of watching; relaunch the watcher." >> "$GITHUB_STEP_SUMMARY"
+          [ "$S" = "complete" ] || [ "$S" = "timeout" ]
       - name: Fetch the output (log, metrics, adapter)
-        if: always()
+        if: always() && steps.wait.outputs.status != 'timeout'
         shell: bash
         run: |
           set -uo pipefail
@@ -38,6 +45,24 @@ jobs:
           ls -la kaggle_out || true
           [ -f kaggle_out/metrics.json ] && cat kaggle_out/metrics.json
           find kaggle_out -maxdepth 2 -name "*.log" -exec tail -n 80 {} \; || true
+          # progress.jsonl -> a readable table (about 15 rows, plus every eval) on the run page
+          [ -f kaggle_out/progress.jsonl ] && python3 - kaggle_out/progress.jsonl >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json, sys
+          rows = [json.loads(x) for x in open(sys.argv[1]) if x.strip()]
+          tr = [r for r in rows if r["kind"] == "train"]
+          keep = {id(r) for r in tr[:: max(1, len(tr) // 15)]} | {id(r) for r in rows if r["kind"] == "eval"}
+          pct = lambda v: "" if v is None else f"{v * 100:.0f}%"
+          num = lambda v, f: "" if v is None else f.format(v)
+          print("\n### Training progress\n\n| step | % | loss | eval loss | action acc | s/step | GPU util | GPU mem (GB) |")
+          print("|---:|---:|---:|---:|---:|---:|---|---|")
+          for r in rows:
+              if id(r) not in keep:
+                  continue
+              g = r.get("gpu") or []
+              print(f"| {r['step']}/{r['total']} | {r['pct']:.0f} | {num(r.get('loss'), '{:.3f}')} | "
+                    f"{num(r.get('eval_loss'), '{:.3f}')} | {pct(r.get('action_acc'))} | {num(r.get('s_per_step'), '{:.1f}')} | "
+                    f"{' '.join(str(x['util']) + '%' for x in g)} | {' '.join(f'{x['mem_used'] / 1024:.1f}' for x in g)} |")
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
