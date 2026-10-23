@@ -1,0 +1,191 @@
+# Goal G4 "learn from mistakes": preference data + Kaggle DPO launch (docs/research/rl_cua_2026-10-22/TRAINING.md):
+#   oracle demos (generated here) + Claude successes + Qwen 4B collection rollouts (artifacts of rl-eval runs)
+#   -> scaffold.rl.train.pairs (first divergence of a failed Qwen episode from a success on the identical prompt,
+#      plus safety pairs for unsafe steps; eval splits are a hard error)
+#   -> artifact rl-dpo-data
+#   -> (push=true and Kaggle secrets set) kaggle datasets version + kaggle kernels push (GPU T4 x2),
+#      kernel awos-rl-sft-g4-dpo running kaggle/rl-sft/train.py with objective=dpo
+# Fetch + export with rl-export.yml when the kernel is complete (same adapter format as SFT).
+#
+#   git push origin HEAD:bench-cloud/rl-train-dpo-g4         (settings: ci/rl_train_dpo.env)
+name: rl-train-dpo
+
+on:
+  push:
+    branches: ["bench-cloud/rl-train-dpo-**"]
+  workflow_dispatch:
+    inputs:
+      success_runs:
+        description: "Space-separated run ids whose TRAIN successes are 'chosen' (e.g. Claude distillation)"
+        default: "39973466526 40003832864"
+        type: string
+      policy_runs:
+        description: "Space-separated run ids of Qwen TRAIN collections (failures = 'rejected')"
+        default: "39852748367 39864014413"
+        type: string
+      oracle:
+        description: "Generate oracle demos (factory train + miniwob train) as 'chosen'"
+        default: true
+        type: boolean
+      max_train_pairs:
+        description: "Cap on train pairs (safety pairs always kept); 0 = no cap"
+        default: "1300"
+        type: string
+      size:
+        description: "2B | 4B"
+        default: "4B"
+        type: string
+      config:
+        description: "train_config overrides, space-separated key=value"
+        default: "objective=dpo run_name=G4-dpo"
+        type: string
+      push:
+        description: "Upload to Kaggle and start the training kernel (needs KAGGLE_* secrets)"
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  data:
+    # macOS pool: separate free concurrency (5) from the Linux pool that rl-eval fills (20).
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      # the rl-eval BASELINE (eval splits): must never become training data
+      EVAL_ONLY_RUNS: "39817774382"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Settings (dispatch inputs, or ci/rl_train_dpo.env on push)
+        id: cfg
+        shell: bash
+        env:
+          I_SUCCESS_RUNS: ${{ inputs.success_runs }}
+          I_POLICY_RUNS: ${{ inputs.policy_runs }}
+          I_ORACLE: ${{ inputs.oracle }}
+          I_MAX_TRAIN_PAIRS: ${{ inputs.max_train_pairs }}
+          I_SIZE: ${{ inputs.size }}
+          I_CONFIG: ${{ inputs.config }}
+          I_PUSH: ${{ inputs.push }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            source ci/rl_train_dpo.env
+          else
+            SUCCESS_RUNS="$I_SUCCESS_RUNS"; POLICY_RUNS="$I_POLICY_RUNS"; ORACLE="$I_ORACLE"
+            MAX_TRAIN_PAIRS="$I_MAX_TRAIN_PAIRS"; SIZE="$I_SIZE"; CONFIG="$I_CONFIG"; PUSH="$I_PUSH"
+          fi
+          for id in ${SUCCESS_RUNS:-} ${POLICY_RUNS:-}; do
+            for bad in $EVAL_ONLY_RUNS; do
+              if [ "$id" = "$bad" ]; then echo "::error::run $id is the EVAL baseline; refusing to train on it"; exit 1; fi
+            done
+          done
+          [ -n "${POLICY_RUNS:-}" ] || { echo "::error::POLICY_RUNS is empty: no failed episodes, no pairs"; exit 1; }
+          case " ${CONFIG:-} " in *" objective=dpo "*) ;; *) CONFIG="objective=dpo ${CONFIG:-}";; esac
+          {
+            echo "success_runs=${SUCCESS_RUNS:-}"; echo "policy_runs=${POLICY_RUNS}"; echo "oracle=${ORACLE:-true}"
+            echo "max_train_pairs=${MAX_TRAIN_PAIRS:-1300}"; echo "size=${SIZE:-4B}"; echo "config=${CONFIG}"
+            echo "push=${PUSH:-false}"
+            echo "kernel_slug=${KERNEL_SLUG:-awos-rl-sft-g4-dpo}"; echo "dataset_slug=${DATASET_SLUG:-awos-rl-sft-data-g4-dpo}"
+          } | tee -a "$GITHUB_OUTPUT"
+
+      - name: Playwright Chromium (oracle demos)
+        if: steps.cfg.outputs.oracle == 'true'
+        run: |
+          pip install -q playwright==1.64.0
+          python -m playwright install --with-deps chromium
+
+      - name: MiniWoB++ html (pinned commit, cached)
+        if: steps.cfg.outputs.oracle == 'true'
+        id: miniwob
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/awos-rl/miniwob
+          key: miniwob-a7658beb68e1d3572329e06734c5822bd284ddc8
+      - name: Fetch MiniWoB++ (cache miss)
+        if: steps.cfg.outputs.oracle == 'true' && steps.miniwob.outputs.cache-hit != 'true'
+        run: bash scripts/rl/fetch_miniwob.sh
+
+      - name: Oracle demos on the TRAIN splits only
+        if: steps.cfg.outputs.oracle == 'true'
+        run: |
+          set -uo pipefail
+          for src in factory miniwob; do
+            python -m scaffold.rl.harness run --source "$src" --split train --model oracle --workers 2 \
+              --out "runs/rl/oracle_${src}_train" | tail -3
+          done
+          ls -la runs/rl/
+
+      - name: Download run artifacts (train splits only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNS: ${{ steps.cfg.outputs.success_runs }} ${{ steps.cfg.outputs.policy_runs }}
+        run: |
+          set -euo pipefail
+          for id in $RUNS; do
+            gh run download "$id" --repo "$GITHUB_REPOSITORY" --pattern 'rl-*-train-*' --dir "artifacts/run-$id"   # eval artifacts would abort the build
+          done
+          find artifacts -name trajectories.jsonl | head -80
+
+      - name: Build the preference pairs (python -m scaffold.rl.train.pairs)
+        env:
+          SUCC: ${{ steps.cfg.outputs.success_runs }}
+          POL: ${{ steps.cfg.outputs.policy_runs }}
+          CAP: ${{ steps.cfg.outputs.max_train_pairs }}
+        run: |
+          set -euo pipefail
+          ARGS=()
+          for d in runs/rl/oracle_*_train; do [ -d "$d" ] && ARGS+=(--success "$(basename "$d")=$d"); done
+          for id in $SUCC; do ARGS+=(--success "model-$id=artifacts/run-$id"); done
+          for id in $POL; do ARGS+=(--policy "model-$id=artifacts/run-$id"); done
+          python -m scaffold.rl.train.pairs "${ARGS[@]}" --out dpo --val-frac 0.1 --max-train-pairs "$CAP" > pairs.log || { cat pairs.log; exit 1; }
+          cat pairs.log
+          {
+            echo '### G4 preference pairs'
+            python -c "import json; s=json.load(open('dpo/stats.json')); print('\n'.join(f'- {k}: {s[k]}' for k in ('pairs_total','train_pairs','valid_pairs','safety_pairs','safety_train','train_tasks','valid_tasks','by_family','safety_by_rule','by_chosen_src','by_rejected_src','rejected_invalid','drops')))"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stage the Kaggle dataset + kernel
+        env:
+          SIZE: ${{ steps.cfg.outputs.size }}
+          CFG: ${{ steps.cfg.outputs.config }}
+          KSLUG: ${{ steps.cfg.outputs.kernel_slug }}
+          DSLUG: ${{ steps.cfg.outputs.dataset_slug }}
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+        run: |
+          set -euo pipefail
+          SETS=(); for kv in $CFG; do SETS+=(--set "$kv"); done
+          python -m scaffold.rl.train.kaggle_driver stage --data dpo --out stage --size "$SIZE" \
+            --kernel-slug "$KSLUG" --dataset-slug "$DSLUG" \
+            --user "${KAGGLE_USERNAME:-KAGGLE_USER}" ${SETS[@]+"${SETS[@]}"}   # macOS bash 3.2: empty array + set -u
+          python -c "import json,sys; c=json.load(open('stage/dataset/train_config.json')); assert c.get('objective')=='dpo', c; print(c)"
+          python -m scaffold.rl.train.kaggle_driver push --stage stage --dry-run
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rl-dpo-data
+          path: |
+            dpo/
+            stage/
+            pairs.log
+          retention-days: 30
+
+      - name: Push to Kaggle and start training
+        if: steps.cfg.outputs.push == 'true'
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KAGGLE_USERNAME" ]; then echo "::error::KAGGLE_USERNAME secret not set"; exit 1; fi
+          pip install -q kaggle==2.2.4
+          python -m scaffold.rl.train.kaggle_driver push --stage stage --message "G4 dpo run $GITHUB_RUN_ID"
+          echo "Kernel started: https://www.kaggle.com/code/$KAGGLE_USERNAME/${{ steps.cfg.outputs.kernel_slug }}" >> "$GITHUB_STEP_SUMMARY"
