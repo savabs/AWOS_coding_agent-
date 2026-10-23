@@ -135,6 +135,25 @@ def _secret_leaf(n: dict) -> bool:
     return bool(txt) and (bool(_SECRETISH.search(txt)) or bool(_SECRET_LABEL.search(label)))
 
 
+def _derived_field_name(n: dict, lines: List[Tuple[str, str]], controls: List["WebControl"]) -> str:
+    """A name for a text field the page left unlabeled (no title/description), so the agent can still use
+    it instead of refusing: its placeholder, else the text just before it (usually the visual label, e.g.
+    "Date:"), else its position. Marked "(unlabeled)" so the model knows it was derived; a numeric
+    suffix keeps it unique on the page (grounding refuses look-alike controls)."""
+    ph = " ".join(str(n.get("placeholder") or "").split())
+    near = next((t for t, kind in reversed(lines) if kind in ("text", "heading") and t.strip()), "")
+    near = " ".join(near.replace('"', "'").split()).strip(" '")
+    base = ph.replace('"', "'") or (f"field after {near[:40]}" if near else "")
+    taken = {c.name for c in controls}
+    k = sum(1 for c in controls if c.kind in ("textbox", "password")) + 1
+    name = f"{base} (unlabeled)" if base else f"text field {k} (unlabeled)"
+    i = 2
+    while name in taken:
+        name = f"{base} (unlabeled {i})" if base else f"text field {k + i - 1} (unlabeled)"
+        i += 1
+    return name
+
+
 def _status_guess(title: str) -> int:
     t = title.strip().lower()
     if re.match(r"^(not found|404)\b", t):
@@ -220,7 +239,10 @@ def read_web(snap: Snapshot, web_path: Optional[Tuple[int, ...]] = None) -> WebV
                 ctx["context"] = _name(n)
 
         def add(kind, **kw):
-            c = WebControl(kind, _name(n), p, ctx.get("context", ""), bool(ctx.get("dialog")),
+            name = _name(n)
+            if not name and kind in ("textbox", "password"):
+                name = _derived_field_name(n, lines, controls)
+            c = WebControl(kind, name, p, ctx.get("context", ""), bool(ctx.get("dialog")),
                            ctx.get("form"), **kw)
             controls.append(c)
             return c

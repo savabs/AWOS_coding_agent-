@@ -41,6 +41,26 @@ def test_ax_value_forms():
     assert web_tools.Control(1, "checkbox", "X", value="1").line().endswith("= checked")
 
 
+def test_unlabeled_text_fields_get_a_derived_unique_name():
+    """A text field with no accessible name used to be refused ("control N has no accessible name",
+    the top failure cause in the 2026-10-23 diagnosis); now it is named from placeholder / preceding text."""
+    from scaffold.agent.desktop.live.driver import read_web
+    from scaffold.agent.desktop.live.observe import Snapshot
+    web = {"role": "AXWebArea", "title": "T", "children": [
+        {"role": "AXStaticText", "value": "Departure Date"},
+        {"role": "AXTextField"},
+        {"role": "AXTextField"},
+        {"role": "AXTextField", "placeholder": "Search \"flights\""},
+        {"role": "AXTextField", "title": "From:"},
+    ]}
+    win = {"role": "AXWindow", "title": "T", "children": [web]}
+    view = read_web(Snapshot(tree=win, truncated=False, app={}, url="http://127.0.0.1:1/", web_paths=[(0,)]))
+    names = [c.name for c in view.controls]
+    assert names == ["field after Departure Date (unlabeled)", "field after Departure Date (unlabeled 2)",
+                     "Search 'flights' (unlabeled)", "From:"]
+    assert len(set(names)) == len(names) and not any('"' in n for n in names)
+
+
 def test_tab_is_a_clickable_control():
     """WebKit exposes role=tab as AXRadioButton/AXTabButton inside an AXTabGroup."""
     from scaffold.agent.desktop.live.driver import read_web
