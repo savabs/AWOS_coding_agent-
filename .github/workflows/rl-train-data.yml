@@ -83,6 +83,8 @@ jobs:
             echo "collect_runs=${COLLECT_RUNS:-}"; echo "oracle=${ORACLE:-true}"
             echo "oracle_weight=${ORACLE_WEIGHT:-1}"; echo "max_per_task=${MAX_PER_TASK:-4}"
             echo "size=${SIZE:-4B}"; echo "config=${CONFIG:-}"; echo "push=${PUSH:-false}"
+            # separate Kaggle notebook + dataset per run, so concurrent runs never replace each other
+            echo "kernel_slug=${KERNEL_SLUG:-awos-rl-sft}"; echo "dataset_slug=${DATASET_SLUG:-awos-rl-sft-data}"
           } | tee -a "$GITHUB_OUTPUT"
 
       - name: Playwright Chromium (oracle demos)
@@ -141,11 +143,14 @@ jobs:
         env:
           SIZE: ${{ steps.cfg.outputs.size }}
           CFG: ${{ steps.cfg.outputs.config }}
+          KSLUG: ${{ steps.cfg.outputs.kernel_slug }}
+          DSLUG: ${{ steps.cfg.outputs.dataset_slug }}
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
         run: |
           set -euo pipefail
           SETS=(); for kv in $CFG; do SETS+=(--set "$kv"); done
           python -m scaffold.rl.train.kaggle_driver stage --data sft --out stage --size "$SIZE" \
+            --kernel-slug "$KSLUG" --dataset-slug "$DSLUG" \
             --user "${KAGGLE_USERNAME:-KAGGLE_USER}" ${SETS[@]+"${SETS[@]}"}   # macOS bash 3.2: empty array + set -u
           python -m scaffold.rl.train.kaggle_driver push --stage stage --dry-run
 
@@ -168,4 +173,4 @@ jobs:
           if [ -z "$KAGGLE_USERNAME" ]; then echo "::error::KAGGLE_USERNAME secret not set"; exit 1; fi
           pip install -q kaggle==2.2.4
           python -m scaffold.rl.train.kaggle_driver push --stage stage --message "run $GITHUB_RUN_ID"
-          echo "Kernel started: https://www.kaggle.com/code/$KAGGLE_USERNAME/awos-rl-sft" >> "$GITHUB_STEP_SUMMARY"
+          echo "Kernel started: https://www.kaggle.com/code/$KAGGLE_USERNAME/${{ steps.cfg.outputs.kernel_slug }}" >> "$GITHUB_STEP_SUMMARY"

@@ -82,6 +82,7 @@ DEFAULTS = {
     "eval_gen_rows": 48,          # held-out rows answered greedily at each eval -> action accuracy (0 = off)
     "gpu_sample_s": 30,
     "ntfy_topic": "awos-rl-be26ddc76649",   # live progress: https://ntfy.sh/awos-rl-be26ddc76649 ("" = off)
+    "run_name": "",                         # label on every ping when several runs share the topic
 }
 
 
@@ -223,6 +224,8 @@ def ntfy(cfg: dict, message: str, title: str = "", priority: str = "default", ta
     topic = cfg.get("ntfy_topic")
     if not topic:
         return
+    if cfg.get("run_name"):                        # several runs share the topic: label each ping
+        title = f"[{cfg['run_name']}] {title}"
     try:
         import urllib.request
         req = urllib.request.Request(f"https://ntfy.sh/{topic}", data=message.encode("utf-8"), method="POST")
