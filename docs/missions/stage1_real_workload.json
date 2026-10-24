@@ -1,0 +1,22 @@
+{
+  "id": "stage1_real_workload_v1",
+  "title": "Stage 1 Real Workload Mission",
+  "updated": "2026-06-18",
+  "env": {
+    "AWOS_USE_WORKTREE": "true",
+    "AWOS_RUNTIME_SESSION": "true",
+    "AWOS_CHEAP_ONLY": "true",
+    "AWOS_PREMIUM_BUDGET": "0",
+    "AWOS_MONTHLY_BUDGET": "20",
+    "AWOS_LEARNING_DISABLE": "true"
+  },
+  "goal": "Stage 1 real workload mission (worktree, multi-step): (1) scaffold/agent/mcts_policy.py — expand module docstring with when MCTS runs (2) scripts/install-awos-cli.sh — add echo line showing awos version path (3) tests/test_mcts_trace_store.py — add test that empty store count is 0 (already exists, ensure green) (4) awos.py cmd_sessions_show — print Sandbox line when worktree enabled (5) docs/missions/README.md — one paragraph mission playbook",
+  "success_criteria": [
+    "Session rs_* status completed with 3+ tasks",
+    "Main repo git status clean (changes only in .awos/worktrees/)",
+    "Pause/resume at least once OR total wall time > 30 minutes",
+    "awos sessions show prints Sandbox worktree path",
+    "SymbolIndex > 0 files in worktree logs"
+  ],
+  "pause_hint": "Ctrl+C after task 2 completes — then: awos sessions list && awos sessions resume rs_<id>"
+}

@@ -1,0 +1,5 @@
+# monthly_summary_perf
+
+This task tests whether the agent can speed up code without changing its results. The project is a small stdlib-only ledger service (`ledger/`) whose monthly summary takes about 4 s on a large account. The slowness has four sources in different modules: `storage` re-parses every row with `strptime` on each query, `summary` rebuilds each daily balance from scratch, `fx` scans the whole rate table for every conversion, and `rules` sorts the rules and looks up each regex again for every transaction. No single fix gets past about 2.2x, so the agent has to profile and fix at least three of them.
+
+It is realistic because the numbers use `Decimal` with two-step FX rounding, rate corrections where the last one received wins, and rule order by priority then name. A careless optimisation breaks these. The hidden tests compare the output to goldens taken from the original code. They also compare it against a frozen copy of the original after late postings, FX corrections and rule changes, to catch stale caches. Finally they time the work against that frozen copy in the same process. The reference solution is about 11.7x faster.

@@ -226,3 +226,8 @@ Until we know the unknowns, we can't solve this.
 ---
 
 **Status:** Research incomplete - need actual token consumption data to proceed
+
+## Related
+
+- _(add links to related documents here)_
+

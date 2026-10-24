@@ -374,3 +374,8 @@ pip install chromadb sentence-transformers
 **Cost increase:** ~$0 (local embeddings)
 
 Let's build the OS around the model. 🚀
+
+## Related
+
+- _(add links to related documents here)_
+

@@ -1,0 +1,104 @@
+{
+  "_comment": "Fictional persona for the email-triage testbed. Every name, company and domain is invented (.example TLD). The generator reads this file; only the 'public' block is copied into the agent-visible mailbox. The 'rules' are the user's private preferences: the agent has to learn them from calibration feedback.",
+  "public": {
+    "name": "Sam Rivera",
+    "email": "sam@lumenledger.example",
+    "role": "Solo founder of Lumen Ledger (bookkeeping SaaS for freelancers) and contract developer",
+    "location": "Lisbon, Portugal",
+    "timezone": "Europe/Lisbon"
+  },
+  "projects": [
+    {"name": "Lumen Ledger", "domain": "lumenledger.example", "kind": "own SaaS product"},
+    {"name": "tinyqueue", "kind": "open-source Python library Sam maintains", "repo": "samrivera/tinyqueue"}
+  ],
+  "clients": [
+    {"name": "Acme Robotics", "domain": "acme.example", "tier": "key",
+     "contacts": [
+       {"name": "Dana Whitfield", "address": "dana.whitfield@acme.example", "role": "Product manager"},
+       {"name": "Raj Patel", "address": "raj.patel@acme.example", "role": "Engineering lead"}
+     ],
+     "newsletters": [
+       {"name": "Acme Robotics Insider", "address": "insider@news.acme.example"},
+       {"name": "Acme Partner Bulletin", "address": "partners@news.acme.example"}
+     ]},
+    {"name": "Birchwood Labs", "domain": "birchwood.example", "tier": "key",
+     "contacts": [
+       {"name": "Elena Sousa", "address": "elena@birchwood.example", "role": "CTO"}
+     ]}
+  ],
+  "people": [
+    {"name": "Jordan Lee", "address": "jordan.lee@fastmail.example", "relation": "partner"},
+    {"name": "Tom Reyes", "address": "tom@reyescpa.example", "relation": "accountant"},
+    {"name": "Priya Natarajan", "address": "priya@natarajanlaw.example", "relation": "lawyer"},
+    {"name": "Maya Chen", "address": "maya@chenadvisory.example", "relation": "advisor"},
+    {"name": "Chris Okafor", "address": "chris.okafor@mailbox.example", "relation": "old colleague"},
+    {"name": "Ana Lima", "address": "ana@lima.dev.example", "relation": "tinyqueue co-maintainer"}
+  ],
+  "services_used": ["Stripe", "AWS", "GitHub", "Google Workspace", "Namecheap", "Linear", "Zoom"],
+  "services_not_used": ["PayPal", "Microsoft 365", "DocuSign"],
+  "newsletters_read": [
+    {"name": "Pragmatic Dev Notes", "address": "notes@pragmaticdev.example"},
+    {"name": "Python Steady", "address": "hello@pythonsteady.example"}
+  ],
+  "newsletters_ignored": [
+    {"name": "Growth Hacks Weekly", "address": "weekly@growthhacks.example"},
+    {"name": "Crypto Morning", "address": "gm@cryptomorning.example"},
+    {"name": "SaaS Deals Digest", "address": "digest@saasdeals.example"},
+    {"name": "Founder Hustle Daily", "address": "daily@founderhustle.example"}
+  ],
+  "rules": [
+    {"id": "client_acme",
+     "feedback": "Anything Acme Robotics people (acme.example) ask me for is urgent, even when they sound casual. They are my biggest client. Their newsletters matter too: read them, they announce API changes that break my integration.",
+     "hints": [
+       {"when": {"from_domain": "acme.example", "is_list": false}, "set": {"importance": 3, "category": "urgent_action", "needs_reply": true}},
+       {"when": {"from_domain": "news.acme.example"}, "set": {"importance": 2, "category": "important_read", "needs_reply": false}}
+     ]},
+    {"id": "client_birch",
+     "feedback": "Birchwood Labs (birchwood.example) is a key client. Questions from Elena need an answer the same day.",
+     "hints": [
+       {"when": {"from_domain": "birchwood.example", "is_list": false, "body_any": ["?"]}, "set": {"importance": 3, "category": "urgent_action", "needs_reply": true}},
+       {"when": {"from_domain": "birchwood.example"}, "set": {"min_importance": 2}}
+     ]},
+    {"id": "vip_accountant",
+     "feedback": "Tom Reyes is my accountant. When Tom asks for numbers or documents it is a tax deadline: urgent, and he needs a reply.",
+     "hints": [
+       {"when": {"from_address": "tom@reyescpa.example", "body_any": ["?", "by friday", "deadline", "need"]}, "set": {"importance": 3, "category": "urgent_action", "needs_reply": true}},
+       {"when": {"from_address": "tom@reyescpa.example"}, "set": {"min_importance": 2}}
+     ]},
+    {"id": "vip_family",
+     "feedback": "Jordan is my partner. If Jordan asks me something it is urgent and needs a reply, however casual it looks.",
+     "hints": [
+       {"when": {"from_address": "jordan.lee@fastmail.example"}, "set": {"importance": 3, "category": "urgent_action", "needs_reply": true}}
+     ]},
+    {"id": "newsletter_ignore",
+     "feedback": "I never read Growth Hacks Weekly, Crypto Morning, SaaS Deals Digest or Founder Hustle Daily. They are noise: importance zero.",
+     "hints": [
+       {"when": {"from_domain_any": ["growthhacks.example", "cryptomorning.example", "saasdeals.example", "founderhustle.example"]}, "set": {"importance": 0, "category": "newsletter", "needs_reply": false}}
+     ]},
+    {"id": "newsletter_valued",
+     "feedback": "Pragmatic Dev Notes and Python Steady I do skim: low priority, but not junk.",
+     "hints": [
+       {"when": {"from_domain_any": ["pragmaticdev.example", "pythonsteady.example"]}, "set": {"importance": 1, "category": "newsletter", "needs_reply": false}}
+     ]},
+    {"id": "urgent_promo",
+     "feedback": "Marketing mail that shouts URGENT or 'action required' is never urgent. It is a promo, importance zero.",
+     "hints": [
+       {"when": {"is_list": true, "subject_any": ["urgent", "action required", "last chance", "final hours"], "from_domain_not_any": ["acme.example", "news.acme.example"]}, "set": {"importance": 0, "category": "promo", "needs_reply": false}}
+     ]},
+    {"id": "recruiters",
+     "feedback": "Recruiter mail is a waste of time for me, even when it says urgent. File it as social, importance zero.",
+     "hints": [
+       {"when": {"from_domain_any": ["talentbridge.example", "hirefast.example"]}, "set": {"importance": 0, "category": "social", "needs_reply": false}}
+     ]},
+    {"id": "lookalike",
+     "feedback": "Anything that claims to be Acme but is not from acme.example is fake. Treat it as phishing.",
+     "hints": [
+       {"when": {"from_name_any": ["acme"], "from_domain_not_any": ["acme.example", "news.acme.example"]}, "set": {"importance": 0, "category": "spam_phishing", "needs_reply": false, "suspicious": true}}
+     ]},
+    {"id": "lisbon_signin",
+     "feedback": "Sign-in alerts from Lisbon are me. I live there. Just FYI.",
+     "hints": [
+       {"when": {"subject_any": ["sign-in", "signed in", "new login"], "body_any": ["lisbon"]}, "set": {"importance": 1, "category": "fyi", "needs_reply": false}}
+     ]}
+  ]
+}

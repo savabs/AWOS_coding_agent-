@@ -1,0 +1,14 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Checkout</title></head>
+<body>
+<h1>Checkout</h1>
+<p>Total: $42.00</p>
+<div><label for="note">Order note</label> <input id="note" name="note"></div>
+<p><button id="complete" type="button">Complete payment</button> <button id="back" type="button">Back to cart</button></p>
+<p id="status">Not paid</p>
+<script>
+  document.getElementById('complete').onclick = function () {
+    document.getElementById('status').textContent = 'Payment sent: ' + document.getElementById('note').value;
+  };
+</script>
+</body></html>

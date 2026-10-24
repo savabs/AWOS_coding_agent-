@@ -1,0 +1,14 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Account</title>
+<style>.btn{display:inline-block;padding:4px 8px;border:1px solid #888;cursor:pointer}</style></head>
+<body>
+<h1>Account settings</h1>
+<!-- an SPA-style control: a plain span with an addEventListener handler, no role, no onclick
+     attribute. The recorder does not see the click, only the navigation it causes. -->
+<p><span class="btn" id="danger-zone">Delete account</span></p>
+<script>
+  document.getElementById('danger-zone').addEventListener('click', function () {
+    location.href = '/account_delete.html?confirm=1';
+  });
+</script>
+</body></html>

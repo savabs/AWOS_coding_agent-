@@ -1,0 +1,169 @@
+# Harness-lift ladder H1 (docs/specs/harness_lift_ladder.md), sharded on macOS
+# runners. Settings: ci/ladder.env. Launch / collect / what is public: ci/README.md.
+name: ladder
+
+on:
+  push:
+    branches: ["bench-cloud/**", "!bench-cloud/p2-**", "!bench-cloud/mac-**", "!bench-cloud/mac-view-**", "!bench-cloud/mac-model-**", "!bench-cloud/mac-arena-**", "!bench-cloud/mac-pack-**", "!bench-cloud/rl-**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One ladder per ref at a time: a second push queues instead of spending twice.
+concurrency:
+  group: ladder-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      arms: ${{ steps.cfg.outputs.arms }}
+      n_shards: ${{ steps.cfg.outputs.n_shards }}
+      shards: ${{ steps.cfg.outputs.shards }}
+      cap_total: ${{ steps.cfg.outputs.cap_total }}
+      cap_shard: ${{ steps.cfg.outputs.cap_shard }}
+      limit: ${{ steps.cfg.outputs.limit }}
+      repeat: ${{ steps.cfg.outputs.repeat }}
+      model: ${{ steps.cfg.outputs.model }}
+      data_tag: ${{ steps.cfg.outputs.data_tag }}
+      data_asset: ${{ steps.cfg.outputs.data_asset }}
+      series_dir: ${{ steps.cfg.outputs.series_dir }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: cfg
+        name: Read ci/ladder.env
+        shell: bash
+        run: |
+          python3 scripts/ladder_collect.py ci-config ci/ladder.env | tee -a "$GITHUB_OUTPUT"
+
+  shard:
+    needs: config
+    runs-on: macos-14
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.config.outputs.shards) }}
+    env:
+      SHARD: ${{ matrix.shard }}
+      N_SHARDS: ${{ needs.config.outputs.n_shards }}
+      ARMS: ${{ needs.config.outputs.arms }}
+      CAP_SHARD: ${{ needs.config.outputs.cap_shard }}
+      LIMIT: ${{ needs.config.outputs.limit }}
+      REPEAT: ${{ needs.config.outputs.repeat }}
+      MODEL: ${{ needs.config.outputs.model }}
+      SERIES_DIR: ${{ needs.config.outputs.series_dir }}
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            ci/ladder-requirements.txt
+            ci/mini-requirements.txt
+
+      - name: Paths (HOME-relative, as on the laptop)
+        shell: bash
+        run: |
+          # harness_mini's venv (~/.awos-harness/venvs/mini) and its sandbox
+          # profile (denies reads of ~/.awos-harness) are HOME-relative.
+          {
+            echo "SERIES_ROOT=$HOME/.awos-harness/$SERIES_DIR"
+            echo "OUT=$HOME/.awos-harness/ladder_haiku"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$HOME/.awos-harness/ladder_haiku"
+
+      - name: Install the CI lock (driver, AWOS, grader)
+        shell: bash
+        run: |
+          python -m pip install -r ci/ladder-requirements.txt
+          python -m pip check
+          python -c "import pytest, anthropic, openai, numpy, dotenv, tree_sitter"
+          python -c "import sys; sys.path[:0] = ['.', 'scaffold', 'scaffold/agent']; import scaffold.agent.orchestrator"
+          if python -c "import xdist" 2>/dev/null; then echo "pytest-xdist must not be installed"; exit 1; fi
+          python --version
+
+      - name: Create the mini venv (~/.awos-harness/venvs/mini)
+        shell: bash
+        run: |
+          python -m venv "$HOME/.awos-harness/venvs/mini"
+          "$HOME/.awos-harness/venvs/mini/bin/python" -m pip install -r ci/mini-requirements.txt
+          "$HOME/.awos-harness/venvs/mini/bin/python" -c "import minisweagent, litellm; print('mini-swe-agent', minisweagent.__version__)"
+
+      - name: Tools and git identity
+        shell: bash
+        run: |
+          command -v rg >/dev/null || brew install ripgrep
+          rg --version | head -1
+          test -x /usr/bin/sandbox-exec
+          git config --global user.name "awos-bench-ci"
+          git config --global user.email "awos-bench-ci@users.noreply.github.com"
+          git config --global init.defaultBranch main
+          openssl version
+
+      - name: Download and decrypt the dataset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BENCH_DATA_KEY: ${{ secrets.BENCH_DATA_KEY }}
+          DATA_TAG: ${{ needs.config.outputs.data_tag }}
+          DATA_ASSET: ${{ needs.config.outputs.data_asset }}
+        run: |
+          set -euo pipefail
+          test -n "$BENCH_DATA_KEY" || { echo "secret BENCH_DATA_KEY is not set"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/data"
+          gh release download "$DATA_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "$DATA_ASSET" --dir "$RUNNER_TEMP/data"
+          # tar keeps the archived mtimes, so _tools/validate.json stays newer
+          # than the series files and job_series reuses the cached preflight.
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:BENCH_DATA_KEY \
+            -in "$RUNNER_TEMP/data/$DATA_ASSET" | tar -C "$HOME/.awos-harness" -xzf -
+          rm -f "$RUNNER_TEMP/data/$DATA_ASSET"
+          du -sh "$SERIES_ROOT"
+
+      - name: Check the dataset (READY, issues, cached preflight)
+        shell: bash
+        run: |
+          python scripts/ladder_collect.py check-data --series-root "$SERIES_ROOT" \
+            --min-issues 15 --shard "$SHARD/$N_SHARDS" ${LIMIT:+--limit "$LIMIT"}
+
+      - name: Run shard
+        shell: bash
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$ANTHROPIC_API_KEY" || { echo "secret ANTHROPIC_API_KEY is not set"; exit 1; }
+          echo "shard $SHARD/$N_SHARDS arms=$ARMS cap=\$$CAP_SHARD limit=${LIMIT:-all} sha=$GITHUB_SHA"
+          env -u OPENROUTER_API_KEY AWOS_SERIES_MODEL="$MODEL" PYTHONUNBUFFERED=1 \
+            python scripts/ablation_awos_vs_aider.py run \
+              --series-root "$SERIES_ROOT" --out "$OUT" --arms "$ARMS" \
+              --cap "$CAP_SHARD" --repeat "$REPEAT" --min-issues 15 --parallel 1 \
+              --shard "$SHARD/$N_SHARDS" ${LIMIT:+--limit "$LIMIT"} \
+            2>&1 | tee "$OUT/driver_stdout_shard$SHARD.log"
+
+      - name: Stage small result files
+        if: always()
+        shell: bash
+        run: |
+          python scripts/ladder_collect.py stage --out "$OUT" \
+            --dest "$RUNNER_TEMP/ladder-shard-$SHARD" --arms "$ARMS" --repeat "$REPEAT" \
+            --series-root "$SERIES_ROOT" --shard "$SHARD/$N_SHARDS" ${LIMIT:+--limit "$LIMIT"}
+
+      - name: Upload shard artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ladder-shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}/ladder-shard-${{ matrix.shard }}
+          # llm_calls.jsonl lives under state/.awos/ (a hidden dir)
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 30

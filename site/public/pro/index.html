@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>AWOS Pro · unlimited cloud-model jobs</title>
+<meta name="description" content="AWOS is free for local models and for 25 cloud-model jobs a month. AWOS Pro removes the monthly limit. You keep paying your model provider directly.">
+<link rel="canonical" href="https://awos.tirramind.com/pro/">
+<meta property="og:title" content="AWOS Pro · unlimited cloud-model jobs">
+<meta property="og:description" content="AWOS is free for local models and for 25 cloud-model jobs a month. AWOS Pro removes the monthly limit. You keep paying your model provider directly.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://awos.tirramind.com/pro/">
+<meta name="robots" content="index,follow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap">
+  <a class="brand" href="/" aria-label="AWOS home">AWOS<span>.</span></a>
+  <nav class="links" aria-label="Main">
+    <a class="wide" href="/#how">How it works</a>
+    <a class="wide" href="/#results">Results</a>
+    <a href="/docs/">Docs</a>
+    <a class="wide" href="/docs/security/">Security</a>
+    <a class="wide" href="/#pricing">Pricing</a>
+  </nav>
+  <a class="btn primary" href="/#waitlist">Join the waitlist</a>
+</div></header>
+<main id="main" class="wrap">
+<div class="access">
+  <div class="eyebrow">Pricing</div>
+  <h1>AWOS Pro</h1>
+  <p class="sub">AWOS runs on your machine with your own Anthropic key or a local model. You always pay your model provider directly. Pro removes the monthly limit on cloud-model jobs.</p>
+  <div class="two">
+    <div class="price"><div class="tag">Free</div>
+      <ul>
+        <li>Local-model jobs: unlimited</li>
+        <li>Cloud-model jobs: 25 a month, counted on your machine</li>
+        <li>Everything else in AWOS</li>
+      </ul>
+    </div>
+    <div class="price"><div class="tag" id="pro-price">Pro</div>
+      <ul>
+        <li>Cloud-model jobs: unlimited</li>
+        <li>Local-model jobs: unlimited</li>
+        <li>Cancel any time; access runs to the end of the period you paid for</li>
+      </ul>
+      <div class="cta"><button class="btn primary" id="pro-buy" type="button" disabled>Checkout opening soon</button></div>
+      <p class="status" id="pro-status" role="status" aria-live="polite"></p>
+    </div>
+  </div>
+  <h2>After you pay</h2>
+  <p>The next page shows your licence key. Activate it once on each machine:</p>
+  <pre><code>awos activate awos_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+awos licence status</code></pre>
+  <p class="note">AWOS checks the key with this site at most once a day and keeps working offline for 14 days. Payments are handled by Paddle, our reseller and merchant of record. Usage counts are a separate, opt-in setting: see <a href="/telemetry/">what AWOS sends</a>.</p>
+</div>
+</main>
+<script src="/assets/pro.js" defer></script>
+<footer class="site"><div class="wrap">
+  <span>AWOS. A local-first coding agent. Built in India.</span>
+  <nav aria-label="Footer">
+    <a href="/docs/">Docs</a>
+    <a href="/docs/quickstart/">Quickstart</a>
+    <a href="/docs/security/">Security</a>
+    <a href="/docs/faq/">FAQ</a>
+    <a href="/#waitlist">Waitlist</a>
+    <a href="/access/">Team early access</a>
+  </nav>
+</div></footer>
+</body>
+</html>

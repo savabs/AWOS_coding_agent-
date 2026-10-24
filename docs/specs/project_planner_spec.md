@@ -1,3 +1,9 @@
+---
+title: "Spec: ProjectPlanner — Persistent Goal DAG (Phase 5C)"
+tags:
+  - doc/spec
+---
+
 # Spec: ProjectPlanner — Persistent Goal DAG (Phase 5C)
 
 > Canonical HTML: docs/specs/project_planner_spec.html

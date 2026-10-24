@@ -1,0 +1,29 @@
+{
+  "id": "clawcode_ci_rescue_v1",
+  "title": "CI Rescue Sprint — clawcode (real repo, 12 reds)",
+  "updated": "2026-06-26",
+  "codebase_root": "/home/becmachlean/2024/projects/clawcode",
+  "env": {
+    "AWOS_USE_WORKTREE": "true",
+    "AWOS_RUNTIME_SESSION": "true",
+    "AWOS_CHEAP_ONLY": "true",
+    "AWOS_PREMIUM_BUDGET": "0",
+    "AWOS_MONTHLY_BUDGET": "20",
+    "AWOS_LEARNING_DISABLE": "true"
+  },
+  "plan_file": "clawcode_ci_rescue.plan.json",
+  "goal": "CI Rescue on clawcode: fix all 12 failing tests in tests/test_porting_workspace.py. Edit only src/ files. Do not modify tests/ or test files. Restore correct behavior for port manifest, query engine, commands, tools, subsystems, setup, remote modes, and bootstrap prompt output.",
+  "goal_assertions": {
+    "must_still_pass": "python3 -m pytest tests/ -q --tb=no",
+    "forbidden_paths": ["tests/"],
+    "max_wall_minutes": 120
+  },
+  "goal_assertions_file": "docs/missions/clawcode_ci_rescue_goal.json",
+  "success_criteria": [
+    "pytest tests/ all green in worktree",
+    "wedge_v1_assert.py SEMANTIC_PASS",
+    "12 bugs fixed across src/ only",
+    "clawcode main branch untouched"
+  ],
+  "pause_hint": "Branch awos-ci-rescue-buggy must exist on clawcode before start. Run: python3 scripts/clawcode_ci_rescue_prepare.py"
+}

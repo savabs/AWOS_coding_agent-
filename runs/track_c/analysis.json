@@ -1,0 +1,546 @@
+{
+  "inputs": [
+    "runs/track_c/main/job_series_20261011T152307.json",
+    "runs/track_c/main/job_series_20261011T152630.json",
+    "runs/track_c/main/job_series_20261011T152947.json",
+    "runs/track_c/main/job_series_20261011T153230.json",
+    "runs/track_c/main/job_series_20261011T153525.json",
+    "runs/track_c/main/job_series_20261011T154120.json",
+    "runs/track_c/main/job_series_20261011T154648.json",
+    "runs/track_c/main/job_series_20261011T154915.json",
+    "runs/track_c/main/job_series_20261011T155239.json",
+    "runs/track_c/main/job_series_20261011T155626.json",
+    "runs/track_c/main/job_series_20261011T160119.json",
+    "runs/track_c/main/job_series_20261011T160621.json",
+    "runs/track_c/main/job_series_20261011T161109.json",
+    "runs/track_c/main/job_series_20261011T161400.json",
+    "runs/track_c/main/job_series_20261011T161706.json",
+    "runs/track_c/main/job_series_20261011T162130.json",
+    "runs/track_c/main/job_series_20261011T162758.json",
+    "runs/track_c/main/job_series_20261011T163330.json"
+  ],
+  "n_rows": 156,
+  "invalid_rows": 0,
+  "spend_usd": 0.50553,
+  "curves": {
+    "off": {
+      "1": {
+        "runs": 18,
+        "solved": 18,
+        "solve_rate": 1.0,
+        "mean_cost": 0.002437222222222222,
+        "mean_turns": 3.7777777777777777,
+        "mean_minutes": 0.2538888888888889,
+        "cost_per_solved": 0.002437222222222222,
+        "notebook_cost": 0.0,
+        "mean_notebook_chars": 0.0
+      },
+      "2": {
+        "runs": 18,
+        "solved": 18,
+        "solve_rate": 1.0,
+        "mean_cost": 0.0024136666666666664,
+        "mean_turns": 3.8333333333333335,
+        "mean_minutes": 0.2744444444444445,
+        "cost_per_solved": 0.0024136666666666664,
+        "notebook_cost": 0.0,
+        "mean_notebook_chars": 0.0
+      },
+      "3": {
+        "runs": 18,
+        "solved": 18,
+        "solve_rate": 1.0,
+        "mean_cost": 0.002544611111111111,
+        "mean_turns": 3.9444444444444446,
+        "mean_minutes": 0.25055555555555553,
+        "cost_per_solved": 0.002544611111111111,
+        "notebook_cost": 0.0,
+        "mean_notebook_chars": 0.0
+      },
+      "4": {
+        "runs": 18,
+        "solved": 18,
+        "solve_rate": 1.0,
+        "mean_cost": 0.0022395555555555554,
+        "mean_turns": 3.4444444444444446,
+        "mean_minutes": 0.2411111111111111,
+        "cost_per_solved": 0.0022395555555555554,
+        "notebook_cost": 0.0,
+        "mean_notebook_chars": 0.0
+      },
+      "5": {
+        "runs": 6,
+        "solved": 3,
+        "solve_rate": 0.5,
+        "mean_cost": 0.002515166666666667,
+        "mean_turns": 4.166666666666667,
+        "mean_minutes": 0.26,
+        "cost_per_solved": 0.005030333333333334,
+        "notebook_cost": 0.0,
+        "mean_notebook_chars": 0.0
+      }
+    },
+    "learn": {
+      "1": {
+        "runs": 18,
+        "solved": 18,
+        "solve_rate": 1.0,
+        "mean_cost": 0.002915888888888889,
+        "mean_turns": 3.7222222222222223,
+        "mean_minutes": 0.3272222222222222,
+        "cost_per_solved": 0.002915888888888889,
+        "notebook_cost": 0.0005044444444444444,
+        "mean_notebook_chars": 1263.888888888889
+      },
+      "2": {
+        "runs": 18,
+        "solved": 18,
+        "solve_rate": 1.0,
+        "mean_cost": 0.0036504444444444444,
+        "mean_turns": 3.7777777777777777,
+        "mean_minutes": 0.37444444444444447,
+        "cost_per_solved": 0.0036504444444444444,
+        "notebook_cost": 0.0007547222222222222,
+        "mean_notebook_chars": 2016.3333333333333
+      },
+      "3": {
+        "runs": 18,
+        "solved": 18,
+        "solve_rate": 1.0,
+        "mean_cost": 0.0043991111111111115,
+        "mean_turns": 3.9444444444444446,
+        "mean_minutes": 0.3577777777777778,
+        "cost_per_solved": 0.0043991111111111115,
+        "notebook_cost": 0.0009301666666666667,
+        "mean_notebook_chars": 2720.5
+      },
+      "4": {
+        "runs": 18,
+        "solved": 18,
+        "solve_rate": 1.0,
+        "mean_cost": 0.004814388888888889,
+        "mean_turns": 3.8333333333333335,
+        "mean_minutes": 0.3794444444444445,
+        "cost_per_solved": 0.004814388888888889,
+        "notebook_cost": 0.0010894444444444443,
+        "mean_notebook_chars": 3181.0555555555557
+      },
+      "5": {
+        "runs": 6,
+        "solved": 1,
+        "solve_rate": 0.16666666666666666,
+        "mean_cost": 0.005495166666666666,
+        "mean_turns": 4.333333333333333,
+        "mean_minutes": 0.48833333333333334,
+        "cost_per_solved": 0.032971,
+        "notebook_cost": 0.0012871666666666667,
+        "mean_notebook_chars": 3345.1666666666665
+      }
+    }
+  },
+  "solve_rule_pos2_4": {
+    "label": "INCONCLUSIVE",
+    "base": "off",
+    "cand": "learn",
+    "n_tasks": 18,
+    "runs_base": [
+      54,
+      54
+    ],
+    "runs_cand": [
+      54,
+      54
+    ],
+    "delta_obs": 0.0,
+    "p_pos": 0.50005,
+    "p_pos_bb": 0.5,
+    "delta_post": -0.0007202642294843857,
+    "cri": [
+      -0.13732013114688893,
+      0.13588033181719264
+    ],
+    "mcnemar_b": 0,
+    "mcnemar_c": 0,
+    "mcnemar_p": 1.0,
+    "mde": 0.0,
+    "cost_base": 0.002399277777777778,
+    "cost_cand": 0.004287981481481482,
+    "cost_ratio": 1.7871967644584406,
+    "cost_budget": 0.5,
+    "reasons": [
+      "P(\u0394>0) = 0.500 < 0.95",
+      "McNemar p = 1.000 > 0.05",
+      "cost \u00d71.79 over budget +50%"
+    ],
+    "draws": 20000,
+    "seed": 20261009
+  },
+  "solve_rule_pos1_4": {
+    "label": "INCONCLUSIVE",
+    "base": "off",
+    "cand": "learn",
+    "n_tasks": 24,
+    "runs_base": [
+      72,
+      72
+    ],
+    "runs_cand": [
+      72,
+      72
+    ],
+    "delta_obs": 0.0,
+    "p_pos": 0.4997,
+    "p_pos_bb": 0.5,
+    "delta_post": 0.0002903113077066167,
+    "cri": [
+      -0.11737261326586163,
+      0.11643192887860276
+    ],
+    "mcnemar_b": 0,
+    "mcnemar_c": 0,
+    "mcnemar_p": 1.0,
+    "mde": 0.0,
+    "cost_base": 0.002408763888888889,
+    "cost_cand": 0.003944958333333333,
+    "cost_ratio": 1.6377521896316112,
+    "cost_budget": 0.5,
+    "reasons": [
+      "P(\u0394>0) = 0.500 < 0.95",
+      "McNemar p = 1.000 > 0.05",
+      "cost \u00d71.64 over budget +50%"
+    ],
+    "draws": 20000,
+    "seed": 20261009
+  },
+  "efficiency_pos2_4": {
+    "cost": {
+      "metric": "cost",
+      "positions": [
+        2,
+        3,
+        4
+      ],
+      "n_tasks": 18,
+      "cheaper": 0,
+      "dearer": 18,
+      "sign_p": 7.629394531250002e-06,
+      "p_mean_d_lt_0": 0.0,
+      "geo_ratio": 1.7898516572362073,
+      "geo_ratio_cri": [
+        1.617658790449118,
+        1.9753662282900348
+      ],
+      "per_task": {
+        "102": {
+          "base": 0.0017089999999999998,
+          "cand": 0.002518666666666667
+        },
+        "103": {
+          "base": 0.001296,
+          "cand": 0.002491
+        },
+        "104": {
+          "base": 0.001626,
+          "cand": 0.0031839999999999998
+        },
+        "202": {
+          "base": 0.0026269999999999996,
+          "cand": 0.003924666666666667
+        },
+        "203": {
+          "base": 0.003638,
+          "cand": 0.0058256666666666665
+        },
+        "204": {
+          "base": 0.002954333333333333,
+          "cand": 0.004777
+        },
+        "302": {
+          "base": 0.0019416666666666668,
+          "cand": 0.0035566666666666667
+        },
+        "303": {
+          "base": 0.0017419999999999998,
+          "cand": 0.0038209999999999997
+        },
+        "304": {
+          "base": 0.0018873333333333335,
+          "cand": 0.004480666666666667
+        },
+        "402": {
+          "base": 0.002651,
+          "cand": 0.004924666666666667
+        },
+        "403": {
+          "base": 0.00301,
+          "cand": 0.006589
+        },
+        "404": {
+          "base": 0.0028,
+          "cand": 0.006551
+        },
+        "502": {
+          "base": 0.003538,
+          "cand": 0.003917333333333333
+        },
+        "503": {
+          "base": 0.003422,
+          "cand": 0.004490666666666667
+        },
+        "504": {
+          "base": 0.002072,
+          "cand": 0.00514
+        },
+        "602": {
+          "base": 0.0020153333333333334,
+          "cand": 0.0030606666666666664
+        },
+        "603": {
+          "base": 0.002159666666666667,
+          "cand": 0.003177333333333333
+        },
+        "604": {
+          "base": 0.0020976666666666665,
+          "cand": 0.0047536666666666665
+        }
+      }
+    },
+    "turns": {
+      "metric": "turns",
+      "positions": [
+        2,
+        3,
+        4
+      ],
+      "n_tasks": 18,
+      "cheaper": 4,
+      "dearer": 9,
+      "sign_p": 0.26684570312500017,
+      "p_mean_d_lt_0": 0.2041,
+      "geo_ratio": 1.0351037588509082,
+      "geo_ratio_cri": [
+        0.9450480036611734,
+        1.1217956665025886
+      ],
+      "per_task": {
+        "102": {
+          "base": 3.0,
+          "cand": 3.0
+        },
+        "103": {
+          "base": 3.0,
+          "cand": 3.0
+        },
+        "104": {
+          "base": 3.0,
+          "cand": 3.0
+        },
+        "202": {
+          "base": 4.0,
+          "cand": 4.0
+        },
+        "203": {
+          "base": 5.0,
+          "cand": 5.333333333333333
+        },
+        "204": {
+          "base": 4.333333333333333,
+          "cand": 3.6666666666666665
+        },
+        "302": {
+          "base": 3.3333333333333335,
+          "cand": 4.0
+        },
+        "303": {
+          "base": 3.0,
+          "cand": 4.0
+        },
+        "304": {
+          "base": 3.0,
+          "cand": 4.0
+        },
+        "402": {
+          "base": 4.0,
+          "cand": 4.666666666666667
+        },
+        "403": {
+          "base": 4.0,
+          "cand": 4.666666666666667
+        },
+        "404": {
+          "base": 4.0,
+          "cand": 4.333333333333333
+        },
+        "502": {
+          "base": 5.333333333333333,
+          "cand": 3.6666666666666665
+        },
+        "503": {
+          "base": 5.0,
+          "cand": 3.6666666666666665
+        },
+        "504": {
+          "base": 3.0,
+          "cand": 3.6666666666666665
+        },
+        "602": {
+          "base": 3.3333333333333335,
+          "cand": 3.3333333333333335
+        },
+        "603": {
+          "base": 3.6666666666666665,
+          "cand": 3.0
+        },
+        "604": {
+          "base": 3.3333333333333335,
+          "cand": 4.333333333333333
+        }
+      }
+    }
+  },
+  "labels": {
+    "cost": "LEARNING HURTS",
+    "turns": "INCONCLUSIVE"
+  },
+  "placebo_pos1": {
+    "cost": {
+      "metric": "cost",
+      "positions": [
+        1
+      ],
+      "n_tasks": 6,
+      "cheaper": 0,
+      "dearer": 6,
+      "sign_p": 0.031250000000000014,
+      "p_mean_d_lt_0": 0.0,
+      "geo_ratio": 1.2320588395697318,
+      "geo_ratio_cri": [
+        1.115083843569456,
+        1.3604016828157248
+      ],
+      "per_task": {
+        "101": {
+          "base": 0.0014923333333333334,
+          "cand": 0.0021420000000000002
+        },
+        "201": {
+          "base": 0.0025526666666666666,
+          "cand": 0.0031073333333333335
+        },
+        "301": {
+          "base": 0.0018693333333333333,
+          "cand": 0.0022760000000000002
+        },
+        "401": {
+          "base": 0.0038626666666666666,
+          "cand": 0.004282333333333333
+        },
+        "501": {
+          "base": 0.0031086666666666663,
+          "cand": 0.0031196666666666664
+        },
+        "601": {
+          "base": 0.0017376666666666667,
+          "cand": 0.002568
+        }
+      }
+    },
+    "turns": {
+      "metric": "turns",
+      "positions": [
+        1
+      ],
+      "n_tasks": 6,
+      "cheaper": 1,
+      "dearer": 1,
+      "sign_p": 1.0,
+      "p_mean_d_lt_0": 0.5965,
+      "geo_ratio": 0.9919012787602388,
+      "geo_ratio_cri": [
+        0.9302333612135102,
+        1.0456522452122108
+      ],
+      "per_task": {
+        "101": {
+          "base": 3.0,
+          "cand": 3.0
+        },
+        "201": {
+          "base": 4.0,
+          "cand": 4.0
+        },
+        "301": {
+          "base": 3.3333333333333335,
+          "cand": 3.3333333333333335
+        },
+        "401": {
+          "base": 4.666666666666667,
+          "cand": 4.666666666666667
+        },
+        "501": {
+          "base": 4.666666666666667,
+          "cand": 4.0
+        },
+        "601": {
+          "base": 3.0,
+          "cand": 3.3333333333333335
+        }
+      }
+    }
+  },
+  "near_miss_pos5": {
+    "cost": {
+      "metric": "cost",
+      "positions": [
+        5
+      ],
+      "n_tasks": 2,
+      "cheaper": 0,
+      "dearer": 2,
+      "sign_p": 0.5,
+      "p_mean_d_lt_0": 0.0,
+      "geo_ratio": 2.248671646925531,
+      "geo_ratio_cri": [
+        1.7911624587545198,
+        2.822270301676935
+      ],
+      "per_task": {
+        "505": {
+          "base": 0.0019199999999999998,
+          "cand": 0.005485
+        },
+        "605": {
+          "base": 0.0031103333333333334,
+          "cand": 0.005505333333333333
+        }
+      }
+    },
+    "turns": {
+      "metric": "turns",
+      "positions": [
+        5
+      ],
+      "n_tasks": 2,
+      "cheaper": 1,
+      "dearer": 1,
+      "sign_p": 1.0,
+      "p_mean_d_lt_0": 0.27375,
+      "geo_ratio": 1.0583005244258363,
+      "geo_ratio_cri": [
+        0.9391713208016733,
+        1.1923698533258424
+      ],
+      "per_task": {
+        "505": {
+          "base": 3.3333333333333335,
+          "cand": 4.0
+        },
+        "605": {
+          "base": 5.0,
+          "cand": 4.666666666666667
+        }
+      }
+    }
+  },
+  "harm": []
+}

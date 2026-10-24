@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "session_id": "rs_d39c498dd4ca",
+  "goal": "CI Rescue Sprint: fix auth.py, billing.py, inventory.py, shipping.py, and promo.py so all 35 pytest tests pass. Do not edit tests/, conftest.py, or golden/. Keep 7 regression tests green.",
+  "goal_hash": "83dde3d198",
+  "status": "completed",
+  "created_at": "2026-06-25T14:06:57Z",
+  "updated_at": "2026-06-25T14:07:51Z",
+  "paused_at": null,
+  "codebase_root": "/home/becmachlean/2024/projects/AWOS_coding_agent/tests/fixtures/wedge_v1/ci_rescue_sprint/.awos/worktrees/d39c498dd4ca",
+  "reasoning_session_id": null,
+  "goal_graph_id": null,
+  "progress": {
+    "completed_task_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18
+    ],
+    "failed_task_ids": [],
+    "current_task_id": null,
+    "total_tasks": 18,
+    "decomposition_depth": 0
+  },
+  "budget": {
+    "spent_usd": 0.0
+  },
+  "sandbox": {
+    "enabled": true,
+    "feature_id": "d39c498dd4ca",
+    "worktree_path": "/home/becmachlean/2024/projects/AWOS_coding_agent/tests/fixtures/wedge_v1/ci_rescue_sprint/.awos/worktrees/d39c498dd4ca",
+    "branch": "awos/feature/d39c498dd4ca"
+  },
+  "parent_session_id": null,
+  "cancel_requested": false,
+  "pause_reason": null
+}

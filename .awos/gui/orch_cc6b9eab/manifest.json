@@ -1,0 +1,76 @@
+{
+  "session_id": "orch_cc6b9eab",
+  "goal": "In scaffold/agent/integration_reviewer.py add a one-line docstring to _is_cheap_only explaining it reads AWOS_CHEAP_ONLY from the environment",
+  "status": "completed",
+  "started_at": "2026-06-16T08:18:51Z",
+  "files": [
+    {
+      "path": "scaffold/agent/integration_reviewer.py",
+      "status": "modified",
+      "lines_added": 1,
+      "lines_removed": 0,
+      "hunks": [
+        {
+          "old_start": 1,
+          "old_count": 4,
+          "new_start": 1,
+          "new_count": 5,
+          "lines": [
+            {
+              "type": "header",
+              "content": "@@ -1,4 +1,5 @@",
+              "old_line_no": null,
+              "new_line_no": null
+            },
+            {
+              "type": "context",
+              "content": "def _is_cheap_only() -> bool:",
+              "old_line_no": 1,
+              "new_line_no": 1
+            },
+            {
+              "type": "add",
+              "content": "    \"\"\"Check if cheap-only mode is enabled via AWOS_CHEAP_ONLY environment variable.\"\"\"",
+              "old_line_no": null,
+              "new_line_no": 2
+            },
+            {
+              "type": "context",
+              "content": "    try:",
+              "old_line_no": 2,
+              "new_line_no": 3
+            },
+            {
+              "type": "context",
+              "content": "        from escalation_engine import is_cheap_only",
+              "old_line_no": 3,
+              "new_line_no": 4
+            },
+            {
+              "type": "context",
+              "content": "    except ImportError:",
+              "old_line_no": 4,
+              "new_line_no": 5
+            }
+          ]
+        }
+      ],
+      "unified_diff": "--- scaffold/agent/integration_reviewer.py (before)\n+++ scaffold/agent/integration_reviewer.py (after)\n@@ -1,4 +1,5 @@\n def _is_cheap_only() -> bool:\n\n+    \"\"\"Check if cheap-only mode is enabled via AWOS_CHEAP_ONLY environment variable.\"\"\"\n\n     try:\n\n         from escalation_engine import is_cheap_only\n\n     except ImportError:\n",
+      "before_excerpt": "def _is_cheap_only() -> bool:\n    try:\n        from escalation_engine import is_cheap_only\n    except ImportError:\n        from .escalation_engine import is_cheap_only\n    return is_cheap_only()",
+      "after_excerpt": "def _is_cheap_only() -> bool:\n    \"\"\"Check if cheap-only mode is enabled via AWOS_CHEAP_ONLY environment variable.\"\"\"\n    try:\n        from escalation_engine import is_cheap_only\n    except ImportError:\n        from .escalation_engine import is_cheap_only\n    return is_cheap_only()"
+    }
+  ],
+  "summary": {
+    "total_files": 1,
+    "created": 0,
+    "modified": 1,
+    "deleted": 0,
+    "lines_added": 1,
+    "lines_removed": 0
+  },
+  "completed_at": "2026-06-16T08:18:58Z",
+  "tasks_completed": 1,
+  "tasks_failed": 0,
+  "total_cost_usd": 0.00122743,
+  "elapsed_sec": 8.872334480285645
+}

@@ -1,0 +1,50 @@
+{
+  "root_id": "g_c63699026a84",
+  "nodes": {
+    "g_c63699026a84": {
+      "goal_id": "g_c63699026a84",
+      "description": "In scaffold/agent/runtime_session.py add a one-line docstring to RuntimeSessionStore.list_sessions explaining it returns durable sessions sorted by updated time",
+      "parent_ids": [],
+      "child_ids": [
+        "g_19d0fde66329"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-18T04:16:27Z",
+      "updated_at": "2026-06-18T04:16:36Z",
+      "completed_at": "2026-06-18T04:16:36Z",
+      "session_ids": [
+        "orch_d0a28cd8"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_19d0fde66329": {
+      "goal_id": "g_19d0fde66329",
+      "description": "Add a one-line docstring to the `RuntimeSessionStore.list_sessions` method.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "scaffold/agent/runtime_session.py",
+          "action": "Add a one-line docstring to the `RuntimeSessionStore.list_sessions` method.",
+          "complexity": "low",
+          "function_signature": "def list_sessions(self, limit: Optional[int] = None) -> List[DurableSession]:",
+          "constraints": "The docstring should explain that it returns durable sessions sorted by updated time. It should be a standard Python docstring within the function.",
+          "file": "scaffold/agent/runtime_session.py"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-18T04:16:33Z",
+      "updated_at": "2026-06-18T04:16:36Z",
+      "completed_at": "2026-06-18T04:16:36Z",
+      "session_ids": [
+        "orch_d0a28cd8"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

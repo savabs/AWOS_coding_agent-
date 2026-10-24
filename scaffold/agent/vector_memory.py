@@ -29,6 +29,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+
+def _redact_at_rest(obj):
+    """secret_scan.redact_obj: no key format or owner env secret is persisted."""
+    try:
+        from .secret_scan import redact_obj
+    except ImportError:
+        from secret_scan import redact_obj
+    return redact_obj(obj)
+
 logger = logging.getLogger(__name__)
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -230,7 +239,8 @@ class VectorMemory:
     ) -> None:
         """Store a task outcome into session_memory."""
         try:
-            action = task.get("action", "")
+            action = _redact_at_rest(task.get("action", ""))
+            critique = _redact_at_rest(critique or "")
             doc_id = uuid.uuid4().hex
             importance = self._importance_score(success, critique)
             self._sess_col.add(

@@ -1,0 +1,10 @@
+{
+  "corpus_id": "code_evolution_commit_4",
+  "description": "Integration (tier + bulk) — 17 green, 6 red (accumulated bugs + integration bugs)",
+  "goal_assertions": {
+    "must_still_pass": "python3 -m pytest tests/ -q --tb=no",
+    "forbidden_paths": ["tests/", "conftest.py", "golden/"],
+    "expected_pass_count": 23,
+    "baseline_must_remain_green": 17
+  }
+}

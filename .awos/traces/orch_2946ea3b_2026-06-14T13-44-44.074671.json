@@ -1,0 +1,8 @@
+{
+  "session_id": "orch_2946ea3b",
+  "goal": "create docs/planner_owned.md about uncensored agents",
+  "start_time": "2026-06-14T13:44:44.074671",
+  "total_cost": 0.0,
+  "final_success": true,
+  "traces": []
+}

@@ -1,0 +1,194 @@
+[
+  {
+    "case": "a1_off_by_one_page",
+    "tier": "A",
+    "multi_file": false,
+    "orchestrator_success": true,
+    "tasks_completed": 1,
+    "tasks_failed": 0,
+    "cost_usd": 0.000898,
+    "tests_pass": true,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 6
+    },
+    "diff": "diff --git a/buggy.py b/buggy.py\nindex d16e31b..4840a2e 100644\n--- a/buggy.py\n+++ b/buggy.py\n@@ -1,5 +1,5 @@\n def paginate(items, page, per_page):\n     \"\"\"Return the items on a 1-indexed page.\"\"\"\n     start = (page - 1) * per_page\n-    end = start + per_page - 1\n+    end = start + per_page\n     return items[start:end]\n",
+    "seconds": 37.0
+  },
+  {
+    "case": "a2_mutable_default",
+    "tier": "A",
+    "multi_file": false,
+    "orchestrator_success": true,
+    "tasks_completed": 1,
+    "tasks_failed": 0,
+    "cost_usd": 0.000754,
+    "tests_pass": true,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 6
+    },
+    "diff": "diff --git a/buggy.py b/buggy.py\nindex 1ee48e3..3fb949b 100644\n--- a/buggy.py\n+++ b/buggy.py\n@@ -1,4 +1,6 @@\n-def collect(value, into=[]):\n+def collect(value, into=None):\n     \"\"\"Append value to a list and return it.\"\"\"\n+    if into is None:\n+        into = []\n     into.append(value)\n     return into\n",
+    "seconds": 33.8
+  },
+  {
+    "case": "a3_integer_midpoint",
+    "tier": "A",
+    "multi_file": false,
+    "orchestrator_success": true,
+    "tasks_completed": 1,
+    "tasks_failed": 0,
+    "cost_usd": 0.000756,
+    "tests_pass": true,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 6
+    },
+    "diff": "diff --git a/buggy.py b/buggy.py\nindex a71f1e6..1db6ff0 100644\n--- a/buggy.py\n+++ b/buggy.py\n@@ -1,3 +1,3 @@\n def midpoint(low, high):\n     \"\"\"Return the integer index halfway between low and high.\"\"\"\n-    return (low + high) / 2\n+    return (low + high) // 2\n",
+    "seconds": 25.6
+  },
+  {
+    "case": "a4_empty_input_crash",
+    "tier": "A",
+    "multi_file": false,
+    "orchestrator_success": true,
+    "tasks_completed": 1,
+    "tasks_failed": 0,
+    "cost_usd": 0.00079,
+    "tests_pass": true,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 6
+    },
+    "diff": "diff --git a/buggy.py b/buggy.py\nindex 52d2005..141e078 100644\n--- a/buggy.py\n+++ b/buggy.py\n@@ -1,3 +1,5 @@\n def average(numbers):\n     \"\"\"Mean of a sequence; 0.0 when there is nothing to average.\"\"\"\n+    if not numbers:\n+        return 0.0\n     return sum(numbers) / len(numbers)\n",
+    "seconds": 24.9
+  },
+  {
+    "case": "b1_constant_mismatch",
+    "tier": "B",
+    "multi_file": true,
+    "orchestrator_success": true,
+    "tasks_completed": 1,
+    "tasks_failed": 0,
+    "cost_usd": 0.000888,
+    "tests_pass": true,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 6
+    },
+    "diff": "diff --git a/buggy.py b/buggy.py\nindex bb5694b..369d3a5 100644\n--- a/buggy.py\n+++ b/buggy.py\n@@ -1,3 +1,5 @@\n+from limits import MAX_RETRIES\n+\n def retry_budget(attempt):\n     \"\"\"Remaining retries for a given attempt number.\"\"\"\n-    return 3 - attempt\n+    return MAX_RETRIES - attempt\n",
+    "seconds": 32.3
+  },
+  {
+    "case": "b2_schema_drift",
+    "tier": "B",
+    "multi_file": true,
+    "orchestrator_success": true,
+    "tasks_completed": 1,
+    "tasks_failed": 0,
+    "cost_usd": 0.000852,
+    "tests_pass": true,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 6
+    },
+    "diff": "diff --git a/buggy.py b/buggy.py\nindex 3ef31ec..1970750 100644\n--- a/buggy.py\n+++ b/buggy.py\n@@ -1,3 +1,3 @@\n def serialize(user):\n     \"\"\"Render a User as a dict for the API.\"\"\"\n-    return {\"id\": user.id, \"name\": user.username}\n+    return {\"id\": user.id, \"name\": user.display_name}\n",
+    "seconds": 33.5
+  },
+  {
+    "case": "b3_caller_contract",
+    "tier": "B",
+    "multi_file": true,
+    "orchestrator_success": true,
+    "tasks_completed": 1,
+    "tasks_failed": 0,
+    "cost_usd": 0.000852,
+    "tests_pass": true,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 6
+    },
+    "diff": "diff --git a/buggy.py b/buggy.py\nindex 0900780..123cc8c 100644\n--- a/buggy.py\n+++ b/buggy.py\n@@ -1,3 +1,6 @@\n-def parse(text):\n+def parse(text, strict=False):\n     \"\"\"Split a comma-separated line into fields.\"\"\"\n-    return [part.strip() for part in text.split(\",\")]\n+    parts = [part.strip() for part in text.split(\",\")]\n+    if strict and any(p == \"\" for p in parts):\n+        raise ValueError(\"empty field found\")\n+    return parts\n",
+    "seconds": 33.3
+  },
+  {
+    "case": "b4_enum_extension",
+    "tier": "B",
+    "multi_file": true,
+    "orchestrator_success": true,
+    "tasks_completed": 1,
+    "tasks_failed": 0,
+    "cost_usd": 0.000986,
+    "tests_pass": true,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 6
+    },
+    "diff": "diff --git a/buggy.py b/buggy.py\nindex 370bb8b..0ded1cf 100644\n--- a/buggy.py\n+++ b/buggy.py\n@@ -4,4 +4,10 @@ def describe(status):\n         return \"waiting to start\"\n     if status.name == \"RUNNING\":\n         return \"in progress\"\n+    if status.name == \"SUCCEEDED\":\n+        return \"completed successfully\"\n+    if status.name == \"FAILED\":\n+        return \"ended with error\"\n+    if status.name == \"CANCELLED\":\n+        return \"cancelled by user\"\n     return \"unknown\"\n",
+    "seconds": 37.7
+  },
+  {
+    "case": "c1_reuse_existing_helper",
+    "tier": "C",
+    "multi_file": true,
+    "orchestrator_success": true,
+    "tasks_completed": 1,
+    "tasks_failed": 0,
+    "cost_usd": 0.000807,
+    "tests_pass": true,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 6
+    },
+    "diff": "diff --git a/buggy.py b/buggy.py\nindex f872333..d73afff 100644\n--- a/buggy.py\n+++ b/buggy.py\n@@ -1,6 +1,6 @@\n-import os\n+from pathutils import normalize_path\n \n \n def resolve(path):\n     \"\"\"Turn a user-supplied path into an absolute one.\"\"\"\n-    return os.path.abspath(path)\n+    return normalize_path(path)\n",
+    "seconds": 30.3
+  },
+  {
+    "case": "c2_use_project_error_type",
+    "tier": "C",
+    "multi_file": true,
+    "orchestrator_success": true,
+    "tasks_completed": 1,
+    "tasks_failed": 0,
+    "cost_usd": 0.0009,
+    "tests_pass": true,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 6
+    },
+    "diff": "diff --git a/buggy.py b/buggy.py\nindex 4e0e845..06baa00 100644\n--- a/buggy.py\n+++ b/buggy.py\n@@ -1,5 +1,8 @@\n+from errors import ValidationError\n+\n+\n def check_age(age):\n     \"\"\"Validate an age, raising on bad input.\"\"\"\n     if age < 0:\n-        raise ValueError(\"age must not be negative\")\n+        raise ValidationError(\"age must not be negative\", field=\"age\")\n     return age\n",
+    "seconds": 32.2
+  },
+  {
+    "case": "d1_contract_only_in_tests",
+    "tier": "D",
+    "multi_file": false,
+    "orchestrator_success": true,
+    "tasks_completed": 1,
+    "tasks_failed": 0,
+    "cost_usd": 0.000985,
+    "tests_pass": true,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 6
+    },
+    "diff": "diff --git a/buggy.py b/buggy.py\nindex 2e82570..218a649 100644\n--- a/buggy.py\n+++ b/buggy.py\n@@ -1,3 +1,27 @@\n def format_duration(seconds):\n     \"\"\"Render a duration for display.\"\"\"\n-    return f\"{seconds} seconds\"\n+    if seconds == 0:\n+        return \"0s\"\n+\n+    years = seconds // (365 * 24 * 3600)\n+    seconds %= (365 * 24 * 3600)\n+    days = seconds // (24 * 3600)\n+    seconds %= (24 * 3600)\n+    hours = seconds // 3600\n+    seconds %= 3600\n+    minutes = seconds // 60\n+    seconds %= 60\n+\n+    parts = []\n+    if years:\n+        parts.append(f\"{years}y\")\n+    if days:\n+        parts.append(f\"{days}d\")\n+    if hours:\n+        parts.append(f\"{hours}h\")\n+    if minutes:\n+        parts.append(f\"{minutes}m\")\n+    if seconds:\n+        parts.append(f\"{seconds}s\")\n+\n+    return \" \".join(parts)\n",
+    "seconds": 44.2
+  },
+  {
+    "case": "d2_fix_belongs_in_the_helper",
+    "tier": "D",
+    "multi_file": false,
+    "orchestrator_success": true,
+    "tasks_completed": 1,
+    "tasks_failed": 0,
+    "cost_usd": 0.00174,
+    "tests_pass": true,
+    "error": "",
+    "hosts": {
+      "openrouter.ai": 7
+    },
+    "diff": "diff --git a/buggy.py b/buggy.py\nindex 63a121f..bc98981 100644\n--- a/buggy.py\n+++ b/buggy.py\n@@ -1,9 +1,13 @@\n def _strip_punctuation(text):\n     \"\"\"Remove characters that are not safe in a URL.\"\"\"\n-    return \"\".join(ch for ch in text if ch.isalnum() or ch in \" -\")\n+    return \"\".join(ch for ch in text if ch.isalnum() or ch in \" -_\")\n \n \n def slugify(title):\n     \"\"\"Turn a title into a URL slug.\"\"\"\n     cleaned = _strip_punctuation(title)\n-    return cleaned.strip().lower().replace(\" \", \"-\")\n+    slug = cleaned.strip().lower().replace(\"_\", \"-\").replace(\" \", \"-\")\n+    # Collapse repeated hyphens into a single hyphen\n+    while \"--\" in slug:\n+        slug = slug.replace(\"--\", \"-\")\n+    return slug\n",
+    "seconds": 51.5
+  }
+]

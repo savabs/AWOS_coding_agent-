@@ -1,0 +1,106 @@
+{
+  "_comment": "Held-out persona for the email-triage testbed. Fictional: every name, shop, company and domain is invented (.example TLD; one lookalike uses .invalid). Only 'public' is copied into the agent-visible mailbox; 'rules' are private preferences the agent must learn from calibration feedback.",
+  "public": {
+    "name": "Wren Halvorsen",
+    "email": "wren@quarrylanebooks.example",
+    "role": "Owner of Quarry Lane Books & Cafe (independent bookshop with a licensed cafe); parent of a teenager",
+    "location": "Hobart, Tasmania, Australia",
+    "timezone": "Australia/Hobart"
+  },
+  "shop": {"name": "Quarry Lane Books & Cafe", "domain": "quarrylanebooks.example"},
+  "staff": [
+    {"name": "Jarrah Nwosu", "address": "jarrah@quarrylanebooks.example", "role": "Cafe lead"},
+    {"name": "Elif Sandoval", "address": "elif@quarrylanebooks.example", "role": "Senior bookseller"},
+    {"name": "Hamish Tran", "address": "hamish@quarrylanebooks.example", "role": "Weekend barista"},
+    {"name": "Odette Kwan", "address": "odette@quarrylanebooks.example", "role": "Events and children's section"}
+  ],
+  "vendors": [
+    {"name": "TillTide", "domain": "tilltide.example", "kind": "POS and card terminals"},
+    {"name": "ClearSettle Merchant Services", "domain": "clearsettle.example", "kind": "card acquirer (disputes, settlements)"},
+    {"name": "Southern Cross Book Distribution", "domain": "scbd.example", "kind": "main book distributor"},
+    {"name": "Tidewater Press", "domain": "tidewaterpress.example", "kind": "publisher"},
+    {"name": "Larkspur & Vane Publishing", "domain": "larkspurvane.example", "kind": "publisher (author events)"},
+    {"name": "Ember Hill Roasters", "domain": "emberhill.example", "kind": "coffee supplier"},
+    {"name": "Rostra", "domain": "rostra.example", "kind": "staff rota and timesheets"}
+  ],
+  "people": [
+    {"name": "Rafi Halvorsen", "address": "rafi.halvorsen@inkwellmail.example", "relation": "son, 15"},
+    {"name": "Derwent Hills High School Office", "address": "office@derwenthills.example", "relation": "son's school"},
+    {"name": "Desmond Pryce", "address": "desmond@albionproperty.example", "relation": "landlord (Albion Property Holdings)"},
+    {"name": "Wilhelmina Oduya", "address": "wilhelmina@oduyareese.example", "relation": "accountant"},
+    {"name": "Yusuf Karim", "address": "yusuf@harbourlinebrokers.example", "relation": "insurance broker"}
+  ],
+  "authorities": [
+    {"name": "Liquor Licensing Commission", "domain": "liquorcommission.example"},
+    {"name": "Derwent City Council", "domain": "derwentcouncil.example"}
+  ],
+  "newsletters_read": [
+    {"name": "The Slow Shelf", "address": "letters@slowshelf.example", "note": "book-club newsletter she loves"},
+    {"name": "Booksellers' Bench", "address": "bench@booksellersbench.example"},
+    {"name": "Cafe Counter Notes", "address": "notes@cafecounter.example"}
+  ],
+  "newsletters_ignored": [
+    {"name": "Retail Growth Hacks", "address": "hacks@retailgrowthhacks.example"},
+    {"name": "Crypto Barista Daily", "address": "daily@cryptobarista.example"},
+    {"name": "Trend Radar for Booksellers", "address": "radar@trendradar.example"}
+  ],
+  "rules": [
+    {"id": "vip_family",
+     "feedback": "Anything from my son Rafi or from the Derwent Hills front office jumps the queue. If they need something from me it is urgent and I write back straight away, even mid-rush at the till.",
+     "hints": [
+       {"when": {"from_address": "rafi.halvorsen@inkwellmail.example"}, "set": {"importance": 3, "category": "urgent_action", "needs_reply": true}},
+       {"when": {"from_address": "office@derwenthills.example"}, "set": {"importance": 3, "category": "urgent_action", "needs_reply": true}}
+     ]},
+    {"id": "staff_cover",
+     "feedback": "If one of my crew can't make a shift or wants to swap, I have to sort the rota before we open. That's urgent and they need a yes or no from me.",
+     "hints": [
+       {"when": {"from_domain": "quarrylanebooks.example", "is_list": false, "body_any": ["can't make my shift", "swap shifts", "calling in sick", "won't be able to open", "cover for me"]}, "set": {"importance": 3, "category": "urgent_action", "needs_reply": true}}
+     ]},
+    {"id": "distributor",
+     "feedback": "Southern Cross is where nearly all our stock comes from. If they put the account on hold or a returns window is about to shut, drop everything. Their frontlist catalogue I actually sit down and read; that's how I plan orders.",
+     "hints": [
+       {"when": {"from_domain": "scbd.example", "text_any": ["credit hold", "orders paused", "returns window"]}, "set": {"importance": 3, "category": "urgent_action", "needs_reply": false}},
+       {"when": {"from_domain": "trade.scbd.example"}, "set": {"importance": 2, "category": "important_read", "needs_reply": false}}
+     ]},
+    {"id": "slow_shelf",
+     "feedback": "The Slow Shelf is the one newsletter I love. Our book club picks half its titles from it, so every issue is important reading for me, never junk.",
+     "hints": [
+       {"when": {"from_domain": "slowshelf.example"}, "set": {"importance": 2, "category": "important_read", "needs_reply": false}}
+     ]},
+    {"id": "author_events",
+     "feedback": "Larkspur & Vane send me author events. Those are important and I always reply to confirm numbers and dates, though they're rarely same-day.",
+     "hints": [
+       {"when": {"from_domain": "larkspurvane.example"}, "set": {"importance": 2, "category": "important_read", "needs_reply": true}}
+     ]},
+    {"id": "accountant",
+     "feedback": "Wilhelmina is my accountant. Her emails matter and she always needs an answer from me, but they're not emergencies.",
+     "hints": [
+       {"when": {"from_domain": "oduyareese.example"}, "set": {"importance": 2, "category": "important_read", "needs_reply": true}}
+     ]},
+    {"id": "trade_reading",
+     "feedback": "Booksellers' Bench and Cafe Counter Notes I skim with my coffee. Low priority, but keep them, they're not junk.",
+     "hints": [
+       {"when": {"from_domain_any": ["booksellersbench.example", "cafecounter.example"]}, "set": {"importance": 1, "category": "newsletter", "needs_reply": false}}
+     ]},
+    {"id": "newsletter_ignore",
+     "feedback": "Retail Growth Hacks, Crypto Barista Daily and that Trend Radar thing are clutter I never open. Zero.",
+     "hints": [
+       {"when": {"from_domain_any": ["retailgrowthhacks.example", "cryptobarista.example", "trendradar.example"]}, "set": {"importance": 0, "category": "newsletter", "needs_reply": false}}
+     ]},
+    {"id": "countdown_sales",
+     "feedback": "A sale with a countdown clock in the subject is still a sale. 'Ends tonight', 'last chance' and so on: promo, importance zero.",
+     "hints": [
+       {"when": {"is_list": true, "subject_any": ["last chance", "ends tonight", "final hours", "only hours left", "don't miss out"], "from_domain_not_any": ["slowshelf.example", "trade.scbd.example"]}, "set": {"importance": 0, "category": "promo", "needs_reply": false}}
+     ]},
+    {"id": "tilltide_marketing",
+     "feedback": "TillTide's hello@ address only ever sells me upgrades, however it words the subject. Their real alerts come from a different address. The hello@ mail is promo, zero.",
+     "hints": [
+       {"when": {"from_address": "hello@tilltide.example"}, "set": {"importance": 0, "category": "promo", "needs_reply": false}}
+     ]},
+    {"id": "lookalike_tilltide",
+     "feedback": "TillTide only writes from tilltide.example. Anything with the TillTide name on any other domain is a scam: phishing.",
+     "hints": [
+       {"when": {"from_name_any": ["tilltide"], "from_domain_not_any": ["tilltide.example"]}, "set": {"importance": 0, "category": "spam_phishing", "needs_reply": false, "suspicious": true}}
+     ]}
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "id": "07_refund_command",
+  "goal": "Support needs to record refunds without touching the database. Add a `refund ORDER_ID` command that marks a paid order as refunded and confirms with `refunded <order id> (<amount>)`, the amount shown the way the tool shows money for that merchant. Only paid orders can be refunded: refunding a refunded or cancelled order is an error and must change nothing. An order id we don't have should be reported the same way an unknown customer is (`error: unknown order <id>`). After a refund the daily report should show the order under Refunded instead of in the total.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

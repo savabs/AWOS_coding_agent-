@@ -1,0 +1,239 @@
+{
+  "spec": "docs/specs/local_model_reality_2026-10.md",
+  "provider": "local (llama-server, Qwen3.5-9B Q4_K_M, 1 slot, 24k ctx)",
+  "timeout_min": 45,
+  "solved": 8,
+  "n": 10,
+  "runs": [
+    {
+      "series": "real_boltons_428",
+      "source_file": "job_series_20261011T153940.json",
+      "result": {
+        "solved": false,
+        "turns": 1,
+        "llm_calls": 2,
+        "minutes": 8.25,
+        "timed_out": false,
+        "invalid": false,
+        "attempts": 1,
+        "cost_usd": 0.0,
+        "input_tokens": 22946,
+        "output_tokens": 1369,
+        "hidden_passed": 44,
+        "hidden_failed": 1,
+        "hidden_summary": "1 failed, 44 passed in 0.15s",
+        "failing_tests": [
+          "tests/test_hidden_iterutils.py::test_backoff_constant_factor"
+        ],
+        "plan_source": "planner",
+        "files_changed": 1
+      }
+    },
+    {
+      "series": "real_funcy_191",
+      "source_file": "job_series_20261011T154812.json",
+      "result": {
+        "solved": true,
+        "turns": 12,
+        "llm_calls": 5,
+        "minutes": 29.02,
+        "timed_out": false,
+        "invalid": false,
+        "attempts": 1,
+        "cost_usd": 0.0,
+        "input_tokens": 109806,
+        "output_tokens": 10917,
+        "hidden_passed": 13,
+        "hidden_failed": 0,
+        "hidden_summary": "13 passed in 0.08s",
+        "failing_tests": [],
+        "plan_source": "planner",
+        "files_changed": 1
+      }
+    },
+    {
+      "series": "real_attrs_1513",
+      "source_file": "job_series_20261011T161722.json",
+      "result": {
+        "solved": true,
+        "turns": 12,
+        "llm_calls": 3,
+        "minutes": 12.64,
+        "timed_out": false,
+        "invalid": false,
+        "attempts": 1,
+        "cost_usd": 0.0,
+        "input_tokens": 106944,
+        "output_tokens": 3778,
+        "hidden_passed": 163,
+        "hidden_failed": 0,
+        "hidden_summary": "163 passed in 0.99s",
+        "failing_tests": [],
+        "plan_source": "skipped_small_goal",
+        "files_changed": 1
+      }
+    },
+    {
+      "series": "real_cachetools_405",
+      "source_file": "job_series_20261011T163014.json",
+      "result": {
+        "solved": false,
+        "turns": 11,
+        "llm_calls": 4,
+        "minutes": 29.42,
+        "timed_out": false,
+        "invalid": false,
+        "attempts": 1,
+        "cost_usd": 0.0,
+        "input_tokens": 106628,
+        "output_tokens": 4435,
+        "hidden_passed": 168,
+        "hidden_failed": 7,
+        "hidden_summary": "7 failed, 168 passed in 0.24s",
+        "failing_tests": [
+          "tests/test_hidden_cache.py::CacheTest::test_getsizeof_replace_grow",
+          "tests/test_hidden_fifo.py::FIFOCacheTest::test_getsizeof_replace_grow",
+          "tests/test_hidden_lfu.py::LFUCacheTest::test_getsizeof_replace_grow",
+          "tests/test_hidden_lru.py::LRUCacheTest::test_getsizeof_replace_grow",
+          "tests/test_hidden_rr.py::RRCacheTest::test_getsizeof_replace_grow",
+          "tests/test_hidden_tlru.py::TLRUCacheTest::test_getsizeof_replace_grow",
+          "tests/test_hidden_ttl.py::TTLCacheTest::test_getsizeof_replace_grow"
+        ],
+        "plan_source": "skipped_small_goal",
+        "files_changed": 1
+      }
+    },
+    {
+      "series": "real_humanize_381",
+      "source_file": "job_series_20261011T170004.json",
+      "result": {
+        "solved": true,
+        "turns": 1,
+        "llm_calls": 2,
+        "minutes": 3.3,
+        "timed_out": false,
+        "invalid": false,
+        "attempts": 1,
+        "cost_usd": 0.0,
+        "input_tokens": 18888,
+        "output_tokens": 691,
+        "hidden_passed": 14,
+        "hidden_failed": 0,
+        "hidden_summary": "14 passed in 0.01s",
+        "failing_tests": [],
+        "plan_source": "skipped_small_goal",
+        "files_changed": 1
+      }
+    },
+    {
+      "series": "real_jsonpointer_64",
+      "source_file": "job_series_20261011T170330.json",
+      "result": {
+        "solved": true,
+        "turns": 22,
+        "llm_calls": 6,
+        "minutes": 27.21,
+        "timed_out": false,
+        "invalid": false,
+        "attempts": 1,
+        "cost_usd": 0.0,
+        "input_tokens": 134411,
+        "output_tokens": 4547,
+        "hidden_passed": 26,
+        "hidden_failed": 0,
+        "hidden_summary": "26 passed, 5 subtests passed in 0.08s",
+        "failing_tests": [],
+        "plan_source": "skipped_small_goal",
+        "files_changed": 1
+      }
+    },
+    {
+      "series": "real_markdown_1606",
+      "source_file": "job_series_20261011T173052.json",
+      "result": {
+        "solved": true,
+        "turns": 22,
+        "llm_calls": 4,
+        "minutes": 30.76,
+        "timed_out": false,
+        "invalid": false,
+        "attempts": 1,
+        "cost_usd": 0.0,
+        "input_tokens": 207830,
+        "output_tokens": 8408,
+        "hidden_passed": 76,
+        "hidden_failed": 0,
+        "hidden_summary": "76 passed, 2 skipped in 0.11s",
+        "failing_tests": [],
+        "plan_source": "planner",
+        "files_changed": 1
+      }
+    },
+    {
+      "series": "real_tabulate_256",
+      "source_file": "job_series_20261011T180151.json",
+      "result": {
+        "solved": true,
+        "turns": 25,
+        "llm_calls": 6,
+        "minutes": 18.01,
+        "timed_out": false,
+        "invalid": false,
+        "attempts": 1,
+        "cost_usd": 0.0,
+        "input_tokens": 133693,
+        "output_tokens": 6736,
+        "hidden_passed": 178,
+        "hidden_failed": 0,
+        "hidden_summary": "178 passed, 21 skipped in 0.18s",
+        "failing_tests": [],
+        "plan_source": "skipped_small_goal",
+        "files_changed": 1
+      }
+    },
+    {
+      "series": "real_toolz_635",
+      "source_file": "job_series_20261011T182005.json",
+      "result": {
+        "solved": true,
+        "turns": 5,
+        "llm_calls": 4,
+        "minutes": 4.95,
+        "timed_out": false,
+        "invalid": false,
+        "attempts": 1,
+        "cost_usd": 0.0,
+        "input_tokens": 39117,
+        "output_tokens": 924,
+        "hidden_passed": 51,
+        "hidden_failed": 0,
+        "hidden_summary": "51 passed in 0.12s",
+        "failing_tests": [],
+        "plan_source": "skipped_small_goal",
+        "files_changed": 1
+      }
+    },
+    {
+      "series": "real_more-itertools_1250",
+      "source_file": "job_series_20261011T182513.json",
+      "result": {
+        "solved": true,
+        "turns": 28,
+        "llm_calls": 4,
+        "minutes": 27.45,
+        "timed_out": false,
+        "invalid": false,
+        "attempts": 1,
+        "cost_usd": 0.0,
+        "input_tokens": 235739,
+        "output_tokens": 7902,
+        "hidden_passed": 597,
+        "hidden_failed": 0,
+        "hidden_summary": "597 passed, 11189 subtests passed in 3.45s",
+        "failing_tests": [],
+        "plan_source": "skipped_small_goal",
+        "files_changed": 1
+      }
+    }
+  ]
+}

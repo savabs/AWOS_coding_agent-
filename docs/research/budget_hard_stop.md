@@ -1,3 +1,9 @@
+---
+title: "Budget Hard Stop — Research"
+tags:
+  - doc/research
+---
+
 # Budget Hard Stop — Research
 
 ## Problem
@@ -42,3 +48,8 @@ def check_budget(self, estimated_cost: float, monthly_budget: float = 20.0) -> t
 ## No new dependencies
 `BudgetLedger` is already imported and initialized in both Orchestrator and UnifiedAgent.
 `get_ledger()` returns the singleton.
+
+## Related
+
+- _(add links to related documents here)_
+

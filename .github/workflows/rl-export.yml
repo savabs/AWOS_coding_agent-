@@ -1,0 +1,212 @@
+# Stage-A export (docs/research/rl_cua_2026-10-22/TRAINING.md): Kaggle LoRA adapter -> merged HF bf16
+# -> GGUF (llama.cpp b11146, same tag as the runtime) -> Q4_K_M (unsloth's imatrix) -> llama-server
+# check -> artifact (+ optional GitHub pre-release asset that rl-eval can pin by URL + sha256).
+#
+#   mode=smoke   CPU end-to-end on a tiny random Qwen3.5 (no GPU, no Kaggle): pytest + scripts/rl/train_smoke.sh
+#   mode=export  fetch the adapter (Kaggle kernel output, or an artifact of another run) and export it
+#   mode=base    export the untouched base through the same pipeline (baseline GGUF for a fair A/B)
+#
+#   gh workflow run rl-export.yml --ref <branch> -f mode=export -f size=4B -f name=qwen3.5-4b-rft-v1 -f release=true
+# Pushing to bench-cloud/rl-train-** runs mode=smoke.
+name: rl-export
+
+on:
+  push:
+    # rl-train-smoke-** = smoke; rl-export-** = settings from ci/rl_export.env (dispatch needs the file on main)
+    branches: ["bench-cloud/rl-train-smoke-**", "bench-cloud/rl-export-**"]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "smoke | export | base"
+        default: "export"
+        type: string
+      size:
+        description: "2B | 4B"
+        default: "4B"
+        type: string
+      name:
+        description: "Output name, e.g. qwen3.5-4b-rft-v1 (GGUF = <name>-Q4_K_M.gguf, release tag rl-<name>)"
+        default: "qwen3.5-4b-rft"
+        type: string
+      kernel:
+        description: "Kaggle kernel to fetch the adapter from (default <KAGGLE_USERNAME>/awos-rl-sft)"
+        default: ""
+        type: string
+      adapter_run_id:
+        description: "Instead of Kaggle: a GitHub run id whose artifact 'rl-sft-adapter' holds adapter/"
+        default: ""
+        type: string
+      release:
+        description: "Also publish a GitHub pre-release rl-<name> with the GGUF + sha256 + metrics"
+        default: false
+        type: boolean
+
+permissions:
+  contents: write      # only used by the optional release step
+  actions: read
+
+concurrency:
+  group: rl-export-${{ github.ref }}-${{ inputs.name }}
+  cancel-in-progress: false
+
+env:
+  LLAMA_TAG: b11146
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  QWEN2B_REV: 15852e8c16360a2fea060d615a32b45270f8a8fc
+  QWEN4B_REV: 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
+  UNSLOTH2B_REV: f6d5376be1edb4d416d56da11e5397a961aca8ae
+  UNSLOTH4B_REV: e87f176479d0855a907a41277aca2f8ee7a09523
+  IMATRIX2B_SHA: 0661bad5020138c6da2d45d2223ba32f0e4e8329a2fbf8e2ae382e782348fbca
+  IMATRIX4B_SHA: 63718abd33c6ddcbb67f9089fb8bbaf0bc9996be4e23bba14ce17dcee76924d2
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Settings (dispatch inputs, or ci/rl_export.env on push to bench-cloud/rl-export-**)
+        shell: bash
+        env:
+          I_MODE: ${{ inputs.mode || 'smoke' }}
+          I_SIZE: ${{ inputs.size || '2B' }}
+          I_NAME: ${{ inputs.name || 'smoke' }}
+          I_KERNEL: ${{ inputs.kernel }}
+          I_ADAPTER_RUN_ID: ${{ inputs.adapter_run_id }}
+          I_RELEASE: ${{ inputs.release }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF_NAME" == bench-cloud/rl-export-* ]]; then
+            source ci/rl_export.env
+            { echo "MODE=$MODE"; echo "SIZE=$SIZE"; echo "NAME=$NAME"; echo "KERNEL=${KERNEL:-}"
+              echo "ADAPTER_RUN_ID=${ADAPTER_RUN_ID:-}"; echo "RELEASE=${RELEASE:-false}"; } | tee -a "$GITHUB_ENV"
+          else
+            { echo "MODE=$I_MODE"; echo "SIZE=$I_SIZE"; echo "NAME=$I_NAME"; echo "KERNEL=$I_KERNEL"
+              echo "ADAPTER_RUN_ID=$I_ADAPTER_RUN_ID"; echo "RELEASE=${I_RELEASE:-false}"; } | tee -a "$GITHUB_ENV"
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Work dir on the big disk (/mnt) + free root space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          sudo mkdir -p /mnt/w && sudo chown "$USER" /mnt/w
+          df -h / /mnt
+
+      - name: llama.cpp ${{ env.LLAMA_TAG }} (source for convert_hf_to_gguf.py + official CPU binaries)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd /mnt/w
+          curl -fsSL --retry 5 -o src.tar.gz "https://github.com/ggml-org/llama.cpp/archive/refs/tags/$LLAMA_TAG.tar.gz"
+          tar -xzf src.tar.gz && echo "LLAMA_SRC=/mnt/w/llama.cpp-$LLAMA_TAG" >> "$GITHUB_ENV"
+          mkdir -p bin && cd bin
+          gh release download "$LLAMA_TAG" --repo ggml-org/llama.cpp --pattern "llama-$LLAMA_TAG-bin-ubuntu-x64.tar.gz" --clobber
+          tar -xzf "llama-$LLAMA_TAG-bin-ubuntu-x64.tar.gz"
+          Q=$(find /mnt/w/bin -name llama-quantize -type f | head -1); S=$(find /mnt/w/bin -name llama-server -type f | head -1)
+          G=$(find /mnt/w/bin -name llama-gguf-split -type f | head -1)
+          chmod +x "$Q" "$S" "$G"
+          echo "QUANTIZE=$Q" >> "$GITHUB_ENV"; echo "SERVER=$S" >> "$GITHUB_ENV"; echo "GGUF_SPLIT=$G" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$(dirname "$S")" >> "$GITHUB_ENV"
+
+      - name: Convert env (llama.cpp's pinned requirements, CPU torch)
+        run: |
+          set -euo pipefail
+          python -m venv /mnt/w/cvenv
+          /mnt/w/cvenv/bin/pip install -q -r "$LLAMA_SRC/requirements/requirements-convert_hf_to_gguf.txt" "$LLAMA_SRC/gguf-py" huggingface_hub
+          echo "PY=/mnt/w/cvenv/bin/python" >> "$GITHUB_ENV"
+
+      # ------------------------------------------------------------------ smoke --
+      - name: "smoke: training env (torch CPU + transformers 5.19 + peft) and tests"
+        if: env.MODE == 'smoke'
+        run: |
+          set -euo pipefail
+          python -m venv /mnt/w/tvenv
+          /mnt/w/tvenv/bin/pip install -q --extra-index-url https://download.pytorch.org/whl/cpu torch==2.14.1 \
+            transformers==5.19.0 peft==0.21.2 accelerate==1.15.0 jinja2 pytest==9.1.1 pytest-timeout==2.4.0
+          PYTHONPATH=. /mnt/w/tvenv/bin/python -m pytest -p no:cacheprovider tests/rl/test_train_dataset.py \
+            tests/rl/test_train_kaggle.py tests/rl/test_train_export.py -q
+      - name: "smoke: tiny Qwen3.5 end to end (dataset -> stage -> train.py CPU -> merge -> GGUF -> Q4_K_M -> llama-server)"
+        if: env.MODE == 'smoke'
+        run: |
+          set -euo pipefail
+          mkdir -p /mnt/w/tok
+          for f in tokenizer.json tokenizer_config.json vocab.json merges.txt chat_template.jinja; do
+            curl -fsSL --retry 5 -o /mnt/w/tok/$f "https://huggingface.co/Qwen/Qwen3.5-2B/resolve/$QWEN2B_REV/$f"
+          done
+          WORK=/mnt/w/smoke TRAJ=scaffold/rl/train/fixtures/oracle_demos.jsonl TOKENIZER=/mnt/w/tok \
+            TRAIN_PY=/mnt/w/tvenv/bin/python bash scripts/rl/train_smoke.sh | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # ----------------------------------------------------------------- export --
+      - name: Fetch the adapter from Kaggle
+        if: env.MODE == 'export' && env.ADAPTER_RUN_ID == ''
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KAGGLE_USERNAME" ]; then echo "::error::KAGGLE_USERNAME secret not set"; exit 1; fi
+          python -m pip install -q kaggle==2.2.4
+          K="${KERNEL:-$KAGGLE_USERNAME/awos-rl-sft}"
+          python -m scaffold.rl.train.kaggle_driver wait --kernel "$K" --timeout-min 1
+          python -m scaffold.rl.train.kaggle_driver fetch --kernel "$K" --out /mnt/w/kout
+          A=$(dirname "$(find /mnt/w/kout -name adapter_model.safetensors | head -1)")
+          echo "ADAPTER=$A" >> "$GITHUB_ENV"
+      - name: Fetch the adapter from a GitHub artifact
+        if: env.MODE == 'export' && env.ADAPTER_RUN_ID != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh run download "$ADAPTER_RUN_ID" --repo "$GITHUB_REPOSITORY" --name rl-sft-adapter --dir /mnt/w/kout
+          A=$(dirname "$(find /mnt/w/kout -name adapter_model.safetensors | head -1)")
+          echo "ADAPTER=$A" >> "$GITHUB_ENV"
+
+      - name: Base checkpoint (pinned) + unsloth imatrix (pinned, sha256)
+        if: env.MODE != 'smoke'
+        run: |
+          set -euo pipefail
+          if [ "$SIZE" = 4B ]; then REPO=Qwen/Qwen3.5-4B; REV=$QWEN4B_REV; UREV=$UNSLOTH4B_REV; ISHA=$IMATRIX4B_SHA
+          else REPO=Qwen/Qwen3.5-2B; REV=$QWEN2B_REV; UREV=$UNSLOTH2B_REV; ISHA=$IMATRIX2B_SHA; fi
+          "$PY" -c "import sys; from huggingface_hub import snapshot_download as s; s(sys.argv[1], revision=sys.argv[2], local_dir='/mnt/w/base', allow_patterns=['*.json','*.safetensors','*.jinja','*.txt'])" "$REPO" "$REV"
+          curl -fsSL --retry 5 -o /mnt/w/imatrix.gguf "https://huggingface.co/unsloth/Qwen3.5-$SIZE-GGUF/resolve/$UREV/imatrix_unsloth.gguf_file"
+          echo "$ISHA  /mnt/w/imatrix.gguf" | sha256sum -c -
+          du -sh /mnt/w/base; df -h /mnt
+
+      - name: Merge -> GGUF -> Q4_K_M -> llama-server check
+        if: env.MODE != 'smoke'
+        run: |
+          set -euo pipefail
+          [ "$MODE" = base ] && unset ADAPTER || true
+          BASE=/mnt/w/base OUT=/mnt/w/out IMATRIX=/mnt/w/imatrix.gguf MERGE_IN_PLACE=1 \
+            TRAJ=scaffold/rl/train/fixtures/oracle_demos.jsonl bash scripts/rl/train_export.sh
+          cp /mnt/w/kout/metrics.json /mnt/w/out/ 2>/dev/null || true
+          ls -lh /mnt/w/out
+          cat /mnt/w/out/export.json >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: env.MODE != 'smoke'
+        with:
+          name: rl-gguf-${{ env.NAME }}
+          path: /mnt/w/out/
+          retention-days: 30
+
+      - name: GitHub pre-release rl-${{ env.NAME }}
+        if: env.MODE != 'smoke' && env.RELEASE == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd /mnt/w/out
+          # release assets must be < 2 GiB: upload the shards when the GGUF was split, else the file
+          if ls "$NAME"-Q4_K_M-0*-of-0*.gguf >/dev/null 2>&1; then G=$(ls "$NAME"-Q4_K_M-0*-of-0*.gguf); else G="$NAME-Q4_K_M.gguf"; fi
+          # shellcheck disable=SC2086
+          gh release create "rl-$NAME" --repo "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
+            --title "rl-$NAME" --notes-file export.json \
+            $G SHA256SUMS export.json $(ls metrics.json serve_check.json merge.json 2>/dev/null)
+          echo "release rl-$NAME: $(echo $G)  (llama-server -m <first file>)" | tee -a "$GITHUB_STEP_SUMMARY"

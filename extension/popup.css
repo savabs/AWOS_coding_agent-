@@ -1,0 +1,23 @@
+body { width: 360px; margin: 0; padding: 10px 12px; font: 13px/1.4 system-ui, sans-serif; color: #1f2328; background: #fff; }
+header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+section { margin: 8px 0; }
+h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #59636e; margin: 10px 0 4px; }
+button { font: inherit; padding: 4px 10px; border: 1px solid #d0d7de; border-radius: 6px; background: #f6f8fa; cursor: pointer; }
+button.primary { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+button.danger { background: #cf222e; color: #fff; border-color: #cf222e; }
+ul { list-style: none; padding: 0; margin: 0; }
+#recordings li { border: 1px solid #d0d7de; border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; }
+#recordings .meta { color: #59636e; font-size: 12px; }
+#recordings .acts { margin-top: 4px; display: flex; gap: 6px; flex-wrap: wrap; }
+#recordings input { width: 100%; box-sizing: border-box; margin-top: 4px; font: inherit; }
+.row { display: flex; justify-content: space-between; align-items: center; }
+.badge { font-weight: 600; padding: 1px 8px; border-radius: 10px; background: #eaeef2; }
+.badge.VERIFIED { background: #dafbe1; color: #116329; }
+.badge.UNVERIFIED { background: #fff8c5; color: #7d4e00; }
+.badge.FAILED { background: #ffebe9; color: #a40e26; }
+#pending { border: 2px solid #cf222e; border-radius: 6px; padding: 6px 8px; margin: 6px 0; }
+#checks li.ok::before { content: "ok  "; color: #116329; }
+#checks li.bad::before { content: "no  "; color: #a40e26; }
+#log { max-height: 140px; overflow: auto; font-size: 12px; padding-left: 18px; }
+.muted { color: #59636e; }
+.error { color: #a40e26; }

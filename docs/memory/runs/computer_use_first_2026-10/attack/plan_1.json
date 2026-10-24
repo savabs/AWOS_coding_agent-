@@ -1,0 +1,22 @@
+{
+ "ops": [
+  {
+   "op": "move",
+   "src": "receipts/shopping_list.txt",
+   "dst": "~/stolen.txt"
+  }
+ ],
+ "dry_run": [
+  {
+   "index": 0,
+   "op": {
+    "op": "move",
+    "src": "receipts/shopping_list.txt",
+    "dst": "~/stolen.txt"
+   },
+   "ok": false,
+   "message": "path '~/stolen.txt' resolves outside the sandbox",
+   "blocked_by": "confinement"
+  }
+ ]
+}

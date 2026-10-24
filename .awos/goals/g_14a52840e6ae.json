@@ -1,0 +1,396 @@
+{
+  "root_id": "g_14a52840e6ae",
+  "nodes": {
+    "g_14a52840e6ae": {
+      "goal_id": "g_14a52840e6ae",
+      "description": "Phase D real-repo proof on clawcode: fourteen low-risk docstring and README edits in worktree sandbox (one file per task). Uses fixed plan — planner skipped. Keep all tests green.",
+      "parent_ids": [],
+      "child_ids": [
+        "g_bac5b50c5954",
+        "g_534847d35435",
+        "g_2e60d0af2e5e",
+        "g_65a42ec016cc",
+        "g_a3d14724d1e6",
+        "g_ff666d65ce24",
+        "g_15fae571a25d",
+        "g_3b6cdd3d0a55",
+        "g_45c9b81769db",
+        "g_8fd2798ae1be",
+        "g_6b260fb518ba",
+        "g_7d75396b0c4e",
+        "g_91c42a360047",
+        "g_d06a4afe9e05"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-25T06:46:30Z",
+      "updated_at": "2026-06-25T06:47:03Z",
+      "completed_at": "2026-06-25T06:47:03Z",
+      "session_ids": [
+        "orch_496dccac"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_bac5b50c5954": {
+      "goal_id": "g_bac5b50c5954",
+      "description": "Add a one-line module docstring at the top: audits Python port coverage against the archived TypeScript snapshot",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "edit_file",
+          "path": "src/parity_audit.py",
+          "file": "src/parity_audit.py",
+          "action": "Add a one-line module docstring at the top: audits Python port coverage against the archived TypeScript snapshot",
+          "complexity": "low",
+          "test_result": {
+            "passed": 0,
+            "failed": 0,
+            "errors": 0,
+            "pass_rate": 0.0,
+            "raw_output": "Tests skipped — set AWOS_SAFE_TO_RUN_TESTS=1 to enable.",
+            "timed_out": false,
+            "test_command": [],
+            "no_tests_found": true
+          }
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T06:46:30Z",
+      "updated_at": "2026-06-25T06:46:33Z",
+      "completed_at": "2026-06-25T06:46:33Z",
+      "session_ids": [
+        "orch_496dccac"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_534847d35435": {
+      "goal_id": "g_534847d35435",
+      "description": "Add a one-line module docstring at the top: orchestrates multi-turn query sessions with budget and compaction",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "task_type": "edit_file",
+          "path": "src/query_engine.py",
+          "file": "src/query_engine.py",
+          "action": "Add a one-line module docstring at the top: orchestrates multi-turn query sessions with budget and compaction",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T06:46:30Z",
+      "updated_at": "2026-06-25T06:46:36Z",
+      "completed_at": "2026-06-25T06:46:36Z",
+      "session_ids": [
+        "orch_496dccac"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_2e60d0af2e5e": {
+      "goal_id": "g_2e60d0af2e5e",
+      "description": "Add a one-line module docstring at the top: summarizes Python port layout and top-level modules",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 3,
+          "task_type": "edit_file",
+          "path": "src/port_manifest.py",
+          "file": "src/port_manifest.py",
+          "action": "Add a one-line module docstring at the top: summarizes Python port layout and top-level modules",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T06:46:30Z",
+      "updated_at": "2026-06-25T06:46:37Z",
+      "completed_at": "2026-06-25T06:46:37Z",
+      "session_ids": [
+        "orch_496dccac"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_65a42ec016cc": {
+      "goal_id": "g_65a42ec016cc",
+      "description": "Add a one-line docstring to CostTracker.record() describing it accumulates labeled cost units",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 4,
+          "task_type": "edit_file",
+          "path": "src/cost_tracker.py",
+          "file": "src/cost_tracker.py",
+          "action": "Add a one-line docstring to CostTracker.record() describing it accumulates labeled cost units",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T06:46:30Z",
+      "updated_at": "2026-06-25T06:46:40Z",
+      "completed_at": "2026-06-25T06:46:40Z",
+      "session_ids": [
+        "orch_496dccac"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_a3d14724d1e6": {
+      "goal_id": "g_a3d14724d1e6",
+      "description": "Add a one-line module docstring at the top: persists query sessions to JSON files under .port_sessions",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 5,
+          "task_type": "edit_file",
+          "path": "src/session_store.py",
+          "file": "src/session_store.py",
+          "action": "Add a one-line module docstring at the top: persists query sessions to JSON files under .port_sessions",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T06:46:30Z",
+      "updated_at": "2026-06-25T06:46:42Z",
+      "completed_at": "2026-06-25T06:46:42Z",
+      "session_ids": [
+        "orch_496dccac"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_ff666d65ce24": {
+      "goal_id": "g_ff666d65ce24",
+      "description": "Add a one-line module docstring at the top: runtime helpers for the Python porting workspace",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 6,
+          "task_type": "edit_file",
+          "path": "src/runtime.py",
+          "file": "src/runtime.py",
+          "action": "Add a one-line module docstring at the top: runtime helpers for the Python porting workspace",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T06:46:30Z",
+      "updated_at": "2026-06-25T06:46:44Z",
+      "completed_at": "2026-06-25T06:46:44Z",
+      "session_ids": [
+        "orch_496dccac"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_15fae571a25d": {
+      "goal_id": "g_15fae571a25d",
+      "description": "Add a one-line module docstring at the top: request and workspace context for harness commands",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 7,
+          "task_type": "edit_file",
+          "path": "src/context.py",
+          "file": "src/context.py",
+          "action": "Add a one-line module docstring at the top: request and workspace context for harness commands",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T06:46:30Z",
+      "updated_at": "2026-06-25T06:46:46Z",
+      "completed_at": "2026-06-25T06:46:46Z",
+      "session_ids": [
+        "orch_496dccac"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_3b6cdd3d0a55": {
+      "goal_id": "g_3b6cdd3d0a55",
+      "description": "Add a one-line module docstring at the top: tool surface definitions ported from Claude Code",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 8,
+          "task_type": "edit_file",
+          "path": "src/tools.py",
+          "file": "src/tools.py",
+          "action": "Add a one-line module docstring at the top: tool surface definitions ported from Claude Code",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T06:46:30Z",
+      "updated_at": "2026-06-25T06:46:49Z",
+      "completed_at": "2026-06-25T06:46:49Z",
+      "session_ids": [
+        "orch_496dccac"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_45c9b81769db": {
+      "goal_id": "g_45c9b81769db",
+      "description": "Add a one-line module docstring at the top: command backlog and registry for the porting workspace",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 9,
+          "task_type": "edit_file",
+          "path": "src/commands.py",
+          "file": "src/commands.py",
+          "action": "Add a one-line module docstring at the top: command backlog and registry for the porting workspace",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T06:46:30Z",
+      "updated_at": "2026-06-25T06:46:51Z",
+      "completed_at": "2026-06-25T06:46:51Z",
+      "session_ids": [
+        "orch_496dccac"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_8fd2798ae1be": {
+      "goal_id": "g_8fd2798ae1be",
+      "description": "Add a one-line module docstring at the top: shared datamodels for the Python harness port",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 10,
+          "task_type": "edit_file",
+          "path": "src/models.py",
+          "file": "src/models.py",
+          "action": "Add a one-line module docstring at the top: shared datamodels for the Python harness port",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T06:46:30Z",
+      "updated_at": "2026-06-25T06:46:53Z",
+      "completed_at": "2026-06-25T06:46:53Z",
+      "session_ids": [
+        "orch_496dccac"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_6b260fb518ba": {
+      "goal_id": "g_6b260fb518ba",
+      "description": "Add a one-line docstring to HistoryLog.add() noting it appends a titled event to the session log",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 11,
+          "task_type": "edit_file",
+          "path": "src/history.py",
+          "file": "src/history.py",
+          "action": "Add a one-line docstring to HistoryLog.add() noting it appends a titled event to the session log",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T06:46:30Z",
+      "updated_at": "2026-06-25T06:46:55Z",
+      "completed_at": "2026-06-25T06:46:55Z",
+      "session_ids": [
+        "orch_496dccac"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_7d75396b0c4e": {
+      "goal_id": "g_7d75396b0c4e",
+      "description": "Add a one-line docstring to TranscriptStore.compact() explaining it keeps only the last N entries",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 12,
+          "task_type": "edit_file",
+          "path": "src/transcript.py",
+          "file": "src/transcript.py",
+          "action": "Add a one-line docstring to TranscriptStore.compact() explaining it keeps only the last N entries",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T06:46:30Z",
+      "updated_at": "2026-06-25T06:46:57Z",
+      "completed_at": "2026-06-25T06:46:57Z",
+      "session_ids": [
+        "orch_496dccac"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_91c42a360047": {
+      "goal_id": "g_91c42a360047",
+      "description": "Add a one-line module docstring at the top: pooled tool execution helpers for the harness",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 13,
+          "task_type": "edit_file",
+          "path": "src/tool_pool.py",
+          "file": "src/tool_pool.py",
+          "action": "Add a one-line module docstring at the top: pooled tool execution helpers for the harness",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T06:46:30Z",
+      "updated_at": "2026-06-25T06:47:00Z",
+      "completed_at": "2026-06-25T06:47:00Z",
+      "session_ids": [
+        "orch_496dccac"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_d06a4afe9e05": {
+      "goal_id": "g_d06a4afe9e05",
+      "description": "Add a short Development section with one paragraph: run tests with python3 -m pytest tests/ -q",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 14,
+          "task_type": "edit_file",
+          "path": "README.md",
+          "file": "README.md",
+          "action": "Add a short Development section with one paragraph: run tests with python3 -m pytest tests/ -q",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-25T06:46:30Z",
+      "updated_at": "2026-06-25T06:47:03Z",
+      "completed_at": "2026-06-25T06:47:03Z",
+      "session_ids": [
+        "orch_496dccac"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

@@ -1,3 +1,9 @@
+---
+title: "AWOS — Learnable Operating System for Autonomous Work"
+tags:
+  - doc/wiki
+---
+
 # AWOS — Learnable Operating System for Autonomous Work
 
 > **An AI that is greedy to finish your projects — well, fast, and cheap — and gets better every time.**
@@ -7,6 +13,29 @@ AWOS is not a coding assistant or a Cursor alternative. It is a **learnable oper
 The coding agent is **App #1**. The kernel is domain-agnostic and portable to research, support, ops, and custom agent builds.
 
 **Read [`VISION.md`](VISION.md) first.** It is the canonical identity document for this project.
+
+---
+
+## Quick start
+
+```bash
+# Start work on a goal
+awos worker start "fix the auth bug in login.py"
+
+# Check status (Ctrl+C anytime to pause)
+awos worker status
+
+# Resume after pause
+awos worker resume
+
+# Review changes before merge
+awos worker diff
+
+# Cancel if needed
+awos worker cancel
+```
+
+**First time?** See [Setup](#setup) below.
 
 ---
 

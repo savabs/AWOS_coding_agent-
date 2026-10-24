@@ -1,0 +1,29 @@
+[
+  {
+    "timestamp": "2026-05-16T16:16:27.192990",
+    "month": "2026-05",
+    "request_type": "coding",
+    "model": "DeepSeek",
+    "input_tokens": 100,
+    "output_tokens": 50,
+    "cost": 0.0001
+  },
+  {
+    "timestamp": "2026-05-16T17:11:17.712790",
+    "month": "2026-05",
+    "request_type": "coding",
+    "model": "DeepSeek",
+    "input_tokens": 100,
+    "output_tokens": 50,
+    "cost": 0.0001
+  },
+  {
+    "timestamp": "2026-05-16T18:41:58.469419",
+    "month": "2026-05",
+    "request_type": "coding",
+    "model": "DeepSeek",
+    "input_tokens": 100,
+    "output_tokens": 50,
+    "cost": 0.0001
+  }
+]

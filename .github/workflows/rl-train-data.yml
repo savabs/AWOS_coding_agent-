@@ -1,0 +1,184 @@
+# Stage-A data + Kaggle launch (docs/research/rl_cua_2026-10-22/TRAINING.md):
+#   oracle demos (generated here) + model rollouts (artifacts of rl-eval collection runs)
+#   -> scaffold.rl.train.dataset (verified, safe successes only; eval splits are a hard error)
+#   -> artifact rl-sft-data
+#   -> (push=true and Kaggle secrets set) kaggle datasets version + kaggle kernels push (GPU T4 x2)
+# The Kaggle run takes hours; fetch + export with rl-export.yml (mode=export) when it is complete.
+#
+#   gh workflow run rl-train-data.yml --ref <branch> -f collect_runs="123 456" -f size=4B -f push=true
+name: rl-train-data
+
+on:
+  # Push to bench-cloud/rl-train-data-<anything>: settings come from ci/rl_train.env.
+  push:
+    branches: ["bench-cloud/rl-train-data-**"]
+  workflow_dispatch:
+    inputs:
+      collect_runs:
+        description: "Space-separated run ids of rl-eval COLLECTION runs (split=train, SAMPLES>1); empty = oracle only"
+        default: ""
+        type: string
+      oracle:
+        description: "Generate oracle demos (factory train + miniwob train) and include them"
+        default: true
+        type: boolean
+      oracle_weight:
+        description: "Mixing weight of oracle demos (model successes get 1)"
+        default: "1"
+        type: string
+      max_per_task:
+        description: "Cap kept episodes per (source, task); 0 = no cap"
+        default: "4"
+        type: string
+      size:
+        description: "2B | 4B"
+        default: "4B"
+        type: string
+      config:
+        description: "train_config overrides, space-separated key=value (e.g. 'epochs=1 lora_r=32 dtype=fp32')"
+        default: ""
+        type: string
+      push:
+        description: "Upload to Kaggle and start the training kernel (needs KAGGLE_* secrets)"
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  data:
+    # macOS pool: separate free concurrency (5) from the Linux pool that rl-eval fills (20).
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Settings (dispatch inputs, or ci/rl_train.env on push)
+        id: cfg
+        shell: bash
+        env:
+          I_COLLECT_RUNS: ${{ inputs.collect_runs }}
+          I_ORACLE: ${{ inputs.oracle }}
+          I_ORACLE_WEIGHT: ${{ inputs.oracle_weight }}
+          I_MAX_PER_TASK: ${{ inputs.max_per_task }}
+          I_SIZE: ${{ inputs.size }}
+          I_CONFIG: ${{ inputs.config }}
+          I_PUSH: ${{ inputs.push }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            source ci/rl_train.env
+          else
+            COLLECT_RUNS="$I_COLLECT_RUNS"; ORACLE="$I_ORACLE"; ORACLE_WEIGHT="$I_ORACLE_WEIGHT"
+            MAX_PER_TASK="$I_MAX_PER_TASK"; SIZE="$I_SIZE"; CONFIG="$I_CONFIG"; PUSH="$I_PUSH"
+          fi
+          {
+            echo "collect_runs=${COLLECT_RUNS:-}"; echo "oracle=${ORACLE:-true}"
+            echo "oracle_weight=${ORACLE_WEIGHT:-1}"; echo "max_per_task=${MAX_PER_TASK:-4}"
+            echo "size=${SIZE:-4B}"; echo "config=${CONFIG:-}"; echo "push=${PUSH:-false}"
+            # separate Kaggle notebook + dataset per run, so concurrent runs never replace each other
+            echo "kernel_slug=${KERNEL_SLUG:-awos-rl-sft}"; echo "dataset_slug=${DATASET_SLUG:-awos-rl-sft-data}"
+            # earlier kernels whose outputs (checkpoints) this run continues from (space-separated USER/SLUG)
+            echo "kernel_sources=${KERNEL_SOURCES:-}"
+          } | tee -a "$GITHUB_OUTPUT"
+
+      - name: Playwright Chromium (oracle demos)
+        if: steps.cfg.outputs.oracle == 'true'
+        run: |
+          pip install -q playwright==1.64.0
+          python -m playwright install --with-deps chromium
+
+      - name: MiniWoB++ html (pinned commit, cached)
+        if: steps.cfg.outputs.oracle == 'true'
+        id: miniwob
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/awos-rl/miniwob
+          key: miniwob-a7658beb68e1d3572329e06734c5822bd284ddc8
+      - name: Fetch MiniWoB++ (cache miss)
+        if: steps.cfg.outputs.oracle == 'true' && steps.miniwob.outputs.cache-hit != 'true'
+        run: bash scripts/rl/fetch_miniwob.sh
+
+      - name: Oracle demos on the TRAIN splits only
+        if: steps.cfg.outputs.oracle == 'true'
+        run: |
+          set -uo pipefail
+          for src in factory miniwob; do
+            python -m scaffold.rl.harness run --source "$src" --split train --model oracle --workers 2 \
+              --out "runs/rl/oracle_${src}_train" | tail -3
+          done
+          ls -la runs/rl/
+
+      - name: Download collection-run artifacts
+        if: steps.cfg.outputs.collect_runs != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNS: ${{ steps.cfg.outputs.collect_runs }}
+        run: |
+          set -euo pipefail
+          for id in $RUNS; do
+            gh run download "$id" --repo "$GITHUB_REPOSITORY" --pattern 'rl-*-train-*' --dir "artifacts/collect-$id"   # train splits only (eval artifacts would abort the build)
+          done
+          find artifacts -name trajectories.jsonl | head -50
+
+      - name: Build the SFT set (python -m scaffold.rl.train.dataset)
+        env:
+          RUNS: ${{ steps.cfg.outputs.collect_runs }}
+          OW: ${{ steps.cfg.outputs.oracle_weight }}
+          CAP: ${{ steps.cfg.outputs.max_per_task }}
+        run: |
+          set -euo pipefail
+          ARGS=()
+          for d in runs/rl/oracle_*_train; do [ -d "$d" ] && ARGS+=(--input "$(basename "$d")=$d:$OW"); done
+          for id in $RUNS; do ARGS+=(--input "model-$id=artifacts/collect-$id"); done
+          [ ${#ARGS[@]} -gt 0 ] || { echo "::error::no inputs"; exit 1; }
+          # optional BOOST_TASKS (ci/rl_train.env): repeat train examples of listed task ids BOOST_FACTOR times
+          eval "$(grep -E '^(BOOST_TASKS|BOOST_FACTOR)=' ci/rl_train.env || true)"
+          BOOST=(); [ -n "${BOOST_TASKS:-}" ] && BOOST=(--boost-tasks "$BOOST_TASKS" --boost-factor "${BOOST_FACTOR:-3}")
+          python -m scaffold.rl.train.dataset "${ARGS[@]}" --out sft --val-frac 0.1 --max-per-task "$CAP" \
+            ${BOOST[@]+"${BOOST[@]}"} | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Stage the Kaggle dataset + kernel
+        env:
+          SIZE: ${{ steps.cfg.outputs.size }}
+          CFG: ${{ steps.cfg.outputs.config }}
+          KSLUG: ${{ steps.cfg.outputs.kernel_slug }}
+          DSLUG: ${{ steps.cfg.outputs.dataset_slug }}
+          KSRCS: ${{ steps.cfg.outputs.kernel_sources }}
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+        run: |
+          set -euo pipefail
+          SETS=(); for kv in $CFG; do SETS+=(--set "$kv"); done
+          for k in $KSRCS; do SETS+=(--kernel-source "$k"); done
+          python -m scaffold.rl.train.kaggle_driver stage --data sft --out stage --size "$SIZE" \
+            --kernel-slug "$KSLUG" --dataset-slug "$DSLUG" \
+            --user "${KAGGLE_USERNAME:-KAGGLE_USER}" ${SETS[@]+"${SETS[@]}"}   # macOS bash 3.2: empty array + set -u
+          python -m scaffold.rl.train.kaggle_driver push --stage stage --dry-run
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rl-sft-data
+          path: |
+            sft/
+            stage/
+          retention-days: 30
+
+      - name: Push to Kaggle and start training
+        if: steps.cfg.outputs.push == 'true'
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KAGGLE_USERNAME" ]; then echo "::error::KAGGLE_USERNAME secret not set"; exit 1; fi
+          pip install -q kaggle==2.2.4
+          python -m scaffold.rl.train.kaggle_driver push --stage stage --message "run $GITHUB_RUN_ID"
+          echo "Kernel started: https://www.kaggle.com/code/$KAGGLE_USERNAME/${{ steps.cfg.outputs.kernel_slug }}" >> "$GITHUB_STEP_SUMMARY"

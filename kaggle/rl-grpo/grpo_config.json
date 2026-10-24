@@ -1,0 +1,29 @@
+{
+  "kernel": {
+    "speed_probe": true,
+    "speed_only": false,
+    "completion": 40,
+    "steps": 6,
+    "iterations": 50,
+    "tasks_per_iter": 4,
+    "group": 6,
+    "budget_hours": 4.5,
+    "resume_from": ""
+  },
+  "grpo": {
+    "base_model": "Qwen/Qwen3.5-2B",
+    "base_revision": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+    "init_adapter": "",
+    "tasks_per_iter": 4,
+    "group_size": 6,
+    "iterations": 50,
+    "max_steps": 8,
+    "temperature": 1.0,
+    "max_new_tokens": 64,
+    "lr": 1e-5,
+    "kl_coef": 0.001,
+    "dtype": "fp16",
+    "checkpoint_every": 5,
+    "max_hours": 4.5
+  }
+}

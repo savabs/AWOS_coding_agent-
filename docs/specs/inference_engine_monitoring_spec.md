@@ -446,3 +446,8 @@ monitor.export_csv("2026-05-01", "2026-05-15", "output.csv")
 ---
 
 **Next:** Implement core system (Phase 1)
+
+## Related
+
+- _(add links to related documents here)_
+

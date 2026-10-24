@@ -1,0 +1,72 @@
+{
+  "root_id": "g_155787c6320c",
+  "nodes": {
+    "g_155787c6320c": {
+      "goal_id": "g_155787c6320c",
+      "description": "In scaffold/agent/worker.py, when _parse_search_replace fails, log the first 200 characters of the response and the specific reason for failure (no SEARCH: found, mismatched blocks, etc.) so debugging failed tasks is easier",
+      "parent_ids": [],
+      "child_ids": [
+        "g_f172a6900a11",
+        "g_512ab075f48c"
+      ],
+      "tasks": [],
+      "status": "in_progress",
+      "created_at": "2026-05-24T09:44:20Z",
+      "updated_at": "2026-05-24T09:44:33Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_8cf83a20"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_f172a6900a11": {
+      "goal_id": "g_f172a6900a11",
+      "description": "Inside `_parse_search_replace`, identify code paths leading to failure (e.g., no 'SEARCH:' found, mismatched block counts). At each failure point, add a `logging.error` call that clearly states the specific reason for the parsing failure.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "scaffold/agent/worker.py",
+          "action": "Inside `_parse_search_replace`, identify code paths leading to failure (e.g., no 'SEARCH:' found, mismatched block counts). At each failure point, add a `logging.error` call that clearly states the specific reason for the parsing failure.",
+          "complexity": "low"
+        }
+      ],
+      "status": "failed",
+      "created_at": "2026-05-24T09:44:33Z",
+      "updated_at": "2026-05-24T11:45:18Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_8cf83a20",
+        "orch_bd8d7679"
+      ],
+      "failure_count": 2,
+      "critique_ids": []
+    },
+    "g_512ab075f48c": {
+      "goal_id": "g_512ab075f48c",
+      "description": "Modify the `logging.error` calls added in Task 1. Ensure the `response` string (which is an argument to `_parse_search_replace`) is included in the log message, truncated to its first 200 characters, alongside the specific failure reason.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "file": "scaffold/agent/worker.py",
+          "action": "Modify the `logging.error` calls added in Task 1. Ensure the `response` string (which is an argument to `_parse_search_replace`) is included in the log message, truncated to its first 200 characters, alongside the specific failure reason.",
+          "complexity": "low"
+        }
+      ],
+      "status": "failed",
+      "created_at": "2026-05-24T09:44:33Z",
+      "updated_at": "2026-05-24T11:45:34Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_8cf83a20",
+        "orch_bd8d7679"
+      ],
+      "failure_count": 2,
+      "critique_ids": []
+    }
+  }
+}

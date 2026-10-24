@@ -1,0 +1,131 @@
+# Automated failure diagnosis of computer-use RL episodes with Claude Sonnet 5.5 through the
+# Message Batches API (docs/research/rl_cua_2026-10-22/DIAGNOSIS_METHOD.md).
+#
+# Launch: push to a branch named bench-cloud/rl-diagnose-<anything>. Settings are in `env` below.
+# Spends Anthropic API credit: select refuses when the estimate exceeds MAX_USD, and submit runs once
+# per job (batch.json). To re-attach to a batch that was already submitted (e.g. the job died while
+# waiting), set BATCH_ID below and push again: nothing new is submitted.
+name: rl-diagnose
+
+on:
+  push:
+    branches: ["bench-cloud/rl-diagnose-**"]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: rl-diagnose
+  cancel-in-progress: false
+
+env:
+  RUN_IDS: "39817774382 39864014413 39852748367"   # baseline exam + two qwen3.5-4b collection runs
+  SOURCE_REPO: ${{ github.repository }}
+  MAX_USD: "15"            # hard cap: select / submit refuse above this estimate
+  BUDGET_USD: "11"         # soft target: select stops adding episodes at this estimate
+  MAX_EPISODES: "0"        # 0 = no cap beyond the budget
+  MAX_PER_CLUSTER: "40"    # per (model, source, family, harness reason)
+  MODE: "fast"             # fast = thinking between_tools | think = adaptive thinking, effort low
+  WAIT_SECONDS: "18000"    # poll up to 5 h, then cancel and collect what finished
+  BATCH_ID: ""             # set to re-attach to an existing batch instead of submitting
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GH_TOKEN: ${{ github.token }}
+      OUT: diag
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the Anthropic SDK (pinned)
+        run: python -m pip install --quiet "anthropic==1.17.0"
+
+      - name: Check the API key is configured (value never printed)
+        shell: bash
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "::error::secret ANTHROPIC_API_KEY is not set"; exit 1
+          fi
+          echo "ANTHROPIC_API_KEY is set"
+
+      - name: Download trajectory artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          for id in $RUN_IDS; do
+            mkdir -p "artifacts/$id"
+            gh run download "$id" --repo "$SOURCE_REPO" --pattern 'rl-*' --dir "artifacts/$id"
+          done
+          find artifacts -name trajectories.jsonl | wc -l
+
+      - name: Select failed episodes (estimate cost, refuse above MAX_USD)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/rl/diagnose_failures.py select artifacts --out "$OUT" --max-usd "$MAX_USD" \
+            --budget-usd "$BUDGET_USD" --max-episodes "$MAX_EPISODES" --max-per-cluster "$MAX_PER_CLUSTER" \
+            --mode "$MODE" | tee select.log
+          { echo "## rl-diagnose selection"; echo; echo '```'; cat select.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Submit the batch (or re-attach to BATCH_ID)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "$BATCH_ID" ]; then
+            printf '{"id": "%s", "mode": "%s", "reattached": true}\n' "$BATCH_ID" "$MODE" > "$OUT/batch.json"
+            echo "re-attached to $BATCH_ID"
+          else
+            python scripts/rl/diagnose_failures.py submit --out "$OUT" --max-usd "$MAX_USD" --mode "$MODE"
+          fi
+          echo "batch: $(python -c "import json;print(json.load(open('$OUT/batch.json'))['id'])")" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save the batch id early
+        uses: actions/upload-artifact@v4
+        with:
+          name: rl-diagnosis-batch
+          path: |
+            diag/batch.json
+            diag/selection.json
+          retention-days: 30
+
+      - name: Wait for the batch to end
+        id: wait
+        shell: bash
+        run: |
+          set -uo pipefail
+          python scripts/rl/diagnose_failures.py wait --out "$OUT" --timeout "$WAIT_SECONDS" --interval 60
+          echo "rc=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Collect results
+        if: always() && hashFiles('diag/batch.json') != ''
+        run: python scripts/rl/diagnose_failures.py collect --out "$OUT"
+
+      - name: Report
+        if: always() && hashFiles('diag/diagnoses.jsonl') != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/rl/diagnose_failures.py report --out "$OUT" > /dev/null
+          cat "$OUT/report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload diagnosis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rl-diagnosis
+          path: |
+            diag/failures.jsonl
+            diag/diagnoses.jsonl
+            diag/report.md
+            diag/selection.json
+            diag/batch.json
+          if-no-files-found: warn
+          retention-days: 30

@@ -1,0 +1,81 @@
+# Waits for a Kaggle training kernel (default awos-rl-sft; set KSLUG in ci/kaggle_watch.env) to finish, then fetches its output
+# (training log, metrics.json, adapter) as an artifact. Read-only on Kaggle.
+# Launch: push to a branch named bench-cloud/rl-kaggle-watch-<anything>.
+name: kaggle-watch
+
+on:
+  push:
+    branches: ["bench-cloud/rl-kaggle-watch-**"]
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    runs-on: macos-latest   # separate from the Linux runners rl-eval fills
+    timeout-minutes: 350
+    env:
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Settings (kernel slug from ci/kaggle_watch.env, default awos-rl-sft)
+        shell: bash
+        run: |
+          KSLUG=awos-rl-sft
+          [ -f ci/kaggle_watch.env ] && . ci/kaggle_watch.env
+          echo "KSLUG=$KSLUG" >> "$GITHUB_ENV"; echo "watching $KSLUG"
+      - name: Wait for the kernel
+        id: wait
+        shell: bash
+        run: |
+          set -uo pipefail
+          pip install -q kaggle==2.2.4
+          # A GitHub job lives at most ~6 h; a kernel can run 10.5 h. "timeout" = still running, not a failure:
+          # push to a new bench-cloud/rl-kaggle-watch-* branch to keep watching.
+          # live progress: the run pings https://ntfy.sh/<topic>; each minute's line shows the latest ping
+          TOPIC=$(python3 -c "import ast,re;s=open('kaggle/rl-sft/train.py').read();print(re.search(r'\"ntfy_topic\": \"([^\"]*)\"',s).group(1))")
+          python -m scaffold.rl.train.kaggle_driver wait --kernel "$KAGGLE_USERNAME/$KSLUG" --timeout-min 330 \
+            --ntfy-topic "$TOPIC" | tee wait.log
+          S=$(tail -1 wait.log)
+          echo "status=$S" >> "$GITHUB_OUTPUT"
+          echo "### Kaggle kernel status: \`$S\`" >> "$GITHUB_STEP_SUMMARY"
+          [ "$S" = "timeout" ] && echo "Still running after 5.5 h of watching; relaunch the watcher." >> "$GITHUB_STEP_SUMMARY"
+          [ "$S" = "complete" ] || [ "$S" = "timeout" ]
+      - name: Fetch the output (log, metrics, adapter)
+        if: always() && steps.wait.outputs.status != 'timeout'
+        shell: bash
+        run: |
+          set -uo pipefail
+          python -m scaffold.rl.train.kaggle_driver fetch --kernel "$KAGGLE_USERNAME/$KSLUG" --out kaggle_out || true
+          ls -la kaggle_out || true
+          [ -f kaggle_out/metrics.json ] && cat kaggle_out/metrics.json
+          find kaggle_out -maxdepth 2 -name "*.log" -exec tail -n 80 {} \; || true
+          # progress.jsonl -> a readable table (about 15 rows, plus every eval) on the run page
+          [ -f kaggle_out/progress.jsonl ] && python3 - kaggle_out/progress.jsonl >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json, sys
+          rows = [json.loads(x) for x in open(sys.argv[1]) if x.strip()]
+          tr = [r for r in rows if r["kind"] == "train"]
+          keep = {id(r) for r in tr[:: max(1, len(tr) // 15)]} | {id(r) for r in rows if r["kind"] == "eval"}
+          pct = lambda v: "" if v is None else f"{v * 100:.0f}%"
+          num = lambda v, f: "" if v is None else f.format(v)
+          print("\n### Training progress\n\n| step | % | loss | eval loss | action acc | s/step | GPU util | GPU mem (GB) |")
+          print("|---:|---:|---:|---:|---:|---:|---|---|")
+          for r in rows:
+              if id(r) not in keep:
+                  continue
+              g = r.get("gpu") or []
+              print(f"| {r['step']}/{r['total']} | {r['pct']:.0f} | {num(r.get('loss'), '{:.3f}')} | "
+                    f"{num(r.get('eval_loss'), '{:.3f}')} | {pct(r.get('action_acc'))} | {num(r.get('s_per_step'), '{:.1f}')} | "
+                    f"{' '.join(str(x['util']) + '%' for x in g)} | {' '.join(f'{x['mem_used'] / 1024:.1f}' for x in g)} |")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kaggle-out
+          path: kaggle_out/
+          retention-days: 30

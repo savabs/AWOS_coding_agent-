@@ -244,7 +244,8 @@ class TestLinUCBRouter:
         router = self._router(tmp_path)
         s = router.summary()
         assert "learned_weights" in s
-        assert set(s["learned_weights"].keys()) == {"gemini_flash", "deepseek", "openai", "haiku", "sonnet"}
+        assert set(s["learned_weights"].keys()) == {
+            "gemini_flash", "deepseek", "openai", "haiku", "sonnet", "openrouter"}
 
     def test_learns_to_prefer_rewarded_action(self, tmp_path):
         """After many updates rewarding action 1 (deepseek), it should be preferred."""
@@ -343,11 +344,12 @@ class TestEscalationEngineIntegration:
         task = self._task()
         feat = ext.extract(task, 0)
         for _ in range(10):
-            router.update(feat, action_id=1, reward=1.0)
+            router.update(feat, action_id=1, reward=1.0)  # arm 1 = LADDER[1] (Pro)
         engine = EscalationEngine(monthly_budget=20.0, ml_router=router)
-        decision = engine.decide(task, force_level=EscalationLevel.SONNET)
-        assert decision.spec.level == EscalationLevel.SONNET
+        decision = engine.decide(task, force_level=EscalationLevel.DEEPSEEK)
+        assert decision.spec.level == EscalationLevel.DEEPSEEK
         assert decision.forced is True
+        assert "LinUCB" not in decision.reason
 
 
 # ─── ReplayGate ──────────────────────────────────────────────────────────────

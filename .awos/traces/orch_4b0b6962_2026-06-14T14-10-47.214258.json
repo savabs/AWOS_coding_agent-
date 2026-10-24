@@ -1,0 +1,8 @@
+{
+  "session_id": "orch_4b0b6962",
+  "goal": "create docs/e2e_via_http_guide.md about deliverable routing",
+  "start_time": "2026-06-14T14:10:47.214258",
+  "total_cost": 0.0,
+  "final_success": true,
+  "traces": []
+}

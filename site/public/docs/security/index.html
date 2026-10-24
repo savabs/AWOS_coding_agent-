@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Security and privacy · AWOS docs</title>
+<meta name="description" content="How AWOS keeps your checkout untouched, never pushes, blocks branches that contain secrets, and runs local-only jobs with no cloud access.">
+<link rel="canonical" href="https://awos.tirramind.com/docs/security/">
+<meta property="og:title" content="Security and privacy · AWOS docs">
+<meta property="og:description" content="How AWOS keeps your checkout untouched, never pushes, blocks branches that contain secrets, and runs local-only jobs with no cloud access.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://awos.tirramind.com/docs/security/">
+<meta name="robots" content="index,follow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap">
+  <a class="brand" href="/" aria-label="AWOS home">AWOS<span>.</span></a>
+  <nav class="links" aria-label="Main">
+    <a class="wide" href="/#how">How it works</a>
+    <a class="wide" href="/#results">Results</a>
+    <a href="/docs/">Docs</a>
+    <a class="wide" href="/docs/security/" aria-current="page">Security</a>
+    <a class="wide" href="/#pricing">Pricing</a>
+  </nav>
+  <a class="btn primary" href="/#waitlist">Join the waitlist</a>
+</div></header>
+<main id="main" class="wrap"><div class="docs-layout">
+<nav class="docs-side" aria-label="Docs">
+<h2>Docs</h2>
+<ul>
+<li><a href="/docs/">Overview</a></li>
+<li><a href="/docs/quickstart/">Quickstart</a></li>
+<li><a href="/docs/fix-github/">Fix a GitHub issue or PR</a></li>
+<li><a href="/docs/concepts/">Concepts</a></li>
+<li><a href="/docs/models-and-cost/">Models and cost</a></li>
+<li><a href="/docs/cli/">CLI reference</a></li>
+<li><a href="/docs/security/" aria-current="page">Security and privacy</a></li>
+<li><a href="/docs/faq/">FAQ</a></li>
+</ul>
+</nav>
+<article class="doc">
+<div class="eyebrow">Docs · Security and privacy</div>
+<h1>Security and privacy</h1>
+<p class="lede">AWOS is built to run unattended on code you care about. These are the guarantees it makes and how each one works.</p>
+
+<h2 id="local">Runs on your machine</h2>
+<p>The worker, the queue, job folders and logs all live on your computer, under <code>~/.awos/host/</code> by default. There is no AWOS cloud service holding your code. The only thing that leaves your machine is the context sent to the model provider you chose, and with a local model nothing leaves at all.</p>
+
+<h2 id="checkout">Your checkout is never edited</h2>
+<p>Each job works in its own git worktree at your current commit. The review branch is assembled with git plumbing and a temporary index, so your <code>HEAD</code>, index, working tree and uncommitted changes are not read-modified-written.</p>
+
+<h2 id="push">Nothing is pushed</h2>
+<p>Results land on a local branch <code>awos/&lt;id&gt;</code>. The handoff has no network git operation: you decide what to merge and what to push. The one exception is one you ask for explicitly: <code>awos fix --pr</code> / <code>--push</code> pushes the fix branch (and with <code>--pr</code> opens a draft PR) after the job succeeds.</p>
+
+<h2 id="secrets">Secret scan on every handoff</h2>
+<ul>
+  <li>The diff is scanned for credential patterns and for the values of secrets in the job's environment. If it finds one, the branch is blocked and the job is marked as such.</li>
+  <li>A secret found in the report is redacted. Findings name the kind and location, never the secret value.</li>
+  <li>Some paths are never handed off whatever the workspace contains: <code>.env</code> files, <code>*.pem</code>, <code>*.key</code>, <code>id_rsa*</code>, the <code>.awos/</code> folder, bytecode and test caches.</li>
+</ul>
+
+<h2 id="local-only">Local-only jobs</h2>
+<p><code>awos submit --privacy local_only</code> runs a job with cloud API keys present but empty in its environment, so a cloud call cannot authenticate. This fails closed: if no local model is available, the job cannot quietly fall back to the cloud. Keys that only authenticate your local model server are kept.</p>
+
+<h2 id="budgets">Hard budgets</h2>
+<p>Every job has a dollar cap (<code>--budget</code>, default 1.0) that bounds all of its attempts. Spend is counted by AWOS from its own model calls.</p>
+
+<h2 id="keys">Keys</h2>
+<ul>
+  <li><code>awos keys</code> checks providers with free, read-only requests and never prints key values.</li>
+  <li>When a key is wrong, revoked or out of credit, jobs pause as <code>blocked</code> instead of retrying against a dead key, and you get one notification.</li>
+</ul>
+
+<h2 id="report">Reporting a problem</h2>
+<p>Early-access members have a direct line to the builder. If you find a security issue, use it, or reach us through the <a href="/access/">access form</a>.</p>
+<nav class="pager" aria-label="Docs pages"><a class="prev" href="/docs/cli/"><small>Previous</small>CLI reference</a><a class="next" href="/docs/faq/"><small>Next</small>FAQ</a></nav>
+</article>
+</div></main>
+<footer class="site"><div class="wrap">
+  <span>AWOS. A local-first coding agent. Built in India.</span>
+  <nav aria-label="Footer">
+    <a href="/docs/">Docs</a>
+    <a href="/docs/quickstart/">Quickstart</a>
+    <a href="/docs/security/">Security</a>
+    <a href="/docs/faq/">FAQ</a>
+    <a href="/#waitlist">Waitlist</a>
+    <a href="/access/">Team early access</a>
+  </nav>
+</div></footer>
+</body>
+</html>

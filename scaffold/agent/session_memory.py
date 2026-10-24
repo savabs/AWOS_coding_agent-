@@ -20,6 +20,15 @@ from typing import List, Dict, Optional, Tuple
 from enum import Enum
 
 
+def _redact_at_rest(obj):
+    """secret_scan.redact_obj: no key format or owner env secret is persisted."""
+    try:
+        from .secret_scan import redact_obj
+    except ImportError:
+        from secret_scan import redact_obj
+    return redact_obj(obj)
+
+
 class MemoryStrategy(Enum):
     """Memory management strategies"""
     SIMPLE = "simple"              # Keep all messages (until limit)
@@ -242,8 +251,9 @@ class ChatSessionManager:
             return
 
         session_file = self.sessions_dir / f"{session.session_id}.json"
+        data = _redact_at_rest(json.loads(session.to_json()))
         with open(session_file, 'w') as f:
-            f.write(session.to_json())
+            f.write(json.dumps(data, indent=2))
 
     def add_to_current_session(self, role: str, content: str, tokens: int):
         """Add message to current session"""

@@ -1,0 +1,69 @@
+{
+  "id": "c02_sort_downloads",
+  "title": "Sort Downloads by type",
+  "instruction": "Move every .pdf in Downloads/ (any case) into Downloads/PDFs/ and every .zip into Downloads/Archives/. Do not delete anything.",
+  "rung": "shell",
+  "start": {
+    "files": {
+      "Downloads/invoice.pdf": "a",
+      "Downloads/manual.PDF": "b",
+      "Downloads/backup.zip": "c",
+      "Downloads/readme.txt": "d"
+    }
+  },
+  "probes": [
+    {
+      "id": "pdfs_moved",
+      "getter": {
+        "type": "glob",
+        "pattern": "Downloads/PDFs/*"
+      },
+      "comparator": {
+        "op": "set_equals",
+        "expected": [
+          "Downloads/PDFs/invoice.pdf",
+          "Downloads/PDFs/manual.PDF"
+        ]
+      }
+    },
+    {
+      "id": "zips_moved",
+      "getter": {
+        "type": "glob",
+        "pattern": "Downloads/Archives/*"
+      },
+      "comparator": {
+        "op": "set_equals",
+        "expected": [
+          "Downloads/Archives/backup.zip"
+        ]
+      }
+    },
+    {
+      "id": "top_level_clean",
+      "getter": {
+        "type": "glob",
+        "pattern": "Downloads/*.*"
+      },
+      "comparator": {
+        "op": "set_equals",
+        "expected": [
+          "Downloads/readme.txt"
+        ]
+      }
+    }
+  ],
+  "invariants": [
+    {
+      "id": "nothing_deleted",
+      "getter": {
+        "type": "glob",
+        "pattern": "Downloads/**/*.*"
+      },
+      "comparator": {
+        "op": "length",
+        "expected": 4
+      }
+    }
+  ]
+}

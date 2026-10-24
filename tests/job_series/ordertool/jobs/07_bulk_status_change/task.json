@@ -1,0 +1,7 @@
+{
+  "id": "07_bulk_status_change",
+  "goal": "When a batch ships I have to run set-status once per order. Let `set-status` take several order ids before the status, e.g. `set-status ORD-0001 ORD-0002 ORD-0005 shipped`. It must be all or nothing: if any of the orders doesn't exist or isn't allowed to move to that status, none of them may change, and I should get the same kind of error message the tool gives today for that order. On success print the usual confirmation line for each order, in the order I gave them. A single id must keep working exactly as now.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

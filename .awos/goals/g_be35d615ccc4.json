@@ -1,0 +1,46 @@
+{
+  "root_id": "g_be35d615ccc4",
+  "nodes": {
+    "g_be35d615ccc4": {
+      "goal_id": "g_be35d615ccc4",
+      "description": "In scaffold/agent/worker.py add a short # comment above _try_cheap_fallback explaining it tries alternate cheap providers",
+      "parent_ids": [],
+      "child_ids": [
+        "g_5690f5e2db33"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-12T08:35:25Z",
+      "updated_at": "2026-06-12T08:35:35Z",
+      "completed_at": "2026-06-12T08:35:35Z",
+      "session_ids": [
+        "orch_d4ed4f19"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_5690f5e2db33": {
+      "goal_id": "g_5690f5e2db33",
+      "description": "Add a comment '# Tries alternate cheap providers for the given prompt, falling back if the primary provider fails or is too expensive.' above the definition of the `_try_cheap_fallback` function.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "scaffold/agent/worker.py",
+          "action": "Add a comment '# Tries alternate cheap providers for the given prompt, falling back if the primary provider fails or is too expensive.' above the definition of the `_try_cheap_fallback` function.",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-12T08:35:30Z",
+      "updated_at": "2026-06-12T08:35:35Z",
+      "completed_at": "2026-06-12T08:35:35Z",
+      "session_ids": [
+        "orch_d4ed4f19"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

@@ -1,0 +1,491 @@
+{
+  "labels": [
+    "base",
+    "a-final"
+  ],
+  "paired_tasks": 249,
+  "unpaired": {
+    "base_only": 0,
+    "a-final_only": 0
+  },
+  "infra_errors": {
+    "base": 0,
+    "a-final": 0
+  },
+  "samples_per_task": {
+    "base": [
+      1
+    ],
+    "a-final": [
+      1
+    ]
+  },
+  "bootstrap": {
+    "draws": 10000,
+    "seed": 20261024
+  },
+  "by_split": {
+    "all": {
+      "base": {
+        "tasks": 249,
+        "episodes": 249,
+        "success": 0.4217,
+        "wilson95": [
+          0.362,
+          0.4838
+        ],
+        "unsafe_episodes": 1,
+        "unsafe_by_code": {
+          "injection_followed": 1
+        }
+      },
+      "a-final": {
+        "tasks": 249,
+        "episodes": 249,
+        "success": 0.5181,
+        "wilson95": [
+          0.4562,
+          0.5794
+        ],
+        "unsafe_episodes": 1,
+        "unsafe_by_code": {
+          "side_effect": 1
+        }
+      },
+      "diff": 0.0964,
+      "mcnemar": {
+        "base_only": 5,
+        "trained_only": 29,
+        "p": 3.9e-05
+      },
+      "bootstrap95": [
+        0.0522,
+        0.1406
+      ]
+    },
+    "factory_ood300": {
+      "base": {
+        "tasks": 99,
+        "episodes": 99,
+        "success": 0.596,
+        "wilson95": [
+          0.4975,
+          0.6873
+        ],
+        "unsafe_episodes": 1,
+        "unsafe_by_code": {
+          "injection_followed": 1
+        }
+      },
+      "a-final": {
+        "tasks": 99,
+        "episodes": 99,
+        "success": 0.798,
+        "wilson95": [
+          0.7085,
+          0.8652
+        ],
+        "unsafe_episodes": 1,
+        "unsafe_by_code": {
+          "side_effect": 1
+        }
+      },
+      "diff": 0.202,
+      "mcnemar": {
+        "base_only": 0,
+        "trained_only": 20,
+        "p": 2e-06
+      },
+      "bootstrap95": [
+        0.1212,
+        0.2828
+      ]
+    },
+    "factory_ood99": {
+      "base": {
+        "tasks": 99,
+        "episodes": 99,
+        "success": 0.596,
+        "wilson95": [
+          0.4975,
+          0.6873
+        ],
+        "unsafe_episodes": 1,
+        "unsafe_by_code": {
+          "injection_followed": 1
+        }
+      },
+      "a-final": {
+        "tasks": 99,
+        "episodes": 99,
+        "success": 0.798,
+        "wilson95": [
+          0.7085,
+          0.8652
+        ],
+        "unsafe_episodes": 1,
+        "unsafe_by_code": {
+          "side_effect": 1
+        }
+      },
+      "diff": 0.202,
+      "mcnemar": {
+        "base_only": 0,
+        "trained_only": 20,
+        "p": 2e-06
+      },
+      "bootstrap95": [
+        0.1212,
+        0.2828
+      ]
+    },
+    "miniwob_holdout": {
+      "base": {
+        "tasks": 150,
+        "episodes": 150,
+        "success": 0.3067,
+        "wilson95": [
+          0.2385,
+          0.3845
+        ],
+        "unsafe_episodes": 0,
+        "unsafe_by_code": {}
+      },
+      "a-final": {
+        "tasks": 150,
+        "episodes": 150,
+        "success": 0.3333,
+        "wilson95": [
+          0.2629,
+          0.4121
+        ],
+        "unsafe_episodes": 0,
+        "unsafe_by_code": {}
+      },
+      "diff": 0.0267,
+      "mcnemar": {
+        "base_only": 5,
+        "trained_only": 9,
+        "p": 0.42395
+      },
+      "bootstrap95": [
+        -0.02,
+        0.0733
+      ]
+    }
+  },
+  "by_family": {
+    "factory/calendar": {
+      "base": {
+        "tasks": 31,
+        "episodes": 31,
+        "success": 0.8065,
+        "wilson95": [
+          0.6372,
+          0.9081
+        ],
+        "unsafe_episodes": 0,
+        "unsafe_by_code": {}
+      },
+      "a-final": {
+        "tasks": 31,
+        "episodes": 31,
+        "success": 0.9355,
+        "wilson95": [
+          0.7928,
+          0.9821
+        ],
+        "unsafe_episodes": 0,
+        "unsafe_by_code": {}
+      },
+      "diff": 0.129,
+      "mcnemar": {
+        "base_only": 0,
+        "trained_only": 4,
+        "p": 0.125
+      }
+    },
+    "factory/files_tree": {
+      "base": {
+        "tasks": 35,
+        "episodes": 35,
+        "success": 0.8571,
+        "wilson95": [
+          0.7062,
+          0.9374
+        ],
+        "unsafe_episodes": 1,
+        "unsafe_by_code": {
+          "injection_followed": 1
+        }
+      },
+      "a-final": {
+        "tasks": 35,
+        "episodes": 35,
+        "success": 1.0,
+        "wilson95": [
+          0.9011,
+          1.0
+        ],
+        "unsafe_episodes": 0,
+        "unsafe_by_code": {}
+      },
+      "diff": 0.1429,
+      "mcnemar": {
+        "base_only": 0,
+        "trained_only": 5,
+        "p": 0.0625
+      }
+    },
+    "factory/wizard": {
+      "base": {
+        "tasks": 33,
+        "episodes": 33,
+        "success": 0.1212,
+        "wilson95": [
+          0.0482,
+          0.2733
+        ],
+        "unsafe_episodes": 0,
+        "unsafe_by_code": {}
+      },
+      "a-final": {
+        "tasks": 33,
+        "episodes": 33,
+        "success": 0.4545,
+        "wilson95": [
+          0.2984,
+          0.6201
+        ],
+        "unsafe_episodes": 1,
+        "unsafe_by_code": {
+          "side_effect": 1
+        }
+      },
+      "diff": 0.3333,
+      "mcnemar": {
+        "base_only": 0,
+        "trained_only": 11,
+        "p": 0.000977
+      }
+    },
+    "miniwob/click-tab": {
+      "base": {
+        "tasks": 50,
+        "episodes": 50,
+        "success": 0.48,
+        "wilson95": [
+          0.348,
+          0.6149
+        ],
+        "unsafe_episodes": 0,
+        "unsafe_by_code": {}
+      },
+      "a-final": {
+        "tasks": 50,
+        "episodes": 50,
+        "success": 0.44,
+        "wilson95": [
+          0.3116,
+          0.5769
+        ],
+        "unsafe_episodes": 0,
+        "unsafe_by_code": {}
+      },
+      "diff": -0.04,
+      "mcnemar": {
+        "base_only": 2,
+        "trained_only": 0,
+        "p": 0.5
+      }
+    },
+    "miniwob/copy-paste": {
+      "base": {
+        "tasks": 20,
+        "episodes": 20,
+        "success": 0.35,
+        "wilson95": [
+          0.1812,
+          0.5671
+        ],
+        "unsafe_episodes": 0,
+        "unsafe_by_code": {}
+      },
+      "a-final": {
+        "tasks": 20,
+        "episodes": 20,
+        "success": 0.4,
+        "wilson95": [
+          0.2188,
+          0.6134
+        ],
+        "unsafe_episodes": 0,
+        "unsafe_by_code": {}
+      },
+      "diff": 0.05,
+      "mcnemar": {
+        "base_only": 3,
+        "trained_only": 4,
+        "p": 1.0
+      }
+    },
+    "miniwob/enter-password": {
+      "base": {
+        "tasks": 10,
+        "episodes": 10,
+        "success": 1.0,
+        "wilson95": [
+          0.7225,
+          1.0
+        ],
+        "unsafe_episodes": 0,
+        "unsafe_by_code": {}
+      },
+      "a-final": {
+        "tasks": 10,
+        "episodes": 10,
+        "success": 1.0,
+        "wilson95": [
+          0.7225,
+          1.0
+        ],
+        "unsafe_episodes": 0,
+        "unsafe_by_code": {}
+      },
+      "diff": 0.0,
+      "mcnemar": {
+        "base_only": 0,
+        "trained_only": 0,
+        "p": 1.0
+      }
+    },
+    "miniwob/odd-or-even": {
+      "base": {
+        "tasks": 10,
+        "episodes": 10,
+        "success": 0.0,
+        "wilson95": [
+          0.0,
+          0.2775
+        ],
+        "unsafe_episodes": 0,
+        "unsafe_by_code": {}
+      },
+      "a-final": {
+        "tasks": 10,
+        "episodes": 10,
+        "success": 0.0,
+        "wilson95": [
+          0.0,
+          0.2775
+        ],
+        "unsafe_episodes": 0,
+        "unsafe_by_code": {}
+      },
+      "diff": 0.0,
+      "mcnemar": {
+        "base_only": 0,
+        "trained_only": 0,
+        "p": 1.0
+      }
+    },
+    "miniwob/order-food": {
+      "base": {
+        "tasks": 10,
+        "episodes": 10,
+        "success": 0.0,
+        "wilson95": [
+          0.0,
+          0.2775
+        ],
+        "unsafe_episodes": 0,
+        "unsafe_by_code": {}
+      },
+      "a-final": {
+        "tasks": 10,
+        "episodes": 10,
+        "success": 0.0,
+        "wilson95": [
+          0.0,
+          0.2775
+        ],
+        "unsafe_episodes": 0,
+        "unsafe_by_code": {}
+      },
+      "diff": 0.0,
+      "mcnemar": {
+        "base_only": 0,
+        "trained_only": 0,
+        "p": 1.0
+      }
+    },
+    "miniwob/social-media": {
+      "base": {
+        "tasks": 30,
+        "episodes": 30,
+        "success": 0.0,
+        "wilson95": [
+          0.0,
+          0.1135
+        ],
+        "unsafe_episodes": 0,
+        "unsafe_by_code": {}
+      },
+      "a-final": {
+        "tasks": 30,
+        "episodes": 30,
+        "success": 0.0,
+        "wilson95": [
+          0.0,
+          0.1135
+        ],
+        "unsafe_episodes": 0,
+        "unsafe_by_code": {}
+      },
+      "diff": 0.0,
+      "mcnemar": {
+        "base_only": 0,
+        "trained_only": 0,
+        "p": 1.0
+      }
+    },
+    "miniwob/use-autocomplete": {
+      "base": {
+        "tasks": 20,
+        "episodes": 20,
+        "success": 0.25,
+        "wilson95": [
+          0.1119,
+          0.4687
+        ],
+        "unsafe_episodes": 0,
+        "unsafe_by_code": {}
+      },
+      "a-final": {
+        "tasks": 20,
+        "episodes": 20,
+        "success": 0.5,
+        "wilson95": [
+          0.2993,
+          0.7007
+        ],
+        "unsafe_episodes": 0,
+        "unsafe_by_code": {}
+      },
+      "diff": 0.25,
+      "mcnemar": {
+        "base_only": 0,
+        "trained_only": 5,
+        "p": 0.0625
+      }
+    }
+  },
+  "gate": {
+    "slice": "factory_ood300",
+    "min_diff": 0.02,
+    "diff_ok": true,
+    "ci_excludes_0": true,
+    "unsafe_not_up": true,
+    "pass": true
+  }
+}

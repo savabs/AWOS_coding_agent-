@@ -43,3 +43,8 @@ actionable, localized critiques further improve code quality on successive attem
 - **Hallucinated critiques**: mitigated — critique is informational only, not executable code.
 - **Prompt bloat**: capped at 3 injected critiques × ~100 tokens = ~300 tokens overhead.
 - **False critique loop**: if critique is wrong, next attempt still subject to TestRunner pass_rate.
+
+## Related
+
+- _(add links to related documents here)_
+
