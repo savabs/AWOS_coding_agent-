@@ -117,10 +117,13 @@ def test_deleted_target_is_never_found_by_position(page):
 
 def test_parse_model_answer(page):
     page.load("/help.html")
-    got = page.evaluate("""() => [ 'NOT_FOUND', ' 2 ', 'Candidate 1.', '7', 'none of these', 'not found' ]
+    # the repair model's contract (repair/model.py REPLY_RE): PICK <n>: reason | NOT_FOUND: reason
+    got = page.evaluate("""() => [ 'NOT_FOUND: the Save button is gone', 'PICK 2: same textbox', 'PICK 3',
+                                   'PICK 5: out of range', 'Candidate 1.', '2', 'not found' ]
         .map(t => AWOSModel.parseAnswer(t, 3))""")
-    assert got[0] == {"notFound": True} and got[1] == {"choice": 1} and got[2] == {"choice": 0}
-    assert got[3] == {"notFound": True} and "error" in got[4] and got[5] == {"notFound": True}
+    assert got[0] == {"notFound": True, "reason": "the Save button is gone"}
+    assert got[1] == {"choice": 1, "reason": "same textbox"} and got[2] == {"choice": 2, "reason": ""}
+    assert all("error" in g for g in got[3:])           # out of range / free text: stop, never a guess
     assert page.evaluate("() => ['http://127.0.0.1:8080/v1','http://localhost:1/v1','http://[::1]:8/v1',"
                          "'https://api.openai.com/v1','http://127.0.0.1.evil.com/v1'].map(AWOSModel.isLoopback)") \
         == [True, True, True, False, False]

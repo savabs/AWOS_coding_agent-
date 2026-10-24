@@ -192,7 +192,11 @@ async function driveInner(runId) {
       return fail(run, 'NOT_FOUND', 'step ' + (i + 1) + ': nothing on the page resembles "' + (step.loc.name || step.loc.css) + '"');
     } else {
       logRun(run, 'scoring not confident (' + loc.status + ', best ' + loc.score + '); asking local model over ' + loc.shortlist.length + ' candidates');
-      var ans = await M.ask(cfg, step, loc.shortlist);
+      var t0 = Date.now(), ans = await M.ask(cfg, step, loc.shortlist);
+      (run.modelCalls = run.modelCalls || []).push({ step: i, status: loc.status, best: loc.score, ms: Date.now() - t0,
+        target: { role: step.loc.role, name: step.loc.name || '' },
+        shortlist: loc.shortlist.slice(0, 5).map(function (c) { return { role: c.desc.role, name: c.desc.name, score: c.score }; }),
+        answer: ans.raw || '', outcome: ans.error ? 'error' : ans.notFound ? 'NOT_FOUND' : 'PICK ' + (ans.choice + 1) });
       if (ans.error) return fail(run, 'NOT_FOUND', 'step ' + (i + 1) + ': no confident match and ' + ans.error);
       if (ans.notFound) return fail(run, 'NOT_FOUND', 'step ' + (i + 1) + ': local model says the control "' + (step.loc.name || '') + '" is gone');
       index = loc.shortlist[ans.choice].index; how = 'model pick #' + (ans.choice + 1) + ' (score ' + loc.shortlist[ans.choice].score + ')';
@@ -296,6 +300,36 @@ async function decide(kind, runId, n) {
   drive(run.id);
 }
 
+// ---- shareable run log (redacted) ------------------------------------------------
+// What the owner can send back to improve AWOS: per run the verdict, how each step was found
+// (score / model pick), every model call (shortlist names + answer). Never typed values (only their
+// length), never URL queries or fragments, never anything from a sensitive field.
+function redactUrl(u) { try { var x = new URL(u); return x.origin + x.pathname; } catch (e) { return ''; } }
+function redactText(s) { return String(s || '').replace(/https?:\/\/[^\s"')]+/g, function (u) { return redactUrl(u); }); }
+async function exportLog() {
+  var recs = await getLocal('recordings', {}), runs = await getLocal('runs', []), cfg = await settings();
+  var recOut = Object.values(recs).map(function (r) {
+    return { id: r.id, name: r.name, start: redactUrl(r.startUrl), createdAt: r.createdAt,
+      expect: { url: !!(r.expect && r.expect.urlPattern), texts: ((r.expect && r.expect.texts) || []).length },
+      steps: r.steps.map(function (s) {
+        if (s.action === 'goto') return { action: 'goto', url: redactUrl(s.url) };
+        var l = s.loc || {};
+        return { action: s.action, role: l.role, name: l.name, context: l.context || '', danger: s.danger || '',
+                 sensitive: s.sensitive || '', valueLen: s.value != null ? String(s.value).length : null, navigates: !!s.navigates };
+      }) };
+  });
+  var runOut = runs.map(function (r) {
+    return { recId: r.recId, recName: r.recName, status: r.status, startedAt: r.startedAt, endedAt: r.endedAt,
+      verdict: r.result && r.result.verdict, code: r.result && r.result.code, reason: redactText(r.result && r.result.reason),
+      checks: ((r.result && r.result.checks) || []).map(function (c) { return { kind: c.kind, ok: c.ok }; }),
+      resolved: r.resolved, modelCalls: r.modelCalls || [],
+      log: r.log.map(function (l) { return { t: l.t, step: l.step, text: redactText(l.text) }; }) };
+  });
+  return { kind: 'awos-replay-runlog/1', exportedAt: Date.now(), version: chrome.runtime.getManifest().version,
+           model: { endpoint: redactUrl(cfg.endpoint), name: cfg.model, enabled: cfg.enabled },
+           recordings: recOut, runs: runOut };
+}
+
 // ---- messages ---------------------------------------------------------------
 function fromExtensionPage(sender) { return sender.id === chrome.runtime.id && String(sender.url || '').indexOf(chrome.runtime.getURL('')) === 0; }
 
@@ -324,6 +358,7 @@ var HANDLERS = {
   continue: async function (msg) { await decide('continue', msg.runId, msg.nonce); return { ok: true }; },
   reject: async function (msg) { await decide('reject', msg.runId, msg.nonce); return { ok: true }; },
   save_settings: async function (msg) { await setLocal('settings', msg.settings || {}); return settings(); },
+  export_log: async function () { return exportLog(); },
 };
 var PAGE_ONLY = { hello: 1, rec_step: 1 };   // the only messages a content script may send
 

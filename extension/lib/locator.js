@@ -48,9 +48,54 @@
     if (tag === 'input') {
       var t = (el.getAttribute('type') || 'text').toLowerCase();
       return { checkbox: 'checkbox', radio: 'radio', submit: 'button', button: 'button', reset: 'button',
-               image: 'button', range: 'slider' }[t] || 'textbox';
+               image: 'button', range: 'slider', password: 'password' }[t] || 'textbox';
     }
     return IMPLICIT_ROLE[tag] || '';
+  }
+
+  // ---- the repair model's view of a control (scaffold/agent/desktop/repair: Fingerprint) -----------
+  // context = name of the innermost dialog / alertdialog / form / region ancestor (htmldriver's Context);
+  // block   = text of the nearest of up to 3 enclosing blocks, minus the control's own name (mutate._label);
+  // siblings = names of the 2 controls before and 2 after it, in document order (ctl_fingerprint).
+  // The repair model (G6) was trained on exactly these fields; scoring below does not use them.
+  var CONTEXT_SEL = 'dialog, [role=dialog], [role=alertdialog], [role=form], [role=region], form[aria-label],'
+                  + ' form[aria-labelledby], section[aria-label], section[aria-labelledby]';
+  var ALL_CONTROLS = null;
+  function contextOf(el) {
+    var c = el.parentElement && el.parentElement.closest ? el.parentElement.closest(CONTEXT_SEL) : null;
+    if (!c) return '';
+    var lb = c.getAttribute('aria-labelledby');
+    if (lb) {
+      var t = lb.split(/\s+/).map(function (id) { var n = document.getElementById(id); return n ? n.textContent : ''; }).join(' ');
+      if (norm(t)) return norm(t);
+    }
+    return norm(c.getAttribute('aria-label') || '');
+  }
+  function blockText(el, own) {
+    var u = el;
+    for (var k = 0; k < 3; k++) {
+      if (!u.parentElement || /^(body|html)$/i.test(u.parentElement.tagName)) break;
+      u = u.parentElement;
+      var t = String(u.textContent || '');
+      if (own) t = t.split(own).join(' ');
+      t = norm(t);
+      if (t) return t.slice(0, 200);
+    }
+    return '';
+  }
+  function allControls() {
+    if (!ALL_CONTROLS) ALL_CONTROLS = [KIND_SELECTOR.fill, KIND_SELECTOR.select, KIND_SELECTOR.click].join(', ');
+    return Array.prototype.slice.call(document.querySelectorAll(ALL_CONTROLS)).filter(visible);
+  }
+  /** names of every visible control in document order, computed once per scan. */
+  function pageNames() {
+    var els = allControls();
+    return { els: els, names: els.map(function (e) { return accName(e); }) };
+  }
+  function siblingsOf(el, page) {
+    var i = page.els.indexOf(el);
+    if (i < 0) return [];
+    return page.names.slice(Math.max(0, i - 2), i).concat(page.names.slice(i + 1, i + 3));
   }
 
   function accName(el) {
@@ -95,16 +140,20 @@
     return parts.join(' > ');
   }
 
-  function describe(el) {
+  function describe(el, page) {
     var r = el.getBoundingClientRect();
     var form = el.form || (el.closest && el.closest('form'));
     var href = el.getAttribute('href') || '';
     try { if (href) href = new URL(href, location.href).pathname; } catch (e) {}
+    var name = accName(el);
     return {
       tag: el.tagName.toLowerCase(),
       type: low(el.getAttribute('type')),
       role: roleOf(el),
-      name: accName(el),
+      name: name,
+      context: contextOf(el),
+      block: blockText(el, name),
+      siblings: siblingsOf(el, page || pageNames()),
       text: norm(el.innerText || el.textContent).slice(0, 80),
       id: el.id || '',
       nameAttr: el.getAttribute('name') || '',
@@ -193,10 +242,10 @@
 
   /** -> {status, index, score, margin, shortlist:[{index, score, desc}]} ; index into lastScan. */
   function find(rec, kind) {
-    var els = candidates(kind), scored = [];
+    var els = candidates(kind), scored = [], page = pageNames();
     lastScan = els;
     for (var i = 0; i < els.length; i++) {
-      var d = describe(els[i]), r = detail(rec, d);
+      var d = describe(els[i], page), r = detail(rec, d);
       scored.push({ index: i, score: r.score, anchor: r.anchor, desc: d });
     }
     scored.sort(function (a, b) { return b.score - a.score; });
@@ -214,7 +263,8 @@
 
   function brief(d) {
     return { tag: d.tag, type: d.type, role: d.role, name: d.name, text: d.text.slice(0, 60), id: d.id,
-             nameAttr: d.nameAttr, label: d.label, placeholder: d.placeholder, neighbor: d.neighbor, href: d.href };
+             nameAttr: d.nameAttr, label: d.label, placeholder: d.placeholder, neighbor: d.neighbor, href: d.href,
+             context: d.context || '', block: d.block || '', siblings: d.siblings || [] };
   }
 
   function element(index) { return lastScan[index] || null; }

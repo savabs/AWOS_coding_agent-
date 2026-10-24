@@ -34,28 +34,52 @@
     return bits.join(' ');
   }
 
-  var VERB = { click: 'click', fill: 'type into', select: 'choose an option in' };
+  // The repair model's contract, byte-for-byte the same as scaffold/agent/desktop/repair/model.py
+  // (SYSTEM, prompt(), GRAMMAR, REPLY_RE): the trained 2B (G6) learned exactly this text, so any drift
+  // here is a distribution shift. tests/extension/test_model_contract.py pins JS == Python.
+  var SYSTEM = 'You repair one step of a recorded web chore. The page changed and the control the step used '
+    + 'is no longer found exactly. Pick the candidate that IS the same control (same purpose, same '
+    + 'item), or answer NOT_FOUND when none of them is. Controls get deleted: a similar-looking '
+    + 'neighbour (another row, another item, a different action) is NOT the same control. '
+    + "Reply with exactly one line: 'PICK <n>: <reason>' or 'NOT_FOUND: <reason>'.";
+  var GRAMMAR = 'root ::= ("PICK " [1-5] | "NOT_FOUND") ": " [^\\n]{0,160}';
+  var REPLY_RE = /^\s*(?:PICK\s+([1-5])|(NOT_FOUND))\s*(?::\s*([\s\S]*))?$/;
 
-  function buildMessages(step, shortlist) {
-    var lines = shortlist.map(function (c, i) { return (i + 1) + '. ' + fmt(c.desc); });
-    return [
-      { role: 'system', content: 'You re-find a UI control for a recorded browser automation step. '
-        + 'The page changed since recording. Reply with only the number of the candidate that is the same control, '
-        + 'or NOT_FOUND if none of them is. Do not guess: a different control is worse than NOT_FOUND.' },
-      { role: 'user', content: 'Recorded step: ' + (VERB[step.action] || step.action) + ' ' + fmt(step.loc)
-        + '\nCandidates on the page now:\n' + lines.join('\n') + '\nAnswer:' },
-    ];
+  /** Python repr() of a str (the training prompts quote values with repr). */
+  function pyRepr(s) {
+    s = String(s == null ? '' : s);
+    var q = (s.indexOf("'") >= 0 && s.indexOf('"') < 0) ? '"' : "'";
+    var out = s.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
+    if (q === "'") out = out.replace(/'/g, "\\'");
+    return q + out + q;
   }
 
-  /** -> {choice: 0-based index} | {notFound: true} | {error} */
+  /** repair.model.prompt's desc(): role named 'name'; in region '...'; next to text '...'; between ... */
+  function desc(d) {
+    var bits = [(d.role || d.tag || '') + ' named ' + pyRepr(d.name || '')];
+    if (d.context) bits.push('in region ' + pyRepr(d.context));
+    if (d.block) bits.push('next to text ' + pyRepr(String(d.block).slice(0, 120)));
+    if (d.siblings && d.siblings.length) bits.push('between ' + d.siblings.slice(0, 4).map(pyRepr).join(', '));
+    return bits.join('; ');
+  }
+
+  function buildMessages(step, shortlist) {
+    var lines = ['The step used: ' + desc(step.loc || {}), '', 'Candidates on the page now:'];
+    shortlist.forEach(function (c, i) { lines.push((i + 1) + '. ' + desc(c.desc || {})); });
+    lines.push('', "Which candidate is the same control? 'PICK <n>: reason' or 'NOT_FOUND: reason'.");
+    return [{ role: 'system', content: SYSTEM }, { role: 'user', content: lines.join('\n') }];
+  }
+
+  /** -> {choice: 0-based index, reason} | {notFound: true, reason} | {error}; an unparsable reply or an
+   * out-of-range pick is an error (stop and show the user), never a guess. */
   function parseAnswer(text, n) {
-    var t = String(text || '').trim();
-    if (/NOT[_ ]?FOUND/i.test(t)) return { notFound: true };
-    var m = /\b(\d{1,2})\b/.exec(t);
+    var t = String(text || '').trim().split('\n')[0];
+    var m = REPLY_RE.exec(t);
     if (!m) return { error: 'unparsable model answer: ' + t.slice(0, 60) };
+    if (m[2]) return { notFound: true, reason: (m[3] || '').trim() };
     var k = parseInt(m[1], 10);
-    if (k < 1 || k > n) return { notFound: true };
-    return { choice: k - 1 };
+    if (k < 1 || k > n) return { error: 'model picked ' + k + ' of ' + n };
+    return { choice: k - 1, reason: (m[3] || '').trim() };
   }
 
   async function ask(settings, step, shortlist) {
@@ -66,7 +90,8 @@
     try {
       var resp = await fetch(s.endpoint.replace(/\/+$/, '') + '/chat/completions', {
         method: 'POST', signal: ctl.signal, headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: s.model, messages: buildMessages(step, shortlist), temperature: 0, max_tokens: 8 }),
+        body: JSON.stringify({ model: s.model, messages: buildMessages(step, shortlist.slice(0, 5)), temperature: 0,
+                               max_tokens: 64, grammar: GRAMMAR }),
       });
       if (!resp.ok) return { error: 'model HTTP ' + resp.status };
       var j = await resp.json();
@@ -78,5 +103,6 @@
     } finally { clearTimeout(timer); }
   }
 
-  root.AWOSModel = { DEFAULTS: DEFAULTS, isLoopback: isLoopback, buildMessages: buildMessages, parseAnswer: parseAnswer, ask: ask, fmt: fmt };
+  root.AWOSModel = { DEFAULTS: DEFAULTS, isLoopback: isLoopback, buildMessages: buildMessages, parseAnswer: parseAnswer, ask: ask,
+                     fmt: fmt, desc: desc, pyRepr: pyRepr, SYSTEM: SYSTEM, GRAMMAR: GRAMMAR };
 })(typeof globalThis !== 'undefined' ? globalThis : self);

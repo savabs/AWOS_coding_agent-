@@ -104,6 +104,13 @@ function decide(kind) {
 $('approve').onclick = function () { decide('approve'); };
 $('continue').onclick = function () { decide('continue'); };
 $('reject').onclick = function () { decide('reject'); };
+$('export').onclick = function () {
+  call({ type: 'export_log' }).then(function (log) {
+    var a = el('a', { href: URL.createObjectURL(new Blob([JSON.stringify(log, null, 1)], { type: 'application/json' })),
+                      download: 'awos-runlog-' + new Date().toISOString().slice(0, 10) + '.json' });
+    document.body.appendChild(a); a.click(); a.remove();
+  });
+};
 
 (async function () {
   targetTab = await resolveTab();

@@ -115,12 +115,12 @@ def test_model_out_of_range_answer_is_not_found(x):
 
 
 def _pick_line_with(word):
-    """fake model: answer the number of the candidate line mentioning `word`, else NOT_FOUND."""
+    """fake model (repair contract): PICK the candidate line mentioning `word`, else NOT_FOUND."""
     def answer(body):
         for line in body["messages"][1]["content"].split("Candidates on the page now:\n")[1].splitlines():
             if word in line and line[:1].isdigit():
-                return line.split(".")[0]
-        return "NOT_FOUND"
+                return f"PICK {line.split('.')[0]}: fake"
+        return "NOT_FOUND: fake"
     return answer
 
 
@@ -130,12 +130,34 @@ def test_model_pick_used_when_scoring_unanchored(x):
     page = x.ctx.new_page()
     rec, tab = _record_form(x, page)
     x.server.overrides["/form.html"] = "form_button_renamed.html"
-    x.server.model_answer = _pick_line_with('"Update"')
+    x.server.model_answer = _pick_line_with("named 'Update'")
     run = _replay(x, page, rec, tab)
     assert run["result"]["verdict"] == "VERIFIED", run["log"]
     click = next(r for r in run["resolved"] if r["step"] == 4)
     assert click["how"].startswith("model pick") and click["name"] == "Update"
     assert len(x.server.model_calls) == 1
+
+
+def test_model_call_speaks_repair_contract_and_export_is_redacted(x):
+    """The model gets the trained repair prompt (G6's format, with region / nearby text / siblings), the
+    run records the call, and the shareable log carries it without typed values or URL queries."""
+    page = x.ctx.new_page()
+    rec, tab = _record_form(x, page)
+    x.server.overrides["/form.html"] = "form_button_renamed.html"
+    x.server.model_answer = _pick_line_with("named 'Update'")
+    run = _replay(x, page, rec, tab)
+    assert run["result"]["verdict"] == "VERIFIED", run["log"]
+    body = x.server.model_calls[0]
+    assert body["messages"][1]["content"].startswith("The step used: button named 'Save profile'")
+    assert "between " in body["messages"][1]["content"] and body["grammar"].startswith('root ::= ("PICK "')
+    log = x.call("export_log")
+    blob = json.dumps(log)
+    assert "Ada Lovelace" not in blob and "ada@example.com" not in blob     # typed values never leave
+    r = next(r for r in log["runs"] if r["recName"] == "profile" and r["modelCalls"])
+    assert r["verdict"] == "VERIFIED" and r["modelCalls"][0]["outcome"] == "PICK " + r["modelCalls"][0]["answer"][5]
+    steps = next(x_ for x_ in log["recordings"] if x_["id"] == rec["id"])["steps"]
+    assert any(s.get("valueLen") == len("Ada Lovelace") for s in steps)
+    assert all("?" not in (s.get("url") or "") for s in steps)
 
 
 def test_gate_applies_to_model_picked_target(x):
