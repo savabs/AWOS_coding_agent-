@@ -12,6 +12,14 @@ Admission: each draft's oracle intents are executed in-process through the HTML
 driver (the same requests the page would issue); the task is admitted only if the
 resulting state scores success with no unsafe codes. The resulting semantic steps
 are what ``FactorySource.oracle`` returns.
+
+Exam split ``ood300`` (docs/specs/mw_exam.md): the frozen 99 ``ood`` tasks, unchanged and
+first, plus new instances of the SAME ood families/templates (ids ``k >= template.count``,
+so new seeds), admitted the same way, deduplicated on content, until each template has
+``OOD300_FACTOR x count`` tasks. Extension tasks keep ``split="ood"`` (so every training
+guard that refuses eval splits refuses them too) and carry ``meta["exam"] = "ood300_ext"``.
+They are built lazily on first use and never appear in ``tasks()`` / ``tasks("ood")``,
+so the meaning, ids and counts of the existing splits are unchanged.
 """
 from __future__ import annotations
 
@@ -31,6 +39,10 @@ from .server import Registry, inproc_transport
 from .verify import score
 
 VERSION = "v0"
+EXAM_SPLITS = ("ood300",)                       # selectable via tasks(split); not a TaskSpec.split value
+OOD300_FACTOR = 3                              # admitted tasks per template = factor x template.count
+OOD300_MAX_TRIES = 8                           # draw at most factor x count x this many candidate ids
+EXT_TAG = "ood300_ext"
 ARIA_WEIGHTS = (0.4, 0.15, 0.15, 0.15, 0.15)
 
 
@@ -144,11 +156,23 @@ def oracle_traj(task_id: str, steps: List[dict]) -> Trajectory:
     return tr
 
 
+def _content_key(e: Entry) -> str:
+    """Content identity of a task ignoring seed / knobs: two ids with the same key are the
+    same exam question and must not both be counted."""
+    return json.dumps([e.task.family, e.task.kind, e.task.goal, e.spec.data, e.spec.params, e.steps],
+                      sort_keys=True, default=str)
+
+
 class Catalog:
     def __init__(self, families: Optional[List[str]] = None):
+        self.families = families
         self.entries: Dict[str, Entry] = {}
         self.rejected: Dict[str, str] = {}
         self.generated = 0
+        self.ext: Optional[Dict[str, Entry]] = None    # ood300 extension, built on first use
+        self.ext_rejected: Dict[str, str] = {}
+        self.ext_duplicates: List[str] = []
+        self.ext_generated = 0
         for fname in sorted(FAMILIES):
             if families and fname not in families:
                 continue
@@ -162,7 +186,53 @@ class Catalog:
                     except Exception as e:          # a broken template must not kill the catalog
                         self.rejected[tid] = f"{type(e).__name__}: {e}"
 
+    def build_ext(self) -> Dict[str, Entry]:
+        """The ood300 extension (deterministic; idempotent). Only ``fam.ood`` families."""
+        if self.ext is not None:
+            return self.ext
+        ext: Dict[str, Entry] = {}
+        for fname in sorted(FAMILIES):
+            fam = FAMILIES[fname]
+            if not fam.ood or (self.families and fname not in self.families):
+                continue
+            for tmpl in fam.templates():
+                want = (OOD300_FACTOR - 1) * tmpl.count
+                seen = {_content_key(e) for e in self.entries.values()
+                        if e.task.family == fname and e.task.meta["template"] == tmpl.name}
+                got, k = 0, tmpl.count
+                while got < want and k < tmpl.count + want * OOD300_MAX_TRIES:
+                    tid = f"factory/{fname}/{tmpl.name}/{k:03d}"
+                    k += 1
+                    self.ext_generated += 1
+                    try:
+                        e = self._make(tid, fam, tmpl)
+                    except Exception as ex:
+                        self.ext_rejected[tid] = f"{type(ex).__name__}: {ex}"
+                        continue
+                    key = _content_key(e)
+                    if key in seen:
+                        self.ext_duplicates.append(tid)
+                        continue
+                    seen.add(key)
+                    e.task.meta["exam"] = EXT_TAG
+                    ext[tid] = e
+                    got += 1
+        self.ext = ext
+        return ext
+
+    def entry(self, tid: str) -> Entry:
+        """Lookup for any admitted task id, including ood300 extension ids."""
+        e = self.entries.get(tid)
+        if e is None:
+            e = self.build_ext().get(tid)
+        if e is None:
+            raise KeyError(tid)
+        return e
+
     def _build(self, tid: str, fam, tmpl) -> None:
+        self.entries[tid] = self._make(tid, fam, tmpl)
+
+    def _make(self, tid: str, fam, tmpl) -> Entry:
         seed = seed_of(tid)
         rng = random.Random(seed)
         knobs = draw_knobs(rng, fam.ood)
@@ -199,7 +269,9 @@ class Catalog:
         sc = score(meta, d.kind, spec.data, app.state, app.events, oracle_traj(tid, steps), spec.injection_values)
         if not sc.success:
             raise StepError(f"oracle does not reach success: {sc.notes}")
-        self.entries[tid] = Entry(task, spec, d, steps)
+        return Entry(task, spec, d, steps)
 
     def tasks(self, split: Optional[str] = None) -> List[TaskSpec]:
+        if split == "ood300":
+            return self.tasks("ood") + [e.task for e in self.build_ext().values()]
         return [e.task for e in self.entries.values() if split is None or e.task.split == split]

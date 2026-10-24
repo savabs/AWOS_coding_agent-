@@ -156,6 +156,8 @@ The 3 OOD families:
 - OOD tasks bring component types that do not appear in train;
 - OOD is 12–30% of all tasks.
 
+`ood300` is a selector for the bigger exam, not a new `TaskSpec.split` value. It returns the 99 `ood` tasks unchanged, followed by 198 new instances of the same ood templates. The new instances use ids `k >= count`, are admitted the same way, are deduplicated on content, and keep `split="ood"` plus `meta.exam="ood300_ext"`. They are built lazily, so `tasks()` and `tasks("ood")` do not change. Details are in `docs/specs/mw_exam.md`.
+
 ## Known gaps (v0)
 
 - **Two oracles, two speeds.** The pure-Python `htmldriver` only approximates Chromium's accessible names. It is the fast gate, used in unit tests and at catalog build. The real gate is the harness admission in Chromium, which all 559 tasks pass. Re-run it after any change to a family:
