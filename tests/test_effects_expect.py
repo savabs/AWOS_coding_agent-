@@ -215,6 +215,35 @@ def test_pack_hook_never_upgrades(tmp_path):
     assert entry["status"] == RUN.MISSING
 
 
+def test_pack_hook_ignores_flagged_files():
+    """Review finding: a flagged extra file (e.g. last month's statement) must not refute a correct month."""
+    hook = pack_hook({"acme": induce_files([{"name": "stmt.pdf", "size": 50_000, "sha256": "a"}])})
+    good = {"path": "/p/stmt_2026-10.pdf", "size": 48_000, "sha256": "b", "type_ok": True}
+    stray = dict(good, path="/p/stmt_2026-09.pdf", sha256="c", flagged=True)
+    entry = {"status": RUN.COLLECTED_VERIFIED, "files": [good, stray]}
+    RUN.expect_gate(entry, "acme", None, hook)
+    assert entry["status"] == RUN.COLLECTED_VERIFIED and entry["expect"]["verdict"] == RUN_VERIFIED
+    entry = {"status": RUN.COLLECTED_VERIFIED, "files": [dict(good, type_ok=False)]}   # no good file left
+    RUN.expect_gate(entry, "acme", None, hook)
+    assert entry["status"] == RUN.FAILED
+
+
+def test_pack_hook_accepts_more_good_files_but_not_duplicates():
+    """The pack accepts >= expected.count good files; the hook matches (duplicates still FAIL)."""
+    hook = pack_hook({"acme": induce_files([{"name": "inv.pdf", "size": 40_000, "sha256": "a"}])})
+    f = {"path": "/p/inv1.pdf", "size": 40_000, "sha256": "b", "type_ok": True}
+    entry = {"status": RUN.COLLECTED_VERIFIED, "files": [f, dict(f, path="/p/inv2.pdf", sha256="c")]}
+    RUN.expect_gate(entry, "acme", None, hook)
+    assert entry["status"] == RUN.COLLECTED_VERIFIED
+    entry = {"status": RUN.COLLECTED_VERIFIED, "files": [f, dict(f, path="/p/inv1 (1).pdf")]}
+    RUN.expect_gate(entry, "acme", None, hook)
+    assert entry["status"] == RUN.FAILED
+    exact = induce_files([{"name": "inv.pdf", "size": 40_000, "sha256": "a"}])      # direct check stays exact
+    two = Observation(files=[{"name": "a.pdf", "size": 40_000, "sha256": "b"}, {"name": "b.pdf", "size": 40_000,
+                                                                                "sha256": "c"}])
+    assert check(exact, Observation(), two).verdict == RUN_FAILED
+
+
 def test_pack_without_hook_unchanged(tmp_path):
     e = _run(_cfg(tmp_path), [("inv.pdf", PDF)])
     assert e["status"] == RUN.COLLECTED_VERIFIED and "expect" not in e

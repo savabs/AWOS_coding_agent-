@@ -24,7 +24,7 @@ Product track. Background research: `docs/research/rl_cua_2026-10-24/repair_veri
   - `RunCheck.outcome` maps these verdicts onto the closed `outcome.Outcome` enum.
 - **Judge hook.** The judge is an injectable callable. It is called only when the deterministic verdict is VERIFIED, so it cannot grant a pass. If it returns `False` or a non-empty string, VERIFIED becomes UNVERIFIED. If it raises, the run is also downgraded.
 - **No values in reasons.** Reasons and records never contain observed values. Items are named by label, and evidence holds counts and digests only. A test covers this.
-- **Pack adapter.** `pack_hook({source_id: induce_files(taught_files)})` checks a source's filed documents.
+- **Pack adapter.** `pack_hook({source_id: induce_files(taught_files)})` checks a source's filed documents. It counts files by the same rule as the pack's `_good()`: `type_ok` and not `flagged`. A stray download that the document verifier already set aside, such as last month's statement, therefore cannot refute a correct month. The pack accepts *at least* `expected.count` good files, so the hook relaxes `files_arrived` to "at least the taught count". A month with more good documents than the demo is not FAILED, and a double download is still FAILED through `files_distinct`. A direct `check()` keeps the exact count.
 
 `scaffold/agent/desktop/pack/run.py` (minimal opt-in hook)
 

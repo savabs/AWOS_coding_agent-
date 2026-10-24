@@ -26,7 +26,8 @@ Expectation kinds (each one gets its own verdict; ``required`` ones decide the r
                    deleted"); the demo's own changes are excluded
     row_count      number of row atoms ("row:" prefix) on read[key] changed by N
     no_error       the final page shows no role=alert banner
-    files_arrived  exactly N new files, extension in the taught set, size within bounds
+    files_arrived  exactly N new files (at least N if value.at_least, as pack_hook sets),
+                   extension in the taught set, size within bounds
     files_distinct no two arrived files share a sha256 (a double download)
     answer         the final answer contains the taught value (case/space-insensitive)
     ended          the run ended the taught way (needs_user at a checkpoint)
@@ -305,8 +306,9 @@ def check_one(e: Expect, before: Observation, after: Observation) -> ExpectVerdi
         lo, hi = int(v.get("min_size") or 1), v.get("max_size")
         bad_size = [f for f in after.files if int(f.get("size") or 0) < lo or (hi and int(f.get("size") or 0) > hi)]
         ev = {"count": n, "expected_count": v.get("count"), "bad_type": len(bad_type), "bad_size": len(bad_size)}
-        if n != v.get("count"):
-            return _bad(e, f"{n} file(s) arrived, expected {v.get('count')}", **ev)
+        want, floor = int(v.get("count") or 0), bool(v.get("at_least"))
+        if n < want or (n > want and not floor):
+            return _bad(e, f"{n} file(s) arrived, expected {'at least ' if floor else ''}{want}", **ev)
         if bad_type or bad_size:
             return _bad(e, f"{len(bad_type)} wrong type, {len(bad_size)} out-of-range size", **ev)
         return _ok(e, f"{n} file(s) of the taught type and size", **ev)
@@ -367,10 +369,20 @@ def apply_judge(res: RunCheck, exp: Expectation, after: Observation, judge: Opti
 
 # ── pack adapter (scaffold/agent/desktop/pack/run.py ``expect=`` hook) ────────
 def pack_observation(entry: Mapping[str, Any]) -> Observation:
-    """Files a pack source holds this month, as an Observation (name, size, sha256)."""
+    """Files a pack source holds this month, as an Observation (name, size, sha256).
+    Same rule as pack/run.py ``_good``: type_ok and not flagged (wrong period / failed document
+    checks), so a stray download the pack already set aside cannot refute a correct month."""
     files = [{"name": Path(str(f.get("path", ""))).name, "size": f.get("size"), "sha256": f.get("sha256")}
-             for f in entry.get("files") or [] if f.get("type_ok", True)]
+             for f in entry.get("files") or [] if f.get("type_ok") and not f.get("flagged")]
     return Observation(files=files)
+
+
+def _at_least(exp: Expectation) -> Expectation:
+    """The pack accepts >= expected.count good files; match it, so a month with more good
+    documents than the demo is not FAILED (a double download is still caught by files_distinct)."""
+    items = [Expect(i.kind, i.key, dict(i.value or {}, at_least=True), i.required, i.label)
+             if i.kind == "files_arrived" else i for i in exp.items]
+    return Expectation(exp.kind, items, exp.observable, exp.note)
 
 
 def pack_hook(expectations: Mapping[str, Expectation], judge: Optional[Judge] = None):
@@ -380,5 +392,5 @@ def pack_hook(expectations: Mapping[str, Expectation], judge: Optional[Judge] = 
         exp = expectations.get(getattr(source, "id", source))
         if exp is None:
             return None
-        return check(exp, Observation(files=[]), pack_observation(entry), judge=judge)
+        return check(_at_least(exp), Observation(files=[]), pack_observation(entry), judge=judge)
     return hook
