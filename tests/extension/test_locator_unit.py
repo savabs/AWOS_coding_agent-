@@ -61,6 +61,20 @@ def test_danger_vocabulary(page):
     assert got == cases
 
 
+def test_url_danger(page):
+    page.load("/help.html")
+    cases = {
+        "http://a.test/account/delete?confirm=1": "delete", "http://a.test/cart/empty": "empty",
+        "http://a.test/pay?order=7": "pay", "http://a.test/app#/trash/delete-permanently": "delete",
+        "http://a.test/x?action=send-money": "send", "http://a.test/check-out": "check out",
+        "http://a.test/profile/edit": None, "http://a.test/form.html": None,
+        "http://pay.send.test/home": None,              # the host is not matched, only path/query/hash
+        "http://a.test/sendgrid/settings": None,
+    }
+    got = page.evaluate("(cs) => Object.fromEntries(cs.map(c => [c, AWOSSafety.urlDanger(c)]))", list(cases))
+    assert got == cases
+
+
 def test_danger_context_includes_form(page):
     page.load("/help.html")
     r = page.evaluate("""() => { document.body.innerHTML =

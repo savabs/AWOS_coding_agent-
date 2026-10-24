@@ -8,6 +8,8 @@
  *  - dangerMatch(text) -> matched phrase | null. A click whose target name or
  *    context matches pay/buy/send/delete/... pauses replay until the user clicks
  *    Approve in the extension UI. Nothing in the code path auto-approves.
+ *  - urlDanger(url): the same vocabulary over a URL's path/query/hash, so a
+ *    recorded navigation (goto) to /cart/empty or /pay?order=.. is gated too.
  * Plain script: defines globalThis.AWOSSafety so it loads in a page, a content
  * script, or the service worker (importScripts) without a build step.
  */
@@ -31,6 +33,15 @@
   function dangerMatch(text) {
     var m = DANGER_RE.exec(norm(text));
     return m ? m[1].toLowerCase() : null;
+  }
+
+  /** danger phrase in a navigation URL's path, query or hash (not the host), or null.
+   *  A GET to /account/delete?confirm=1 or #/cart/empty can act as the click it came from. */
+  function urlDanger(url) {
+    var u; try { u = new URL(String(url || '')); } catch (e) { return dangerMatch(url); }
+    var rest = u.pathname + ' ' + u.search + ' ' + u.hash;
+    try { rest = decodeURIComponent(rest); } catch (e) { /* keep raw */ }
+    return dangerMatch(rest.replace(/[\/_.?=&#+%:;,~!-]+/g, ' '));
   }
 
   /** text pieces to check for one element: own name/text plus enclosing form/dialog context. */
@@ -76,7 +87,7 @@
   function isPlaceholder(v) { return /^\{\{secret:[a-z0-9-]+\}\}$/i.test(String(v || '')); }
 
   root.AWOSSafety = {
-    DANGER_RE: DANGER_RE, dangerMatch: dangerMatch, dangerContext: dangerContext,
+    DANGER_RE: DANGER_RE, dangerMatch: dangerMatch, urlDanger: urlDanger, dangerContext: dangerContext,
     sensitiveField: sensitiveField, labelOf: labelOf, norm: norm,
     placeholderFor: placeholderFor, isPlaceholder: isPlaceholder,
   };

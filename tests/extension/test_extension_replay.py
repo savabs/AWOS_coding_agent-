@@ -142,7 +142,7 @@ def test_gate_applies_to_model_picked_target(x):
     """"Pay now" renamed "Complete payment": the model re-finds it, and the gate still pauses."""
     page = x.ctx.new_page()
     rec, tab = _record_checkout(x, page)
-    x.server.overrides["/checkout.html"] = "checkout_renamed.html"
+    x.server.overrides["/cart.html"] = "cart_renamed.html"
     x.server.model_answer = _pick_line_with("Complete payment")
     page.goto(x.server.base + "/help.html")
     x.call("run", recId=rec["id"], tabId=tab)
@@ -163,7 +163,7 @@ def test_non_loopback_endpoint_refused(x):
 
 
 def _record_checkout(x, page):
-    page.goto(x.server.base + "/checkout.html")
+    page.goto(x.server.base + "/cart.html")
     tab = x.tab_id(page)
     x.call("start_recording", tabId=tab, name="pay")
     page.fill("#note", "order 7")
@@ -266,3 +266,75 @@ def test_popup_lists_recordings_and_runs(x):
     run = x.wait_run()
     assert run["result"]["verdict"] == "VERIFIED"
     popup.wait_for_selector("#verdict.VERIFIED")
+
+
+def _record_spa_delete(x, page):
+    """A span with an addEventListener handler is not a recordable click, so the
+    recorder sees only the navigation it causes (/account_delete.html?confirm=1)."""
+    page.goto(x.server.base + "/spa.html")
+    tab = x.tab_id(page)
+    x.call("start_recording", tabId=tab, name="spa")
+    page.click("#danger-zone")
+    page.wait_for_url("**/account_delete.html*")
+    time.sleep(0.5)
+    return x.call("stop_recording"), tab
+
+
+def test_recorded_navigation_to_dangerous_url_is_gated(x):
+    """Replaying that goto is the delete itself: it must pause for approval like a click."""
+    page = x.ctx.new_page()
+    rec, tab = _record_spa_delete(x, page)
+    assert [s["action"] for s in rec["steps"]] == ["goto", "goto"], rec["steps"]
+    assert "account_delete.html?confirm=1" in rec["steps"][1]["url"]
+    page.goto(x.server.base + "/help.html")
+    x.call("run", recId=rec["id"], tabId=tab)
+    run = x.wait_run(statuses=("awaiting_approval", "done", "failed"))
+    assert run["status"] == "awaiting_approval" and run["pending"]["step"] == 1, run["log"]
+    assert "account_delete.html?confirm=1" in run["pending"]["message"] and run["pending"]["danger"] == "delete"
+    time.sleep(1.5)
+    assert x.state()["run"]["status"] == "awaiting_approval"
+    assert page.url.startswith(x.server.base + "/spa.html")    # the dangerous URL was never opened
+    x.call("approve", runId=run["id"], nonce=run["pending"]["nonce"])
+    run = x.wait_run()
+    assert run["status"] == "done", run["log"]
+    assert page.url.startswith(x.server.base + "/account_delete.html")
+
+
+def test_dangerous_goto_reject_never_navigates(x):
+    page = x.ctx.new_page()
+    rec, tab = _record_spa_delete(x, page)
+    page.goto(x.server.base + "/help.html")
+    x.call("run", recId=rec["id"], tabId=tab)
+    run = x.wait_run(statuses=("awaiting_approval",))
+    x.call("reject", runId=run["id"], nonce=run["pending"]["nonce"])
+    run = x.wait_run()
+    assert run["result"]["code"] == "REJECTED"
+    assert page.url.startswith(x.server.base + "/spa.html")
+
+
+def test_approval_completes_when_live_target_has_no_name(x):
+    """Recorded "Pay now"; at replay the button is icon-only (re-found by its id).
+    One Approve must be enough: the pause and the approval check name the target
+    the same way, so the run does not re-pause on every Approve."""
+    page = x.ctx.new_page()
+    rec, tab = _record_checkout(x, page)
+    x.server.overrides["/cart.html"] = "cart_icon.html"
+    page.goto(x.server.base + "/help.html")
+    x.call("run", recId=rec["id"], tabId=tab)
+    run = x.wait_run(statuses=("awaiting_approval", "done", "failed"))
+    assert run["status"] == "awaiting_approval", run["log"]
+    assert page.inner_text("#status") == "Not paid"
+    x.call("approve", runId=run["id"], nonce=run["pending"]["nonce"])
+    run = x.wait_run(statuses=("awaiting_approval", "done", "failed"))
+    assert run["status"] == "done" and run["result"]["verdict"] == "VERIFIED", run["log"]
+    assert page.inner_text("#status") == "Payment sent: order 7"
+    assert sum("paused" in l["text"] for l in run["log"]) == 1
+
+
+def test_run_refused_while_recording(x):
+    page = x.ctx.new_page()
+    rec, tab = _record_form(x, page)
+    x.call("start_recording", tabId=tab, name="again")
+    r = x.sw.evaluate("([id, t]) => HANDLERS.run({recId: id, tabId: t}).then(() => 'ok', e => String(e))", [rec["id"], tab])
+    assert "stop the recording" in r
+    x.call("stop_recording")

@@ -14,7 +14,8 @@
  * scoring) -> if not confident, ask the local model to pick from the shortlist
  * or say NOT_FOUND -> approval gate for dangerous clicks -> content 'act'.
  * Any failure stops the run (FAILED) and is shown in the popup and on the page.
- * Approval: a gated click pauses with a fresh nonce; only an 'approve' message
+ * Approval: a gated click, or a goto whose URL path/query/hash matches the danger
+ * vocabulary (AWOSSafety.urlDanger), pauses with a fresh nonce; only an 'approve' message
  * carrying that nonce *from an extension page* (the popup) resumes it. There is
  * no setting, timeout or code path that approves on its own.
  * Verify: after the last step, check the recorded final-URL pattern and the
@@ -136,6 +137,7 @@ async function saveRun(run) {
 async function startRun(recId, tabId) {
   var cur = await getSess('run');
   if (cur && /^(running|awaiting_approval|needs_user)$/.test(cur.status)) throw new Error('a replay is already in progress');
+  if (await getSess('recState')) throw new Error('stop the recording before running a replay');
   var rec = (await getLocal('recordings', {}))[recId];
   if (!rec) throw new Error('no such recording');
   var run = { id: uid('run'), recId: recId, recName: rec.name, tabId: tabId, i: 0, status: 'running', startedAt: Date.now(),
@@ -165,10 +167,17 @@ async function driveInner(runId) {
   while (run.i < rec.steps.length) {
     var step = rec.steps[run.i], i = run.i;
     if (step.action === 'goto') {
+      // a navigation can be the effect of an unrecorded click (div/span handlers set
+      // location): /account/delete?confirm=1 replayed as a GET deletes. Gate it like a click.
+      var gd = S.urlDanger(step.url);
+      if (gd && !approved(run, i, step.url)) {
+        return pause(run, 'awaiting_approval', { danger: gd, target: step.url,
+          message: 'Step ' + (i + 1) + ' will open ' + step.url + ' (matches "' + gd + '"). Approve to continue.' });
+      }
       logRun(run, 'goto ' + step.url);
       await chrome.tabs.update(run.tabId, { url: step.url });
       await sleep(150); await waitForLoad(run.tabId); await ensureContent(run.tabId, step.url);
-      run.i++; await saveRun(run); continue;
+      run.i++; run.approval = null; await saveRun(run); continue;
     }
     await waitForLoad(run.tabId); await ensureContent(run.tabId);
     if (step.action === 'fill' && S.isPlaceholder(step.value)) {
@@ -189,18 +198,21 @@ async function driveInner(runId) {
       index = loc.shortlist[ans.choice].index; how = 'model pick #' + (ans.choice + 1) + ' (score ' + loc.shortlist[ans.choice].score + ')';
     }
     var cand = (loc.shortlist.find(function (c) { return c.index === index; }) || {}).desc || {};
+    // the same expression names the target when pausing and when checking the approval,
+    // so an approved target whose live name is empty (icon-only button) does not re-pause forever.
+    var target = cand.name || step.loc.name || step.loc.label || step.loc.css || '';
+    var ok = approved(run, i, target);
     if (step.action === 'click') {
       var danger = loc.dangers[index] || step.danger || S.dangerMatch(cand.name || '');
-      var ok = run.approval && run.approval.step === i && run.approval.name === (cand.name || '');
       if (danger && !ok) {
-        return pause(run, 'awaiting_approval', { danger: danger, target: cand.name || step.loc.name,
-          message: 'Step ' + (i + 1) + ' will click "' + (cand.name || step.loc.name) + '" (matches "' + danger + '"). Approve to continue.' });
+        return pause(run, 'awaiting_approval', { danger: danger, target: target,
+          message: 'Step ' + (i + 1) + ' will click "' + target + '" (matches "' + danger + '"). Approve to continue.' });
       }
     }
-    var r = await sendTab(run.tabId, { type: 'act', step: step, index: index, approved: !!(run.approval && run.approval.step === i) });
+    var r = await sendTab(run.tabId, { type: 'act', step: step, index: index, approved: ok });
     if (!r || !r.ok) {
-      if (r && r.needsApproval) return pause(run, 'awaiting_approval', { danger: r.danger, target: cand.name,
-        message: 'Step ' + (i + 1) + ' will click "' + cand.name + '" (matches "' + r.danger + '"). Approve to continue.' });
+      if (r && r.needsApproval) return pause(run, 'awaiting_approval', { danger: r.danger, target: target,
+        message: 'Step ' + (i + 1) + ' will click "' + target + '" (matches "' + r.danger + '"). Approve to continue.' });
       return fail(run, 'ERROR', 'step ' + (i + 1) + ': ' + (r ? r.error : 'no reply'));
     }
     run.resolved.push({ step: i, how: how, name: cand.name || '' });
@@ -210,6 +222,9 @@ async function driveInner(runId) {
   }
   await finish(run, rec);
 }
+
+/** the user approved exactly this step and this target (a name, or a URL for a goto). */
+function approved(run, i, target) { return !!(run.approval && run.approval.step === i && run.approval.name === (target || '')); }
 
 async function pause(run, status, pending) {
   run.status = status; run.pending = Object.assign({ nonce: nonce(), step: run.i }, pending);
