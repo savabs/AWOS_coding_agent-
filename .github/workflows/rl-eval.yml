@@ -89,7 +89,7 @@ jobs:
           case "$REPO" in
             gh-release:*)   # our trained GGUF: all shards of the release (llama-server -m <first> loads the rest)
               gh release download "$REV" --repo "${REPO#gh-release:}" --dir ~/models --clobber \
-                --pattern "${FILE%-00001-of-*}*.gguf" ;;
+                --pattern "$(basename "${FILE%-00001-of-*}" .gguf)*.gguf" ;;   # sharded or single file
             *) curl -fL --retry 5 -o ~/models/"$FILE" "https://huggingface.co/$REPO/resolve/$REV/$FILE" ;;
           esac
           echo "$SHA  $HOME/models/$FILE" | sha256sum -c -
@@ -151,7 +151,7 @@ jobs:
           case "$GGUF_REPO" in
             gh-release:*)
               gh release download "$GGUF_REV" --repo "${GGUF_REPO#gh-release:}" --dir ~/models --clobber \
-                --pattern "${GGUF_FILE%-00001-of-*}*.gguf" ;;
+                --pattern "$(basename "${GGUF_FILE%-00001-of-*}" .gguf)*.gguf" ;;   # sharded or single file
             *) curl -fL --retry 5 -o ~/models/"$GGUF_FILE" "https://huggingface.co/$GGUF_REPO/resolve/$GGUF_REV/$GGUF_FILE" ;;
           esac
           echo "$SHA  $HOME/models/$GGUF_FILE" | sha256sum -c -
