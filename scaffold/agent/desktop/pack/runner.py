@@ -30,6 +30,9 @@ ctx.allowed(url, action), ctx.checkpoint, ctx.password_item, ctx.log. For one so
      reach, an unknown dialog over the window -- HALTS: status ``failed`` with the reason.
      Interruptions known to be benign (Safari's save-password sheet, ...) are dismissed with
      their safe button only (live/interrupts.py).
+     Opt-in: ``LiveRunner(repair=repair.SkillRepair(...))`` first re-finds a missing control
+     (scaffold/agent/desktop/repair; never onto a destructive / send control) and writes the
+     repair into a new skill version only after a clean run.
 """
 from __future__ import annotations
 
@@ -642,10 +645,14 @@ class PackSkillRunner(SkillRunner):
     fields, popup ``select`` steps, downloads into ctx.downloads, and Restart after a cleared
     checkpoint."""
 
-    def __init__(self, program: dict, env: PackEnv, *, values: Dict[str, str], policy_source: P.SourceConfig):
+    def __init__(self, program: dict, env: PackEnv, *, values: Dict[str, str], policy_source: P.SourceConfig,
+                 repair: Any = None):
         inputs = {p["name"]: values[p["name"]] for p in program.get("params", [])
                   if p.get("scope") == "input" and p["name"] in values}
-        super().__init__(program, env, ground=make_ground(values), inputs=inputs, fuzzy=False)
+        ground = make_ground(values)
+        if repair is not None:                  # opt-in: repair/core.SkillRepair re-finds a missing control
+            ground = repair.wrap(ground)
+        super().__init__(program, env, ground=ground, inputs=inputs, fuzzy=False)
         self.values = dict(values)
         self.psrc = policy_source
         self.downloads: List[str] = []
@@ -742,7 +749,8 @@ class LiveRunner:
                  interrupt_rules: Sequence[Any] = (), notify: Optional[Callable[[str, str], Any]] = None,
                  human: Optional[Callable[["PackEnv", CK.HumanNeeded], None]] = None, keep_window: bool = False,
                  load_timeout: float = 20.0, settle: Optional[float] = None, home: Optional[Path] = None,
-                 hygiene_fn: Optional[Callable[..., Any]] = None, allow_downloads: bool = False):
+                 hygiene_fn: Optional[Callable[..., Any]] = None, allow_downloads: bool = False,
+                 repair: Any = None):
         from ..live import in_guest_vm
         self.wait_for_human, self.human_timeout_s, self.poll_s = wait_for_human, human_timeout_s, poll_s
         self.pace, self.skills_root, self.max_restarts = pace, skills_root, max_restarts
@@ -753,6 +761,7 @@ class LiveRunner:
         self.load_timeout, self.settle, self.home = load_timeout, settle, home
         self.hygiene_fn = hygiene_fn
         self.allow_downloads = allow_downloads
+        self.repair = repair                    # repair/core.SkillRepair (opt-in); None = strict replay
         self.last: Dict[str, Any] = {}
 
     # -- plumbing ---------------------------------------------------------------
@@ -835,13 +844,15 @@ class LiveRunner:
         env = self.make_env(source, ctx, psrc)
         values = period_values(period)
         keep = self.keep_window
+        if self.repair is not None:
+            self.repair.begin()
         try:
             for attempt in range(1 + self.max_restarts):
                 detail["attempts"] = attempt + 1
                 runner = None
                 try:
                     env.start(source.start_url)
-                    runner = PackSkillRunner(program, env, values=values, policy_source=psrc)
+                    runner = PackSkillRunner(program, env, values=values, policy_source=psrc, repair=self.repair)
                     res = runner.run()
                 except Restart as r:
                     detail["restarts"].append(str(r))
@@ -860,6 +871,8 @@ class LiveRunner:
                     detail["halt"] = {k: h.get(k) for k in ("reason", "op_id", "message")}
                     return RunnerResult(RUN_FAILED, f"halted ({h.get('reason')}) at step {h.get('op_id')}: "
                                                     f"{h.get('message')}", None, detail)
+                if self.repair is not None:     # repairs are written into the skill only after a clean run
+                    detail["repairs"] = self.repair.finish(program, ok=True, root=self.skills_root)
                 return RunnerResult(RUN_OK, "", None, detail)
             return RunnerResult(RUN_FAILED, f"the portal kept stopping the skill ({len(detail['restarts'])} "
                                             "restarts after human checkpoints)", None, detail)
@@ -870,6 +883,8 @@ class LiveRunner:
             res.detail = detail
             return res
         finally:
+            if self.repair is not None and "repairs" not in detail:
+                detail["repairs"] = self.repair.finish(program, ok=False)
             detail["checkpoint_events"] = list(env.checkpoint.events)
             detail["interruptions"] = list(env.actor.interruptions)
             detail["unverified"] = len(env.unverified)
