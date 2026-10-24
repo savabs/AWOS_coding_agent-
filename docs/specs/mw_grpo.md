@@ -104,12 +104,12 @@ Tests: `PYTHONPATH=.:tests python -m pytest tests/rl/test_grpo.py -q`.
 
 | What | Result |
 |---|---|
-| `tests/rl` (rl-venv, no torch) | 189 passed, 9 skipped (both model tests skip there) |
+| `tests/rl` (rl-venv, no torch) | 189 passed, 9 skipped; without test_grpo.py 179 passed, 7 skipped (the 2 model tests skip there) |
 | `tests/rl/test_grpo.py` (torch env + playwright overlay) | 12 passed in ~3 min |
 | Real-harness end-to-end, tiny random Qwen3.5, `factory/assign/answer_owner/001`, 2 iterations x 2 rollouts | loss finite (0.756), LoRA changed, 1 injected oracle per iteration, 8.4 s/iteration, 0.15 rollouts/s, 12 generated tokens/s, 0.69 GB RSS |
 | Kernel entry, local (`run.py --repo .`, tiny model, 2 iterations) | 415 train tasks in the pool, 18-22 s/iteration |
 | `grpo_speed.py --tiny --measure-env` (CPU, fp32) | prompt 844 tokens, 40-token reply 4.8 s (8.4 tokens/s), train fwd+bwd 0.47 s, ref fwd 0.20 s, browser 0.11 s/step, so 113 rollouts/h vs 240/h needed: no-go on CPU (expected) |
-| `grpo_speed.py` on the real Qwen3.5-2B, CPU bf16 | see "2B on CPU" below |
+| `grpo_speed.py` on the real Qwen3.5-2B, CPU bf16, 20-token replies, 1 repeat | did not finish: I killed it after 40 min wall-clock (26 min CPU) with no result, while other agents were loading the machine. CPU is not an option for 2B; the T4 number is still unknown |
 
 Decoding is slow even for the tiny model because transformers falls back to its reference PyTorch
 GatedDeltaNet and causal-conv kernels (`fla` and `causal_conv1d` are missing, and `gdn_impl=torch`
