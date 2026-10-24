@@ -27,6 +27,22 @@ T1=$(ts)
 
 echo "=== tiny Qwen3.5 + train.py on CPU"
 "$TRAIN_PY" -m scaffold.rl.train.tiny_qwen35 --tokenizer "$TOKENIZER" --out "$W/tiny" >/dev/null
+# right-padding (pad_multiple) must not change the loss: causal model, loss stops at the real length
+"$TRAIN_PY" - "$W/tiny" "$W/stage/kernel/train.py" <<'PY'
+import importlib.util, sys, torch
+spec = importlib.util.spec_from_file_location("t", sys.argv[2]); T = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(T)
+from transformers import AutoModelForImageTextToText
+m = AutoModelForImageTextToText.from_pretrained(sys.argv[1], dtype=torch.float32).eval()
+ids = list(range(5, 5 + 37)); pl = 20
+with torch.no_grad():
+    a = T.completion_loss(m, torch.tensor([ids]), pl).item()
+    b = T.completion_loss(m, torch.tensor([T.pad_ids(ids, 16, 0)]), pl, len(ids)).item()
+    la, ka = T.completion_logps(m, torch.tensor([ids]), pl)
+    lb, kb = T.completion_logps(m, torch.tensor([T.pad_ids(ids, 16, 0)]), pl, len(ids))
+assert abs(a - b) < 1e-4 and abs(la.item() - lb.item()) < 1e-3 and ka == kb, (a, b, la, lb, ka, kb)
+print(f"padding check: loss {a:.5f} == padded {b:.5f}, completion tokens {ka}")
+PY
 AWOS_NO_TORCHRUN=1 "$TRAIN_PY" "$W/stage/kernel/train.py" --config "$W/stage/dataset/train_config.json" \
   --data "$W/stage/dataset" --out "$W/kout" --base-model "$W/tiny" 2>&1 | grep -E "^\[|Error|error" || true
 test -f "$W/kout/adapter/adapter_model.safetensors"

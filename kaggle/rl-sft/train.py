@@ -84,6 +84,9 @@ DEFAULTS = {
     # memory probe (every rank, every mem_probe_steps; 0 = off): smaps split, live tensors by device, pinned
     # host cache -> mem_rank<r>.jsonl + an "AWOS mem" ping; mem_trace adds tracemalloc's top growth lines
     "mem_probe_steps": 25, "mem_trace": False,
+    # per-shape native caches: right-pad sequences to a multiple of pad_multiple tokens (bounded shapes), and
+    # cuDNN off (its conv plan cache keys on every input length; the GDN conv1d fallback is its only user)
+    "pad_multiple": 128, "cudnn": False, "cudnn_plan_cache": 64,
     "eval_rows": 200, "preflight_rows": 16, "template_check_rows": 32,
     "gdn_impl": "torch",          # "torch" (blocks fla) | "auto" (use fla if installed)
     "dtype": "auto",              # auto: bf16 if supported, else fp16 on CUDA, fp32 on CPU | fp16 | bf16 | fp32
@@ -555,6 +558,7 @@ def supervise(cmd: list, out: Path, cfg: dict) -> int:
     # glibc malloc arenas fragment with multi-threaded torch: the 2026-10-23 runs grew host RAM until the OS
     # killed a rank at step ~158-168. Fewer arenas + periodic malloc_trim (MemHygiene) keep RSS flat.
     env.setdefault("MALLOC_ARENA_MAX", str(cfg.get("malloc_arena_max", 2)))
+    env.setdefault("TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT", str(cfg.get("cudnn_plan_cache", 64)))
     err_file = out / "error.txt"                        # a rank's fatal error, quoted in the ended-early ping
     env["AWOS_ERROR_FILE"] = str(err_file)
     p = subprocess.Popen(cmd, start_new_session=True, env=env)
@@ -616,26 +620,40 @@ def supervise(cmd: list, out: Path, cfg: dict) -> int:
     return 0 if ok else (rc or 1)
 
 
-def completion_loss(model, input_ids, prompt_len):
-    """Mean CE over completion tokens of ONE sequence, projecting only the needed positions."""
+def pad_ids(ids: list, multiple: int, pad_id: int) -> list:
+    """Right-pad to a multiple of ``multiple`` tokens (0/1 = off). Every distinct sequence length is a new
+    shape for the native per-shape caches (cuDNN conv plans for the GatedDeltaNet conv1d fallback, ...):
+    the 2026-10-24 probe saw each rank's native heap grow ~0.1-0.2 GB/step with Python and tensors flat.
+    Buckets bound the shapes to max_seq_len / multiple. The model is causal, so the real positions'
+    outputs are unchanged; the loss stops at the real length."""
+    if multiple <= 1:
+        return ids
+    return ids + [pad_id] * (-len(ids) % multiple)
+
+
+def completion_loss(model, input_ids, prompt_len, n_tok=None):
+    """Mean CE over completion tokens of ONE sequence, projecting only the needed positions.
+    n_tok = real length when input_ids is right-padded (padding is ignored)."""
     import torch.nn.functional as F
     T = input_ids.shape[1]
+    n = n_tok or T
     keep = T - prompt_len + 1                      # positions prompt_len-1 .. T-1 (the last is unused)
     out = model(input_ids=input_ids, logits_to_keep=keep, use_cache=False)
-    logits = out.logits[:, :-1].float()            # predicts tokens prompt_len .. T-1
-    targets = input_ids[:, prompt_len:]
+    logits = out.logits[:, : n - prompt_len].float()   # predicts tokens prompt_len .. n-1
+    targets = input_ids[:, prompt_len:n]
     return F.cross_entropy(logits.reshape(-1, logits.shape[-1]), targets.reshape(-1))
 
 
-def completion_logps(model, input_ids, prompt_len):
+def completion_logps(model, input_ids, prompt_len, n_tok=None):
     """(SUM of log p over the completion tokens of ONE sequence, number of completion tokens), with the
     same logits_to_keep trick as completion_loss (fp32 log-softmax over the kept positions only)."""
     import torch.nn.functional as F
     T = input_ids.shape[1]
+    n = n_tok or T
     keep = T - prompt_len + 1
     out = model(input_ids=input_ids, logits_to_keep=keep, use_cache=False)
-    logits = out.logits[:, :-1].float()
-    targets = input_ids[:, prompt_len:]
+    logits = out.logits[:, : n - prompt_len].float()
+    targets = input_ids[:, prompt_len:n]
     lp = -F.cross_entropy(logits.reshape(-1, logits.shape[-1]), targets.reshape(-1), reduction="sum")
     return lp, targets.numel()
 
@@ -647,17 +665,18 @@ def dpo_terms(pi_c, pi_r, ref_c, ref_r, beta: float):
     return -F.logsigmoid(z), z
 
 
-def dpo_pair_loss(model, ref_model, chosen_ids, rejected_ids, prompt_len, beta: float, sft_weight: float):
+def dpo_pair_loss(model, ref_model, chosen_ids, rejected_ids, prompt_len, beta: float, sft_weight: float,
+                  n_c=None, n_r=None):
     """Loss of ONE preference pair: sft_weight * mean CE(chosen) + DPO. `model` gets the gradient (the DDP
     wrapper on multi-GPU); `ref_model` is the bare PeftModel, run with its adapter disabled and no grad,
     BEFORE the policy forwards (no autograd graph is alive during it). Returns (loss, float metrics)."""
     import torch
     with torch.no_grad(), ref_model.disable_adapter():
-        ref_c, _ = completion_logps(ref_model, chosen_ids, prompt_len)
-        ref_r, _ = completion_logps(ref_model, rejected_ids, prompt_len)
-    pi_c, n_c = completion_logps(model, chosen_ids, prompt_len)
-    pi_r, _ = completion_logps(model, rejected_ids, prompt_len)
-    sft = -pi_c / max(1, n_c)
+        ref_c, _ = completion_logps(ref_model, chosen_ids, prompt_len, n_c)
+        ref_r, _ = completion_logps(ref_model, rejected_ids, prompt_len, n_r)
+    pi_c, k_c = completion_logps(model, chosen_ids, prompt_len, n_c)
+    pi_r, _ = completion_logps(model, rejected_ids, prompt_len, n_r)
+    sft = -pi_c / max(1, k_c)
     dpo, z = dpo_terms(pi_c, pi_r, ref_c.detach(), ref_r.detach(), beta)
     loss = dpo + sft_weight * sft if sft_weight else dpo
     zf = float(z.detach())
@@ -721,6 +740,7 @@ def main(argv=None) -> int:
     from transformers import (AutoModelForImageTextToText, AutoTokenizer, Trainer, TrainerCallback,
                               TrainingArguments)
 
+    torch.backends.cudnn.enabled = bool(cfg.get("cudnn", False))   # see DEFAULTS["cudnn"]
     rank = int(os.environ.get("RANK", "0"))
     world = int(os.environ.get("WORLD_SIZE", "1"))
     main_proc = rank == 0
@@ -861,14 +881,19 @@ def main(argv=None) -> int:
         def __getitem__(self, i):
             return self.ex[i]
 
+    pad_id = tok.pad_token_id if tok.pad_token_id is not None else tok.convert_tokens_to_ids("<|im_end|>")
+    mult = int(cfg.get("pad_multiple") or 0)
+
     def collate(batch):
         (e,) = batch
-        return {"input_ids": torch.tensor([e["input_ids"]]), "prompt_len": e["prompt_len"]}
+        return {"input_ids": torch.tensor([pad_ids(e["input_ids"], mult, pad_id)]), "prompt_len": e["prompt_len"],
+                "n_tok": len(e["input_ids"])}
 
     def collate_pair(batch):
         (e,) = batch
-        return {"input_ids": torch.tensor([e["input_ids"]]), "rej_ids": torch.tensor([e["rej_ids"]]),
-                "prompt_len": e["prompt_len"]}
+        return {"input_ids": torch.tensor([pad_ids(e["input_ids"], mult, pad_id)]),
+                "rej_ids": torch.tensor([pad_ids(e["rej_ids"], mult, pad_id)]), "prompt_len": e["prompt_len"],
+                "n_tok": len(e["input_ids"]), "n_rej": len(e["rej_ids"])}
 
     class DPOTrainer(Trainer):
         """One preference pair per device per micro-step; the window means of the DPO metrics are added to
@@ -878,14 +903,15 @@ def main(argv=None) -> int:
         def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
             ref = self.accelerator.unwrap_model(model)
             loss, mt = dpo_pair_loss(model, ref, inputs["input_ids"], inputs["rej_ids"], inputs["prompt_len"],
-                                     cfg["beta"], cfg["sft_weight"])
+                                     cfg["beta"], cfg["sft_weight"], inputs.get("n_tok"), inputs.get("n_rej"))
             for k, v in mt.items():
                 self._acc.setdefault(k, []).append(v)
             return (loss, None) if return_outputs else loss
 
         def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
             with torch.no_grad():
-                loss = completion_loss(model, inputs["input_ids"].to(model.device), inputs["prompt_len"])
+                loss = completion_loss(model, inputs["input_ids"].to(model.device), inputs["prompt_len"],
+                                       inputs.get("n_tok"))
             return loss.detach(), None, None
 
         def log(self, logs, *args, **kwargs):
@@ -896,12 +922,13 @@ def main(argv=None) -> int:
 
     class SFTTrainer(Trainer):
         def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
-            loss = completion_loss(model, inputs["input_ids"], inputs["prompt_len"])
+            loss = completion_loss(model, inputs["input_ids"], inputs["prompt_len"], inputs.get("n_tok"))
             return (loss, None) if return_outputs else loss
 
         def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
             with torch.no_grad():
-                loss = completion_loss(model, inputs["input_ids"].to(model.device), inputs["prompt_len"])
+                loss = completion_loss(model, inputs["input_ids"].to(model.device), inputs["prompt_len"],
+                                       inputs.get("n_tok"))
             return loss.detach(), None, None
 
     steps_per_epoch = math.ceil(len(train_ex) / (cfg["grad_accum"] * world))
@@ -962,8 +989,6 @@ def main(argv=None) -> int:
                     torch.cuda.empty_cache()
                 malloc_trim()
             return control
-
-    rank = int(os.environ.get("RANK", 0))
 
     class MemProbe(TrainerCallback):
         """Where host RAM goes, per rank: the 2026-10-24 resume lost ~0.17 GB of machine RAM per step even

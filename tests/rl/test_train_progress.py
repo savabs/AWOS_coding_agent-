@@ -191,6 +191,15 @@ def test_mem_info_and_mem_line(tmp_path):
     assert "r1 anon 0.0" in line
 
 
+def test_pad_ids_buckets_lengths():
+    assert T.pad_ids([1, 2, 3], 4, 0) == [1, 2, 3, 0]
+    assert T.pad_ids([1, 2, 3, 4], 4, 0) == [1, 2, 3, 4]
+    assert T.pad_ids([1, 2, 3], 0, 0) == [1, 2, 3] and T.pad_ids([1, 2, 3], 1, 0) == [1, 2, 3]
+    shapes = {len(T.pad_ids([7] * n, 128, 0)) for n in range(1, 4097)}
+    assert len(shapes) == 32 and max(shapes) == 4096
+    assert T.DEFAULTS["pad_multiple"] == 128 and T.DEFAULTS["cudnn"] is False
+
+
 def test_stage_attaches_kernel_sources(tmp_path):
     import json
     from scaffold.rl.train import kaggle_driver as kd
