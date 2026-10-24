@@ -85,6 +85,10 @@ kaggle datasets create -p stage-grpo/dataset && kaggle kernels push -p stage-grp
 ```
 
 The kernel (`kaggle/rl-grpo/run.py`) does four things:
+0. if `kernel.resume_from` is set, finds the newest complete `ck/iter_*/` of that earlier run first
+   (`find_resume`: a path, or a slug with an optional `owner/` prefix, searched at depths 1-4 under
+   `/kaggle/input`, so both `/kaggle/input/<slug>/` and `/kaggle/input/notebooks/<owner>/<slug>/` mounts
+   are found). If none is found it exits before any install or probe time is spent;
 1. unpacks the repo;
 2. pip-installs the SFT kernel's pins (read from `kaggle/rl-sft/train.py`, which is not edited) plus
    playwright, then installs Chromium;
@@ -104,8 +108,8 @@ Tests: `PYTHONPATH=.:tests python -m pytest tests/rl/test_grpo.py -q`.
 
 | What | Result |
 |---|---|
-| `tests/rl` (rl-venv, no torch) | 189 passed, 9 skipped; without test_grpo.py 179 passed, 7 skipped (the 2 model tests skip there) |
-| `tests/rl/test_grpo.py` (torch env + playwright overlay) | 12 passed in ~3 min |
+| `tests/rl` (rl-venv, no torch) | 191 passed, 9 skipped after the mw-grpo-r fix (was 189); without test_grpo.py 179 passed, 7 skipped (the 2 model tests skip there) |
+| `tests/rl/test_grpo.py` (torch env + playwright overlay) | 12 passed in ~3 min; after mw-grpo-r, train-cpu-venv without the overlay: 13 passed, 1 skipped (no playwright) |
 | Real-harness end-to-end, tiny random Qwen3.5, `factory/assign/answer_owner/001`, 2 iterations x 2 rollouts | loss finite (0.756), LoRA changed, 1 injected oracle per iteration, 8.4 s/iteration, 0.15 rollouts/s, 12 generated tokens/s, 0.69 GB RSS |
 | Kernel entry, local (`run.py --repo .`, tiny model, 2 iterations) | 415 train tasks in the pool, 18-22 s/iteration |
 | `grpo_speed.py --tiny --measure-env` (CPU, fp32) | prompt 844 tokens, 40-token reply 4.8 s (8.4 tokens/s), train fwd+bwd 0.47 s, ref fwd 0.20 s, browser 0.11 s/step, so 113 rollouts/h vs 240/h needed: no-go on CPU (expected) |

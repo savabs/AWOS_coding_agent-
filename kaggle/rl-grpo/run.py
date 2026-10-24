@@ -15,7 +15,8 @@ Steps:
        number: rollouts/hour on this T4 with one in-process HF model)
     4. unless kernel.speed_only: GRPO for grpo.iterations iterations on factory TRAIN tasks ->
        /kaggle/working/{grpo_log.jsonl, rollouts.jsonl, ck/, final/adapter/}; resumes from the newest
-       checkpoint of kernel.resume_from (an earlier run of this kernel attached as a kernel source)
+       checkpoint of kernel.resume_from (an earlier run of this kernel attached as a kernel source; looked up
+       before step 2 so a missing checkpoint fails fast)
 Locally (CPU smoke, no Kaggle):  python kaggle/rl-grpo/run.py --repo . --config grpo_config.json --out /tmp/g
 No paid API is called anywhere in this path; GPU time is the only cost (grpo.max_hours caps it).
 """
@@ -80,12 +81,33 @@ def install(repo: Path, kcfg: dict) -> None:
     subprocess.check_call(cmd)
 
 
-def copy_resume(slug: str, out: Path) -> None:
-    """Copy the newest complete checkpoint of an attached earlier run into out/ck (grpo.train resumes it)."""
-    cands = sorted(p for p in Path("/kaggle/input").glob(f"{slug}*/**/ck/iter_*") if (p / "state.json").exists())
+def _iter_no(d: Path) -> int:
+    try:
+        return int(d.name.split("_", 1)[1])
+    except (IndexError, ValueError):
+        return -1
+
+
+def find_resume(spec: str, inputs: Path = Path("/kaggle/input")) -> Path:
+    """Newest complete ck/iter_*/ of an earlier run. ``spec`` is a path, or a kernel slug ("owner/" prefix
+    allowed, as stage.py accepts it). Kaggle mounts kernel sources at /kaggle/input/<slug>/ or deeper at
+    /kaggle/input/notebooks/<owner>/<slug>/, so roots are searched at depths 1-4 (same as the SFT kernel's
+    find_resume_checkpoint). Raises SystemExit when nothing is found, so call it before install/probe."""
+    p = Path(spec)
+    roots = [p] if p.is_absolute() and p.is_dir() else []
+    if not roots:
+        slug = spec.rstrip("/").rsplit("/", 1)[-1]
+        for depth in range(1, 5):
+            roots += [d for d in inputs.glob("/".join(["*"] * (depth - 1) + [f"{slug}*"])) if d.is_dir()]
+    cands = [d for r in roots for d in ([r] if r.name.startswith("iter_") else r.rglob("iter_*"))
+             if d.parent.name == "ck" and (d / "state.json").exists() and _iter_no(d) >= 0]
     if not cands:
-        raise SystemExit(f"resume_from={slug!r}: no ck/iter_*/state.json under /kaggle/input (attach the kernel)")
-    src = max(cands, key=lambda p: p.name)
+        raise SystemExit(f"resume_from={spec!r}: no ck/iter_*/state.json under {inputs} (attach the kernel)")
+    return max(cands, key=_iter_no)
+
+
+def copy_resume(src: Path, out: Path) -> None:
+    """Copy a checkpoint found by find_resume into out/ck (grpo.train resumes the newest there)."""
     dst = out / "ck" / src.name
     if not dst.exists():
         shutil.copytree(src, dst)
@@ -103,6 +125,8 @@ def main(argv=None) -> int:
     kcfg, gcfg = dict(conf.get("kernel") or {}), dict(conf.get("grpo") or {})
     out = Path(a.out or ("/kaggle/working" if on_kaggle() else "./grpo-out"))
     out.mkdir(parents=True, exist_ok=True)
+    # resolve the resume checkpoint first: a missing one should fail before install + probe spend GPU time
+    resume = find_resume(kcfg["resume_from"]) if kcfg.get("resume_from") and not kcfg.get("speed_only") else None
     repo = Path(a.repo).resolve() if a.repo else unpack_repo(find_input("awos_src.tar.gz"), Path("/kaggle/tmp/awos"))
     if on_kaggle() and kcfg.get("pip_install", True):
         install(repo, kcfg)
@@ -119,8 +143,8 @@ def main(argv=None) -> int:
         log(f"speed probe exit {rc}")
     if kcfg.get("speed_only"):
         return 0
-    if kcfg.get("resume_from"):
-        copy_resume(kcfg["resume_from"], out)
+    if resume is not None:
+        copy_resume(resume, out)
     from scaffold.rl.train.grpo import GRPOConfig, train
     cfg = GRPOConfig.from_dict(gcfg)
     row = train(cfg, out, log=log)

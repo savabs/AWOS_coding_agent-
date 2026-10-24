@@ -156,6 +156,49 @@ def test_kaggle_kernel_files():
     assert rm.sft_pins(Path(G.REPO))[0].startswith("transformers==")
 
 
+def _load_run():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("grpo_run", Path(G.REPO) / "kaggle" / "rl-grpo" / "run.py")
+    rm = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rm)
+    return rm
+
+
+def _ck(d: Path):
+    d.mkdir(parents=True)
+    (d / "state.json").write_text("{}")
+    return d
+
+
+def test_find_resume_kaggle_mount_layouts(tmp_path):
+    rm = _load_run()
+    inp = tmp_path / "input"
+    # Kaggle mounts kernel sources deep: /kaggle/input/notebooks/<owner>/<slug>/
+    deep = _ck(inp / "notebooks" / "alice" / "awos-rl-grpo" / "ck" / "iter_000030")
+    _ck(inp / "notebooks" / "alice" / "awos-rl-grpo" / "ck" / "iter_000005")
+    (inp / "notebooks" / "alice" / "awos-rl-grpo" / "ck" / "iter_000040").mkdir()  # incomplete: no state.json
+    (inp / "awos-rl-grpo-data").mkdir(parents=True)                               # the dataset: no ck
+    assert rm.find_resume("awos-rl-grpo", inp) == deep
+    assert rm.find_resume("alice/awos-rl-grpo", inp) == deep                      # owner/ prefix stripped
+    shallow = _ck(tmp_path / "in2" / "awos-rl-grpo" / "ck" / "iter_000100")       # shallow mount still works
+    assert rm.find_resume("awos-rl-grpo", tmp_path / "in2") == shallow
+    assert rm.find_resume(str(tmp_path / "in2" / "awos-rl-grpo"), inp) == shallow  # absolute path
+    with pytest.raises(SystemExit):
+        rm.find_resume("other-kernel", inp)
+
+
+def test_run_missing_resume_fails_before_install_and_probe(tmp_path, monkeypatch):
+    rm = _load_run()
+    cfg = tmp_path / "c.json"
+    cfg.write_text(json.dumps({"kernel": {"resume_from": "no-such-kernel-xyz", "speed_probe": True}, "grpo": {}}))
+    called = []
+    monkeypatch.setattr(rm.subprocess, "call", lambda *a, **k: called.append(a) or 0)
+    monkeypatch.setattr(rm.subprocess, "check_call", lambda *a, **k: called.append(a) or 0)
+    with pytest.raises(SystemExit, match="no-such-kernel-xyz"):
+        rm.main(["--repo", str(G.REPO), "--config", str(cfg), "--out", str(tmp_path / "o")])
+    assert not called                                       # no pip install, no speed probe
+
+
 # --------------------------------------------------------------- model --
 
 def _tokenizer_dir():
