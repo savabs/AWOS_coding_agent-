@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -24,11 +25,11 @@ merge = _load("merge_baselines")
 def test_env_parses_and_pins_models():
     env = ci_matrix.parse_env(ROOT / "ci" / "rl_eval.env")
     specs = ci_matrix.model_specs(env)
-    assert set(specs) == {"qwen3.5-2b", "qwen3.5-4b", "qwen3.5-9b", "mimo-v2.6-9b"}
+    # base models + our trained GGUFs (gh-release:, split in shards: <name>-Q4_K_M-00001-of-0000N.gguf)
+    assert {"qwen3.5-2b", "qwen3.5-4b", "qwen3.5-9b", "mimo-v2.6-9b", "a-final"} <= set(specs)
     assert specs["qwen3.5-9b"]["bytes"] == 5680522464          # == the laptop's file
-    assert all(s["file"].endswith("Q4_K_M.gguf") for s in specs.values())
+    assert all(re.search(r"Q4_K_M(-00001-of-\d{5})?\.gguf$", s["file"]) for s in specs.values())
     assert env["LLAMA_TAG"] == "b11146"
-    import re
     text = (ROOT / "ci" / "rl_eval.env").read_text()
     assert not re.search(r"hf_[A-Za-z0-9]{20,}|(?i:token|api_key|secret)\s*=", text)
 
@@ -37,7 +38,8 @@ def test_matrix_defaults_and_overrides():
     env = ci_matrix.parse_env(ROOT / "ci" / "rl_eval.env")
     matrix, models = ci_matrix.build(env)
     inc = matrix["include"]
-    shards = sum(s["shards"] for s in ci_matrix.model_specs(env).values())
+    specs = ci_matrix.model_specs(env)
+    shards = sum(specs[m]["shards"] for m in env["MODELS"].split())     # default MODELS only
     assert len(inc) == shards * 2                               # miniwob + factory
     assert {(r["source"], r["split"]) for r in inc} == {("miniwob", "holdout"), ("factory", "ood")}
     assert len(models["include"]) == 4
