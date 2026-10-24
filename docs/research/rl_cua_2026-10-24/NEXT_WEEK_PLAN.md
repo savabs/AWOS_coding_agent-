@@ -1,4 +1,21 @@
-# Next week's training plan (draft for owner approval, 2026-10-23)
+# Next week's training plan (APPROVED by the owner 2026-10-24, with the changes below)
+
+## Approved changes (2026-10-24)
+
+1. **Never start from scratch when a checkpoint exists** (owner). Runs continue from checkpoints: exact
+   resume (same data: weights + optimizer + schedule + step) or warm start (new data: weights only),
+   via `resume_from` / `KERNEL_SOURCES` (commit ed5710d).
+2. **First GPU run = RAM test that also continues training:** resume run A from its checkpoint 150
+   (exact, same data) for at least 200 steps in one process with RAM in every ping. All three 4B runs on
+   2026-10-23 lost a rank to the OS at step 155-168; the RAM fix (5a6a1fb) must be shown to hold before
+   any longer run.
+3. **Re-collect training data with the current page reader** (unlabeled-field names, tabs, checkboxes)
+   on free GitHub runners before building the v3 data.
+4. **Weight recovery / anti-loop data and app variety higher:** the checkpoint-150 exam lost 12 MiniWoB
+   tasks to tab-switching loops on a task type absent from training (runs/exam_r2a_ck150_vs_base.md).
+5. Kaggle allows **2 GPU sessions at once** on this account; the schedule below runs at most 2 together.
+
+Original draft follows.
 
 Budget: 30 Kaggle GPU-hours (2x T4), free GitHub runners for data building and exams, remaining
 Anthropic credits (small amounts only). Goal: **higher success on unseen sites** (owner's top metric),
