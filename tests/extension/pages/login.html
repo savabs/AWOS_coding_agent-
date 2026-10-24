@@ -1,0 +1,15 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Sign in</title></head>
+<body>
+<h1>Sign in</h1>
+<form id="login" action="/signed_in.html" method="get">
+  <div><label for="user">Username</label> <input id="user" name="user" autocomplete="username"></div>
+  <div><label for="pw">Password</label> <input id="pw" name="pw" type="password"></div>
+  <div><label for="code">Verification code</label> <input id="code" name="code" inputmode="numeric"></div>
+  <div><label for="cardno">Card number</label> <input id="cardno" name="cardno"></div>
+  <div><label for="ssn">SSN</label> <input id="ssn" name="ssn"></div>
+  <div><button type="button" id="next">Next</button></div>
+</form>
+<p id="out"></p>
+<script>document.getElementById('next').onclick = function () { document.getElementById('out').textContent = 'Next pressed'; };</script>
+</body></html>

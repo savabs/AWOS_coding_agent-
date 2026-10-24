@@ -1,0 +1,17 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Profile</title>
+<style>body{font:15px system-ui;margin:30px} div{margin:10px 0} label{display:inline-block;width:110px}</style></head>
+<body>
+<!-- same form after a redesign: the email label AND id changed, a banner was added above it -->
+<p class="notice">New: profiles now support work addresses.</p>
+<h1>Edit profile</h1>
+<form id="profile" action="/done.html" method="get">
+  <div><label for="fullname">Full name</label><input id="fullname" name="fullname"></div>
+  <div><label for="contact-email">Work e-mail address</label><input id="contact-email" name="email" type="email"></div>
+  <div><label for="plan">Plan</label>
+    <select id="plan" name="plan"><option value="">Choose...</option><option value="free">Free</option><option value="pro">Pro</option></select></div>
+  <div><button type="submit" id="save">Save profile</button>
+       <button type="button" id="cancel" onclick="location.href='/cancelled.html'">Cancel</button></div>
+</form>
+<p><a href="/help.html">Help</a></p>
+</body></html>

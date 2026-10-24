@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>AWOS Replay</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <strong>AWOS Replay</strong>
+    <a href="options.html" target="_blank" id="opts">Options</a>
+  </header>
+
+  <section id="recbar">
+    <button id="rec" class="primary">Record this tab</button>
+    <button id="stop" hidden>Stop recording</button>
+    <span id="recinfo"></span>
+  </section>
+
+  <section id="runpanel" hidden>
+    <div class="row"><span id="runname"></span><span id="verdict" class="badge"></span></div>
+    <div id="pending" hidden>
+      <p id="pendingmsg"></p>
+      <button id="approve" class="danger" hidden>Approve this click</button>
+      <button id="continue" hidden>Continue</button>
+      <button id="reject">Stop run</button>
+    </div>
+    <p id="reason"></p>
+    <ul id="checks"></ul>
+    <details><summary>Log</summary><ol id="log"></ol></details>
+  </section>
+
+  <section>
+    <h3>Recordings</h3>
+    <p id="empty" class="muted">None yet. Press Record, do the task once, press Stop.</p>
+    <ul id="recordings"></ul>
+  </section>
+  <p id="error" class="error"></p>
+<script src="popup.js"></script>
+</body>
+</html>

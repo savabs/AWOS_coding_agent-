@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>AWOS Replay options</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; max-width: 560px; margin: 24px auto; padding: 0 16px; color: #1f2328; background: #fff; }
+  label { display: block; margin: 12px 0 4px; font-weight: 600; }
+  input[type=text], input[type=number] { width: 100%; box-sizing: border-box; padding: 6px; font: inherit; }
+  .hint { color: #59636e; font-size: 12px; }
+  #status { margin-left: 8px; color: #116329; }
+  .error { color: #a40e26; }
+</style>
+</head>
+<body>
+<h2>AWOS Replay options</h2>
+<p class="hint">Recordings stay in this browser (chrome.storage.local). The only network call the extension makes
+is to the local model below, and only when it cannot re-find a control by itself.</p>
+
+<label for="endpoint">Local model endpoint (OpenAI-compatible)</label>
+<input type="text" id="endpoint" placeholder="http://127.0.0.1:8080/v1">
+<div class="hint">Loopback only (127.0.0.1, localhost, [::1]). e.g. llama.cpp <code>llama-server --port 8080</code>.</div>
+
+<label for="model">Model name</label>
+<input type="text" id="model" placeholder="local">
+
+<label><input type="checkbox" id="enabled"> Use the local model when a control cannot be re-found</label>
+<div class="hint">Off: an unclear match stops the run and asks you.</div>
+
+<label for="findTimeoutMs">Wait for each control (ms)</label>
+<input type="number" id="findTimeoutMs" min="500" max="30000" step="500">
+
+<p><button id="save">Save</button><span id="status"></span></p>
+<script src="lib/model.js"></script>
+<script src="options.js"></script>
+</body>
+</html>
