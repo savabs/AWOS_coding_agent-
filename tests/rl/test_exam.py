@@ -26,6 +26,10 @@ _spec.loader.exec_module(R)
 #: sha256 of sorted (id, goal) of the 99 ``ood`` tasks at commit 5a2c6c7 (before ood300 existed)
 OOD99_SHA = "58c3a1f0c6568b7e37821736aaae499c48565f78eb3dd6b303c77d02ce6b1675"
 
+#: building ood300 (and replaying oracles) takes seconds; the 10 s default in pytest.ini times out
+#: on a loaded machine, so this module gets its own ceiling
+pytestmark = pytest.mark.timeout(120)
+
 _CAT = Catalog()
 
 
@@ -82,16 +86,31 @@ def test_training_guards_refuse_every_exam_task():
     assert not exam & {t.id for t in _CAT.tasks()} - {t.id for t in _CAT.tasks("ood")}
 
 
+def _replay_sample(ext):
+    """First and last extension task of every (family, template): covers every template and the
+    highest seeds while keeping the test a few seconds. All 198 stay checked by
+    `python -m scaffold.rl.factory check --split ood300` (and by score() at catalog build)."""
+    by = {}
+    for t in ext:
+        by.setdefault((t.family, t.meta["template"]), []).append(t)
+    out = []
+    for ts in by.values():
+        out += [ts[0]] + ([ts[-1]] if len(ts) > 1 else [])
+    return out
+
+
 def test_ood300_oracles_replay_over_http():
-    """The same admission check as `python -m scaffold.rl.factory check`, on the new tasks."""
+    """The same admission check as `python -m scaffold.rl.factory check`, on a sample of the new tasks."""
     from scaffold.rl.factory.__main__ import check
     src = FactorySource(families=sorted(n for n, f in FAMILIES.items() if f.ood))
     try:
         ext = src.tasks("ood300")[99:]
-        res = check(src, ext)
+        sample = _replay_sample(ext)
+        assert {(t.family, t.meta["template"]) for t in sample} == {(t.family, t.meta["template"]) for t in ext}
+        res = check(src, sample)
     finally:
         src.stop()
-    assert res["checked"] == len(ext) and res["admitted"] == len(ext), res["failed"]
+    assert res["checked"] == len(sample) and res["admitted"] == len(sample), res["failed"]
 
 
 def test_fresh_source_resolves_ext_ids_lazily():

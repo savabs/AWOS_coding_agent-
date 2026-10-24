@@ -79,7 +79,9 @@ No `ci/` env file was added. `rl-eval.yml` always reads `ci/rl_eval.env`, and `s
   - Oracle harness run (`run --model oracle --split ood300 --workers 4`): pass@1 1.0 on 297 tasks with 0 unsafe, in about 80 s.
 - Report on that oracle run against itself: 1.5 s. The Wilson CI at 100% is [98.7, 100] for n=297 and [96.3, 100] for n=99.
 - Precision: at p ≈ 0.61 (Qwen 4B base), the Wilson half-width is about ±5.5 pts at n=297, versus about ±9.5 at n=99.
-- Tests: `tests/rl/test_exam.py` 11 passed. `tests/rl`: 190 passed, 7 skipped, 9 deselected.
+- Tests: `tests/rl/test_exam.py` 11 passed (16 s at load average ~20). `tests/rl`: 190 passed, 7 skipped, 9 deselected.
+  - `test_exam.py` sets its own `pytest.mark.timeout(120)`: building ood300 takes several seconds and the 10 s default in `pytest.ini` timed out under load.
+  - The HTTP replay test replays a sample of 40 of the 198 new tasks: the first and last of every (family, template), so every template and the highest seeds are covered. This takes about 4 s instead of 9-24 s. The full 297-task replay is `factory check --split ood300` (above), and `score()` admits every task when the catalog is built.
 
 ## Limits (honest)
 
