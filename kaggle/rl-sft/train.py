@@ -977,6 +977,7 @@ def main(argv=None) -> int:
                 if main_proc:
                     log(f"{stop_reason['why']} at step {state.global_step}: stopping and saving")
                 control.should_training_stop = True
+                control.should_save = True              # a full checkpoint at the stop step: exact resume loses nothing
             return control
 
     class MemHygiene(TrainerCallback):
