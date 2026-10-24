@@ -200,12 +200,17 @@ _FORMAT_RULE = ("\n\nReply format (strict): optionally ONE line starting with '#
 
 def normalize_text_reply(text: str) -> str:
     """Claude's reply -> the local model's GBNF text form: an optional '# reason' line + one action line.
-    Returns '' when no line parses as an action (MicroAgent then records an invalid step)."""
+    Returns '' when no line parses as an action (MicroAgent then records an invalid step).
+    A 'reason: ...' line is accepted as the reason too; an empty reason is dropped (the grammar's
+    reason rule needs 1-160 characters after '# ')."""
     from scaffold.agent.desktop.micro_agent import ParseError, parse_text_action
     reason, lines = "", [x.strip().strip("`") for x in (text or "").splitlines() if x.strip().strip("`")]
     for ln in lines:
-        if ln.startswith("#"):
-            reason = reason or ("# " + ln.lstrip("#").strip())[:162]
+        note = ln.lstrip("#").strip() if ln.startswith("#") else (
+            ln.split(":", 1)[1].strip() if ln.lower().startswith("reason:") else None)
+        if note is not None:
+            if note and not reason:
+                reason = ("# " + note)[:162].rstrip()
             continue
         try:
             parse_text_action(ln)
