@@ -29,6 +29,14 @@ missing / ambiguous does it re-find. It records:
 Nothing is written unless the run finished OK (``finish(ok=True)``); a failed run drops its repairs.
 Steps whose target is a period ``name_template`` (pack documents for one month) are never repaired:
 picking "the other month's PDF" is exactly the wrong repair the template exists to prevent.
+Absence-tolerant targets (``begin(program)`` collects them: an ``optional`` op's target, a handler's
+guard control) may legitimately be missing, so a "missing" there is information, not breakage: they
+get the rule tier only (no model call), and anything short of a confident repair returns the strict
+grounder's own result -- the runner then skips the optional step / does not fire the handler, as it
+would with no hook.
+Labels never carry typed text: the ``value`` of an editable control (textbox / combobox / ...) is not
+read when building a fingerprint's nearby label (it would store usernames, account numbers in the
+skill JSON), and the label is passed through ``web_tools.mask_secrets``.
 """
 from __future__ import annotations
 
@@ -112,7 +120,7 @@ class Repairer:
                             f"would repair onto {res.candidate.show()}, which is {why}: needs the owner's approval",
                             res.model_calls, res.shortlist)
 
-    def refind(self, fp: Fingerprint, cands: Sequence[Fingerprint]) -> RepairResult:
+    def refind(self, fp: Fingerprint, cands: Sequence[Fingerprint], *, use_model: bool = True) -> RepairResult:
         ranked = S.rank(fp, cands, self.weights)
         d = S.decide(ranked, fp, accept=self.accept, margin=self.margin, floor=self.floor)
         short = [(s, c.show()) for s, c in (d.shortlist or ranked[:S.SHORTLIST])]
@@ -121,7 +129,7 @@ class Repairer:
                                                shortlist=short))
         if d.kind == "abstain":
             return RepairResult("not_found", None, "rule", d.score, d.margin, d.reason, shortlist=short)
-        if self.picker is None:
+        if self.picker is None or not use_model:
             return RepairResult("ambiguous", d.best, "rule", d.score, d.margin,
                                 f"rule tier unsure ({d.reason}); no model tier", shortlist=short)
         items = [c for _s, c in d.shortlist]
@@ -148,6 +156,11 @@ ROLE_NORM = {"AXLink": "link", "AXButton": "button", "AXTextField": "textbox", "
              "AXTextArea": "textbox", "AXPopUpButton": "combobox", "AXComboBox": "combobox",
              "AXCheckBox": "checkbox", "AXRadioGroup": "radiogroup"}
 TEXT_KEYS = ("value", "title", "description")
+# controls whose AX ``value`` is what the user / runner typed or picked (usernames, account numbers):
+# never part of a stored label -- only their title / description (the field's own label) is read
+EDITABLE_ROLES = frozenset({"AXTextField", "AXSecureTextField", "AXTextArea", "AXSearchField", "AXComboBox",
+                            "AXPopUpButton", "AXSlider", "AXIncrementor", "AXDateField", "AXCheckBox",
+                            "AXRadioButton"})
 
 
 def _node_text(n: dict, skip: Optional[dict] = None, limit: int = 40) -> List[str]:
@@ -157,7 +170,10 @@ def _node_text(n: dict, skip: Optional[dict] = None, limit: int = 40) -> List[st
         if x is skip or len(out) >= limit:
             return
         if x.get("role") in ("AXStaticText", "AXHeading", "AXCell") or not x.get("children"):
+            editable = x.get("role") in EDITABLE_ROLES or x.get("subrole") == "AXSecureTextField"
             for k in TEXT_KEYS:
+                if k == "value" and editable:
+                    continue
                 v = x.get(k)
                 if isinstance(v, str) and v.strip():
                     out.append(" ".join(v.split()))
@@ -200,7 +216,7 @@ def page_candidates(page: Any) -> List[Fingerprint]:
                 if len(path) > up + 1:
                     par = snap.node(path[:-up])
                     if par is not None:
-                        label = " ".join(t for t in _node_text(par, skip=me) if t != e.get("name"))[:200]
+                        label = _mask(" ".join(t for t in _node_text(par, skip=me) if t != e.get("name")))[:200]
                         if label:
                             break
         idx = seen.get(role, 0)
@@ -210,6 +226,14 @@ def page_candidates(page: Any) -> List[Fingerprint]:
                                ancestors=anc, index=idx, count=counts[role], siblings=sib,
                                href=str(e.get("href") or ""), ref=e))
     return out
+
+
+def _mask(text: str) -> str:
+    try:
+        from ..web_tools import mask_secrets
+        return mask_secrets(text)
+    except Exception:  # pragma: no cover - product package unavailable
+        return text
 
 
 def target_role(target: dict) -> str:
@@ -240,11 +264,13 @@ class SkillRepair:
         self.pending: Dict[int, dict] = {}         # id(target) -> pending record
         self.targets: Dict[int, dict] = {}
         self.events: List[dict] = []
+        self.tolerant: Dict[int, dict] = {}        # id(target) -> target that may legitimately be absent
 
-    def begin(self) -> None:
+    def begin(self, program: Optional[dict] = None) -> None:
         self.pending.clear()
         self.targets.clear()
         self.events.clear()
+        self.tolerant = absence_tolerant(program) if program else {}
         self.repairer.model_calls = 0
 
     # -- grounding ----------------------------------------------------------
@@ -268,9 +294,12 @@ class SkillRepair:
             fp = target_fingerprint(target)
             ex = {" ".join(str(x).split()).lower() for x in exclude or ()}
             cands = [c for c in self.candidates(page) if " ".join(c.name.split()).lower() not in ex]
-            res = self.repairer.refind(fp, cands)
-            ev = dict(res.to_dict(), target=fp.show(), strict=g.status)
+            tolerant = self.tolerant.get(id(target)) is target
+            res = self.repairer.refind(fp, cands, use_model=not tolerant)
+            ev = dict(res.to_dict(), target=fp.show(), strict=g.status, **({"tolerant": True} if tolerant else {}))
             self.events.append(ev)
+            if tolerant and res.status != "repaired":
+                return g                        # optional step / handler guard: absent is a valid answer
             if res.status == "repaired":
                 self.pending[id(target)] = {"kind": "repair", "from": {"role": fp.role, "name": fp.name},
                                             "to": {"role": res.candidate.role, "name": res.candidate.name,
@@ -348,6 +377,22 @@ class SkillRepair:
         return out
 
 
+def absence_tolerant(program: dict) -> Dict[int, dict]:
+    """Targets the runner treats as possibly absent: ``optional`` ops (skipped when missing) and handler
+    guard controls (the handler just does not fire). Keyed by id() -- the runner grounds these dicts."""
+    out: Dict[int, dict] = {}
+    for _sect, ops in _sections(program):
+        for op in ops:
+            t = op.get("target")
+            if op.get("optional") and isinstance(t, dict):
+                out[id(t)] = t
+    for h in program.get("handlers") or []:
+        t = (h.get("guard") or {}).get("control")
+        if isinstance(t, dict):
+            out[id(t)] = t
+    return out
+
+
 def _sections(program: dict):
     yield "setup", list(program.get("setup") or [])
     yield "loop", list((program.get("loop") or {}).get("body") or [])
@@ -360,4 +405,4 @@ def _get_sect(program: dict, sect: str) -> List[dict]:
     return program.get(sect) or []
 
 
-__all__ = ["RepairResult", "Repairer", "SEND_RE", "SkillRepair", "page_candidates", "risk_of", "target_fingerprint"]
+__all__ = ["RepairResult", "absence_tolerant", "Repairer", "SEND_RE", "SkillRepair", "page_candidates", "risk_of", "target_fingerprint"]

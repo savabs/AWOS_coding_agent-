@@ -845,7 +845,7 @@ class LiveRunner:
         values = period_values(period)
         keep = self.keep_window
         if self.repair is not None:
-            self.repair.begin()
+            self.repair.begin(program)     # program: which targets are optional / handler guards
         try:
             for attempt in range(1 + self.max_restarts):
                 detail["attempts"] = attempt + 1
