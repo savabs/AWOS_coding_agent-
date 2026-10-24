@@ -160,6 +160,53 @@ class OracleModel:
         return f"needs_user({_q('oracle: unknown op')})"
 
 
+def _slip(value: str, rng) -> str:
+    """A plausible wrong value (what a hurried agent types): drop the last word, shift a digit, or cut it."""
+    v = str(value)
+    words = v.split()
+    digits = [i for i, ch in enumerate(v) if ch.isdigit()]
+    options = []
+    if len(words) > 1:
+        options.append(" ".join(words[:-1]))
+    if digits:
+        i = rng.choice(digits)
+        options.append(v[:i] + str((int(v[i]) + rng.randint(1, 8)) % 10) + v[i + 1:])
+    if len(v) > 3:
+        options.append(v[: max(1, len(v) * 2 // 3)])
+    return rng.choice(options) if options else v + "x"
+
+
+class SaboteurModel(OracleModel):
+    """The oracle with ONE plausible slip, then the rest of the script and done(): episodes that CLAIM done
+    with a success banner but miss a detail (wrong title / time / text, or a skipped click). Hard negatives
+    for the verifier, labelled by the task's executable verifier (2026-10-24: G6 called 57 such exam
+    episodes VERIFIED). ``variant`` (the sample index) picks which step slips, deterministically."""
+
+    def __init__(self, steps: Sequence[dict], task_id: str = "", variant: int = 0):
+        import random
+        super().__init__(steps)
+        rng = random.Random(f"saboteur:{task_id}:{variant}")
+        fills = [i for i, s in enumerate(self.steps) if s.get("op") == "fill" and str(s.get("value", ""))
+                 and not HANDLE_RE.match(str(s.get("value", "")))]
+        clicks = [i for i, s in enumerate(self.steps[:-1]) if s.get("op") == "click"]
+        self.slip = None
+        if fills and (variant % 2 == 0 or not clicks):
+            i = fills[variant // 2 % len(fills)]
+            old = str(self.steps[i]["value"])
+            self.steps[i]["value"] = _slip(old, rng)
+            self.slip = {"step": i, "kind": "fill", "from": old, "to": self.steps[i]["value"]}
+        elif clicks:
+            i = clicks[variant // 2 % len(clicks)]
+            self.slip = {"step": i, "kind": "skip_click", "name": self.steps[i].get("name", "")}
+            del self.steps[i]
+
+    def decide(self, system: str, user: str, grammar: Optional[str] = None) -> str:
+        out = super().decide(system, user, grammar)
+        if self.slip and out.startswith("needs_user("):
+            return 'done("Done.")'          # after the slip the script cannot go on: a hurried agent claims done
+        return out
+
+
 def oracle_to_script(steps: Sequence[dict]) -> List[str]:
     """Semantic oracle steps -> micro_agent.ScriptedModel lines (role-prefixed names)."""
     out = []

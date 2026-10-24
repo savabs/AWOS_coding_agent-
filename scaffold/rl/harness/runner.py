@@ -54,9 +54,11 @@ def load_source(name: str, kwargs: Optional[dict] = None) -> Any:
 
 def make_model(kind: str, source: Any, task: TaskSpec, sample: int, args: dict) -> Tuple[Any, str]:
     from scaffold.agent.desktop.micro_agent import ScriptedModel
-    from .models import OracleModel, SampledLocalModel, oracle_to_script
+    from .models import OracleModel, SaboteurModel, SampledLocalModel, oracle_to_script
     if kind == "oracle":
         return OracleModel(source.oracle(task)), args.get("model_label") or "oracle"
+    if kind == "saboteur":          # verifier hard negatives: the oracle with one plausible slip (sample = variant)
+        return SaboteurModel(source.oracle(task), task.id, sample), args.get("model_label") or "saboteur"
     if kind == "scripted":
         script = task.meta.get("script") or oracle_to_script(source.oracle(task))
         return ScriptedModel(script), args.get("model_label") or "scripted"
@@ -395,7 +397,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     r.add_argument("--source", required=True)
     r.add_argument("--source-arg", action="append", default=[], help="key=value passed to the source constructor")
     r.add_argument("--split", default=None)
-    r.add_argument("--model", default="oracle", choices=["oracle", "scripted", "local", "cloud"])
+    r.add_argument("--model", default="oracle", choices=["oracle", "saboteur", "scripted", "local", "cloud"])
     r.add_argument("--model-label", default=None)
     r.add_argument("--n", type=int, default=0, help="first N tasks (0 = all)")
     r.add_argument("--task", action="append", default=None, help="only this task id (repeatable)")
