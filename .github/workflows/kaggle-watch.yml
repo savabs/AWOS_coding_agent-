@@ -1,4 +1,4 @@
-# Waits for the Kaggle training kernel (awos-rl-sft) to finish, then fetches its output
+# Waits for a Kaggle training kernel (default awos-rl-sft; set KSLUG in ci/kaggle_watch.env) to finish, then fetches its output
 # (training log, metrics.json, adapter) as an artifact. Read-only on Kaggle.
 # Launch: push to a branch named bench-cloud/rl-kaggle-watch-<anything>.
 name: kaggle-watch
@@ -23,6 +23,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Settings (kernel slug from ci/kaggle_watch.env, default awos-rl-sft)
+        shell: bash
+        run: |
+          KSLUG=awos-rl-sft
+          [ -f ci/kaggle_watch.env ] && . ci/kaggle_watch.env
+          echo "KSLUG=$KSLUG" >> "$GITHUB_ENV"; echo "watching $KSLUG"
       - name: Wait for the kernel
         id: wait
         shell: bash
@@ -33,7 +39,7 @@ jobs:
           # push to a new bench-cloud/rl-kaggle-watch-* branch to keep watching.
           # live progress: the run pings https://ntfy.sh/<topic>; each minute's line shows the latest ping
           TOPIC=$(python3 -c "import ast,re;s=open('kaggle/rl-sft/train.py').read();print(re.search(r'\"ntfy_topic\": \"([^\"]*)\"',s).group(1))")
-          python -m scaffold.rl.train.kaggle_driver wait --kernel "$KAGGLE_USERNAME/awos-rl-sft" --timeout-min 330 \
+          python -m scaffold.rl.train.kaggle_driver wait --kernel "$KAGGLE_USERNAME/$KSLUG" --timeout-min 330 \
             --ntfy-topic "$TOPIC" | tee wait.log
           S=$(tail -1 wait.log)
           echo "status=$S" >> "$GITHUB_OUTPUT"
@@ -45,7 +51,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          python -m scaffold.rl.train.kaggle_driver fetch --kernel "$KAGGLE_USERNAME/awos-rl-sft" --out kaggle_out || true
+          python -m scaffold.rl.train.kaggle_driver fetch --kernel "$KAGGLE_USERNAME/$KSLUG" --out kaggle_out || true
           ls -la kaggle_out || true
           [ -f kaggle_out/metrics.json ] && cat kaggle_out/metrics.json
           find kaggle_out -maxdepth 2 -name "*.log" -exec tail -n 80 {} \; || true
