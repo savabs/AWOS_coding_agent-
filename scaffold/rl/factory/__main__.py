@@ -1,9 +1,9 @@
 """
-python -m scaffold.rl.factory list   [--split train|ood] [--family F] [--kind K] [--tag T]
+python -m scaffold.rl.factory list   [--split train|ood|ood300] [--family F] [--kind K] [--tag T]
 python -m scaffold.rl.factory stats  [--json]
 python -m scaffold.rl.factory export --out tasks.jsonl [--split S] [--no-spec]
 python -m scaffold.rl.factory serve  [--task ID ...] [--port N]     (prints start URLs; Ctrl-C to stop)
-python -m scaffold.rl.factory check  [--family F]                   (replay every oracle over HTTP)
+python -m scaffold.rl.factory check  [--family F] [--split S]     (replay every oracle over HTTP)
 """
 from __future__ import annotations
 
@@ -69,6 +69,7 @@ def main(argv=None) -> int:
     p.add_argument("--limit", type=int, default=10)
     p = sub.add_parser("check")
     p.add_argument("--family")
+    p.add_argument("--split")
     a = ap.parse_args(argv)
 
     from .source import FactorySource
@@ -104,7 +105,7 @@ def main(argv=None) -> int:
         src.base = src.server.start()
         ids = a.task or [t.id for t in src.tasks()][:a.limit]
         for tid in ids:
-            t = src.catalog.entries[tid].task
+            t = src.catalog.entry(tid).task
             print(f"{tid}\t{src.reset(t)}\t{t.goal}")
         print(f"serving on {src.base} (Ctrl-C to stop)", file=sys.stderr)
         try:
@@ -114,7 +115,7 @@ def main(argv=None) -> int:
             pass
         src.stop()
     elif a.cmd == "check":
-        res = check(src, _filter(src.tasks(), a))
+        res = check(src, _filter(src.tasks(a.split), a))
         src.stop()
         print(json.dumps(res, indent=2))
         return 0 if not res["failed"] else 1

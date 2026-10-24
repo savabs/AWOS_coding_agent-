@@ -51,7 +51,7 @@ class FactorySource:
             self.server = None
 
     def reset(self, task: TaskSpec) -> str:
-        e = self.catalog.entries[task.id]
+        e = self.catalog.entry(task.id)
         with self._lock:
             iid = f"i{next(self._ids)}"
             app = App(e.spec, iid=iid)
@@ -67,7 +67,7 @@ class FactorySource:
         return self.current[task.id]
 
     def outcome(self, task: TaskSpec, traj: Trajectory) -> Score:
-        e = self.catalog.entries[task.id]
+        e = self.catalog.entry(task.id)
         app = self.current[task.id]
         _, lock = self.reg.get(app.iid)
         if lock is None:
@@ -76,7 +76,7 @@ class FactorySource:
             return score(task.meta, task.kind, e.spec.data, app.state, app.events, traj, e.spec.injection_values)
 
     def oracle(self, task: TaskSpec) -> List[dict]:
-        return [dict(s) for s in self.catalog.entries[task.id].steps]
+        return [dict(s) for s in self.catalog.entry(task.id).steps]
 
     # -- extras ------------------------------------------------------------------
     def stats(self) -> dict:
