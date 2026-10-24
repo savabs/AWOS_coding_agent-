@@ -28,12 +28,13 @@ class FakeEnv(FW.Env):
     """A=1 then B=2 completes; B before A breaks the app; 'Delete all' breaks it and is unsafe; Help is a no-op;
     Name (5) locks after the first fill. done succeeds iff the goal holds and nothing broke."""
 
-    def __init__(self, goal="Click A then B.", want_name=None, cap=8, drift_at=0, need_a=False):
+    def __init__(self, goal="Click A then B.", want_name=None, cap=8, drift_at=0, need_a=False, pause=False):
         self.goal, self.want_name, self.cap, self.drift_at, self.need_a = goal, want_name, cap, drift_at, need_a
-        self.episodes = 0
+        self.pause = pause      # pause task: B navigates away (Help vanishes, no data change); success = verify.py's
+        self.episodes = 0       # pause rule: ended in needs_user with the data unchanged
 
     def _user(self, st, i, hist, cap):
-        lines = [f'[{n}] {r} "{nm}"' for n, r, nm in CTRLS]
+        lines = [f'[{n}] {r} "{nm}"' for n, r, nm in CTRLS if not (st.get("away") and nm == "Help")]
         state = f"a={st['a']} b={st['b']} name={st['name']!r}"
         if self.drift_at and self.episodes > self.drift_at:
             state += " (drifted)"
@@ -66,9 +67,12 @@ class FakeEnv(FW.Env):
                 break
             if verb == "needs_user":
                 outcome = "needs_user"
+                success = self.pause and not (st["a"] or st["b"] or st["name"] or st["broken"])
                 break
             n = int(arg.split(",")[0])
-            if verb == "click":
+            if verb == "click" and self.pause and n == 2:
+                st["away"] = True
+            elif verb == "click":
                 if n == 1 and not st["b"]:
                     st["a"] = 1
                 elif n == 2:
@@ -315,6 +319,29 @@ def test_cli_dry_run_and_refusal(tmp_path, capsys):
     assert FW.main(["--policy", f"q={p}", "--out", str(tmp_path / "o"), "--dry-run"]) == 2
 
 
+ORACLE_PAUSE = [{"op": "click", "role": "link", "name": "Help"}, {"op": "needs_user", "text": "checkpoint: confirm"}]
+
+
+def test_oracle_failure_reply_is_never_a_recovery_on_pause_tasks():
+    """OracleModel answers needs_user("oracle: ... not in the observation") when its control is gone; the pause
+    verifier passes any unchanged run ending in needs_user, so that must count neither as a recovery nor a target."""
+    assert FW.oracle_failed('needs_user("oracle: script exhausted")') and FW.oracle_failed('x\nneeds_user( "oracle: a")')
+    assert not FW.oracle_failed('needs_user("checkpoint: confirm")') and not FW.oracle_failed("")
+    env = FakeEnv(goal="Open Help and stop at the checkpoint.", pause=True)
+    rec = record(env, ["click(2)", 'done("finished")'], kind="pause")
+    # 1-step plan: from s_1 (away) clicking Help fails -> oracle failure reply -> NOT recoverable -> step 1 is wrong
+    one = [{"op": "click", "role": "link", "name": "Help"}]
+    from scaffold.rl.harness.models import OracleModel
+    assert FW.oracle_failed(OracleModel([]).decide(SYS, "")), "script exhausted is an oracle failure"
+    v = FW.find_first_wrong(rec, env, one)
+    assert v.verdict == "oracle_fails_at_start", v       # its only 'success' is the exhaustion message itself
+    # full plan: from s_1 the click-Help suffix fails (rejected, was a fake success before); the bare stop
+    # suffix needs_user("checkpoint: confirm") genuinely passes, so step 2's done() is the first wrong step
+    v = FW.find_first_wrong(rec, env, ORACLE_PAUSE)
+    assert v.verdict == "labelled" and v.step == 2 and v.category == "gave_up_early", v
+    assert v.correct_reply == 'needs_user("checkpoint: confirm")' and v.oracle_j == 1
+
+
 # ------------------------------------------------------- real Chromium replay --
 
 def _chromium_or_skip():
@@ -351,5 +378,33 @@ def test_real_factory_replay_finds_injected_mistakes():
                 assert v.verdict == "labelled", (t.id, v)
                 assert v.step == len(traj.steps) and v.category == "gave_up_early"
                 assert v.correct_action.startswith("done(")
+    finally:
+        src.stop()
+
+
+@pytest.mark.timeout(600)
+def test_real_pause_task_never_uses_oracle_failure_text():
+    """Review repro: factory/checkpoints/reauth/000 (train, pause), agent clicks another control then done().
+    The old finder took the oracle's needs_user("oracle: ... is not in the observation") as the correction."""
+    _chromium_or_skip()
+    from scaffold.rl.factory import FactorySource
+    from scaffold.rl.harness.chromium import Chromium
+    from scaffold.rl.harness.episode import run_episode
+    from scaffold.rl.harness.runner import record as mkrec
+    src = FactorySource()
+    src.start()
+    try:
+        t = next((x for x in src.tasks("train") if x.id == "factory/checkpoints/reauth/000"), None)
+        if t is None:
+            pytest.skip("reauth/000 not in this catalog")
+        assert t.kind == "pause" and t.split == "train"
+        orc = src.oracle(t)
+        with Chromium() as ch:
+            env = FW.HarnessEnv(src, ch)
+            traj, sc = run_episode(src, t, Replies(["click(3)", 'done("finished")']), model_label="bad", chromium=ch)
+            rec = json.loads(json.dumps(mkrec(t, 0, traj, sc)))
+            v = FW.find_first_wrong(rec, env, orc)
+        assert v.verdict == "labelled" and not FW.oracle_failed(v.correct_reply), v
+        assert v.correct_reply == 'needs_user("%s")' % orc[-1]["text"], v
     finally:
         src.stop()

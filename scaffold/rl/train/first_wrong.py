@@ -18,7 +18,9 @@ the task's scripted oracle o_1..o_m (factory catalog steps / miniwob oracles.py)
   * state s_k = the environment after replaying r_1..r_k through the REAL harness (run_episode:
     same TaskSource, same seeded task, MicroAgent + headless Chromium, same guards as the original).
   * recoverable(s_k) <=> some oracle suffix o_j..o_m played from s_k reaches Score.success with no
-    unsafe code (suffixes tried from the last one that worked: usually 1-2 episodes per state).
+    unsafe code (suffixes tried from the last one that worked: usually 1-2 episodes per state). A check
+    in which OracleModel itself failed (its needs_user("oracle: ...") reply: target not in the observation,
+    ambiguous, script exhausted) never counts, even where the verifier would pass it (pause tasks).
     A replay whose prompts differ from the recorded ones is "diverged" (environment or page-reader
     drift): the trajectory is reported, never labelled. Prompts are compared like pairs.prompt_key
     (exact text except the factory instance counter and MiniWoB's awos_ep episode id); --prompt-check observation compares only the
@@ -187,6 +189,14 @@ def _obs_of(step: dict) -> str:
     return m.group(0) if m else ""
 
 
+_ORACLE_FAIL = re.compile(r'^\s*needs_user\(\s*"oracle:')
+
+
+def oracle_failed(reply: Optional[str]) -> bool:
+    """True for harness.models.OracleModel's failure reply (control not found / ambiguous / script exhausted)."""
+    return bool(_ORACLE_FAIL.match((reply or "").strip().splitlines()[-1] if (reply or "").strip() else ""))
+
+
 def _verb(action: str) -> str:
     return action.split("(", 1)[0]
 
@@ -247,8 +257,13 @@ def find_first_wrong(rec: dict, env: Env, oracle: List[dict], *, label: str = "p
     plans = plans_of(oracle, task)
     m = len(plans)
 
-    def passed(rp: Replay) -> bool:
-        """dataset.episode_drop_reason semantics: verified, safe, and pause <=> ended in needs_user."""
+    def passed(rp: Replay, k: int) -> bool:
+        """dataset.episode_drop_reason semantics: verified, safe, and pause <=> ended in needs_user. A check
+        whose oracle-played steps (after the k agent replies) include OracleModel's own failure reply
+        (needs_user("oracle: ...": target missing / script exhausted) never counts: on a pause task the
+        verifier would accept it (state unchanged + needs_user), turning an oracle miss into a fake recovery."""
+        if any(oracle_failed(s.get("reply")) for s in rp.steps[k:]):
+            return False
         return rp.success and not rp.unsafe and ((rp.outcome == "needs_user") == (task.kind == "pause"))
 
     def diverged(rp: Replay, k: int, extended: bool = False) -> str:
@@ -275,7 +290,7 @@ def find_first_wrong(rec: dict, env: Env, oracle: List[dict], *, label: str = "p
             why = diverged(rp, k, extended)
             if why:
                 return None, None, made, why
-            if passed(rp):
+            if passed(rp, k):
                 return j, rp, made, ""
         return None, None, made, ""
 
@@ -313,7 +328,7 @@ def find_first_wrong(rec: dict, env: Env, oracle: List[dict], *, label: str = "p
                     break
                 rp = env.check(task, replies[:k - 1], plans[j3], guards=guards)
                 v.checks += 1
-                if (not diverged(rp, k - 1) and passed(rp) and len(rp.steps) >= k
+                if (not diverged(rp, k - 1) and passed(rp, k - 1) and len(rp.steps) >= k
                         and rp.steps[k - 1].get("valid", True)):
                     j, ok, oracle_step = j3, rp, rp.steps[k - 1]
                     break
@@ -324,6 +339,9 @@ def find_first_wrong(rec: dict, env: Env, oracle: List[dict], *, label: str = "p
         v.step, v.wrong_action, v.oracle_j = k, agent, j
         v.correct_reply = (oracle_step.get("reply") or "").strip()
         v.correct_action = action_of(oracle_step)
+        if oracle_failed(v.correct_reply):     # unreachable after passed(); never train on the oracle's debug text
+            v.verdict, v.reason = "no_valid_correction", f"step {k}: the oracle's reply is its own failure message"
+            return v
         if v.correct_action == agent:
             v.verdict, v.reason = "no_wrong_step", f"step {k}: the oracle's action equals the agent's (nondeterminism?)"
             return v

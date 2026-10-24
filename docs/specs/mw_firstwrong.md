@@ -10,7 +10,10 @@ Chromium, and the same guards. At each state s_k it asks whether the scripted or
 the task. A state is recoverable if some oracle continuation played from s_k passes the verifier.
 Continuations are every suffix of the oracle, plus "close the popup, then a later suffix" on popup
 tasks. Passing uses the same rules as `dataset.episode_drop_reason`: success, no unsafe code, and
-pause tasks must end in needs_user. The first wrong step is the first k where s_{k-1} is recoverable
+pause tasks must end in needs_user. A check where the oracle itself failed never counts. That failure
+is OracleModel's `needs_user("oracle: ...")` reply (target not in the observation, ambiguous, or
+script exhausted). The pause verifier would otherwise accept it, because the state is unchanged and
+the run ends in needs_user. The first wrong step is the first k where s_{k-1} is recoverable
 and s_k is not. The correction is the oracle's reply at step k from s_{k-1}. The replay checks that
 the prompt there equals the recorded one, so the reply's control numbers refer to the observation the
 agent actually saw. No model, no judge, no paid API.
@@ -100,7 +103,16 @@ First-wrong-step categories on the 63 labelled factory episodes:
 The corrections are 51 `click`, 5 `fill`, 5 `select` and 2 `done`. Shard s14 is mostly a degenerate
 model (needs_user("") at step 1, garbage fills), which inflates `gave_up_early`.
 
+The s14/s18 shards have no failed pause episodes, so the review fix below does not change these
+numbers. On all 5 failed pause episodes in the downloaded artifacts (s10/s19), the old and new code
+give identical verdicts (2 train rows, none containing oracle text).
+
 ## Limits / not done
+
+- **Pause tasks: a detour that keeps the data unchanged is not "wrong".** Under verify.py's pause rule,
+  stopping with needs_user from any unchanged state passes. So after a wrong click the first wrong
+  step is the later `done()`, and the correction is the oracle's real checkpoint `needs_user(...)`.
+  The wrong click itself is not flagged (review fix, see `mw_firstwrong-r.md`).
 
 - **"Recoverable" means recoverable by the scripted oracle.** A detour that Back would undo (wrong
   page, a dialog opened before the popup was closed) counts as the wrong step. The correction is
