@@ -49,12 +49,13 @@ jobs:
             echo "train_runs=$TRAIN_RUNS"; echo "exam_run=$EXAM_RUN"; echo "max_train=${MAX_TRAIN:-2600}"
             echo "size=${SIZE:-4B}"; echo "config=${CONFIG:-}"; echo "push=${PUSH:-false}"
             echo "kernel_slug=$KERNEL_SLUG"; echo "dataset_slug=$DATASET_SLUG"
+            echo "repair=${REPAIR:-false}"; echo "repair_max_per_kind=${REPAIR_MAX_PER_KIND:-450}"
           } | tee -a "$GITHUB_OUTPUT"
 
       - name: Tests (verifier data)
         run: |
           pip install -q pytest==8.4.2 pytest-timeout jinja2==3.1.6   # pytest.ini passes --timeout
-          PYTHONPATH=. python -m pytest -q tests/rl/test_verifier_data.py
+          PYTHONPATH=. python -m pytest -q tests/rl/test_verifier_data.py tests/rl/test_repair_data.py
 
       - name: Download artifacts (train splits of the collection runs, ood/holdout of the exam run)
         env:
@@ -85,6 +86,16 @@ jobs:
             --train-stats verifier/stats.json | tee -a "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Mix in repair rows (shortlist PICK / NOT_FOUND; benchmark DEV families only)
+        if: steps.cfg.outputs.repair == 'true'
+        env:
+          CAP: ${{ steps.cfg.outputs.repair_max_per_kind }}
+        run: |
+          set -euo pipefail
+          { echo '### Repair rows (mixed into train / valid)'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          PYTHONPATH=. python -m scaffold.rl.train.repair_data --out repair --max-per-kind "$CAP" --append-to verifier \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
       - name: Trivial baselines on the exam file (what the model must beat)
         run: |
           set -euo pipefail
@@ -108,6 +119,7 @@ jobs:
             --kernel-slug "$KSLUG" --dataset-slug "$DSLUG" \
             --user "${KAGGLE_USERNAME:-KAGGLE_USER}" ${SETS[@]+"${SETS[@]}"}
           test ! -e stage/dataset/eval.jsonl
+          du -sh stage/dataset stage/dataset/* | tee -a "$GITHUB_STEP_SUMMARY"   # the 10-23 create failed with an empty reply
           python -m scaffold.rl.train.kaggle_driver push --stage stage --dry-run
 
       - uses: actions/upload-artifact@v4
