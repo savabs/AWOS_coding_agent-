@@ -84,7 +84,7 @@ def test_mem_info_and_ram_line(tmp_path):
     f = tmp_path / "meminfo"
     f.write_text("MemTotal:       32879092 kB\nMemFree:  1 kB\nMemAvailable:    9437184 kB\n")
     m = T.mem_info(str(f))
-    assert m == {"avail_gb": 9.0, "total_gb": 31.36}
+    assert m == {"avail_gb": 9.0, "total_gb": 31.36, "shmem_gb": 0.0}
     assert T.mem_info(str(tmp_path / "missing")) == {}
     line = T.ram_line({**m, "procs": [{"pid": 1, "rss_gb": 10.2}, {"pid": 2, "rss_gb": 10.4}]})
     assert line == "RAM free 9.0/31 GB (ranks 10.2+10.4)"
@@ -155,6 +155,40 @@ def test_record_fatal_writes_rank0_error(tmp_path, monkeypatch):
     assert not f.exists()
     T._record_fatal(SystemExit("resume_from='x': no checkpoint"))
     assert "no checkpoint" in f.read_text()
+
+
+def _fake_proc(root, procs):
+    """procs: {pid: (ppid, rss_kb)} -> a minimal /proc with stat + status + smaps_rollup."""
+    for pid, (ppid, rss) in procs.items():
+        d = root / str(pid)
+        d.mkdir(parents=True)
+        (d / "stat").write_text(f"{pid} (py thon) S {ppid} {pid} {pid} 0 0\n")
+        (d / "status").write_text(f"Name:\tpython\nVmRSS:\t{rss} kB\n")
+        (d / "smaps_rollup").write_text(f"Rss: {rss} kB\nAnonymous: {rss - 1024} kB\n"
+                                        "Rss_File: 1024 kB\nRss_Shmem: 0 kB\n")
+
+
+def test_tree_finds_ranks_in_their_own_sessions(tmp_path):
+    # torchrun (10) -> ranks 11, 12 (own sessions); an unrelated big process (99) is ignored
+    gb = 1024 * 1024
+    _fake_proc(tmp_path, {10: (1, 200_000), 11: (10, 9 * gb), 12: (10, 8 * gb), 13: (11, 100), 99: (1, 20 * gb)})
+    assert sorted(T.tree_pids(10, proc=str(tmp_path))) == [10, 11, 12, 13]
+    rows = T.tree_rss_gb(10, proc=str(tmp_path))
+    assert [r["pid"] for r in rows] == [11, 12] and rows[0]["rss_gb"] == 9.0
+    m = T.proc_mem(11, proc=str(tmp_path))
+    assert m["rss_gb"] == 9.0 and m["file_gb"] == round(1 / 1024, 3) and m["shmem_gb"] == 0.0
+    assert T.proc_mem(555, proc=str(tmp_path)) == {}
+
+
+def test_mem_info_and_mem_line(tmp_path):
+    f = tmp_path / "meminfo"
+    f.write_text("MemTotal: 33554432 kB\nMemAvailable: 8388608 kB\nShmem: 1048576 kB\n")
+    assert T.mem_info(str(f)) == {"avail_gb": 8.0, "total_gb": 32.0, "shmem_gb": 1.0}
+    line = T.mem_line([{"rank": 0, "mem": {"anon_gb": 9.5, "file_gb": 1.2, "shmem_gb": 0.1},
+                        "tensors": {"cpu": {"n": 12, "gb": 0.25}, "pinned": {"n": 3, "gb": 0.0}},
+                        "host": {"reserved": 0.5}}, {"rank": 1, "mem": {}, "tensors": {}, "host": {}}])
+    assert "r0 anon 9.5 file 1.2 shm 0.1 | cpu tensors 12 (0.25 GB) pinned 3 host cache 0.50" in line
+    assert "r1 anon 0.0" in line
 
 
 def test_stage_attaches_kernel_sources(tmp_path):

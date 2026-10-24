@@ -81,6 +81,9 @@ DEFAULTS = {
     # host RAM (2026-10-23: a rank was OOM-killed at step ~158 twice): stop + save below ram_low_gb free,
     # kill + recover if still below ram_critical_gb ram_grace_s later; hygiene every mem_gc_steps
     "ram_low_gb": 3.0, "ram_critical_gb": 1.2, "ram_grace_s": 360, "mem_gc_steps": 25, "malloc_arena_max": 2,
+    # memory probe (every rank, every mem_probe_steps; 0 = off): smaps split, live tensors by device, pinned
+    # host cache -> mem_rank<r>.jsonl + an "AWOS mem" ping; mem_trace adds tracemalloc's top growth lines
+    "mem_probe_steps": 25, "mem_trace": False,
     "eval_rows": 200, "preflight_rows": 16, "template_check_rows": 32,
     "gdn_impl": "torch",          # "torch" (blocks fla) | "auto" (use fla if installed)
     "dtype": "auto",              # auto: bf16 if supported, else fp16 on CUDA, fp32 on CPU | fp16 | bf16 | fp32
@@ -324,27 +327,113 @@ def mem_info(path: str = "/proc/meminfo") -> dict:
         for ln in Path(path).read_text().splitlines():
             k, _, v = ln.partition(":")
             kv[k.strip()] = int(v.split()[0]) / 1024 / 1024          # kB -> GB
-        return {"avail_gb": round(kv["MemAvailable"], 2), "total_gb": round(kv["MemTotal"], 2)}
+        return {"avail_gb": round(kv["MemAvailable"], 2), "total_gb": round(kv["MemTotal"], 2),
+                "shmem_gb": round(kv.get("Shmem", 0.0), 2)}
     except (OSError, KeyError, ValueError, IndexError):
         return {}
 
 
-def group_rss_gb(pgid: int, proc: str = "/proc") -> list:
-    """Resident memory (GB) of every process in a process group: [{"pid", "rss_gb"}] (the training ranks)."""
-    rows = []
+def tree_pids(root: int, proc: str = "/proc") -> list:
+    """``root`` and all its descendants. Not a process group: torchrun starts every rank with
+    start_new_session=True, so the ranks are NOT in the supervisor's group (killpg / pgrp miss them)."""
+    kids: dict = {}
     for d in Path(proc).glob("[0-9]*"):
         try:
             stat = (d / "stat").read_text()
-            fields = stat[stat.rindex(")") + 2:].split()          # after "(comm) "
-            if int(fields[2]) != pgid:                             # field 5 of stat = pgrp
-                continue
-            rss = next(ln for ln in (d / "status").read_text().splitlines() if ln.startswith("VmRSS:"))
+            ppid = int(stat[stat.rindex(")") + 2:].split()[1])     # field 4 of stat = ppid
+            kids.setdefault(ppid, []).append(int(d.name))
+        except (OSError, ValueError, IndexError):
+            continue
+    out, todo = [], [root]
+    while todo:
+        pid = todo.pop()
+        out.append(pid)
+        todo += kids.get(pid, [])
+    return out
+
+
+def tree_rss_gb(root: int, proc: str = "/proc") -> list:
+    """Resident memory (GB) of ``root`` and its descendants over 0.5 GB: [{"pid", "rss_gb"}] (the ranks)."""
+    rows = []
+    for pid in tree_pids(root, proc):
+        try:
+            rss = next(ln for ln in (Path(proc) / str(pid) / "status").read_text().splitlines()
+                       if ln.startswith("VmRSS:"))
             gb = int(rss.split()[1]) / 1024 / 1024
-            if gb > 0.5:                                           # skip shells / small helpers
-                rows.append({"pid": int(d.name), "rss_gb": round(gb, 2)})
+            if gb > 0.5:                                           # skip torchrun / shells / small helpers
+                rows.append({"pid": pid, "rss_gb": round(gb, 2)})
         except (OSError, ValueError, StopIteration, IndexError):
             continue
     return sorted(rows, key=lambda r: -r["rss_gb"])
+
+
+def signal_tree(root: int, sig: int, proc: str = "/proc") -> None:
+    """Send ``sig`` to ``root`` and every descendant (each rank lives in its own session)."""
+    for pid in reversed(tree_pids(root, proc)):
+        try:
+            os.kill(pid, sig)
+        except OSError:
+            pass
+
+
+def proc_mem(pid="self", proc: str = "/proc") -> dict:
+    """One process's memory (GB) split by kind, from smaps_rollup: anon (heap, CPU tensors, CUDA host
+    allocations), file (mapped libraries / weights), shmem (/dev/shm, NCCL). {} where unavailable."""
+    keys = {"Rss": "rss_gb", "Anonymous": "anon_gb", "Rss_File": "file_gb", "Rss_Shmem": "shmem_gb"}
+    try:
+        r = {}
+        for ln in (Path(proc) / str(pid) / "smaps_rollup").read_text().splitlines():
+            k, _, v = ln.partition(":")
+            if k.strip() in keys:
+                r[keys[k.strip()]] = round(int(v.split()[0]) / 1024 / 1024, 3)
+        return r
+    except (OSError, ValueError, IndexError):
+        return {}
+
+
+def tensor_census() -> dict:
+    """Live tensors reachable by the GC, by device: count and unique storage GB. CPU tensors that keep
+    growing step after step = something holds references; flat census + growing anon = a native leak."""
+    import gc
+    import torch
+    seen, out = set(), {}
+    for o in gc.get_objects():
+        try:
+            if not isinstance(o, torch.Tensor):
+                continue
+            dev = "pinned" if (o.device.type == "cpu" and o.is_pinned()) else o.device.type
+            s = out.setdefault(dev, {"n": 0, "gb": 0.0})
+            s["n"] += 1
+            st = o.untyped_storage()
+            if st.data_ptr() not in seen:
+                seen.add(st.data_ptr())
+                s["gb"] += st.nbytes() / 1024 ** 3
+        except Exception:
+            continue
+    return {k: {"n": v["n"], "gb": round(v["gb"], 3)} for k, v in out.items()}
+
+
+def host_cache_stats() -> dict:
+    """PyTorch's pinned host-memory cache (GB), where this torch exposes it."""
+    try:
+        import torch
+        s = torch.cuda.host_memory_stats()
+        return {k: round(s[f"{k}_bytes.all.current"] / 1024 ** 3, 3) for k in ("allocated", "reserved")
+                if f"{k}_bytes.all.current" in s}
+    except Exception:
+        return {}
+
+
+def mem_line(rows: list) -> str:
+    """Compact per-rank probe summary for the ping."""
+    parts = []
+    for r in rows:
+        m, t = r.get("mem", {}), r.get("tensors", {})
+        parts.append(f"r{r['rank']} anon {m.get('anon_gb', 0):.1f} file {m.get('file_gb', 0):.1f} "
+                     f"shm {m.get('shmem_gb', 0):.1f} | cpu tensors {t.get('cpu', {}).get('n', 0)} "
+                     f"({t.get('cpu', {}).get('gb', 0):.2f} GB) pinned {t.get('pinned', {}).get('n', 0)}"
+                     + (f" host cache {r['host'].get('reserved', 0):.2f}" if r.get("host") else ""))
+    return " || ".join(parts)
 
 
 def ram_line(r: dict) -> str:
@@ -478,7 +567,7 @@ def supervise(cmd: list, out: Path, cfg: dict) -> int:
         # RAM watch: log machine + per-rank memory; ask the ranks to stop and save before the OS kills one
         mem = cfg.get("_mem_fn", mem_info)()
         if mem:
-            mem["procs"] = group_rss_gb(p.pid)
+            mem["procs"] = tree_rss_gb(p.pid)
             mem["t"] = round(now - _START, 1)
             with (out / "ram.jsonl").open("a") as fh:
                 fh.write(json.dumps(mem) + "\n")
@@ -504,13 +593,13 @@ def supervise(cmd: list, out: Path, cfg: dict) -> int:
             ntfy(cfg, f"watchdog: {reason}. Stopping and recovering the newest checkpoint.",
                  title="AWOS training STALLED", priority="high", tags="warning")
             try:
-                os.killpg(p.pid, signal.SIGUSR1)
+                signal_tree(p.pid, signal.SIGUSR1)
                 time.sleep(cfg.get("stack_dump_wait_s", 20))
-                os.killpg(p.pid, signal.SIGTERM)
+                signal_tree(p.pid, signal.SIGTERM)
                 p.wait(timeout=120)
             except Exception:
                 try:
-                    os.killpg(p.pid, signal.SIGKILL)
+                    signal_tree(p.pid, signal.SIGKILL)
                 except Exception:
                     pass
             break
@@ -874,6 +963,56 @@ def main(argv=None) -> int:
                 malloc_trim()
             return control
 
+    rank = int(os.environ.get("RANK", 0))
+
+    class MemProbe(TrainerCallback):
+        """Where host RAM goes, per rank: the 2026-10-24 resume lost ~0.17 GB of machine RAM per step even
+        with MALLOC_ARENA_MAX + malloc_trim. Rank 0 pings both ranks' latest rows."""
+        snap = None
+
+        def on_train_begin(self, args, state, control, **kw):
+            if cfg.get("mem_trace"):
+                import tracemalloc
+                tracemalloc.start(6)
+                self.snap = tracemalloc.take_snapshot()
+
+        def on_step_end(self, args, state, control, **kw):
+            n = cfg.get("mem_probe_steps") or 0
+            if not n or state.global_step % n:
+                return control
+            try:
+                self._probe(state)
+            except Exception as ex:                     # a metric must never kill the run
+                log(f"mem probe skipped: {type(ex).__name__}: {ex}")
+            return control
+
+        def _probe(self, state):
+            row = {"rank": rank, "step": state.global_step, "t": round(time.time() - _START, 1),
+                   "mem": proc_mem(), "tensors": tensor_census(), "host": host_cache_stats()}
+            if self.snap is not None:
+                import tracemalloc
+                cur = tracemalloc.take_snapshot()
+                row["py_growth"] = [f"{s.size_diff / 2 ** 20:+.1f} MB {s.traceback[0].filename.rsplit('/', 2)[-1]}:"
+                                    f"{s.traceback[0].lineno}" for s in cur.compare_to(self.snap, "lineno")[:6]]
+                row["py_traced_gb"] = round(tracemalloc.get_traced_memory()[0] / 1024 ** 3, 3)
+                self.snap = cur
+            with (out / f"mem_rank{rank}.jsonl").open("a") as fh:
+                fh.write(json.dumps(row) + "\n")
+            (out / f"mem_rank{rank}.json").write_text(json.dumps(row) + "\n")
+            if main_proc:
+                rows = [row]
+                for f in sorted(out.glob("mem_rank*.json")):
+                    if f.name != f"mem_rank{rank}.json":
+                        try:
+                            rows.append(json.loads(f.read_text()))
+                        except (OSError, ValueError):
+                            pass
+                msg = f"step {state.global_step}: {mem_line(rows)}"
+                if row.get("py_growth"):
+                    msg += " | py: " + "; ".join(row["py_growth"][:3])
+                log(msg)
+                ntfy(cfg, msg[:1500], title="AWOS mem", tags="mag")
+
     gpu_last: list = []
 
     def gpu_loop():
@@ -917,10 +1056,12 @@ def main(argv=None) -> int:
     class Progress(TrainerCallback):
         """One readable line per log step in the kernel log, plus progress.jsonl / progress.json."""
         t_train = None
+        step0 = 0                                       # a resumed run starts at the checkpoint's step
         last_eval: dict = {}
 
         def on_train_begin(self, args, state, control, **kw):
             self.t_train = time.time()
+            self.step0 = state.global_step
 
         def on_evaluate(self, args, state, control, metrics=None, model=None, **kw):
             if not main_proc:
@@ -954,7 +1095,8 @@ def main(argv=None) -> int:
             logs = logs or {}
             step, total = state.global_step, max(1, state.max_steps)
             el = time.time() - (self.t_train or _START)
-            sps = el / step if step else None
+            done = step - self.step0                    # steps run in THIS session (resume-safe speed / ETA)
+            sps = el / done if done > 0 else None
             p = {"kind": kind, "t": round(time.time() - _START, 1), "step": step, "total": total,
                  "pct": round(100 * step / total, 1), "epoch": round(state.epoch or 0, 3),
                  "loss": logs.get("loss"), "lr": logs.get("learning_rate"), "grad_norm": logs.get("grad_norm"),
@@ -980,7 +1122,7 @@ def main(argv=None) -> int:
     trainer = (DPOTrainer if dpo_mode else SFTTrainer)(
         model=model, args=targs, train_dataset=SeqDataset(train_ex),
         eval_dataset=SeqDataset(valid_ex) if valid_ex and not dpo_mode else None,
-        data_collator=collate_pair if dpo_mode else collate, callbacks=[StopControl(), MemHygiene(), Progress()])
+        data_collator=collate_pair if dpo_mode else collate, callbacks=[StopControl(), MemHygiene(), MemProbe(), Progress()])
     t1 = time.time()
     res = trainer.train(resume_from_checkpoint=resume_exact) if resume_exact else trainer.train()
     train_s = time.time() - t1
