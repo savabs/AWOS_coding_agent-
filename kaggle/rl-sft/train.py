@@ -92,6 +92,9 @@ DEFAULTS = {
     "gpu_sample_s": 30,
     "ntfy_topic": "awos-rl-be26ddc76649",   # live progress: https://ntfy.sh/awos-rl-be26ddc76649 ("" = off)
     "run_name": "",                         # label on every ping when several runs share the topic
+    # continue instead of starting over: resume_from = checkpoint path or the slug of an earlier kernel
+    # attached as a kernel source; resume_mode exact (same data: optimizer + schedule + step) | warm (weights)
+    "resume_from": "", "resume_mode": "warm",
     # "sft": completion CE on prompt -> completion rows (Stage A). "dpo": preference pairs (goal G4):
     # sft_weight * CE(chosen) - logsigmoid(beta * ((pi_c - ref_c) - (pi_r - ref_r))), logps summed over
     # completion tokens, reference = the same model with the LoRA adapter disabled.
@@ -358,6 +361,32 @@ def malloc_trim() -> None:
         ctypes.CDLL("libc.so.6").malloc_trim(0)
     except Exception:
         pass
+
+
+def find_resume_checkpoint(spec: str, inputs: Path = Path("/kaggle/input")):
+    """A checkpoint to continue from: ``spec`` is a path, or the slug of an earlier kernel attached as a
+    kernel source (its output appears under /kaggle/input/<slug>/). Returns (path, full) where full means
+    optimizer + scheduler + trainer state are present (exact resume possible), or None."""
+    if not spec:
+        return None
+    p = Path(spec)
+    cands = [p] if (p / "adapter_model.safetensors").exists() else []
+    if not cands:
+        roots = [p] if p.exists() else [d for d in inputs.glob(f"{spec}*") if d.is_dir()]
+        for root in roots:
+            cands += [d for d in root.rglob("checkpoint-*") if (d / "adapter_model.safetensors").exists()]
+            cands += [d for d in root.rglob("adapter") if (d / "adapter_model.safetensors").exists()]
+
+    def step(d):
+        try:
+            return int(d.name.rsplit("-", 1)[1])
+        except (IndexError, ValueError):
+            return -1                                   # a final adapter/ dir: lowest priority for "exact"
+    if not cands:
+        return None
+    best = max(cands, key=step)
+    full = all((best / f).exists() for f in ("optimizer.pt", "scheduler.pt", "trainer_state.json"))
+    return best, full
 
 
 def latest_checkpoint(out: Path):
@@ -639,6 +668,28 @@ def main(argv=None) -> int:
     lcfg = LoraConfig(r=cfg["lora_r"], lora_alpha=cfg["lora_alpha"], lora_dropout=cfg["lora_dropout"],
                       target_modules=cfg["target_regex"], bias="none", task_type="CAUSAL_LM")
     model = get_peft_model(model, lcfg)
+    # never restart from scratch when a checkpoint exists: resume_from = path or earlier kernel slug
+    resume = find_resume_checkpoint(cfg.get("resume_from") or "")
+    resume_exact = None
+    if cfg.get("resume_from") and resume is None:
+        raise SystemExit(f"resume_from={cfg['resume_from']!r}: no checkpoint found (attach the kernel as a source)")
+    if resume:
+        ck, full = resume
+        mode = cfg.get("resume_mode", "warm")
+        if mode == "exact" and not full:
+            raise SystemExit(f"resume_mode=exact needs optimizer/scheduler/trainer state in {ck}")
+        if mode == "exact":
+            resume_exact = str(ck)                      # Trainer restores weights, optimizer, schedule, step
+        else:                                           # warm start: trained weights, fresh optimizer + schedule
+            from peft.utils import set_peft_model_state_dict
+            from safetensors.torch import load_file
+            res_load = set_peft_model_state_dict(model, load_file(str(ck / "adapter_model.safetensors")))
+            unexpected = len(getattr(res_load, "unexpected_keys", []) or [])
+            if unexpected:
+                raise SystemExit(f"warm start from {ck}: {unexpected} adapter keys do not match this LoRA config")
+        if main_proc:
+            log(f"resume: {mode} from {ck} (full state: {full})")
+            ntfy(cfg, f"continuing from {ck.name} ({mode})", title="AWOS training resume", tags="repeat")
     n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
     targets = sorted({n.split("model.language_model.layers.")[-1].split(".", 1)[-1].rsplit(".lora_A", 1)[0]
                       for n, _ in model.named_parameters() if "lora_A" in n})
@@ -901,7 +952,7 @@ def main(argv=None) -> int:
         eval_dataset=SeqDataset(valid_ex) if valid_ex and not dpo_mode else None,
         data_collator=collate_pair if dpo_mode else collate, callbacks=[StopControl(), MemHygiene(), Progress()])
     t1 = time.time()
-    res = trainer.train()
+    res = trainer.train(resume_from_checkpoint=resume_exact) if resume_exact else trainer.train()
     train_s = time.time() - t1
     if not main_proc:
         return 0

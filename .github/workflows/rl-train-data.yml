@@ -85,6 +85,8 @@ jobs:
             echo "size=${SIZE:-4B}"; echo "config=${CONFIG:-}"; echo "push=${PUSH:-false}"
             # separate Kaggle notebook + dataset per run, so concurrent runs never replace each other
             echo "kernel_slug=${KERNEL_SLUG:-awos-rl-sft}"; echo "dataset_slug=${DATASET_SLUG:-awos-rl-sft-data}"
+            # earlier kernels whose outputs (checkpoints) this run continues from (space-separated USER/SLUG)
+            echo "kernel_sources=${KERNEL_SOURCES:-}"
           } | tee -a "$GITHUB_OUTPUT"
 
       - name: Playwright Chromium (oracle demos)
@@ -149,10 +151,12 @@ jobs:
           CFG: ${{ steps.cfg.outputs.config }}
           KSLUG: ${{ steps.cfg.outputs.kernel_slug }}
           DSLUG: ${{ steps.cfg.outputs.dataset_slug }}
+          KSRCS: ${{ steps.cfg.outputs.kernel_sources }}
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
         run: |
           set -euo pipefail
           SETS=(); for kv in $CFG; do SETS+=(--set "$kv"); done
+          for k in $KSRCS; do SETS+=(--kernel-source "$k"); done
           python -m scaffold.rl.train.kaggle_driver stage --data sft --out stage --size "$SIZE" \
             --kernel-slug "$KSLUG" --dataset-slug "$DSLUG" \
             --user "${KAGGLE_USERNAME:-KAGGLE_USER}" ${SETS[@]+"${SETS[@]}"}   # macOS bash 3.2: empty array + set -u

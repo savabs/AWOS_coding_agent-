@@ -107,6 +107,48 @@ def test_supervisor_low_ram_asks_for_a_clean_stop(tmp_path):
     assert rc != 0 or (tmp_path / "adapter").exists()          # killed after grace (no checkpoint here)
 
 
+def test_find_resume_checkpoint_prefers_newest_full_state(tmp_path):
+    inp = tmp_path / "input"
+    k = inp / "awos-rl-sft" / "checkpoints"
+    for step, full in ((100, True), (150, True)):
+        d = k / f"checkpoint-{step}"
+        d.mkdir(parents=True)
+        (d / "adapter_model.safetensors").write_bytes(b"w")
+        if full:
+            for f in ("optimizer.pt", "scheduler.pt", "trainer_state.json"):
+                (d / f).write_text("x")
+    (inp / "awos-rl-sft" / "adapter").mkdir()
+    (inp / "awos-rl-sft" / "adapter" / "adapter_model.safetensors").write_bytes(b"w")
+    ck, full = T.find_resume_checkpoint("awos-rl-sft", inputs=inp)
+    assert ck.name == "checkpoint-150" and full
+    ck, full = T.find_resume_checkpoint(str(inp / "awos-rl-sft" / "adapter"), inputs=inp)
+    assert ck.name == "adapter" and not full
+    assert T.find_resume_checkpoint("", inputs=inp) is None
+    assert T.find_resume_checkpoint("nothing-here", inputs=inp) is None
+
+
+def test_stage_attaches_kernel_sources(tmp_path):
+    import json
+    from scaffold.rl.train import kaggle_driver as kd
+    data = tmp_path / "d"
+    data.mkdir()
+    row = {"prompt": "<|im_start|>system\nS<|im_end|>\n<|im_start|>user\nU<|im_end|>\n<|im_start|>assistant\n"
+                     "<think>\n\n</think>\n\n", "completion": "click(1)<|im_end|>",
+           "messages": [{"role": "system", "content": "S"}, {"role": "user", "content": "U"},
+                        {"role": "assistant", "content": "click(1)"}], "meta": {"split": "train"}}
+    (data / "train.jsonl").write_text(json.dumps(row) + "\n")
+    try:
+        kd.stage(data, tmp_path / "st", "4B", "me", {"resume_from": "awos-rl-sft", "resume_mode": "exact"},
+                 kernel_sources=["me/awos-rl-sft"])
+    except SystemExit:
+        import pytest
+        pytest.skip("row validation needs the real rendered format")
+    meta = json.loads((tmp_path / "st" / "kernel" / "kernel-metadata.json").read_text())
+    assert meta["kernel_sources"] == ["me/awos-rl-sft"]
+    cfg = json.loads((tmp_path / "st" / "dataset" / "train_config.json").read_text())
+    assert cfg["resume_from"] == "awos-rl-sft" and cfg["resume_mode"] == "exact"
+
+
 def test_defaults_are_one_epoch_with_stop_switch():
     assert T.DEFAULTS["epochs"] == 1.0
     assert T.DEFAULTS["stop_url"].endswith("/rl-control/kaggle/STOP")

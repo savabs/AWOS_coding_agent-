@@ -21,7 +21,7 @@ python3 -m scaffold.rl.train.dataset --input "oracle=$TRAJ" --out "$W/data" --va
 echo "=== kaggle stage + push --dry-run"
 python3 -m scaffold.rl.train.kaggle_driver stage --data "$W/data" --out "$W/stage" --size 2B --user smoke \
   --set max_steps=3 --set grad_accum=2 --set eval_steps=2 --set eval_rows=4 --set preflight_rows=2 --set logging_steps=1 \
-  --set eval_gen_rows=4 --set stop_check_steps=1 --set gpu_sample_s=5 --set 'ntfy_topic=""' >/dev/null
+  --set eval_gen_rows=4 --set stop_check_steps=1 --set gpu_sample_s=5 --set 'ntfy_topic=""' --set save_steps=2 >/dev/null
 python3 -m scaffold.rl.train.kaggle_driver push --stage "$W/stage" --dry-run
 T1=$(ts)
 
@@ -39,6 +39,20 @@ ev = [r for r in rows if r['kind'] == 'eval']
 assert rows and ev and 'action_acc' in ev[-1] and ev[-1]['total'] == 3, rows
 print('progress rows', len(rows), 'last eval', {k: ev[-1].get(k) for k in ('step', 'eval_loss', 'action_acc')})
 " "$W/kout/progress.jsonl"
+
+echo "=== resume: exact (same data, continue from checkpoint-2 to step 5) and warm (new run from the adapter)"
+mkcfg() { python3 -c "
+import json, sys
+c = json.load(open(sys.argv[1])); c.update(json.loads(sys.argv[2])); json.dump(c, open(sys.argv[3], 'w'))
+" "$W/stage/dataset/train_config.json" "$1" "$2"; }
+mkcfg "{\"max_steps\": 5, \"resume_from\": \"$W/kout/checkpoints\", \"resume_mode\": \"exact\"}" "$W/cfg_exact.json"
+AWOS_NO_TORCHRUN=1 "$TRAIN_PY" "$W/stage/kernel/train.py" --config "$W/cfg_exact.json" --data "$W/stage/dataset" \
+  --out "$W/kout_exact" --base-model "$W/tiny" 2>&1 | grep -E "resume:|done|Error|error" || true
+python3 -c "import json,sys; m=json.load(open(sys.argv[1])); assert m['global_steps'] == 5, m['global_steps']; print('exact resume ok: reached step', m['global_steps'])" "$W/kout_exact/metrics.json"
+mkcfg "{\"max_steps\": 2, \"resume_from\": \"$W/kout/adapter\", \"resume_mode\": \"warm\"}" "$W/cfg_warm.json"
+AWOS_NO_TORCHRUN=1 "$TRAIN_PY" "$W/stage/kernel/train.py" --config "$W/cfg_warm.json" --data "$W/stage/dataset" \
+  --out "$W/kout_warm" --base-model "$W/tiny" 2>&1 | grep -E "resume:|done|Error|error" || true
+grep -q "resume: warm" "$W/kout_warm/train_stdout.log" 2>/dev/null || python3 -c "import json,sys; m=json.load(open(sys.argv[1])); assert m['global_steps'] == 2; print('warm start ok: new run of', m['global_steps'], 'steps')" "$W/kout_warm/metrics.json"
 T2=$(ts)
 
 echo "=== export"

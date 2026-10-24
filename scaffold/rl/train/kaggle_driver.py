@@ -67,7 +67,7 @@ def validate_rows(path: Path) -> int:
 
 
 def stage(data: Path, out: Path, size: str, user: str, overrides: dict, dataset_slug: str = DATASET_SLUG,
-          kernel_slug: str = KERNEL_SLUG) -> dict:
+          kernel_slug: str = KERNEL_SLUG, kernel_sources: Optional[List[str]] = None) -> dict:
     data, out = data.expanduser(), out.expanduser()
     if size not in SIZES:
         raise SystemExit(f"size must be one of {list(SIZES)}")
@@ -93,6 +93,8 @@ def stage(data: Path, out: Path, size: str, user: str, overrides: dict, dataset_
     shutil.copy(KERNEL_SRC, kn / "train.py")
     meta = json.loads(KERNEL_META_TEMPLATE.read_text())
     meta.update({"id": f"{user}/{kernel_slug}", "title": kernel_slug, "dataset_sources": [f"{user}/{dataset_slug}"]})
+    if kernel_sources:                    # earlier runs' outputs (checkpoints) mount under /kaggle/input/<slug>/
+        meta["kernel_sources"] = list(kernel_sources)
     (kn / "kernel-metadata.json").write_text(json.dumps(meta, indent=2) + "\n")
     info = {"rows": counts, "config": cfg, "dataset": f"{user}/{dataset_slug}", "kernel": f"{user}/{kernel_slug}"}
     (out / "stage.json").write_text(json.dumps(info, indent=2) + "\n")
@@ -232,6 +234,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     s.add_argument("--set", action="append", default=[], help="train_config override key=value (JSON value)")
     s.add_argument("--dataset-slug", default=DATASET_SLUG)
     s.add_argument("--kernel-slug", default=KERNEL_SLUG)
+    s.add_argument("--kernel-source", action="append", default=[],
+                   help="USER/SLUG of an earlier kernel whose output (checkpoints) this run reads (repeatable)")
     p = sub.add_parser("push")
     p.add_argument("--stage", required=True, type=Path)
     p.add_argument("--dry-run", action="store_true")
@@ -248,7 +252,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     a = ap.parse_args(argv)
     if a.cmd == "stage":
         overrides = {k: _val(v) for k, _, v in (x.partition("=") for x in a.set)}
-        print(json.dumps(stage(a.data, a.out, a.size, a.user, overrides, a.dataset_slug, a.kernel_slug), indent=1))
+        print(json.dumps(stage(a.data, a.out, a.size, a.user, overrides, a.dataset_slug, a.kernel_slug,
+                               kernel_sources=a.kernel_source), indent=1))
     elif a.cmd == "push":
         print(json.dumps(push(a.stage, a.dry_run, a.message)))
     elif a.cmd == "wait":
