@@ -24,6 +24,11 @@ retries missing / failed / needs_you. Resume: the state is written before the ru
 starts (status "running" + the Downloads snapshot), so after a crash the next run first
 collects whatever finished downloading, and only re-runs the skill if that is not enough.
 A per-month lock file stops two runs on the same month.
+
+Opt-in expected-effects gate: ``run_month(..., expect=hook)`` where
+``hook(source, period, entry) -> RunCheck | None`` (effects/expect.py ``pack_hook``). It runs
+after a source is collected_* and can only DOWNGRADE: unverified -> collected_unverified,
+failed (an expectation refuted) -> failed with the refutation as reason. None = no opinion.
 """
 from __future__ import annotations
 
@@ -399,8 +404,31 @@ def run_source(cfg: PackConfig, month: str, source: Source, st: Dict[str, Any], 
 
 
 # ── one month ───────────────────────────────────────────────────────────────
+def expect_gate(entry: Dict[str, Any], source: Source, period: Period, expect: Callable) -> None:
+    """Apply the opt-in expected-effects hook to a collected entry. Never upgrades a status."""
+    if entry.get("status") not in DONE:
+        return
+    try:
+        res = expect(source, period, entry)
+    except Exception as e:                       # a broken gate never stamps anything verified
+        entry["expect"] = {"verdict": "unverified", "reason": f"expect hook error: {type(e).__name__}"}
+        if entry["status"] == COLLECTED_VERIFIED:
+            entry.update(status=COLLECTED_UNVERIFIED, reason="expected-effects check errored")
+        return
+    if res is None:
+        return
+    rec = res.to_record() if hasattr(res, "to_record") else {"verdict": str(getattr(res, "verdict", "unverified"))}
+    entry["expect"] = rec
+    verdict, why = str(rec.get("verdict")), scrub(rec.get("reason") or getattr(res, "reason", ""))
+    if verdict == "failed":
+        entry.update(status=FAILED, reason=why or "expected effects refuted")
+    elif verdict != "verified" and entry["status"] == COLLECTED_VERIFIED:
+        entry.update(status=COLLECTED_UNVERIFIED, reason=why or "expected effects not confirmed")
+
+
 def run_month(cfg: PackConfig, month: str, *, runner: Optional[Callable] = None, check: Optional[Callable] = None,
               only: Optional[str] = None, force: bool = False, policy_factory: Optional[Callable] = None,
+              expect: Optional[Callable] = None,
               sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic,
               log: Callable[[str], None] = lambda s: None) -> Dict[str, Any]:
     month = parse_month(month)
@@ -415,8 +443,10 @@ def run_month(cfg: PackConfig, month: str, *, runner: Optional[Callable] = None,
         st["runs"] = st["runs"][-50:]
         for s in sources:
             try:
-                run_source(cfg, month, s, st, runner=runner, check=check, policy_factory=policy_factory,
-                           ledger=ledger, force=force, sleep=sleep, clock=clock, log=log)
+                entry = run_source(cfg, month, s, st, runner=runner, check=check, policy_factory=policy_factory,
+                                   ledger=ledger, force=force, sleep=sleep, clock=clock, log=log)
+                if expect is not None:
+                    expect_gate(entry, s, period_for(s, month), expect)
             except PackBusy:
                 raise
             except Exception as e:              # one broken source never stops the month
