@@ -372,7 +372,10 @@ def find_resume_checkpoint(spec: str, inputs: Path = Path("/kaggle/input")):
     p = Path(spec)
     cands = [p] if (p / "adapter_model.safetensors").exists() else []
     if not cands:
-        roots = [p] if p.exists() else [d for d in inputs.glob(f"{spec}*") if d.is_dir()]
+        # a kernel source may mount at /kaggle/input/<slug>/ or deeper (e.g. notebooks/<owner>/<slug>/)
+        roots = [p] if p.exists() else [] if "/" in spec else [d for depth in range(1, 5)
+                                        for d in inputs.glob("/".join(["*"] * (depth - 1) + [f"{spec}*"]))
+                                        if d.is_dir()]
         for root in roots:
             cands += [d for d in root.rglob("checkpoint-*") if (d / "adapter_model.safetensors").exists()]
             cands += [d for d in root.rglob("adapter") if (d / "adapter_model.safetensors").exists()]
@@ -387,6 +390,27 @@ def find_resume_checkpoint(spec: str, inputs: Path = Path("/kaggle/input")):
     best = max(cands, key=step)
     full = all((best / f).exists() for f in ("optimizer.pt", "scheduler.pt", "trainer_state.json"))
     return best, full
+
+
+def input_tree(inputs: Path = Path("/kaggle/input"), depth: int = 4, limit: int = 40) -> str:
+    """What is mounted under /kaggle/input (dirs only, a few levels): shown when a resume finds nothing."""
+    rows = [str(d.relative_to(inputs)) for k in range(1, depth + 1) for d in inputs.glob("/".join(["*"] * k))
+            if d.is_dir()]
+    return ", ".join(sorted(rows)[:limit]) or "(empty)"
+
+
+def check_resume(cfg: dict, inputs: Path = Path("/kaggle/input")):
+    """Fail fast, before any model load, when resume_from is set but unusable. Returns the find result."""
+    spec = cfg.get("resume_from") or ""
+    if not spec:
+        return None
+    found = find_resume_checkpoint(spec, inputs)
+    if found is None:
+        raise SystemExit(f"resume_from={spec!r}: no checkpoint found under {inputs} "
+                         f"(attach the kernel as a source); mounted: {input_tree(inputs)}")
+    if cfg.get("resume_mode", "warm") == "exact" and not found[1]:
+        raise SystemExit(f"resume_mode=exact needs optimizer/scheduler/trainer state in {found[0]}")
+    return found
 
 
 def latest_checkpoint(out: Path):
@@ -442,6 +466,8 @@ def supervise(cmd: list, out: Path, cfg: dict) -> int:
     # glibc malloc arenas fragment with multi-threaded torch: the 2026-10-23 runs grew host RAM until the OS
     # killed a rank at step ~158-168. Fewer arenas + periodic malloc_trim (MemHygiene) keep RSS flat.
     env.setdefault("MALLOC_ARENA_MAX", str(cfg.get("malloc_arena_max", 2)))
+    err_file = out / "error.txt"                        # a rank's fatal error, quoted in the ended-early ping
+    env["AWOS_ERROR_FILE"] = str(err_file)
     p = subprocess.Popen(cmd, start_new_session=True, env=env)
     reason = None
     low_since = None
@@ -493,8 +519,10 @@ def supervise(cmd: list, out: Path, cfg: dict) -> int:
         return 0
     ok = recover_adapter(out, reason or f"training exited with code {rc}")
     best = latest_checkpoint(out)
+    err = err_file.read_text()[-400:].strip() if err_file.exists() else ""
     ntfy(cfg, (f"recovered the adapter from step {best[0]}" if ok and best else "NO checkpoint to recover")
-         + f" ({reason or f'exit code {rc}'})", title="AWOS training ended early",
+         + f" ({reason or f'exit code {rc}'})" + (f"; error: {err}" if err else ""),
+         title="AWOS training ended early",
          priority="high", tags="warning" if ok else "rotating_light")
     return 0 if ok else (rc or 1)
 
@@ -573,6 +601,12 @@ def main(argv=None) -> int:
 
     # torchrun re-launch for multi-GPU (Kaggle T4 x2): one process per GPU, DDP via Trainer.
     if "LOCAL_RANK" not in os.environ and not os.environ.get("AWOS_NO_TORCHRUN"):
+        try:                                            # a bad resume setting costs seconds, not a model load
+            check_resume(cfg)
+        except SystemExit as e:
+            log(str(e))
+            ntfy(cfg, str(e)[:900], title="AWOS training not started", priority="high", tags="rotating_light")
+            raise
         ensure_deps(cfg["pip_install"])
         import torch
         n = torch.cuda.device_count()
@@ -669,15 +703,11 @@ def main(argv=None) -> int:
                       target_modules=cfg["target_regex"], bias="none", task_type="CAUSAL_LM")
     model = get_peft_model(model, lcfg)
     # never restart from scratch when a checkpoint exists: resume_from = path or earlier kernel slug
-    resume = find_resume_checkpoint(cfg.get("resume_from") or "")
+    resume = check_resume(cfg)
     resume_exact = None
-    if cfg.get("resume_from") and resume is None:
-        raise SystemExit(f"resume_from={cfg['resume_from']!r}: no checkpoint found (attach the kernel as a source)")
     if resume:
         ck, full = resume
         mode = cfg.get("resume_mode", "warm")
-        if mode == "exact" and not full:
-            raise SystemExit(f"resume_mode=exact needs optimizer/scheduler/trainer state in {ck}")
         if mode == "exact":
             resume_exact = str(ck)                      # Trainer restores weights, optimizer, schedule, step
         else:                                           # warm start: trained weights, fresh optimizer + schedule
@@ -993,5 +1023,20 @@ def _importable(name: str) -> bool:
         return False
 
 
+def _record_fatal(e: BaseException) -> None:
+    """Rank 0's fatal error -> AWOS_ERROR_FILE, so the supervisor's ping says why the run died."""
+    path = os.environ.get("AWOS_ERROR_FILE")
+    if not path or os.environ.get("RANK", "0") != "0" or (isinstance(e, SystemExit) and not e.code):
+        return
+    try:
+        Path(path).write_text(f"{type(e).__name__}: {e}"[-2000:])
+    except OSError:
+        pass
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except BaseException as e:
+        _record_fatal(e)
+        raise

@@ -125,6 +125,36 @@ def test_find_resume_checkpoint_prefers_newest_full_state(tmp_path):
     assert ck.name == "adapter" and not full
     assert T.find_resume_checkpoint("", inputs=inp) is None
     assert T.find_resume_checkpoint("nothing-here", inputs=inp) is None
+    assert T.find_resume_checkpoint("/no/such/path", inputs=inp) is None
+
+
+def test_find_resume_checkpoint_nested_mount_and_fail_fast(tmp_path):
+    inp = tmp_path / "input"
+    d = inp / "notebooks" / "someone" / "awos-rl-sft" / "checkpoints" / "checkpoint-150"
+    d.mkdir(parents=True)
+    (d / "adapter_model.safetensors").write_bytes(b"w")
+    (inp / "awos-rl-sft-data-a-resume").mkdir()              # the run's own data: matches the prefix, no ckpt
+    ck, full = T.find_resume_checkpoint("awos-rl-sft", inputs=inp)
+    assert ck == d and not full
+    assert T.check_resume({"resume_from": "awos-rl-sft", "resume_mode": "warm"}, inputs=inp)[0] == d
+    with pytest.raises(SystemExit, match="exact needs"):
+        T.check_resume({"resume_from": "awos-rl-sft", "resume_mode": "exact"}, inputs=inp)
+    with pytest.raises(SystemExit, match="mounted: .*awos-rl-sft-data-a-resume"):
+        T.check_resume({"resume_from": "other-run"}, inputs=inp)
+    assert T.check_resume({}, inputs=inp) is None
+
+
+def test_record_fatal_writes_rank0_error(tmp_path, monkeypatch):
+    f = tmp_path / "error.txt"
+    monkeypatch.setenv("AWOS_ERROR_FILE", str(f))
+    monkeypatch.setenv("RANK", "1")
+    T._record_fatal(RuntimeError("boom"))
+    assert not f.exists()
+    monkeypatch.setenv("RANK", "0")
+    T._record_fatal(SystemExit(0))
+    assert not f.exists()
+    T._record_fatal(SystemExit("resume_from='x': no checkpoint"))
+    assert "no checkpoint" in f.read_text()
 
 
 def test_stage_attaches_kernel_sources(tmp_path):
