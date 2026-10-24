@@ -1,0 +1,135 @@
+# Off-the-shelf vs trained local models on the product's two narrow model jobs, on free ubuntu runners
+# (CPU llama.cpp serving a GGUF; no Chromium, no keys, no paid calls):
+#   repair  scripts/repair_bench.py --model local   (moved control: pick from a shortlist or NOT_FOUND)
+#   verify  scripts/rl/eval_verifier.py --server    (final page: VERIFIED / NOT_DONE / UNSAFE; may only veto)
+# Settings: ci/rl_repair_verify.env; model specs: ci/rl_eval.env MODEL_SPECS.
+# Launch: push to a branch named bench-cloud/rl-repair-verify-<anything>.
+name: rl-repair-verify
+
+on:
+  push:
+    branches: ["bench-cloud/rl-repair-verify-**"]
+
+permissions:
+  contents: read
+  actions: read          # download the exam runs' artifacts (verify rows)
+
+jobs:
+  config:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.cfg.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: cfg
+        name: Matrix (model x bench) from ci/rl_repair_verify.env + ci/rl_eval.env
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ci/rl_repair_verify.env
+          python3 - "$MODELS" "$BENCHES" >> "$GITHUB_OUTPUT" <<'PY'
+          import json, re, sys
+          models, benches = sys.argv[1].split(), sys.argv[2].split()
+          env = open("ci/rl_eval.env").read()
+          specs = {}
+          for ln in re.search(r'MODEL_SPECS="\n(.*?)"', env, re.S).group(1).splitlines():
+              p = ln.split()
+              if len(p) >= 6:
+                  specs[p[0]] = {"model": p[0], "repo": p[1], "file": p[2], "rev": p[3], "sha256": p[5]}
+          missing = [m for m in models if m not in specs]
+          if missing:
+              sys.exit(f"unknown model labels {missing}")
+          inc = [{**specs[m], "bench": b} for m in models for b in benches]
+          print("matrix=" + json.dumps({"include": inc}))
+          PY
+
+  bench:
+    needs: config
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix: ${{ fromJSON(needs.config.outputs.matrix) }}
+    env:
+      MODEL: ${{ matrix.model }}
+      BENCH: ${{ matrix.bench }}
+      GGUF_REPO: ${{ matrix.repo }}
+      GGUF_FILE: ${{ matrix.file }}
+      GGUF_REV: ${{ matrix.rev }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python deps
+        run: pip install -q -r requirements.txt
+      - name: Download the GGUF (pinned revision, sha256-checked)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ matrix.sha256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/models
+          case "$GGUF_REPO" in
+            gh-release:*)
+              gh release download "$GGUF_REV" --repo "${GGUF_REPO#gh-release:}" --dir ~/models --clobber \
+                --pattern "${GGUF_FILE%-00001-of-*}*.gguf" ;;
+            *) curl -fL --retry 5 -o ~/models/"$GGUF_FILE" "https://huggingface.co/$GGUF_REPO/resolve/$GGUF_REV/$GGUF_FILE" ;;
+          esac
+          echo "$SHA  $HOME/models/$GGUF_FILE" | sha256sum -c -
+      - name: llama.cpp (official CPU build) + server
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          source ci/rl_eval.env
+          mkdir -p ~/llama && cd ~/llama
+          gh release download "$LLAMA_TAG" --repo ggml-org/llama.cpp --pattern "llama-$LLAMA_TAG-bin-ubuntu-x64.tar.gz" --clobber
+          tar -xzf "llama-$LLAMA_TAG-bin-ubuntu-x64.tar.gz"
+          BIN=$(find ~/llama -name llama-server -type f | head -1); chmod +x "$BIN"
+          LD_LIBRARY_PATH="$(dirname "$BIN"):${LD_LIBRARY_PATH:-}" nohup "$BIN" \
+            -m ~/models/$GGUF_FILE --alias "$MODEL" --host 127.0.0.1 --port 8080 \
+            -ngl 0 -t "$(nproc)" -c 8192 -np 1 --jinja --reasoning off --cache-prompt --temp 0 \
+            > ~/llama-server.log 2>&1 &
+          for i in $(seq 1 120); do curl -s -m 2 http://127.0.0.1:8080/health | grep -q ok && break; sleep 5; done
+          curl -s http://127.0.0.1:8080/health
+      - name: Repair benchmark (shortlist pick / NOT_FOUND)
+        if: matrix.bench == 'repair'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ci/rl_repair_verify.env
+          mkdir -p out
+          python scripts/repair_bench.py --split "$REPAIR_SPLIT" --model local --max-calls "$REPAIR_MAX_CALLS" \
+            --out "out/repair_${MODEL}.json" | tee "out/repair_${MODEL}.txt"
+          { echo "### repair: $MODEL"; echo '```'; tail -40 "out/repair_${MODEL}.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Verify benchmark (rows from the exam runs, real labels)
+        if: matrix.bench == 'verify'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          source ci/rl_repair_verify.env
+          mkdir -p out
+          ARGS=()
+          for id in $VERIFY_RUNS; do
+            gh run download "$id" --repo "$GITHUB_REPOSITORY" --pattern 'rl-*-s*of*' --dir "artifacts/exam-$id"
+            ARGS+=(--input "exam-$id=artifacts/exam-$id")
+          done
+          python -m scaffold.rl.train.verifier_data exam "${ARGS[@]}" --out verify_rows | tail -3
+          python scripts/rl/eval_verifier.py --rows verify_rows/eval.jsonl --server http://127.0.0.1:8080 \
+            --limit "$VERIFY_LIMIT" --out "out/verify_${MODEL}.json" | tee "out/verify_${MODEL}.txt"
+          { echo "### verify: $MODEL"; echo '```'; tail -40 "out/verify_${MODEL}.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Server log
+        if: always()
+        run: cp ~/llama-server.log "out/llama-server_${MODEL}_${BENCH}.log" 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rv-${{ matrix.model }}-${{ matrix.bench }}
+          path: out/
+          retention-days: 30
