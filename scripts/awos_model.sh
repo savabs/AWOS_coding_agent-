@@ -58,4 +58,4 @@ if curl -s -m 2 "http://127.0.0.1:$PORT/health" | grep -q ok; then
 fi
 echo "serving $FILE on http://127.0.0.1:$PORT (Ctrl-C to stop); extension Options -> endpoint http://127.0.0.1:$PORT/v1"
 exec llama-server -m "$DIR/$FILE" --alias local --host 127.0.0.1 --port "$PORT" \
-  -c 4096 -np 1 --jinja --reasoning off --cache-prompt --temp 0
+  -c 4096 -np 1 --jinja --reasoning off --cache-prompt --cache-ram 0 -cms 256 --temp 0   # EngineBench lever 0: -19% time, -94% memory

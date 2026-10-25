@@ -92,7 +92,7 @@ jobs:
           BIN=$(find ~/llama -name llama-server -type f | head -1); chmod +x "$BIN"
           LD_LIBRARY_PATH="$(dirname "$BIN"):${LD_LIBRARY_PATH:-}" nohup "$BIN" \
             -m ~/models/$GGUF_FILE --alias "$MODEL" --host 127.0.0.1 --port 8080 \
-            -ngl 0 -t "$(nproc)" -c 8192 -np 1 --jinja --reasoning off --cache-prompt --temp 0 \
+            -ngl 0 -t "$(nproc)" -c 8192 -np 1 --jinja --reasoning off --cache-prompt --cache-ram 0 -cms 256 --temp 0 \
             > ~/llama-server.log 2>&1 &
           for i in $(seq 1 120); do curl -s -m 2 http://127.0.0.1:8080/health | grep -q ok && break; sleep 5; done
           curl -s http://127.0.0.1:8080/health
