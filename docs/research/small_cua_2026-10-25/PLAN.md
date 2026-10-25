@@ -1,0 +1,68 @@
+# Best small computer-use model on a laptop (owner-approved 2026-10-25)
+
+**Goal:** the best small, text-only (accessibility-tree) web agent that runs on a CPU laptop. It is proven on the public
+**Online-Mind2Web** benchmark and released open source.
+
+**Owner decisions (2026-10-25):**
+- Paid official judge (o4-mini WebJudge, about $5-10 per 300-task run): OK.
+- Claude as teacher for real-web demonstrations: OK.
+- Open-source the model: yes.
+
+## Benchmark
+- [Online-Mind2Web](https://github.com/OSU-NLP-Group/Online-Mind2Web): 300 tasks on 136 real websites.
+  - Code is MIT; the tasks are on [HF osunlp/Online-Mind2Web](https://huggingface.co/datasets/osunlp/Online-Mind2Web), CC-BY-4.0, gated with auto-approve.
+- Judge: WebJudge.
+  - o4-mini is the official, comparable judge, with about 85% agreement with humans.
+  - WebJudge-7B is the free judge used for daily iteration.
+- Bar, as reported by the vendors (single rollout):
+
+  | Model | Online-Mind2Web |
+  |---|---|
+  | Fara1.5-27B | 72.3% |
+  | **Fara1.5-4B** (same Qwen3.5-4B base as ours) | **57.3%** |
+  | GPT-5 (medium, HAL generic harness) | ~42% |
+  | MolmoWeb-8B | 35.3% |
+
+  All of these are screenshot agents.
+
+## Why this can work
+- Our edge is a text-only observation: about 3-5x lighter than screenshots, and it fits a CPU laptop.
+- The repair and verify models (2B, 0.3% wrong repairs, 16% false "done") make the agent stop rather than guess, and
+  report its own failures.
+- The training engine is proven: SFT on Kaggle 2x T4, with the RAM leak fixed, warm resumes, DPO, a GRPO harness, and exams
+  with confidence intervals.
+
+## The hard parts
+1. **Domain gap.** Our models have only seen synthetic apps. Expect a low first real-web score; the M0 baseline sets
+   the starting line.
+2. **Data is the moat.** Real-web demonstrations will come from:
+   - Mind2Web train (human), converted to our format;
+   - MolmoWeb (ODC-BY);
+   - Claude teacher runs on live sites;
+   - self-improvement: our model attempts tasks, WebJudge-7B keeps the successes, and we retrain.
+3. **Action space.** The real web needs Enter / submit, back and goto in addition to click / fill / select / scroll.
+4. **Live sites from cloud IPs.** Bot checks and captchas: measure them, never bypass them, and report blocked tasks
+   separately.
+5. **Speed.** Real pages make prompts about 3-5x longer. Use a 100-task dev subset for iteration and the full 300 for
+   official numbers. Run on Kaggle GPU (it has internet) when CPU runners are too slow.
+6. **Honesty.**
+   - Never train on the 300 test tasks (fuzzy-match exclusion).
+   - Report website overlap.
+   - Same judge for every model.
+   - Report blocked tasks separately.
+
+## Milestones
+| | Target | Notes |
+|---|---|---|
+| M0 | Honest baseline on Online-Mind2Web: base 4B, run A final (and base 2B) | live harness + judge |
+| M1 | Beat MolmoWeb-8B single rollout: > 35% | real-web SFT (Mind2Web + MolmoWeb + Claude teacher), then self-improvement rounds |
+| M2 | Beat Fara1.5-4B: > 57% | long shot on free compute; DPO / GRPO on the judge's reward |
+| Ship | Open-source model + report | after M1 |
+
+## Workstreams (M0, started 2026-10-25, in parallel)
+- **Live-web harness:** `scaffold/rl/web/` and `.github/workflows/rl-web.yml`. New actions, judge-layout output,
+  blocked-page detection.
+- **Judge:** `scaffold/rl/web_judge/` and `scripts/web/judge.py`. o4-mini (cost cap) and WebJudge-7B (Kaggle).
+- **Data engine:** `scaffold/rl/train/mind2web_data.py`. Mind2Web to our format, with the contamination check.
+
+**Needs from the owner:** `HF_TOKEN` (accept the dataset terms) and `OPENAI_API_KEY` as GitHub secrets.
