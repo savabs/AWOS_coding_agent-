@@ -135,6 +135,36 @@ def dataset_status(ref: str, dry: bool) -> str:
     return out.splitlines()[-1] if out else "unknown"
 
 
+def dataset_files(ref: str) -> dict:
+    """{name: size in bytes, or None when the CLI prints a human size like "4GB"} that Kaggle lists for the
+    dataset's current version ({} if it cannot list)."""
+    p = run(["kaggle", "datasets", "files", ref, "--csv"], False, check=False)
+    out = {}
+    for line in (p.stdout or "").splitlines()[1:]:                   # name,size,creationDate
+        parts = line.rsplit(",", 2)
+        if len(parts) == 3 and parts[0].strip():
+            out[parts[0].strip().strip('"')] = int(parts[1]) if parts[1].strip().isdigit() else None
+    return out
+
+
+def wait_files(ref: str, ds_dir: Path, wait_s: int, poll_s: int = 20) -> None:
+    """status "ready" only means the dataset record exists: a multi-GB version is still processing then, and a
+    kernel pushed at that moment starts WITHOUT its inputs (2026-10-25, awos-web-eval-smoke: 4.6 GB, ready after
+    47 s, kernel failed "web_eval_src.tar.gz not found"). Wait until every staged file is listed at its size."""
+    want = {p.name: p.stat().st_size for p in ds_dir.iterdir()
+            if p.is_file() and p.name != "dataset-metadata.json"}
+    t0 = time.time()
+    while True:
+        have = dataset_files(ref)
+        missing = sorted(n for n, sz in want.items() if n not in have or have[n] not in (sz, None))
+        if not missing:
+            return
+        if time.time() - t0 > wait_s:
+            raise SystemExit(f"dataset {ref}: files still not listed after {wait_s}s: {missing[:5]}")
+        print(f"dataset {ref}: waiting for {len(missing)} file(s) to finish processing", flush=True)
+        time.sleep(poll_s)
+
+
 def push(stage_dir: Path, dry: bool = False, message: str = "awos rl-sft data", wait_s: int = 900) -> dict:
     info = json.loads((stage_dir / "stage.json").read_text())
     ds, kn = str(stage_dir / "dataset"), str(stage_dir / "kernel")
@@ -151,6 +181,10 @@ def push(stage_dir: Path, dry: bool = False, message: str = "awos rl-sft data", 
         if time.time() - t0 > wait_s:
             raise SystemExit(f"dataset {info['dataset']} not ready after {wait_s}s (status {st!r})")
         time.sleep(15)
+    if not dry:
+        wait_files(info["dataset"], Path(ds), max(60, wait_s - int(time.time() - t0)))
+        size_gb = sum(p.stat().st_size for p in Path(ds).iterdir() if p.is_file()) / 1e9
+        time.sleep(min(300, 30 + 20 * size_gb))       # listed is not yet mountable for big versions: settle
     p = run(["kaggle", "kernels", "push", "-p", kn], dry)
     # the CLI exits 0 even when Kaggle refuses the push (e.g. "Kernel push error: Maximum batch GPU session
     # count of 2 reached." on 2026-10-23), so a refused start looked like a success: fail loudly instead

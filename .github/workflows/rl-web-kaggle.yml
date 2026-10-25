@@ -171,7 +171,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          python kaggle/web-eval/stage.py collect --kernel "$KAGGLE_USERNAME/$KERNEL_SLUG" --out kaggle_out | tee dirs.txt
+          PYTHONPATH=. python kaggle/web-eval/stage.py collect --kernel "$KAGGLE_USERNAME/$KERNEL_SLUG" --out kaggle_out | tee dirs.txt
           i=0
           for d in $(grep '__web-' dirs.txt); do
             i=$((i + 1)); name=$(basename "$d"); model="${name%%__*}"; split="${name#*__web-}"

@@ -99,3 +99,38 @@ def test_access_token_in_kaggle_key_is_passed_as_api_token(monkeypatch):
     monkeypatch.setenv("KAGGLE_KEY", "0123456789abcdef" * 2)      # legacy 32-hex key stays
     env = kd._kaggle_env()
     assert env["KAGGLE_KEY"] == "0123456789abcdef" * 2 and "KAGGLE_API_TOKEN" not in env
+
+
+def test_wait_files_waits_for_every_staged_file_at_its_size(tmp_path, monkeypatch):
+    """"ready" is not enough for a multi-GB version: wait until Kaggle lists every staged file at its size."""
+    import subprocess
+    (tmp_path / "web_eval_src.tar.gz").write_bytes(b"x" * 10)
+    (tmp_path / "model.gguf").write_bytes(b"y" * 20)
+    (tmp_path / "dataset-metadata.json").write_text("{}")
+    listings = iter([
+        "name,size,creationDate\n",                                                  # nothing processed yet
+        "name,size,creationDate\nweb_eval_src.tar.gz,10,2026-10-25\nmodel.gguf,7,2026-10-25\n",   # partial
+        "name,size,creationDate\nweb_eval_src.tar.gz,10,2026-10-25\nmodel.gguf,20,2026-10-25\n",  # done
+    ])
+    calls = []
+
+    def fake_run(cmd, dry, check=True):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, next(listings), "")
+    monkeypatch.setattr(kd, "run", fake_run)
+    monkeypatch.setattr(kd.time, "sleep", lambda s: None)
+    kd.wait_files("me/ds", tmp_path, wait_s=60)
+    assert len(calls) == 3 and calls[0][:3] == ["kaggle", "datasets", "files"]
+
+    monkeypatch.setattr(kd, "run", lambda cmd, dry, check=True: subprocess.CompletedProcess(cmd, 0, "name,size\n", ""))
+    t = iter(range(0, 10_000, 100))
+    monkeypatch.setattr(kd.time, "time", lambda: next(t))
+    with pytest.raises(SystemExit, match="still not listed"):
+        kd.wait_files("me/ds", tmp_path, wait_s=150)
+
+
+def test_dataset_files_accepts_human_sizes(monkeypatch):
+    import subprocess
+    out = 'name,size,creationDate\n"model.gguf",4GB,2026-10-25\nweb_eval_src.tar.gz,1234,2026-10-25\n'
+    monkeypatch.setattr(kd, "run", lambda cmd, dry, check=True: subprocess.CompletedProcess(cmd, 0, out, ""))
+    assert kd.dataset_files("me/ds") == {"model.gguf": None, "web_eval_src.tar.gz": 1234}
