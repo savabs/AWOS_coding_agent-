@@ -244,6 +244,24 @@ These gaps cost the agent on the live web too, not only in this converter:
 - **The action set lacks Enter / submit**, as PLAN.md says. `fill` also does not re-observe, so autocomplete lists
   that appear after typing are invisible until the next click.
 
+**Fixed in the shared reader (2026-10-26, branch `claude/web-reader`).** The same code path serves the live agent,
+this converter and the MiniWoB / factory harness (`harness.chromium.read_cdp` → `axmap` → `driver.read_web`):
+- links and buttons inside headings are controls (the heading stays one text line);
+- ARIA `option` (outside `<select>`), `menuitem` / `menuitemradio`, `menuitemcheckbox` (as `checkbox`), `treeitem`,
+  focusable / clickable `gridcell`, and elements Chromium marks clickable (DOMSnapshot `isClickable`) or that start
+  a `cursor:pointer` run are controls (`option`, `menuitem`, `treeitem`, `gridcell`, `clickable`); `click(n)` acts on
+  them with a full pointer / mouse event sequence;
+- the DOM index comes from one `DOMSnapshot.captureSnapshot` (`flat_document`, any depth); plain wrappers below
+  depth 96 are spliced, so very deep pages read;
+- unnamed controls get a derived name ("cart (unnamed)", "link to account/settings (unnamed)", "button after
+  Quantity (unnamed)", "button 3 (unnamed)"); look-alike controls get their item as context
+  (`button "Add to cart" (in "Desk Lamp")`, `link "Details" (in "B-200 | $30")`, `gridcell "12" (in "May 2026")`);
+- `ChromiumBackend.fill` waits (≥ 150 ms, then settle) and returns the re-read page.
+
+Sample rerun (same 45 tasks / 419 steps, stop mode): **mapping rate 61.3% → 80.5% (306 / 380)**; `grounding_refused`
+62 → 0; `target_not_semantic` 58 → 42 (the rest are JS-clickable `<div>` / `<li>` / `<label>` targets a static dump
+cannot reveal: it has no listeners and no CSS); rows 126 → 238. Fixtures: `tests/rl/test_web_reader.py`.
+
 ## 4. Contamination rules
 
 **Hard rules, enforced in code:**

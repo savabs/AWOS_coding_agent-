@@ -20,9 +20,9 @@ Per step (one Mind2Web action):
   * elements Mind2Web recorded as not rendered (bounding_box_rect "-1,-1,-1,-1" with no rendered
     descendant) are hidden (display:none), because the dump has no CSS; values the trajectory
     typed / selected earlier on the same page are put back in their fields;
-  * the observation is the product's: CDP Accessibility.getFullAXTree + DOM.getDocument ->
-    axmap.snapshot_from_cdp -> live.driver.to_micro_page -> web_tools.Page (the exact path of
-    ChromiumBackend._snap / _load), and the prompt is MicroAgent._prompt with the product wiring
+  * the observation is the product's: harness.chromium.read_cdp (CDP Accessibility.getFullAXTree +
+    DOMSnapshot.captureSnapshot) -> axmap.snapshot_from_cdp -> live.driver.to_micro_page ->
+    web_tools.Page (the exact path of ChromiumBackend._snap / _load), and the prompt is MicroAgent._prompt with the product wiring
     (BrokerSecretStore masking, WebAXGrounder), SYSTEM, Step i of max_steps, history of previous
     actions in the product's wording, "Pages so far", the injection warning;
   * the ground-truth element (``data_pw_testid_buckeye`` = action_uid in raw_html, then the
@@ -67,6 +67,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
+from scaffold.agent.desktop.web_tools import CLICKABLE_ROLES
+from scaffold.rl.harness.axmap import flat_document  # noqa: F401  (moved to the shared reader; re-exported)
 from scaffold.rl.train.dataset import EvalSplitError, Example, _len_stats
 
 #: the URL each snapshot is served at; never fetched (a route answers it from memory)
@@ -75,7 +77,7 @@ TASK_PREFIX = "m2w:"
 DEFAULT_THRESHOLD = 0.75
 DEFAULT_JACCARD = 0.7
 HIDDEN_RECT = "-1,-1,-1,-1"
-CLICKABLE = ("link", "button", "checkbox", "tab")
+CLICKABLE = CLICKABLE_ROLES          # what click(n) acts on (the AX reader's extra click targets included)
 MAX_SCROLLS = 6                       # a target past 7 windows (280 controls) is unmapped (too_far)
 
 
@@ -407,35 +409,6 @@ def dom_maps(doc: dict, uid: str = "") -> Tuple[Dict[int, str], Dict[int, Option
     return m2w, parent, tag, (marked[0] if marked else None), labels
 
 
-def flat_document(snapshot: dict) -> dict:
-    """DOMSnapshot.captureSnapshot -> a DOM.getDocument-shaped dict whose root lists every element as a
-    direct child (with ``_parent``). axmap.dom_index only reads backendNodeId -> tag + attributes, so the
-    observation is the same; used when DOM.getDocument(depth=-1) fails on a deeply nested page (CDP's
-    CBOR encoder has a nesting limit)."""
-    strings = snapshot.get("strings") or []
-    s = lambda i: strings[i] if isinstance(i, int) and 0 <= i < len(strings) else ""  # noqa: E731
-    d = (snapshot.get("documents") or [{}])[0]
-    nodes = d.get("nodes") or {}
-    par = nodes.get("parentIndex") or []
-    types = nodes.get("nodeType") or []
-    names = nodes.get("nodeName") or []
-    bids = nodes.get("backendNodeId") or []
-    attrs = nodes.get("attributes") or []
-    elem_bid: Dict[int, int] = {}
-    out: List[dict] = []
-    for i, t in enumerate(types):
-        if t != 1:
-            continue
-        elem_bid[i] = bids[i]
-        j = par[i] if i < len(par) else -1
-        while j >= 0 and j not in elem_bid:          # parents come before children in the snapshot
-            j = par[j] if j < len(par) else -1
-        out.append({"nodeType": 1, "backendNodeId": bids[i], "localName": s(names[i]).lower(),
-                    "attributes": [s(x) for x in (attrs[i] if i < len(attrs) else [])],
-                    "_parent": elem_bid.get(j)})
-    return {"root": {"nodeType": 9, "children": out}}
-
-
 class SnapshotBrowser:
     """Renders stored HTML in headless Chromium (harness Chromium, JS off, no network) and reads it
     through the product's observation path."""
@@ -449,7 +422,7 @@ class SnapshotBrowser:
                                                      service_workers="block")
         self._html = ""
         self.blocked = 0
-        self.flat_fallbacks = 0                  # pages whose DOM.getDocument hit CDP's nesting limit
+        self.flat_fallbacks = 0                  # pages nested past DOM.getDocument's limit (harness.chromium.DEEP_DOM)
         self.ctx.route("**/*", self._route)
         self.pg = self.ctx.new_page()
         self.cdp = self.ctx.new_cdp_session(self.pg)
@@ -468,26 +441,19 @@ class SnapshotBrowser:
                values: Optional[Dict[str, Tuple[str, str]]] = None, title: str = "") -> Rendered:
         from scaffold.agent.desktop.live.driver import to_micro_page
         from scaffold.agent.desktop.web_tools import WebError
-        from scaffold.rl.harness.axmap import snapshot_from_cdp
+        from scaffold.rl.harness.chromium import read_cdp
         self._html = repair_html(html)
         self.pg.goto(SNAPSHOT_URL, wait_until="load", timeout=30000)
         vals = {k: list(v) for k, v in (values or {}).items()}
         hidden, revealed, behind = self.pg.evaluate(PREP_JS, [list(keep), vals, title, uid])
-        # == ChromiumBackend._snap + _load
-        ax = self.cdp.send("Accessibility.getFullAXTree")
-        try:
-            dom = self.cdp.send("DOM.getDocument", {"depth": -1})
-        except Exception as e:                   # "CBOR: stack limit exceeded": the page nests too deep
-            if "stack limit" not in str(e) and "CBOR" not in str(e):
-                raise
-            dom = flat_document(self.cdp.send("DOMSnapshot.captureSnapshot", {"computedStyles": []}))
-            self.flat_fallbacks += 1
         url = self.pg.url
         try:
             title = self.pg.title()
         except Exception:
             title = ""
-        snap = snapshot_from_cdp(ax, dom, url, title)
+        # == ChromiumBackend._snap + _load (one shared reader, harness.chromium.read_cdp)
+        snap, ax, dom, deep = read_cdp(self.cdp, url, title)
+        self.flat_fallbacks += int(deep)
         if not snap.ok or not snap.web_paths:
             raise WebError("the snapshot has no web area")
         page = to_micro_page(snap)

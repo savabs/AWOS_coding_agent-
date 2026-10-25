@@ -52,6 +52,9 @@ _SECRETISH = re.compile(r"(?<![A-Za-z0-9_\-])(?=[A-Za-z0-9_\-]*\d)(?=[A-Za-z0-9_
                         r"[A-Za-z0-9_\-]{20,}(?![A-Za-z0-9_\-])")
 _SECRET_LABEL = re.compile(r"\b(api[ _-]?key|key value|secret|token|password|private key)\b", re.I)
 _TEXT_INPUT_TYPES = {"", "text", "email", "search", "tel", "url", "number"}
+#: control roles click(n) acts on: the classic four, plus the click targets the AX reader adds
+#: (live/driver.read_web: ARIA options / menu items / tree items / grid cells, JS-clickable elements)
+CLICKABLE_ROLES = ("link", "button", "checkbox", "tab", "option", "menuitem", "treeitem", "gridcell", "clickable")
 
 
 class NotLoopback(PermissionError):
@@ -85,6 +88,7 @@ class Control:
     """One numbered control in the observation (1-based ``n``)."""
     n: int
     role: str                      # link | button | textbox | password | radiogroup | combobox | checkbox | secret_text
+                                   # (AX reader also: tab | option | menuitem | treeitem | gridcell | clickable)
     name: str
     context: str = ""              # label of the enclosing form / region / dialog
     in_dialog: bool = False

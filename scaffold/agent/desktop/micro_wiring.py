@@ -129,7 +129,9 @@ def control_target(c: Control, page: Optional[Page] = None) -> wp6.Target:
     ctx = (c.context or "").strip()
     if ctx:
         container.append(("group", ctx))
-    return wp6.Target(role=_AX_ROLE.get(c.role, c.role), name=c.name, container=tuple(container))
+    # grounding keeps a node's first 200 characters of name (grounding._attr): a longer name (a whole
+    # product card read as one button) must be matched on the same prefix, or it is never found
+    return wp6.Target(role=_AX_ROLE.get(c.role, c.role), name=c.name[:200], container=tuple(container))
 
 
 class WebAXGrounder:

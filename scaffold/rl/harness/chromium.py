@@ -3,16 +3,20 @@ chromium.py — ChromiumBackend: MicroAgent's browser interface (the same surfac
 live/driver.MacBrowserBackend: open / click / fill / select / read_raw / wait_for / close,
 ``.page``, ``.log``) over headless Chromium.
 
-Observation path (byte-identical to the product): CDP Accessibility.getFullAXTree +
-DOM.getDocument -> axmap.snapshot_from_cdp (macOS AX dict shape) -> driver.to_micro_page
+Observation path (byte-identical to the product; read_cdp): CDP Accessibility.getFullAXTree +
+DOMSnapshot.captureSnapshot (the DOM index, as DOM.getDocument gave it, plus the click targets) ->
+axmap.snapshot_from_cdp (macOS AX dict shape) -> driver.to_micro_page
 (-> driver.read_web) -> web_tools.Page. MicroAgent then prompts with web_tools.outline
 exactly as it does on live Safari.
 
 Actions go to the DOM node behind the control's AX path (backendDOMNodeId), the way AXPress /
 AXValue act on the element itself (no hit-testing, overlays do not intercept):
-    click   el.focus(); el.click()
+    click   el.focus(); el.click()  (link / button / checkbox / tab); the reader's other click targets
+            (option / menuitem / treeitem / gridcell / clickable) get the full pointerdown / mousedown /
+            pointerup / mouseup / click sequence (PRESS_JS)
     fill    focus, clear through the native value setter (+ input event), CDP Input.insertText
-            (trusted input events, works for React-style controlled inputs), then a change event
+            (trusted input events, works for React-style controlled inputs), then a change event;
+            then a short wait (fill_wait_ms) + settle and a re-read: fill returns the new page
     select  <select>: pick the option by text, input + change events; radio group: click the radio
 After every action the page is allowed to settle: no pending main-frame navigation, document
 complete, no in-flight fetch/XHR, no pending short timers (<= 2 s), and no DOM mutation for
@@ -36,13 +40,13 @@ import re
 import time
 import urllib.parse
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from scaffold.agent.desktop.live.driver import to_micro_page
-from scaffold.agent.desktop.web_tools import (_SECRETISH, Page, UserNeeded, WebError, check_loopback,  # noqa: F401
-                                              mask_secrets)
+from scaffold.agent.desktop.web_tools import (_SECRETISH, CLICKABLE_ROLES, Page, UserNeeded, WebError,  # noqa: F401
+                                              check_loopback, mask_secrets)
 
-from .axmap import snapshot_from_cdp
+from .axmap import clickable_ids, flat_document, snapshot_from_cdp
 
 SETTLE_JS = r"""
 (() => {
@@ -113,6 +117,50 @@ SELECT_JS = """function(text) {
 }"""
 
 CLICK_JS = "function() { if (this.focus) this.focus(); this.click(); return true; }"
+
+#: click for the reader's extra click targets (option / menuitem / gridcell / clickable ...): custom
+#: widgets often listen to pointerdown / mousedown (an autocomplete list picks on mousedown, before the
+#: input's blur closes it), so the whole press sequence is dispatched at the element's centre
+PRESS_JS = """function() {
+  const r = this.getBoundingClientRect();
+  const o = {bubbles: true, cancelable: true, composed: true, view: window, button: 0,
+             clientX: r.left + r.width / 2, clientY: r.top + r.height / 2};
+  const P = window.PointerEvent || MouseEvent;
+  this.dispatchEvent(new P('pointerdown', Object.assign({pointerId: 1, isPrimary: true}, o)));
+  this.dispatchEvent(new MouseEvent('mousedown', Object.assign({buttons: 1}, o)));
+  this.dispatchEvent(new P('pointerup', Object.assign({pointerId: 1, isPrimary: true}, o)));
+  this.dispatchEvent(new MouseEvent('mouseup', o));
+  this.click();
+  return true;
+}"""
+
+
+#: DOM depth (elements below <html>) from which DOM.getDocument(depth=-1) fails with "CBOR: stack limit
+#: exceeded" (measured on Chromium 1xx: 140 nested elements read, 150 do not)
+DEEP_DOM = 150
+
+
+def read_cdp(cdp, url: str, title: str = "") -> Tuple[Any, dict, dict, bool]:
+    """The product's page reading over one CDP session -> (observe.Snapshot, AX tree, DOM, deep).
+
+    Accessibility.getFullAXTree + one DOMSnapshot.captureSnapshot (computed cursor + isClickable). The
+    snapshot gives the click targets that are not controls by role (axmap.clickable_ids) and, through
+    axmap.flat_document, the DOM index the AX mapping reads (tag + attributes per backendNodeId: the same
+    as DOM.getDocument(depth=-1) gave, pseudo elements aside, which DOM.getDocument fails to encode on
+    deep pages: "CBOR: stack limit exceeded"; one call instead of two). DOM.getDocument is the fallback
+    when the snapshot fails. ``deep``: the page nests >= DEEP_DOM elements. Shared by ChromiumBackend and
+    the Mind2Web converter (rl/train/mind2web_data.SnapshotBrowser)."""
+    ax = cdp.send("Accessibility.getFullAXTree")
+    try:
+        dsnap = cdp.send("DOMSnapshot.captureSnapshot", {"computedStyles": ["cursor"]})
+    except Exception:                                # no layout (closed page): no click targets
+        dsnap = None
+    if dsnap is not None:
+        dom = flat_document(dsnap)
+    else:
+        dom = cdp.send("DOM.getDocument", {"depth": -1})
+    deep = int(dom.get("maxDepth") or 0) >= DEEP_DOM
+    return snapshot_from_cdp(ax, dom, url, title, clickable=clickable_ids(dsnap)), ax, dom, deep
 
 
 def find_chromium() -> Optional[str]:
@@ -202,11 +250,13 @@ class ChromiumBackend:
     def __init__(self, base_url: str, *, chromium: Optional[Chromium] = None, load_timeout: float = 15.0,
                  settle_timeout: float = 5.0, quiet_ms: float = 60.0, viewport=(1280, 800),
                  log: Optional[Callable[[str], None]] = None, web: bool = False, allow_private: bool = False,
-                 page_hook: Optional[Callable[[Page], None]] = None):
+                 page_hook: Optional[Callable[[Page], None]] = None, fill_wait_ms: float = 150.0):
         """``web=True`` (scaffold/rl/web only): real http(s) sites under check_web_url instead of
         loopback-only, the HTTP status of the last main-frame response on Page.status, and the
         extra verbs press_enter / go_back / goto / reveal / screenshot. ``page_hook(page)`` runs on
-        every observation (it may clip the page, or raise UserNeeded to stop on a blocked page)."""
+        every observation (it may clip the page, or raise UserNeeded to stop on a blocked page).
+        ``fill`` waits at least ``fill_wait_ms`` (then until the page settles) and re-reads the page, so
+        options an input shows while typing (autocomplete) are in the page it returns."""
         self.web, self.allow_private = bool(web), bool(allow_private)
         self.base = (check_web_url(base_url, self.allow_private) if self.web
                      else check_loopback(base_url)).rstrip("/")
@@ -225,11 +275,13 @@ class ChromiumBackend:
         self.cdp.send("DOM.enable")
         self.cdp.send("Accessibility.enable")
         self.load_timeout, self.settle_timeout, self.quiet_ms = load_timeout, settle_timeout, quiet_ms
+        self.fill_wait_ms = float(fill_wait_ms)
         self.page: Optional[Page] = None
         self.log: List[str] = []                     # method + path + outcome (no values)
         self.unverified: List[dict] = []
         self.interruptions: List[dict] = []
         self.timings: List[dict] = []                # per call: {"op", "act_ms", "settle_ms", "observe_ms"}
+        self.deep_reads = 0                          # observations of pages nested >= DEEP_DOM elements
         self._ulog = log
         self._nav_pending = 0
         self._last_status: Optional[int] = None
@@ -335,14 +387,14 @@ class ChromiumBackend:
                 time.sleep(0.015)
 
     def _snap(self):
-        ax = self.cdp.send("Accessibility.getFullAXTree")
-        dom = self.cdp.send("DOM.getDocument", {"depth": -1})
         url = self.pg.url
         try:
             title = self.pg.title()
         except Exception:
             title = ""
-        return snapshot_from_cdp(ax, dom, url, title)
+        snap, _ax, _dom, deep = read_cdp(self.cdp, url, title)
+        self.deep_reads += int(deep)
+        return snap
 
     def _load(self, settled: Optional[bool] = None) -> Page:
         t0 = time.monotonic()
@@ -417,14 +469,14 @@ class ChromiumBackend:
 
     def click(self, page: Page, n: int) -> Page:
         c, snap, path, backend = self._live(page, n)
-        if c.role not in ("link", "button", "checkbox", "tab"):
+        if c.role not in CLICKABLE_ROLES:
             raise WebError(f"control {n} ({c.role}) is not clickable")
         rec = self._time("click")
         t0 = time.monotonic()
         if self.web:
             self._into_view(backend)                 # so the step's screenshot shows what was clicked
         try:
-            self._call(backend, CLICK_JS)
+            self._call(backend, CLICK_JS if c.role in ("link", "button", "checkbox", "tab") else PRESS_JS)
         except WebError:
             self.log.append(f"CLICK {c.role} -> refused")
             raise
@@ -451,9 +503,36 @@ class ChromiumBackend:
         page.values[n] = value
         c.value = "•" * 8 if c.role == "password" else mask_secrets(value)
         t1 = time.monotonic()
-        self._settle()                               # input handlers may fetch / re-render
+        settled = self._settle(min_wait_ms=self.fill_wait_ms)   # input handlers may fetch / re-render
         rec["settle_ms"] = round((time.monotonic() - t1) * 1000, 1)
-        return page
+        return self._reread(page, settled)
+
+    def _reread(self, page: Page, settled: bool) -> Page:
+        """The page again after typing (an autocomplete list may have appeared), keeping what was
+        typed: values by control path, a password field still shown as filled. ``page`` itself when the
+        read fails (the caller keeps working on the page it had)."""
+        rec = self.timings[-1] if self.timings else {}
+        settle_ms = rec.get("settle_ms", 0.0)
+        try:
+            new = self._load(settled=settled)
+        except UserNeeded:                           # the page turned into a wall while typing
+            raise
+        except WebError:
+            return page
+        finally:
+            if rec:
+                rec["settle_ms"] = settle_ms         # _load would book ~0 (the wait happened before it)
+        old_paths = getattr(page, "_live", {}).get("paths", {})
+        by_path = {p: m for m, p in new._live["paths"].items()}  # type: ignore[attr-defined]
+        for m0, v in page.values.items():
+            m = by_path.get(old_paths.get(m0))
+            oc, nc = page.control(m0), new.control(m) if m else None
+            if nc is None or oc is None or nc.role != oc.role:
+                continue
+            new.values[m] = v
+            if nc.role == "password":
+                nc.value = "•" * 8
+        return new
 
     def select(self, page: Page, n: int, option: str) -> Page:
         c, snap, path, backend = self._live(page, n)
