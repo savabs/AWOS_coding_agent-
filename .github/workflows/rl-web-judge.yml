@@ -1,0 +1,124 @@
+# WebJudge (Online-Mind2Web's automatic judge, scaffold/rl/web_judge) over the judge-layout artifacts of
+# rl-web runs, with OpenAI o4-mini under a hard USD cap (docs/specs/web_judge.md).
+#
+# Launch: push to a branch named bench-cloud/rl-web-judge-<anything>. Settings: ci/rl_web_judge.env
+# (RUNS, BACKEND, MAX_USD, ...; no secrets). Spends OpenAI credit through the OPENAI_API_KEY secret; the
+# dry-run step prints the estimate first, and the judge stops before any call that could pass MAX_USD.
+# bench-cloud/rl-** branches are excluded from the paid ladder workflow (.github/workflows/ladder.yml).
+name: rl-web-judge
+
+on:
+  push:
+    branches: ["bench-cloud/rl-web-judge-**"]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: rl-web-judge-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  judge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_REPO: ${{ github.repository }}
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ci/rl_web_judge.env
+          if [ -z "$RUNS" ]; then echo "::error::RUNS is empty in ci/rl_web_judge.env"; exit 1; fi
+          case "$BACKEND" in o4mini|dry) ;; *) echo "::error::BACKEND must be o4mini or dry here (webjudge7b runs on Kaggle)"; exit 1 ;; esac
+          for k in RUNS ARTIFACT_PATTERN BACKEND MAX_USD SERVICE_TIER MAX_OUTPUT_TOKENS WORKERS IMAGE_WORKERS LEVELS_URL PILLOW_PIN; do
+            printf '%s=%s\n' "$k" "${!k}" >> "$GITHUB_ENV"
+          done
+          printf 'RUNS=%s\nBACKEND=%s\nMAX_USD=%s\nSERVICE_TIER=%s\n' "$RUNS" "$BACKEND" "$MAX_USD" "$SERVICE_TIER"
+
+      - name: Pillow (upstream pin)
+        run: python -m pip install --quiet "$PILLOW_PIN"
+
+      - name: Check the API key is configured (value never printed)
+        if: env.BACKEND == 'o4mini'
+        shell: bash
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "::error::secret OPENAI_API_KEY is not set"; exit 1
+          fi
+          echo "OPENAI_API_KEY is set"
+
+      - name: Download the run artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARGS=""
+          for entry in $RUNS; do
+            label="${entry%%=*}"; rest="${entry#*=}"
+            [ "$label" = "$entry" ] && label="run$entry"
+            id="${rest%%:*}"; pattern="$ARTIFACT_PATTERN"
+            [ "$rest" != "$id" ] && pattern="${rest#*:}"
+            mkdir -p "artifacts/$label"
+            gh run download "$id" --repo "$SOURCE_REPO" --pattern "$pattern" --dir "artifacts/$label"
+            echo "$label: $(find "artifacts/$label" -name result.json | wc -l) result.json"
+            ARGS="$ARGS $label=artifacts/$label"
+          done
+          echo "JUDGE_RUNS=${ARGS# }" >> "$GITHUB_ENV"
+          if [ -n "$LEVELS_URL" ]; then
+            curl -fsSL --retry 3 -o levels.json "$LEVELS_URL"
+            echo "LEVELS_ARG=--levels levels.json" >> "$GITHUB_ENV"
+          fi
+
+      - name: Estimate (dry run, no call)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p judge
+          # shellcheck disable=SC2086
+          python scripts/web/judge.py --runs $JUDGE_RUNS --backend dry --out judge/estimate.json \
+            --max-usd "$MAX_USD" --max-output-tokens "$MAX_OUTPUT_TOKENS" ${LEVELS_ARG:-} | tee judge/estimate.log
+          { echo "## rl-web-judge estimate"; echo; echo '```'; cat judge/estimate.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Judge (o4-mini, hard cap MAX_USD)
+        id: judge
+        if: env.BACKEND == 'o4mini'
+        shell: bash
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -uo pipefail
+          # shellcheck disable=SC2086
+          python scripts/web/judge.py --runs $JUDGE_RUNS --backend o4mini --out judge/results.json \
+            --max-usd "$MAX_USD" --service-tier "$SERVICE_TIER" --max-output-tokens "$MAX_OUTPUT_TOKENS" \
+            --workers "$WORKERS" --image-workers "$IMAGE_WORKERS" --quiet ${LEVELS_ARG:-} 2>&1 | tee judge/judge.log
+          RC=${PIPESTATUS[0]}
+          echo "rc=$RC" >> "$GITHUB_OUTPUT"
+          { echo "## rl-web-judge results (exit $RC)"; echo; echo '```'; tail -n 60 judge/judge.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$RC" = "3" ]; then echo "::warning::stopped by the MAX_USD cap: partial results"; fi
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rl-web-judge
+          path: judge/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Fail on a fatal judge error
+        if: steps.judge.outputs.rc != '' && steps.judge.outputs.rc != '0' && steps.judge.outputs.rc != '3'
+        run: |
+          echo "::error::judge exited ${{ steps.judge.outputs.rc }} (2 = fatal backend error, e.g. model no longer served)"
+          exit 1
