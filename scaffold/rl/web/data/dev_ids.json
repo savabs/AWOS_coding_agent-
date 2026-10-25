@@ -1,0 +1,10 @@
+{
+ "dataset": "osunlp/Online-Mind2Web",
+ "file": "Online_Mind2Web.json",
+ "revision": "eacad896a84dc5b65e29b0b06e4699ab0544d701",
+ "seed": "online-mind2web-dev-v1",
+ "size": 0,
+ "by_level": {},
+ "status": "pending: written by `python -m scaffold.rl.web freeze-dev` once the gated dataset is available (HF_TOKEN); until then runs use the same deterministic selection and record dev_ids_source=computed",
+ "ids": []
+}

@@ -132,6 +132,12 @@ class OracleModel:
         if op == "scroll":
             self.i += 1
             return f"scroll({s.get('direction', 'down')})"
+        if op == "go_back":                         # open-web verbs (scaffold/rl/web)
+            self.i += 1
+            return "go_back()"
+        if op == "goto":
+            self.i += 1
+            return f"goto({_q(str(s.get('url', '')))})"
         n = find_control(user, s.get("role"), str(s.get("name", "")), s.get("context"), s.get("dialog"))
         if n is None or n < 0:
             m = _SHOWING.search(_obs(user))
@@ -148,9 +154,9 @@ class OracleModel:
         self.i += 1
         if op == "click":
             return f"click({n})"
-        if op == "fill":
+        if op in ("fill", "fill_enter"):
             v = str(s.get("value", ""))
-            return f"fill({n}, {v if HANDLE_RE.match(v) else _q(v)})"
+            return f"{op}({n}, {v if HANDLE_RE.match(v) else _q(v)})"
         if op == "select":
             return f"select({n}, {_q(str(s.get('option', '')))})"
         if op in ("copy", "copy_to_secret"):

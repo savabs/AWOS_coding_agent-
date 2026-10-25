@@ -16,6 +16,14 @@ closed verb set:
     done("summary")              claim success (checked, see below)
     needs_user("reason")         stop and hand back to the owner
 
+Open-web verbs (opt-in, ``MicroAgent(..., web_verbs=True)``; scaffold/rl/web uses them on
+real sites). The parser always accepts them; the grammar and the prompt offer them only when
+switched on, so the product's prompts and grammars are unchanged:
+
+    fill_enter(n, "text")        fill a text input, then press Enter in it (search boxes)
+    go_back()                    browser back
+    goto("https://...")          open an http(s) URL (the browser enforces its own URL policy)
+
 Local model: the reply is constrained by a per-step GBNF grammar (control
 numbers and secret names enumerated from the observation). Cloud model: a
 JSON object, parsed and type-checked the same way.
@@ -134,13 +142,19 @@ class Verb(str, Enum):
     SCROLL = "scroll"
     DONE = "done"
     NEEDS_USER = "needs_user"
+    FILL_ENTER = "fill_enter"                  # open-web verbs (web_verbs=True)
+    GO_BACK = "go_back"
+    GOTO = "goto"
+
+
+WEB_VERBS = (Verb.FILL_ENTER, Verb.GO_BACK, Verb.GOTO)
 
 
 @dataclass
 class MicroAction:
     verb: Verb
     n: Optional[int] = None
-    value: Optional[str] = None                # fill text or handle
+    value: Optional[str] = None                # fill / fill_enter text or handle; goto URL
     option: Optional[str] = None               # select
     name: Optional[str] = None                 # copy_to_secret target
     text: str = ""                             # done summary / needs_user reason
@@ -148,9 +162,13 @@ class MicroAction:
 
     def show(self) -> str:
         """Log form: never contains a secret value (fill values are handles or masked text)."""
-        if self.verb is Verb.FILL:
+        if self.verb in (Verb.FILL, Verb.FILL_ENTER):
             v = self.value or ""
-            return f"fill({self.n}, {v if HANDLE_RE.match(v) else json.dumps(mask_secrets(v))})"
+            return f"{self.verb.value}({self.n}, {v if HANDLE_RE.match(v) else json.dumps(mask_secrets(v))})"
+        if self.verb is Verb.GO_BACK:
+            return "go_back()"
+        if self.verb is Verb.GOTO:
+            return f"goto({json.dumps(mask_secrets(self.value or '')[:300])})"
         if self.verb is Verb.SELECT:
             return f"select({self.n}, {json.dumps(self.option)})"
         if self.verb is Verb.COPY:
@@ -173,15 +191,22 @@ def _lit(s: str) -> str:
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def build_grammar(n_controls: int, secrets_in: Sequence[str] = (), secrets_out: Sequence[str] = ()) -> str:
+def build_grammar(n_controls: int, secrets_in: Sequence[str] = (), secrets_out: Sequence[str] = (),
+                  web: bool = False) -> str:
     """GBNF over the verb set for the current observation: control numbers and
     secret names are enumerated, so the model cannot even emit a number that
-    is not on the page or a handle the subtask did not grant."""
+    is not on the page or a handle the subtask did not grant. ``web`` adds the
+    open-web verbs (fill_enter / go_back / goto); without it the grammar is
+    byte-identical to the product's."""
     nums = " | ".join(_lit(str(i)) for i in range(1, max(1, n_controls) + 1))
     acts = ["click", "fill", "select"]
+    if web:
+        acts.append("fillenter")
     if secrets_out:
         acts.append("copy")
     acts += ["scroll", "done", "needs"]
+    if web:
+        acts += ["goback", "goto"]
     fill_val = "( handle | str )" if secrets_in else "str"
     lines = [
         "root ::= reason? action",
@@ -196,6 +221,10 @@ def build_grammar(n_controls: int, secrets_in: Sequence[str] = (), secrets_out: 
         f"num ::= {nums}",
         'str ::= "\\"" ( [^"\\\\\\n] | "\\\\" ["\\\\] ){0,200} "\\""',
     ]
+    if web:
+        lines += [f'fillenter ::= "fill_enter(" num ", " {fill_val} ")"',
+                  'goback ::= "go_back()"',
+                  r'goto ::= "goto(\"" ( "http://" | "https://" ) [^"\\\n ]{1,280} "\")"']
     if secrets_in:
         lines.append('handle ::= "{{secret:" ( ' + " | ".join(_lit(s) for s in secrets_in) + ' ) "}}"')
     if secrets_out:
@@ -206,7 +235,7 @@ def build_grammar(n_controls: int, secrets_in: Sequence[str] = (), secrets_out: 
 ACTION_SCHEMA = {
     "type": "object",
     "properties": {
-        "action": {"type": "string", "enum": [v.value for v in Verb]},
+        "action": {"type": "string", "enum": [v.value for v in Verb if v not in WEB_VERBS]},
         "n": {"type": "integer", "minimum": 1},
         "value": {"type": "string"}, "option": {"type": "string"}, "name": {"type": "string"},
         "text": {"type": "string"}, "direction": {"type": "string", "enum": ["down", "up"]},
@@ -216,14 +245,20 @@ ACTION_SCHEMA = {
 
 _STR = r'"((?:[^"\\\n]|\\["\\])*)"'
 _TEXT_FORMS = [
-    (re.compile(r"^click\((\d{1,3})\)$"), lambda m: MicroAction(Verb.CLICK, int(m[1]))),
-    (re.compile(r"^fill\((\d{1,3}), (\{\{secret:[a-z][a-z0-9_]{0,39}\}\})\)$"),
+    (re.compile(r"^click\((\d{1,4})\)$"), lambda m: MicroAction(Verb.CLICK, int(m[1]))),
+    (re.compile(r"^fill\((\d{1,4}), (\{\{secret:[a-z][a-z0-9_]{0,39}\}\})\)$"),
      lambda m: MicroAction(Verb.FILL, int(m[1]), value=m[2])),
-    (re.compile(r"^fill\((\d{1,3}), " + _STR + r"\)$"), lambda m: MicroAction(Verb.FILL, int(m[1]), value=_unq(m[2]))),
-    (re.compile(r"^select\((\d{1,3}), " + _STR + r"\)$"),
+    (re.compile(r"^fill\((\d{1,4}), " + _STR + r"\)$"), lambda m: MicroAction(Verb.FILL, int(m[1]), value=_unq(m[2]))),
+    (re.compile(r"^select\((\d{1,4}), " + _STR + r"\)$"),
      lambda m: MicroAction(Verb.SELECT, int(m[1]), option=_unq(m[2]))),
-    (re.compile(r"^copy_to_secret\((\d{1,3}), ([a-z][a-z0-9_]{0,39})\)$"),
+    (re.compile(r"^copy_to_secret\((\d{1,4}), ([a-z][a-z0-9_]{0,39})\)$"),
      lambda m: MicroAction(Verb.COPY, int(m[1]), name=m[2])),
+    (re.compile(r"^fill_enter\((\d{1,4}), (\{\{secret:[a-z][a-z0-9_]{0,39}\}\})\)$"),
+     lambda m: MicroAction(Verb.FILL_ENTER, int(m[1]), value=m[2])),
+    (re.compile(r"^fill_enter\((\d{1,4}), " + _STR + r"\)$"),
+     lambda m: MicroAction(Verb.FILL_ENTER, int(m[1]), value=_unq(m[2]))),
+    (re.compile(r"^go_back\(\)$"), lambda m: MicroAction(Verb.GO_BACK)),
+    (re.compile(r"^goto\(" + _STR + r"\)$"), lambda m: MicroAction(Verb.GOTO, value=_unq(m[1]))),
     (re.compile(r"^scroll\((down|up)\)$"), lambda m: MicroAction(Verb.SCROLL, direction=m[1])),
     (re.compile(r"^done\(" + _STR + r"\)$"), lambda m: MicroAction(Verb.DONE, text=_unq(m[1]))),
     (re.compile(r"^needs_user\(" + _STR + r"\)$"), lambda m: MicroAction(Verb.NEEDS_USER, text=_unq(m[1]))),
@@ -261,10 +296,15 @@ def parse_json_action(raw: str) -> MicroAction:
     n = d.get("n")
     if n is not None and not isinstance(n, int):
         raise ParseError("n must be an integer")
-    if verb in (Verb.CLICK, Verb.FILL, Verb.SELECT, Verb.COPY) and n is None:
+    if verb in (Verb.CLICK, Verb.FILL, Verb.SELECT, Verb.COPY, Verb.FILL_ENTER) and n is None:
         raise ParseError("n required")
-    if verb is Verb.FILL and not isinstance(d.get("value"), str):
+    if verb in (Verb.FILL, Verb.FILL_ENTER) and not isinstance(d.get("value"), str):
         raise ParseError("value required")
+    if verb is Verb.GOTO:
+        url = d.get("url") if isinstance(d.get("url"), str) else d.get("value")
+        if not isinstance(url, str) or not url:
+            raise ParseError("url required")
+        return MicroAction(verb, value=url)
     if verb is Verb.SELECT and not isinstance(d.get("option"), str):
         raise ParseError("option required")
     if verb is Verb.COPY and not IDENT_RE.match(str(d.get("name", ""))):
@@ -651,13 +691,29 @@ SYSTEM = (
     "- Reply done(\"summary\") only when the page itself shows the goal is complete."
 )
 
+#: appended to SYSTEM when the open-web verbs are on (MicroAgent(web_verbs=True))
+SYSTEM_WEB = (
+    "\nOn the open web you also have: fill_enter(n, \"text\") (type into a text field, then press Enter, "
+    "e.g. a search box) | go_back() | goto(\"https://...\").\n"
+    "- Prefer the site's own search, menus and filters; goto only a URL you saw or the site's own pages.\n"
+    "- If the goal asks for information, give the answer itself in done(\"...\")."
+)
+
 
 class MicroAgent:
     def __init__(self, browser: LoopbackBrowser, model: ActionModel, *,
                  store: Optional[SecretStore] = None, grounder: Optional[Grounder] = None,
                  approver: Optional[Approver] = None, user_channel: Optional[UserChannel] = None,
-                 clock: Callable[[], float] = time.monotonic, log: Optional[Callable[[str], None]] = None):
+                 clock: Callable[[], float] = time.monotonic, log: Optional[Callable[[str], None]] = None,
+                 web_verbs: bool = False, max_steps_cap: Optional[int] = None,
+                 max_seconds_cap: Optional[float] = None):
+        """``web_verbs`` offers fill_enter / go_back / goto (grammar + prompt); ``max_steps_cap`` /
+        ``max_seconds_cap`` replace MAX_STEPS / max_seconds_cap() for this agent (open-web evaluation
+        needs ~25 steps). Defaults keep the product behaviour."""
         self.br = browser
+        self.web_verbs = bool(web_verbs)
+        self.max_steps_cap = int(max_steps_cap) if max_steps_cap else MAX_STEPS
+        self.max_seconds_override = float(max_seconds_cap) if max_seconds_cap else None
         self.model = model
         from . import micro_wiring                       # real WP6/WP7 pieces unless AWOS_MICRO_WIRING=local
         self.store = store or micro_wiring.default_store()
@@ -773,7 +829,11 @@ class MicroAgent:
                        '{"action": "fill", "n": 2, "value": "{{secret:name}}"} or {"action": "done", "text": "..."}.')
         else:
             out.append("Reply with ONE action line, e.g. click(3) or fill(2, {{secret:name}}) or "
-                       "select(4, \"Read-only\") or done(\"...\"). You may put one short '# reason' line first.")
+                       "select(4, \"Read-only\") or done(\"...\"). You may put one short '# reason' line first."
+                       if not self.web_verbs else
+                       "Reply with ONE action line, e.g. click(3) or fill_enter(2, \"search words\") or "
+                       "select(4, \"Newest\") or go_back() or done(\"...\"). You may put one short '# reason' "
+                       "line first.")
         return "\n".join(out)
 
     # -- checks ----------------------------------------------------------------
@@ -811,8 +871,8 @@ class MicroAgent:
 
     # -- the loop ----------------------------------------------------------------
     def run(self, st: Subtask) -> MicroResult:
-        st.max_steps = max(1, min(int(st.max_steps), MAX_STEPS))
-        cap = max_seconds_cap()
+        st.max_steps = max(1, min(int(st.max_steps), self.max_steps_cap))
+        cap = self.max_seconds_override or max_seconds_cap()
         st.max_seconds = cap if st.max_seconds is None else max(1.0, min(float(st.max_seconds), cap))
         res = MicroResult(st.name, Outcome.HALTED)
         secrets_in = list(st.secrets_in)
@@ -898,9 +958,10 @@ class MicroAgent:
                                   captured=captured, visited=visited, complete=complete(page))
             # a name captured in this run is no longer offered: a small model cannot even emit the repeat
             out_left = [s for s in st.secrets_out if s not in captured]
-            grammar = build_grammar(len(page.controls), secrets_in, out_left) if fmt == "gbnf" else None
+            grammar = build_grammar(len(page.controls), secrets_in, out_left, web=self.web_verbs) \
+                if fmt == "gbnf" else None
             try:
-                raw = self.model.decide(SYSTEM, prompt, grammar)
+                raw = self.model.decide(SYSTEM + SYSTEM_WEB if self.web_verbs else SYSTEM, prompt, grammar)
             except Exception as e:                       # model down / timeout: stop, do not guess
                 return finish(Outcome.NEEDS_USER, f"model call failed: {type(e).__name__}")
             if self.clock() - t0 > st.max_seconds:
@@ -948,6 +1009,12 @@ class MicroAgent:
                 window = max(0, window + (WINDOW if act.direction == "down" else -WINDOW))
                 if window >= len(page.controls):
                     window = max(0, len(page.controls) - WINDOW)
+                reveal = getattr(self.br, "reveal", None)     # optional: move the viewport along
+                if reveal is not None:
+                    try:
+                        reveal(page, window + 1)
+                    except Exception:
+                        pass
             if act.verb is Verb.DONE:
                 return verify_done(page, ev, act.text)
             if err:
@@ -1014,6 +1081,15 @@ class MicroAgent:
                     "done(\"summary\"); otherwise continue with the goal.")
         return "Continue with the next field or control the goal needs."
 
+    def _enter(self, page: Page, c: Control):
+        """fill_enter's second half: Enter in the field just filled (the page may navigate)."""
+        try:
+            return None, self.br.press_enter(page, c.n), None
+        except UserNeeded:
+            raise
+        except WebError as e:
+            return f"the text was typed but pressing Enter failed: {e}", page, None
+
     def _execute(self, st: Subtask, act: MicroAction, page: Page, secrets_in: List[str], res: MicroResult,
                  approved: bool, ev: dict):
         """-> (error-for-the-model | None, page, stop (Outcome, reason) | None)"""
@@ -1025,6 +1101,21 @@ class MicroAgent:
             if len(page.controls) <= WINDOW:
                 return "nothing more to scroll; every control is already listed", page, None
             return None, page, None
+        if act.verb in WEB_VERBS and not self.web_verbs:
+            return f"{act.verb.value} is not available here", page, None
+        if act.verb in (Verb.GO_BACK, Verb.GOTO):
+            fn = getattr(self.br, "go_back" if act.verb is Verb.GO_BACK else "goto", None)
+            if fn is None:
+                return f"this browser cannot {act.verb.value}", page, None
+            if act.verb is Verb.GOTO and not re.match(r"^https?://[^\s/]+", act.value or "", re.I):
+                return "goto only takes an http:// or https:// URL", page, None
+            try:
+                new = fn() if act.verb is Verb.GO_BACK else fn(act.value)
+            except UserNeeded:
+                raise
+            except WebError as e:
+                return f"{act.verb.value} failed: {e}", page, None
+            return None, new, None
         gr = self.grounder.resolve(page, act.n or 0)
         if gr.control is None:
             if page.control(act.n or 0) is None:
@@ -1073,9 +1164,14 @@ class MicroAgent:
                 ev["write"] = True
             return None, new, None
 
-        if act.verb is Verb.FILL:
+        if act.verb in (Verb.FILL, Verb.FILL_ENTER):
             if c.role not in ("textbox", "password"):
                 return f"control {c.n} is a {c.role}; fill only works on text inputs", page, None
+            enter = act.verb is Verb.FILL_ENTER
+            if enter and not st.allow_writes and c.form is not None:
+                return "this subtask may not submit forms", page, None
+            if enter and getattr(self.br, "press_enter", None) is None:
+                return "this browser cannot press Enter", page, None
             v = act.value or ""
             m = HANDLE_RE.match(v)
             if m:
@@ -1084,7 +1180,7 @@ class MicroAgent:
                     return f"secret handle {name} is not available in this subtask", page, None
                 self.br.fill(page, c.n, self.store.get(name))        # substituted at the sink
                 c.value = v                                           # the model sees the handle
-                return None, page, None
+                return self._enter(page, c) if enter else (None, page, None)
             if "{{" in v or "secret:" in v:
                 return "a secret handle must be the whole value: fill(n, {{secret:name}})", page, None
             if is_secret_field(c):
@@ -1097,8 +1193,16 @@ class MicroAgent:
             err = self._pinned_ok(st, c, v)
             if err:
                 return err, page, None
-            self.br.fill(page, c.n, v)
-            return None, page, None
+            if self.web_verbs:                       # open web: a stale field is the model's problem, not infra
+                try:
+                    self.br.fill(page, c.n, v)
+                except UserNeeded:
+                    raise
+                except WebError as e:
+                    return f"fill failed: {e}", page, None
+            else:
+                self.br.fill(page, c.n, v)
+            return self._enter(page, c) if enter else (None, page, None)
 
         if act.verb is Verb.SELECT:
             if c.role not in ("radiogroup", "combobox"):
@@ -1109,7 +1213,15 @@ class MicroAgent:
             err = self._pinned_ok(st, c, opt)
             if err:
                 return err, page, None
-            self.br.select(page, c.n, opt)
+            if self.web_verbs:
+                try:
+                    self.br.select(page, c.n, opt)
+                except UserNeeded:
+                    raise
+                except WebError as e:
+                    return f"select failed: {e}", page, None
+            else:
+                self.br.select(page, c.n, opt)
             return None, page, None
 
         if act.verb is Verb.COPY:
@@ -1207,6 +1319,7 @@ class ScriptedModel:
         'click "API keys"'   'fill "Email" {{secret:user}}'   'fill "Key name" "x"'
         'select "Scope" "Read-only"'   'copy "New API key value" key'
         'done "..."'   'needs_user "..."'   'raw <literal reply>'   'scroll down'
+        'fill_enter "Search" "x"'   'go_back'   'goto "https://..."'   (open-web verbs)
     A name may carry a role prefix ('button:Create key') or a dialog marker
     ('Create key@dialog'). Every prompt is kept in ``prompts``."""
     output_format = "gbnf"
@@ -1250,9 +1363,13 @@ class ScriptedModel:
         vals = [a or b or c for a, b, c in args]
         if verb == "click":
             return f"click({self._find(user, vals[0])})"
-        if verb == "fill":
+        if verb in ("fill", "fill_enter"):
             v = vals[1]
-            return f"fill({self._find(user, vals[0])}, {v if HANDLE_RE.match(v) else json.dumps(v)})"
+            return f"{verb}({self._find(user, vals[0])}, {v if HANDLE_RE.match(v) else json.dumps(v)})"
+        if verb == "go_back":
+            return "go_back()"
+        if verb == "goto":
+            return f"goto({json.dumps(vals[0] if vals else '')})"
         if verb == "select":
             return f"select({self._find(user, vals[0])}, {json.dumps(vals[1])})"
         if verb == "copy":
