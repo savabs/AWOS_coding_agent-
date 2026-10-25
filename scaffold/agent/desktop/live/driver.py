@@ -18,6 +18,17 @@ Reading rules (AX -> controls), document order:
     AXPopUpButton -> combobox            AXCheckBox -> checkbox
     a labelled leaf (DOM id / aria-label) whose text looks like a credential, or whose label says
     key / token / secret -> secret_text (raw text only via read_raw; masked everywhere else)
+    AXMenuItem (an ARIA menu, not a <select>'s) -> menuitem; a node the Chromium mapping marks
+    "press" (axmap: ARIA option / menuitem / treeitem / clickable gridcell, JS-clickable generic)
+    -> that kind (option | menuitem | checkbox | treeitem | gridcell | clickable), unless a control
+    sits inside it (the inner control is the target). Controls inside headings are read too (the
+    heading's text stays one heading line).
+Names: a control with no accessible name gets a derived one marked "(unnamed)" (text fields:
+"(unlabeled)", _derived_field_name): the DOM hint (title / alt / icon class, axmap "hint"), else
+"link to <path>", else "<kind> after <the text before it>", else "<kind> N". Controls that still
+look alike (same kind, name, context and dialog flag; grounding refuses those) get the text of
+the item that holds each one as context (a product card's heading, a table row), else the text
+just before it, else "item k of m" — so every number maps to exactly one control.
 Forms: an explicit form (AXLandmarkForm / role description "form"); otherwise a button belongs
 to the innermost ancestor that contains an input (the web area counts), or to its dialog.
 Every form is treated as a POST form, so micro_agent counts its submit as a write and asks
@@ -28,6 +39,7 @@ from __future__ import annotations
 
 import contextlib
 import itertools
+import os
 import re
 import urllib.parse
 from dataclasses import dataclass, field
@@ -35,13 +47,15 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 from ..ax_compress import norm_role
-from ..web_tools import (_SECRET_LABEL, _SECRETISH, Control, Form, Page, UserNeeded, WebError, check_loopback,
-                         mask_secrets)
+from ..web_tools import (_SECRET_LABEL, _SECRETISH, CLICKABLE_ROLES, Control, Form, Page, UserNeeded, WebError,
+                         check_loopback, mask_secrets)
 from .actions import NEEDS_USER, SAFARI, Actor, Expect, Outcome, Revealed, norm_url
 from .observe import Snapshot, snapshot_element
 
 INPUT_ROLES = {"textfield", "textarea", "searchfield", "combobox", "securetextfield", "radiogroup",
                "popupbutton", "checkbox"}
+#: roles read_web turns into a control (a "press" node counts too)
+CONTROL_ROLES = INPUT_ROLES | {"link", "button", "radiobutton", "menuitem"}
 DIALOG_SUBROLES = {"AXApplicationAlertDialog", "AXApplicationDialog"}
 LEAF_TEXT_ROLES = {"statictext", "text"}
 _snap_ids = itertools.count(1)
@@ -63,6 +77,7 @@ class WebControl:
     options: List[str] = field(default_factory=list)
     option_paths: Dict[str, Tuple[int, ...]] = field(default_factory=dict)
     raw: str = field(default="", repr=False)          # secret_text only; never shown
+    near: str = field(default="", repr=False)         # the page text just before it (disambiguation)
 
 
 @dataclass
@@ -154,6 +169,162 @@ def _derived_field_name(n: dict, lines: List[Tuple[str, str]], controls: List["W
     return name
 
 
+def _press_kind(n: dict) -> str:
+    """The control kind of a clickable non-control node ("" if it is none)."""
+    k = n.get("press")
+    if isinstance(k, str) and k:
+        return k
+    return "menuitem" if _role(n) == "menuitem" else ""
+
+
+def _clip_words(s: str, limit: int) -> str:
+    s = " ".join(str(s or "").replace('"', "'").split())
+    if len(s) <= limit:
+        return s
+    cut = s[:limit].rsplit(" ", 1)[0]
+    return (cut if len(cut) >= limit // 2 else s[:limit]).rstrip(" ,;:-") + "…"
+
+
+def _href_words(url: str) -> str:
+    """'https://shop.example/cart/items?x=1' -> 'cart/items'; '' for '#' / javascript: links."""
+    u = urllib.parse.urlsplit(url or "")
+    if u.scheme not in ("http", "https", ""):
+        return ""
+    segs = [urllib.parse.unquote(x) for x in u.path.split("/") if x]
+    if segs:
+        return re.sub(r"\.(html?|php|aspx?)$", "", "/".join(segs[-2:]))[:60]
+    return (u.hostname or "")[:60]
+
+
+def _derived_control_name(n: dict, kind: str, lines: List[Tuple[str, str]],
+                          controls: List["WebControl"]) -> str:
+    """A name for a link / button / other clickable the page left unnamed (an icon button), so it can
+    be used instead of refused: the DOM hint (title / alt / icon class: axmap "hint", WebKit AXHelp),
+    else where a link goes, else the text just before it, else its position. Marked "(unnamed)" so the
+    model knows it was derived."""
+    hint = " ".join(str(n.get("hint") or n.get("help") or "").split())
+    ident = str(n.get("identifier") or "")
+    if not hint and re.fullmatch(r"[A-Za-z][A-Za-z_-]{2,40}", ident):
+        hint = " ".join(re.sub(r"[-_]+|(?<=[a-z])(?=[A-Z])", " ", ident).lower().split())
+    base = _clip_words(hint, 60) if hint else ""
+    if not base and kind == "link":
+        where = _href_words(str(n.get("url") or ""))
+        base = f"link to {where}" if where else ""
+    if not base:
+        near = next((t for t, k in reversed(lines) if k in ("text", "heading") and t.strip()), "")
+        near = _clip_words(near.strip(" '"), 40)
+        base = f"{kind} after {near}" if near else ""
+    taken = {c.name for c in controls}
+    if not base:
+        k = sum(1 for c in controls if c.kind == kind and "(unnamed" in c.name) + 1
+        while f"{kind} {k} (unnamed)" in taken:
+            k += 1
+        return f"{kind} {k} (unnamed)"
+    name, i = f"{base} (unnamed)", 2
+    while name in taken:                             # a numeric suffix keeps it unique, as for text fields
+        name, i = f"{base} (unnamed {i})", i + 1
+    return name
+
+
+def _node_at(root: dict, wp: Tuple[int, ...], path: Tuple[int, ...]) -> Optional[dict]:
+    n: Optional[dict] = root
+    for i in path[len(wp):]:
+        kids = (n or {}).get("children") or []
+        if not 0 <= i < len(kids):
+            return None
+        n = kids[i]
+    return n
+
+
+def _first_heading(n: dict, budget: int = 120) -> str:
+    """The first heading inside ``n`` (looking at no more than ``budget`` nodes)."""
+    stack = [n]
+    while stack and budget > 0:
+        x = stack.pop()
+        budget -= 1
+        if _role(x) == "heading":
+            return _text_head(x, 200) or _name(x)
+        stack.extend(reversed(x.get("children") or []))
+    return ""
+
+
+def _text_head(n: dict, limit: int, budget: int = 120) -> str:
+    """text_of(n, limit), but it stops once ``limit`` characters (or ``budget`` nodes) are read: the
+    label of a look-alike's box only needs its start, and boxes can be most of the page."""
+    parts: List[str] = []
+    size = 0
+    stack = [n]
+    while stack and budget > 0 and size < limit:
+        x = stack.pop()
+        budget -= 1
+        if _role(x) in LEAF_TEXT_ROLES:
+            t = _leaf_text(x)
+            if t:
+                parts.append(t)
+                size += len(t) + 1
+        stack.extend(reversed(x.get("children") or []))
+    return " ".join(parts)[:limit]
+
+
+def _gkey(c: "WebControl") -> tuple:
+    from ..grounding import norm                     # the grounder's own text normalisation
+    return (c.kind, norm(c.name), norm(c.context), c.in_dialog)
+
+
+def _disambiguate(controls: List["WebControl"], root: dict, wp: Tuple[int, ...]) -> None:
+    """Give look-alike controls (same kind, name, context, dialog flag) a context that tells them
+    apart: the item each one sits in alone (its heading, else its text without the control's own name:
+    a product card, a table row; a named box such as a calendar grid gives its name), else the text just
+    before it, else "item k of m". The original context (form / region / dialog label) is kept in front
+    ("Cart: Blue Mug"). Controls that are not look-alikes keep their context unchanged."""
+    groups: Dict[tuple, List[WebControl]] = {}
+    for c in controls:
+        groups.setdefault(_gkey(c), []).append(c)
+    for twins in groups.values():
+        if len(twins) < 2:
+            continue
+        labels: List[str] = []
+        for c in twins:
+            deep = max(len(os.path.commonprefix([c.path, o.path])) for o in twins if o is not c)
+            lab = ""
+            if deep < len(c.path):
+                box = _node_at(root, wp, c.path[:deep + 1])
+                if box is not None:
+                    if _role(box) == "row":              # a table row: its cells, as the row's text line
+                        cells = [_text_head(x, 200) for x in box.get("children") or []]
+                        lab = " | ".join(t for t in cells if t and t.casefold() != c.name.casefold())
+                    elif _role(box) not in CONTROL_ROLES:  # a named grid / list / card
+                        lab = _name(box)
+                    lab = lab or _first_heading(box)
+                    if not lab or lab.casefold() == c.name.casefold():
+                        lab = _text_head(box, 600)
+                    if c.name and lab.casefold() != c.name.casefold():   # the control's own text, as a word
+                        lab = re.sub(rf"(?<!\w){re.escape(c.name)}(?!\w)", " ", lab)
+                    lab = lab.strip(" |,;:-")
+            labels.append(_clip_words(lab, 60))
+        from ..grounding import norm
+        seen: Dict[str, int] = {}
+        for lab in labels:
+            seen[norm(lab)] = seen.get(norm(lab), 0) + 1
+        for i, c in enumerate(twins):
+            if not labels[i] or seen[norm(labels[i])] > 1:
+                near = _clip_words(c.near, 60)
+                labels[i] = near if near and near.casefold() != c.name.casefold() else ""
+        seen = {}
+        for lab in labels:
+            seen[norm(lab)] = seen.get(norm(lab), 0) + 1
+        m = len(twins)
+        for i, c in enumerate(twins):
+            lab = labels[i] if labels[i] and seen[norm(labels[i])] == 1 else f"item {i + 1} of {m}"
+            c.context = f"{c.context}: {lab}" if c.context else lab
+    again: Dict[tuple, List[WebControl]] = {}        # a new context that met another control's
+    for c in controls:
+        again.setdefault(_gkey(c), []).append(c)
+    for twins in again.values():
+        for i, c in enumerate(twins[1:], 2):
+            c.context = f"{c.context} #{i}"
+
+
 def _status_guess(title: str) -> int:
     t = title.strip().lower()
     if re.match(r"^(not found|404)\b", t):
@@ -169,13 +340,17 @@ def read_web(snap: Snapshot, web_path: Optional[Tuple[int, ...]] = None) -> WebV
     if root is None:
         return WebView(snap.url or "", snap.window_title, 0, [], [], [], [], [], "", [], [], [])
     has_input: Dict[Tuple[int, ...], bool] = {}
+    ctl_below: Dict[Tuple[int, ...], bool] = {}      # a control strictly inside the node
 
-    def mark(n, p) -> bool:
-        r = _role(n) in INPUT_ROLES
+    def mark(n, p) -> Tuple[bool, bool]:
+        role = _role(n)
+        r, below = role in INPUT_ROLES, False
         for i, c in enumerate(n.get("children") or []):
-            r = mark(c, p + (i,)) or r
+            ri, ci = mark(c, p + (i,))
+            r, below = r or ri, below or ci
         has_input[p] = r
-        return r
+        ctl_below[p] = below
+        return r, below or role in CONTROL_ROLES or bool(_press_kind(n))
     mark(root, wp)
 
     controls: List[WebControl] = []
@@ -238,21 +413,37 @@ def read_web(snap: Snapshot, web_path: Optional[Tuple[int, ...]] = None) -> WebV
             if _name(n):
                 ctx["context"] = _name(n)
 
-        def add(kind, **kw):
-            name = _name(n)
+        def add(kind, name=None, **kw):
+            name = _name(n) if name is None else name
             if not name and kind in ("textbox", "password"):
                 name = _derived_field_name(n, lines, controls)
+            elif not name and kind != "secret_text":
+                name = _derived_control_name(n, kind, lines, controls)
+            near = next((t for t, k in reversed(lines) if k in ("text", "heading", "row") and t.strip()), "")
             c = WebControl(kind, name, p, ctx.get("context", ""), bool(ctx.get("dialog")),
-                           ctx.get("form"), **kw)
+                           ctx.get("form"), near=near, **kw)
             controls.append(c)
             return c
 
-        if r == "heading":
+        quiet = ctx.get("in_table") or ctx.get("in_heading")    # their text is already a line
+        kind = _press_kind(n)
+        if kind and not ctl_below.get(p):
+            nm = _name(n) or (_leaf_text(n) if r in LEAF_TEXT_ROLES else text_of(n, 300))
+            nm = _clip_words(nm, 80)
+            val = str(n.get("value", "")) if kind == "checkbox" else ("1" if n.get("selected") else "")
+            add(kind, name=nm, value=val)
+            if nm and not quiet and kind != "treeitem":
+                lines.append((nm, "text"))
+            if kind != "treeitem":                   # a tree item's children: its text, nested items
+                return
+        elif r == "heading":
             t = text_of(n, 300) or _name(n)
             if t:
                 headings.append(t)
                 lines.append((t, "heading"))
-            return
+            if not ctl_below.get(p):
+                return
+            ctx["in_heading"] = True                 # links / buttons inside the heading still count
         if r == "table":
             rows = []
             for row in n.get("children") or []:
@@ -269,7 +460,7 @@ def read_web(snap: Snapshot, web_path: Optional[Tuple[int, ...]] = None) -> WebV
             ctx["in_table"] = True                   # controls inside still count; text already taken
         elif r == "link":
             add("link", href=str(n.get("url") or ""))
-            if not ctx.get("in_table") and _name(n):
+            if not quiet and _name(n):
                 lines.append((_name(n), "text"))
             return
         elif r == "button":
@@ -322,7 +513,7 @@ def read_web(snap: Snapshot, web_path: Optional[Tuple[int, ...]] = None) -> WebV
             lines.append((mask_secrets(raw), "text"))
             return
         elif r in LEAF_TEXT_ROLES:
-            if not ctx.get("in_table"):
+            if not quiet:
                 t = _leaf_text(n)
                 if t:
                     lines.append((t, "text"))
@@ -332,6 +523,7 @@ def read_web(snap: Snapshot, web_path: Optional[Tuple[int, ...]] = None) -> WebV
             walk(c, p + (i,), ctx, ancestors + [(p, n)])
 
     walk(root, wp, {}, [])
+    _disambiguate(controls, root, wp)
     # inputs with no explicit form join the synthetic form whose container holds them
     for c in controls:
         if c.form is None and c.kind in ("textbox", "password", "radiogroup", "combobox", "checkbox"):
@@ -526,7 +718,7 @@ class MacBrowserBackend:
 
     def click(self, page: Page, n: int) -> Page:
         c, snap, path = self._live(page, n)
-        if c.role not in ("link", "button", "checkbox", "tab"):
+        if c.role not in CLICKABLE_ROLES:
             raise WebError(f"control {n} ({c.role}) is not clickable")
         before = (snap.url, snap.render(400)) if snap.ok else None
         n0 = len(self.actor.interruptions)

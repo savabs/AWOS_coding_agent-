@@ -1125,7 +1125,7 @@ class MicroAgent:
         ev["control"] = f"{c.role} \"{mask_secrets(c.name)}\""
 
         if act.verb is Verb.CLICK:
-            if c.role not in ("link", "button", "checkbox", "tab"):
+            if c.role not in web_tools.CLICKABLE_ROLES:
                 return f"control {c.n} is a {c.role}, not clickable (use fill/select)", page, None
             if is_destructive(c):
                 if c.name not in st.allow_destructive:
@@ -1195,14 +1195,18 @@ class MicroAgent:
                 return err, page, None
             if self.web_verbs:                       # open web: a stale field is the model's problem, not infra
                 try:
-                    self.br.fill(page, c.n, v)
+                    new = self.br.fill(page, c.n, v)
                 except UserNeeded:
                     raise
                 except WebError as e:
                     return f"fill failed: {e}", page, None
             else:
-                self.br.fill(page, c.n, v)
-            return self._enter(page, c) if enter else (None, page, None)
+                new = self.br.fill(page, c.n, v)
+            if enter:
+                return self._enter(page, c)
+            # a browser that re-reads the page after typing (ChromiumBackend) returns the new page, so an
+            # autocomplete list that appeared is visible on the next step; the others return ``page``
+            return None, (new if isinstance(new, Page) else page), None
 
         if act.verb is Verb.SELECT:
             if c.role not in ("radiogroup", "combobox"):
@@ -1336,8 +1340,8 @@ class ScriptedModel:
         role = None
         dialog = ref.endswith("@dialog")
         ref = ref[:-7] if dialog else ref
-        if ":" in ref and ref.split(":", 1)[0] in ("link", "button", "textbox", "password", "radiogroup",
-                                                    "combobox", "secret_text"):
+        if ":" in ref and ref.split(":", 1)[0] in ("textbox", "password", "radiogroup", "combobox",
+                                                    "secret_text") + web_tools.CLICKABLE_ROLES:
             role, ref = ref.split(":", 1)
         obs = user.split("<observation", 1)[-1]
         for m in _CTRL_LINE.finditer(obs):
