@@ -46,8 +46,12 @@ class _Handler(SimpleHTTPRequestHandler):
         if self.path.rstrip("/") != "/v1/chat/completions":
             self.send_error(404)
             return
-        self.server.model_calls.append(body)
-        ans = self.server.model_answer
+        if str(body.get("grammar", "")).startswith('root ::= ("VERIFIED"'):    # the verifier's call, not repair's
+            self.server.verify_calls.append(body)
+            ans = self.server.verify_answer
+        else:
+            self.server.model_calls.append(body)
+            ans = self.server.model_answer
         ans = ans(body) if callable(ans) else ans
         out = json.dumps({"choices": [{"message": {"role": "assistant", "content": ans}}]}).encode()
         self.send_response(200)
@@ -62,6 +66,7 @@ class _Handler(SimpleHTTPRequestHandler):
 def server():
     srv = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     srv.overrides, srv.model_calls, srv.model_answer = {}, [], "NOT_FOUND"
+    srv.verify_calls, srv.verify_answer = [], "VERIFIED: fake"
     srv.base = f"http://127.0.0.1:{srv.server_address[1]}"
     t = threading.Thread(target=srv.serve_forever, daemon=True)
     t.start()
@@ -76,6 +81,8 @@ def _reset_server(request):
         srv.overrides.clear()
         srv.model_calls.clear()
         srv.model_answer = "NOT_FOUND"
+        srv.verify_calls.clear()
+        srv.verify_answer = "VERIFIED: fake"
     yield
 
 

@@ -36,10 +36,10 @@ def _record_form(x, page):
     return rec, tab
 
 
-def _replay(x, page, rec, tab):
+def _replay(x, page, rec, tab, timeout=45):
     page.goto(x.server.base + "/help.html")       # start somewhere else; the recording's goto takes it back
     x.call("run", recId=rec["id"], tabId=tab)
-    return x.wait_run()
+    return x.wait_run(timeout=timeout)
 
 
 def test_record_three_step_form(x):
@@ -158,6 +158,32 @@ def test_model_call_speaks_repair_contract_and_export_is_redacted(x):
     steps = next(x_ for x_ in log["recordings"] if x_["id"] == rec["id"])["steps"]
     assert any(s.get("valueLen") == len("Ada Lovelace") for s in steps)
     assert all("?" not in (s.get("url") or "") for s in steps)
+
+
+def test_verifier_may_only_downgrade(x):
+    """Checks pass + verifier says NOT_DONE -> CHECK (with its reason); verifier VERIFIED or unparsable ->
+    the checks' verdict stands; a FAILED run is never upgraded. The verifier sees the goal and the page."""
+    page = x.ctx.new_page()
+    rec, tab = _record_form(x, page)
+    x.call("save_recording", id=rec["id"], goal="Profile saved for Ada on plan pro", expect=rec["expect"])
+    x.server.verify_answer = "NOT_DONE: the plan shown is not pro"
+    run = _replay(x, page, rec, tab)
+    assert run["result"]["verdict"] == "CHECK" and "not pro" in run["result"]["reason"], run["log"]
+    user = x.server.verify_calls[-1]["messages"][1]["content"]
+    assert user.startswith("Goal: Profile saved for Ada on plan pro\nActions taken (")
+    assert '\n<observation untrusted="true">\nURL path: /done.html  (HTTP 200)\n' in user and user.endswith("Was the goal really completed?")
+    assert 'fill(' in user and 'on textbox "' in user
+
+    x.server.verify_answer = "maybe"                                  # unparsable: never changes the verdict
+    run = _replay(x, page, rec, tab)
+    assert run["result"]["verdict"] == "VERIFIED" and run["verifier"].get("error"), run["log"]
+
+    x.call("save_recording", id=rec["id"], goal="g", expect={"urlPattern": rec["expect"]["urlPattern"], "texts": ["not on the page"]})
+    x.server.verify_answer = "VERIFIED: looks fine"                   # a failed check stays FAILED
+    run = _replay(x, page, rec, tab)
+    assert run["result"]["verdict"] == "FAILED" and run["verifier"]["label"] == "VERIFIED"
+    log = x.call("export_log")
+    assert any(r.get("verifier") and r["verifier"]["label"] == "NOT_DONE" for r in log["runs"])
 
 
 def test_gate_applies_to_model_picked_target(x):

@@ -269,9 +269,47 @@
 
   function element(index) { return lastScan[index] || null; }
 
+  // ---- the verifier's view of the final page (web_tools.outline's fields, from the DOM) -------------
+  // alerts = role=alert; statuses = role=status / aria-live=polite; regions = named role=region;
+  // dialog = an open dialog's name; text = visible page text; controls = every visible control in
+  // document order. Values of sensitive fields (passwords, card numbers, codes) are always masked.
+  function textOf(el, n) { return norm(el.innerText || el.textContent).slice(0, n || 600); }
+  function observe() {
+    var q = function (sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)).filter(visible); };
+    var alerts = q('[role=alert]').map(function (e) { return textOf(e); }).filter(Boolean);
+    var statuses = q('[role=status], [aria-live=polite]:not([role=alert]), output').map(function (e) { return textOf(e); }).filter(Boolean);
+    var regions = q('[role=region][aria-label], [role=region][aria-labelledby]').map(function (e) {
+      var nm = contextOf(e.firstElementChild || e) || norm(e.getAttribute('aria-label'));
+      var t = textOf(e); return t ? (nm ? nm + ': ' : '') + t : '';
+    }).filter(Boolean);
+    var dlg = q('dialog[open], [role=dialog], [role=alertdialog]')[0];
+    var lines = String(document.body ? document.body.innerText : '').split('\n').map(norm).filter(Boolean);
+    var controls = allControls().map(function (el) {
+      var role = roleOf(el), d = { role: role === 'radio' ? 'radiogroup' : role, name: accName(el), context: contextOf(el),
+                                   inDialog: !!(el.closest && el.closest('dialog, [role=dialog], [role=alertdialog]')) };
+      if (el.tagName === 'SELECT') {
+        d.role = 'combobox';
+        d.options = Array.prototype.slice.call(el.options).map(function (o) { return norm(o.text); }).slice(0, 12);
+        var so = el.options[el.selectedIndex]; d.value = so ? norm(so.text) : '';
+      } else if (role === 'checkbox' || el.type === 'radio') {
+        d.value = el.checked ? '1' : '0';
+      } else if (role === 'textbox' || role === 'password') {
+        var sens = root.AWOSSafety && root.AWOSSafety.sensitiveField(el);
+        var v = el.isContentEditable ? norm(el.innerText) : String(el.value == null ? '' : el.value);
+        d.value = (role === 'password' || sens) && v ? '••••••••' : v.slice(0, 120);
+      } else if (role === 'tab') {
+        d.value = el.getAttribute('aria-selected') === 'true' ? '1' : '0';
+      }
+      return d;
+    });
+    return { url: location.href, title: norm(document.title), alerts: alerts, statuses: statuses, regions: regions,
+             dialog: dlg ? (contextOf(dlg.firstElementChild || dlg) || norm(dlg.getAttribute('aria-label')) || textOf(dlg, 120)) : '',
+             text: lines.join('\n'), controls: controls };
+  }
+
   root.AWOSLocator = {
     ACCEPT: ACCEPT, MARGIN: MARGIN, FLOOR: FLOOR, WEIGHTS: WEIGHTS, KIND_SELECTOR: KIND_SELECTOR,
-    describe: describe, score: score, find: find, element: element, brief: brief,
+    describe: describe, score: score, find: find, element: element, brief: brief, observe: observe,
     accName: accName, roleOf: roleOf, strSim: strSim, kindOf: kindOf,
   };
 

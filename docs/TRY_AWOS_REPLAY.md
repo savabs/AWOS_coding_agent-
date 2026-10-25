@@ -19,14 +19,22 @@ AWOS Replay is a Chrome extension: **show a web chore once, then replay it whene
 ## 2. Record a chore (once per chore)
 1. Open the start page of the chore and log in yourself (AWOS never stores passwords).
 2. Click the AWOS icon, then **Record this tab**. Do the chore once, normally. Then click **Stop recording**.
-3. Under the recording, fill **Expect text on final page**: a phrase that only appears when it worked (for example
-   "Statement downloaded", "Saved", or the month's name). Click **Save checks**. Without a check, the run can only end
-   UNVERIFIED.
+3. Under the recording, fill in two fields, then click **Save goal + checks**:
+   - **Goal**: what must be true at the end, with the details that matter (for example "October 2026 statement for account
+     ...1234 downloaded"). The local verifier reads it.
+   - **Expect text on final page**: a phrase that only appears when it worked (for example "Statement downloaded",
+     "Saved", or the month's name). Without a check, the run can only end UNVERIFIED.
 
 ## 3. Replay
 - Click **Run** on the recording.
 - You will be asked to type passwords and codes yourself, and to approve any pay / send / delete / submit click.
-- The result is **VERIFIED** (all checks passed), **UNVERIFIED** (no checks set), or **FAILED** with the reason.
+- The result is one of four verdicts:
+  - **VERIFIED**: all checks passed and the local verifier agrees.
+  - **CHECK**: the checks passed, but the local verifier read the final page against your goal and disagrees. Look at that
+    run; the reason is shown.
+  - **UNVERIFIED**: no checks were set.
+  - **FAILED**: a check failed or the run stopped; the reason is shown.
+- The verifier can only downgrade. It never turns a failed check into a pass.
 - Replay the same chore again a few days or weeks later. That is the real test: sites change.
 
 ## 4. Good first chores (recurring, low risk)

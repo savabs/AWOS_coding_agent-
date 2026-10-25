@@ -150,6 +150,7 @@
         return;
       }
       case 'page_text': reply({ url: location.href, text: S.norm(document.body ? document.body.innerText : '').slice(0, 2000) }); return;
+      case 'observe': reply(L.observe()); return;             // the final page for the local verifier
       case 'banner': banner(msg.text); reply({ ok: true }); return;
     }
   });

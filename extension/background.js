@@ -20,7 +20,10 @@
  * no setting, timeout or code path that approves on its own.
  * Verify: after the last step, check the recorded final-URL pattern and the
  * expected texts -> VERIFIED (all checks pass), UNVERIFIED (finished but no
- * checks recorded), FAILED (a check failed or the run stopped).
+ * checks recorded), FAILED (a check failed or the run stopped). Then the local
+ * verifier model (G7) reads the goal, the actions and the final page; it may only
+ * downgrade VERIFIED to CHECK ("look at this one"), and its opinion is logged on
+ * every run.
  */
 importScripts('lib/safety.js', 'lib/model.js');
 var S = self.AWOSSafety, M = self.AWOSModel;
@@ -220,6 +223,12 @@ async function driveInner(runId) {
       return fail(run, 'ERROR', 'step ' + (i + 1) + ': ' + (r ? r.error : 'no reply'));
     }
     run.resolved.push({ step: i, how: how, name: cand.name || '' });
+    // the verifier's action list, in the agent's own syntax (verifier_data.action_list)
+    var q = function (v) { return JSON.stringify(String(v == null ? '' : v)); };
+    var an = step.action === 'fill' ? 'fill(' + (index + 1) + ', ' + (step.sensitive || S.isPlaceholder(step.value) ? '{secret}' : q(step.value)) + ')'
+      : step.action === 'select' ? 'select(' + (index + 1) + ', ' + q(step.optionText || step.value) + ')'
+      : 'click(' + (index + 1) + ')';
+    (run.actions = run.actions || []).push({ action: an, control: (cand.role || step.loc.role || '') + ' ' + q(cand.name || step.loc.name || '') });
     logRun(run, step.action + ' "' + (cand.name || '') + '" via ' + how);
     run.i++; run.approval = null; await saveRun(run);
     if (step.action === 'click') { await sleep(400); await waitForLoad(run.tabId); }
@@ -265,9 +274,25 @@ async function finish(run, rec) {
     texts.forEach(function (t, k) { checks.push({ kind: 'text', expected: t, ok: !!c.present[k] }); });
   }
   var verdict = !checks.length ? 'UNVERIFIED' : checks.every(function (x) { return x.ok; }) ? 'VERIFIED' : 'FAILED';
+  var reason = verdict === 'UNVERIFIED' ? 'no expectations recorded' : '';
+  // second opinion from the local verifier (G7). It may only DOWNGRADE: a VERIFIED it disagrees with
+  // becomes CHECK ("look at this one"); it never turns UNVERIFIED / FAILED into a pass. Its opinion is
+  // always recorded (shadow mode for the other verdicts), so exported logs show what it would have caught.
+  var cfg = await settings();
+  if (cfg.enabled && cfg.verify !== false) {
+    var obs = await sendRetry(run.tabId, { type: 'observe' }).catch(function () { return null; });
+    var op = obs ? await M.askVerify(cfg, M.buildVerifyMessages(rec.goal || rec.name, (run.actions || []).concat([{ action: 'done("Done.")' }]),
+                                                          M.outline(obs), 'done("Done.")'))
+                 : { error: 'could not read the final page' };
+    run.verifier = op;
+    logRun(run, op.error ? 'verifier: ' + op.error : 'verifier says ' + op.label + ': ' + op.reason + ' (' + op.ms + ' ms)');
+    if (verdict === 'VERIFIED' && !op.error && op.label !== 'VERIFIED') {
+      verdict = 'CHECK';
+      reason = 'checks passed, but the local verifier says ' + op.label + ': ' + op.reason;
+    }
+  }
   run.status = verdict === 'FAILED' ? 'failed' : 'done';
-  run.result = { verdict: verdict, code: verdict === 'FAILED' ? 'CHECK_FAILED' : '', checks: checks,
-                 reason: verdict === 'UNVERIFIED' ? 'no expectations recorded' : '' };
+  run.result = { verdict: verdict, code: verdict === 'FAILED' ? 'CHECK_FAILED' : '', checks: checks, reason: reason };
   logRun(run, verdict + ' (' + checks.filter(function (x) { return x.ok; }).length + '/' + checks.length + ' checks)');
   await archive(run);
   await sendTab(run.tabId, { type: 'banner', text: '' }).catch(function () {});
@@ -309,7 +334,7 @@ function redactText(s) { return String(s || '').replace(/https?:\/\/[^\s"')]+/g,
 async function exportLog() {
   var recs = await getLocal('recordings', {}), runs = await getLocal('runs', []), cfg = await settings();
   var recOut = Object.values(recs).map(function (r) {
-    return { id: r.id, name: r.name, start: redactUrl(r.startUrl), createdAt: r.createdAt,
+    return { id: r.id, name: r.name, goal: r.goal || '', start: redactUrl(r.startUrl), createdAt: r.createdAt,
       expect: { url: !!(r.expect && r.expect.urlPattern), texts: ((r.expect && r.expect.texts) || []).length },
       steps: r.steps.map(function (s) {
         if (s.action === 'goto') return { action: 'goto', url: redactUrl(s.url) };
@@ -323,6 +348,8 @@ async function exportLog() {
       verdict: r.result && r.result.verdict, code: r.result && r.result.code, reason: redactText(r.result && r.result.reason),
       checks: ((r.result && r.result.checks) || []).map(function (c) { return { kind: c.kind, ok: c.ok }; }),
       resolved: r.resolved, modelCalls: r.modelCalls || [],
+      verifier: r.verifier ? { label: r.verifier.label || '', reason: redactText(r.verifier.reason || ''),
+                               error: r.verifier.error || '', ms: r.verifier.ms || 0 } : null,
       log: r.log.map(function (l) { return { t: l.t, step: l.step, text: redactText(l.text) }; }) };
   });
   return { kind: 'awos-replay-runlog/1', exportedAt: Date.now(), version: chrome.runtime.getManifest().version,
@@ -349,6 +376,7 @@ var HANDLERS = {
     var all = await getLocal('recordings', {}), rec = all[msg.id];
     if (!rec) throw new Error('no such recording');
     if (typeof msg.name === 'string') rec.name = msg.name;
+    if (typeof msg.goal === 'string') rec.goal = msg.goal.slice(0, 300);    // what the chore must achieve (the verifier reads it)
     if (msg.expect) rec.expect = { urlPattern: String(msg.expect.urlPattern || ''), texts: (msg.expect.texts || []).map(String) };
     await setLocal('recordings', all); return rec;
   },

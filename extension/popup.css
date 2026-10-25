@@ -15,6 +15,7 @@ ul { list-style: none; padding: 0; margin: 0; }
 .badge.VERIFIED { background: #dafbe1; color: #116329; }
 .badge.UNVERIFIED { background: #fff8c5; color: #7d4e00; }
 .badge.FAILED { background: #ffebe9; color: #a40e26; }
+.badge.CHECK { background: #fff1e5; color: #953800; }   /* checks passed, the local verifier disagrees: look */
 #pending { border: 2px solid #cf222e; border-radius: 6px; padding: 6px 8px; margin: 6px 0; }
 #checks li.ok::before { content: "ok  "; color: #116329; }
 #checks li.bad::before { content: "no  "; color: #a40e26; }

@@ -17,7 +17,7 @@ pytestmark = [pytest.mark.timeout(240), pytest.mark.skipif(not URL, reason="AWOS
 
 @pytest.fixture()
 def xr(x):
-    x.set_settings(endpoint=URL, model="local", timeoutMs=120000)
+    x.set_settings(endpoint=URL, model="local", timeoutMs=120000, verifyTimeoutMs=180000)
     return x
 
 
@@ -29,7 +29,7 @@ def test_real_model_picks_renamed_button(xr):
     page = xr.ctx.new_page()
     rec, tab = _record_form(xr, page)
     xr.server.overrides["/form.html"] = "form_button_renamed.html"
-    run = _replay(xr, page, rec, tab)
+    run = _replay(xr, page, rec, tab, timeout=200)
     print("model:", run.get("modelCalls"), _model_lines(run))
     assert run["result"]["verdict"] == "VERIFIED", run["log"]
 
@@ -38,9 +38,31 @@ def test_real_model_refuses_deleted_button(xr):
     page = xr.ctx.new_page()
     rec, tab = _record_form(xr, page)
     xr.server.overrides["/form.html"] = "form_deleted.html"
-    run = _replay(xr, page, rec, tab)
+    run = _replay(xr, page, rec, tab, timeout=200)
     print("model:", run.get("modelCalls"), _model_lines(run))
     assert run["status"] == "failed" and run["result"]["code"] == "NOT_FOUND", run["log"]
+
+
+def _verify_case(xr, done_page):
+    page = xr.ctx.new_page()
+    rec, tab = _record_form(xr, page)
+    xr.call("save_recording", id=rec["id"], goal="Save the profile for Ada Lovelace (ada@example.com) on plan pro",
+            expect={"urlPattern": rec["expect"]["urlPattern"], "texts": ["Profile saved"]})   # passes on both pages
+    if done_page:
+        xr.server.overrides["/done.html"] = done_page
+    run = _replay(xr, page, rec, tab, timeout=200)
+    print("verifier:", run.get("verifier"), "| verdict:", run["result"]["verdict"])
+    return run
+
+
+def test_real_verifier_keeps_a_good_run(xr):
+    run = _verify_case(xr, None)
+    assert run["result"]["verdict"] == "VERIFIED", run["log"]
+
+
+def test_real_verifier_flags_a_lying_banner(xr):
+    run = _verify_case(xr, "done_wrong.html")          # "Profile saved ... on plan basic": checks pass, detail wrong
+    assert run["result"]["verdict"] == "CHECK", run["log"]
 
 
 def test_real_model_pick_still_gated(xr):
@@ -49,7 +71,7 @@ def test_real_model_pick_still_gated(xr):
     xr.server.overrides["/cart.html"] = "cart_renamed.html"
     page.goto(xr.server.base + "/help.html")
     xr.call("run", recId=rec["id"], tabId=tab)
-    run = xr.wait_run(statuses=("awaiting_approval", "done", "failed"))
+    run = xr.wait_run(statuses=("awaiting_approval", "done", "failed"), timeout=200)
     print("model:", run.get("modelCalls"), _model_lines(run))
     assert run["status"] in ("awaiting_approval", "failed"), run["log"]   # never clicks pay on its own
     if run["status"] == "awaiting_approval":

@@ -44,15 +44,17 @@ function renderRecordings() {
     li.appendChild(el('div', null, r.name));
     var acts = r.steps.filter(function (s) { return s.action !== 'goto'; }).length;
     li.appendChild(el('div', { class: 'meta' }, acts + ' actions, from ' + r.startUrl));
+    var goal = el('input', { class: 'goal', placeholder: 'Goal: what must be true at the end (e.g. October statement downloaded)', value: r.goal || '' });
+    li.appendChild(goal);
     var texts = el('input', { class: 'texts', placeholder: 'Expect text on final page (comma separated)', value: (r.expect.texts || []).join(', ') });
     var url = el('input', { class: 'url', placeholder: 'Final URL (origin+path, * allowed; blank = no check)', value: r.expect.urlPattern || '' });
     li.appendChild(texts); li.appendChild(url);
     var row = el('div', { class: 'acts' });
     var run = el('button', { class: 'run primary' }, 'Run'); run.disabled = !!(busy || state.recState);
     run.onclick = function () { call({ type: 'run', recId: r.id, tabId: targetTab }).then(refresh); };
-    var save = el('button', { class: 'save' }, 'Save checks');
+    var save = el('button', { class: 'save' }, 'Save goal + checks');
     save.onclick = function () {
-      call({ type: 'save_recording', id: r.id, expect: { urlPattern: url.value.trim(),
+      call({ type: 'save_recording', id: r.id, goal: goal.value.trim(), expect: { urlPattern: url.value.trim(),
              texts: texts.value.split(',').map(function (s) { return s.trim(); }).filter(Boolean) } }).then(refresh);
     };
     var del = el('button', { class: 'del' }, 'Delete');

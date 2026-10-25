@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AWOS Replay (MVP)",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Show once, replay free. Records a web task, replays it with locator re-finding, a local-model fallback, an approval gate and result checks.",
   "background": { "service_worker": "background.js" },
   "permissions": ["storage", "tabs"],
