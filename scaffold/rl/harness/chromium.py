@@ -139,16 +139,41 @@ def find_chromium() -> Optional[str]:
 LAUNCH_ARGS = ["--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost",
                "--no-proxy-server", "--disable-background-networking", "--disable-component-update",
                "--disable-sync", "--no-first-run", "--disable-features=Translate,MediaRouter"]
+#: open-web mode (scaffold/rl/web): the same minus the resolver rule that blackholes every host
+WEB_LAUNCH_ARGS = [a for a in LAUNCH_ARGS if not a.startswith("--host-resolver-rules")]
+
+_PRIVATE_HOST = re.compile(r"^(localhost|.*\.local|.*\.localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|"
+                           r"192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|169\.254\.\d+\.\d+|"
+                           r"0\.0\.0\.0|\[?::1?\]?|\[?f[cd][0-9a-f:]*\]?)$", re.I)
+
+
+class NotWebURL(PermissionError):
+    pass
+
+
+def check_web_url(url: str, allow_private: bool = False) -> str:
+    """Open-web URL policy: http(s) only (no file:, data:, javascript:, chrome: ...), a host is
+    required, and loopback / private / link-local hosts are refused unless ``allow_private``
+    (tests serve their fake sites on 127.0.0.1; a real run must not reach the runner's own
+    services, e.g. llama-server on 127.0.0.1:8080)."""
+    u = urllib.parse.urlsplit(url or "")
+    if u.scheme not in ("http", "https") or not u.hostname:
+        raise NotWebURL(f"refusing URL with scheme {u.scheme or '(none)'!r}: only http(s) pages")
+    if not allow_private and _PRIVATE_HOST.match(u.hostname):
+        raise NotWebURL(f"refusing private / loopback host {u.hostname}")
+    return url
 
 
 class Chromium:
-    """One Playwright + one headless Chromium per worker process; contexts per episode."""
+    """One Playwright + one headless Chromium per worker process; contexts per episode.
+    ``web=True`` launches it able to resolve real hosts (open-web evaluation only)."""
 
-    def __init__(self, headless: bool = True, executable: Optional[str] = None):
+    def __init__(self, headless: bool = True, executable: Optional[str] = None, web: bool = False):
         from playwright.sync_api import sync_playwright
         self._pw = sync_playwright().start()
         exe = executable or find_chromium()
-        kw: Dict[str, Any] = {"headless": headless, "args": LAUNCH_ARGS}
+        self.web = bool(web)
+        kw: Dict[str, Any] = {"headless": headless, "args": WEB_LAUNCH_ARGS if web else LAUNCH_ARGS}
         if exe:
             kw["executable_path"] = exe
         try:
@@ -176,13 +201,24 @@ class ChromiumBackend:
 
     def __init__(self, base_url: str, *, chromium: Optional[Chromium] = None, load_timeout: float = 15.0,
                  settle_timeout: float = 5.0, quiet_ms: float = 60.0, viewport=(1280, 800),
-                 log: Optional[Callable[[str], None]] = None):
-        self.base = check_loopback(base_url).rstrip("/")
+                 log: Optional[Callable[[str], None]] = None, web: bool = False, allow_private: bool = False,
+                 page_hook: Optional[Callable[[Page], None]] = None):
+        """``web=True`` (scaffold/rl/web only): real http(s) sites under check_web_url instead of
+        loopback-only, the HTTP status of the last main-frame response on Page.status, and the
+        extra verbs press_enter / go_back / goto / reveal / screenshot. ``page_hook(page)`` runs on
+        every observation (it may clip the page, or raise UserNeeded to stop on a blocked page)."""
+        self.web, self.allow_private = bool(web), bool(allow_private)
+        self.base = (check_web_url(base_url, self.allow_private) if self.web
+                     else check_loopback(base_url)).rstrip("/")
         self._own = chromium is None
-        self.chromium = chromium or Chromium()
+        self.chromium = chromium or Chromium(web=self.web)
+        if self.web and not getattr(self.chromium, "web", False):
+            raise ValueError("web=True needs a Chromium launched with web=True (the loopback one cannot resolve hosts)")
+        self.page_hook = page_hook
+        ctx_kw: Dict[str, Any] = {"locale": "en-US"} if self.web else {}
         self.ctx = self.chromium.browser.new_context(viewport={"width": viewport[0], "height": viewport[1]},
                                                      java_script_enabled=True, accept_downloads=False,
-                                                     service_workers="block")
+                                                     service_workers="block", **ctx_kw)
         self.ctx.add_init_script(SETTLE_JS)
         self.pg = self.ctx.new_page()
         self.cdp = self.ctx.new_cdp_session(self.pg)
@@ -258,15 +294,18 @@ class ChromiumBackend:
             self.log.append("INTERRUPT popup -> close (closed)")
             try:
                 if url and url != "about:blank":
-                    check_loopback(url)
+                    self._check(url)
                     self.pg.goto(url, wait_until="domcontentloaded", timeout=self.load_timeout * 1000)
             except Exception:
                 pass
 
     # -- plumbing -----------------------------------------------------------------
+    def _check(self, url: str) -> str:
+        return check_web_url(url, self.allow_private) if self.web else check_loopback(url)
+
     def _url(self, path_or_url: str) -> str:
         base = self.page.url if self.page and self.page.url.startswith("http") else self.base + "/"
-        return check_loopback(urllib.parse.urljoin(base, path_or_url))
+        return self._check(urllib.parse.urljoin(base, path_or_url))
 
     def _settle(self, min_wait_ms: float = 30.0) -> bool:
         """Wait until the page is idle (see module docstring). True when it settled."""
@@ -315,9 +354,13 @@ class ChromiumBackend:
             raise WebError("the Chromium page has no web area (closed or not loaded)")
         self.page = to_micro_page(snap)
         self.page._live["settled"] = bool(settled)  # type: ignore[attr-defined]
+        if self.web and self._last_status:
+            self.page.status = int(self._last_status)
         t2 = time.monotonic()
         if self.timings:
             self.timings[-1].update(settle_ms=round((t1 - t0) * 1000, 1), observe_ms=round((t2 - t1) * 1000, 1))
+        if self.page_hook is not None:
+            self.page_hook(self.page)                     # may raise UserNeeded (blocked page)
         return self.page
 
     def _time(self, op: str) -> dict:
@@ -378,6 +421,8 @@ class ChromiumBackend:
             raise WebError(f"control {n} ({c.role}) is not clickable")
         rec = self._time("click")
         t0 = time.monotonic()
+        if self.web:
+            self._into_view(backend)                 # so the step's screenshot shows what was clicked
         try:
             self._call(backend, CLICK_JS)
         except WebError:
@@ -460,6 +505,83 @@ class ChromiumBackend:
         """Re-read the current page (no action)."""
         self._time("observe")
         return self._load()
+
+    # -- open-web verbs (web=True; MicroAgent web_verbs) ------------------------------
+    def _into_view(self, backend_id: Any) -> None:
+        try:
+            if backend_id is not None:
+                self.cdp.send("DOM.scrollIntoViewIfNeeded", {"backendNodeId": int(backend_id)})
+        except Exception:
+            pass
+
+    def _need_web(self, op: str) -> None:
+        if not self.web:
+            raise WebError(f"{op} is only available in open-web mode")
+
+    def press_enter(self, page: Page, n: int) -> Page:
+        """Enter in text control ``n`` (focus it, then a trusted key press): submits search boxes."""
+        self._need_web("press_enter")
+        c, snap, path, backend = self._live(page, n)
+        if c.role not in ("textbox", "password"):
+            raise WebError(f"control {n} is not a text input")
+        rec = self._time("enter")
+        t0 = time.monotonic()
+        try:
+            self._call(backend, "function() { this.focus(); return true; }")
+            self.pg.keyboard.press("Enter")
+        except WebError:
+            self.log.append(f"ENTER {c.role} -> refused")
+            raise
+        except Exception as e:                       # navigation raced the key press: it happened
+            if "context" not in str(e).lower() and "target" not in str(e).lower():
+                self.log.append(f"ENTER {c.role} -> refused")
+                raise WebError(f"enter failed: {type(e).__name__}") from e
+        rec["act_ms"] = round((time.monotonic() - t0) * 1000, 1)
+        self.log.append(f"ENTER {c.role} -> verified")
+        return self._load()
+
+    def go_back(self) -> Page:
+        self._need_web("go_back")
+        rec = self._time("back")
+        t0 = time.monotonic()
+        try:
+            resp = self.pg.go_back(wait_until="domcontentloaded", timeout=self.load_timeout * 1000)
+        except Exception as e:
+            self.log.append("BACK -> refused")
+            raise WebError(f"go_back failed: {type(e).__name__}") from e
+        if resp is None and self.page is not None and self.pg.url == self.page.url:
+            self.log.append("BACK -> refused")
+            raise WebError("there is no previous page")
+        rec["act_ms"] = round((time.monotonic() - t0) * 1000, 1)
+        self.log.append("BACK -> verified")
+        return self._load()
+
+    def goto(self, url: str) -> Page:
+        """Open an absolute http(s) URL (check_web_url policy)."""
+        self._need_web("goto")
+        try:
+            self._check(url)
+        except PermissionError as e:
+            raise WebError(str(e)) from e
+        return self.open(url)
+
+    def reveal(self, page: Page, n: int) -> None:
+        """Scroll the viewport to control ``n`` (MicroAgent calls it after scroll(), so the
+        screenshot follows the control window the model sees)."""
+        if not self.web:
+            return
+        live = getattr(page, "_live", None)
+        if live is None or n not in live["paths"]:
+            return
+        self._into_view(live["snap"].element(live["paths"][n]))
+
+    def screenshot(self, path: str) -> bool:
+        """Viewport PNG of the current page (evidence for the WebJudge layout)."""
+        try:
+            self.pg.screenshot(path=str(path), full_page=False, timeout=15000)
+            return True
+        except Exception:
+            return False
 
     def close(self) -> bool:
         try:
