@@ -87,6 +87,18 @@ def find_input(name: str, inputs: Path = Path("/kaggle/input")):
     return None
 
 
+def locate_src(inputs: Path, tmp: Path) -> Path:
+    """The repo code: web_eval_src.tar.gz, or the folder Kaggle unpacks it into. Kaggle unpacks an uploaded .tar.gz
+    into a same-stem folder (2026-10-25 smoke: the dataset listed web_eval_src/scaffold/..., never the archive)."""
+    tar = find_input("web_eval_src.tar.gz", inputs)
+    if tar:
+        return extract(tar, tmp / "src")
+    unpacked = find_input("web_eval_src", inputs)
+    if unpacked and (unpacked / "scaffold").is_dir():
+        return unpacked
+    raise SystemExit("web_eval_src(.tar.gz) not found (attach the awos-web-eval-data dataset)")
+
+
 def extract(tar_path: Path, dest: Path) -> Path:
     dest.mkdir(parents=True, exist_ok=True)
     with tarfile.open(tar_path) as tf:
@@ -406,10 +418,7 @@ def main(argv=None) -> int:
     elif a.dry_run:
         src = tmp / "src"
     else:
-        tar = find_input("web_eval_src.tar.gz", inputs)
-        if not tar:
-            raise SystemExit("web_eval_src.tar.gz not found (attach the awos-web-eval-data dataset)")
-        src = extract(tar, tmp / "src")
+        src = locate_src(inputs, tmp)
     ports = [int(cfg["base_port"]) + g for g in range(int(cfg["gpus"]))]
     log(f"models: {', '.join(ggufs)} | split {cfg['split']} | {cfg['workers']} workers over {cfg['gpus']} GPU(s), "
         f"{slots(cfg)} slots each | caps {cfg['max_steps']} steps, {cfg['max_seconds']} s per task")

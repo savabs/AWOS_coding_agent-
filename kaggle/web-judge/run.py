@@ -152,10 +152,14 @@ def main(argv=None) -> int:
     if a.repo:
         repo = Path(a.repo).resolve()
     else:
-        src = find_input("web_judge_src.tar.gz")
-        if not src:
-            raise SystemExit("web_judge_src.tar.gz not found under /kaggle/input (attach awos-web-judge-data)")
-        repo = extract(src, tmp / "src")
+        # Kaggle unpacks an uploaded .tar.gz into a same-stem folder (seen 2026-10-25 on the web-eval dataset)
+        src, unpacked = find_input("web_judge_src.tar.gz"), find_input("web_judge_src")
+        if src:
+            repo = extract(src, tmp / "src")
+        elif unpacked and unpacked.is_dir():
+            repo = unpacked
+        else:
+            raise SystemExit("web_judge_src(.tar.gz) not found under /kaggle/input (attach awos-web-judge-data)")
     runs_dir = Path(a.runs_dir) if a.runs_dir else (find_input("runs") or Path("/kaggle/input/missing-runs"))
     runs = collect_runs(runs_dir, tmp)
     levels = Path(cfg["levels_file"]) if cfg.get("levels_file") else find_input("levels.json")

@@ -147,16 +147,27 @@ def dataset_files(ref: str) -> dict:
     return out
 
 
+def _stem(name: str) -> str:
+    for ext in (".tar.gz", ".tgz", ".tar", ".zip"):
+        if name.endswith(ext):
+            return name[: -len(ext)]
+    return name
+
+
 def wait_files(ref: str, ds_dir: Path, wait_s: int, poll_s: int = 20) -> None:
-    """status "ready" only means the dataset record exists: a multi-GB version is still processing then, and a
-    kernel pushed at that moment starts WITHOUT its inputs (2026-10-25, awos-web-eval-smoke: 4.6 GB, ready after
-    47 s, kernel failed "web_eval_src.tar.gz not found"). Wait until every staged file is listed at its size."""
+    """Wait until every staged file is listed at its size before the kernel is pushed: status "ready" can come
+    while a multi-GB version is still processing. An uploaded archive counts once Kaggle lists its unpacked
+    folder: Kaggle unpacks x.tar.gz into x/ (2026-10-25 awos-web-eval-smoke: the kernel looked for
+    web_eval_src.tar.gz and failed, the dataset only had web_eval_src/scaffold/...)."""
     want = {p.name: p.stat().st_size for p in ds_dir.iterdir()
             if p.is_file() and p.name != "dataset-metadata.json"}
     t0 = time.time()
     while True:
         have = dataset_files(ref)
-        missing = sorted(n for n, sz in want.items() if n not in have or have[n] not in (sz, None))
+        # Kaggle unpacks an uploaded archive: x.tar.gz is listed as x/<members>, never as x.tar.gz itself
+        unpacked = {n.split("/", 1)[0] for n in have if "/" in n}
+        missing = sorted(n for n, sz in want.items()
+                         if not (n in have and have[n] in (sz, None)) and _stem(n) not in unpacked)
         if not missing:
             return
         if time.time() - t0 > wait_s:

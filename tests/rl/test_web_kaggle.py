@@ -364,3 +364,21 @@ def test_two_workers_each_use_their_own_server(tmp_path):
         site_srv.shutdown()
         for s in llamas:
             s.shutdown()
+
+
+def test_locate_src_accepts_the_archive_or_kaggles_unpacked_folder(tmp_path):
+    """Kaggle unpacks web_eval_src.tar.gz into web_eval_src/ (2026-10-25 smoke): both forms must work."""
+    import tarfile
+    inp = tmp_path / "input" / "datasets" / "me" / "awos-web-eval-data"
+    (inp / "web_eval_src" / "scaffold").mkdir(parents=True)          # what Kaggle mounts
+    assert RUN.locate_src(tmp_path / "input", tmp_path / "tmp") == inp / "web_eval_src"
+    inp2 = tmp_path / "input2" / "awos-web-eval-data"
+    (tmp_path / "pkg" / "scaffold").mkdir(parents=True)
+    (tmp_path / "pkg" / "scaffold" / "__init__.py").write_text("")
+    inp2.mkdir(parents=True)
+    with tarfile.open(inp2 / "web_eval_src.tar.gz", "w:gz") as tf:
+        tf.add(tmp_path / "pkg" / "scaffold", arcname="scaffold")
+    got = RUN.locate_src(tmp_path / "input2", tmp_path / "tmp2")
+    assert (got / "scaffold" / "__init__.py").exists()
+    with pytest.raises(SystemExit, match="not found"):
+        RUN.locate_src(tmp_path / "nothing", tmp_path / "tmp3")
