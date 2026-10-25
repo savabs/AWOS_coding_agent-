@@ -73,6 +73,12 @@
 The converter maps Enter to "click the form's only button". It should use the harness's new `fill_enter` verb now
 that it has landed.
 
+**Reader fixes (claude/web-reader, merged 2026-10-26).** All five gaps above are fixed in the shared reader path.
+- Mind2Web step mapping: **61.3% -> 80.5%**. Grounding refusals: **62 -> 0**.
+- Named, unique controls are byte-identical, so trained models see no shift.
+- The remaining unmapped steps are mostly JS-only clickable div / li elements. They are undetectable offline (no
+  listeners in the dumps), but the live reader catches them through cursor / clickable detection.
+
 ## Milestones
 | | Target | Notes |
 |---|---|---|
