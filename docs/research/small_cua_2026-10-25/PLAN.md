@@ -51,6 +51,28 @@
    - Same judge for every model.
    - Report blocked tasks separately.
 
+## Data engine findings (2026-10-25, docs/specs/web_data.md)
+
+**Mind2Web train converts offline.**
+- It covers 1,009 tasks on 73 sites. 61% of real steps map onto our numbered controls, giving about 2.8K rows (stop at
+  the first unmapped step) or 6.7K rows (continue past it).
+- **Text contamination: 0.** No Mind2Web train task matches any of the 346 Online-Mind2Web task texts.
+- **Website overlap: 37 of 73 train sites** (517 tasks) are benchmark sites. Rows carry a flag for this, and
+  `--exclude-overlap-websites` drops them. Train both ways and report both.
+
+**MolmoWeb cannot be converted offline.** It has no DOM or accessibility tree, only live replay. Its
+`task_seeded_om2w` subset is seeded from the benchmark itself, so **it must never be used**.
+
+**Observation gaps found** (these limit the live agent too; fix them before SFT v4):
+- links and buttons inside headings are dropped;
+- JS-clickable div / li / span elements (autocomplete options, menus, calendar cells) are not controls;
+- CDP "CBOR stack limit" errors on very deep pages;
+- grounding refuses about 16% of real steps (ambiguous or unnamed controls);
+- `fill` does not re-observe, so an autocomplete list that appears after typing is never seen.
+
+The converter maps Enter to "click the form's only button". It should use the harness's new `fill_enter` verb now
+that it has landed.
+
 ## Milestones
 | | Target | Notes |
 |---|---|---|
