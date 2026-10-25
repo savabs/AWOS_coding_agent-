@@ -124,3 +124,7 @@ tests/fixtures/wedge_v1/ci_rescue_sprint/.awos/
 .awos/worktrees/
 .awos/benchmark_*/awos/
 .awos/benchmark_*/raw/
+
+# EngineBench: local-only workloads (public-site pages) and run outputs
+bench/engine/local/
+bench/engine/runs/
