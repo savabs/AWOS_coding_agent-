@@ -1,0 +1,31 @@
+# Checks the HF_TOKEN secret can download the gated Online-Mind2Web task file. Prints only the token's
+# length class and HTTP status codes, never the token. Launch: push to bench-cloud/rl-hf-check-<anything>.
+name: rl-hf-check
+
+on:
+  push:
+    branches: ["bench-cloud/rl-hf-check-**"]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+    steps:
+      - name: Token present and dataset reachable
+        shell: bash
+        run: |
+          if [ -z "$HF_TOKEN" ]; then echo "::error::HF_TOKEN is empty (re-run: gh secret set HF_TOKEN, and paste the token)"; exit 1; fi
+          echo "token: non-empty (${#HF_TOKEN} chars), starts with hf_: $([[ $HF_TOKEN == hf_* ]] && echo yes || echo no)"
+          W=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $HF_TOKEN" https://huggingface.co/api/whoami-v2)
+          echo "whoami: HTTP $W"
+          D=$(curl -s -L -o /dev/null -w "%{http_code}" -r 0-99 -H "Authorization: Bearer $HF_TOKEN" \
+            https://huggingface.co/datasets/osunlp/Online-Mind2Web/resolve/main/Online_Mind2Web.json)
+          echo "Online_Mind2Web.json: HTTP $D"
+          { echo "### HF_TOKEN check"; echo "- whoami: HTTP $W"; echo "- dataset file: HTTP $D"; } >> "$GITHUB_STEP_SUMMARY"
+          [ "$W" = 200 ] || { echo "::error::token rejected by Hugging Face"; exit 1; }
+          case "$D" in 200|206) echo "OK: dataset access works";; 403|401) echo "::error::token works but the dataset terms are not accepted yet (open the dataset page logged in and agree)"; exit 1;; *) exit 1;; esac
