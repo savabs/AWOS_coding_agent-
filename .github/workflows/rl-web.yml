@@ -11,7 +11,8 @@ name: rl-web
 
 on:
   push:
-    branches: ["bench-cloud/rl-web-**"]
+    # rl-web-judge-** and rl-web-kaggle-** are their own workflows (rl-web-judge.yml, rl-web-kaggle.yml)
+    branches: ["bench-cloud/rl-web-**", "!bench-cloud/rl-web-judge-**", "!bench-cloud/rl-web-kaggle-**"]
   workflow_dispatch:
     inputs:
       models:

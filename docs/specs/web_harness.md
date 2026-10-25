@@ -265,4 +265,6 @@ The live check was one task on en.wikipedia.org with the local llama-server alre
 - The CI workflow has not run yet. Its YAML, matrix and settings are covered by a unit test.
 - The HF download path has not run, because there is no token here. Only the missing-token error is tested.
 - The `cloud` model on the web has not run (no paid calls).
-- Multi-worker runs (`--workers > 1`) have not been tested.
+- Multi-worker runs (`--workers > 1`) have only run against fake llama-servers (`tests/rl/test_web_kaggle.py`:
+  2 workers, one `--base-url` each). On the live web they have not run. `--base-url URL` (repeatable) gives
+  worker `i` URL `i mod n`, for one llama-server per GPU (`docs/specs/web_kaggle.md`).

@@ -1,0 +1,217 @@
+# Online-Mind2Web on the live web with llama.cpp on a free Kaggle T4 x2 (docs/specs/web_kaggle.md): the same
+# harness as rl-web.yml (python -m scaffold.rl.web run), ~1-3 s per model step instead of 100-150 s on CPU.
+# launch: downloads the gated task file (HF_TOKEN) and the pinned GGUFs (ci/rl_eval.env MODEL_SPECS, sha256),
+#   stages a private Kaggle dataset + kernel (kaggle/web-eval/stage.py) and pushes them (kaggle_driver).
+# watch: waits for the kernel (ntfy progress in the log), fetches its output and uploads one artifact per model,
+#   rl-web-merged-<model>-<split> (<model>__web-<split>/ with trajectories.jsonl + judge/<task_id>/, the layout
+#   rl-web.yml's merged/ has), which rl-web-judge.yml reads with RUNS="A=<this run id>:rl-web-merged-<model>-*"
+#   and kaggle/web-judge/stage.py with --runs A=<dir>. Plus rl-web-kaggle-summary (summary.*, env.json, logs).
+# Secrets: HF_TOKEN, KAGGLE_USERNAME, KAGGLE_KEY (or KAGGLE_API_TOKEN). Settings: ci/rl_web_kaggle.env.
+#
+# Launch: push to a branch named bench-cloud/rl-web-kaggle-<anything>. Watch again (the GitHub job lives
+# 6 h at most): Actions -> rl-web-kaggle -> Run workflow with watch_only.
+# (bench-cloud/rl-** is excluded from the paid ladder workflow, see .github/workflows/ladder.yml.)
+# Kaggle allows 2 concurrent GPU sessions: a refused push fails the launch job (kaggle_driver.push).
+name: rl-web-kaggle
+
+on:
+  push:
+    branches: ["bench-cloud/rl-web-kaggle-**"]
+  workflow_dispatch:
+    inputs:
+      watch_only:
+        description: "Only wait for / fetch the kernel already running (no staging, no push)"
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rl-web-kaggle
+  cancel-in-progress: false
+
+jobs:
+  launch:
+    if: github.event_name == 'push' || !inputs.watch_only
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Settings (ci/rl_web_kaggle.env)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 kaggle/web-eval/stage.py settings | tee -a "$GITHUB_ENV"
+          python3 kaggle/web-eval/stage.py settings --format specs > "$RUNNER_TEMP/specs.txt"
+
+      - name: Check the secrets are configured (values never printed)
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          [ -n "${HF_TOKEN:-}" ] || { echo "::error::HF_TOKEN secret is empty (see .github/workflows/rl-hf-check.yml)"; exit 1; }
+          [ -n "${KAGGLE_USERNAME:-}" ] && { [ -n "${KAGGLE_KEY:-}" ] || [ -n "${KAGGLE_API_TOKEN:-}" ]; } \
+            || { echo "::error::KAGGLE_USERNAME + KAGGLE_KEY (or KAGGLE_API_TOKEN) secrets are not set"; exit 1; }
+          echo "secrets are set"
+
+      - name: Kaggle CLI; refuse while the kernel is still running
+        shell: bash
+        run: |
+          set -euo pipefail
+          pip install -q kaggle==2.2.4
+          S=$(python -c "from scaffold.rl.train.kaggle_driver import kernel_status as k; import os; print(k(os.environ['KAGGLE_USERNAME'] + '/$KERNEL_SLUG'))" | tail -1)
+          echo "kernel $KERNEL_SLUG: $S"
+          case "$S" in running|queued) echo "::error::$KERNEL_SLUG is $S: wait for it (watch_only) before relaunching"; exit 1 ;; esac
+
+      - name: Online-Mind2Web task file (gated; HF_TOKEN secret; never printed, never committed)
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/om2w"
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from scaffold.rl.web.source import download, load_entries
+          p = download(Path(os.environ["RUNNER_TEMP"]) / "om2w" / "Online_Mind2Web.json")
+          print(f"task file: {len(load_entries(p))} tasks")
+          PY
+
+      - name: Download the GGUFs (pinned revision, sha256-checked)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          M="$RUNNER_TEMP/models"; mkdir -p "$M"
+          while read -r LABEL REPO FILE REV SHA; do
+            [ -n "$LABEL" ] || continue
+            case "$REPO" in
+              gh-release:*)   # our trained GGUF: all shards of the release (llama-server -m <first> loads the rest)
+                gh release download "$REV" --repo "${REPO#gh-release:}" --dir "$M" --clobber \
+                  --pattern "$(basename "${FILE%-00001-of-*}" .gguf)*.gguf" ;;
+              *) curl -fL --retry 5 -o "$M/$FILE" "https://huggingface.co/$REPO/resolve/$REV/$FILE" ;;
+            esac
+            echo "$SHA  $M/$FILE" | sha256sum -c -
+          done < "$RUNNER_TEMP/specs.txt"
+          ls -lh "$M"; df -h "$RUNNER_TEMP"
+
+      - name: Stage the dataset + kernel (kaggle/web-eval/stage.py)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python kaggle/web-eval/stage.py stage --tasks-json "$RUNNER_TEMP/om2w/Online_Mind2Web.json" \
+            --models-dir "$RUNNER_TEMP/models" --out "$RUNNER_TEMP/stage-we" --user "$KAGGLE_USERNAME"
+          cat "$RUNNER_TEMP/stage-we/kernel/kernel-metadata.json"
+
+      - name: Push (private dataset version, then the kernel)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from scaffold.rl.train.kaggle_driver import push
+          # several GB of GGUFs: give Kaggle up to an hour to process the dataset version
+          print(push(Path(os.environ["RUNNER_TEMP"]) / "stage-we", message=f"awos web eval {os.environ['GITHUB_SHA'][:8]}",
+                     wait_s=3600))
+          PY
+          { echo "### rl-web-kaggle pushed"; echo; echo "\`$KAGGLE_USERNAME/$KERNEL_SLUG\`: $MODELS on $SPLIT, $WORKERS workers"; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the task file from the runner
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/om2w" "$RUNNER_TEMP/stage-we"
+
+  watch:
+    needs: launch
+    if: always() && (needs.launch.result == 'success' || needs.launch.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Settings
+        shell: bash
+        run: python3 kaggle/web-eval/stage.py settings | tee -a "$GITHUB_ENV"
+      - name: Wait for the kernel (ntfy progress each minute)
+        id: wait
+        shell: bash
+        run: |
+          set -uo pipefail
+          pip install -q kaggle==2.2.4
+          TOPIC=$(python3 -c "import re;s=open('kaggle/web-eval/run.py').read();print(re.search(r'\"ntfy_topic\": \"([^\"]*)\"',s).group(1))")
+          python -m scaffold.rl.train.kaggle_driver wait --kernel "$KAGGLE_USERNAME/$KERNEL_SLUG" --timeout-min 320 \
+            --ntfy-topic "$TOPIC" | tee wait.log
+          S=$(tail -1 wait.log)
+          echo "status=$S" >> "$GITHUB_OUTPUT"
+          echo "### Kaggle kernel status: \`$S\`" >> "$GITHUB_STEP_SUMMARY"
+          [ "$S" = "timeout" ] && echo "Still running; rerun this workflow with watch_only." >> "$GITHUB_STEP_SUMMARY"
+          [ "$S" = "complete" ] || [ "$S" = "timeout" ]
+      - name: Fetch the output; one folder per model
+        if: always() && steps.wait.outputs.status != 'timeout'
+        shell: bash
+        run: |
+          set -uo pipefail
+          python kaggle/web-eval/stage.py collect --kernel "$KAGGLE_USERNAME/$KERNEL_SLUG" --out kaggle_out | tee dirs.txt
+          i=0
+          for d in $(grep '__web-' dirs.txt); do
+            i=$((i + 1)); name=$(basename "$d"); model="${name%%__*}"; split="${name#*__web-}"
+            mkdir -p "art$i"; mv "$d" "art$i/$name"
+            echo "WE_NAME_$i=rl-web-merged-$model-$split" >> "$GITHUB_ENV"
+            echo "$name: $(find "art$i/$name/judge" -name result.json | wc -l) result.json"
+          done
+          [ -f kaggle_out/summary.md ] && cat kaggle_out/summary.md >> "$GITHUB_STEP_SUMMARY"
+          for f in kaggle_out/*/harness.log; do [ -f "$f" ] && tail -n 20 "$f"; done
+          true
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WE_NAME_1 != ''
+        with:
+          name: ${{ env.WE_NAME_1 }}
+          path: art1/
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WE_NAME_2 != ''
+        with:
+          name: ${{ env.WE_NAME_2 }}
+          path: art2/
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WE_NAME_3 != ''
+        with:
+          name: ${{ env.WE_NAME_3 }}
+          path: art3/
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WE_NAME_4 != ''
+        with:
+          name: ${{ env.WE_NAME_4 }}
+          path: art4/
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rl-web-kaggle-summary
+          path: |
+            kaggle_out/
+            wait.log
+          if-no-files-found: warn
+          retention-days: 30
