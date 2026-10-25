@@ -173,7 +173,8 @@ jobs:
           set -uo pipefail
           PYTHONPATH=. python kaggle/web-eval/stage.py collect --kernel "$KAGGLE_USERNAME/$KERNEL_SLUG" --out kaggle_out | tee dirs.txt
           i=0
-          for d in $(grep '__web-' dirs.txt); do
+          # only the folder lines collect prints (the Kaggle CLI's "Output file downloaded to ..." lines also contain __web-)
+          for d in $(grep -E '^kaggle_out/[^/ ]+__web-[^/ ]+$' dirs.txt); do
             i=$((i + 1)); name=$(basename "$d"); model="${name%%__*}"; split="${name#*__web-}"
             mkdir -p "art$i"; mv "$d" "art$i/$name"
             echo "WE_NAME_$i=rl-web-merged-$model-$split" >> "$GITHUB_ENV"
