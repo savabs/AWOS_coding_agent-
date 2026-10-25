@@ -61,6 +61,7 @@ DEFAULTS = {
     "cuda_arch": "75",              # T4 = Turing sm_75
     "local_timeout_s": 180,         # one model call on a GPU; CI's CPU value is 600
     "server_start_timeout_s": 900,
+    "first_server_timeout_s": 2400,  # the first server JIT-compiles the PTX kernels for the T4 (see server_plan)
     "deadline_hours": 11.0,         # Kaggle stops a session at 12 h: stop the harness before (it is resumable)
     "playwright_pin": "playwright==1.64.0",
     "ntfy_topic": "awos-rl-be26ddc76649",   # same topic as kaggle/rl-sft/train.py ("" = off)
@@ -148,7 +149,11 @@ def server_plan(cfg: dict, binary: str, gguf: str, alias: str) -> list:
     plan = []
     for g in range(int(cfg["gpus"])):
         port = int(cfg["base_port"]) + g
-        env = {"CUDA_VISIBLE_DEVICES": str(g), "LD_LIBRARY_PATH": lib + ":" + os.environ.get("LD_LIBRARY_PATH", "")}
+        # the prebuilt binary carries T4 (sm_75) code only as PTX: the first start JIT-compiles every kernel
+        # (~10-15+ min on Kaggle's 4 vCPU). One shared, large JIT cache lets the next server reuse it.
+        env = {"CUDA_VISIBLE_DEVICES": str(g), "LD_LIBRARY_PATH": lib + ":" + os.environ.get("LD_LIBRARY_PATH", ""),
+               "CUDA_CACHE_PATH": str(cfg.get("cuda_cache_path") or "/kaggle/tmp/web-eval/nv-cache"),
+               "CUDA_CACHE_MAXSIZE": str(4 * 1024 ** 3)}
         plan.append((g, port, server_cmd(cfg, binary, gguf, alias, port), env))
     return plan
 
@@ -280,14 +285,16 @@ def smoke(port: int, alias: str) -> float:
 def start_servers(cfg: dict, binary: Path, gguf: Path, alias: str, logdir: Path) -> list:
     procs = []
     try:
-        for g, port, cmd, env in server_plan(cfg, str(binary), str(gguf), alias):
+        # one at a time (2026-10-25 M0: two servers JIT-compiling the PTX at once were not healthy after 900 s):
+        # the first pays the JIT once (long timeout), the next ones load the cached kernels
+        for k, (g, port, cmd, env) in enumerate(server_plan(cfg, str(binary), str(gguf), alias)):
             log(f"gpu{g}:", " ".join(cmd))
             fh = open(logdir / f"llama-server-gpu{g}.log", "w")
-            procs.append((port, subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT,
-                                                 env={**os.environ, **env}), fh))
-        for port, p, _ in procs:
-            wait_health(port, cfg["server_start_timeout_s"], p)
-            log(f"llama-server :{port} healthy; smoke {smoke(port, alias):.2f} s")
+            p = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT, env={**os.environ, **env})
+            procs.append((port, p, fh))
+            t0 = time.time()
+            wait_health(port, cfg["first_server_timeout_s"] if k == 0 else cfg["server_start_timeout_s"], p)
+            log(f"llama-server :{port} healthy after {time.time() - t0:.0f} s; smoke {smoke(port, alias):.2f} s")
         return procs
     except Exception:
         stop_servers(procs)

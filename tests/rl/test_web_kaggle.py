@@ -382,3 +382,25 @@ def test_locate_src_accepts_the_archive_or_kaggles_unpacked_folder(tmp_path):
     assert (got / "scaffold" / "__init__.py").exists()
     with pytest.raises(SystemExit, match="not found"):
         RUN.locate_src(tmp_path / "nothing", tmp_path / "tmp3")
+
+
+def test_servers_share_a_large_cuda_jit_cache_and_start_one_at_a_time(tmp_path, monkeypatch):
+    """2026-10-25 M0: two servers JIT-compiling the prebuilt PTX at once were not healthy after 900 s."""
+    plan = RUN.server_plan(dict(RUN.DEFAULTS, gpus=2), "/x/llama-server", "/m.gguf", "m")
+    caches = {e["CUDA_CACHE_PATH"] for _g, _p, _c, e in plan}
+    assert len(caches) == 1 and all(int(e["CUDA_CACHE_MAXSIZE"]) >= 2 ** 31 for _g, _p, _c, e in plan)
+    order = []
+
+    class P:
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, **kw):
+        order.append(("start", kw["env"]["CUDA_VISIBLE_DEVICES"]))
+        return P()
+    monkeypatch.setattr(RUN.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(RUN, "wait_health", lambda port, timeout, p: order.append(("healthy", port, timeout)))
+    monkeypatch.setattr(RUN, "smoke", lambda port, alias: 0.1)
+    RUN.start_servers(dict(RUN.DEFAULTS, gpus=2), tmp_path / "llama-server", tmp_path / "m.gguf", "m", tmp_path)
+    assert [o[0] for o in order] == ["start", "healthy", "start", "healthy"]
+    assert order[1][2] == RUN.DEFAULTS["first_server_timeout_s"] > order[3][2] == RUN.DEFAULTS["server_start_timeout_s"]
