@@ -27,22 +27,31 @@ check() {
 
 case "${1:-g7}" in
   --check) check; exit $? ;;
-  g7)
-    FILE=qwen3.5-2b-g7-rv-Q4_K_M.gguf
-    SHA=a63e356f91aa5e1f741fc5132301f88140445e50f4b3a45658f921813c957f4f
-    [ -f "$DIR/$FILE" ] || gh release download rl-qwen3.5-2b-g7-rv --repo "$REPO" --pattern "$FILE" --dir "$DIR" ;;
-  g6)
-    FILE=qwen3.5-2b-g6-rv-Q4_K_M.gguf
-    SHA=af133cd576eecab134d955de70457aa40f91843d6bd0845d53bf1b2fa6534c62
-    [ -f "$DIR/$FILE" ] || gh release download rl-qwen3.5-2b-g6-rv --repo "$REPO" --pattern "$FILE" --dir "$DIR" ;;
-  base2b)
-    FILE=Qwen3.5-2B-Q4_K_M.gguf
-    SHA=aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223
-    [ -f "$DIR/$FILE" ] || curl -fL --retry 5 -o "$DIR/$FILE" \
-      "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/f6d5376be1edb4d416d56da11e5397a961aca8ae/$FILE" ;;
+  g7) FILE=qwen3.5-2b-g7-rv-Q4_K_M.gguf; SHA=a63e356f91aa5e1f741fc5132301f88140445e50f4b3a45658f921813c957f4f
+      TAG=rl-qwen3.5-2b-g7-rv ;;
+  g6) FILE=qwen3.5-2b-g6-rv-Q4_K_M.gguf; SHA=af133cd576eecab134d955de70457aa40f91843d6bd0845d53bf1b2fa6534c62
+      TAG=rl-qwen3.5-2b-g6-rv ;;
+  base2b) FILE=Qwen3.5-2B-Q4_K_M.gguf; SHA=aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223
+      TAG="" ;;
   *) echo "usage: $0 [g7|g6|base2b|--check]"; exit 2 ;;
 esac
-echo "$SHA  $DIR/$FILE" | shasum -a 256 -c - >/dev/null || { echo "sha256 mismatch for $DIR/$FILE: delete it and retry"; exit 1; }
+ok_file() { [ -f "$DIR/$FILE" ] && echo "$SHA  $DIR/$FILE" | shasum -a 256 -c - >/dev/null 2>&1; }
+# download to <file>.part and rename only when complete + sha256-correct (a cut download never looks finished)
+for attempt in 1 2 3; do
+  ok_file && break
+  rm -f "$DIR/$FILE" "$DIR/$FILE.part"
+  echo "downloading $FILE (attempt $attempt)..."
+  if [ -n "$TAG" ]; then
+    rm -rf "$DIR/.dl" && mkdir -p "$DIR/.dl" && gh release download "$TAG" --repo "$REPO" --pattern "$FILE" --dir "$DIR/.dl" \
+      && mv "$DIR/.dl/$FILE" "$DIR/$FILE.part"
+  else
+    curl -fL --retry 5 -o "$DIR/$FILE.part" \
+      "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/f6d5376be1edb4d416d56da11e5397a961aca8ae/$FILE"
+  fi
+  [ -f "$DIR/$FILE.part" ] && mv "$DIR/$FILE.part" "$DIR/$FILE"
+done
+rm -rf "$DIR/.dl"
+ok_file || { rm -f "$DIR/$FILE"; echo "download failed or sha256 mismatch for $FILE: run the script again"; exit 1; }
 command -v llama-server >/dev/null || { echo "llama-server not found: brew install llama.cpp"; exit 1; }
 if curl -s -m 2 "http://127.0.0.1:$PORT/health" | grep -q ok; then
   echo "something is already serving on 127.0.0.1:$PORT (stop it first, or set AWOS_MODEL_PORT)"; exit 1
