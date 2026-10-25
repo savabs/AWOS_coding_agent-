@@ -124,3 +124,6 @@ tests/fixtures/wedge_v1/ci_rescue_sprint/.awos/
 .awos/worktrees/
 .awos/benchmark_*/awos/
 .awos/benchmark_*/raw/
+
+# Online-Mind2Web task file: gated (HF_TOKEN), never committed (docs/specs/web_kaggle.md)
+Online_Mind2Web.json

@@ -14,7 +14,8 @@ Output directory:
     run.json             settings;  summary.json / summary.md: counts, blocked-by-kind, steps, tokens
 
 Models: local (llama-server at AWOS_LOCAL_BASE_URL, default http://127.0.0.1:8080/v1, temperature
-0), cloud (CloudTextModel; AWOS_CLOUD_MAX_USD spend cap, split across workers), scripted (tests:
+0; --base-url URL, repeatable, gives each worker process one of the URLs round-robin, e.g. one
+llama-server per GPU), cloud (CloudTextModel; AWOS_CLOUD_MAX_USD spend cap, split across workers), scripted (tests:
 task.meta["script"] through micro_agent.ScriptedModel). There is no oracle on the live web.
 Resumable: tasks already written without an infra error (traj.error) are skipped.
 """
@@ -62,7 +63,19 @@ def make_model(kind: str, task: TaskSpec, args: dict) -> Tuple[Any, str]:
 _W: Dict[str, Any] = {}
 
 
-def _worker_init(args: dict) -> None:
+def worker_base_url(urls: List[str], index: int) -> str:
+    """The llama-server URL of the index-th worker (0-based): round-robin over --base-url."""
+    return urls[index % len(urls)]
+
+
+def _worker_init(args: dict, counter=None) -> None:
+    urls = args.get("base_urls") or []
+    if urls:                                    # before the model is built: LocalGBNFModel reads the env
+        idx = 0
+        if counter is not None:
+            with counter.get_lock():
+                idx, counter.value = counter.value, counter.value + 1
+        os.environ["AWOS_LOCAL_BASE_URL"] = worker_base_url(urls, idx)
     from scaffold.rl.harness.chromium import Chromium
     _W["chromium"] = Chromium(web=True)
     _W["args"] = args
@@ -114,7 +127,7 @@ def run(out: Path, *, model: str = "local", split: str = "dev", shard: Optional[
         task_ids: Optional[List[str]] = None, tasks_json: Optional[str] = None, max_steps: int = MAX_STEPS,
         max_seconds: float = MAX_SECONDS, workers: int = 1, guards: str = "product",
         model_label: Optional[str] = None, allow_private: bool = False, dev_ids_path: Optional[str] = None,
-        log=print) -> Dict[str, Any]:
+        base_urls: Optional[List[str]] = None, log=print) -> Dict[str, Any]:
     out = Path(out)
     (out / "judge").mkdir(parents=True, exist_ok=True)
     path = out / "trajectories.jsonl"
@@ -123,7 +136,8 @@ def run(out: Path, *, model: str = "local", split: str = "dev", shard: Optional[
     have = {r["task"]["id"] for r in read_records(path) if not (r.get("trajectory") or {}).get("error")}
     jobs = [t.to_dict() for t in tasks if t.id not in have]
     args = {"model": model, "guards": guards, "model_label": model_label, "workers": workers, "out": str(out),
-            "max_steps": int(max_steps), "max_seconds": float(max_seconds), "allow_private": allow_private}
+            "max_steps": int(max_steps), "max_seconds": float(max_seconds), "allow_private": allow_private,
+            "base_urls": list(base_urls or [])}
     meta = {"source": "online-mind2web", "dataset_file": src.path.name, "split": split, "shard": shard,
             "model": model, "model_label": model_label, "guards": guards, "max_steps": max_steps,
             "max_seconds": max_seconds, "tasks": len(tasks), "dev_ids_source": src.dev_ids_source or None}
@@ -144,7 +158,7 @@ def run(out: Path, *, model: str = "local", split: str = "dev", shard: Optional[
                 _worker_close()
         else:
             ctx = mp.get_context("spawn")
-            with ctx.Pool(workers, initializer=_worker_init, initargs=(args,)) as pool:
+            with ctx.Pool(workers, initializer=_worker_init, initargs=(args, ctx.Value("i", 0))) as pool:
                 for i, rec in enumerate(pool.imap_unordered(_worker_run, jobs), 1):
                     emit(rec, i)
     summ = summarize(out)
@@ -271,6 +285,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     r.add_argument("--workers", type=int, default=1)
     r.add_argument("--guards", default="product", choices=["product", "raw"])
     r.add_argument("--allow-private", action="store_true", help="tests only: allow loopback / private hosts")
+    r.add_argument("--base-url", action="append", default=None,
+                   help="llama-server URL for --model local (repeatable: worker i uses URL i mod n; "
+                        "default AWOS_LOCAL_BASE_URL)")
     r.add_argument("--out", required=True)
     s = sub.add_parser("summarize", help="(re)write summary.md / summary.json for a run directory")
     s.add_argument("out")
@@ -284,7 +301,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         summ = run(Path(a.out), model=a.model, split=a.split, shard=a.shard, n=a.n, task_ids=a.task,
                    tasks_json=a.tasks_json, max_steps=a.max_steps, max_seconds=a.max_seconds, workers=a.workers,
                    guards=a.guards, model_label=a.model_label, allow_private=a.allow_private,
-                   dev_ids_path=a.dev_ids)
+                   dev_ids_path=a.dev_ids, base_urls=a.base_url)
         print(to_markdown(summ))
         return 0
     if a.cmd == "summarize":
