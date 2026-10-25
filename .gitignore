@@ -127,3 +127,6 @@ tests/fixtures/wedge_v1/ci_rescue_sprint/.awos/
 
 # Online-Mind2Web task file: gated (HF_TOKEN), never committed (docs/specs/web_kaggle.md)
 Online_Mind2Web.json
+# EngineBench: local-only workloads (public-site pages) and run outputs
+bench/engine/local/
+bench/engine/runs/
