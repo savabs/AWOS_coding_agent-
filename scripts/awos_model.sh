@@ -1,14 +1,15 @@
 #!/bin/bash
 # awos_model.sh — run the AWOS repair model on this Mac for the Chrome extension (AWOS Replay).
 #
-#     bash scripts/awos_model.sh            # G6: Qwen3.5 2B trained for repair + verify (default)
+#     bash scripts/awos_model.sh            # G7: Qwen3.5 2B trained for repair + verify, round 2 (default)
+#     bash scripts/awos_model.sh g6         # G6: round 1
 #     bash scripts/awos_model.sh base2b     # untrained Qwen3.5 2B (for an A/B)
 #     bash scripts/awos_model.sh --check    # is it up? (one tiny repair prompt)
 #
 # Downloads the GGUF once into ~/.awos/models (sha256-checked), then serves it with llama.cpp on
 # 127.0.0.1:8080 ONLY (the extension refuses any non-loopback endpoint; nothing leaves the machine).
 # Same server flags as CI (rl-repair-verify.yml): --jinja --reasoning off --temp 0, one slot.
-# Needs: brew install llama.cpp (llama-server), and gh (logged in) for the G6 release.
+# Needs: brew install llama.cpp (llama-server), and gh (logged in) for the G6 / G7 releases.
 set -euo pipefail
 REPO=savabs/AWOS_coding_agent-
 DIR="$HOME/.awos/models"
@@ -24,8 +25,12 @@ check() {
   }' | python3 -c "import json,sys; print('model server: UP; sample answer:', json.load(sys.stdin)['choices'][0]['message']['content'])"
 }
 
-case "${1:-g6}" in
+case "${1:-g7}" in
   --check) check; exit $? ;;
+  g7)
+    FILE=qwen3.5-2b-g7-rv-Q4_K_M.gguf
+    SHA=a63e356f91aa5e1f741fc5132301f88140445e50f4b3a45658f921813c957f4f
+    [ -f "$DIR/$FILE" ] || gh release download rl-qwen3.5-2b-g7-rv --repo "$REPO" --pattern "$FILE" --dir "$DIR" ;;
   g6)
     FILE=qwen3.5-2b-g6-rv-Q4_K_M.gguf
     SHA=af133cd576eecab134d955de70457aa40f91843d6bd0845d53bf1b2fa6534c62
@@ -35,7 +40,7 @@ case "${1:-g6}" in
     SHA=aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223
     [ -f "$DIR/$FILE" ] || curl -fL --retry 5 -o "$DIR/$FILE" \
       "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/f6d5376be1edb4d416d56da11e5397a961aca8ae/$FILE" ;;
-  *) echo "usage: $0 [g6|base2b|--check]"; exit 2 ;;
+  *) echo "usage: $0 [g7|g6|base2b|--check]"; exit 2 ;;
 esac
 echo "$SHA  $DIR/$FILE" | shasum -a 256 -c - >/dev/null || { echo "sha256 mismatch for $DIR/$FILE: delete it and retry"; exit 1; }
 command -v llama-server >/dev/null || { echo "llama-server not found: brew install llama.cpp"; exit 1; }
