@@ -65,6 +65,7 @@ def load_settings(path: Path = DEFAULT_ENV, web_env: Path = WEB_ENV, eval_env: P
     workers = _int(env, "WORKERS", 4, 1, 16)
     s = {"MODELS": models, "SPLIT": split, "WORKERS": workers, "GPUS": gpus,
          "MAX_STEPS": _int(env, "MAX_STEPS", 25, 1, 100), "MAX_SECONDS": _int(env, "MAX_SECONDS", 900, 60, 7200),
+         "N_TASKS": _int(env, "N_TASKS", 0, 0, 300),
          "KERNEL_SLUG": env.get("KERNEL_SLUG") or "awos-web-eval",
          "DATASET_SLUG": env.get("DATASET_SLUG") or "awos-web-eval-data",
          "RUN_NAME": env.get("RUN_NAME") or "", "LLAMA_BUILD_SOURCE": env.get("LLAMA_BUILD_SOURCE") or "",
@@ -93,6 +94,7 @@ def load_kernel():
 def kernel_config(s: dict, ntfy_topic=None) -> dict:
     cfg = dict(load_kernel().DEFAULTS)
     cfg.update({"models": [{"label": m, "file": s["specs"][m]["file"]} for m in s["MODELS"]], "split": s["SPLIT"],
+                "n_tasks": s["N_TASKS"],
                 "workers": s["WORKERS"], "gpus": s["GPUS"], "slots_per_server": s["SLOTS_PER_SERVER"],
                 "max_steps": s["MAX_STEPS"], "max_seconds": s["MAX_SECONDS"], "ctx_per_slot": s["CTX_PER_SLOT"],
                 "llama_tag": s["LLAMA_TAG"], "deadline_hours": s["DEADLINE_HOURS"], "run_name": s["RUN_NAME"]})

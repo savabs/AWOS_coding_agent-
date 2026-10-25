@@ -47,6 +47,7 @@ TASK_FILE = "Online_Mind2Web.json"
 DEFAULTS = {
     "models": [],                   # [{"label", "file"}]: file = the GGUF llama-server -m loads (first shard)
     "split": "dev",
+    "n_tasks": 0,                   # first N tasks of the split (0 = all): a smoke run before the full one
     "workers": 4,                   # harness worker processes (one Chromium each), round-robin over the servers
     "max_steps": 25,
     "max_seconds": 900,             # wall clock per task
@@ -144,6 +145,8 @@ def harness_cmd(cfg: dict, label: str, tasks_json: str, out: Path, ports: list) 
     cmd = [sys.executable, "-m", "scaffold.rl.web", "run", "--model", "local", "--model-label", label,
            "--split", cfg["split"], "--max-steps", str(cfg["max_steps"]), "--max-seconds", str(cfg["max_seconds"]),
            "--workers", str(cfg["workers"]), "--tasks-json", tasks_json, "--out", str(out) + "/"]
+    if int(cfg.get("n_tasks") or 0) > 0:
+        cmd += ["--n", str(int(cfg["n_tasks"]))]
     for p in ports:
         cmd += ["--base-url", f"http://127.0.0.1:{p}/v1"]
     return cmd

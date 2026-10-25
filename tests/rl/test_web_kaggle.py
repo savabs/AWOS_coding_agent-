@@ -208,6 +208,9 @@ def test_harness_invocation_spreads_workers_over_the_servers(tmp_path):
     assert "--model local --model-label a-final --split dev --max-steps 25 --max-seconds 900 --workers 4" in s
     assert "--tasks-json /in/Online_Mind2Web.json" in s and f"--out {tmp_path / 'a-final__web-dev'}/" in s
     assert s.endswith("--base-url http://127.0.0.1:8080/v1 --base-url http://127.0.0.1:8081/v1")
+    assert "--n " not in s                                       # all tasks by default
+    smoke = " ".join(RUN.harness_cmd(dict(cfg, n_tasks=8), "a-final", "/in/t.json", tmp_path / "x", [8080]))
+    assert " --n 8 " in smoke                                    # N_TASKS: a smoke run before the full one
     from scaffold.rl.web.runner import main as harness_main   # the CLI accepts exactly these options
     with pytest.raises(SystemExit) as ex:
         harness_main(cmd[3:] + ["--help"])
