@@ -65,4 +65,12 @@
 - **Judge:** `scaffold/rl/web_judge/` and `scripts/web/judge.py`. o4-mini (cost cap) and WebJudge-7B (Kaggle).
 - **Data engine:** `scaffold/rl/train/mind2web_data.py`. Mind2Web to our format, with the contamination check.
 
-**Needs from the owner:** `HF_TOKEN` (accept the dataset terms) and `OPENAI_API_KEY` as GitHub secrets.
+**Owner action, done 2026-10-25:** `HF_TOKEN` is set, and the gated dataset downloads (rl-hf-check 40207562651).
+
+**Update 2026-10-25: OpenAI shut down o4-mini on 2026-10-23** (OpenAI deprecations page). The official judge is
+therefore **WebJudge-7B**, which agrees with humans 87.0% of the time per its authors (o4-mini: 85.7%). It is open,
+runs free on Kaggle (`kaggle/web-judge/`), and replaces o4-mini for both daily and official numbers. No OpenAI key is
+needed.
+
+My earlier o4-mini estimate of $5-10 per run was wrong: the judge agent estimated $22-49 per 300 tasks at Standard
+pricing.
