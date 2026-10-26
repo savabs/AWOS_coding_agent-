@@ -101,16 +101,17 @@ def test_access_token_in_kaggle_key_is_passed_as_api_token(monkeypatch):
     assert env["KAGGLE_KEY"] == "0123456789abcdef" * 2 and "KAGGLE_API_TOKEN" not in env
 
 
-def test_wait_files_waits_for_every_staged_file_at_its_size(tmp_path, monkeypatch):
-    """"ready" is not enough for a multi-GB version: wait until Kaggle lists every staged file at its size."""
+def test_wait_files_waits_until_the_new_version_is_listed(tmp_path, monkeypatch):
+    """"ready" can come while a big version still processes: wait until a staged file (or its unpacked folder)
+    is listed. Not every file: the CLI's listing is one page, so with hundreds of files most never appear."""
     import subprocess
     (tmp_path / "web_eval_src.tar.gz").write_bytes(b"x" * 10)
     (tmp_path / "model.gguf").write_bytes(b"y" * 20)
     (tmp_path / "dataset-metadata.json").write_text("{}")
     listings = iter([
         "name,size,creationDate\n",                                                  # nothing processed yet
-        "name,size,creationDate\nweb_eval_src.tar.gz,10,2026-10-25\nmodel.gguf,7,2026-10-25\n",   # partial
-        "name,size,creationDate\nweb_eval_src.tar.gz,10,2026-10-25\nmodel.gguf,20,2026-10-25\n",  # done
+        "name,size,creationDate\nother.json,3,2026-10-25\n",                         # an older version's file
+        "name,size,creationDate\nmodel.gguf,20,2026-10-25\n",                        # a staged file: go
     ])
     calls = []
 
@@ -125,7 +126,7 @@ def test_wait_files_waits_for_every_staged_file_at_its_size(tmp_path, monkeypatc
     monkeypatch.setattr(kd, "run", lambda cmd, dry, check=True: subprocess.CompletedProcess(cmd, 0, "name,size\n", ""))
     t = iter(range(0, 10_000, 100))
     monkeypatch.setattr(kd.time, "time", lambda: next(t))
-    with pytest.raises(SystemExit, match="still not listed"):
+    with pytest.raises(SystemExit, match="no staged file listed"):
         kd.wait_files("me/ds", tmp_path, wait_s=150)
 
 

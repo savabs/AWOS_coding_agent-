@@ -155,24 +155,24 @@ def _stem(name: str) -> str:
 
 
 def wait_files(ref: str, ds_dir: Path, wait_s: int, poll_s: int = 20) -> None:
-    """Wait until every staged file is listed at its size before the kernel is pushed: status "ready" can come
-    while a multi-GB version is still processing. An uploaded archive counts once Kaggle lists its unpacked
-    folder: Kaggle unpacks x.tar.gz into x/ (2026-10-25 awos-web-eval-smoke: the kernel looked for
-    web_eval_src.tar.gz and failed, the dataset only had web_eval_src/scaffold/...)."""
+    """Wait until Kaggle lists the new version's files at all (status "ready" can come while a multi-GB version
+    is still processing). Deliberately NOT a per-file check:
+    - Kaggle unpacks an uploaded x.tar.gz into x/ and lists x/<members>, never x.tar.gz (2026-10-25 web-eval smoke);
+    - the CLI's listing is paginated (one page of a few dozen files), so with hundreds of screenshots most
+      staged files never appear (2026-10-26 web-judge smoke waited its full 15 min and failed).
+    A staged file that is listed (top level, name and size) counts as proof the new version is the one listed."""
     want = {p.name: p.stat().st_size for p in ds_dir.iterdir()
             if p.is_file() and p.name != "dataset-metadata.json"}
     t0 = time.time()
     while True:
         have = dataset_files(ref)
-        # Kaggle unpacks an uploaded archive: x.tar.gz is listed as x/<members>, never as x.tar.gz itself
-        unpacked = {n.split("/", 1)[0] for n in have if "/" in n}
-        missing = sorted(n for n, sz in want.items()
-                         if not (n in have and have[n] in (sz, None)) and _stem(n) not in unpacked)
-        if not missing:
+        exact = [n for n, sz in want.items() if n in have and have[n] in (sz, None)]
+        unpacked = {n.split("/", 1)[0] for n in have if "/" in n} & {_stem(n) for n in want}
+        if have and (exact or unpacked):
             return
         if time.time() - t0 > wait_s:
-            raise SystemExit(f"dataset {ref}: files still not listed after {wait_s}s: {missing[:5]}")
-        print(f"dataset {ref}: waiting for {len(missing)} file(s) to finish processing", flush=True)
+            raise SystemExit(f"dataset {ref}: no staged file listed after {wait_s}s")
+        print(f"dataset {ref}: waiting for the version to be listed", flush=True)
         time.sleep(poll_s)
 
 
