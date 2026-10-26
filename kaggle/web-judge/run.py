@@ -96,6 +96,42 @@ def collect_runs(runs_dir: Path, tmp: Path) -> list:
     return out
 
 
+TORCH_CHECK = ("import torch, json; print(json.dumps({'torch': torch.__version__, 'cuda': torch.version.cuda, "
+               "'ok': torch.cuda.is_available() and torch.cuda.device_count() > 0}))")
+
+
+def fix_torch_stack() -> dict:
+    """After `pip install vllm` on Kaggle (2026-10-26 judge smoke):
+    1. vLLM pulls a CUDA 13 torch while Kaggle's preinstalled torchaudio is a CUDA 12.8 build, and transformers
+       imports torchaudio, so vLLM dies at import. The judge needs no audio: remove torchaudio.
+    2. A CUDA 13 torch needs a newer driver than CUDA 12.8 (our prebuilt cu12.8 llama.cpp runs on these T4s).
+       If torch cannot see the GPUs, reinstall the same torch (+ torchvision) built for cu128."""
+    def check() -> dict:
+        p = subprocess.run([sys.executable, "-c", TORCH_CHECK], capture_output=True, text=True)
+        try:
+            return json.loads(p.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            return {"ok": False, "error": (p.stderr or "")[-400:]}
+    subprocess.call([sys.executable, "-m", "pip", "uninstall", "-y", "-q", "torchaudio"])
+    first = check()
+    log("torch after vllm install:", first)
+    if first.get("ok"):
+        return {"first": first}
+    ver = str(first.get("torch") or "").split("+")[0]
+    pkgs = [f"torch=={ver}"] if ver else ["torch"]
+    import importlib.metadata as md
+    try:
+        pkgs.append(f"torchvision=={md.version('torchvision').split('+')[0]}")
+    except md.PackageNotFoundError:
+        pass
+    log("torch cannot use the GPU: reinstalling for cu128:", pkgs)
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "--force-reinstall", "--no-deps",
+                           "--index-url", "https://download.pytorch.org/whl/cu128", *pkgs])
+    second = check()
+    log("torch after cu128 reinstall:", second)
+    return {"first": first, "reinstalled": pkgs, "second": second}
+
+
 def vllm_cmd(cfg: dict) -> list:
     cmd = [sys.executable, "-m", "vllm.entrypoints.openai.api_server", "--model", cfg["model"],
            "--revision", cfg["revision"], "--served-model-name", cfg["model"], "--host", "127.0.0.1",
@@ -169,12 +205,15 @@ def main(argv=None) -> int:
     log("judge:", " ".join(jcmd))
     if a.dry_run:
         return 0
+    env_info = {"config": cfg, "python": sys.version}
     if on_kaggle():
         log("pip install", cfg["vllm_pin"])
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", cfg["vllm_pin"]])
-    env_info = {"config": cfg, "python": sys.version}
+        env_info["torch_fix"] = fix_torch_stack()
     try:
         env_info["nvidia_smi"] = subprocess.run(["nvidia-smi", "-L"], capture_output=True, text=True).stdout
+        env_info["driver"] = subprocess.run(["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
+                                            capture_output=True, text=True).stdout.strip()
     except OSError:
         pass
     (out / "env.json").write_text(json.dumps(env_info, indent=1) + "\n")

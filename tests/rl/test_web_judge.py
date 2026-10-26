@@ -512,3 +512,24 @@ def test_kaggle_stage_and_kernel_dry_run(tmp_path, capsys):
     assert [lbl for lbl, _ in runs] == ["A"] and len(find_episodes(runs[0][1])) == 2
     with pytest.raises(SystemExit):
         stage.build_config(["nope=1"])
+
+
+def test_fix_torch_stack_removes_torchaudio_and_falls_back_to_cu128(monkeypatch):
+    """2026-10-26 smoke: vLLM's CUDA 13 torch vs Kaggle's cu12.8 torchaudio killed vLLM at import."""
+    import subprocess as sp
+    run = load_file(REPO / "kaggle" / "web-judge" / "run.py", "wj_run_fix")
+    calls = []
+    checks = iter(['{"torch": "2.11.0+cu130", "cuda": "13.0", "ok": false}',
+                   '{"torch": "2.11.0+cu128", "cuda": "12.8", "ok": true}'])
+    monkeypatch.setattr(run.subprocess, "call", lambda cmd, **kw: calls.append(cmd) or 0)
+    monkeypatch.setattr(run.subprocess, "check_call", lambda cmd, **kw: calls.append(cmd) or 0)
+    monkeypatch.setattr(run.subprocess, "run", lambda cmd, **kw: sp.CompletedProcess(cmd, 0, next(checks), ""))
+    out = run.fix_torch_stack()
+    assert "uninstall" in calls[0] and calls[0][-1] == "torchaudio"
+    assert "https://download.pytorch.org/whl/cu128" in calls[1] and "torch==2.11.0" in calls[1]
+    assert out["second"]["ok"] and out["first"]["cuda"] == "13.0"
+    ok_checks = iter(['{"torch": "2.11.0+cu130", "cuda": "13.0", "ok": true}'])
+    calls.clear()
+    monkeypatch.setattr(run.subprocess, "run", lambda cmd, **kw: sp.CompletedProcess(cmd, 0, next(ok_checks), ""))
+    assert run.fix_torch_stack() == {"first": {"torch": "2.11.0+cu130", "cuda": "13.0", "ok": True}}
+    assert len(calls) == 1                                       # GPU usable: only torchaudio removed
