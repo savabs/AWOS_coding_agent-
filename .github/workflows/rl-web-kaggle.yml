@@ -183,6 +183,12 @@ jobs:
           [ -f kaggle_out/summary.md ] && cat kaggle_out/summary.md >> "$GITHUB_STEP_SUMMARY"
           for f in kaggle_out/*/harness.log; do [ -f "$f" ] && tail -n 20 "$f"; done
           true
+      - name: Seal the artifacts (public repo; task texts + screenshots are gated data)
+        if: always()
+        shell: bash
+        env:
+          BENCH_DATA_KEY: ${{ secrets.BENCH_DATA_KEY }}
+        run: for d in art1 art2 art3 art4 kaggle_out; do bash scripts/ci_seal.sh "$d"; done
       - uses: actions/upload-artifact@v4
         if: always() && env.WE_NAME_1 != ''
         with:

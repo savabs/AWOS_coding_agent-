@@ -51,6 +51,7 @@ jobs:
                 -in "enc/$m-$SPLIT.tar.gz.enc" | tar -xzf - -C "art/$m"
             else
               gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" -n "rl-web-merged-$m-$SPLIT" -D "art/$m"
+              bash scripts/ci_unseal.sh "art/$m"
             fi
             J=$(find "art/$m" -type d -name judge | head -1)
             [ -n "$J" ] || { echo "::error::no judge/ folder in rl-web-merged-$m-$SPLIT"; exit 1; }
@@ -107,6 +108,12 @@ jobs:
           PY
           fi
           find judge_out -name "*.log" -exec tail -n 40 {} \; || true
+      - name: Seal the results (public repo; verdicts carry the task texts)
+        if: always()
+        shell: bash
+        env:
+          BENCH_DATA_KEY: ${{ secrets.BENCH_DATA_KEY }}
+        run: bash scripts/ci_seal.sh judge_out
       - uses: actions/upload-artifact@v4
         if: always()
         with:

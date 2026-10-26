@@ -211,6 +211,12 @@ jobs:
           { echo "### $NAME"; cat "$OUT/summary.md" 2>/dev/null; } >> "$GITHUB_STEP_SUMMARY"
           exit $RC
 
+      - name: Seal the results (public repo; task texts + screenshots are gated data)
+        if: always()
+        env:
+          BENCH_DATA_KEY: ${{ secrets.BENCH_DATA_KEY }}
+        run: bash scripts/ci_seal.sh runs/web
+
       - name: Upload results (trajectories + judge layout)
         if: always()
         uses: actions/upload-artifact@v4
@@ -235,8 +241,11 @@ jobs:
           pattern: rl-web-*
       - name: Merge shards per model (trajectories.jsonl + judge/) and summarize
         shell: bash
+        env:
+          BENCH_DATA_KEY: ${{ secrets.BENCH_DATA_KEY }}
         run: |
           set -uo pipefail
+          bash scripts/ci_unseal.sh artifacts || exit 1
           export PYTHONPATH="$PWD"
           for d in artifacts/rl-web-*/*/; do
             name=$(basename "$d"); model="${name%%__*}"; rest="${name#*__}"; split="${rest%%__*}"
@@ -262,6 +271,10 @@ jobs:
           export PYTHONPATH="$PWD"
           python -m scaffold.rl.web freeze-dev --dest merged/dev_ids.json || true
           git diff --no-index --stat scaffold/rl/web/data/dev_ids.json merged/dev_ids.json || true
+      - name: Seal the merged results (public repo)
+        env:
+          BENCH_DATA_KEY: ${{ secrets.BENCH_DATA_KEY }}
+        run: bash scripts/ci_seal.sh merged
       - uses: actions/upload-artifact@v4
         with:
           name: rl-web-merged

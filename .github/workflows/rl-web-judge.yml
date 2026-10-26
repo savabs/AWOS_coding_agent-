@@ -62,6 +62,8 @@ jobs:
 
       - name: Download the run artifacts
         shell: bash
+        env:
+          BENCH_DATA_KEY: ${{ secrets.BENCH_DATA_KEY }}
         run: |
           set -euo pipefail
           ARGS=""
@@ -72,6 +74,7 @@ jobs:
             [ "$rest" != "$id" ] && pattern="${rest#*:}"
             mkdir -p "artifacts/$label"
             gh run download "$id" --repo "$SOURCE_REPO" --pattern "$pattern" --dir "artifacts/$label"
+            bash scripts/ci_unseal.sh "artifacts/$label"
             echo "$label: $(find "artifacts/$label" -name result.json | wc -l) result.json"
             ARGS="$ARGS $label=artifacts/$label"
           done
@@ -107,6 +110,12 @@ jobs:
           echo "rc=$RC" >> "$GITHUB_OUTPUT"
           { echo "## rl-web-judge results (exit $RC)"; echo; echo '```'; tail -n 60 judge/judge.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           if [ "$RC" = "3" ]; then echo "::warning::stopped by the MAX_USD cap: partial results"; fi
+
+      - name: Seal the results (public repo; verdicts carry the task texts)
+        if: always()
+        env:
+          BENCH_DATA_KEY: ${{ secrets.BENCH_DATA_KEY }}
+        run: bash scripts/ci_seal.sh judge
 
       - name: Upload results
         if: always()
