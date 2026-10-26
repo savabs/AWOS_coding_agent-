@@ -548,12 +548,20 @@ def outline(page: Page, start: int = 0, limit: int = 40) -> str:
         out.append("Alerts: " + " | ".join(page.alerts))
     if page.statuses:
         out.append("Status: " + " | ".join(page.statuses))
-    if page.dialog:
-        out.append("Dialog: " + page.dialog)
+    ctl = page.controls[start:start + limit]
+    # an open dialog sits above the page: list its controls up front when the window would not
+    # show them (consent / newsletter pop-ups are usually the last nodes of a long page); each
+    # control is listed once, so a control number never appears twice in one observation
+    shown = {c.n for c in ctl}
+    dlg = [c for c in page.controls if c.in_dialog and c.n not in shown][:8]
+    if page.dialog or dlg:
+        out.append("Dialog: " + (page.dialog or "(open, no text)"))
+    if dlg:
+        out.append("Dialog controls (the dialog is open above the page):")
+        out += [c.line() for c in dlg]
     if page.regions:
         out.append("Regions: " + " | ".join(page.regions))
     out.append("Page text:\n" + page.text[:3000])
-    ctl = page.controls[start:start + limit]
     out.append(f"Controls ({len(page.controls)} total, showing {start + 1}-{start + len(ctl)}):")
     out += [c.line() for c in ctl]
     return "\n".join(out)

@@ -28,8 +28,10 @@ synthetic frame (so the visibility gate has a centre).
 The control the model picked becomes a WP6 ``Target`` (role + accessible
 name + its container), and ``ground`` must resolve that Target back to the
 very same node: two controls that the role, name and container cannot tell
-apart are an ``ambiguous`` refusal (-> needs_user), as are modal-blocked,
-risk-escalation and disabled refusals. The relaxed (renamed-control) tier is
+apart are an ``ambiguous`` refusal (-> needs_user), as are risk-escalation
+and disabled refusals. A modal-blocked refusal also carries the dialog's name
+and control numbers (``Grounding.kind / dialog / dialog_controls``); the
+agent shows them to the model, which closes the dialog itself. The relaxed (renamed-control) tier is
 off: the model chose an exact control on this very page, so a fuzzy match
 would only ever be a different control.
 """
@@ -159,8 +161,15 @@ class WebAXGrounder:
             if r is not None and r.reason == "ambiguous":
                 return Grounding(None, f"ambiguous control: {len(cands) or 'several'} controls look like "
                                        f"{label} ({cands})")
-            return Grounding(None, f"grounding refused ({r.reason if r else 'unknown'}) for {label}: "
-                                   f"{mask_secrets(r.message if r else '')}")
+            msg = (f"grounding refused ({r.reason if r else 'unknown'}) for {label}: "
+                   f"{mask_secrets(r.message if r else '')}")
+            if r is not None and r.reason == "blocked_by_modal":
+                # candidates = [the modal] + its buttons (only five are kept); add the dialog's other
+                # controls (links, checkboxes) so the model sees every way out
+                dialog = cands + [x.n for x in page.controls if x.in_dialog and x.n not in cands]
+                return Grounding(None, msg, kind="blocked_by_modal", dialog=_dialog_name(page),
+                                 dialog_controls=dialog)
+            return Grounding(None, msg, kind=r.reason if r else "")
         got = paths.get(tuple(g.match.path))
         if got != c.n:
             return Grounding(None, f"ambiguous control: grounding resolved control {n} to control {got}")
