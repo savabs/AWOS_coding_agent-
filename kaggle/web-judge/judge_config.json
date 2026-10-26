@@ -4,15 +4,16 @@
  "vllm_pin": "vllm==0.31.0",
  "dtype": "half",
  "tensor_parallel": 2,
- "max_model_len": 65536,
- "max_images": 50,
+ "max_model_len": 40960,
+ "max_images": 30,
  "gpu_memory_utilization": 0.9,
- "mm_max_pixels": null,
+ "mm_max_pixels": 1003520,
  "port": 8000,
  "server_start_timeout_s": 2400,
  "workers": 4,
  "image_workers": 8,
  "score_threshold": 3,
  "judge_blocked": false,
- "levels_file": null
+ "levels_file": null,
+ "enforce_eager": true
 }

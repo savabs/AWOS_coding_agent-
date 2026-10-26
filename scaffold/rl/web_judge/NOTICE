@@ -36,6 +36,11 @@ Deviations from upstream (also in docs/specs/web_judge.md):
      the judge (--judge-blocked sends them) and are reported separately.
   6. Cost cap. --max-usd stops the run before a call that could exceed the cap. Unfinished episodes are
      reported as not_judged; upstream has no cap.
+  7. WebJudge-7B on 2x T4 (kaggle/web-judge, 2026-10-26). Upstream serves the model with its preprocessor
+     defaults (max_pixels 12.8 MP), a 65536 context and up to 50 images; on 16 GB T4s vLLM's start-up profiling
+     ran out of memory. The Kaggle kernel uses max_pixels 1003520 (about 1 MP: our 1280x800 screenshots are
+     barely downscaled), max_model_len 40960, at most 30 images per request, and --enforce-eager.
+     A final-answer call with more than 30 key screenshots is rejected by vLLM and recorded as judge_error.
   Everything else is unchanged: key-point parsing, the per-image 1-5 score regex, score_threshold=3,
   MAX_IMAGE=50, the "image/png" data-URL label on the JPEG key screenshots, the prompt without images
   when none pass the threshold, and success = "success" after "Status:" in the final answer.

@@ -42,10 +42,14 @@ DEFAULTS = {
     "vllm_pin": "vllm==0.31.0",
     "dtype": "half",
     "tensor_parallel": 2,
-    "max_model_len": 65536,
-    "max_images": 50,
+    # sized for 2x T4 (16 GB): with upstream's 65536 / 50 images / the preprocessor's 12.8 MP max_pixels, vLLM's
+    # start-up profiling ran out of memory (2026-10-26 smoke; weights alone take 7.9 GB per GPU). A deviation
+    # from the official judge: screenshots above ~1 MP are downscaled (ours are 1280x800 = 1.02 MP). See NOTICE.
+    "max_model_len": 40960,
+    "max_images": 30,
     "gpu_memory_utilization": 0.9,
-    "mm_max_pixels": None,          # None = the model's own preprocessor (max_pixels 12845056), as upstream
+    "mm_max_pixels": 1003520,
+    "enforce_eager": True,
     "port": 8000,
     "server_start_timeout_s": 2400,
     "workers": 4,
@@ -140,6 +144,8 @@ def vllm_cmd(cfg: dict) -> list:
            "--limit-mm-per-prompt", json.dumps({"image": cfg["max_images"]})]
     if cfg.get("mm_max_pixels"):
         cmd += ["--mm-processor-kwargs", json.dumps({"max_pixels": int(cfg["mm_max_pixels"])})]
+    if cfg.get("enforce_eager"):
+        cmd += ["--enforce-eager"]                      # no CUDA-graph capture: saves memory on 16 GB T4s
     return cmd
 
 

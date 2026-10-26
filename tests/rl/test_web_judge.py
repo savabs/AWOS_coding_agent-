@@ -507,7 +507,8 @@ def test_kaggle_stage_and_kernel_dry_run(tmp_path, capsys):
                    "--out", str(tmp_path / "o"), "--dry-run"])
     out = capsys.readouterr().out
     assert rc == 0 and "--backend webjudge7b" in out and "A=" in out
-    assert '--limit-mm-per-prompt {"image": 50}' in out and "--revision bb550f8e" in out and "--dtype half" in out
+    assert '--limit-mm-per-prompt {"image": 30}' in out and "--revision bb550f8e" in out and "--dtype half" in out
+    assert '--mm-processor-kwargs {"max_pixels": 1003520}' in out and "--enforce-eager" in out   # T4 sizing (NOTICE 7)
     runs = run.collect_runs(ds / "runs", tmp_path / "t")
     assert [lbl for lbl, _ in runs] == ["A"] and len(find_episodes(runs[0][1])) == 2
     with pytest.raises(SystemExit):
