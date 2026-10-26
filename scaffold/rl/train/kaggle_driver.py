@@ -180,10 +180,12 @@ def push(stage_dir: Path, dry: bool = False, message: str = "awos rl-sft data", 
     info = json.loads((stage_dir / "stage.json").read_text())
     ds, kn = str(stage_dir / "dataset"), str(stage_dir / "kernel")
     st = dataset_status(info["dataset"], dry)
+    # the CLI skips sub-folders unless told otherwise (kaggle/web-judge keeps runs/ in one): upload them as tar
+    sub = ["--dir-mode", "tar"] if any(p.is_dir() for p in Path(ds).iterdir()) else []
     if st == "missing":
-        run(["kaggle", "datasets", "create", "-p", ds, "-q"], dry)        # private by default
+        run(["kaggle", "datasets", "create", "-p", ds, "-q"] + sub, dry)        # private by default
     else:
-        run(["kaggle", "datasets", "version", "-p", ds, "-m", message, "-q"], dry)
+        run(["kaggle", "datasets", "version", "-p", ds, "-m", message, "-q"] + sub, dry)
     t0 = time.time()
     while not dry:
         st = dataset_status(info["dataset"], dry)
