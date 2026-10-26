@@ -77,7 +77,10 @@ def _worker_init(args: dict, counter=None) -> None:
                 idx, counter.value = counter.value, counter.value + 1
         os.environ["AWOS_LOCAL_BASE_URL"] = worker_base_url(urls, idx)
     from scaffold.rl.harness.chromium import Chromium
-    _W["chromium"] = Chromium(web=True)
+    # AWOS_WEB_HEADFUL=1: an ordinary visible browser window (the residential-IP run in the sandbox VM; point
+    # AWOS_RL_CHROMIUM at a full Chromium, not chrome-headless-shell). Nothing is disguised: no stealth, no
+    # fingerprint or user-agent changes; it is the same browser a person would open.
+    _W["chromium"] = Chromium(headless=os.environ.get("AWOS_WEB_HEADFUL") != "1", web=True)
     _W["args"] = args
 
 

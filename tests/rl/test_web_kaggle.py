@@ -261,7 +261,7 @@ def test_worker_base_url_round_robin(monkeypatch):
     from scaffold.rl.harness import chromium
     from scaffold.rl.web import runner
     assert [runner.worker_base_url(["a", "b"], i) for i in range(5)] == ["a", "b", "a", "b", "a"]
-    monkeypatch.setattr(chromium, "Chromium", lambda web=False: object())
+    monkeypatch.setattr(chromium, "Chromium", lambda web=False, headless=True: object())
     monkeypatch.setenv("AWOS_LOCAL_BASE_URL", "http://127.0.0.1:9999/v1")
     counter = mp.get_context("spawn").Value("i", 0)
     args = {"base_urls": ["http://127.0.0.1:8080/v1", "http://127.0.0.1:8081/v1"]}
