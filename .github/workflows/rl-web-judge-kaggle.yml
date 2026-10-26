@@ -29,18 +29,29 @@ jobs:
         run: |
           set -euo pipefail
           source ci/rl_web_judge_kaggle.env
-          for k in SOURCE_RUN MODELS SPLIT N_TASKS KERNEL_SLUG DATASET_SLUG CONFIG; do echo "$k=${!k}" >> "$GITHUB_ENV"; done
+          for k in SOURCE_RUN SOURCE_ENC_RELEASE MODELS SPLIT N_TASKS KERNEL_SLUG DATASET_SLUG CONFIG; do echo "$k=${!k}" >> "$GITHUB_ENV"; done
           [ -n "$KAGGLE_USERNAME" ] || { echo "::error::KAGGLE_USERNAME secret not set"; exit 1; }
           pip install -q kaggle==2.2.4
       - name: Download the runs (judge layout) and take the first N_TASKS of each
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          BENCH_DATA_KEY: ${{ secrets.BENCH_DATA_KEY }}
         run: |
           set -euo pipefail
           ARGS=()
           for m in $MODELS; do
-            gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" -n "rl-web-merged-$m-$SPLIT" -D "art/$m"
+            if [ -n "${SOURCE_ENC_RELEASE:-}" ]; then
+              # runs made outside CI (the home-network run in the sandbox VM): an AES-256 (openssl, pbkdf2) tarball
+              # on a release of this PUBLIC repo; only this job can read it (BENCH_DATA_KEY secret)
+              test -n "$BENCH_DATA_KEY" || { echo "::error::BENCH_DATA_KEY secret not set"; exit 1; }
+              gh release download "$SOURCE_ENC_RELEASE" --repo "$GITHUB_REPOSITORY" -p "$m-$SPLIT.tar.gz.enc" -D enc --clobber
+              mkdir -p "art/$m"
+              openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:BENCH_DATA_KEY \
+                -in "enc/$m-$SPLIT.tar.gz.enc" | tar -xzf - -C "art/$m"
+            else
+              gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" -n "rl-web-merged-$m-$SPLIT" -D "art/$m"
+            fi
             J=$(find "art/$m" -type d -name judge | head -1)
             [ -n "$J" ] || { echo "::error::no judge/ folder in rl-web-merged-$m-$SPLIT"; exit 1; }
             if [ "$N_TASKS" -gt 0 ]; then
