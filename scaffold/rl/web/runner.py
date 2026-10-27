@@ -3,6 +3,8 @@ runner.py — Online-Mind2Web rollouts on the live web, resumable and shardable,
 
     python -m scaffold.rl.web run --model local --split dev --shard 1/12 --out runs/web/qwen4b-dev-s1/
     python -m scaffold.rl.web run --model cloud --split dev --n 5 --out runs/web/haiku-dev/
+    python -m scaffold.rl.web run --model anthropic:claude-haiku-5-5 --split train --tasks-json teach_tasks.json \
+        --shard 1/10 --out runs/web/teach-s1/          # teacher data (scaffold/rl/web/teacher.py)
     python -m scaffold.rl.web summarize runs/web/qwen4b-dev-s1/
     python -m scaffold.rl.web freeze-dev            # write data/dev_ids.json (needs the dataset)
     python -m scaffold.rl.web validate runs/web/x/judge/    # check the judge layout (schema v2 rules)
@@ -15,9 +17,12 @@ Output directory:
 
 Models: local (llama-server at AWOS_LOCAL_BASE_URL, default http://127.0.0.1:8080/v1, temperature
 0; --base-url URL, repeatable, gives each worker process one of the URLs round-robin, e.g. one
-llama-server per GPU), cloud (CloudTextModel; AWOS_CLOUD_MAX_USD spend cap, split across workers), scripted (tests:
+llama-server per GPU), cloud (CloudTextModel; AWOS_CLOUD_MAX_USD spend cap, split across workers), anthropic:<id>
+(teacher.TeacherModel: the same contract with the per-step grammar enforced locally and one repair call;
+AWOS_TEACHER_MAX_USD hard cap, split across workers; AWOS_TEACHER_DRY=1 = no network), scripted (tests:
 task.meta["script"] through micro_agent.ScriptedModel). There is no oracle on the live web.
-Resumable: tasks already written without an infra error (traj.error) are skipped.
+Resumable: tasks already written without an infra error (traj.error) are skipped. When a spend cap is
+reached ("cloud budget reached"), the runner stops dispatching new tasks (the rest are reruns on resume).
 """
 from __future__ import annotations
 
@@ -49,13 +54,17 @@ def make_model(kind: str, task: TaskSpec, args: dict) -> Tuple[Any, str]:
         total = float(os.environ.get("AWOS_CLOUD_MAX_USD") or 5.0)
         m = CloudTextModel(max_usd=total / workers)        # each worker process gets its share of the cap
         return m, args.get("model_label") or m.model
+    if kind.startswith("anthropic:"):
+        from .teacher import make_teacher
+        m = make_teacher(kind, workers=int(args.get("workers") or 1))
+        return m, args.get("model_label") or m.model
     if kind == "scripted":
         from scaffold.agent.desktop.micro_agent import ScriptedModel
         script = task.meta.get("script")
         if not script:
             raise ValueError("--model scripted needs task.meta['script']")
         return ScriptedModel(script), args.get("model_label") or "scripted"
-    raise SystemExit(f"unknown model {kind!r} (local | cloud | scripted)")
+    raise SystemExit(f"unknown model {kind!r} (local | cloud | anthropic:<model id> | scripted)")
 
 
 # ----------------------------------------------------------------- workers --
@@ -125,6 +134,17 @@ def read_web_records(path: Path) -> List[dict]:
     return recs
 
 
+def budget_reached(rec: dict) -> bool:
+    return str((rec.get("trajectory") or {}).get("error") or "").startswith("cloud budget reached")
+
+
+def model_kind(v: str) -> str:
+    """argparse type of --model: local | cloud | scripted | anthropic:<model id>."""
+    if v in ("local", "cloud", "scripted") or (v.startswith("anthropic:") and len(v) > len("anthropic:")):
+        return v
+    raise argparse.ArgumentTypeError(f"{v!r}: local | cloud | scripted | anthropic:<model id>")
+
+
 def _worker_close() -> None:
     ch = _W.pop("chromium", None)
     if ch is not None:
@@ -164,7 +184,7 @@ def run(out: Path, *, model: str = "local", split: str = "dev", shard: Optional[
     args = {"model": model, "guards": guards, "model_label": model_label, "workers": workers, "out": str(out),
             "max_steps": int(max_steps), "max_seconds": float(max_seconds), "allow_private": allow_private,
             "base_urls": list(base_urls or [])}
-    meta = {"source": "online-mind2web", "dataset_file": src.path.name, "split": split, "shard": shard,
+    meta = {"source": "mind2web-train" if split == "train" else "online-mind2web", "dataset_file": src.path.name, "split": split, "shard": shard,
             "model": model, "model_label": model_label, "guards": guards, "max_steps": max_steps,
             "max_seconds": max_seconds, "tasks": len(tasks), "dev_ids_source": src.dev_ids_source or None}
     (out / "run.json").write_text(json.dumps(meta, indent=2) + "\n")
@@ -179,7 +199,11 @@ def run(out: Path, *, model: str = "local", split: str = "dev", shard: Optional[
             _worker_init(args)
             try:
                 for i, job in enumerate(jobs, 1):
-                    emit(_worker_run(job), i)
+                    rec = _worker_run(job)
+                    emit(rec, i)
+                    if budget_reached(rec):
+                        log("spend cap reached: no more tasks dispatched (resume reruns the rest)")
+                        break
             finally:
                 _worker_close()
         else:
@@ -187,6 +211,10 @@ def run(out: Path, *, model: str = "local", split: str = "dev", shard: Optional[
             with ctx.Pool(workers, initializer=_worker_init, initargs=(args, ctx.Value("i", 0))) as pool:
                 for i, rec in enumerate(pool.imap_unordered(_worker_run, jobs), 1):
                     emit(rec, i)
+                    if budget_reached(rec):
+                        log("spend cap reached: no more tasks dispatched (resume reruns the rest)")
+                        pool.terminate()
+                        break
     summ = summarize(out)
     summ["run_seconds"] = round(time.monotonic() - t0, 2)
     return summ
@@ -297,9 +325,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m scaffold.rl.web")
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run", help="roll out a model on Online-Mind2Web (live websites)")
-    r.add_argument("--model", required=True, choices=["local", "cloud", "scripted"])
+    r.add_argument("--model", required=True, type=model_kind,
+                   help="local | cloud | scripted | anthropic:<model id> (teacher, e.g. anthropic:claude-haiku-5-5)")
     r.add_argument("--model-label", default=None)
-    r.add_argument("--split", default="dev", choices=["dev", "all"])
+    r.add_argument("--split", default="dev", choices=["dev", "all", "train"],
+                   help="dev | all (Online-Mind2Web) | train (a teacher task file from scaffold.rl.web.m2w_tasks)")
     r.add_argument("--shard", default=None, help="K/N: every N-th selected task starting at K (1-based)")
     r.add_argument("--n", type=int, default=0, help="first N selected tasks (0 = all)")
     r.add_argument("--task", action="append", default=None, help="only this task id (repeatable)")

@@ -14,6 +14,9 @@ One TaskSpec per entry: id = task_id, goal = confirmed_task, start = website (ab
 family = the site's host, tags = [level], meta = {level, reference_length, website}.
 
 Splits:
+    train every task of a TEACHER task file (scaffold/rl/web/m2w_tasks.py: Mind2Web train tasks in this
+          shape, each entry ``"source": "mind2web-train"``). Refused for any other file, and any task id
+          in the committed dev ids is refused: Online-Mind2Web tasks are never labelled train.
     all   every task in the file
     dev   a fixed 100-task subset, stratified by level (easy / medium / hard in proportion,
           largest remainder), seeded (DEV_SEED). The ids are committed in data/dev_ids.json
@@ -48,6 +51,8 @@ LEVELS = ("easy", "medium", "hard")
 DATA_DIR = Path(__file__).resolve().parent / "data"
 DEV_IDS = DATA_DIR / "dev_ids.json"
 MAX_STEPS = 25
+#: TaskSpec.source of teacher tasks (Mind2Web train, scaffold/rl/web/m2w_tasks.py)
+TRAIN_SOURCE = "mind2web-train"
 
 
 def cache_path(revision: str = DATASET_REVISION) -> Path:
@@ -130,7 +135,10 @@ def to_spec(d: dict, split: str) -> TaskSpec:
     for k in ("oracle", "script"):                # local test tasks only
         if k in d:
             meta[k] = d[k]
-    return TaskSpec(id=str(d.get("task_id") or d.get("id")).strip(), source="online-mind2web",
+    for k in ("annotation_id", "m2w_website", "base_task", "start_url_how"):    # teacher task files
+        if d.get(k) is not None:
+            meta[k] = d[k]
+    return TaskSpec(id=str(d.get("task_id") or d.get("id")).strip(), source=str(d.get("source") or "online-mind2web"),
                     family=host[4:] if host.startswith("www.") else host, split=split,
                     goal=str(d.get("confirmed_task") or d.get("task")).strip(), start=website, kind="act",
                     tags=[level], allow_writes=True, max_steps=MAX_STEPS, meta=meta)
@@ -206,13 +214,23 @@ class OnlineMind2WebSource:
 
     def tasks(self, split: Optional[str] = None) -> Iterable[TaskSpec]:
         split = split or "all"
+        if split == "train":
+            bad = [d for d in self.entries if d.get("source") != TRAIN_SOURCE]
+            if bad:
+                raise ValueError(f"--split train needs a teacher task file (every entry source={TRAIN_SOURCE!r}); "
+                                 f"{len(bad)} entries are not (e.g. {str(bad[0].get('task_id'))[:40]!r})")
+            dev = set(committed_dev_ids(self.dev_ids_path))
+            leak = [d for d in self.entries if str(d.get("task_id")).strip() in dev]
+            if leak:
+                raise ValueError(f"{len(leak)} teacher tasks have Online-Mind2Web dev ids: refusing")
+            return [to_spec(d, "train") for d in self.entries]
         if split == "all":
             return [to_spec(d, "all") for d in self.entries]
         if split == "dev":
             keep = set(self.dev_ids())
             return [to_spec(d, "dev") for d in self.entries
                     if str(d.get("task_id") or d.get("id")).strip() in keep]
-        raise ValueError(f"unknown split {split!r} (all | dev)")
+        raise ValueError(f"unknown split {split!r} (all | dev | train)")
 
     def start(self) -> str:
         return ""
