@@ -7,6 +7,7 @@ import html
 import json
 import struct
 import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -63,19 +64,46 @@ def route(path, query):
                           for i in range(12))
         links = "".join(f'<a href="/item/mug?{i}">{"Very long product name " * 20} {i}</a><br>' for i in range(400))
         return _page("Big page", f"<h1>Big</h1><p>{'filler words ' * 2000}</p>{regions}{links}")
+    if path == "/late":                 # an app shell: load fires at once, the controls come with a slow fetch
+        return _page("Late shop", '<div id="app"></div><script>fetch("/js/late.html").then(r => r.text())'
+                                  '.then(t => { document.getElementById("app").innerHTML = t; });</script>')
+    if path == "/slowres":              # controls rendered by a script that is slow to arrive (load is late)
+        return _page("Slow shop", '<div id="app"></div><script async src="/js/slow.js"></script>')
+    churn = ('<div id="t"></div><script>setInterval(() => { document.getElementById("t")'
+             '.setAttribute("data-x", String(Math.random())); }, 20);</script>')
+    if path == "/never":                # never settles: a hung resource holds load, the DOM churns forever
+        return _page("", churn + '<img src="/js/hang.png">')
+    if path == "/churn":                # loads, never settles (DOM churns), never shows a control
+        return _page("", churn)
     return _page("Not found", "<h1>Not found</h1>", 404)
+
+
+SLOW_S, HANG_S = 2.5, 30.0
+SLOW_BODY = {"/js/slow.js": (('document.getElementById("app").innerHTML = \'<a href="/about">Slow about</a> '
+                              '<button type="button">Slow button</button>\';'), "application/javascript"),
+             "/js/late.html": ('<a href="/deals">Late deals</a> <button type="button">Late button</button>',
+                               "text/html")}
 
 
 class _H(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urllib.parse.urlsplit(self.path)
-        status, body = route(u.path, urllib.parse.parse_qs(u.query))
+        if u.path.startswith("/js/"):              # slow resources (SLOW_BODY) or a hung one
+            time.sleep(SLOW_S if u.path in SLOW_BODY else HANG_S)
+            body, ctype = SLOW_BODY.get(u.path, ("", "image/png"))
+            status = 200
+        else:
+            status, body = route(u.path, urllib.parse.parse_qs(u.query))
+            ctype = "text/html; charset=utf-8"
         raw = body.encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(raw)))
-        self.end_headers()
-        self.wfile.write(raw)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+        except OSError:                 # the browser gave up on a hung resource
+            pass
 
     def log_message(self, *a):
         pass
@@ -457,6 +485,85 @@ def test_big_real_page_prompt_stays_under_budget(site, webchrome, tmp_path):
     assert traj.error == "" and h["blocked"] is None
     assert len(traj.steps) == 3 and h["max_prompt_tokens_est"] < 6000, h["max_prompt_tokens_est"]
     assert "showing 41-80" in traj.steps[1].user and "showing 81-120" in traj.steps[2].user
+
+
+# ------------------------------------------------------- settle before reading --
+
+@needs_chromium
+@pytest.mark.parametrize("path,names", [("/late", ["Late deals", "Late button"]),
+                                        ("/slowres", ["Slow about", "Slow button"])])
+def test_first_observation_waits_for_late_controls(site, webchrome, tmp_path, path, names):
+    """The model's first prompt has the controls a page renders late: an app shell whose controls come
+    with a slow fetch (load fired, the page is not idle, the first read is empty), or a slow async
+    script (load comes after settle_timeout)."""
+    from scaffold.rl.web.episode import run_web_episode
+    model = MA.ScriptedModel(['done "x"'])
+    traj, _ = run_web_episode(_spec(site, path, ['done "x"'], tid="late" + path.strip("/")), model,
+                              model_label="s", chromium=webchrome, judge_root=tmp_path / "judge",
+                              allow_private=True, backend_kw={"settle_timeout": 1.0})
+    h = traj.events[-1]
+    assert traj.error == "" and h["blocked"] is None, (traj.error, h.get("blocked"))
+    first = traj.steps[0].user
+    assert all(n in first for n in names), first
+    op = h["timings"][0]
+    assert op["op"] == "open" and 1000 < op["settle_ms"] < 8000 + 500
+    s = h["settle"]
+    assert s["ops"] == len(h["timings"]) and s["total_ms"] >= op["settle_ms"]
+    if path == "/late":
+        assert op.get("reread") == 1 and s["rereads"] >= 1    # read empty once, then again with controls
+    else:
+        assert op.get("load_wait_ms") and s["load_waits"] >= 1 and "reread" not in op
+
+
+@needs_chromium
+@pytest.mark.parametrize("path", ["/never", "/churn"])
+def test_a_page_that_never_settles_is_read_within_the_cap(site, webchrome, monkeypatch, path):
+    """/never: load never fires (hung image), the load wait takes the whole cap. /churn: loads, never
+    idle, never shows a control: the empty-page wait and the re-read stay inside the cap."""
+    from scaffold.rl.harness.chromium import ChromiumBackend
+    monkeypatch.setenv("AWOS_WEB_SETTLE_S", "2.5")
+    b = ChromiumBackend(site, chromium=webchrome, web=True, allow_private=True, settle_timeout=1.0)
+    try:
+        assert b.web_cap == 2.5
+        t0 = time.monotonic()
+        p = b.open(site + path)
+        took = time.monotonic() - t0
+        op = b.timings[-1]
+        assert p.controls == [] and p._live["settled"] is False
+        assert 2500 - 300 <= op["settle_ms"] <= 2500 + 300 and took < 2.5 + 2.0, (op, took)
+        if path == "/never":
+            assert op.get("load_wait_ms", 0) > 1000
+        else:
+            assert op.get("reread") == 1 and "load_wait_ms" not in op
+    finally:
+        b.close()
+
+
+@needs_chromium
+def test_settle_cap_zero_is_the_old_read(site, webchrome):
+    from scaffold.rl.harness.chromium import ChromiumBackend
+    off = ChromiumBackend(site, chromium=webchrome, web=True, allow_private=True, settle_timeout=1.0,
+                          web_settle_cap=0)
+    try:                                                     # 0 = settle_timeout only, read what is there
+        p = off.open(site + "/late")
+        assert off.web_cap == 0 and "reread" not in off.timings[-1]
+        assert "Late button" not in [c.name for c in p.controls]
+    finally:
+        off.close()
+
+
+def test_settle_cap_env_and_summary(monkeypatch):
+    from scaffold.rl.harness import chromium as C
+    from scaffold.rl.web.episode import settle_summary
+    monkeypatch.delenv("AWOS_WEB_SETTLE_S", raising=False)
+    assert C.default_web_settle_cap() == C.WEB_SETTLE_CAP_S == 8.0
+    for raw, want in (("3", 3.0), ("0", 0.0), ("-1", 0.0), ("junk", C.WEB_SETTLE_CAP_S)):
+        monkeypatch.setenv("AWOS_WEB_SETTLE_S", raw)
+        assert C.default_web_settle_cap() == want
+    tm = [{"op": "open", "settle_ms": 3000.0, "load_wait_ms": 900.0, "reread": 1},
+          {"op": "click", "settle_ms": 120.0}]
+    assert settle_summary(tm) == {"ops": 2, "total_ms": 3120.0, "max_ms": 3000.0, "load_waits": 1, "rereads": 1}
+    assert settle_summary([]) == {"ops": 0, "total_ms": 0.0, "max_ms": 0.0, "load_waits": 0, "rereads": 0}
 
 
 # --------------------------------------------------------------------- CI --

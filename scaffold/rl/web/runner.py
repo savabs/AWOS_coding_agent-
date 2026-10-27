@@ -236,6 +236,12 @@ def summarize(out: Path) -> Dict[str, Any]:
             d["steps_per_episode"] = round(len(steps) / len(rs), 2)
             d["invalid_action_rate"] = round(sum(not s["valid"] for s in steps) / len(steps), 4)
             d["model_ms_per_step"] = round(sum(s["ms"] for s in steps) / len(steps), 1)
+        st = [h.get("settle") or {} for h in hs]
+        ops = sum(int(x.get("ops") or 0) for x in st)
+        if ops:
+            d["settle_ms_per_op"] = round(sum(float(x.get("total_ms") or 0) for x in st) / ops, 1)
+            d["settle_load_waits"] = sum(int(x.get("load_waits") or 0) for x in st)
+            d["settle_rereads"] = sum(int(x.get("rereads") or 0) for x in st)
         d["max_prompt_tokens_est"] = max([h.get("max_prompt_tokens_est") or 0 for h in hs] or [0])
         toks = [int((h.get("usage") or {}).get("prompt_tokens") or 0) + int((h.get("usage") or {}).get(
             "completion_tokens") or 0) or int(h.get("est_tokens") or 0) for h in hs]

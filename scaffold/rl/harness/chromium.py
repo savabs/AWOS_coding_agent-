@@ -20,7 +20,15 @@ AXValue act on the element itself (no hit-testing, overlays do not intercept):
     select  <select>: pick the option by text, input + change events; radio group: click the radio
 After every action the page is allowed to settle: no pending main-frame navigation, document
 complete, no in-flight fetch/XHR, no pending short timers (<= 2 s), and no DOM mutation for
-``quiet_ms``; capped by ``settle_timeout``.
+``quiet_ms``; capped by ``settle_timeout``. Open-web observations (web=True) then wait some more,
+all within ``web_settle_cap`` (default WEB_SETTLE_CAP_S, env AWOS_WEB_SETTLE_S) counted from the
+start of the read: an unsettled page gets the rest of the cap to fire its ``load`` event (long-polling
+and analytics keep fetch/timers busy forever, so "settled" alone is not awaited past
+``settle_timeout``), and an unsettled page read with <= EMPTY_CONTROLS controls (a shell still
+rendering) waits up to WEB_EMPTY_WAIT_S for interactive elements to appear and is read once more (a
+settled page is taken as it is: idle and sparse is a real page, an error page or a short article). The
+time spent is booked on ``timings`` (settle_ms; load_wait_ms / empty_wait_ms / reread only when they
+happened).
 
 Safety: every URL the backend opens must be loopback (web_tools.check_loopback); Chromium is
 launched with a host-resolver rule that makes every other host unresolvable, so page scripts
@@ -133,6 +141,37 @@ PRESS_JS = """function() {
   this.click();
   return true;
 }"""
+
+
+#: open-web read budget (see the module docstring): the hard cap on all waiting before one observation
+#: is read (the action settle included); within it, the most a near-empty page waits for controls before
+#: its one re-read, and the short settle once they appear (so a list renders whole). 8 s: the web
+#: episode's 4 s settle_timeout plus as much again for a slow page's load event / first render; more
+#: would only stretch the 25-step episodes that already hit the wall clock (not measured yet)
+WEB_SETTLE_CAP_S = 8.0
+WEB_EMPTY_WAIT_S = 3.0
+WEB_RENDER_SETTLE_S = 0.5
+EMPTY_CONTROLS = 1
+
+
+def default_web_settle_cap() -> float:
+    """WEB_SETTLE_CAP_S, or AWOS_WEB_SETTLE_S (seconds, 0 turns the extra waits off) when set."""
+    try:
+        return max(0.0, float(os.environ.get("AWOS_WEB_SETTLE_S") or WEB_SETTLE_CAP_S))
+    except ValueError:
+        return WEB_SETTLE_CAP_S
+
+
+#: visible interactive elements in the top document (-1 before DOMContentLoaded): a cheap "has the page
+#: rendered its controls yet" probe; not the observation (the AX read decides what the model sees)
+INTERACTIVE_JS = r"""(() => {
+  if (document.readyState === 'loading' || !document.body) return -1;
+  const q = 'a[href], button, input:not([type=hidden]), select, textarea, [role=button], [role=link], '
+          + '[role=textbox], [role=searchbox], [role=combobox], [role=checkbox], [role=tab], [role=menuitem], [onclick]';
+  let n = 0;
+  for (const el of document.querySelectorAll(q)) { if (el.getClientRects().length && ++n > 50) break; }
+  return n;
+})()"""
 
 
 #: DOM depth (elements below <html>) from which DOM.getDocument(depth=-1) fails with "CBOR: stack limit
@@ -250,13 +289,15 @@ class ChromiumBackend:
     def __init__(self, base_url: str, *, chromium: Optional[Chromium] = None, load_timeout: float = 15.0,
                  settle_timeout: float = 5.0, quiet_ms: float = 60.0, viewport=(1280, 800),
                  log: Optional[Callable[[str], None]] = None, web: bool = False, allow_private: bool = False,
-                 page_hook: Optional[Callable[[Page], None]] = None, fill_wait_ms: float = 150.0):
+                 page_hook: Optional[Callable[[Page], None]] = None, fill_wait_ms: float = 150.0,
+                 web_settle_cap: Optional[float] = None):
         """``web=True`` (scaffold/rl/web only): real http(s) sites under check_web_url instead of
         loopback-only, the HTTP status of the last main-frame response on Page.status, and the
         extra verbs press_enter / go_back / goto / reveal / screenshot. ``page_hook(page)`` runs on
         every observation (it may clip the page, or raise UserNeeded to stop on a blocked page).
         ``fill`` waits at least ``fill_wait_ms`` (then until the page settles) and re-reads the page, so
-        options an input shows while typing (autocomplete) are in the page it returns."""
+        options an input shows while typing (autocomplete) are in the page it returns.
+        ``web_settle_cap`` (web=True only; None = default_web_settle_cap(), 0 = off): the open-web read budget."""
         self.web, self.allow_private = bool(web), bool(allow_private)
         self.base = (check_web_url(base_url, self.allow_private) if self.web
                      else check_loopback(base_url)).rstrip("/")
@@ -276,6 +317,8 @@ class ChromiumBackend:
         self.cdp.send("Accessibility.enable")
         self.load_timeout, self.settle_timeout, self.quiet_ms = load_timeout, settle_timeout, quiet_ms
         self.fill_wait_ms = float(fill_wait_ms)
+        self.web_cap = (default_web_settle_cap() if web_settle_cap is None else max(0.0, float(web_settle_cap))) \
+            if self.web else 0.0
         self.page: Optional[Page] = None
         self.log: List[str] = []                     # method + path + outcome (no values)
         self.unverified: List[dict] = []
@@ -359,10 +402,10 @@ class ChromiumBackend:
         base = self.page.url if self.page and self.page.url.startswith("http") else self.base + "/"
         return self._check(urllib.parse.urljoin(base, path_or_url))
 
-    def _settle(self, min_wait_ms: float = 30.0) -> bool:
+    def _settle(self, min_wait_ms: float = 30.0, timeout: Optional[float] = None) -> bool:
         """Wait until the page is idle (see module docstring). True when it settled."""
         t0 = time.monotonic()
-        t_end = t0 + self.settle_timeout
+        t_end = t0 + (self.settle_timeout if timeout is None else max(0.0, timeout))
         try:
             self.pg.wait_for_timeout(min_wait_ms)       # lets request / navigation events arrive
         except Exception:
@@ -396,21 +439,79 @@ class ChromiumBackend:
         self.deep_reads += int(deep)
         return snap
 
-    def _load(self, settled: Optional[bool] = None) -> Page:
-        t0 = time.monotonic()
-        if settled is None:
-            settled = self._settle()
-        t1 = time.monotonic()
+    def _read(self, settled: bool) -> Page:
         snap = self._snap()
         if not snap.ok or not snap.web_paths:
             raise WebError("the Chromium page has no web area (closed or not loaded)")
-        self.page = to_micro_page(snap)
-        self.page._live["settled"] = bool(settled)  # type: ignore[attr-defined]
+        page = to_micro_page(snap)
+        page._live["settled"] = bool(settled)  # type: ignore[attr-defined]
         if self.web and self._last_status:
-            self.page.status = int(self._last_status)
-        t2 = time.monotonic()
+            page.status = int(self._last_status)
+        return page
+
+    def _wait_loaded(self, t_end: float) -> None:
+        """Until the main document fired ``load`` (or ``t_end``); never raises."""
+        left = t_end - time.monotonic()
+        if left > 0.05:
+            try:
+                self.pg.wait_for_load_state("load", timeout=left * 1000)
+            except Exception:                              # timeout / navigation: read what is there
+                pass
+
+    def _wait_controls(self, t_end: float) -> None:
+        """Until the page shows more than EMPTY_CONTROLS interactive elements (or ``t_end``)."""
+        while time.monotonic() < t_end:
+            if self._popups:
+                self._drain_popups()
+            try:
+                if int(self.pg.evaluate(INTERACTIVE_JS) or 0) > EMPTY_CONTROLS:
+                    return
+            except Exception:                              # context destroyed by a navigation
+                pass
+            try:
+                self.pg.wait_for_timeout(100)
+            except Exception:
+                time.sleep(0.1)
+
+    def _load(self, settled: Optional[bool] = None, since: Optional[float] = None) -> Page:
+        """Settle (unless the caller did: ``settled``), read, run the page hook. Open web: the extra
+        load / empty-page waits of the module docstring, all before ``since`` + ``web_cap``."""
+        t0 = time.monotonic()
+        t_cap = (since if since is not None else t0) + self.web_cap
+        extra: Dict[str, Any] = {}
+        if settled is None:
+            settled = self._settle(timeout=min(self.settle_timeout, self.web_cap) if self.web_cap else None)
+        if self.web_cap and not settled:
+            w = time.monotonic()
+            self._wait_loaded(t_cap)
+            if time.monotonic() - w >= 0.05:
+                extra["load_wait_ms"] = round((time.monotonic() - w) * 1000, 1)
+        t1 = time.monotonic()
+        page = self._read(settled)
+        read_ms = time.monotonic() - t1
+        if self.web_cap and not settled and len(page.controls) <= EMPTY_CONTROLS and time.monotonic() < t_cap:
+            # a shell still rendering (or a busy page that really has one control): wait for controls, a
+            # short settle so a list renders whole, then read once more whatever came of it
+            w = time.monotonic()
+            t_end = min(t_cap, w + WEB_EMPTY_WAIT_S)
+            self._wait_loaded(t_end)
+            self._wait_controls(t_end)
+            if self._settle(timeout=min(WEB_RENDER_SETTLE_S, max(0.0, t_cap - time.monotonic()))):
+                settled = True
+            extra["empty_wait_ms"] = round((time.monotonic() - w) * 1000, 1)
+            r = time.monotonic()
+            page = self._read(settled)
+            read_ms += time.monotonic() - r
+            extra["reread"] = 1
+        self.page = page
         if self.timings:
-            self.timings[-1].update(settle_ms=round((t1 - t0) * 1000, 1), observe_ms=round((t2 - t1) * 1000, 1))
+            rec = self.timings[-1]
+            wait_ms = (time.monotonic() - t0 - read_ms) * 1000
+            rec["settle_ms"] = round(rec.get("settle_ms", 0.0) + wait_ms, 1)
+            rec["observe_ms"] = round(read_ms * 1000, 1)
+            for k, v in extra.items():
+                if v:
+                    rec[k] = v
         if self.page_hook is not None:
             self.page_hook(self.page)                     # may raise UserNeeded (blocked page)
         return self.page
@@ -505,23 +606,18 @@ class ChromiumBackend:
         t1 = time.monotonic()
         settled = self._settle(min_wait_ms=self.fill_wait_ms)   # input handlers may fetch / re-render
         rec["settle_ms"] = round((time.monotonic() - t1) * 1000, 1)
-        return self._reread(page, settled)
+        return self._reread(page, settled, since=t1)
 
-    def _reread(self, page: Page, settled: bool) -> Page:
+    def _reread(self, page: Page, settled: bool, since: Optional[float] = None) -> Page:
         """The page again after typing (an autocomplete list may have appeared), keeping what was
         typed: values by control path, a password field still shown as filled. ``page`` itself when the
         read fails (the caller keeps working on the page it had)."""
-        rec = self.timings[-1] if self.timings else {}
-        settle_ms = rec.get("settle_ms", 0.0)
         try:
-            new = self._load(settled=settled)
+            new = self._load(settled=settled, since=since)
         except UserNeeded:                           # the page turned into a wall while typing
             raise
         except WebError:
             return page
-        finally:
-            if rec:
-                rec["settle_ms"] = settle_ms         # _load would book ~0 (the wait happened before it)
         old_paths = getattr(page, "_live", {}).get("paths", {})
         by_path = {p: m for m, p in new._live["paths"].items()}  # type: ignore[attr-defined]
         for m0, v in page.values.items():

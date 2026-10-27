@@ -11,6 +11,9 @@ outline) and the same MicroAgent prompt / grammar / code guards, with:
   * a page hook on every observation: clip_page (prompt budget) then detect_block (CAPTCHA,
     Cloudflare, bot wall, 403/429, a start page that failed). A blocked page stops the episode
     (UserNeeded -> needs_user) and is recorded in the harness event as ``blocked``;
+  * every observation waits for the page within ChromiumBackend's open-web read budget (load event,
+    one re-read of a near-empty page; AWOS_WEB_SETTLE_S, default 8 s); the cost is in the harness
+    event as ``timings`` (per op) and ``settle`` (summary);
   * a viewport screenshot before every model call (= the state after the previous action) and
     one at the end.
 
@@ -89,6 +92,16 @@ def clip_page(p: Page) -> Page:
     p.headings = [cut(h, 200) for h in p.headings[:20]]
     p.title = cut(p.title, 200)
     return p
+
+
+def settle_summary(timings: List[dict]) -> Dict[str, Any]:
+    """What waiting for pages cost this episode (the per-op detail stays in ``timings``): total and
+    worst settle ms, how many reads waited for ``load`` past the settle and how many near-empty pages
+    were read twice (ChromiumBackend web_settle_cap)."""
+    ms = [float(t.get("settle_ms") or 0.0) for t in timings]
+    return {"ops": len(ms), "total_ms": round(sum(ms), 1), "max_ms": round(max(ms or [0.0]), 1),
+            "load_waits": sum(1 for t in timings if t.get("load_wait_ms")),
+            "rereads": sum(int(t.get("reread") or 0) for t in timings)}
 
 
 class ShotModel:
@@ -192,6 +205,7 @@ def run_web_episode(task: TaskSpec, model: Any, *, model_label: str, chromium: A
             harness["browser_log"] = list(backend.log)
             harness["interruptions"] = list(backend.interruptions)
             harness["timings"] = list(backend.timings)
+            harness["settle"] = settle_summary(backend.timings)
             try:
                 backend.close()
             except Exception:
