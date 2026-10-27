@@ -45,7 +45,11 @@ Hard rules enforced in code, not in the prompt:
     approver agrees: never chosen implicitly;
   * MFA / CAPTCHA / passkey / sign-in walls, HTTP errors, ambiguous controls
     (two controls with the same role+name+context) -> NEEDS_USER, never a
-    guess. An optional UserChannel may answer an MFA prompt by placing the
+    guess. One exception: a click under an open dialog (grounding refusal
+    ``blocked_by_modal``: cookie consent, newsletter, region pop-up) is fed
+    back to the model with the dialog's own controls, at most
+    MAX_MODAL_RETRIES times per subtask, so it can close the dialog itself
+    (code never picks a dialog button). An optional UserChannel may answer an MFA prompt by placing the
     code in the secret store (the model still only sees a handle);
   * success (VERIFIED) only when the page showed the subtask's explicit
     acknowledgement after the last write AND the effect check passes;
@@ -106,6 +110,7 @@ MAX_SECONDS = 120.0                  # default wall-clock cap per subtask
 MAX_SECONDS_ENV = "AWOS_MICRO_MAX_SECONDS"
 MAX_SECONDS_CEILING = 3600.0
 MAX_INVALID = 3
+MAX_MODAL_RETRIES = 2                # blocked_by_modal refusals fed back to the model, then NEEDS_USER
 WINDOW = 40                          # controls per observation window
 
 
@@ -380,6 +385,9 @@ class EffectCheck(Protocol):
 class Grounding:
     control: Optional[Control]
     refusal: str = ""                  # non-empty -> needs_user
+    kind: str = ""                     # grounding refusal reason ("blocked_by_modal", ...) when known
+    dialog: str = ""                   # blocked_by_modal: the open dialog's name
+    dialog_controls: List[int] = field(default_factory=list)   # blocked_by_modal: its control numbers
 
 
 @runtime_checkable
@@ -724,6 +732,7 @@ class MicroAgent:
         self._log = log
         self.flags: List[dict] = []
         self._flag_seen: set = set()
+        self._modal_retries = 0
 
     # -- logging (always redacted) -------------------------------------------
     def log(self, msg: str) -> None:
@@ -756,8 +765,10 @@ class MicroAgent:
         bits = [f"Current page: \"{mask_secrets(p.title)[:80]}\" (path {path})"]
         if p.headings and p.headings[0].strip().lower() != p.title.strip().lower():
             bits.append(f"main heading \"{mask_secrets(p.headings[0])[:80]}\"")
-        if p.dialog:
-            bits.append(f"a dialog is open: \"{mask_secrets(p.dialog)[:120]}\"")
+        dialog_open = bool(p.dialog) or any(c.in_dialog for c in p.controls)
+        if dialog_open:
+            bits.append(f"a dialog is open: \"{mask_secrets(p.dialog)[:120]}\"" if p.dialog
+                        else "a dialog is open above the page")
             # Name the dialog's own controls by number: live Safari flattens the dialog text
             # WITHOUT its button labels, and a small model then picked "Cancel" for "confirm".
             dbtn = [c for c in p.controls if c.in_dialog and c.role in ("button", "link")]
@@ -778,7 +789,7 @@ class MicroAgent:
                 bits.append(f"its hidden value [{c.n}] is ALREADY SAVED as {{{{secret:{captured_here[c.n]}}}}}")
             else:
                 bits.append(f"it shows a new hidden value [{c.n}] to save with copy_to_secret")
-        if not labels and not hidden and not p.dialog:
+        if not labels and not hidden and not dialog_open:
             if any(c.role in ("link", "button") for c in p.controls):
                 bits.append("navigation page (no form here); click the link or button that leads toward the goal")
         return "; ".join(bits) + "."
@@ -887,6 +898,7 @@ class MicroAgent:
         done_here: Dict[tuple, int] = {}     # fill/select already applied on the current page -> step
         duplicates = 0
         visited: List[str] = []
+        self._modal_retries = 0
 
         def finish(outcome: Outcome, reason: str = "", summary: str = "") -> MicroResult:
             res.outcome, res.reason, res.summary = outcome, reason, summary
@@ -1018,7 +1030,8 @@ class MicroAgent:
             if act.verb is Verb.DONE:
                 return verify_done(page, ev, act.text)
             if err:
-                invalid += 1
+                if not ev.get("blocked_by_modal"):       # a dialog in the way is not the model's mistake
+                    invalid += 1
                 ev["rejected"] = err
                 history.append(f"{res.steps}. {act.show()} -> REJECTED: {err}")
                 self.log(f"[{st.name}]   rejected: {err}")
@@ -1081,6 +1094,22 @@ class MicroAgent:
                     "done(\"summary\"); otherwise continue with the goal.")
         return "Continue with the next field or control the goal needs."
 
+    @staticmethod
+    def _modal_feedback(page: Page, n: int, gr: Grounding) -> str:
+        """blocked_by_modal -> what the model sees next: which dialog is in the way and its controls
+        by number. Nothing is clicked here; the hint prefers closing / declining over accepting."""
+        c = page.control(n)
+        nums = [x for x in gr.dialog_controls if page.control(x) is not None] or \
+            [x.n for x in page.controls if x.in_dialog]
+        listed = ", ".join(f"[{x}] {page.control(x).role} \"{mask_secrets(page.control(x).name)[:40]}\""
+                           for x in nums[:8])
+        name = mask_secrets(gr.dialog or "dialog")[:80]
+        return (f"nothing was done: a dialog \"{name}\" is open above control {n}"
+                + (f" ({c.role} \"{mask_secrets(c.name)[:40]}\")" if c is not None else "")
+                + (f". Its controls: {listed}" if listed else "")
+                + ". Deal with the dialog first (prefer its close / dismiss / reject / 'no thanks' option "
+                  "unless the goal needs it), then continue with the goal.")
+
     def _enter(self, page: Page, c: Control):
         """fill_enter's second half: Enter in the field just filled (the page may navigate)."""
         try:
@@ -1120,6 +1149,10 @@ class MicroAgent:
         if gr.control is None:
             if page.control(act.n or 0) is None:
                 return gr.refusal, page, None
+            if getattr(gr, "kind", "") == "blocked_by_modal" and self._modal_retries < MAX_MODAL_RETRIES:
+                self._modal_retries += 1
+                ev["blocked_by_modal"] = self._modal_retries
+                return self._modal_feedback(page, act.n or 0, gr), page, None
             return None, page, (Outcome.NEEDS_USER, gr.refusal)
         c = gr.control
         ev["control"] = f"{c.role} \"{mask_secrets(c.name)}\""

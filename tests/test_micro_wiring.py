@@ -432,3 +432,84 @@ def test_time_cap_env_applies_to_subtasks(monkeypatch):
     r = agent.run(ma.Subtask("t", "loop", start="/"))
     assert r.outcome is ma.Outcome.HALTED and "time cap 300s" in r.reason
     assert len(model.prompts) > 2                         # 120 s would have stopped after ~2 calls
+
+
+# --- open dialog over the target: the model gets the dialog back, not needs_user ----------------
+
+_CONSENT = ('<div role="dialog" aria-label="Cookie consent"><p>We use cookies.</p>'
+            '<a href="/accept">Accept all</a><a href="/reject">Reject all</a></div>')
+
+
+class _ModalBr:
+    """Fake browser: the start page has a consent dialog over the "Products" link until
+    "Reject all" / "Accept all" is clicked (``sticky``: the dialog never goes away)."""
+    page = None
+
+    def __init__(self, sticky=False):
+        self.sticky, self.clicked = sticky, []
+
+    def open(self, path):
+        return _page('<h1>Shop</h1><a href="/products">Products</a>' + _CONSENT)
+
+    def click(self, page, n):
+        c = page.control(n)
+        self.clicked.append(c.name)
+        if c.name in ("Reject all", "Accept all") and not self.sticky:
+            return _page('<h1>Shop</h1><a href="/products">Products</a>')
+        if c.name == "Products":
+            return _page('<h1>Products</h1><p>Widget 9.99</p>')
+        return page
+
+
+def test_modal_refusal_is_fed_back_then_the_target_is_clicked():
+    br = _ModalBr()
+    model = ma.ScriptedModel(['click "Products"', 'click "Reject all"', 'click "Products"', 'done "Widget"'])
+    agent = ma.MicroAgent(br, model, grounder=mw.WebAXGrounder(), store=ma.LocalSecretStore(), web_verbs=True)
+    res = agent.run(ma.Subtask("t", "open products", start="/"))
+    assert br.clicked == ["Reject all", "Products"]          # the first click was refused, nothing done
+    assert res.outcome is not ma.Outcome.NEEDS_USER
+    ev = res.events[0]
+    assert ev["blocked_by_modal"] == 1 and 'a dialog "We use cookies.' in ev["rejected"]
+    assert 'is open above control 1 (link "Products")' in ev["rejected"]
+    assert '[2] link "Accept all"' in ev["rejected"] and '[3] link "Reject all"' in ev["rejected"]
+    assert "prefer its close / dismiss / reject" in ev["rejected"]
+    assert "REJECTED: nothing was done: a dialog" in model.prompts[1]   # the model saw it as feedback
+    assert "a dialog is open" in model.prompts[0]
+
+
+def test_modal_refusals_are_bounded():
+    br = _ModalBr(sticky=True)
+    model = ma.ScriptedModel(['click "Products"'] * 6)
+    agent = ma.MicroAgent(br, model, grounder=mw.WebAXGrounder(), store=ma.LocalSecretStore(), web_verbs=True)
+    res = agent.run(ma.Subtask("t", "open products", start="/"))
+    assert br.clicked == []
+    assert len(model.prompts) == ma.MAX_MODAL_RETRIES + 1
+    assert res.outcome is ma.Outcome.NEEDS_USER and "grounding refused (blocked_by_modal)" in res.reason
+
+
+def test_other_refusals_still_end_the_run():
+    p = _page('<form method="post" action="/x"><button type="submit">Go</button></form>'
+              '<form method="post" action="/y"><button type="submit">Go</button></form>')
+
+    class Br:
+        page = None
+
+        def open(self, path):
+            return p
+
+    agent = ma.MicroAgent(Br(), ma.ScriptedModel(["raw click(1)"]), grounder=mw.WebAXGrounder(),
+                          store=ma.LocalSecretStore())
+    res = agent.run(ma.Subtask("t", "go", start="/"))
+    assert res.outcome is ma.Outcome.NEEDS_USER and res.reason.startswith("ambiguous control")
+
+
+def test_outline_lists_dialog_controls_outside_the_window():
+    links = "".join(f'<a href="/p{i}">Item {i}</a>' for i in range(50))
+    p = _page(links + _CONSENT)
+    out = wt.outline(p, 0, 40)
+    assert "Dialog: We use cookies." in out and "Dialog controls (the dialog is open above the page):" in out
+    assert out.count('[52] link "Reject all"') == 1
+    assert out.index('[52] link "Reject all"') < out.index("Controls (52 total")
+    out2 = wt.outline(p, 12, 40)                          # dialog now inside the window: listed once
+    assert "Dialog controls" not in out2 and out2.count('[52] link "Reject all"') == 1
+    assert "Dialog controls" not in wt.outline(_page(links))
