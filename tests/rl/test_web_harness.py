@@ -487,3 +487,18 @@ def test_ci_matrix_env_and_workflow():
     assert "playwright install --with-deps chromium" in wf and '--shard "$SHARD/$SHARDS"' in wf
     ladder = (root / ".github/workflows/ladder.yml").read_text()
     assert '"!bench-cloud/rl-**"' in ladder                  # rl-web pushes never start the paid ladder
+
+
+def test_model_server_down_is_an_infra_error_rerun_on_resume(tmp_path):
+    """A model server stopped mid-run (the agent ends needs_user "model call failed: URLError") is infra:
+    resume reruns it and the summary keeps it out of the scores, also for records written before the check."""
+    from scaffold.rl.web import runner as R
+    p = tmp_path / "trajectories.jsonl"
+    rows = [{"task": {"id": "a"}, "trajectory": {"outcome": "needs_user", "reason": "model call failed: URLError"}},
+            {"task": {"id": "b"}, "trajectory": {"outcome": "needs_user", "reason": "model call failed: ValueError"}},
+            {"task": {"id": "c"}, "trajectory": {"outcome": "completed_unverified", "reason": "done"}}]
+    p.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    recs = {r["task"]["id"]: r["trajectory"] for r in R.read_web_records(p)}
+    assert recs["a"]["error"].startswith("model server unreachable")
+    assert not recs["b"].get("error") and not recs["c"].get("error")
+    assert R.server_down("model call failed: ConnectionRefusedError") and not R.server_down("why")

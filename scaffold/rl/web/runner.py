@@ -99,7 +99,30 @@ def _worker_run(td: dict) -> dict:
                                   judge_root=Path(a["out"]) / "judge", max_steps=a["max_steps"],
                                   max_seconds=a["max_seconds"], guards=a.get("guards", "product"),
                                   allow_private=bool(a.get("allow_private")))
+    if not traj.error and server_down(traj.reason):
+        traj.error = f"model server unreachable: {traj.reason}"[:500]
     return record(task, 0, traj, score)
+
+
+# the agent ends the episode as needs_user when the model call fails; when the model SERVER is unreachable
+# (stopped, tunnel down) that is infrastructure, not the model: rerun on resume, keep it out of the scores
+SERVER_DOWN = ("model call failed: URLError", "model call failed: ConnectionRefusedError",
+               "model call failed: ConnectionResetError", "model call failed: RemoteDisconnected")
+
+
+def server_down(reason: str) -> bool:
+    return (reason or "").startswith(SERVER_DOWN)
+
+
+def read_web_records(path: Path) -> List[dict]:
+    """read_records, with model-server-unreachable episodes written before that check existed marked as
+    infra errors too."""
+    recs = read_records(path)
+    for r in recs:
+        tr = r.get("trajectory") or {}
+        if not tr.get("error") and server_down(tr.get("reason", "")):
+            tr["error"] = f"model server unreachable: {tr['reason']}"[:500]
+    return recs
 
 
 def _worker_close() -> None:
@@ -136,7 +159,7 @@ def run(out: Path, *, model: str = "local", split: str = "dev", shard: Optional[
     path = out / "trajectories.jsonl"
     src = OnlineMind2WebSource(tasks_json, dev_ids_path=dev_ids_path)
     tasks = select_tasks(src, split, n, task_ids, shard)
-    have = {r["task"]["id"] for r in read_records(path) if not (r.get("trajectory") or {}).get("error")}
+    have = {r["task"]["id"] for r in read_web_records(path) if not (r.get("trajectory") or {}).get("error")}
     jobs = [t.to_dict() for t in tasks if t.id not in have]
     args = {"model": model, "guards": guards, "model_label": model_label, "workers": workers, "out": str(out),
             "max_steps": int(max_steps), "max_seconds": float(max_seconds), "allow_private": allow_private,
@@ -190,7 +213,7 @@ def summarize(out: Path) -> Dict[str, Any]:
     count as failures in any score but are broken out so infrastructure loss is visible."""
     out = Path(out)
     latest: Dict[str, dict] = {}
-    for r in read_records(out / "trajectories.jsonl"):
+    for r in read_web_records(out / "trajectories.jsonl"):
         latest[r["task"]["id"]] = r
     errors = [r for r in latest.values() if r["trajectory"].get("error")]
     good = [r for r in latest.values() if not r["trajectory"].get("error")]
