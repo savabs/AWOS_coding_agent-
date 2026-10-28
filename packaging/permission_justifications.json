@@ -26,6 +26,9 @@
   "content_script_matches": {
     "http://*/*": "The recorder (captures the user's own clicks and typing while they record) and replayer (repeats them) must be present on whatever site the chore is on. It does nothing until the user starts a recording or replay in that tab.",
     "https://*/*": "Same as http://*/*.",
-    "<all_urls>": "Same as http://*/*."
+    "<all_urls>": "Same as http://*/*.",
+    "https://awos.tirramind.com/r/*": "Recipe import bridge: on the AWOS recipe page (/r/) only, it answers the page's 'is AWOS Replay installed' hello and passes a shared recipe the user clicked 'Add' on to the extension, which shows every step and imports it only after the user confirms. It reads nothing else on the page.",
+    "https://awos-site.pages.dev/r/*": "Recipe import bridge: on the AWOS recipe page (/r/) only, it answers the page's 'is AWOS Replay installed' hello and passes a shared recipe the user clicked 'Add' on to the extension, which shows every step and imports it only after the user confirms. It reads nothing else on the page. (the same site's Cloudflare Pages address)",
+    "http://localhost:8000/r/*": "Recipe import bridge: on the AWOS recipe page (/r/) only, it answers the page's 'is AWOS Replay installed' hello and passes a shared recipe the user clicked 'Add' on to the extension, which shows every step and imports it only after the user confirms. It reads nothing else on the page. (local development copy of the site only; no data is sent anywhere)"
   }
 }
