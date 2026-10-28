@@ -1,1 +1,1 @@
-INSTALL_COMMAND
+curl -fsSL https://raw.githubusercontent.com/savabs/AWOS_coding_agent-/main/scripts/install_replay.sh | bash

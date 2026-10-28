@@ -24,7 +24,7 @@ Link: `https://awos.tirramind.com/?src=hn`
 >
 > Limits, plainly: main frame only (no iframes, shadow DOM, file uploads or multi-tab chores), it doesn't yet check that a download actually arrived, and the model was trained on synthetic apps, so real sites will find its blind spots. It's open source and free. A paid tier (schedules, Claude with your own key) is waitlist-only.
 >
-> Install: `INSTALL_COMMAND`
+> Install (macOS): `curl -fsSL https://raw.githubusercontent.com/savabs/AWOS_coding_agent-/main/scripts/install_replay.sh | bash`
 >
 > What I'd like to hear: which chore you'd try first, and where it broke. The popup has "Export run log", which strips typed values and URL queries.
 

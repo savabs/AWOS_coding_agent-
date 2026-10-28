@@ -10,11 +10,12 @@ Plain HTML and CSS, no framework, no external JS.
   - `recipes.html` (`/recipes/`): gallery of the 6 example recipes in `src/recipes/examples.json` (fictional `example.com` sites).
   - `r.html` (`/r/`): the shared-recipe page. See "Recipe links" below.
   - `coding-agent.html` (`/coding-agent/`): the previous home page, unchanged apart from its title.
+  - `replay/privacy.html` (`/replay/privacy/`): the extension's privacy policy (the Chrome Web Store listing links here). `EFFECTIVE_DATE` and `CONTACT_EMAIL` are placeholders.
 - `src/assets/` has `style.css` (the design tokens, light and dark themes), the form scripts (`access.js`, `waitlist.js`, `replay-waitlist.js`, `pro.js`) and the recipe code (`recipe-core.js`, `recipe-page.js`). It is copied to `public/assets/`.
-- `src/replay_install.txt`: the AWOS Replay install command shown on `/` and `/r/`. It holds the placeholder `INSTALL_COMMAND` until packaging is ready.
+- `src/replay_install.txt`: the AWOS Replay install command shown on `/` and `/r/`. It installs from `main`, so it works only after `scripts/install_replay.sh` is merged there.
 - `src/_headers`: Cloudflare Pages headers (a strict CSP and `no-referrer` on `/r/`).
-- `build.py` assembles everything into `public/**` and writes `sitemap.xml` and `robots.txt`. It fills `{{replay_install}}` and `<!--RECIPE_CARDS-->` and encodes each example recipe into its `/r/#...` link. Set `SITE_URL` for canonical and sitemap URLs.
-- `check_site.py` checks the built site: every internal link and `#anchor` resolves, every `/r/#...` link decodes to a valid v1 recipe under 64 KB, `/recipes/` has 6 of them, no off-site `<script src>`, the recipe scripts never use `innerHTML`, tags nest correctly, each page has a title, a meta description and one `<h1>`. Launch items still missing (the `INSTALL_COMMAND` placeholder, the demo video) are listed as PENDING; `check_site.py --release` fails on them.
+- `build.py` assembles everything into `public/**` and writes `sitemap.xml` and `robots.txt`. It fills `{{replay_install}}` and `<!--RECIPE_CARDS-->` and encodes each example recipe into its `/r/#...` link. Set `SITE_URL` for canonical and sitemap URLs (default `https://awos.tirramind.com`). Recipe share links are `https://awos.tirramind.com/r/#<payload>`; the `/r/` page only uses `location.origin`, so it works the same on `awos-site.pages.dev` and `localhost:8000`.
+- `check_site.py` checks the built site: every internal link and `#anchor` resolves, every `/r/#...` link decodes to a valid v1 recipe under 64 KB, `/recipes/` has 6 of them, no off-site `<script src>`, the recipe scripts never use `innerHTML`, tags nest correctly, each page has a title, a meta description and one `<h1>`. Launch items still missing (the `INSTALL_COMMAND` placeholder, the demo video, the privacy policy date and contact) are listed as PENDING; `check_site.py --release` fails on them.
 - `functions/api/request-access.js` is a Cloudflare Pages Function. It stores form submissions in a KV namespace and lists them for the owner.
 - `tests/`: `npm test` (`node --test`, Node >= 20, no dependencies): the Pages Functions and the recipe decode/validate/describe logic.
 
@@ -28,7 +29,7 @@ python3 -m http.server 8000 -d site/public   # preview at http://localhost:8000/
 
 Preview a recipe: open http://localhost:8000/recipes/ and click a card.
 
-Before launch: put the real command in `src/replay_install.txt`, add the video at `src/assets/replay/demo.mp4` (poster: `demo-poster.svg`), rebuild, and run `python3 site/check_site.py --release`.
+Before launch: fill `EFFECTIVE_DATE` and `CONTACT_EMAIL` in `src/pages/replay/privacy.html`, add the video at `src/assets/replay/demo.mp4` (poster: `demo-poster.svg`), rebuild, and run `python3 site/check_site.py --release`.
 
 ## Recipe links (`/r/`)
 

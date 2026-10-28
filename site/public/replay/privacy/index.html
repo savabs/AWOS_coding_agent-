@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Privacy policy · AWOS Replay</title>
+<meta name="description" content="What the AWOS Replay browser extension stores and where. Your recordings stay on your computer, the model runs locally by default, and there is no tracking.">
+<link rel="canonical" href="https://awos.tirramind.com/replay/privacy/">
+<meta property="og:title" content="Privacy policy · AWOS Replay">
+<meta property="og:description" content="What the AWOS Replay browser extension stores and where. Your recordings stay on your computer, the model runs locally by default, and there is no tracking.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://awos.tirramind.com/replay/privacy/">
+<meta name="robots" content="index,follow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap">
+  <a class="brand" href="/" aria-label="AWOS Replay home">AWOS<span>.</span> <small>Replay</small></a>
+  <nav class="links" aria-label="Main">
+    <a class="wide" href="/#how">How it works</a>
+    <a href="/recipes/">Recipes</a>
+    <a class="wide" href="/#pricing">Pricing</a>
+    <a class="wide" href="/coding-agent/">Coding agent</a>
+    <a href="/docs/">Docs</a>
+  </nav>
+  <a class="btn primary" href="/#waitlist">Join the waitlist</a>
+</div></header>
+<main id="main" class="wrap">
+<div class="access policy">
+  <div class="eyebrow">AWOS Replay · privacy</div>
+  <h1>AWOS Replay privacy policy</h1>
+  <p class="sub">Effective EFFECTIVE_DATE</p>
+  <p>AWOS Replay is a browser extension that records a task you do on a website and replays it when you ask. It is built so that your data stays on your computer.</p>
+
+  <h2 id="stores">What AWOS Replay stores, and where</h2>
+  <ul>
+    <li><b>Your recordings:</b> the steps you clicked and typed, the page addresses, and the checks you set.</li>
+    <li><b>The results of your last 20 replays.</b></li>
+    <li><b>Your settings.</b></li>
+  </ul>
+  <p>All of this lives only in your browser's local extension storage on your computer. It is not synced to your Google account and is not sent to us. Password fields, card numbers and other sensitive fields are never recorded; AWOS Replay saves a placeholder instead of the value. Uninstalling the extension deletes this data.</p>
+
+  <h2 id="model">The AI model: local by default</h2>
+  <p>When AWOS Replay needs help (re-finding a button that moved, or checking a result), it sends a short description of the step and the relevant part of the page to a model. By default that model runs on your own computer (a llama.cpp server on 127.0.0.1). The extension refuses to send page data to any non-local address unless you turn on the cloud option below. The local model installer downloads the model file from GitHub once. After that the model works offline.</p>
+
+  <h2 id="cloud">Cloud model: only with your own key and your explicit opt-in</h2>
+  <p>If you paste your own Anthropic API key into Options and choose Claude, the same step descriptions and page excerpts go <b>directly from your browser to Anthropic</b> under your own account and <a href="https://www.anthropic.com/legal/privacy">Anthropic's terms</a>. They never pass through AWOS servers. Your key is stored only in your browser's local extension storage. You can turn this off or delete the key at any time.</p>
+
+  <h2 id="tracking">No analytics, no ads, no tracking</h2>
+  <p>The extension contains no analytics, advertising or tracking code, and does not contact AWOS servers. The separate AWOS command-line tool has an <b>opt-in</b>, anonymous usage count. It is off until you say yes, and it sends only an install id, version, OS, outcome and coarse duration/cost buckets; never page content, prompts, keys or names (see <a href="/telemetry/">what AWOS sends</a>). If a future version of the extension adds a count like that, it will be off until you opt in, and it will be listed here first.</p>
+
+  <h2 id="never">What we never do</h2>
+  <p>We don't sell or share your data. We don't use it for advertising or creditworthiness. We don't use it for anything except running your replays.</p>
+
+  <h2 id="children">Children</h2>
+  <p>AWOS Replay is not directed at children under 13.</p>
+
+  <h2 id="contact">Changes and contact</h2>
+  <p>We will post changes here and bump the effective date. Questions: CONTACT_EMAIL.</p>
+</div>
+</main>
+<footer class="site"><div class="wrap">
+  <span>AWOS Replay. Show it once, it does it forever. Open source. Built in India.</span>
+  <nav aria-label="Footer">
+    <a href="/#how">How it works</a>
+    <a href="/recipes/">Recipes</a>
+    <a href="/replay/privacy/">Privacy policy</a>
+    <a href="/#waitlist">Waitlist</a>
+    <a href="/coding-agent/">Coding agent</a>
+    <a href="/docs/">Coding agent docs</a>
+    <a href="/access/">Team early access</a>
+  </nav>
+</div></footer>
+</body>
+</html>

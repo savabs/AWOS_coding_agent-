@@ -55,10 +55,11 @@ Recipe links (`/r/#...`) don't need a tag. Put tags on the landing page or `/rec
 ## Pre-launch checklist
 
 - [ ] Hero video (demo_scripts.md, script 1) recorded, uploaded, and embedded on `/`. Self-healing and recipe clips uploaded for X and PH.
-- [ ] `INSTALL_COMMAND` replaced everywhere: on the site, and in every file in this folder (`grep -rn INSTALL_COMMAND docs/launch/replay site`).
-- [ ] Ran `INSTALL_COMMAND` on a clean Mac user account (or the sandbox VM). The model downloads, the extension loads, and Options shows `http://127.0.0.1:8080/v1`.
+- [ ] `scripts/install_replay.sh` is merged to `main`: the install command (`curl -fsSL https://raw.githubusercontent.com/savabs/AWOS_coding_agent-/main/scripts/install_replay.sh | bash`) downloads from `main`, so it fails before the merge. The site reads it from `site/src/replay_install.txt`.
+- [ ] Ran the install command on a clean Mac user account (or the sandbox VM). The model downloads, the extension loads, and Options shows `http://127.0.0.1:8080/v1`.
 - [ ] Site deployed. `/`, `/recipes/` and `/r/` load on desktop and phone.
 - [ ] Paddle stays **off**. Pro shows "$12/mo, waitlist", and there is no live checkout button anywhere.
+- [ ] Privacy policy at `https://awos.tirramind.com/replay/privacy/` has its effective date and contact filled (`EFFECTIVE_DATE`, `CONTACT_EMAIL` in `site/src/pages/replay/privacy.html`); the Chrome Web Store listing links to it.
 - [ ] Waitlist form submits with the "what chore would you hand off?" answer, and `?src=` is stored. Test one tag per channel.
 - [ ] Opened one `/r/#...` link from each of the 6 gallery recipes with the extension installed: the steps read correctly, and "Add to AWOS Replay" works (or the page says plainly that import is coming).
 - [ ] Confirmed `/r/` sends nothing about the fragment to any server (DevTools Network tab: no request contains the recipe).

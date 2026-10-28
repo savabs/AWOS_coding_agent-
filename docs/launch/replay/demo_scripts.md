@@ -25,7 +25,7 @@ Only film what the shipped build does. If a scene needs a feature that isn't in 
 | 0:46–0:58 | New tab on the dashboard. Click **Run**. Steps replay on their own (show at 2x, labelled). | "Next month I press Run." |
 | 0:58–1:06 | Popup: green **VERIFIED**, checks ✓ url, ✓ text; log line "verifier says VERIFIED". | "VERIFIED: the checks passed, and a small model on my Mac read the page and agreed. If it disagrees, I get CHECK instead of a fake success." |
 | 1:06–1:14 | The `/r/` recipe page for "Download this month's invoice" with steps in plain English. | "And I can share the chore as a link. No passwords inside, and the recipe never touches a server." |
-| 1:14–1:20 | End card: "AWOS Replay. Free, open source, runs on your Mac." + `awos.tirramind.com` + "Install: INSTALL_COMMAND" | "AWOS Replay." |
+| 1:14–1:20 | End card: "AWOS Replay. Free, open source, runs on your Mac." + `awos.tirramind.com` + "Install: awos.tirramind.com/#install" | "AWOS Replay." |
 
 Notes: if the shipped build doesn't export a recipe from a recording yet, show the gallery's prebuilt "Download this month's invoice" recipe at 1:06 and caption it "example recipe". Do not imply the verdict checked the PDF file; it checks the page text and URL.
 

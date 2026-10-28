@@ -17,7 +17,8 @@ Fails (exit 1) when:
 Pending launch items are reported but pass, so the site can be built and
 previewed before launch; `--release` (run before deploying) fails on them:
   - the INSTALL_COMMAND placeholder (fill site/src/replay_install.txt);
-  - a file listed in PENDING_ASSETS that does not exist yet (the demo video).
+  - a file listed in PENDING_ASSETS that does not exist yet (the demo video);
+  - the EFFECTIVE_DATE / CONTACT_EMAIL placeholders in the privacy policy.
 External links (http/https/mailto) are listed, not fetched.
 """
 from __future__ import annotations
@@ -40,7 +41,7 @@ OPTIONAL_END = {"p", "li", "option", "tr", "td", "th", "thead", "tbody"}
 PENDING_ASSETS = {"/assets/replay/demo.mp4": "the demo video (see docs/launch/replay/demo_scripts.md)"}
 REQUIRED = ("sitemap.xml", "robots.txt", "404.html", "_headers", "assets/style.css", "index.html",
             "r/index.html", "recipes/index.html", "coding-agent/index.html", "assets/recipe-core.js",
-            "assets/recipe-page.js", "assets/replay/demo-poster.svg")
+            "assets/recipe-page.js", "assets/replay/demo-poster.svg", "replay/privacy/index.html")
 RECIPE_SCRIPTS = ("assets/recipe-core.js", "assets/recipe-page.js")
 UNSAFE_DOM = re.compile(r"\b(innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval)\b|new Function")
 RECIPE_MAX = 64 * 1024
@@ -220,6 +221,11 @@ def main() -> int:
             m = UNSAFE_DOM.search(code)
             if m:
                 problems.append(f"{js}: uses {m.group(0)} (recipes are untrusted; use textContent)")
+
+    for token, fix in (("EFFECTIVE_DATE", "the effective date"), ("CONTACT_EMAIL", "a contact address")):
+        n = sum(f.read_text(encoding="utf-8").count(token) for f in pages)
+        if n:
+            pending.append(f"{token} placeholder shown {n}x: put {fix} in src/pages/replay/privacy.html")
 
     hits = sum(f.read_text(encoding="utf-8").count("INSTALL_COMMAND") for f in pages)
     if hits:
