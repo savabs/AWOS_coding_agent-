@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>AWOS coding agent · runs on your own computer</title>
+<meta name="description" content="AWOS is a coding agent that runs entirely on your own computer with a free local model. Your code never leaves your machine, and a task costs $0.">
+<link rel="canonical" href="https://awos.tirramind.com/coding-agent/">
+<meta property="og:title" content="AWOS coding agent · runs on your own computer">
+<meta property="og:description" content="AWOS is a coding agent that runs entirely on your own computer with a free local model. Your code never leaves your machine, and a task costs $0.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://awos.tirramind.com/coding-agent/">
+<meta name="robots" content="index,follow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap">
+  <a class="brand" href="/" aria-label="AWOS Replay home">AWOS<span>.</span> <small>Replay</small></a>
+  <nav class="links" aria-label="Main">
+    <a class="wide" href="/#how">How it works</a>
+    <a href="/recipes/">Recipes</a>
+    <a class="wide" href="/#pricing">Pricing</a>
+    <a class="wide" href="/coding-agent/" aria-current="page">Coding agent</a>
+    <a href="/docs/">Docs</a>
+  </nav>
+  <a class="btn primary" href="/#waitlist">Join the waitlist</a>
+</div></header>
+<main id="main" class="wrap">
+  <div class="hero">
+    <div>
+      <div class="eyebrow">AWOS coding agent · early access · <a href="/">looking for AWOS Replay?</a></div>
+      <h1>A coding agent that runs entirely on <em>your own computer</em>.</h1>
+      <p class="lede">Free local model, your code never leaves your machine, $0 per task. Give AWOS an issue. It works in its own copy of your repo, checks the change against your tests, and hands you a branch to review. Nothing is pushed without you.</p>
+      <div class="cta"><a class="btn primary" href="#waitlist">Join the waitlist</a><a class="btn ghost" href="/docs/quickstart/">Install</a></div>
+      <pre class="install" aria-label="Install command"><code>curl -fsSL https://awos.tirramind.com/install.sh | sh</code></pre>
+      <p class="formnote">macOS and Linux. Then point it at a local model server such as <code>llama-server</code>: see <a href="/docs/models-and-cost/#local">local models</a>.</p>
+    </div>
+    <div class="report" role="img" aria-label="A real local run: Qwen3.5 9B on a laptop fixed a failing test in 21 steps and 5 minutes for zero dollars">
+      <div class="bar"><span>awos · AWOS_PROVIDER=local</span><span>2026-10-16</span></div>
+      <div class="body">
+        <div class="job"><span class="pill pass">done</span><span class="what">parse_duration rejects combined durations like 1h30m<span class="meta">Qwen3.5 9B (Q4) on a laptop, on battery · tests 3 passed, 0 failed</span></span><span class="cost">$0</span></div>
+        <div class="job"><span class="pill pass">steps</span><span class="what">21 steps · 5 min 6 s<span class="meta">0 malformed replies · 91% of the prompt reused from cache</span></span><span class="cost">offline</span></div>
+      </div>
+      <div class="foot">A real run, but one small task in a scratch repo. It is a functional check, not a benchmark.</div>
+    </div>
+  </div>
+
+  <section id="how" aria-labelledby="how-h">
+    <div class="eyebrow">How it works</div>
+    <h2 id="how-h">From issue to review branch, on your machine</h2>
+    <p class="sub">You describe the change in a sentence. AWOS does the work locally and only interrupts you for a real decision.</p>
+    <div class="steps">
+      <div><span class="n">1 · model</span><h3>Run a local model</h3><p>Start an open model on your computer (we test with Qwen3.5 9B on a laptop) and set <code>AWOS_PROVIDER=local</code>.</p></div>
+      <div><span class="n">2 · isolate</span><h3>Own workspace</h3><p>Each task gets a separate git worktree at your current commit. Your checkout is never edited.</p></div>
+      <div><span class="n">3 · verify</span><h3>Checked by tests</h3><p>AWOS runs your tests on the change and records what passed. A secret scan runs before handoff.</p></div>
+      <div><span class="n">4 · review</span><h3>Branch + report</h3><p>You get <code>awos/&lt;id&gt;</code> with a short report: tests, steps, time. Merge it or delete it.</p></div>
+    </div>
+  </section>
+
+  <section id="results" aria-labelledby="results-h">
+    <div class="eyebrow">Proof so far</div>
+    <h2 id="results-h">What we have measured, and what we have not</h2>
+    <p class="sub">Each number below comes from a run report in the AWOS repo. Each card says which model it used and how strong the evidence is.</p>
+    <div class="results">
+      <div class="result"><div class="big">40<small> / 40</small></div><h3>Fresh Python issues solved, cloud model</h3><p>AWOS's agent loop on Claude Haiku 5.5, judged by hidden tests. mini-swe-agent solved 39 of 40 on the same model. AWOS cost 0.62× as much per run. Statistically this is a tie, not a win.</p><span class="src">Cloud · pre-registered · 2026-10-15</span></div>
+      <div class="result"><div class="big">$0</div><h3>A real bug fixed by a free local model</h3><p>Qwen3.5 9B on a laptop fixed a failing test in 21 steps and 5 minutes, with 0 malformed replies out of 81. The first attempt ran out of steps because of an AWOS bug, which we fixed.</p><span class="src">Local · one task, not a benchmark · 2026-10-16</span></div>
+      <div class="result"><div class="big">Next</div><h3>Does AWOS make a local model better?</h3><p>Not shown yet. The next pre-registered test runs AWOS and a minimal agent loop on the same local model across 15 issues. We will publish the result whichever way it goes.</p><span class="src">Local · pre-registered · not run yet</span></div>
+    </div>
+    <p class="note">We do not claim that AWOS beats other agents on local models. A small local model is slower and weaker than a frontier cloud model. Today AWOS suits routine, well-tested changes where privacy or cost matters more than speed.</p>
+  </section>
+
+  <section id="security" aria-labelledby="security-h">
+    <div class="eyebrow">Private by design</div>
+    <h2 id="security-h">Your code stays on your computer</h2>
+    <div class="two">
+      <ul class="facts">
+        <li><b>Runs on your machine</b><span>The agent, model, queue and logs live on your computer. There is no AWOS cloud holding your code.</span></li>
+        <li><b>Local-only mode</b><span><code>--privacy local_only</code> blanks cloud keys for that task, so it can only use your local model.</span></li>
+        <li><b>Works offline</b><span>With a local model, a task needs no network at all.</span></li>
+      </ul>
+      <ul class="facts">
+        <li><b>Never touches your checkout</b><span>A separate worktree for each task. Results arrive as a local branch.</span></li>
+        <li><b>Nothing is pushed</b><span>You decide what to merge and push.</span></li>
+        <li><b>Secret scan on every handoff</b><span>A branch is blocked if the diff contains a credential.</span></li>
+      </ul>
+    </div>
+    <p><a href="/docs/security/">Read the security model</a></p>
+  </section>
+
+  <section id="pricing" aria-labelledby="pricing-h">
+    <div class="eyebrow">Pricing</div>
+    <h2 id="pricing-h">$0 per task on a local model</h2>
+    <div class="two">
+      <div class="price"><div class="tag">$0</div><p>per task with a local model. AWOS is free during early access.</p>
+        <ul><li>Your own hardware does the work, so there is no token bill</li><li>Optional cloud model when you want one: you pay the provider directly</li><li>Direct line to the builder for feedback and fixes</li></ul></div>
+      <div><p class="sub">We are still learning who needs a private, local agent most. The waitlist below takes about 20 seconds and tells us what to build next.</p>
+        <a class="btn primary" href="#waitlist">Join the waitlist</a></div>
+    </div>
+  </section>
+
+  <section id="waitlist" aria-labelledby="waitlist-h">
+    <div class="eyebrow">Waitlist</div>
+    <h2 id="waitlist-h">Tell us why you want a local agent</h2>
+    <p class="sub">Two questions. Email is optional; leave it if you want to hear when local results are published.</p>
+    <form id="waitlist-form" class="waitlist" novalidate data-endpoint="/api/request-access">
+      <div class="row">
+        <label for="w-role">Your role<select id="w-role" name="role" required>
+          <option value="">Choose one</option>
+          <option value="solo_dev">Solo developer</option>
+          <option value="team_dev">Developer on a team</option>
+          <option value="founder">Founder</option>
+          <option value="researcher">Researcher</option>
+          <option value="other">Other</option>
+        </select></label>
+        <label for="w-why">Why local?<select id="w-why" name="why" required>
+          <option value="">Choose one</option>
+          <option value="privacy">Privacy: code can't leave my machine</option>
+          <option value="cost">Cost: no per-token bill</option>
+          <option value="offline">Offline: works without a network</option>
+          <option value="speed">Speed: no queue, no rate limits</option>
+          <option value="curiosity">Curiosity: I like running models locally</option>
+          <option value="other">Other</option>
+        </select></label>
+      </div>
+      <label for="w-note">Anything else? (optional)<textarea id="w-note" name="note" maxlength="500" placeholder="e.g. our client contracts forbid sending code to cloud AI"></textarea></label>
+      <label for="w-email">Email (optional)<input id="w-email" name="email" type="email" maxlength="254" autocomplete="email"></label>
+      <label class="hp" for="w-website" aria-hidden="true">Website<input id="w-website" name="website" tabindex="-1" autocomplete="off"></label>
+      <div class="cta"><button class="btn primary" type="submit">Join the waitlist</button></div>
+      <p class="status" id="w-status" role="status" aria-live="polite"></p>
+      <p class="formnote">No trackers and no cookies. We store your answers, your country code and your email if you give one. Only the builder reads them.</p>
+    </form>
+  </section>
+
+  <section id="docs" aria-labelledby="docs-h">
+    <div class="eyebrow">Docs</div>
+    <h2 id="docs-h">Get started in five minutes</h2>
+    <p class="sub">The docs cover installing, local models, the safety model and every command.</p>
+    <div class="cards">
+      <a class="card" href="/docs/quickstart/"><b>Quickstart</b><span>Install, run a task, review the branch.</span></a>
+      <a class="card" href="/docs/models-and-cost/"><b>Models and cost</b><span>Run a free local model, or add a cloud key.</span></a>
+      <a class="card" href="/docs/cli/"><b>CLI reference</b><span>Every flag for submit, serve, status, cancel, unblock and keys.</span></a>
+    </div>
+  </section>
+</main>
+<script src="/assets/waitlist.js" defer></script>
+<footer class="site"><div class="wrap">
+  <span>AWOS Replay. Show it once, it does it forever. Open source. Built in India.</span>
+  <nav aria-label="Footer">
+    <a href="/#how">How it works</a>
+    <a href="/recipes/">Recipes</a>
+    <a href="/#privacy">Privacy</a>
+    <a href="/#waitlist">Waitlist</a>
+    <a href="/coding-agent/">Coding agent</a>
+    <a href="/docs/">Coding agent docs</a>
+    <a href="/access/">Team early access</a>
+  </nav>
+</div></footer>
+</body>
+</html>

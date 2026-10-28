@@ -11,7 +11,8 @@ import { onRequestGet as claim } from "../functions/api/license/claim.js";
 import { onRequestPost as check } from "../functions/api/license/check.js";
 import { onRequestPost as ping, cleanPing } from "../functions/api/ping.js";
 import { onRequestGet as usage } from "../functions/api/usage.js";
-import { onRequestPost as accessPost, onRequestGet as accessGet, segmentFor, cleanWaitlist, waitlistCsv }
+import { onRequestPost as accessPost, onRequestGet as accessGet, segmentFor, cleanWaitlist, waitlistCsv,
+  cleanReplay, replayCsv }
   from "../functions/api/request-access.js";
 
 class FakeKV {
@@ -505,6 +506,53 @@ test("waitlist admin: token-protected counts by segment and CSV export; legacy f
   assert.equal(all.count, 1);
   assert.equal(all.requests[0].email, "ann@x.io");
   assert.equal(all.waitlist_count, 4);
+});
+
+test("replay waitlist: chore is required and from a fixed list; pro answer, email optional", () => {
+  assert.deepEqual(cleanReplay({ chore: "bills_invoices", pro: "yes", note: " six portals ", src: "ph" }).rec,
+    { form: "replay", segment: "bills_invoices", chore: "bills_invoices", pro: "yes", note: "six portals",
+      email: "", src: "ph" });
+  assert.equal(cleanReplay({ chore: "bills_invoices", src: "nope" }).rec.src, "");
+  assert.equal(cleanReplay({ chore: "reports_exports" }).rec.pro, "");
+  assert.match(cleanReplay({}).error, /chore/);
+  assert.match(cleanReplay({ chore: "crypto_trading" }).error, /chore/);
+  assert.match(cleanReplay({ chore: "other", pro: "definitely" }).error, /Pro/);
+  assert.match(cleanReplay({ chore: "other", note: "x".repeat(501) }).error, /500/);
+  assert.match(cleanReplay({ chore: "other", email: "nope" }).error, /email/);
+  assert.match(cleanReplay({ chore: ["other"] }).error, /text/);
+  assert.equal(replayCsv([]), "ts,chore,pro,src,country,email,note\n");
+});
+
+test("replay waitlist: stored under rp:, honeypot, admin view by chore + CSV, counted on the default view", async () => {
+  const e = { ACCESS_REQUESTS: new FakeKV(), ADMIN_TOKEN: "owner-token" };
+  const sign = (o, ip) => accessPost({ request: accessReq({ form: "replay", ...o }, { ip }), env: e });
+  const r1 = await sign({ chore: "bills_invoices", pro: "yes", email: "B@X.io", src: "hn" }, "1");
+  assert.deepEqual(await body(r1), { ok: true, segment: "bills_invoices" });
+  assert.ok(e.ACCESS_REQUESTS.m.has("rp:e:b@x.io"));
+  await sign({ chore: "bills_invoices", pro: "maybe" }, "2");
+  await sign({ chore: "timesheets_forms", note: "=cmd()" }, "3");
+  assert.equal((await sign({ chore: "nope" }, "4")).status, 400);
+  const puts = e.ACCESS_REQUESTS.puts;
+  assert.equal((await sign({ chore: "other", website: "spam.example" }, "5")).status, 200);
+  assert.equal(e.ACCESS_REQUESTS.puts, puts);   // honeypot: nothing stored
+  // Replay sign-ups do not leak into the coding-agent waitlist view.
+  const wl = await body(await accessGet({ request: adminGet("view=waitlist&token=owner-token"), env: e }));
+  assert.equal(wl.count, 0);
+
+  assert.equal((await accessGet({ request: adminGet("view=replay&token=wrong"), env: e })).status, 404);
+  const v = await body(await accessGet({ request: adminGet("view=replay&token=owner-token"), env: e }));
+  assert.equal(v.count, 3);
+  assert.equal(v.by_chore.bills_invoices, 2);
+  assert.equal(v.by_chore.timesheets_forms, 1);
+  assert.equal(v.by_chore.data_entry, 0);
+  assert.deepEqual(v.by_pro, { yes: 1, maybe: 1, no: 0, unknown: 1 });
+  assert.equal(v.by_src.hn, 1);
+  const csv = await (await accessGet({ request: adminGet("view=replay&format=csv&token=owner-token"), env: e })).text();
+  assert.equal(csv.split("\n")[0], "ts,chore,pro,src,country,email,note");
+  assert.ok(csv.includes("'=cmd()"));
+  const all = await body(await accessGet({ request: adminGet("token=owner-token"), env: e }));
+  assert.equal(all.replay_count, 3);
+  assert.equal(all.waitlist_count, 0);
 });
 
 // ── helpers ──────────────────────────────────────────────────────────────────

@@ -16,7 +16,13 @@ Each page starts with a front-matter comment:
   layout: docs          (docs = sidebar + pager; default = plain)
   section: docs         (header link to mark as current: docs, security, access)
   script: /assets/access.js   (optional, a same-origin script)
+  module: yes           (optional: load the script as an ES module)
   -->
+
+Pages may also use {{replay_install}} (the AWOS Replay install command from
+src/replay_install.txt) and <!--RECIPE_CARDS--> or <!--RECIPE_CARDS:3--> (cards
+for the example recipes in src/recipes/examples.json, each linking to
+/r/#<base64url(deflate-raw(JSON))>, the fragment the /r/ page decodes).
 
 Output paths: pages/index.html -> /index.html, pages/404.html -> /404.html,
 pages/x.html -> /x/index.html, pages/docs/index.html -> /docs/index.html,
@@ -25,10 +31,13 @@ pages/docs/y.html -> /docs/y/index.html. Links in pages are root-absolute
 """
 from __future__ import annotations
 
+import base64
 import html
+import json
 import os
 import re
 import shutil
+import zlib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -36,6 +45,12 @@ SRC = HERE / "src"
 OUT = HERE / "public"
 # Cloudflare Pages default domain for the project named in site/README.md.
 SITE_URL = os.environ.get("SITE_URL", "https://awos.tirramind.com").rstrip("/")
+# AWOS Replay install command shown on / and /r/. Packaging writes the real
+# command into src/replay_install.txt; until then it is the placeholder
+# INSTALL_COMMAND (check_site.py reports it; check_site.py --release fails on it).
+REPLAY_INSTALL_FILE = SRC / "replay_install.txt"
+RECIPES_FILE = SRC / "recipes" / "examples.json"
+RECIPE_MAX_BYTES = 64 * 1024
 
 # Docs sidebar order: (url, label).
 DOCS = [
@@ -109,6 +124,52 @@ def docs_shell(url: str, body: str) -> str:
             f'<article class="doc">\n{body.rstrip()}\n{pager}\n</article>\n</div></main>\n')
 
 
+def recipe_fragment(recipe: dict) -> str:
+    """base64url(deflate-raw(JSON)) without padding: what /r/ decodes from location.hash."""
+    raw = json.dumps(recipe, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(raw) > RECIPE_MAX_BYTES:
+        raise SystemExit(f"recipe {recipe.get('name')!r} is over {RECIPE_MAX_BYTES} bytes")
+    co = zlib.compressobj(9, zlib.DEFLATED, -15)
+    packed = co.compress(raw) + co.flush()
+    return base64.urlsafe_b64encode(packed).decode("ascii").rstrip("=")
+
+
+def load_recipes() -> list[dict]:
+    items = json.loads(read(RECIPES_FILE))
+    for it in items:
+        r = it["recipe"]
+        if r.get("awos_recipe") != 1 or not r.get("name") or not r.get("steps"):
+            raise SystemExit(f"{RECIPES_FILE}: {it.get('slug')}: not a v1 recipe")
+        it["href"] = "/r/#" + recipe_fragment(r)
+    return items
+
+
+def recipe_cards(items: list[dict], ids: bool) -> str:
+    out = ['<div class="cards recipes">']
+    for it in items:
+        r = it["recipe"]
+        host = re.sub(r"^https?://([^/]+).*$", r"\1", r["start_url"])
+        n = len(r["steps"])
+        meta = f"{html.escape(it.get('tag', ''))} · {html.escape(host)} · {n} step{'s' if n != 1 else ''}"
+        idattr = f' id="recipe-{html.escape(it["slug"])}"' if ids else ""
+        out.append(f'<a class="card"{idattr} href="{it["href"]}">'
+                   f'<small class="eyebrow">{meta}</small><b>{html.escape(r["name"])}</b>'
+                   f'<span>{html.escape(r.get("description", ""))}</span></a>')
+    out.append("</div>")
+    return "\n".join(out)
+
+
+CARDS_RE = re.compile(r"<!--RECIPE_CARDS(?::(\d+))?-->")
+
+
+def fill(body: str, recipes: list[dict], install: str) -> str:
+    def cards(m: re.Match) -> str:
+        n = m.group(1)
+        return recipe_cards(recipes[: int(n)] if n else recipes, ids=not n)
+    body = CARDS_RE.sub(cards, body)
+    return body.replace("{{replay_install}}", html.escape(install))
+
+
 def mark_section(header: str, section: str) -> str:
     def sub(m: re.Match) -> str:
         cur = ' aria-current="page"' if m.group(1) == section else ""
@@ -123,6 +184,9 @@ def build() -> list[str]:
     OUT.mkdir(exist_ok=True)
     shutil.copytree(SRC / "assets", OUT / "assets")
     shutil.copy2(SRC / "install.sh", OUT / "install.sh")  # curl -fsSL <site>/install.sh | sh
+    shutil.copy2(SRC / "_headers", OUT / "_headers")      # Cloudflare Pages response headers
+    recipes = load_recipes()
+    install = (read(REPLAY_INSTALL_FILE).strip() if REPLAY_INSTALL_FILE.exists() else "") or "INSTALL_COMMAND"
 
     head_t = read(SRC / "partials" / "head.html")
     header_t = read(SRC / "partials" / "header.html")
@@ -132,6 +196,7 @@ def build() -> list[str]:
     for page in sorted((SRC / "pages").rglob("*.html")):
         rel = page.relative_to(SRC / "pages")
         meta, body = parse(page)
+        body = fill(body, recipes, install)
         url = url_for(rel)
         is_404 = url == "/404.html"
         head = (head_t.replace("{{title}}", html.escape(meta["title"]))
@@ -143,7 +208,12 @@ def build() -> list[str]:
             main = docs_shell(url, body)
         else:
             main = f'<main id="main" class="wrap">\n{body.rstrip()}\n</main>\n'
-        script = f'<script src="{meta["script"]}" defer></script>\n' if meta.get("script") else ""
+        if not meta.get("script"):
+            script = ""
+        elif meta.get("module") == "yes":
+            script = f'<script type="module" src="{meta["script"]}"></script>\n'
+        else:
+            script = f'<script src="{meta["script"]}" defer></script>\n'
         doc = head + header + main + script + footer_t
         dest = out_path(url)
         dest.parent.mkdir(parents=True, exist_ok=True)

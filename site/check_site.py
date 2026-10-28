@@ -8,12 +8,25 @@ Fails (exit 1) when:
   - a "#fragment" link points at an id that does not exist on the target page;
   - a page's tags do not nest/close properly (html.parser pass);
   - a page lacks <title>, meta description, one <h1>, or has duplicate ids;
-  - an unfilled INSTALL_COMMAND placeholder is left anywhere in the site.
+  - a <script src> points off-site (no external JS, no CDNs);
+  - a /r/#<fragment> recipe link does not decode (base64url + deflate-raw) to a
+    valid v1 AWOS Replay recipe under 64 KB, or /recipes/ lacks its 6 examples;
+  - the recipe page scripts use innerHTML/outerHTML/insertAdjacentHTML/
+    document.write (recipes are untrusted input);
+  - a required page or file is missing (/, /r/, /recipes/, /coding-agent/, _headers...).
+Pending launch items are reported but pass, so the site can be built and
+previewed before launch; `--release` (run before deploying) fails on them:
+  - the INSTALL_COMMAND placeholder (fill site/src/replay_install.txt);
+  - a file listed in PENDING_ASSETS that does not exist yet (the demo video).
 External links (http/https/mailto) are listed, not fetched.
 """
 from __future__ import annotations
 
+import base64
+import json
+import re
 import sys
+import zlib
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
@@ -23,6 +36,37 @@ VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "met
         "source", "track", "wbr"}
 # Elements whose end tag HTML lets you omit; we still require them closed except these.
 OPTIONAL_END = {"p", "li", "option", "tr", "td", "th", "thead", "tbody"}
+# Linked from the site but supplied by the owner before launch.
+PENDING_ASSETS = {"/assets/replay/demo.mp4": "the demo video (see docs/launch/replay/demo_scripts.md)"}
+REQUIRED = ("sitemap.xml", "robots.txt", "404.html", "_headers", "assets/style.css", "index.html",
+            "r/index.html", "recipes/index.html", "coding-agent/index.html", "assets/recipe-core.js",
+            "assets/recipe-page.js", "assets/replay/demo-poster.svg")
+RECIPE_SCRIPTS = ("assets/recipe-core.js", "assets/recipe-page.js")
+UNSAFE_DOM = re.compile(r"\b(innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval)\b|new Function")
+RECIPE_MAX = 64 * 1024
+EXAMPLE_RECIPES = 6
+
+
+def recipe_problem(fragment: str) -> str | None:
+    """None when the /r/ fragment holds a valid v1 recipe, else what is wrong."""
+    try:
+        packed = base64.urlsafe_b64decode(fragment + "=" * (-len(fragment) % 4))
+        d = zlib.decompressobj(-15)
+        raw = d.decompress(packed, RECIPE_MAX + 1)
+        if len(raw) > RECIPE_MAX or d.unconsumed_tail:
+            return "over 64 KB"
+        r = json.loads(raw.decode("utf-8"))
+    except Exception as e:  # noqa: BLE001 - any decode failure is the finding
+        return f"does not decode ({e.__class__.__name__})"
+    if not isinstance(r, dict) or r.get("awos_recipe") != 1:
+        return "not an awos_recipe v1"
+    if not isinstance(r.get("name"), str) or not r["name"]:
+        return "no name"
+    if not str(r.get("start_url", "")).startswith(("https://", "http://")):
+        return "start_url is not http(s)"
+    if not isinstance(r.get("steps"), list) or not r["steps"]:
+        return "no steps"
+    return None
 
 
 class Page(HTMLParser):
@@ -36,6 +80,7 @@ class Page(HTMLParser):
         self.title = ""
         self.in_title = False
         self.description = ""
+        self.scripts: list[str] = []
 
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
@@ -46,6 +91,8 @@ class Page(HTMLParser):
         for key in ("href", "src", "action"):
             if a.get(key) and not skip:
                 self.links.append(a[key])
+        if tag == "script" and a.get("src"):
+            self.scripts.append(a["src"])
         if tag == "meta" and a.get("name") == "description":
             self.description = a.get("content", "")
         if tag == "h1":
@@ -121,16 +168,20 @@ def main() -> int:
         if dupes:
             problems.append(f"{rel}: duplicate ids {sorted(dupes)}")
 
-    checked, external = 0, set()
+    checked, external, recipes_ok, pending = 0, set(), 0, []
     for f, p in parsed.items():
         base = page_url(f)
+        rel = f.relative_to(PUBLIC)
+        for src in p.scripts:
+            if urlsplit(src).scheme or src.startswith("//"):
+                problems.append(f"{rel}: external script {src} (no external JS)")
         for link in p.links:
             parts = urlsplit(link)
             if parts.scheme in ("http", "https", "mailto", "tel") or link.startswith("//"):
                 external.add(link)
                 continue
             if parts.scheme:
-                problems.append(f"{f.relative_to(PUBLIC)}: odd link {link}")
+                problems.append(f"{rel}: odd link {link}")
                 continue
             full = urlsplit(urljoin(base, link))
             if full.path.startswith("/api/"):
@@ -138,30 +189,63 @@ def main() -> int:
             checked += 1
             tgt = target_file(full.path)
             if not tgt.is_file():
-                problems.append(f"{f.relative_to(PUBLIC)}: broken link {link} -> {tgt.relative_to(PUBLIC)}")
+                if full.path in PENDING_ASSETS:
+                    pending.append(f"{rel}: {full.path} not added yet ({PENDING_ASSETS[full.path]})")
+                    continue
+                problems.append(f"{rel}: broken link {link} -> {tgt.relative_to(PUBLIC)}")
+                continue
+            tp = parsed.get(tgt)
+            if full.path == "/r/" and full.fragment and not (tp and full.fragment in tp.ids):
+                why = recipe_problem(full.fragment)
+                if why:
+                    problems.append(f"{rel}: recipe link {link[:40]}... {why}")
+                else:
+                    recipes_ok += 1
                 continue
             if full.fragment and tgt.suffix == ".html":
                 tp = parsed.get(tgt)
                 if tp is not None and full.fragment not in tp.ids:
-                    problems.append(f"{f.relative_to(PUBLIC)}: missing anchor {link}")
+                    problems.append(f"{rel}: missing anchor {link}")
+
+    gallery = parsed.get(PUBLIC / "recipes" / "index.html")
+    if gallery is not None:
+        n = len({l for l in gallery.links if l.startswith("/r/#")})
+        if n != EXAMPLE_RECIPES:
+            problems.append(f"recipes/index.html: {n} recipe links (want {EXAMPLE_RECIPES})")
+
+    for js in RECIPE_SCRIPTS:
+        f = PUBLIC / js
+        if f.is_file():
+            code = "\n".join(l for l in f.read_text(encoding="utf-8").splitlines() if not l.lstrip().startswith("//"))
+            m = UNSAFE_DOM.search(code)
+            if m:
+                problems.append(f"{js}: uses {m.group(0)} (recipes are untrusted; use textContent)")
 
     hits = sum(f.read_text(encoding="utf-8").count("INSTALL_COMMAND") for f in pages)
     if hits:
-        problems.append(f"INSTALL_COMMAND placeholder left in the site ({hits}x); fill in the real command")
+        pending.append(f"INSTALL_COMMAND placeholder shown {hits}x: put the real command in site/src/replay_install.txt")
 
-    for extra in ("sitemap.xml", "robots.txt", "404.html", "assets/style.css"):
+    for extra in REQUIRED:
         if not (PUBLIC / extra).is_file():
             problems.append(f"missing {extra}")
 
-    print(f"{len(pages)} pages, {checked} internal links checked, {len(external)} external links (not fetched)")
+    print(f"{len(pages)} pages, {checked} internal links checked ({recipes_ok} recipe links decoded), "
+          f"{len(external)} external links (not fetched)")
     for e in sorted(external):
         print("   external:", e)
+    release = "--release" in sys.argv[1:]
+    if pending:
+        print(f"{'FAIL' if release else 'PENDING'} before launch: {len(pending)} item(s)")
+        for x in pending:
+            print("  -", x)
+        if release:
+            problems.extend(pending)
     if problems:
         print(f"FAIL: {len(problems)} problem(s)")
         for x in problems:
             print("  -", x)
         return 1
-    print("OK: all internal links resolve, anchors exist, HTML is well-formed")
+    print("OK: all internal links resolve, anchors exist, recipe links decode, HTML is well-formed")
     return 0
 
 
