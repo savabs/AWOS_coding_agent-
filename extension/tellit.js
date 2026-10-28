@@ -322,6 +322,18 @@ async function tellExecute(t, cfg, act, ctx, approved) {
   if (v.error) { tellReject(t, ctx, v.error); if (!(await tellInvalid(t))) await saveTell(t); return; }
   if (v.secret) return tellSecretPause(t, ctx, v.secret.sensitive, v.secret.name);
   var tabUrl = ((await chrome.tabs.get(t.tabId).catch(function () { return {}; })).url) || '';
+  // loop guard: the same click on the same page a 3rd time in a row (a 4B model toggling one checkbox for all 25
+  // steps on a real run) pauses and asks instead of using up the step budget. micro_agent.py never counts clicks as
+  // duplicates (toggles are legitimate), so two in a row still pass.
+  var rk = act.verb === 'click' && v.control ? tabUrl + '|' + (v.control.name || '') : '';
+  t.repeat = rk && t.repeatKey === rk ? (t.repeat || 1) + 1 : 1;
+  t.repeatKey = rk;
+  if (rk && t.repeat >= 3) {
+    t.repeat = 0; t.repeatKey = '';
+    tellReject(t, ctx, 'the same click on the same page a third time in a row; it is not moving the goal forward');
+    return tellPause(t, 'needs_user', { kind: 'loop', message: 'The agent keeps clicking "' + (v.control.name || 'the same control')
+      + '" on this page without getting closer to the goal. Type a correction below and press Continue, or Stop.' });
+  }
   // safety gate, before anything is sent to the page
   var gateName = '', danger = null;
   if (act.verb === 'goto') { danger = S.urlDanger(act.value); gateName = act.value; }

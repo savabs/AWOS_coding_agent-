@@ -256,6 +256,19 @@ def test_invalid_replies_repair_then_ask_and_correction_reaches_prompt(x):
     _check_trajectory(ep)
 
 
+def test_same_click_three_times_pauses_instead_of_looping(x):
+    # the real Qwen3.5-4B toggled "Marketing e-mails" for all 25 steps on this chore; two in a row is a toggle,
+    # a third is a loop: it is rejected (not clicked) and the run asks the user
+    _setup(x, ['click "Settings"'] + ['click "Marketing e-mails"'] * 6)
+    page, _ = _start(x, "/account.html", "Turn off marketing e-mails and switch the language to Deutsch in my settings")
+    t = _wait_tell(x, ("needs_user", "confirm", "ended", "awaiting_approval"))
+    assert t["status"] == "needs_user" and t["pending"]["kind"] == "loop", t["feed"]
+    assert "Marketing e-mails" in t["pending"]["message"]
+    assert len(t["steps"]) == 4                                   # goto + Settings + two toggles; the third never ran
+    assert page.is_checked("#marketing")                          # toggled twice = back where it started
+    x.call("tell_stop")
+
+
 def test_note_while_running_reaches_next_prompt(x):
     brain = _setup(x, ['click "Back to cart"', 'click "Back to cart"', 'done "ok"'], delay=0.8)
     _start(x, "/cart.html", "Go back to the cart")
