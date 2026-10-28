@@ -8,7 +8,7 @@ version = "0.2.2"
 description = "AWOS: local-first runtime that turns small/local or cloud models into reliable autonomous coding work"
 readme = "docs/INSTALL.md"
 requires-python = ">=3.11"
-license = { text = "Proprietary" }
+license = { text = "MIT" }
 # Only what the quickstart imports (keys, submit, serve --worker, status).
 # Everything heavier is an extra; see [project.optional-dependencies].
 dependencies = [
