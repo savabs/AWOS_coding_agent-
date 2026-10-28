@@ -24,6 +24,10 @@
       'delete', 'remove', 'empty', 'permanently', 'discard', 'clear all', 'transfer', 'wire',
     ].join('|') + ')\\b', 'i');
 
+  // Unattended / untrusted runs (scheduled runs, imported recipes) also gate these: nobody is watching, or the
+  // recipe came from someone else, so a plain "Submit" / "Confirm" / "Place booking" waits for an Approve click.
+  var STRICT_RE = /\b(submit|confirm|approve|authori[sz]e|accept|agree|order|book|reserve|cancel|unsubscribe|publish|post|sign up|finish|complete)\b/i;
+
   // Field names/labels whose values must never be stored.
   var SENSITIVE_RE = /(passw|passcode|\bpin\b|\bcvv\b|\bcvc\b|\bcsc\b|security code|card ?(number|no)|\bcc[-_ ]?(num|number|no|exp|csc)\b|credit ?card|expir|\botp\b|one[- ]?time|verification code|auth(entication)? code|2fa|totp|\bmfa\b|\bssn\b|social security|tax ?id|routing|account ?number|\biban\b|secret)/i;
   var SENSITIVE_AUTOCOMPLETE = /^(current-password|new-password|one-time-code|cc-number|cc-csc|cc-exp|cc-exp-month|cc-exp-year)$/;
@@ -32,6 +36,14 @@
 
   function dangerMatch(text) {
     var m = DANGER_RE.exec(norm(text));
+    return m ? m[1].toLowerCase() : null;
+  }
+
+  /** dangerMatch, plus the stricter vocabulary when `strict` (scheduled run or imported recipe). */
+  function dangerMatchStrict(text, strict) {
+    var d = dangerMatch(text);
+    if (d || !strict) return d;
+    var m = STRICT_RE.exec(norm(text));
     return m ? m[1].toLowerCase() : null;
   }
 
@@ -87,7 +99,7 @@
   function isPlaceholder(v) { return /^\{\{secret:[a-z0-9-]+\}\}$/i.test(String(v || '')); }
 
   root.AWOSSafety = {
-    DANGER_RE: DANGER_RE, dangerMatch: dangerMatch, urlDanger: urlDanger, dangerContext: dangerContext,
+    DANGER_RE: DANGER_RE, STRICT_RE: STRICT_RE, dangerMatch: dangerMatch, dangerMatchStrict: dangerMatchStrict, urlDanger: urlDanger, dangerContext: dangerContext,
     sensitiveField: sensitiveField, labelOf: labelOf, norm: norm,
     placeholderFor: placeholderFor, isPlaceholder: isPlaceholder,
   };

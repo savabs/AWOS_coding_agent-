@@ -6,25 +6,44 @@
 <style>
   body { font: 14px/1.5 system-ui, sans-serif; max-width: 560px; margin: 24px auto; padding: 0 16px; color: #1f2328; background: #fff; }
   label { display: block; margin: 12px 0 4px; font-weight: 600; }
-  input[type=text], input[type=number] { width: 100%; box-sizing: border-box; padding: 6px; font: inherit; }
+  label.choice { font-weight: 400; margin: 6px 0; }
+  input[type=text], input[type=number], input[type=password] { width: 100%; box-sizing: border-box; padding: 6px; font: inherit; }
+  fieldset { border: 1px solid #d0d7de; border-radius: 6px; margin: 12px 0; padding: 4px 12px 12px; }
   .hint { color: #59636e; font-size: 12px; }
   #status { margin-left: 8px; color: #116329; }
-  .error { color: #a40e26; }
+  #localstatus { font-size: 12px; }
+  .error { color: #a40e26 !important; }
+  .ok { color: #116329; }
 </style>
 </head>
 <body>
 <h2>AWOS Replay options</h2>
-<p class="hint">Recordings stay in this browser (chrome.storage.local). The only network call the extension makes
-is to the local model below, and only when it cannot re-find a control by itself.</p>
+<p class="hint">Recordings stay in this browser (chrome.storage.local). The "brain" below is only asked when a button
+cannot be re-found by itself, and to double-check the final page.</p>
+
+<fieldset>
+  <legend>Brain</legend>
+  <label class="choice"><input type="radio" name="brain" value="local" id="brain-local"> Local model (private, free)</label>
+  <div class="hint">Runs on this Mac at the endpoint below. Nothing leaves your machine. <span id="localstatus"></span></div>
+  <label class="choice"><input type="radio" name="brain" value="claude" id="brain-claude"> Claude (your own API key)</label>
+  <div class="hint">Uses Anthropic's API with your key, model claude-haiku-5-5. When used, the step's button names and the final
+  page's text are sent to Anthropic. Typed values are not, except values shown on the page itself.</div>
+  <div id="claudebox">
+    <label for="claudeKey">Anthropic API key</label>
+    <input type="password" id="claudeKey" placeholder="sk-ant-... (stored only in this browser)" autocomplete="off">
+    <div class="hint" id="keystate"></div>
+    <label class="choice"><input type="checkbox" id="cloudConsent"> I agree that page data from my runs is sent to Anthropic</label>
+  </div>
+</fieldset>
 
 <label for="endpoint">Local model endpoint (OpenAI-compatible)</label>
 <input type="text" id="endpoint" placeholder="http://127.0.0.1:8080/v1">
-<div class="hint">Loopback only (127.0.0.1, localhost, [::1]). e.g. llama.cpp <code>llama-server --port 8080</code>.</div>
+<div class="hint">Loopback only (127.0.0.1 or localhost). e.g. llama.cpp <code>llama-server --port 8080</code>, or <code>bash scripts/awos_model.sh</code>.</div>
 
-<label for="model">Model name</label>
+<label for="model">Local model name</label>
 <input type="text" id="model" placeholder="local">
 
-<label><input type="checkbox" id="enabled"> Use the local model when a control cannot be re-found</label>
+<label><input type="checkbox" id="enabled"> Ask the brain when a control cannot be re-found</label>
 <div class="hint">Off: an unclear match stops the run and asks you.</div>
 
 <label for="findTimeoutMs">Wait for each control (ms)</label>

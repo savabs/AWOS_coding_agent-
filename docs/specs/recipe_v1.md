@@ -2,7 +2,7 @@
 
 A **recipe** is a recorded web chore that people can share: what to open, which controls to use, what must be true
 at the end. It is plain JSON. The extension (`extension/lib/recipe.js`) writes and validates it; the website
-(`site/`, recipe page `/r/`) displays it and hands it to the extension. Both code against this file.
+(`site/`, recipe page `https://awos.tirramind.com/r/`) displays it and hands it to the extension. Both code against this file.
 
 Status: v1, shipped with AWOS Replay 0.4. Validator: `AWOSRecipe.validate()` in `extension/lib/recipe.js`, tests in
 `tests/extension/test_recipe_v04.py`.
@@ -118,7 +118,7 @@ Step URLs (`goto.url`, `step.url`) and `loc.href` never carry query strings or f
 ## 4. Share link
 
 ```
-https://awos-site.pages.dev/r/#<base64url(deflate-raw(UTF-8 JSON))>
+https://awos.tirramind.com/r/#<base64url(deflate-raw(UTF-8 JSON))>
 ```
 
 - `deflate-raw` = raw DEFLATE (RFC 1951, no zlib/gzip header), as `CompressionStream('deflate-raw')`.
@@ -139,20 +139,24 @@ const recipe = JSON.parse(json);
 ## 5. Page -> extension handshake (recipe page `/r/`)
 
 The extension injects a small content script (`extension/recipe_bridge.js`) only on
-`https://awos-site.pages.dev/r/*` and `http://localhost:8000/r/*` (dev).
+`https://awos.tirramind.com/r/*` (the site), `https://awos-site.pages.dev/r/*` (Pages preview) and
+`http://localhost:8000/r/*` (dev). It reads only messages whose `event.source === window` and whose
+`event.origin` is one of those three origins, and answers with `window.postMessage(msg, location.origin)`.
 
-1. **Is the extension installed?** The page posts `window.postMessage({type: "awos-ping"}, location.origin)`.
-   The extension answers `{type: "awos-pong", version: "0.4.0"}` via `window.postMessage(..., location.origin)`.
-   No answer within ~1 s = not installed (show the install instructions).
-2. **Import.** The page posts
-   `window.postMessage({type: "awos-import-recipe", recipe: <recipe object>}, location.origin)`.
-   Only messages from the page's own window and origin are accepted.
-3. The extension validates it and answers
-   `{type: "awos-import-status", ok: true, pending: true, name: "<recipe name>"}` or
-   `{type: "awos-import-status", ok: false, error: "<reason>"}`.
-   `pending: true` means: **nothing is imported yet.** The user must open the AWOS popup, which shows the full step
-   list and start URL, and click **Import**. Suggested page text: "Open the AWOS Replay popup to review and confirm."
-   The page never learns whether the user confirmed.
+1. **Is the extension installed?** On load the page posts `{type: "awos-replay-hello"}`. The extension answers
+   `{type: "awos-replay-present", version: "0.4.0"}`. As a fallback signal the bridge also sets
+   `document.documentElement.dataset.awosReplay = "0.4.0"` at document start. No answer within 1.2 s = not
+   installed (show the install instructions).
+2. **Import.** On a button click the page posts `{type: "awos-import-recipe", recipe: <recipe object>}`.
+3. The extension validates the recipe. If invalid it answers at once with
+   `{type: "awos-import-result", ok: false, error: "<reason>"}`. If valid, **nothing is imported yet**: the
+   extension opens its popup when Chrome allows it (otherwise a badge and a notification), shows the full step
+   list, start URL and site, and waits for the user. Then it answers:
+   - `{type: "awos-import-result", ok: true}` after the user clicked **Import**;
+   - `{type: "awos-import-result", ok: false, error: "cancelled"}` after **Discard**;
+   - `{type: "awos-import-result", ok: false, error: "replaced by another recipe"}` if another recipe was offered
+     before the user decided (one pending import at a time).
+   There is no timeout on the extension side; the page may say "Waiting for you to confirm in AWOS Replay".
 
 ## 6. Trust rules for imported recipes (enforced by the extension)
 

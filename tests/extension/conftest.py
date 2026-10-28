@@ -149,9 +149,12 @@ class Ext:
 @pytest.fixture()
 def x(ext, server):
     ctx, sw, ext_id = ext
-    sw.evaluate("chrome.storage.local.clear().then(() => chrome.storage.session.clear())")
+    sw.evaluate("chrome.storage.local.clear().then(() => chrome.storage.session.clear()).then(() => chrome.alarms.clearAll())"
+                ".then(() => { if (self.__realFetch) self.fetch = self.__realFetch; NOTICES.length = 0; })")
     d = Ext(ctx, sw, ext_id, server)
     d.set_settings()
     yield d
+    sw.evaluate("() => { if (self.__realFetch) self.fetch = self.__realFetch; }")
+    ctx.unroute_all()
     for p in ctx.pages[1:]:
         p.close()

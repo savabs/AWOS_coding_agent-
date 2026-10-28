@@ -13,6 +13,7 @@
  *          A click whose target matches the danger vocabulary is refused here
  *          unless the worker passes approved:true (the worker only does that
  *          after a user click in the extension UI) -- a second, local gate.
+ *          strict:true (scheduled run / imported recipe) also gates submit / confirm / order / ...
  *   check  {texts} -> which expected texts are present on the page
  * Messages are plain JSON; element handles never leave the page.
  */
@@ -103,7 +104,7 @@
     el.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
-  function act(step, index, approved, reply) {
+  function act(step, index, approved, strict, reply) {
     var el = L.element(index);
     if (!el || !el.isConnected) return reply({ ok: false, error: 'element gone' });
     el.scrollIntoView({ block: 'center', inline: 'nearest' });
@@ -120,7 +121,7 @@
       setValue(el, o.value);
       return reply({ ok: true });
     }
-    var danger = S.dangerMatch(S.dangerContext(el, L.accName(el))) || step.danger;
+    var danger = S.dangerMatchStrict(S.dangerContext(el, L.accName(el)), strict === true) || step.danger;
     if (danger && approved !== true) return reply({ ok: false, needsApproval: true, danger: danger });
     reply({ ok: true });                 // reply before clicking: the click may unload this page
     setTimeout(function () { el.focus && el.focus(); el.click(); }, 0);
@@ -143,7 +144,7 @@
       case 'ping': reply({ ok: true, url: location.href, recording: recording }); return;
       case 'rec_state': recording = !!msg.on; lastFillKey = null; reply({ ok: true }); return;
       case 'locate': locate(msg.step, msg.timeoutMs).then(reply); return true;
-      case 'act': act(msg.step, msg.index, msg.approved, reply); return;
+      case 'act': act(msg.step, msg.index, msg.approved, msg.strict, reply); return;
       case 'check': {
         var body = S.norm(document.body ? document.body.innerText : '');
         reply({ url: location.href, present: (msg.texts || []).map(function (t) { return body.indexOf(S.norm(t)) >= 0; }) });

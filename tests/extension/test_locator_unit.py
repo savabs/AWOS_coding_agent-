@@ -126,4 +126,4 @@ def test_parse_model_answer(page):
     assert all("error" in g for g in got[3:])           # out of range / free text: stop, never a guess
     assert page.evaluate("() => ['http://127.0.0.1:8080/v1','http://localhost:1/v1','http://[::1]:8/v1',"
                          "'https://api.openai.com/v1','http://127.0.0.1.evil.com/v1'].map(AWOSModel.isLoopback)") \
-        == [True, True, True, False, False]
+        == [True, True, False, False, False]      # [::1] is not in the manifest's host permissions

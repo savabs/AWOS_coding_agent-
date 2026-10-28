@@ -4,21 +4,64 @@
  * Sends one short chat completion to an OpenAI-compatible endpoint (default
  * llama.cpp server at http://127.0.0.1:8080/v1) with the recorded target and a
  * numbered shortlist, and expects back one number or NOT_FOUND.
- * Loopback only: ask() refuses any endpoint that is not 127.0.0.1 / localhost /
- * [::1], so the extension never sends page content off the machine.
+ * Loopback only: ask() refuses any endpoint that is not 127.0.0.1 / localhost
+ * (the manifest's host permissions), so the extension never sends page content off the machine.
  * Errors (unreachable, timeout, unparsable) come back as {error}; the caller
  * treats them as "stop and show the user", never as a guess.
+ *
+ * Brain choice (Options): settings.brain = 'local' (default, the loopback endpoint above) or 'claude' (the
+ * Anthropic Messages API with the user's own key, model claude-haiku-5-5). Claude is used only when the user
+ * picked it AND ticked the consent box (settings.cloudConsent) AND a key is set; there is no automatic
+ * fallback from local to cloud. Same prompts, same parsers, same "error = stop" contract for both brains.
  */
 (function (root) {
   'use strict';
 
   var DEFAULTS = { endpoint: 'http://127.0.0.1:8080/v1', model: 'local', enabled: true, timeoutMs: 20000, findTimeoutMs: 4000,
-                   verify: true, verifyTimeoutMs: 60000 };
+                   verify: true, verifyTimeoutMs: 60000, brain: 'local', claudeModel: 'claude-haiku-5-5', cloudConsent: false };
+  var CLAUDE_URL = 'https://api.anthropic.com/v1/messages', CLAUDE_VERSION = '2026-10-21';
+  var LOCAL_HINT = 'start it (bash scripts/awos_model.sh), or choose "Claude (your own API key)" in Options';
+
+  function useClaude(s) { return s.brain === 'claude'; }
+  /** why the cloud brain may not be used, or '' when it may. */
+  function claudeBlocked(s) {
+    if (!s.cloudConsent) return 'Claude brain not enabled: tick the consent box in Options before page data goes to the cloud';
+    if (!s.claudeKey) return 'Claude brain has no API key: add yours in Options';
+    return '';
+  }
+
+  /** One Messages API call from the extension (raw fetch: the extension has no build step for the SDK).
+   *  messages = [{role:'system'}, {role:'user'}] as built for the local model -> {text} | {error}. */
+  async function claudeChat(s, messages, maxTokens, timeoutMs) {
+    var why = claudeBlocked(s);
+    if (why) return { error: why };
+    var ctl = new AbortController(), timer = setTimeout(function () { ctl.abort(); }, timeoutMs || 30000);
+    try {
+      var resp = await fetch(CLAUDE_URL, {
+        method: 'POST', signal: ctl.signal,
+        headers: { 'content-type': 'application/json', 'x-api-key': s.claudeKey, 'anthropic-version': CLAUDE_VERSION,
+                   'anthropic-dangerous-direct-browser-access': 'true' },
+        body: JSON.stringify({ model: s.claudeModel || DEFAULTS.claudeModel, max_tokens: maxTokens,
+                               system: messages[0].content, messages: messages.slice(1),
+                               thinking: { type: 'disabled' } }),
+      });
+      if (!resp.ok) {
+        var msg = ''; try { var e = await resp.json(); msg = e && e.error && e.error.message || ''; } catch (x) {}
+        return { error: 'Claude API HTTP ' + resp.status + (resp.status === 401 ? ' (check your API key)' : '') + (msg ? ': ' + String(msg).slice(0, 120) : '') };
+      }
+      var j = await resp.json();
+      if (j && j.stop_reason === 'refusal') return { error: 'Claude declined this request' };
+      var text = ((j && j.content) || []).filter(function (b) { return b.type === 'text'; }).map(function (b) { return b.text; }).join('');
+      return { text: text };
+    } catch (e) {
+      return { error: 'Claude API unreachable (' + (e && e.name === 'AbortError' ? 'timeout' : String(e && e.message || e)) + ')' };
+    } finally { clearTimeout(timer); }
+  }
 
   function isLoopback(url) {
     try {
       var u = new URL(url);
-      return /^https?:$/.test(u.protocol) && /^(127\.0\.0\.1|localhost|\[::1\])$/.test(u.hostname);
+      return /^https?:$/.test(u.protocol) && /^(127\.0\.0\.1|localhost)$/.test(u.hostname);   // the manifest's host permissions
     } catch (e) { return false; }
   }
 
@@ -85,7 +128,13 @@
 
   async function ask(settings, step, shortlist) {
     var s = Object.assign({}, DEFAULTS, settings || {});
-    if (!s.enabled) return { error: 'local model disabled in options' };
+    if (!s.enabled) return { error: 'model fallback disabled in options' };
+    if (useClaude(s)) {
+      var c = await claudeChat(s, buildMessages(step, shortlist.slice(0, 5)), 64, s.timeoutMs);
+      if (c.error) return { error: c.error };
+      var co = parseAnswer(c.text, shortlist.length); co.raw = String(c.text || '').slice(0, 80); co.brain = 'claude';
+      return co;
+    }
     if (!isLoopback(s.endpoint)) return { error: 'endpoint is not loopback; refusing to send page data: ' + s.endpoint };
     var ctl = new AbortController(), timer = setTimeout(function () { ctl.abort(); }, s.timeoutMs);
     try {
@@ -100,7 +149,7 @@
       var out = parseAnswer(text, shortlist.length); out.raw = String(text || '').slice(0, 80);
       return out;
     } catch (e) {
-      return { error: 'local model unreachable at ' + s.endpoint + ' (' + (e && e.name === 'AbortError' ? 'timeout' : String(e && e.message || e)) + ')' };
+      return { error: 'local model unreachable at ' + s.endpoint + ' (' + (e && e.name === 'AbortError' ? 'timeout' : String(e && e.message || e)) + '); ' + LOCAL_HINT, localDown: true };
     } finally { clearTimeout(timer); }
   }
 
@@ -179,8 +228,15 @@
   async function askVerify(settings, messages) {
     var s = Object.assign({}, DEFAULTS, settings || {});
     if (!s.enabled || s.verify === false) return { error: 'verifier disabled in options' };
+    var t0 = Date.now();
+    if (useClaude(s)) {
+      var c = await claudeChat(s, messages, 200, s.verifyTimeoutMs || 60000);
+      if (c.error) return { error: c.error };
+      var co = parseVerify(c.text); co.raw = String(c.text || '').slice(0, 220); co.ms = Date.now() - t0; co.brain = 'claude';
+      return co;
+    }
     if (!isLoopback(s.endpoint)) return { error: 'endpoint is not loopback; refusing to send page data: ' + s.endpoint };
-    var ctl = new AbortController(), timer = setTimeout(function () { ctl.abort(); }, s.verifyTimeoutMs || 60000), t0 = Date.now();
+    var ctl = new AbortController(), timer = setTimeout(function () { ctl.abort(); }, s.verifyTimeoutMs || 60000);
     try {
       var resp = await fetch(s.endpoint.replace(/\/+$/, '') + '/chat/completions', {
         method: 'POST', signal: ctl.signal, headers: { 'Content-Type': 'application/json' },
@@ -193,11 +249,24 @@
       var out = parseVerify(text); out.raw = String(text || '').slice(0, 220); out.ms = Date.now() - t0;
       return out;
     } catch (e) {
-      return { error: 'verifier unreachable at ' + s.endpoint + ' (' + (e && e.name === 'AbortError' ? 'timeout' : String(e && e.message || e)) + ')' };
+      return { localDown: true, error: 'verifier unreachable at ' + s.endpoint + ' (' + (e && e.name === 'AbortError' ? 'timeout' : String(e && e.message || e)) + ')' };
     } finally { clearTimeout(timer); }
   }
 
-  root.AWOSModel = { DEFAULTS: DEFAULTS, isLoopback: isLoopback, buildMessages: buildMessages, parseAnswer: parseAnswer, ask: ask,
+  /** is the local server answering? (GET <endpoint>/models, short timeout) -> {ok} | {ok:false, error} */
+  async function pingLocal(settings, timeoutMs) {
+    var s = Object.assign({}, DEFAULTS, settings || {});
+    if (!isLoopback(s.endpoint)) return { ok: false, error: 'endpoint is not loopback' };
+    var ctl = new AbortController(), timer = setTimeout(function () { ctl.abort(); }, timeoutMs || 1500);
+    try {
+      var r = await fetch(s.endpoint.replace(/\/+$/, '') + '/models', { signal: ctl.signal });
+      return r.ok ? { ok: true } : { ok: false, error: 'HTTP ' + r.status };
+    } catch (e) { return { ok: false, error: 'not running at ' + s.endpoint + '; ' + LOCAL_HINT }; }
+    finally { clearTimeout(timer); }
+  }
+
+  root.AWOSModel = { DEFAULTS: DEFAULTS, isLoopback: isLoopback, claudeChat: claudeChat, claudeBlocked: claudeBlocked,
+                     pingLocal: pingLocal, CLAUDE_URL: CLAUDE_URL, CLAUDE_VERSION: CLAUDE_VERSION, buildMessages: buildMessages, parseAnswer: parseAnswer, ask: ask,
                      fmt: fmt, desc: desc, pyRepr: pyRepr, SYSTEM: SYSTEM, GRAMMAR: GRAMMAR,
                      VERIFY_SYSTEM: VERIFY_SYSTEM, VERIFY_GRAMMAR: VERIFY_GRAMMAR, outline: outline, controlLine: controlLine,
                      clip: clip, buildVerifyMessages: buildVerifyMessages, parseVerify: parseVerify, askVerify: askVerify };

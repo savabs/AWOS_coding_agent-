@@ -1,18 +1,28 @@
 {
   "manifest_version": 3,
-  "name": "AWOS Replay (MVP)",
-  "version": "0.3.0",
-  "description": "Show once, replay free. Records a web task, replays it with locator re-finding, a local-model fallback, an approval gate and result checks.",
+  "name": "AWOS Replay",
+  "version": "0.4.0",
+  "description": "Show it once, it does it forever: record a web chore, replay it on demand or on a schedule, verify it, share it.",
   "background": { "service_worker": "background.js" },
-  "permissions": ["storage", "tabs"],
+  "permissions": ["storage", "tabs", "alarms", "downloads", "notifications"],
   "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*"],
       "js": ["lib/safety.js", "lib/locator.js", "content.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://awos.tirramind.com/r/*", "https://awos-site.pages.dev/r/*", "http://localhost:8000/r/*"],
+      "js": ["recipe_bridge.js"],
+      "run_at": "document_start"
     }
   ],
-  "action": { "default_popup": "popup.html", "default_title": "AWOS Replay" },
+  "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "AWOS Replay",
+    "default_icon": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
+  },
   "options_page": "options.html"
 }
