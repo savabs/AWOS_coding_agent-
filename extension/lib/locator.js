@@ -17,6 +17,10 @@
  * ambiguous / not_found carry a shortlist (top SHORTLIST >= FLOOR) that the
  * service worker hands to the local model. Element handles never leave the
  * page; candidates are addressed by their index in the last scan.
+ * Duplicates: candidates that are the same control (same tag / role / name / label / placeholder / href /
+ * region / block text, e.g. a docs page's top and bottom "Quick search" boxes) collapse into one; the margin
+ * is measured against the best DIFFERENT control, and the recorded position / css path picks among copies.
+ * Shadow DOM: candidates are collected through OPEN shadow roots (web components), in document order.
  * Plain script: defines globalThis.AWOSLocator (needs AWOSSafety for labelOf).
  */
 (function (root) {
@@ -37,6 +41,29 @@
          + ' input[type=radio], input[type=image], [role=button], [role=link], [role=tab], [role=menuitem],'
          + ' [role=checkbox], [role=radio], [role=option], [role=switch], summary, [onclick]',
   };
+
+  /** every element matching `sel` in document order, descending into OPEN shadow roots. */
+  function deepAll(sel, r) {
+    var out = [], all = (r || document).querySelectorAll('*');
+    for (var i = 0; i < all.length; i++) {
+      var e = all[i];
+      if (e.matches(sel)) out.push(e);
+      if (e.shadowRoot) { var inner = deepAll(sel, e.shadowRoot); for (var j = 0; j < inner.length; j++) out.push(inner[j]); }
+    }
+    return out;
+  }
+  /** parent across shadow boundaries (an element at the top of a shadow root -> its host). */
+  function parentDeep(n) { return n.parentElement || (n.parentNode && n.parentNode.host) || null; }
+  /** Element.closest that also climbs out of shadow roots. */
+  function closestDeep(el, sel) {
+    for (var n = el; n; n = parentDeep(n)) if (n.nodeType === 1 && n.matches(sel)) return n;
+    return null;
+  }
+  /** getElementById in the element's own tree (document or shadow root). */
+  function byId(el, id) {
+    var r = el.getRootNode ? el.getRootNode() : document;
+    return (r && r.getElementById ? r.getElementById(id) : null) || document.getElementById(id);
+  }
 
   function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
   function low(s) { return norm(s).toLowerCase(); }
@@ -62,11 +89,11 @@
                   + ' form[aria-labelledby], section[aria-label], section[aria-labelledby]';
   var ALL_CONTROLS = null;
   function contextOf(el) {
-    var c = el.parentElement && el.parentElement.closest ? el.parentElement.closest(CONTEXT_SEL) : null;
+    var p = parentDeep(el), c = p ? closestDeep(p, CONTEXT_SEL) : null;
     if (!c) return '';
     var lb = c.getAttribute('aria-labelledby');
     if (lb) {
-      var t = lb.split(/\s+/).map(function (id) { var n = document.getElementById(id); return n ? n.textContent : ''; }).join(' ');
+      var t = lb.split(/\s+/).map(function (id) { var n = byId(c, id); return n ? n.textContent : ''; }).join(' ');
       if (norm(t)) return norm(t);
     }
     return norm(c.getAttribute('aria-label') || '');
@@ -85,7 +112,7 @@
   }
   function allControls() {
     if (!ALL_CONTROLS) ALL_CONTROLS = [KIND_SELECTOR.fill, KIND_SELECTOR.select, KIND_SELECTOR.click].join(', ');
-    return Array.prototype.slice.call(document.querySelectorAll(ALL_CONTROLS)).filter(visible);
+    return deepAll(ALL_CONTROLS).filter(visible);
   }
   /** names of every visible control in document order, computed once per scan. */
   function pageNames() {
@@ -102,7 +129,7 @@
     var a = el.getAttribute('aria-label'); if (a && norm(a)) return norm(a);
     var lb = el.getAttribute('aria-labelledby');
     if (lb) {
-      var t = lb.split(/\s+/).map(function (id) { var n = document.getElementById(id); return n ? n.textContent : ''; }).join(' ');
+      var t = lb.split(/\s+/).map(function (id) { var n = byId(el, id); return n ? n.textContent : ''; }).join(' ');
       if (norm(t)) return norm(t);
     }
     var tag = el.tagName.toLowerCase(), type = (el.getAttribute('type') || '').toLowerCase();
@@ -132,17 +159,19 @@
 
   function cssPath(el) {
     var parts = [];
-    for (var n = el; n && n.nodeType === 1 && n !== document.documentElement; n = n.parentElement) {
+    for (var n = el; n && n.nodeType === 1 && n !== document.documentElement; ) {
       var tag = n.tagName.toLowerCase(), i = 1, s = n;
       while ((s = s.previousElementSibling)) if (s.tagName === n.tagName) i++;
       parts.unshift(tag + ':nth-of-type(' + i + ')');
+      if (!n.parentElement && n.parentNode && n.parentNode.host) { parts.unshift('#shadow-root'); n = n.parentNode.host; }
+      else n = n.parentElement;
     }
     return parts.join(' > ');
   }
 
   function describe(el, page) {
     var r = el.getBoundingClientRect();
-    var form = el.form || (el.closest && el.closest('form'));
+    var form = el.form || closestDeep(el, 'form');
     var href = el.getAttribute('href') || '';
     try { if (href) href = new URL(href, location.href).pathname; } catch (e) {}
     var name = accName(el);
@@ -235,9 +264,15 @@
   }
 
   var lastScan = [];
-  function candidates(kind) {
-    var sel = KIND_SELECTOR[kind] || KIND_SELECTOR.click;
-    return Array.prototype.slice.call(document.querySelectorAll(sel)).filter(visible);
+  /** a 'press' step (Enter in a field) targets the field: same candidates as 'fill'. */
+  function selectorFor(kind) { return KIND_SELECTOR[kind === 'press' ? 'fill' : kind] || KIND_SELECTOR.click; }
+  function candidates(kind) { return deepAll(selectorFor(kind)).filter(visible); }
+
+  var SAME_KEYS = ['tag', 'type', 'role', 'name', 'nameAttr', 'placeholder', 'label', 'href', 'context', 'block', 'text', 'formId'];
+  /** two scanned controls are copies of one control (identical role + name + label + region + block text ...). */
+  function sameControl(a, b) {
+    for (var i = 0; i < SAME_KEYS.length; i++) { var k = SAME_KEYS[i]; if (String(a[k] || '') !== String(b[k] || '')) return false; }
+    return true;
   }
 
   /** -> {status, index, score, margin, shortlist:[{index, score, desc}]} ; index into lastScan. */
@@ -249,16 +284,23 @@
       scored.push({ index: i, score: r.score, anchor: r.anchor, desc: d });
     }
     scored.sort(function (a, b) { return b.score - a.score; });
-    var best = scored[0], second = scored[1];
+    // collapse copies of the same control: keep the best-scoring copy of each (recorded position / css path
+    // already rank the copies), and measure the margin against the best DIFFERENT control.
+    var distinct = [], dupes = 0;
+    scored.forEach(function (c) {
+      for (var j = 0; j < distinct.length; j++) if (sameControl(distinct[j].desc, c.desc)) { if (j === 0) dupes++; return; }
+      distinct.push(c);
+    });
+    var best = distinct[0], second = distinct[1];
     var margin = best ? best.score - (second ? second.score : 0) : 0;
     var r3 = function (v) { return Math.round(v * 1000) / 1000; };
-    var shortlist = scored.filter(function (c) { return c.score >= FLOOR; }).slice(0, SHORTLIST).map(function (c) {
+    var shortlist = distinct.filter(function (c) { return c.score >= FLOOR; }).slice(0, SHORTLIST).map(function (c) {
       return { index: c.index, score: r3(c.score), anchor: c.anchor, desc: brief(c.desc) };
     });
     var status = !best || best.score < FLOOR ? 'not_found'
       : (best.score >= ACCEPT && margin >= MARGIN && best.anchor) ? 'found' : 'ambiguous';
     return { status: status, index: best ? best.index : -1, score: best ? r3(best.score) : 0,
-             anchor: !!(best && best.anchor), margin: r3(margin), shortlist: shortlist };
+             anchor: !!(best && best.anchor), margin: r3(margin), dupes: dupes, shortlist: shortlist };
   }
 
   function brief(d) {
@@ -275,7 +317,7 @@
   // document order. Values of sensitive fields (passwords, card numbers, codes) are always masked.
   function textOf(el, n) { return norm(el.innerText || el.textContent).slice(0, n || 600); }
   function observe() {
-    var q = function (sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)).filter(visible); };
+    var q = function (sel) { return deepAll(sel).filter(visible); };
     var alerts = q('[role=alert]').map(function (e) { return textOf(e); }).filter(Boolean);
     var statuses = q('[role=status], [aria-live=polite]:not([role=alert]), output').map(function (e) { return textOf(e); }).filter(Boolean);
     var regions = q('[role=region][aria-label], [role=region][aria-labelledby]').map(function (e) {
@@ -286,7 +328,7 @@
     var lines = String(document.body ? document.body.innerText : '').split('\n').map(norm).filter(Boolean);
     var controls = allControls().map(function (el) {
       var role = roleOf(el), d = { role: role === 'radio' ? 'radiogroup' : role, name: accName(el), context: contextOf(el),
-                                   inDialog: !!(el.closest && el.closest('dialog, [role=dialog], [role=alertdialog]')) };
+                                   inDialog: !!closestDeep(el, 'dialog, [role=dialog], [role=alertdialog]') };
       if (el.tagName === 'SELECT') {
         d.role = 'combobox';
         d.options = Array.prototype.slice.call(el.options).map(function (o) { return norm(o.text); }).slice(0, 12);
@@ -302,7 +344,8 @@
       }
       return d;
     });
-    return { url: location.href, title: norm(document.title), alerts: alerts, statuses: statuses, regions: regions,
+    var nav = performance.getEntriesByType && performance.getEntriesByType('navigation')[0];
+    return { url: location.href, status: (nav && nav.responseStatus) || 0, title: norm(document.title), alerts: alerts, statuses: statuses, regions: regions,
              dialog: dlg ? (contextOf(dlg.firstElementChild || dlg) || norm(dlg.getAttribute('aria-label')) || textOf(dlg, 120)) : '',
              text: lines.join('\n'), controls: controls };
   }
@@ -311,7 +354,20 @@
     ACCEPT: ACCEPT, MARGIN: MARGIN, FLOOR: FLOOR, WEIGHTS: WEIGHTS, KIND_SELECTOR: KIND_SELECTOR,
     describe: describe, score: score, find: find, element: element, brief: brief, observe: observe,
     accName: accName, roleOf: roleOf, strSim: strSim, kindOf: kindOf,
+    deepAll: deepAll, closestDeep: closestDeep, deepText: deepText, sameControl: sameControl,
   };
+
+  /** visible text of the page including OPEN shadow roots (innerText stops at a shadow host). */
+  function deepText() {
+    var parts = [document.body ? document.body.innerText : ''];
+    deepAll('*').forEach(function (h) {
+      if (!h.shadowRoot) return;
+      for (var c = h.shadowRoot.firstElementChild; c; c = c.nextElementSibling) {
+        if (!/^(style|script|template)$/i.test(c.tagName)) parts.push(c.innerText || '');
+      }
+    });
+    return parts.join('\n');
+  }
 
   function kindOf(el) {
     var tag = el.tagName.toLowerCase();

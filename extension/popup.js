@@ -144,7 +144,7 @@ function renderRecordings() {
     if (r.lastRun) head.appendChild(el('span', { class: 'badge ' + r.lastRun.verdict, title: r.lastRun.reason || '' }, r.lastRun.verdict));
     li.appendChild(head);
     var acts = r.steps.filter(function (s) { return s.action !== 'goto'; }).length;
-    var meta = acts + ' actions, from ' + r.startUrl;
+    var meta = (acts ? acts + ' actions' : 'no actions recorded (only page addresses)') + ', from ' + r.startUrl;
     if (r.params && r.params.length) meta += ' | asks: ' + r.params.map(function (p) { return p.label; }).join(', ');
     if (r.schedule) meta += ' | ' + (r.schedule.kind === 'weekly' ? 'weekly ' + DAYS[r.schedule.day] : 'daily') + ' ' + r.schedule.time;
     li.appendChild(el('div', { class: 'meta' }, meta));
@@ -233,6 +233,7 @@ function describeStep(s) {
   if (s.action === 'goto') return 'open ' + s.url;
   var what = '"' + stepLabel(s) + '"';
   if (s.action === 'click') return 'click ' + what;
+  if (s.action === 'press') return 'press Enter in ' + what;
   if (s.action === 'fill') return 'type into ' + what + ': ' + (s.ask ? (s.sensitive ? 'you type it (' + s.sensitive + ')' : 'you type it') : s.value);
   return 'choose ' + (s.optionText || s.value) + ' in ' + what;
 }
@@ -269,7 +270,9 @@ function render() {
 async function refresh() { state = await call({ type: 'get_state' }); render(); }
 
 $('rec').onclick = function () { call({ type: 'start_recording', tabId: targetTab }).then(refresh); };
-$('stop').onclick = function () { call({ type: 'stop_recording' }).then(refresh); };
+$('stop').onclick = function () {
+  call({ type: 'stop_recording' }).then(function (rec) { if (rec && rec.warning) notice(rec.warning); return refresh(); });
+};
 function decide(kind) {
   var run = state.run; if (!run || !run.pending) return;
   var msg = { type: kind, runId: run.id, nonce: run.pending.nonce };

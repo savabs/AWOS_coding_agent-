@@ -18,7 +18,7 @@
   var TOKEN_RE = /^\{\{([a-z][a-z0-9_]{0,31})\}\}$/;
   var TOKEN_G = /\{\{([a-z][a-z0-9_]{0,31})\}\}/g;
   var KINDS = { text: 1, number: 1, date: 1 };
-  var ACTIONS = { goto: 1, click: 1, fill: 1, select: 1 };
+  var ACTIONS = { goto: 1, click: 1, fill: 1, select: 1, press: 1 };
   var LOC_STR = ['tag', 'type', 'role', 'name', 'context', 'block', 'text', 'id', 'nameAttr', 'placeholder', 'label',
                  'href', 'css', 'classes', 'neighbor', 'title', 'formId'];
   var MIN_SCRUB = 3;          // typed values shorter than this are dropped from the step but not hunted elsewhere
@@ -124,11 +124,15 @@
     if (!Array.isArray(obj.steps) || !obj.steps.length || obj.steps.length > 200) errors.push('steps must be an array of 1-200');
     else obj.steps.forEach(function (s, k) {
       var w = 'steps[' + k + ']';
-      if (!isObj(s) || !ACTIONS[s.action]) { errors.push(w + '.action must be goto, click, fill or select'); return; }
+      if (!isObj(s) || !ACTIONS[s.action]) { errors.push(w + '.action must be goto, click, fill, select or press'); return; }
       if (s.action === 'goto') { var u = cleanUrlField(s.url, w + '.url', errors); if (u) steps.push({ action: 'goto', url: u }); return; }
       var out = { action: s.action, loc: normLoc(s.loc, w, errors) };
       if (s.url != null) { var su = cleanUrlField(s.url, w + '.url', errors); if (su) out.url = su; }
       if (s.action === 'click') {
+        if (s.navigates != null) out.navigates = !!s.navigates;
+      } else if (s.action === 'press') {                         // Enter in a field (submits its form / search box)
+        if (s.key != null && s.key !== 'Enter') errors.push(w + '.key must be "Enter"');
+        out.key = 'Enter';
         if (s.navigates != null) out.navigates = !!s.navigates;
       } else if (s.action === 'fill') {
         var hasVal = s.value != null, ask = s.ask === true;
@@ -222,6 +226,7 @@
       var out = { action: s.action, loc: scrubLoc(s.loc || {}, s.action === 'fill') };
       var u = stripUrl(s.url); if (u) out.url = u;
       if (s.action === 'click') { if (s.navigates) out.navigates = true; }
+      else if (s.action === 'press') { out.key = 'Enter'; if (s.navigates) out.navigates = true; }
       else if (s.action === 'fill') {
         var secret = s.sensitive || S.isPlaceholder(s.value);
         if (!secret && s.param && pnames[s.param]) { out.value = '{{' + s.param + '}}'; usedParams[s.param] = 1; }
@@ -264,7 +269,7 @@
     var S = root.AWOSSafety;
     var steps = recipe.steps.map(function (s) {
       var out = JSON.parse(JSON.stringify(s));
-      if (s.action === 'click') {     // never trust a shipped danger flag: recompute from the description (the live gate runs too)
+      if (s.action === 'click' || s.action === 'press') {     // never trust a shipped danger flag: recompute from the description (the live gate runs too)
         var l = s.loc || {};
         out.danger = S.dangerMatch([l.name, l.text, l.label, l.title, l.id, l.nameAttr, l.formId].join(' | '));
       }

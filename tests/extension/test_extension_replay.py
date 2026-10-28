@@ -173,6 +173,8 @@ def test_verifier_may_only_downgrade(x):
     assert user.startswith("Goal: Profile saved for Ada on plan pro\nActions taken (")
     assert '\n<observation untrusted="true">\nURL path: /done.html  (HTTP 200)\n' in user and user.endswith("Was the goal really completed?")
     assert 'fill(' in user and 'on textbox "' in user
+    assert f'Current address: {x.server.base}/done.html\n' in user                  # the replay's own evidence
+    assert 'Replay checks (recorded with the chore, run on this page): address is ' in user and 'on plan pro": PASS' in user
 
     x.server.verify_answer = "maybe"                                  # unparsable: never changes the verdict
     run = _replay(x, page, rec, tab)

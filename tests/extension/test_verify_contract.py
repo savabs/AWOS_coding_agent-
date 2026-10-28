@@ -79,3 +79,15 @@ def test_grammar_and_parse(page):
                         ".map(AWOSModel.parseVerify)")
     assert got[0] == {"label": "NOT_DONE", "reason": "title is Hiring, goal says Hiring panel"}
     assert got[1]["label"] == "VERIFIED" and "error" in got[2]
+
+
+def test_outline_header_uses_live_status_and_hash_route(page):
+    o = dict(OBS, url="http://127.0.0.1:9/app/#/settings/profile?x=1", status=404)
+    head = page.evaluate("(o) => AWOSModel.outline(o)", o).split(chr(10))[0]
+    assert head == "URL path: /app/#/settings/profile?x=1  (HTTP 404)"
+    o = dict(OBS, url="https://www.openstreetmap.org/#map=4/38.01/-95.84")          # a map-state hash is not a route
+    assert page.evaluate("(o) => AWOSModel.outline(o)", o).startswith("URL path: /  (HTTP 200)")
+    ev = {"url": "https://www.openstreetmap.org/", "checks": ["address is https://www.openstreetmap.org/copyright: FAIL"]}
+    lines = page.evaluate("([o, e]) => AWOSModel.outline(o, e)", [OBS, ev]).split(chr(10))
+    assert lines[2] == "Current address: https://www.openstreetmap.org/"
+    assert lines[3].endswith("address is https://www.openstreetmap.org/copyright: FAIL")

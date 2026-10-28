@@ -1,0 +1,5 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Asset</title></head>
+<body><h1>Asset opened</h1><p id="msg"></p>
+<script>document.getElementById('msg').textContent = 'File: ' + (new URLSearchParams(location.search).get('f') || '?');</script>
+</body></html>

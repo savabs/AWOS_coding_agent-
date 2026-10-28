@@ -65,7 +65,7 @@ declared in `params`. Params that no step uses are allowed (warning only).
 
 ### `steps[]`
 
-Every step has `action` (one of `goto`, `click`, `fill`, `select`). Non-goto steps have `loc` and may have `url`
+Every step has `action` (one of `goto`, `click`, `fill`, `select`, `press`). Non-goto steps have `loc` and may have `url`
 (the page the step was recorded on).
 
 | action | fields |
@@ -74,6 +74,7 @@ Every step has `action` (one of `goto`, `click`, `fill`, `select`). Non-goto ste
 | `click` | `loc`, optional `url`, optional `navigates` (bool) |
 | `fill` | `loc`, optional `url`, and **exactly one of** `value: "{{param}}"` or `ask: true`; optional `sensitive` (string reason, e.g. `"password"`, `"one-time-code"`) only with `ask` |
 | `select` | `loc`, optional `url`, `value` (string, may be `"{{param}}"`), optional `optionText` (string) |
+| `press` | `loc` (the field), optional `url`, `key` (only `"Enter"`), optional `navigates` (bool): Enter in a form / search field, replayed as Enter on that field (same approval gate as clicking the form's submit button) |
 
 `fill` steps never carry a literal value. `ask: true` means: at run time AWOS pauses and the user types that field
 themselves. Any field with a `sensitive` reason (password, OTP, card, SSN, ...) is always `ask`.

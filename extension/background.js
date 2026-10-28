@@ -30,6 +30,9 @@
  * vocabulary (AWOSSafety.urlDanger), pauses with a fresh nonce; only an 'approve' message
  * carrying that nonce *from an extension page* (the popup) resumes it. There is
  * no setting, timeout or code path that approves on its own.
+ * Navigation: a click / Enter recorded as navigating waits (<= 3 s) for the tab URL to change (pushState
+ * counts) and for the DOM to go quiet before the next step; final checks run after a quiet wait and are
+ * retried once after a short wait before FAILED (SPA routes render after the click returns).
  * Verify: after the last step, check the recorded final-URL pattern and the
  * expected texts -> VERIFIED (all checks pass), UNVERIFIED (finished but no
  * checks recorded), FAILED (a check failed or the run stopped). Then the local
@@ -108,11 +111,16 @@ async function stopRecording() {
   var tab = await chrome.tabs.get(st.tabId).catch(function () { return null; });
   var rec = st.rec;
   if (tab && tab.url) { var u = new URL(tab.url); rec.expect.urlPattern = u.origin + u.pathname; }
+  if (!actionCount(rec)) rec.warning = NO_ACTIONS;
   var all = await getLocal('recordings', {}); all[rec.id] = rec; await setLocal('recordings', all);
   await setSess('recState', null);
   if (tab) await sendTab(st.tabId, { type: 'rec_state', on: false }).catch(function () {});
   return rec;
 }
+
+var NO_ACTIONS = 'Nothing was recorded on this page: only page addresses were captured, no click or typing. '
+  + 'A replay would just reopen the last address. Record again, or the controls may be in a frame AWOS cannot see.';
+function actionCount(rec) { return (rec.steps || []).filter(function (s) { return s.action !== 'goto'; }).length; }
 
 var recQueue = Promise.resolve();       // serialise step appends (messages can interleave)
 function onRecStep(tabId, msg) {
@@ -126,7 +134,7 @@ function onRecStep(tabId, msg) {
       var step = msg.step; if (step.action === 'fill') step.mergeKey = msg.mergeKey;
       steps.push(step);
     }
-    if (msg.step.action === 'click') st.lastClickAt = Date.now();
+    if (msg.step.action === 'click' || msg.step.action === 'press') st.lastClickAt = Date.now();
     await setSess('recState', st);
   }).catch(function (e) { console.warn('rec_step', e); });
   return recQueue;
@@ -139,7 +147,7 @@ chrome.tabs.onUpdated.addListener(function (tabId, info) {
     if (!st || st.tabId !== tabId) return;
     var steps = st.rec.steps, last = steps[steps.length - 1];
     if (last && last.action === 'goto' && sameUrl(last.url, info.url)) return;
-    if (Date.now() - (st.lastClickAt || 0) < 3000 && last && last.action === 'click') { last.navigates = true; }
+    if (Date.now() - (st.lastClickAt || 0) < 3000 && last && (last.action === 'click' || last.action === 'press')) { last.navigates = true; }
     else steps.push({ action: 'goto', url: info.url });    // typed / bookmark navigation
     await setSess('recState', st);
   });
@@ -173,6 +181,7 @@ async function startRun(recId, tabId, opts) {
               pending: null, approval: null, userDone: {}, log: [], resolved: [], result: null,
               params: Object.assign({}, rec.lastParams || {}, params), scheduled: !!opts.scheduled, imported: !!rec.imported };
   logRun(run, 'start "' + rec.name + '" (' + rec.steps.length + ' steps)' + (run.scheduled ? ' [scheduled]' : '') + (run.imported ? ' [imported recipe]' : ''));
+  if (!actionCount(rec)) logRun(run, 'note: this recording has no clicks or typing, only page addresses; nothing will be done on the page');
   await saveRun(run);
   drive(run.id);
   return run;
@@ -234,7 +243,11 @@ async function driveInner(runId) {
     }
     var loc = await sendRetry(run.tabId, { type: 'locate', step: step, timeoutMs: cfg.findTimeoutMs });
     var index = -1, how = '';
-    if (loc.status === 'found') { index = loc.index; how = 'score ' + loc.score + ' (margin ' + loc.margin + ')'; }
+    if (loc.scrolled) logRun(run, 'scrolled ' + loc.scrolled.steps + ' step(s) looking for a lazy-loaded target (' + loc.scrolled.ms + ' ms, '
+                                 + (loc.status === 'found' ? 'found' : 'not found') + ')');
+    if (loc.status === 'found') {
+      index = loc.index; how = 'score ' + loc.score + ' (margin ' + loc.margin + ')' + (loc.dupes ? ' [' + (loc.dupes + 1) + ' identical copies, picked by position]' : '');
+    }
     else if (!loc.shortlist.length) {
       return fail(run, 'NOT_FOUND', 'step ' + (i + 1) + ': nothing on the page resembles "' + (step.loc.name || step.loc.css) + '"');
     } else {
@@ -253,17 +266,19 @@ async function driveInner(runId) {
     // so an approved target whose live name is empty (icon-only button) does not re-pause forever.
     var target = cand.name || step.loc.name || step.loc.label || step.loc.css || '';
     var ok = approved(run, i, target);
-    if (step.action === 'click') {
+    var verb = step.action === 'press' ? 'press Enter in' : 'click';
+    if (step.action === 'click' || step.action === 'press') {
       var danger = loc.dangers[index] || step.danger || S.dangerMatchStrict([cand.name || '', step.loc.name || ''].join(' | '), strict);
       if (danger && !ok) {
         return pause(run, 'awaiting_approval', { danger: danger, target: target,
-          message: 'Step ' + (i + 1) + ' will click "' + target + '" (matches "' + danger + '"). Approve to continue.' });
+          message: 'Step ' + (i + 1) + ' will ' + verb + ' "' + target + '" (matches "' + danger + '"). Approve to continue.' });
       }
     }
+    var urlBefore = ((await chrome.tabs.get(run.tabId).catch(function () { return {}; })).url) || '';
     var r = await sendTab(run.tabId, { type: 'act', step: step, index: index, approved: ok, strict: strict });
     if (!r || !r.ok) {
       if (r && r.needsApproval) return pause(run, 'awaiting_approval', { danger: r.danger, target: target,
-        message: 'Step ' + (i + 1) + ' will click "' + target + '" (matches "' + r.danger + '"). Approve to continue.' });
+        message: 'Step ' + (i + 1) + ' will ' + verb + ' "' + target + '" (matches "' + r.danger + '"). Approve to continue.' });
       return fail(run, 'ERROR', 'step ' + (i + 1) + ': ' + (r ? r.error : 'no reply'));
     }
     run.resolved.push({ step: i, how: how, name: cand.name || '' });
@@ -271,13 +286,42 @@ async function driveInner(runId) {
     var q = function (v) { return JSON.stringify(String(v == null ? '' : v)); };
     var an = step.action === 'fill' ? 'fill(' + (index + 1) + ', ' + (step.sensitive || step.ask || S.isPlaceholder(step.value) ? '{secret}' : q(step.value)) + ')'
       : step.action === 'select' ? 'select(' + (index + 1) + ', ' + q(step.optionText || step.value) + ')'
+      : step.action === 'press' ? 'press(' + (index + 1) + ', "Enter")'
       : 'click(' + (index + 1) + ')';
     (run.actions = run.actions || []).push({ action: an, control: (cand.role || step.loc.role || '') + ' ' + q(cand.name || step.loc.name || '') });
-    logRun(run, step.action + ' "' + (cand.name || '') + '" via ' + how);
+    logRun(run, (step.action === 'press' ? 'press Enter in' : step.action) + ' "' + (cand.name || '') + '" via ' + how);
     run.i++; run.approval = null; await saveRun(run);
-    if (step.action === 'click') { await sleep(400); await waitForLoad(run.tabId); }
+    if (step.action === 'click' || step.action === 'press') {
+      if (step.navigates) {
+        var nav = await settleNavigation(run.tabId, urlBefore, 3000);
+        logRun(run, nav.changed ? 'page changed to ' + R.stripUrl(nav.url) + ' (' + nav.ms + ' ms)' : 'recorded as navigating, but the address did not change within 3 s');
+      } else { await sleep(400); await waitForLoad(run.tabId); }
+    }
   }
   await finish(run, rec);
+}
+
+/** after a click / Enter that navigated when recorded: wait (bounded) for the tab URL to change (a real load or
+ *  an SPA pushState), for the load to finish and for the DOM to go quiet. -> {changed, url, ms} */
+async function settleNavigation(tabId, before, maxMs) {
+  var t0 = Date.now(), end = t0 + maxMs, url = before, changed = false;
+  while (Date.now() < end) {
+    var t = await chrome.tabs.get(tabId).catch(function () { return null; });
+    if (!t) throw new Error('tab closed');
+    url = t.pendingUrl || t.url || '';
+    if (url && url !== before) { changed = true; break; }
+    await sleep(100);
+  }
+  var ms = Date.now() - t0;
+  await sleep(150); await waitForLoad(tabId);
+  await waitQuiet(tabId, Math.max(800, end - Date.now()));
+  var t2 = await chrome.tabs.get(tabId).catch(function () { return null; });
+  return { changed: changed, url: (t2 && t2.url) || url, ms: ms };
+}
+/** DOM quiet on the tab's page (no nodes added / removed for 300 ms), bounded; never throws. */
+async function waitQuiet(tabId, maxMs) {
+  try { return await sendRetry(tabId, { type: 'quiet', idleMs: 300, timeoutMs: maxMs }, 2); }
+  catch (e) { return { quiet: false, error: String(e && e.message || e) }; }
 }
 
 // ---- params / domain lock ------------------------------------------------------------------------------
@@ -335,8 +379,9 @@ function urlMatches(pattern, url) {
   try { var u = new URL(url); return u.origin + u.pathname === pattern; } catch (e) { return false; }
 }
 
-async function finish(run, rec) {
-  await sleep(200); await waitForLoad(run.tabId);
+/** the recorded URL + text checks on the page as it is now. */
+async function pageChecks(run, rec) {
+  await waitForLoad(run.tabId);
   var tab = await chrome.tabs.get(run.tabId), checks = [];
   var ex = rec.expect || {}, P = run.params || {};
   var urlPat = R.substitute(ex.urlPattern || '', P);
@@ -346,17 +391,45 @@ async function finish(run, rec) {
     var c = await sendRetry(run.tabId, { type: 'check', texts: texts });
     texts.forEach(function (t, k) { checks.push({ kind: 'text', expected: t, ok: !!c.present[k] }); });
   }
+  return { checks: checks, url: tab.url };
+}
+
+/** the check results as evidence lines for the verifier (URL without its query). */
+function checkEvidence(url, checks) {
+  var bits = checks.map(function (c) {
+    var what = c.kind === 'url' ? 'address is ' + c.expected : c.kind === 'download' ? 'download matching ' + c.expected : 'page shows "' + c.expected + '"';
+    return what + ': ' + (c.ok ? 'PASS' : 'FAIL');
+  });
+  return { url: R.stripUrl(url), checks: bits };
+}
+
+async function finish(run, rec) {
+  await sleep(200); await waitForLoad(run.tabId);
+  await waitQuiet(run.tabId, 1500);
+  var pc = await pageChecks(run, rec), checks = pc.checks;
+  if (checks.some(function (x) { return !x.ok; })) {      // an SPA route may still be rendering: one more look
+    logRun(run, 'checks not met yet (' + checks.filter(function (x) { return !x.ok; }).map(function (x) { return x.kind; }).join(', ') + '); retrying once after a short wait');
+    await sleep(1500); await waitQuiet(run.tabId, 2000);
+    pc = await pageChecks(run, rec); checks = pc.checks;
+  }
   if (rec.expectDownload && rec.expectDownload.nameRegex) checks.push(await checkDownload(run, rec.expectDownload.nameRegex));
   var verdict = !checks.length ? 'UNVERIFIED' : checks.every(function (x) { return x.ok; }) ? 'VERIFIED' : 'FAILED';
   var reason = verdict === 'UNVERIFIED' ? 'no expectations recorded' : '';
+  var noActions = !actionCount(rec);
+  if (noActions && verdict === 'VERIFIED') {               // only reopened a URL: the checks passing is not a chore done
+    verdict = 'UNVERIFIED';
+    reason = 'nothing was recorded on this page (the recording only reopens a page address, no click or typing ran); '
+           + checks.length + '/' + checks.length + ' checks passed on that page';
+  }
   // second opinion from the local verifier (G7). It may only DOWNGRADE: a VERIFIED it disagrees with
   // becomes CHECK ("look at this one"); it never turns UNVERIFIED / FAILED into a pass. Its opinion is
   // always recorded (shadow mode for the other verdicts), so exported logs show what it would have caught.
   var cfg = await brainSettings();
   if (cfg.enabled && cfg.verify !== false) {
     var obs = await sendRetry(run.tabId, { type: 'observe' }).catch(function () { return null; });
+    var P = run.params || {};
     var op = obs ? await M.askVerify(cfg, M.buildVerifyMessages(R.substitute(rec.goal || rec.name, P), (run.actions || []).concat([{ action: 'done("Done.")' }]),
-                                                          M.outline(obs), 'done("Done.")'))
+                                                          M.outline(obs, checkEvidence(pc.url, checks)), 'done("Done.")'))
                  : { error: 'could not read the final page' };
     run.verifier = op;
     logRun(run, op.error ? 'verifier: ' + op.error : 'verifier says ' + op.label + ': ' + op.reason + ' (' + op.ms + ' ms)');
@@ -366,7 +439,8 @@ async function finish(run, rec) {
     }
   }
   run.status = verdict === 'FAILED' ? 'failed' : 'done';
-  run.result = { verdict: verdict, code: verdict === 'FAILED' ? 'CHECK_FAILED' : '', checks: checks, reason: reason };
+  run.result = { verdict: verdict, code: verdict === 'FAILED' ? 'CHECK_FAILED' : noActions ? 'NO_ACTIONS' : '', checks: checks, reason: reason,
+                 noActions: noActions };
   logRun(run, verdict + ' (' + checks.filter(function (x) { return x.ok; }).length + '/' + checks.length + ' checks)');
   await archive(run);
   await sendTab(run.tabId, { type: 'banner', text: '' }).catch(function () {});

@@ -177,10 +177,18 @@
     return bits.join(' ');
   }
 
-  /** web_tools.outline(page) from AWOSLocator.observe()'s fields. */
-  function outline(o) {
-    var path = ''; try { path = new URL(o.url).pathname; } catch (e) {}
-    var out = ['URL path: ' + path + '  (HTTP 200)', 'Title: ' + (o.title || '')];
+  /** web_tools.outline(page) from AWOSLocator.observe()'s fields. The path is the live page's (after any
+   *  pushState), with a hash route (#/x, #!/x) kept; the status is the document's real HTTP status when the
+   *  browser reports it (200 otherwise). `ev` (optional, the replay's own evidence) = {url, checks: [line]}:
+   *  the current address and each recorded check's PASS / FAIL, so the verifier never judges a page it
+   *  cannot place (e.g. "VERIFIED" while the tab still shows the map, not /copyright). */
+  function outline(o, ev) {
+    var path = ''; try { var u = new URL(o.url); path = u.pathname + (/^#!?\//.test(u.hash) ? u.hash : ''); } catch (e) {}
+    var out = ['URL path: ' + path + '  (HTTP ' + (o.status > 0 ? o.status : 200) + ')', 'Title: ' + (o.title || '')];
+    if (ev) {
+      if (ev.url) out.push('Current address: ' + ev.url);
+      if (ev.checks && ev.checks.length) out.push('Replay checks (recorded with the chore, run on this page): ' + ev.checks.join(' | '));
+    }
     if (o.alerts && o.alerts.length) out.push('Alerts: ' + o.alerts.join(' | '));
     if (o.statuses && o.statuses.length) out.push('Status: ' + o.statuses.join(' | '));
     if (o.dialog) out.push('Dialog: ' + o.dialog);

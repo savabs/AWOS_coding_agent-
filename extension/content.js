@@ -4,11 +4,18 @@
  *   click on a clickable control      -> {action:'click', loc, danger}
  *   typing into a text-like field     -> {action:'fill', loc, value}   (merged per field)
  *   changing a <select>               -> {action:'select', loc, value, optionText}
+ *   Enter in a field of a form / search box -> {action:'press', key:'Enter', loc, danger}
+ *                                        (replayed as Enter on that field, not as the URL it led to)
+ * Targets come from e.composedPath()[0], so controls inside OPEN shadow roots (web components) are
+ * recorded as themselves, not as their host element.
  * Sensitive fields (AWOSSafety.sensitiveField) never have their value read
  * into a message: the step carries a {{secret:...}} placeholder instead.
  *
  * Executor (driven by the service worker, one message per phase):
- *   locate {step, timeoutMs} -> AWOSLocator.find result, polled until found or timeout
+ *   locate {step, timeoutMs} -> AWOSLocator.find result, polled until found or timeout; if still no
+ *          anchored match, the page is scrolled in steps (<= 8 viewports, <= 6 s) so lazy-loaded
+ *          targets (GitHub release assets) get a chance to appear, re-scanning after each step
+ *   quiet  {idleMs, timeoutMs} -> resolves once the DOM stopped changing for idleMs (bounded)
  *   act    {step, index, approved} -> performs the step on that scanned candidate.
  *          A click whose target matches the danger vocabulary is refused here
  *          unless the worker passes approved:true (the worker only does that
@@ -23,6 +30,7 @@
   window.__awosReplayLoaded = true;
   var S = window.AWOSSafety, L = window.AWOSLocator;
   var recording = false, lastFillKey = null, keySeq = 0, sentValue = {};
+  var lastEnter = null;         // {form, t}: the Enter that submitted a form (its implicit default-button click is not a step)
 
   function send(msg) { try { chrome.runtime.sendMessage(msg); } catch (e) { /* worker restarting */ } }
   function keyOf(el) { if (!el.__awosKey) el.__awosKey = 'f' + (++keySeq) + '-' + Date.now(); return el.__awosKey; }
@@ -34,19 +42,52 @@
     return { value: String(v == null ? '' : v), sensitive: null };
   }
 
+  /** the real target, also inside an OPEN shadow root (e.target is retargeted to the host). */
+  function realTarget(e) {
+    var p = e.composedPath ? e.composedPath() : null, t = p && p.length ? p[0] : null;
+    if (t && t.nodeType !== 1) t = t.parentElement;
+    return t || e.target;
+  }
+
+  /** the button an Enter in this field would press (HTML implicit submission), or null. */
+  function defaultButton(el) {
+    var f = el.form;
+    return f ? f.querySelector('button:not([type]), button[type=submit], input[type=submit], input[type=image]') : null;
+  }
+  /** danger text for an Enter in a field: the field, its form, and the form's default button. */
+  function pressDanger(el, name, strict) {
+    var b = defaultButton(el);
+    return S.dangerMatchStrict([S.dangerContext(el, name), b ? S.dangerContext(b, L.accName(b)) : ''].join(' | '), strict === true);
+  }
+
   function onClick(e) {
     if (!recording || !e.isTrusted) return;
-    var el = e.target && e.target.closest && e.target.closest(L.KIND_SELECTOR.click);
+    var t = realTarget(e), el = t && L.closestDeep(t, L.KIND_SELECTOR.click);
     if (!el || el.matches(L.KIND_SELECTOR.fill) || el.tagName === 'SELECT') return;
+    if (lastEnter && el.form && el.form === lastEnter.form && Date.now() - lastEnter.t < 600) return;   // Enter's implicit submit click
     var loc = L.describe(el);
     lastFillKey = null;
-    send({ type: 'rec_step', step: { action: 'click', loc: loc, url: location.href,
+    send({ type: 'rec_step', step: { action: 'click', loc: loc, url: location.href, scrollY: Math.round(scrollY),
            danger: S.dangerMatch(S.dangerContext(el, loc.name)) } });
+  }
+
+  /** Enter in a single-line field inside a form or a search box: the submit IS this keypress. */
+  function onKeyDown(e) {
+    if (!recording || !e.isTrusted || e.key !== 'Enter' || e.isComposing || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
+    var el = realTarget(e);
+    if (!el || !el.matches || !el.matches(L.KIND_SELECTOR.fill) || el.tagName === 'TEXTAREA' || el.isContentEditable) return;
+    var inSearch = el.form || L.closestDeep(el, '[role=search], [role=combobox], [role=searchbox]')
+      || /^(search)$/i.test(el.getAttribute('type') || '') || /^(combobox|searchbox)$/.test(el.getAttribute('role') || '');
+    if (!inSearch) return;
+    var loc = L.describe(el);
+    lastFillKey = null; lastEnter = { form: el.form || null, t: Date.now() };
+    send({ type: 'rec_step', step: { action: 'press', key: 'Enter', loc: loc, url: location.href, scrollY: Math.round(scrollY),
+           danger: pressDanger(el, loc.name, false) } });
   }
 
   function onInput(e) {
     if (!recording) return;
-    var el = e.target;
+    var el = realTarget(e);
     if (!el || !el.matches) return;
     if (el.tagName === 'SELECT') {          // isTrusted not required: some UIs set selects by script
       if (e.type !== 'change') return;
@@ -67,10 +108,51 @@
   document.addEventListener('click', onClick, true);
   document.addEventListener('input', onInput, true);
   document.addEventListener('change', onInput, true);
+  document.addEventListener('keydown', onKeyDown, true);
 
   // ---- executor -------------------------------------------------------------
 
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  var SCROLL_STEPS = 8, SCROLL_MS = 6000, SCROLL_WAIT = 450;
+  /** nothing anchored on the page yet: scroll down in viewport steps (first to the recorded spot), re-scanning
+   *  after each, so content that loads when scrolled into view (lazy lists, include-fragments) can appear.
+   *  Bounded by SCROLL_STEPS viewports and SCROLL_MS. Scroll position is restored when nothing turns up. */
+  async function scrollSearch(step, res) {
+    var se = document.scrollingElement || document.documentElement;
+    if (!se || se.scrollHeight <= innerHeight + 4) return res;          // nothing to scroll: lazy content cannot be below
+    var x0 = scrollX, y0 = scrollY, t0 = Date.now(), H = Math.max(200, Math.round(innerHeight * 0.9));
+    var ys = [], p = step.loc && step.loc.pos;
+    var recY = step.scrollY > 0 ? step.scrollY : (p && p.y > innerHeight / 2 ? p.y - innerHeight / 2 : 0);
+    if (recY > 0) ys.push(recY);
+    for (var k = 1; k <= SCROLL_STEPS; k++) ys.push(y0 + k * H);
+    var stuck = 0, tried = 0, r;
+    for (var i = 0; i < ys.length && Date.now() - t0 < SCROLL_MS; i++) {
+      var before = scrollY;
+      window.scrollTo(x0, ys[i]); tried++;
+      await sleep(SCROLL_WAIT);
+      r = L.find(step.loc, step.action);
+      if (r.status === 'found') { r.scrolled = { steps: tried, y: Math.round(scrollY), ms: Date.now() - t0 }; return r; }
+      if (i > 0 && Math.abs(scrollY - before) < 2) { if (++stuck >= 2) break; } else stuck = 0;   // at the bottom
+    }
+    var tail = Math.min(t0 + SCROLL_MS, Date.now() + 1500);           // the last fragment may still be loading
+    while (Date.now() < tail) {
+      await sleep(300);
+      r = L.find(step.loc, step.action);
+      if (r.status === 'found') { r.scrolled = { steps: tried, y: Math.round(scrollY), ms: Date.now() - t0 }; return r; }
+    }
+    window.scrollTo(x0, y0);
+    res = L.find(step.loc, step.action);
+    res.scrolled = { steps: tried, y: -1, ms: Date.now() - t0 };
+    return res;
+  }
+
+  function dangerOf(action, el, name) {
+    if (!el) return null;
+    if (action === 'click') return S.dangerMatch(S.dangerContext(el, name));
+    if (action === 'press') return pressDanger(el, name, false);
+    return null;
+  }
 
   async function locate(step, timeoutMs) {
     var deadline = Date.now() + (timeoutMs || 4000), res;
@@ -79,17 +161,32 @@
       if (res.status === 'found' || Date.now() >= deadline) break;
       await sleep(200);
     }
+    if (res.status !== 'found' && !(res.status === 'ambiguous' && res.anchor)) res = await scrollSearch(step, res);
     res.dangers = {};
     res.shortlist.forEach(function (c) {
-      var el = L.element(c.index);
-      var d = step.action === 'click' && el ? S.dangerMatch(S.dangerContext(el, c.desc.name)) : null;
+      var d = dangerOf(step.action, L.element(c.index), c.desc.name);
       if (d) res.dangers[c.index] = d;
     });
-    if (res.index >= 0 && step.action === 'click' && !(res.index in res.dangers)) {
-      var bel = L.element(res.index), bd = bel ? S.dangerMatch(S.dangerContext(bel, L.accName(bel))) : null;
+    if (res.index >= 0 && !(res.index in res.dangers)) {
+      var bel = L.element(res.index), bd = dangerOf(step.action, bel, bel ? L.accName(bel) : '');
       if (bd) res.dangers[res.index] = bd;
     }
     return res;
+  }
+
+  /** resolves when no node was added / removed / retexted for idleMs, or at timeoutMs (attribute churn such as
+   *  map tiles or animations is ignored). -> {quiet: bool, ms} */
+  function quiet(idleMs, timeoutMs) {
+    return new Promise(function (resolve) {
+      var t0 = Date.now(), last = Date.now(), done = false, mo, iv;
+      function end(q) { if (done) return; done = true; try { mo.disconnect(); } catch (e) {} clearInterval(iv); resolve({ quiet: q, ms: Date.now() - t0 }); }
+      mo = new MutationObserver(function () { last = Date.now(); });
+      try { mo.observe(document, { childList: true, subtree: true, characterData: true }); } catch (e) { return end(true); }
+      iv = setInterval(function () {
+        if (Date.now() - last >= (idleMs || 300)) end(true);
+        else if (Date.now() - t0 >= (timeoutMs || 3000)) end(false);
+      }, 50);
+    });
   }
 
   function setValue(el, v) {
@@ -100,7 +197,7 @@
       el.focus();
       Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, v);
     }
-    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
@@ -121,10 +218,32 @@
       setValue(el, o.value);
       return reply({ ok: true });
     }
+    if (step.action === 'press') {
+      var pd = pressDanger(el, L.accName(el), strict) || step.danger;
+      if (pd && approved !== true) return reply({ ok: false, needsApproval: true, danger: pd });
+      reply({ ok: true, url: location.href });
+      setTimeout(function () { pressEnter(el); }, 0);
+      return;
+    }
     var danger = S.dangerMatchStrict(S.dangerContext(el, L.accName(el)), strict === true) || step.danger;
     if (danger && approved !== true) return reply({ ok: false, needsApproval: true, danger: danger });
-    reply({ ok: true });                 // reply before clicking: the click may unload this page
+    reply({ ok: true, url: location.href });   // reply before clicking: the click may unload this page
     setTimeout(function () { el.focus && el.focus(); el.click(); }, 0);
+  }
+
+  /** Enter on a field as a person would: key events for page handlers (search boxes, comboboxes), then, unless a
+   *  handler cancelled it, HTML implicit submission (click the form's default button, else requestSubmit). */
+  function pressEnter(el) {
+    el.focus && el.focus();
+    var o = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true };
+    var go = el.dispatchEvent(new KeyboardEvent('keydown', o));
+    go = el.dispatchEvent(new KeyboardEvent('keypress', o)) && go;
+    if (go && el.isConnected && el.form) {
+      var b = defaultButton(el);
+      if (b && !b.disabled) b.click();
+      else if (el.form.requestSubmit) el.form.requestSubmit(); else el.form.submit();
+    }
+    if (el.isConnected) el.dispatchEvent(new KeyboardEvent('keyup', o));
   }
 
   function banner(text) {
@@ -145,8 +264,9 @@
       case 'rec_state': recording = !!msg.on; lastFillKey = null; reply({ ok: true }); return;
       case 'locate': locate(msg.step, msg.timeoutMs).then(reply); return true;
       case 'act': act(msg.step, msg.index, msg.approved, msg.strict, reply); return;
+      case 'quiet': quiet(msg.idleMs, msg.timeoutMs).then(reply); return true;
       case 'check': {
-        var body = S.norm(document.body ? document.body.innerText : '');
+        var body = S.norm(L.deepText());
         reply({ url: location.href, present: (msg.texts || []).map(function (t) { return body.indexOf(S.norm(t)) >= 0; }) });
         return;
       }
