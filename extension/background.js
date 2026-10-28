@@ -433,7 +433,12 @@ async function finish(run, rec) {
                  : { error: 'could not read the final page' };
     run.verifier = op;
     logRun(run, op.error ? 'verifier: ' + op.error : 'verifier says ' + op.label + ': ' + op.reason + ' (' + op.ms + ' ms)');
-    if (verdict === 'VERIFIED' && !op.error && op.label !== 'VERIFIED') {
+    // a passed download check is evidence the verifier cannot see (it reads the page, not the browser's
+    // downloads), so for download chores its disagreement is logged but does not downgrade
+    var downloadOk = checks.some(function (x) { return x.kind === 'download' && x.ok; });
+    if (downloadOk && verdict === 'VERIFIED' && !op.error && op.label !== 'VERIFIED') {
+      logRun(run, 'verifier disagreement not applied: the download check passed, which the verifier cannot see');
+    } else if (verdict === 'VERIFIED' && !op.error && op.label !== 'VERIFIED') {
       verdict = 'CHECK';
       reason = 'checks passed, but the local verifier says ' + op.label + ': ' + op.reason;
     }

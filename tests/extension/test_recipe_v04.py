@@ -359,6 +359,16 @@ def test_download_check_pass_and_fail(x):
     dl = [c for c in run["result"]["checks"] if c["kind"] == "download"]
     assert run["result"]["verdict"] == "VERIFIED" and dl[0]["ok"] and dl[0]["actual"] == "statement-2026-10.csv", run["result"]
 
+    # the verifier reads the page, not the downloads list: with the download check passed its NOT_DONE is
+    # logged but does not downgrade (the cloud smoke's GitHub release chore ended CHECK this way)
+    x.server.verify_answer = "NOT_DONE: done was claimed without it"
+    page.goto(x.server.base + "/help.html")
+    x.call("run", recId=rec["id"], tabId=tab)
+    run = x.wait_run()
+    assert run["result"]["verdict"] == "VERIFIED" and run["verifier"]["label"] == "NOT_DONE", run["result"]
+    assert any("verifier disagreement not applied" in e["text"] for e in run["log"]), run["log"]
+    x.server.verify_answer = "VERIFIED: fake"
+
     x.call("save_recording", id=rec["id"], expectDownload={"nameRegex": r"invoice.*\.pdf$"})
     page.goto(x.server.base + "/help.html")
     x.call("run", recId=rec["id"], tabId=tab)
