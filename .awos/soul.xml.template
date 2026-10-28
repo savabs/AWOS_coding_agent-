@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soul>
+  <project name="PROJECT_NAME" created="2026-05-15">
+    <metadata>
+      <description>Project-specific architectural consciousness and learning memory</description>
+      <version>1.0</version>
+      <last_updated>2026-05-15</last_updated>
+    </metadata>
+    
+    <invariants>
+      <!-- Hard project rules — no exceptions -->
+      <!-- Example: <rule id="r1">Zero-copy only for buffers > 1MB</rule> -->
+      <!-- Example: <rule id="r2">No dynamic allocation in hot path</rule> -->
+    </invariants>
+    
+    <patterns>
+      <!-- Learned bug signatures and fixes -->
+      <!-- Format: issue → fix → frequency -->
+      <!-- Example: <pattern id="p1" issue="Segfault on realloc" fix="Use arena allocator" frequency="3"/> -->
+      <!-- Example: <pattern id="p2" issue="Type confusion in protobuf" fix="Always validate msgtype before cast" frequency="2"/> -->
+    </patterns>
+    
+    <decisions>
+      <!-- Architecture choices with rationale -->
+      <!-- Example: <decision id="d1" date="2026-02-20" choice="Chose Vulkan over DX12"> -->
+      <!--   Reason: Cross-platform, lower API overhead, better tool ecosystem. -->
+      <!-- </decision> -->
+    </decisions>
+    
+    <cost_history>
+      <!-- Monthly metrics: spend, cache hit rate, model tier distribution -->
+      <!-- Rolled up from cost_log.xml post-session -->
+      <!-- Example: <month date="2026-05"> -->
+      <!--   <metric key="avg_model_tier">2.3</metric> -->
+      <!--   <metric key="cache_hit_rate">0.78</metric> -->
+      <!--   <metric key="total_spend">$142.55</metric> -->
+      <!-- </month> -->
+    </cost_history>
+  </project>
+</soul>

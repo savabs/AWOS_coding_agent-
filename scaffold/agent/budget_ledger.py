@@ -69,6 +69,9 @@ class BudgetLedger:
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "cost": round(cost, 8),
+            # Which process spent it: .awos/budget.json is shared by every
+            # run, and a goal's budget counts only its own process's calls.
+            "pid": os.getpid(),
         }
         self._append(entry)
         self._rebuild_totals()
@@ -133,6 +136,17 @@ class BudgetLedger:
             )
 
         return True, ""
+
+    def get_premium_spent(self) -> float:
+        """Total spent on premium (Anthropic) models this month."""
+        total = 0.0
+        for r in self._records:
+            if r.get("month") != self._current_month:
+                continue
+            model = r.get("model", "").lower()
+            if "claude" in model:
+                total += r.get("cost", 0)
+        return round(total, 6)
 
     def show_status(self, monthly_budget: float = 20.0) -> None:
         """Print visual budget monitor."""

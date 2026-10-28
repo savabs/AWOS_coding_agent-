@@ -1,0 +1,7 @@
+{
+  "id": "02_list_backups",
+  "goal": "I'd like to see which backups we actually have without poking around in the backup folder. Please add a `list` command that prints one line per backup, oldest first: the archive's file name, when it was taken (YYYY-MM-DD HH:MM:SS) and its size, separated by two spaces, with sizes written the same way `run` reports them. Finish with a line like `3 backups, 4.5 KiB total` (`1 backup, ...` when there is only one). Anything in the folder that isn't one of our backup archives should be ignored. If there are no backups, print `no backups in <folder>`. Our monitoring box runs it with only the backup folder configured (like `status`), so it must not need the rest of the settings.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

@@ -1,0 +1,8 @@
+{
+  "session_id": "orch_ea09b60e",
+  "goal": "create docs/http_only_test.md about automated checks",
+  "start_time": "2026-06-14T13:44:45.938880",
+  "total_cost": 0.0,
+  "final_success": true,
+  "traces": []
+}

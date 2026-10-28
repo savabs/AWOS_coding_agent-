@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='utf-8'?>
+<preflight-manifest timestamp="2026-05-15T07:38:17.201383">
+  <task>Optimize performance bottleneck</task>
+  <complexity score="3" interpretation="simple" />
+  <model-tier tier-name="DeepSeek (Budget)" provider="deepsek" model="deepseek-chat" max-tokens="4000" temperature="0.7" />
+  <cost-estimate usd="0.000420" input-tokens="2000" output-tokens="1000" />
+  <repository path="/home/becmachlean/2024/projects/AWOS_coding_agent/scaffold/agent" />
+  <files-involved>
+    <file>complexity_scorer.py</file>
+    <file>model_router.py</file>
+  </files-involved>
+  <consent-status>pending</consent-status>
+</preflight-manifest>

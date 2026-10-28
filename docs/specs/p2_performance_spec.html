@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>P2 Spec — Performance, Caching, Parallel Sampling, Worktree</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 1100px; margin: 0 auto; padding: 2rem; color: #1a1a2e; background: #f8f9fa; }
+  h1 { color: #0d1b2a; border-bottom: 3px solid #457b9d; padding-bottom: 0.5rem; }
+  h2 { color: #1d3557; border-left: 4px solid #457b9d; padding-left: 0.75rem; margin-top: 2.5rem; }
+  h3 { color: #2c3e50; margin-top: 1.5rem; }
+  h4 { color: #457b9d; margin-top: 1rem; }
+  .meta { background: #1d3557; color: #a8dadc; padding: 1rem 1.5rem; border-radius: 8px; margin-bottom: 2rem; font-size: 0.9rem; }
+  .meta span { margin-right: 2rem; }
+  .code-block { background: #0d1b2a; color: #a8dadc; padding: 1rem 1.5rem; border-radius: 6px; font-family: 'Courier New', monospace; font-size: 0.85rem; overflow-x: auto; margin: 1rem 0; line-height: 1.6; }
+  .key { background: #e8f4f8; border-left: 4px solid #457b9d; padding: 1rem 1.5rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .step { background: #fff; border-left: 4px solid #457b9d; padding: 1rem 1.5rem; margin: 0.75rem 0; border-radius: 0 6px 6px 0; }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+  th { background: #1d3557; color: white; padding: 0.6rem 1rem; text-align: left; }
+  td { padding: 0.6rem 1rem; border-bottom: 1px solid #dee2e6; vertical-align: top; }
+  tr:nth-child(even) td { background: #f1f3f5; }
+  .warn { background: #fff3cd; border: 1px solid #ffc107; padding: 0.75rem 1rem; border-radius: 4px; margin: 0.75rem 0; }
+  .ok { background: #d4edda; border: 1px solid #28a745; padding: 0.75rem 1rem; border-radius: 4px; margin: 0.75rem 0; }
+  .danger { background: #f8d7da; border: 1px solid #dc3545; padding: 0.75rem 1rem; border-radius: 4px; margin: 0.75rem 0; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1rem 0; }
+  .card { background: #fff; border: 1px solid #dee2e6; border-radius: 6px; padding: 1.25rem; }
+  .tag { display: inline-block; background: #457b9d; color: white; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.75rem; margin: 0.1rem; }
+  .test-case { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 0.75rem 1rem; margin: 0.5rem 0; }
+  ul li, ol li { margin: 0.4rem 0; }
+  .interface { background: #1d3557; color: #e8f4f8; padding: 1.5rem; border-radius: 8px; font-family: monospace; font-size: 0.85rem; line-height: 1.8; }
+  .toc { background: #fff; border: 1px solid #dee2e6; border-radius: 6px; padding: 1.5rem; margin-bottom: 2rem; }
+  .toc a { color: #1d3557; text-decoration: none; }
+  .savings { background: #d4edda; border: 1px solid #28a745; padding: 1rem 1.5rem; border-radius: 6px; margin: 1rem 0; font-size: 1.1rem; }
+</style>
+</head>
+<body>
+
+<h1>⚡ P2 Spec — Performance, Caching, Parallel Sampling &amp; Worktree</h1>
+<div class="meta">
+  <span>📅 2026-05-22</span>
+  <span>🎯 Priority: P2 (Medium-High)</span>
+  <span>⏱ Est. 12h total (added worker caching)</span>
+  <span>📂 Files: planner.py, orchestrator.py, worker.py</span>
+  <span>💰 Expected: 85-90% cost reduction (planner + worker caching)</span>
+</div>
+
+<div class="toc">
+  <strong>Contents</strong>
+  <ul>
+    <li><a href="#p21">1. P2.1 — Planner Prompt Cache (2h)</a>
+      <ul>
+        <li><a href="#p21">1.5 — Worker Prompt Cache Architecture (Three-Block)</a></li>
+        <li><a href="#p21">1.6 — MAX_CONTEXT_TOKENS Hard Budget</a></li>
+      </ul>
+    </li>
+    <li><a href="#p22">2. P2.2 — Parallel Sampling for L3+ (4h)</a></li>
+    <li><a href="#p23">3. P2.3 — Git Worktree Isolation (3h)</a></li>
+    <li><a href="#p24">4. P2.4 — Condensed History / ACI-style Context (2h)</a></li>
+    <li><a href="#tests">5. Test Plan</a></li>
+    <li><a href="#risks">6. Risks</a></li>
+  </ul>
+</div>
+
+<!-- ========================================================= -->
+<h2 id="p21">1. P2.1 — Persistent Prompt Cache</h2>
+
+<h3>1.1 Current Problem</h3>
+<div class="danger">
+  Every <code>execute_feature()</code> call creates a new <code>Planner</code> instance → new Anthropic client → new connection. The system prompt (stable ~800 token instructions block) is sent as uncached tokens every time. At $3/MTok input (Sonnet), each plan costs ~$0.0024 just for the system prompt — which could be cached at $0.0003.
+</div>
+
+<p><strong>At 10 eval runs × 4 tasks each = 40 planner calls:</strong></p>
+<table>
+  <tr><th>Scenario</th><th>Cost per call</th><th>Total 40 calls</th></tr>
+  <tr><td>Current (no cache)</td><td>~$0.005</td><td>~$0.20</td></tr>
+  <tr><td>With ephemeral cache (5 min)</td><td>~$0.0015 after first</td><td>~$0.06</td></tr>
+  <tr><td>With persistent singleton</td><td>~$0.001 (cache hit)</td><td>~$0.04</td></tr>
+</table>
+
+<div class="savings">
+  💰 <strong>Expected savings: ~75% on planning costs.</strong> Low effort, high ROI.
+</div>
+
+<h3>1.2 Solution: Module-Level Planner Singleton</h3>
+<div class="code-block">
+# In planner.py — replace per-instance client with module-level singleton
+
+import threading
+
+_planner_lock = threading.Lock()
+_planner_instance: "Planner | None" = None
+
+def get_planner(api_key: str | None = None) -> "Planner":
+    """Return the module-level Planner singleton (thread-safe)."""
+    global _planner_instance
+    if _planner_instance is None:
+        with _planner_lock:
+            if _planner_instance is None:
+                _planner_instance = Planner(api_key=api_key)
+    return _planner_instance
+
+
+class Planner:
+    def __init__(self, api_key: str | None = None):
+        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
+        if not self.api_key:
+            raise ValueError("ANTHROPIC_API_KEY not set")
+        self.client = Anthropic(api_key=self.api_key)
+        self.model = "claude-sonnet-4-6"
+
+        # Build cached system block ONCE at init
+        # Anthropic caches this after the first API call
+        self._system_instructions = self._get_system_instructions()
+        self._system_block = {
+            "type": "text",
+            "text": self._system_instructions,
+            "cache_control": {"type": "ephemeral"},
+        }
+</div>
+
+<h3>1.3 Cache Stability Rules</h3>
+<p>For the cache to hit, the system block must be <strong>byte-identical</strong> between calls:</p>
+<ul>
+  <li>✅ System instructions: static string, never changes → cacheable</li>
+  <li>✅ System block structure: always same JSON keys → cacheable</li>
+  <li>❌ User prompt: changes every call (different goal) → NOT cached (correct)</li>
+  <li>❌ codebase_context: changes per project → NOT in system block</li>
+</ul>
+
+<h3>1.4 Extended Cache with Haiku for Simple Planning</h3>
+<p>Route simple single-file tasks to Haiku for planning (12x cheaper, 80% quality):</p>
+<div class="code-block">
+def plan(self, goal: str, codebase_context: dict, ...) -> dict:
+    # Route simple goals to Haiku
+    is_simple = self._classify_goal_complexity(goal, codebase_context)
+    model = "claude-haiku-4-5" if is_simple else self.model
+
+    response = self.client.messages.create(
+        model=model,
+        max_tokens=1536,
+        system=[self._system_block],  # Always cached after first call
+        messages=[{"role": "user", "content": user_prompt}],
+    )
+    ...
+
+def _classify_goal_complexity(self, goal: str, ctx: dict) -> bool:
+    """True if goal is simple enough for Haiku planning."""
+    goal_lower = goal.lower()
+    simple_keywords = ["add method", "fix bug", "rename", "update", "add test", "add docstring"]
+    complex_keywords = ["refactor", "architecture", "multi-file", "system", "integrate"]
+
+    if any(k in goal_lower for k in complex_keywords):
+        return False
+    if any(k in goal_lower for k in simple_keywords):
+        return True
+    # Default: use Haiku if goal is short and no multi-file indicators
+    return len(goal.split()) &lt; 15 and len(ctx.get("files", [])) &lt; 3
+</div>
+
+<h3>1.5 Worker Prompt Cache Architecture (The Real Cost Killer)</h3>
+<div class="key">
+  <strong>Critical insight:</strong> P2.1 only caches the <em>Planner</em> system prompt (~800 tokens). The <strong>Worker</strong> makes far more API calls and sends far larger prompts — the codebase context block alone can be 3,000–10,000 tokens. If that block is identical between Task 1 and Task 2 of the same feature, it should be cached too. This is where 90% of the real savings live.
+</div>
+
+<p>Anthropic caches any <strong>prefix</strong> of the messages array that stays byte-identical between consecutive calls. The worker prompt must be structured so stable content comes first:</p>
+
+<div class="code-block">
+## Three-Block Worker Prompt Structure:
+
+messages = [
+    {
+        "role": "user",
+        "content": [
+            # BLOCK A — Stable (changes at most once per session)
+            # Cached after first call. Contains: worker instructions,
+            # output format spec, skill templates.
+            {
+                "type": "text",
+                "text": WORKER_SYSTEM_INSTRUCTIONS,
+                "cache_control": {"type": "ephemeral"},
+            },
+
+            # BLOCK B — Semi-stable (changes per target file, not per retry)
+            # Cached within all retries for the same task.
+            # Contains: file content + CodebaseIndex RAG results.
+            {
+                "type": "text",
+                "text": file_and_rag_context,     # built once per task
+                "cache_control": {"type": "ephemeral"},
+            },
+
+            # BLOCK C — Dynamic (changes every call — no cache)
+            # Contains: specific task action, past_critiques, session context.
+            # This is the ONLY part that varies per retry.
+            {
+                "type": "text",
+                "text": dynamic_task_context,     # rebuilt per attempt
+            },
+        ],
+    }
+]
+</div>
+
+<p><strong>Why this matters for retries:</strong> On attempt 2 of a failed task, Blocks A + B are identical to attempt 1. Only Block C changes (new critique added). Cache hits on A + B = 90% savings on those tokens across all retries.</p>
+
+<table>
+  <tr><th>Block</th><th>Content</th><th>Tokens (typical)</th><th>Changes when</th><th>Cache?</th></tr>
+  <tr><td>A — Instructions</td><td>Worker system prompt + JSON format spec + skills</td><td>~600</td><td>Never (session)</td><td>✅ Always</td></tr>
+  <tr><td>B — File + RAG</td><td>Target file content + top-3 CodebaseIndex chunks</td><td>1,000–4,000</td><td>New task or file</td><td>✅ Per-task</td></tr>
+  <tr><td>C — Task context</td><td>Action + past critiques + session state</td><td>200–800</td><td>Every retry</td><td>❌ Never</td></tr>
+</table>
+
+<div class="savings">
+  💰 <strong>Full impact:</strong> 5 retries on a failed task → A+B cached 4/5 times. At 3,000 token B block on Sonnet: 4 × 3,000 × ($3 - $0.30) / 1,000,000 = <strong>$0.032 saved per complex task</strong>.
+</div>
+
+<h3>1.6 Context Token Budget (MAX_CONTEXT_TOKENS)</h3>
+<p>Hard ceiling on tokens sent in Block B. Prevents CodebaseIndex returning 15k tokens of "relevant" context that floods the cache and the model:</p>
+
+<div class="code-block">
+# In worker.py
+MAX_FILE_TOKENS = 2000       # Max tokens from target file content
+MAX_RAG_TOKENS = 1500        # Max tokens from CodebaseIndex RAG results
+MAX_CONTEXT_TOKENS = 4000    # Hard ceiling: Block B total
+
+def _build_file_and_rag_context(
+    self,
+    file_content: str,
+    task: dict,
+    codebase_index,
+) -> str:
+    """
+    Build Block B: file content + RAG results.
+    Enforces token budget. Returns stable, cacheable string.
+    """
+    # 1. File content (truncated if large)
+    file_tokens = self._estimate_tokens(file_content)
+    if file_tokens > MAX_FILE_TOKENS:
+        file_section = self._get_file_context(file_content, task["action"])
+    else:
+        file_section = file_content
+
+    # 2. RAG results from CodebaseIndex
+    rag_results = ""
+    if codebase_index:
+        rag_raw = codebase_index.query_code(task["action"], n_results=5)
+        rag_tokens = self._estimate_tokens(rag_raw)
+        if rag_tokens > MAX_RAG_TOKENS:
+            # Take only top chunks that fit
+            rag_results = self._truncate_to_tokens(rag_raw, MAX_RAG_TOKENS)
+        else:
+            rag_results = rag_raw
+
+    # 3. Combine and enforce hard ceiling
+    combined = f"## File: {task['file']}\n{file_section}\n\n## Related Code:\n{rag_results}"
+    if self._estimate_tokens(combined) > MAX_CONTEXT_TOKENS:
+        combined = self._truncate_to_tokens(combined, MAX_CONTEXT_TOKENS)
+
+    return combined
+
+def _estimate_tokens(self, text: str) -> int:
+    """Fast token estimate: words × 1.3 (good enough for budgeting)."""
+    return int(len(text.split()) * 1.3)
+
+def _truncate_to_tokens(self, text: str, max_tokens: int) -> str:
+    """Truncate text to fit within token budget. Truncate from the end."""
+    words = text.split()
+    target_words = int(max_tokens / 1.3)
+    if len(words) <= target_words:
+        return text
+    truncated = ' '.join(words[:target_words])
+    return truncated + "\n... [truncated to fit token budget]"
+</div>
+
+<!-- ========================================================= -->
+<h2 id="p22">2. P2.2 — Parallel Sampling for L3+</h2>
+
+<h3>2.1 The Agentless Insight</h3>
+<div class="key">
+  <strong>Key finding from Agentless research:</strong> For complex tasks, generating N independent patch candidates and selecting the best by test execution outperforms a single carefully-reasoned attempt. Diversity of approaches + objective selection = better outcome. This is how humans do code review too.
+</div>
+
+<h3>2.2 When to Use Parallel Sampling</h3>
+<table>
+  <tr><th>Condition</th><th>Parallel Sampling?</th><th>N candidates</th></tr>
+  <tr><td>L1/L2 simple tasks</td><td>❌ No</td><td>1</td></tr>
+  <tr><td>L3 multi-file, first attempt</td><td>✅ Yes</td><td>2</td></tr>
+  <tr><td>L3 multi-file, retry after failure</td><td>✅ Yes</td><td>3</td></tr>
+  <tr><td>L4 architecture-level</td><td>✅ Yes</td><td>2</td></tr>
+  <tr><td>Task complexity="high"</td><td>✅ Yes</td><td>2</td></tr>
+</table>
+
+<h3>2.3 Parallel Sampling Flow</h3>
+<div class="code-block">
+# Complexity check: is this worth sampling?
+┌────────────────────────────────────┐
+│ Task: complexity = "high" or L3+   │
+└─────────────────┬──────────────────┘
+                  │ Yes
+                  ▼
+┌────────────────────────────────────┐
+│ Generate N candidates in parallel  │
+│  (ThreadPoolExecutor or asyncio)   │
+│  Each gets: same task + context    │
+│  But: temperature varied (0.3/0.7) │
+└─────────────────┬──────────────────┘
+                  │
+                  ▼
+┌────────────────────────────────────┐
+│ Validate each candidate            │
+│  - Apply edits (P0 JSON format)    │
+│  - Run syntax check                │
+│  - Run pytest (P1 test execution)  │
+└─────────────────┬──────────────────┘
+                  │
+                  ▼
+┌────────────────────────────────────┐
+│ Score candidates:                  │
+│  tests_passed × 0.7 +              │
+│  syntax_ok × 0.2 +                 │
+│  edit_applied × 0.1                │
+└─────────────────┬──────────────────┘
+                  │
+                  ▼
+┌────────────────────────────────────┐
+│ Select best candidate              │
+│ Apply to file                      │
+└────────────────────────────────────┘
+</div>
+
+<h3>2.4 Implementation</h3>
+<div class="code-block">
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+@dataclass
+class PatchCandidate:
+    edits: list[dict]
+    new_content: str
+    reasoning: str
+    temperature: float
+    test_result: TestResult | None
+    syntax_ok: bool
+    score: float = 0.0
+
+def _sample_candidates(
+    self,
+    task: dict,
+    file_content: str,
+    n: int = 2,
+    **kwargs
+) -> list[PatchCandidate]:
+    """Generate N independent patch candidates in parallel."""
+
+    def generate_one(temperature: float) -> PatchCandidate | None:
+        try:
+            edits, reasoning = self._execute_direct(
+                task=task,
+                file_content=file_content,
+                temperature=temperature,
+                **kwargs
+            )
+            new_content, error = self._apply_edits_to_content(file_content, edits)
+            if error:
+                return None
+            return PatchCandidate(
+                edits=edits,
+                new_content=new_content,
+                reasoning=reasoning,
+                temperature=temperature,
+                test_result=None,
+                syntax_ok=self._check_syntax(new_content),
+            )
+        except Exception:
+            return None
+
+    temperatures = [0.2, 0.7] if n == 2 else [0.2, 0.5, 0.8]
+
+    candidates = []
+    with ThreadPoolExecutor(max_workers=n) as executor:
+        futures = {executor.submit(generate_one, t): t for t in temperatures[:n]}
+        for future in as_completed(futures):
+            result = future.result()
+            if result is not None:
+                candidates.append(result)
+
+    return candidates
+
+def _score_candidate(
+    self,
+    candidate: PatchCandidate,
+    task: dict,
+    project_root: str,
+) -> float:
+    """Score a candidate patch. Higher is better."""
+    score = 0.0
+
+    # Syntax check (20% weight)
+    if candidate.syntax_ok:
+        score += 0.2
+
+    # Edit was applied (10% weight)
+    if candidate.new_content != "":
+        score += 0.1
+
+    # Test execution (70% weight — the most important signal)
+    if candidate.test_result:
+        score += 0.7 * candidate.test_result.score
+
+    candidate.score = score
+    return score
+</div>
+
+<h3>2.5 Majority-Vote Reranking (Agentless Upgrade)</h3>
+<div class="key">
+  <strong>Research insight (Agentless, ICLR 2025):</strong> After test-filtering candidates, use AST-normalized majority voting — not just "highest score" — to pick the final patch. Two independently-generated patches that produce the same AST diff are stronger evidence of correctness than one high-scoring outlier. This is how Agentless achieves robustness.
+</div>
+
+<div class="code-block">
+import ast
+import difflib
+
+def _normalize_patch(self, old_content: str, new_content: str) -> str:
+    """
+    Normalize patch for majority voting.
+    Strips docstrings, normalizes whitespace, computes canonical diff.
+    Based on Agentless patch normalization.
+    """
+    def canonicalize(source: str) -> str:
+        try:
+            tree = ast.parse(source)
+            # Remove docstrings (they're surface-level differences)
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                      ast.ClassDef, ast.Module)):
+                    if (node.body and isinstance(node.body[0], ast.Expr)
+                            and isinstance(node.body[0].value, ast.Constant)):
+                        node.body.pop(0)
+            return ast.unparse(tree)  # canonical source format
+        except SyntaxError:
+            return source.strip()
+
+    old_canon = canonicalize(old_content)
+    new_canon = canonicalize(new_content)
+    diff = list(difflib.unified_diff(
+        old_canon.splitlines(), new_canon.splitlines(), lineterm=""
+    ))
+    return '\n'.join(diff)
+
+def _select_by_majority_vote(
+    self,
+    candidates: list["PatchCandidate"],
+    original_content: str,
+) -> "PatchCandidate":
+    """
+    Select the best candidate using Agentless-style majority voting.
+    1. Normalize each patch (AST canonical form → diff)
+    2. Count normalized patch occurrences
+    3. Select the patch with highest occurrence count
+    4. Tiebreak: highest test score
+    """
+    # First: filter to only test-passing candidates
+    passing = [c for c in candidates if c.test_result and c.test_result.score >= 1.0]
+    pool = passing if passing else candidates  # fallback to all if none pass
+
+    if not pool:
+        return candidates[0] if candidates else None
+
+    # Normalize each candidate
+    norm_map: dict[str, list["PatchCandidate"]] = {}
+    for c in pool:
+        key = self._normalize_patch(original_content, c.new_content)
+        if key not in norm_map:
+            norm_map[key] = []
+        norm_map[key].append(c)
+
+    # Majority vote: largest group wins
+    best_group = max(norm_map.values(), key=lambda g: (len(g), max(c.score for c in g)))
+    # Tiebreak within group: highest test score
+    return max(best_group, key=lambda c: c.score)
+</div>
+
+<h3>2.6 Updated execute_with_sampling() using Majority Vote</h3>
+<div class="code-block">
+def execute_with_sampling(
+    self, task: dict, file_content: str, n_samples: int = 3
+) -> dict:
+    """
+    Agentless-style: sample N → test filter → majority vote.
+    Gate: AWOS_PARALLEL_SAMPLING=true and task.complexity >= 5
+    """
+    # 1. Sample N candidates in parallel
+    candidates = self._sample_candidates(task, file_content, n_samples)
+    if not candidates:
+        return self.execute_task(task, file_content)  # fallback
+
+    # 2. Filter by test results (already done inside _sample_candidates scoring)
+    # 3. Majority vote reranking
+    best = self._select_by_majority_vote(candidates, file_content)
+
+    return {
+        "edits": best.edits,
+        "new_content": best.new_content,
+        "score": best.score,
+        "test_result": best.test_result,
+        "n_candidates": len(candidates),
+        "method": "parallel_sampling_majority_vote",
+    }
+</div>
+
+<h3>2.7 Cost Impact</h3>
+<table>
+  <tr><th>Scenario</th><th>Without Parallel Sampling</th><th>With (N=2)</th><th>Cost increase</th></tr>
+  <tr><td>L3 task, first try success</td><td>1 worker call</td><td>2 worker calls</td><td>+100% (but rarely needed)</td></tr>
+  <tr><td>L3 task, currently fails &amp; retries 3x</td><td>3 worker calls</td><td>2 calls (picks best)</td><td>-33%</td></tr>
+  <tr><td>L4 task</td><td>4-5 retries</td><td>2 parallel → best</td><td>-40%</td></tr>
+</table>
+<div class="ok">Net effect: parallel sampling often REDUCES total cost for complex tasks because it avoids the retry loop.</div>
+
+<!-- ========================================================= -->
+<h2 id="p23">3. P2.3 — Git Worktree Isolation</h2>
+
+<h3>3.1 Why Worktrees</h3>
+<p>Git worktrees allow multiple working directories from the same repository. Each directory is fully independent but shares git history. This enables:</p>
+<ul>
+  <li><strong>Safe parallel execution</strong>: Two parallel sampling attempts don't conflict</li>
+  <li><strong>Easy rollback</strong>: Failed feature? Just remove the worktree</li>
+  <li><strong>Clean diffs</strong>: <code>git diff</code> between worktree and main branch shows exactly what changed</li>
+  <li><strong>No dirty main</strong>: Main working directory stays clean during agent runs</li>
+</ul>
+
+<h3>3.2 Worktree Lifecycle</h3>
+<div class="code-block">
+class WorktreeManager:
+    def __init__(self, repo_root: str):
+        self.repo_root = repo_root
+        self.worktrees: dict[str, str] = {}  # feature_id → worktree_path
+
+    def create_worktree(self, feature_id: str) -> str:
+        """Create a git worktree for a feature execution."""
+        # Sanitize feature_id for use as branch name
+        branch_name = f"awos/feature/{feature_id[:20].replace(' ', '-')}"
+        worktree_path = Path(self.repo_root) / ".awos" / "worktrees" / feature_id
+
+        # Create new branch + worktree
+        subprocess.run([
+            "git", "worktree", "add",
+            "-b", branch_name,
+            str(worktree_path),
+            "HEAD",
+        ], cwd=self.repo_root, check=True)
+
+        self.worktrees[feature_id] = str(worktree_path)
+        return str(worktree_path)
+
+    def get_diff(self, feature_id: str) -> str:
+        """Get the diff of all changes made in this worktree."""
+        worktree_path = self.worktrees[feature_id]
+        result = subprocess.run(
+            ["git", "diff", "HEAD"],
+            capture_output=True, text=True, cwd=worktree_path,
+        )
+        return result.stdout
+
+    def commit_worktree(self, feature_id: str, message: str) -> str:
+        """Commit changes in worktree. Returns commit hash."""
+        worktree_path = self.worktrees[feature_id]
+        subprocess.run(["git", "add", "-A"], cwd=worktree_path, check=True)
+        subprocess.run(["git", "commit", "-m", message], cwd=worktree_path, check=True)
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, cwd=worktree_path,
+        )
+        return result.stdout.strip()
+
+    def merge_to_main(self, feature_id: str) -> bool:
+        """Merge worktree branch to current branch."""
+        branch = f"awos/feature/{feature_id[:20].replace(' ', '-')}"
+        result = subprocess.run(
+            ["git", "merge", branch, "--no-ff", "-m", f"Merge AWOS feature: {feature_id}"],
+            capture_output=True, text=True, cwd=self.repo_root,
+        )
+        return result.returncode == 0
+
+    def cleanup_worktree(self, feature_id: str) -> None:
+        """Remove worktree and its branch."""
+        if feature_id not in self.worktrees:
+            return
+        worktree_path = self.worktrees[feature_id]
+        branch = f"awos/feature/{feature_id[:20].replace(' ', '-')}"
+        subprocess.run(
+            ["git", "worktree", "remove", "--force", worktree_path],
+            cwd=self.repo_root
+        )
+        subprocess.run(
+            ["git", "branch", "-D", branch],
+            cwd=self.repo_root
+        )
+        del self.worktrees[feature_id]
+</div>
+
+<h3>3.3 Integration into Orchestrator</h3>
+<div class="code-block">
+def execute_feature(self, goal: str, codebase_context: dict, ...) -> dict:
+    use_worktree = os.getenv("AWOS_USE_WORKTREE", "false").lower() == "true"
+
+    if use_worktree:
+        feature_id = hashlib.md5(goal.encode()).hexdigest()[:8]
+        wm = WorktreeManager(self.project_root)
+        worktree_path = wm.create_worktree(feature_id)
+
+        try:
+            # Run all tasks in worktree
+            result = self._execute_feature_in_path(
+                goal=goal,
+                working_dir=worktree_path,
+                codebase_context=codebase_context,
+            )
+
+            if result["success"]:
+                diff = wm.get_diff(feature_id)
+                result["diff"] = diff
+                wm.commit_worktree(feature_id, f"AWOS: {goal[:80]}")
+                # Optionally merge: wm.merge_to_main(feature_id)
+
+        finally:
+            wm.cleanup_worktree(feature_id)
+
+        return result
+    else:
+        return self._execute_feature_in_path(goal, self.project_root, codebase_context)
+</div>
+
+<h3>3.4 Worktree + Parallel Sampling Together</h3>
+<p>For parallel sampling (P2.2), each candidate gets its own worktree:</p>
+<div class="code-block">
+# Each candidate runs in its own worktree
+worktrees = []
+for i, temperature in enumerate(temperatures):
+    wt_path = wm.create_worktree(f"{feature_id}_candidate_{i}")
+    worktrees.append(wt_path)
+
+# Run candidates in parallel, each in own worktree
+with ThreadPoolExecutor(max_workers=len(temperatures)) as executor:
+    futures = [
+        executor.submit(generate_and_test, task, worktree_path)
+        for worktree_path in worktrees
+    ]
+    candidates = [f.result() for f in futures]
+
+# Select best, apply to main worktree
+best = max(candidates, key=lambda c: c.score)
+
+# Cleanup losers
+for i, wt in enumerate(worktrees):
+    if candidates[i] != best:
+        wm.cleanup_worktree(f"{feature_id}_candidate_{i}")
+</div>
+
+<!-- ========================================================= -->
+<h2 id="p24">4. P2.4 — Condensed History (ACI-style)</h2>
+
+<h3>4.1 The SWE-Agent Insight</h3>
+<div class="key">
+  SWE-Agent keeps only the <strong>last 5 steps condensed</strong> in context. This forces the model to work from current state, not from accumulating history. For AWOS: keep only last N task summaries, not full task bodies.
+</div>
+
+<h3>4.2 Current vs New Context Structure</h3>
+<table>
+  <tr><th>Item</th><th>Current AWOS</th><th>New (ACI-style)</th></tr>
+  <tr><td>Task 1 result</td><td>Full 500-word description</td><td>2-line summary: "Added snapshot() to ToolPerformanceTracker in tool_performance.py"</td></tr>
+  <tr><td>Task 2 result</td><td>Full description + code snippet</td><td>2-line summary + key symbols only</td></tr>
+  <tr><td>Task 3+ result</td><td>Cumulative full context</td><td>Compressed to bullet points after N=3</td></tr>
+  <tr><td>Token cost</td><td>~600 tokens/task (grows unbounded)</td><td>~50 tokens/task (capped)</td></tr>
+</table>
+
+<h3>4.3 Implementation</h3>
+<div class="code-block">
+MAX_TASK_HISTORY = 3       # Show full summaries for last 3 tasks
+SUMMARY_TOKENS_CAP = 600   # Maximum tokens for all task history
+
+def _build_task_history_context(
+    self,
+    completed_tasks: list[TaskSummary],
+    current_task_index: int,
+) -> str:
+    """Build compact task history for injection into worker prompt."""
+
+    if not completed_tasks:
+        return ""
+
+    # Last MAX_TASK_HISTORY tasks: show full summary
+    recent = completed_tasks[-MAX_TASK_HISTORY:]
+    # Older tasks: compress to one line each
+    older = completed_tasks[:-MAX_TASK_HISTORY]
+
+    lines = ["## Previous Task Results (session context):"]
+
+    # Older tasks — very compressed
+    if older:
+        lines.append(f"Earlier: {len(older)} tasks completed in: {', '.join(set(t.file for t in older))}")
+
+    # Recent tasks — more detail
+    for task in recent:
+        icon = "✅" if task.status == "completed" else "❌"
+        lines.append(f"{icon} [{task.task_id}] {task.key_change}")
+        if task.new_symbols:
+            lines.append(f"   → New: {', '.join(task.new_symbols)}")
+
+    return '\n'.join(lines)
+</div>
+
+<!-- ========================================================= -->
+<h2 id="tests">5. Test Plan</h2>
+
+<h3>5.1 Test File: <code>tests/test_p2_improvements.py</code></h3>
+
+<div class="test-case">
+  <strong>test_planner_singleton</strong> — Two calls to get_planner() return same instance
+</div>
+<div class="test-case">
+  <strong>test_planner_system_block_stable</strong> — system block bytes identical across two Planner instances
+</div>
+<div class="test-case">
+  <strong>test_planner_haiku_routing_simple</strong> — simple goal → uses haiku model
+</div>
+<div class="test-case">
+  <strong>test_planner_sonnet_routing_complex</strong> — "refactor architecture" goal → uses sonnet
+</div>
+<div class="test-case">
+  <strong>test_parallel_sampling_returns_n</strong> — with N=2, 2 candidates generated
+</div>
+<div class="test-case">
+  <strong>test_parallel_sampling_selects_best</strong> — candidate with higher test score selected
+</div>
+<div class="test-case">
+  <strong>test_parallel_sampling_handles_one_failure</strong> — if one candidate fails, other selected
+</div>
+<div class="test-case">
+  <strong>test_worktree_create_cleanup</strong> — create + cleanup leaves no worktree artifacts (git worktree list unchanged)
+</div>
+<div class="test-case">
+  <strong>test_worktree_diff</strong> — after editing file in worktree, get_diff() returns non-empty diff
+</div>
+<div class="test-case">
+  <strong>test_worktree_commit</strong> — commit_worktree() creates a commit, returns hash
+</div>
+<div class="test-case">
+  <strong>test_condensed_history_short</strong> — 2 tasks → full summaries shown
+</div>
+<div class="test-case">
+  <strong>test_condensed_history_long</strong> — 10 tasks → older tasks compressed to one line
+</div>
+<div class="test-case">
+  <strong>test_condensed_history_token_budget</strong> — output never exceeds SUMMARY_TOKENS_CAP tokens
+</div>
+
+<!-- ========================================================= -->
+<h2 id="risks">6. Risks &amp; Mitigations</h2>
+
+<table>
+  <tr><th>Risk</th><th>Likelihood</th><th>Mitigation</th></tr>
+  <tr><td>Singleton Planner holds stale API key if rotated</td><td>Low</td><td>Add reset_planner() function; singleton recreates on ValueError</td></tr>
+  <tr><td>Parallel sampling doubles cost on simple L3 tasks that succeed first try</td><td>Medium</td><td>Only sample if complexity="high" or previous attempt failed; gate behind env var AWOS_PARALLEL_SAMPLING=true</td></tr>
+  <tr><td>Worktree left behind on crash</td><td>Medium</td><td>try/finally around worktree lifecycle; add cleanup_stale_worktrees() on startup</td></tr>
+  <tr><td>git not installed or not a git repo</td><td>Low</td><td>WorktreeManager checks git availability at init; falls back to in-place execution gracefully</td></tr>
+  <tr><td>Thread safety issues with parallel worker calls</td><td>Medium</td><td>Each thread gets its own WorktreeManager and Verifier instance; no shared mutable state</td></tr>
+  <tr><td>Condensed history loses critical context</td><td>Low</td><td>Key symbols and modified files always preserved even in compressed form</td></tr>
+</table>
+
+<hr style="margin: 3rem 0; border-color: #dee2e6;">
+<p style="color: #888; font-size: 0.85rem;">P2 Spec | AWOS Coding Agent | 2026-05-22 | Total effort: 11h | Next: P3 Spec (LSP, Skills, Repo Map)</p>
+
+</body>
+</html>

@@ -1,0 +1,6 @@
+{
+  "action": "midpoint() must return an integer index, not a float.",
+  "file": "buggy.py",
+  "task_id": 1,
+  "complexity": "medium"
+}

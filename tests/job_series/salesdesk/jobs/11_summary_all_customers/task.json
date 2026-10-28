@@ -1,0 +1,7 @@
+{
+  "id": "11_summary_all_customers",
+  "goal": "For our morning stand-up I want one screen with every merchant. Add a `summary` command that prints one line per registered customer, sorted by customer id, like `acme  2026-03-10  orders: 2  total: $40.00` (customer id, day, number of orders, total). By default each line is that merchant's today; with --day YYYY-MM-DD it's that date for every merchant. The numbers must be exactly what `report` would show for that merchant and day, and amounts in each merchant's own currency. With no customers at all print `no customers`. Bad input is reported like everywhere else.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

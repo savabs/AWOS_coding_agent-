@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>P1.5 Spec — Agentless-Style Hierarchical Fault Localization</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 1100px; margin: 0 auto; padding: 2rem; color: #1a1a2e; background: #f8f9fa; }
+  h1 { color: #0d1b2a; border-bottom: 3px solid #e67e22; padding-bottom: 0.5rem; }
+  h2 { color: #1d3557; border-left: 4px solid #e67e22; padding-left: 0.75rem; margin-top: 2.5rem; }
+  h3 { color: #2c3e50; margin-top: 1.5rem; }
+  .meta { background: #1d3557; color: #a8dadc; padding: 1rem 1.5rem; border-radius: 8px; margin-bottom: 2rem; font-size: 0.9rem; }
+  .meta span { margin-right: 2rem; }
+  .code-block { background: #0d1b2a; color: #a8dadc; padding: 1rem 1.5rem; border-radius: 6px; font-family: 'Courier New', monospace; font-size: 0.85rem; overflow-x: auto; margin: 1rem 0; line-height: 1.6; }
+  .key { background: #fef3e2; border-left: 4px solid #e67e22; padding: 1rem 1.5rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .research { background: #e8f4f8; border-left: 4px solid #2980b9; padding: 1rem 1.5rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+  th { background: #1d3557; color: white; padding: 0.6rem 1rem; text-align: left; }
+  td { padding: 0.6rem 1rem; border-bottom: 1px solid #dee2e6; vertical-align: top; }
+  tr:nth-child(even) td { background: #f1f3f5; }
+  .savings { background: #d4edda; border: 1px solid #28a745; padding: 1rem 1.5rem; border-radius: 6px; margin: 1rem 0; }
+  .test-case { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 0.75rem 1rem; margin: 0.5rem 0; }
+  ul li, ol li { margin: 0.4rem 0; }
+  .toc { background: #fff; border: 1px solid #dee2e6; border-radius: 6px; padding: 1.5rem; margin-bottom: 2rem; }
+  .toc a { color: #1d3557; text-decoration: none; }
+  .flow { background: #fff; border: 2px solid #e67e22; border-radius: 8px; padding: 1.5rem; margin: 1rem 0; font-family: monospace; font-size: 0.85rem; line-height: 2; }
+</style>
+</head>
+<body>
+
+<h1>🔍 P1.5 Spec — Agentless-Style Hierarchical Fault Localization</h1>
+<div class="meta">
+  <span>📅 2026-05-22</span>
+  <span>🎯 Priority: P1.5 (After P1, before P2)</span>
+  <span>⏱ Est. 5h total</span>
+  <span>📂 New: fault_localizer.py (~250 LOC)</span>
+  <span>📊 Impact: 60-80% context reduction, better edit accuracy</span>
+</div>
+
+<div class="research">
+  <strong>📰 Research Basis (verified):</strong>
+  <ul>
+    <li><strong>Agentless</strong> (arXiv 2407.01489, ICLR 2025) — 3-step hierarchical localization is the core mechanism enabling ~27-33% SWE-bench Lite resolve rate at low cost. Confirmed: file → skeleton → edit location pipeline.</li>
+    <li><strong>HiLoRM</strong> (EMNLP 2025 Findings, ACL Anthology) — Hierarchical Reward Modeling for Fault Localization: +12% line-level localization recall on SWE-bench-Lite vs baseline.</li>
+    <li><strong>ICLR 2025 RepoGraph paper</strong> — confirms Agentless hierarchical localization outperforms flat embedding search in every metric.</li>
+  </ul>
+</div>
+
+<div class="toc">
+  <strong>Contents</strong>
+  <ul>
+    <li><a href="#problem">1. Problem</a></li>
+    <li><a href="#approach">2. The Three-Level Approach</a></li>
+    <li><a href="#impl">3. Implementation: FaultLocalizer</a></li>
+    <li><a href="#skeleton">4. Skeleton Format Builder</a></li>
+    <li><a href="#integration">5. Integration</a></li>
+    <li><a href="#tests">6. Test Plan</a></li>
+  </ul>
+</div>
+
+<!-- ====================================================== -->
+<h2 id="problem">1. Problem</h2>
+
+<div class="key">
+  <strong>Current AWOS flow:</strong> Worker receives entire file content (up to 300+ lines) + CodebaseIndex raw results (up to 4,000 tokens). The LLM must figure out WHERE to edit from all this noise.<br><br>
+  <strong>Root cause of edit failures:</strong> Not that the LLM can't write the fix — it's that it's attending to the wrong part of the file. Give it just the relevant 5 functions and first-attempt success rate jumps significantly.
+</div>
+
+<p>What AWOS currently does vs. what Agentless does:</p>
+
+<table>
+  <tr><th>Step</th><th>AWOS (current)</th><th>Agentless / P1.5 target</th></tr>
+  <tr><td>Find relevant files</td><td>CodebaseIndex vector search (flat)</td><td>Repo structure format → LLM picks top-N files</td></tr>
+  <tr><td>Find relevant functions</td><td>Return raw chunk text (mixed content)</td><td>Skeleton format (signatures only) → LLM picks functions</td></tr>
+  <tr><td>Find edit location</td><td>Worker figures it out from full context</td><td>Function bodies → LLM identifies (file, line_start, line_end)</td></tr>
+  <tr><td>Context tokens to worker</td><td>2,000–8,000 (unfiltered)</td><td>300–800 (just relevant function bodies)</td></tr>
+</table>
+
+<!-- ====================================================== -->
+<h2 id="approach">2. The Three-Level Approach</h2>
+
+<div class="flow">
+INPUT: task_action + error_trace + project_root
+      │
+      ▼
+LEVEL 1 — File Localization
+  Repo structure format (dir tree, no code content)
+  + task_action
+  → cheap LLM call
+  → top-3 suspicious files
+      │
+      ▼
+LEVEL 2 — Symbol Localization
+  Skeleton format of top-3 files
+  (class headers + method signatures + docstrings only)
+  + task_action + error_trace
+  → cheap LLM call
+  → list of (file, symbol_name) pairs
+      │
+      ▼
+LEVEL 3 — Edit Location Identification
+  Full body of selected symbols only
+  + task_action + error_trace
+  → cheap LLM call
+  → list of EditLocation(file, start_line, end_line, confidence, reason)
+      │
+      ▼
+OUTPUT: [EditLocation, ...] — passed to worker as focused context
+</div>
+
+<h3>2.1 Cost Analysis</h3>
+<table>
+  <tr><th>Step</th><th>Tokens In</th><th>Model</th><th>Cost (DeepSeek)</th></tr>
+  <tr><td>L1: File localization</td><td>~500 (repo tree)</td><td>T1 Gemini Flash</td><td>~$0.0001</td></tr>
+  <tr><td>L2: Symbol localization</td><td>~1,000 (skeletons)</td><td>T1 Gemini Flash</td><td>~$0.0002</td></tr>
+  <tr><td>L3: Edit location</td><td>~800 (function bodies)</td><td>T2 DeepSeek</td><td>~$0.0001</td></tr>
+  <tr><td><strong>Total overhead</strong></td><td><strong>~2,300</strong></td><td>—</td><td><strong>~$0.0004</strong></td></tr>
+  <tr><td><strong>Saving on worker</strong></td><td><strong>-5,000 context tokens</strong></td><td>—</td><td><strong>-~$0.003</strong></td></tr>
+</table>
+
+<div class="savings">
+  💰 <strong>Net: ~8x more expensive to localize, but saves ~8x on worker context = break-even on cost + significantly better accuracy.</strong>
+</div>
+
+<!-- ====================================================== -->
+<h2 id="impl">3. Implementation: FaultLocalizer</h2>
+
+<div class="code-block">
+# scaffold/agent/fault_localizer.py
+
+from dataclasses import dataclass, field
+from pathlib import Path
+import ast
+
+@dataclass
+class EditLocation:
+    file: str
+    start_line: int
+    end_line: int
+    symbol_name: str     # function or class name
+    confidence: float    # 0.0–1.0
+    reason: str          # LLM explanation
+
+@dataclass
+class LocalizationResult:
+    task_action: str
+    suspicious_files: list[str]              # L1 output
+    suspicious_symbols: list[tuple[str,str]] # L2 output: [(file, symbol_name)]
+    edit_locations: list[EditLocation]       # L3 output
+    total_context_tokens: int                # how much was used
+
+
+class FaultLocalizer:
+    """
+    Three-level hierarchical localization. Agentless architecture.
+    Cheap calls (Gemini Flash / DeepSeek) only.
+    """
+
+    def __init__(self, project_root: str, cheap_llm_caller, mid_llm_caller=None):
+        self.project_root = Path(project_root)
+        self.cheap_llm = cheap_llm_caller   # Gemini Flash (T1)
+        self.mid_llm   = mid_llm_caller or cheap_llm_caller  # DeepSeek (T2)
+
+    # ─── PUBLIC API ───────────────────────────────────────────────
+
+    def localize(
+        self,
+        task_action: str,
+        error_trace: str = "",
+        top_files: int = 3,
+        top_symbols: int = 8,
+    ) -> LocalizationResult:
+        """
+        Run all three levels. Returns edit locations with confidence scores.
+        Falls back gracefully: if any level fails, use what's available.
+        """
+        # Level 1
+        suspicious_files = self._localize_files(task_action, error_trace, top_files)
+        if not suspicious_files:
+            return LocalizationResult(task_action, [], [], [], 0)
+
+        # Level 2
+        suspicious_symbols = self._localize_symbols(
+            task_action, error_trace, suspicious_files, top_symbols
+        )
+        if not suspicious_symbols:
+            # Fall back: return file-level result only
+            return LocalizationResult(task_action, suspicious_files, [], [], 0)
+
+        # Level 3
+        edit_locations = self._localize_edit_lines(
+            task_action, error_trace, suspicious_symbols
+        )
+
+        total_tokens = self._estimate_context_tokens(edit_locations)
+        return LocalizationResult(
+            task_action=task_action,
+            suspicious_files=suspicious_files,
+            suspicious_symbols=suspicious_symbols,
+            edit_locations=edit_locations,
+            total_context_tokens=total_tokens,
+        )
+
+    def format_for_worker(self, result: LocalizationResult) -> str:
+        """
+        Format localization result as the focused context block for worker.
+        Replaces the raw CodebaseIndex dump.
+        """
+        if not result.edit_locations:
+            return ""
+
+        lines = ["## Localized Edit Targets:\n"]
+        for loc in result.edit_locations[:5]:  # max 5 locations
+            body = self._extract_lines(loc.file, loc.start_line, loc.end_line)
+            lines.append(f"### {loc.file}:{loc.start_line}-{loc.end_line} — `{loc.symbol_name}`")
+            lines.append(f"_Confidence: {loc.confidence:.0%} | Reason: {loc.reason}_")
+            lines.append(f"```python\n{body}\n```\n")
+        return '\n'.join(lines)
+</div>
+
+<!-- ====================================================== -->
+<h2 id="skeleton">4. Key Private Methods</h2>
+
+<h3>4.1 Level 1 — File Localization</h3>
+<div class="code-block">
+def _build_repo_structure(self) -> str:
+    """
+    Build Agentless-style repo structure format.
+    Directory tree with file names, no code content.
+    """
+    lines = []
+    for path in sorted(self.project_root.rglob("*.py")):
+        # Skip test dirs, __pycache__, venv
+        parts = path.parts
+        if any(p in parts for p in ("__pycache__", ".venv", "venv", "node_modules")):
+            continue
+        rel = path.relative_to(self.project_root)
+        indent = "  " * (len(rel.parts) - 1)
+        lines.append(f"{indent}{rel}")
+    return '\n'.join(lines)
+
+def _localize_files(
+    self, task_action: str, error_trace: str, top_n: int
+) -> list[str]:
+    """Level 1: cheap LLM call to identify suspicious files."""
+    repo_structure = self._build_repo_structure()
+
+    prompt = f"""You are a fault localization assistant.
+
+Repository structure:
+{repo_structure}
+
+Task: {task_action}
+{"Error trace: " + error_trace if error_trace else ""}
+
+List the top {top_n} files most likely to need editing to complete this task.
+Reply with ONLY a JSON array of file paths relative to project root:
+["path/to/file1.py", "path/to/file2.py"]
+"""
+    response = self.cheap_llm(prompt, max_tokens=200)
+    try:
+        import json, re
+        match = re.search(r'\[.*\]', response, re.DOTALL)
+        if match:
+            files = json.loads(match.group())
+            # Validate all paths exist
+            return [f for f in files if (self.project_root / f).exists()][:top_n]
+    except Exception:
+        pass
+    return []
+</div>
+
+<h3>4.2 Level 2 — Symbol Localization (Skeleton Format)</h3>
+<div class="code-block">
+def _build_skeleton(self, file_path: str) -> str:
+    """
+    Build Agentless skeleton format: class/function headers + signatures only.
+    No function bodies. Much cheaper to send than full file.
+    """
+    try:
+        source = (self.project_root / file_path).read_text()
+        tree = ast.parse(source)
+    except (SyntaxError, OSError):
+        return ""
+
+    lines = source.split('\n')
+    skeleton_lines = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            # Signature line only
+            sig_line = lines[node.lineno - 1].strip()
+            skeleton_lines.append(
+                f"  {sig_line}  # lines {node.lineno}-{node.end_lineno}"
+            )
+            # First docstring line if present
+            if (node.body and isinstance(node.body[0], ast.Expr)
+                    and isinstance(node.body[0].value, ast.Constant)):
+                doc = node.body[0].value.value.split('\n')[0].strip()
+                skeleton_lines.append(f'    """{doc}"""')
+
+        elif isinstance(node, ast.ClassDef):
+            skeleton_lines.append(
+                f"class {node.name}:  # lines {node.lineno}-{node.end_lineno}"
+            )
+
+    return '\n'.join(skeleton_lines)
+
+def _localize_symbols(
+    self, task_action: str, error_trace: str,
+    files: list[str], top_n: int,
+) -> list[tuple[str, str]]:
+    """Level 2: LLM identifies relevant symbols from skeleton."""
+    skeletons = []
+    for f in files:
+        sk = self._build_skeleton(f)
+        if sk:
+            skeletons.append(f"## {f}\n{sk}")
+
+    if not skeletons:
+        return []
+
+    prompt = f"""You are a fault localization assistant.
+
+Task: {task_action}
+{"Error trace: " + error_trace if error_trace else ""}
+
+Code structure of relevant files:
+{chr(10).join(skeletons)}
+
+List the top {top_n} functions or classes most likely to need editing.
+Reply with ONLY a JSON array: [["file_path", "symbol_name"], ...]
+"""
+    response = self.cheap_llm(prompt, max_tokens=300)
+    try:
+        import json, re
+        match = re.search(r'\[.*\]', response, re.DOTALL)
+        if match:
+            symbols = json.loads(match.group())
+            return [(s[0], s[1]) for s in symbols if len(s) == 2][:top_n]
+    except Exception:
+        pass
+    return []
+</div>
+
+<h3>4.3 Level 3 — Edit Location (Line-Level)</h3>
+<div class="code-block">
+def _localize_edit_lines(
+    self, task_action: str, error_trace: str,
+    symbols: list[tuple[str, str]],
+) -> list[EditLocation]:
+    """Level 3: Extract exact function bodies, ask for line-level locations."""
+    bodies = []
+    symbol_meta = {}
+
+    for file_path, symbol_name in symbols:
+        body, start, end = self._extract_symbol_body(file_path, symbol_name)
+        if body:
+            bodies.append(f"## {file_path}::{symbol_name} (lines {start}-{end})\n{body}")
+            symbol_meta[f"{file_path}::{symbol_name}"] = (file_path, start, end)
+
+    if not bodies:
+        return []
+
+    prompt = f"""You are a fault localization assistant.
+
+Task: {task_action}
+{"Error trace: " + error_trace if error_trace else ""}
+
+Relevant code:
+{chr(10).join(bodies[:5])}
+
+Identify the exact edit locations. Reply ONLY with JSON:
+[
+  {{
+    "file": "path/to/file.py",
+    "symbol_name": "function_name",
+    "start_line": 42,
+    "end_line": 58,
+    "confidence": 0.9,
+    "reason": "brief reason why this needs editing"
+  }}
+]
+"""
+    response = self.mid_llm(prompt, max_tokens=400)
+    try:
+        import json, re
+        match = re.search(r'\[.*\]', response, re.DOTALL)
+        if match:
+            locs = json.loads(match.group())
+            result = []
+            for loc in locs:
+                result.append(EditLocation(
+                    file=loc["file"],
+                    start_line=loc.get("start_line", 1),
+                    end_line=loc.get("end_line", 1),
+                    symbol_name=loc.get("symbol_name", ""),
+                    confidence=float(loc.get("confidence", 0.7)),
+                    reason=loc.get("reason", ""),
+                ))
+            return result
+    except Exception:
+        pass
+    return []
+
+def _extract_symbol_body(
+    self, file_path: str, symbol_name: str
+) -> tuple[str, int, int]:
+    """Extract full body of a named function/class. Returns (body, start, end)."""
+    try:
+        source = (self.project_root / file_path).read_text()
+        tree = ast.parse(source)
+        lines = source.split('\n')
+    except (SyntaxError, OSError):
+        return "", 0, 0
+
+    for node in ast.walk(tree):
+        if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                and node.name == symbol_name):
+            body = '\n'.join(lines[node.lineno - 1:node.end_lineno])
+            return body, node.lineno, node.end_lineno
+    return "", 0, 0
+
+def _extract_lines(self, file_path: str, start: int, end: int) -> str:
+    """Extract lines start..end from file."""
+    try:
+        lines = (self.project_root / file_path).read_text().split('\n')
+        return '\n'.join(lines[start - 1:end])
+    except OSError:
+        return ""
+
+def _estimate_context_tokens(self, locations: list[EditLocation]) -> int:
+    total = 0
+    for loc in locations:
+        body = self._extract_lines(loc.file, loc.start_line, loc.end_line)
+        total += int(len(body.split()) * 1.3)
+    return total
+</div>
+
+<!-- ====================================================== -->
+<h2 id="integration">5. Integration into Orchestrator</h2>
+
+<div class="code-block">
+# In orchestrator.py — _execute_single_task():
+
+# BEFORE (current):
+context = self.codebase_index.query_code(task["action"], n_results=5)
+# → sends 2,000-8,000 tokens of mixed content to worker
+
+# AFTER (P1.5):
+localizer = FaultLocalizer(
+    project_root=self.project_root,
+    cheap_llm_caller=self._cheap_call,    # Gemini Flash
+    mid_llm_caller=self._mid_call,        # DeepSeek
+)
+loc_result = localizer.localize(
+    task_action=task["action"],
+    error_trace=task.get("error_trace", ""),
+)
+focused_context = localizer.format_for_worker(loc_result)
+# → sends 300-800 tokens of precisely targeted function bodies
+
+# Inject into task for worker
+task["focused_context"] = focused_context
+task["edit_locations"] = loc_result.edit_locations
+</div>
+
+<h3>5.1 Worker Receives EditLocations (Block B)</h3>
+<div class="code-block">
+# In worker._build_file_and_rag_context() (P2.1.5):
+# If task has "focused_context", use that instead of raw RAG:
+
+if task.get("focused_context"):
+    # Use localizer output — already budgeted and focused
+    return task["focused_context"]
+else:
+    # Fall back to P2 three-block RAG approach
+    return self._build_rag_context(file_content, task, codebase_index)
+</div>
+
+<!-- ====================================================== -->
+<h2 id="tests">6. Test Plan</h2>
+
+<p>New file: <code>tests/test_fault_localizer.py</code> (~12 tests)</p>
+
+<div class="test-case"><strong>test_build_repo_structure</strong> — project with nested dirs → correct indented format, no pycache, no venv</div>
+<div class="test-case"><strong>test_build_skeleton_simple</strong> — file with 2 functions → skeleton has signatures only, no bodies</div>
+<div class="test-case"><strong>test_build_skeleton_class</strong> — file with class + methods → class header + method signatures in skeleton</div>
+<div class="test-case"><strong>test_extract_symbol_body</strong> — known function name → returns correct lines and line numbers</div>
+<div class="test-case"><strong>test_extract_symbol_body_not_found</strong> — unknown symbol → returns ("", 0, 0), no exception</div>
+<div class="test-case"><strong>test_localize_files_valid_json</strong> — mock LLM returns valid JSON array → files parsed, non-existent filtered out</div>
+<div class="test-case"><strong>test_localize_files_malformed_json</strong> — mock LLM returns garbage → returns [], no exception</div>
+<div class="test-case"><strong>test_localize_symbols_parses_result</strong> — mock LLM returns [["file","func"]] → correct list returned</div>
+<div class="test-case"><strong>test_localize_edit_lines_parses_result</strong> — mock LLM returns EditLocation JSON → EditLocation dataclass populated</div>
+<div class="test-case"><strong>test_full_localize_pipeline</strong> — all three levels with mock LLMs → LocalizationResult has all fields populated</div>
+<div class="test-case"><strong>test_format_for_worker</strong> — LocalizationResult with 3 locations → formatted string has code blocks + confidence</div>
+<div class="test-case"><strong>test_empty_project_graceful</strong> — project_root with no .py files → returns empty LocalizationResult, no crash</div>
+
+<hr style="margin: 3rem 0; border-color: #dee2e6;">
+<p style="color: #888; font-size: 0.85rem;">P1.5 Spec | AWOS Hierarchical Localization | 2026-05-22 | 5h | Based on Agentless (ICLR 2025, arXiv 2407.01489)</p>
+</body>
+</html>

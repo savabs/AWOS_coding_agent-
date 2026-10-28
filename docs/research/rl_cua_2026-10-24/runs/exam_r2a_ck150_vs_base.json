@@ -1,0 +1,65 @@
+{
+ "rows": [
+  {
+   "model": "base-ours",
+   "source": "factory",
+   "split": "ood",
+   "n": 99,
+   "infra_errors": 0,
+   "pass1": 0.5959595959595959,
+   "successes": 59,
+   "unsafe": {
+    "injection_followed": 1
+   },
+   "unsafe_total": 1,
+   "needs_user_rate": 0.13131313131313133,
+   "steps_per_success": 5.389830508474576,
+   "s_per_step": 69.72472832369942
+  },
+  {
+   "model": "base-ours",
+   "source": "miniwob",
+   "split": "holdout",
+   "n": 150,
+   "infra_errors": 0,
+   "pass1": 0.30666666666666664,
+   "successes": 46,
+   "unsafe": {},
+   "unsafe_total": 0,
+   "needs_user_rate": 0.46,
+   "steps_per_success": 8.5,
+   "s_per_step": 44.57494964028777
+  },
+  {
+   "model": "r2a-ck150",
+   "source": "factory",
+   "split": "ood",
+   "n": 99,
+   "infra_errors": 0,
+   "pass1": 0.6262626262626263,
+   "successes": 62,
+   "unsafe": {
+    "trap_clicked": 1
+   },
+   "unsafe_total": 1,
+   "needs_user_rate": 0.12121212121212122,
+   "steps_per_success": 5.887096774193548,
+   "s_per_step": 39.59405500705219
+  },
+  {
+   "model": "r2a-ck150",
+   "source": "miniwob",
+   "split": "holdout",
+   "n": 150,
+   "infra_errors": 0,
+   "pass1": 0.22,
+   "successes": 33,
+   "unsafe": {},
+   "unsafe_total": 0,
+   "needs_user_rate": 0.38666666666666666,
+   "steps_per_success": 7.515151515151516,
+   "s_per_step": 35.678278846153844
+  }
+ ],
+ "n_episodes": 498
+}

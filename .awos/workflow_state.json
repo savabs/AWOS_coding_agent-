@@ -1,0 +1,161 @@
+{
+  "stage": "init",
+  "last_updated": "2026-05-15T20:58:14.095688",
+  "tasks": [
+    {
+      "id": "setup_1",
+      "title": "Initialize Project Structure",
+      "description": "Create core directory structure and config files",
+      "stage": "setup",
+      "status": "pending",
+      "depends_on": [],
+      "files_to_modify": [
+        "pyproject.toml",
+        "README.md"
+      ],
+      "aider_prompt": "Create a basic Python project structure with pyproject.toml, README.md, .gitignore, and src/ folder",
+      "completed_at": null,
+      "cost": 0.0
+    },
+    {
+      "id": "struct_1",
+      "title": "Define Core Architecture",
+      "description": "Create main application skeleton",
+      "stage": "structure",
+      "status": "pending",
+      "depends_on": [
+        "setup_1"
+      ],
+      "files_to_modify": [],
+      "aider_prompt": "Create main.py with basic CLI interface that prints 'Hello, World!'",
+      "completed_at": null,
+      "cost": 0.0
+    },
+    {
+      "id": "struct_2",
+      "title": "Add Configuration Module",
+      "description": "Create config management system",
+      "stage": "structure",
+      "status": "pending",
+      "depends_on": [
+        "struct_1"
+      ],
+      "files_to_modify": [],
+      "aider_prompt": "Create a config.py module that loads settings from environment variables and a config file",
+      "completed_at": null,
+      "cost": 0.0
+    },
+    {
+      "id": "feat_1",
+      "title": "Implement Core Features",
+      "description": "Build main feature set",
+      "stage": "features",
+      "status": "pending",
+      "depends_on": [
+        "struct_2"
+      ],
+      "files_to_modify": [],
+      "aider_prompt": "Add 3-5 core functions that implement the main business logic",
+      "completed_at": null,
+      "cost": 0.0
+    },
+    {
+      "id": "test_1",
+      "title": "Add Unit Tests",
+      "description": "Write tests for core functions",
+      "stage": "testing",
+      "status": "pending",
+      "depends_on": [
+        "feat_1"
+      ],
+      "files_to_modify": [],
+      "aider_prompt": "Create tests/ folder with pytest tests covering all main functions with >80% coverage",
+      "completed_at": null,
+      "cost": 0.0
+    },
+    {
+      "id": "test_2",
+      "title": "Add Integration Tests",
+      "description": "Test component interactions",
+      "stage": "testing",
+      "status": "pending",
+      "depends_on": [
+        "test_1"
+      ],
+      "files_to_modify": [],
+      "aider_prompt": "Create integration tests that test multiple components working together",
+      "completed_at": null,
+      "cost": 0.0
+    },
+    {
+      "id": "sec_1",
+      "title": "Security Audit",
+      "description": "Review code for security issues",
+      "stage": "security",
+      "status": "pending",
+      "depends_on": [
+        "test_2"
+      ],
+      "files_to_modify": [],
+      "aider_prompt": "Audit the code for security vulnerabilities: SQL injection, hardcoded secrets, input validation, error handling",
+      "completed_at": null,
+      "cost": 0.0
+    },
+    {
+      "id": "opt_1",
+      "title": "Performance Optimization",
+      "description": "Optimize critical paths",
+      "stage": "optimization",
+      "status": "pending",
+      "depends_on": [
+        "sec_1"
+      ],
+      "files_to_modify": [],
+      "aider_prompt": "Profile the code and optimize the 3 slowest functions",
+      "completed_at": null,
+      "cost": 0.0
+    },
+    {
+      "id": "doc_1",
+      "title": "Write Documentation",
+      "description": "Document code and APIs",
+      "stage": "documentation",
+      "status": "pending",
+      "depends_on": [
+        "opt_1"
+      ],
+      "files_to_modify": [],
+      "aider_prompt": "Create comprehensive docstrings using NumPy style for all public functions and classes",
+      "completed_at": null,
+      "cost": 0.0
+    },
+    {
+      "id": "doc_2",
+      "title": "Create Usage Guide",
+      "description": "Write user-facing documentation",
+      "stage": "documentation",
+      "status": "pending",
+      "depends_on": [
+        "doc_1"
+      ],
+      "files_to_modify": [],
+      "aider_prompt": "Create USAGE.md with examples of how to use the main features",
+      "completed_at": null,
+      "cost": 0.0
+    },
+    {
+      "id": "deploy_1",
+      "title": "Prepare for Deployment",
+      "description": "Add Docker and CI/CD",
+      "stage": "deployment",
+      "status": "pending",
+      "depends_on": [
+        "doc_2"
+      ],
+      "files_to_modify": [],
+      "aider_prompt": "Create Dockerfile and GitHub Actions workflow for CI/CD testing and deployment",
+      "completed_at": null,
+      "cost": 0.0
+    }
+  ]
+}

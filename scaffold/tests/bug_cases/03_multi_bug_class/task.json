@@ -1,0 +1,7 @@
+{
+  "task_id": "bench_03",
+  "file": "buggy.py",
+  "action": "Fix three bugs in TaskQueue: (1) push() uses 'priority > t[priority]' which should be 'priority < t[priority]' — currently inserts high-urgency tasks at the wrong end. (2) pop() calls self._tasks.pop() which removes the last element, should be self._tasks.pop(0) to remove the first. (3) drain() returns a copy but never clears self._tasks — add self._tasks.clear() after building result.",
+  "complexity": "high",
+  "error_context": "FAILED test_push_priority_ordering - AssertionError: assert 'low' == 'high'\nFAILED test_pop_returns_highest_urgency - AssertionError: assert 'c' == 'a'\nFAILED test_drain_clears_queue - AssertionError: assert 1 == 0\n  File \"buggy.py\", line 19, in TaskQueue.push\n  File \"buggy.py\", line 28, in TaskQueue.pop\n  File \"buggy.py\", line 44, in TaskQueue.drain"
+}

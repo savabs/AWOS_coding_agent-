@@ -1,0 +1,80 @@
+{
+  "root_id": "g_82b32c51eca3",
+  "nodes": {
+    "g_82b32c51eca3": {
+      "goal_id": "g_82b32c51eca3",
+      "description": "explain this repo to me",
+      "parent_ids": [],
+      "child_ids": [
+        "g_96acc2a91bd9",
+        "g_063ee1dc5c94"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-12T09:00:52Z",
+      "updated_at": "2026-06-12T09:01:18Z",
+      "completed_at": "2026-06-12T09:01:18Z",
+      "session_ids": [
+        "orch_09d154cb"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_96acc2a91bd9": {
+      "goal_id": "g_96acc2a91bd9",
+      "description": "Add a comprehensive file-level docstring explaining its role as the primary evaluation harness for AWOS-based Python agents. Detail its responsibilities in running tasks, evaluating agent responses, checking syntax, running pytest for agent-generated code, and reporting results within the planner/worker/verifier architectural context.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "eval_awos_batch.py",
+          "action": "Add a comprehensive file-level docstring explaining its role as the primary evaluation harness for AWOS-based Python agents. Detail its responsibilities in running tasks, evaluating agent responses, checking syntax, running pytest for agent-generated code, and reporting results within the planner/worker/verifier architectural context.",
+          "complexity": "low",
+          "test_result": {
+            "passed": 0,
+            "failed": 0,
+            "errors": 0,
+            "pass_rate": 0.0,
+            "raw_output": "Tests skipped — set AWOS_SAFE_TO_RUN_TESTS=1 to enable.",
+            "timed_out": false,
+            "test_command": [],
+            "no_tests_found": true
+          }
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-12T09:01:06Z",
+      "updated_at": "2026-06-12T09:01:13Z",
+      "completed_at": "2026-06-12T09:01:13Z",
+      "session_ids": [
+        "orch_09d154cb"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_063ee1dc5c94": {
+      "goal_id": "g_063ee1dc5c94",
+      "description": "Add a comprehensive file-level docstring explaining its purpose as the demonstration framework for AWOS-based Python agents. Describe how it's used to initialize and run agents against specific goals, potentially utilizing mock workers to showcase the agent's capabilities and the planner/worker/verifier interaction.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "file": "run_awos_demo.py",
+          "action": "Add a comprehensive file-level docstring explaining its purpose as the demonstration framework for AWOS-based Python agents. Describe how it's used to initialize and run agents against specific goals, potentially utilizing mock workers to showcase the agent's capabilities and the planner/worker/verifier interaction.",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-12T09:01:06Z",
+      "updated_at": "2026-06-12T09:01:18Z",
+      "completed_at": "2026-06-12T09:01:18Z",
+      "session_ids": [
+        "orch_09d154cb"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

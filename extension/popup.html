@@ -1,0 +1,71 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>AWOS Replay</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <strong>AWOS Replay</strong>
+    <a href="options.html" target="_blank" id="opts">Options</a>
+  </header>
+  <p id="brainwarn" class="warn" hidden></p>
+
+  <section id="importpanel" hidden>
+    <h3>Import this recipe?</h3>
+    <div class="row"><strong id="imp-name"></strong><span class="badge">untrusted</span></div>
+    <p id="imp-desc" class="muted"></p>
+    <div class="meta">Starts at <code id="imp-start"></code>, stays on <strong id="imp-site"></strong> (other sites need your approval).</div>
+    <div class="meta">From: <span id="imp-source"></span></div>
+    <div id="imp-params" class="meta"></div>
+    <ol id="imp-steps" class="steps"></ol>
+    <div id="imp-checks" class="meta"></div>
+    <ul id="imp-warn" class="warnlist"></ul>
+    <p class="muted">Pay / send / delete / submit clicks always wait for your Approve click. Passwords and "ask" fields are typed by you.</p>
+    <button id="imp-ok" class="primary">Import</button>
+    <button id="imp-no">Discard</button>
+  </section>
+
+  <section id="recbar">
+    <button id="rec" class="primary">Record this tab</button>
+    <button id="stop" hidden>Stop recording</button>
+    <span id="recinfo"></span>
+  </section>
+
+  <section id="runpanel" hidden>
+    <div class="row"><span id="runname"></span><span id="verdict" class="badge"></span></div>
+    <div id="pending" hidden>
+      <p id="pendingmsg"></p>
+      <div id="needparams"></div>
+      <button id="approve" class="danger" hidden>Approve this click</button>
+      <button id="continue" hidden>Continue</button>
+      <button id="reject">Stop run</button>
+    </div>
+    <p id="reason"></p>
+    <ul id="checks"></ul>
+    <details><summary>Log</summary><ol id="log"></ol></details>
+  </section>
+
+  <section>
+    <h3>Recordings</h3>
+    <p id="empty" class="muted">None yet. Press Record, do the task once, press Stop.</p>
+    <ul id="recordings"></ul>
+  </section>
+  <section>
+    <h3>Import a recipe</h3>
+    <div class="acts">
+      <input id="implink" placeholder="Paste a recipe link (https://awos-site.pages.dev/r/#...)">
+      <button id="implinkgo">Open link</button>
+      <label class="filebtn">From file<input type="file" id="impfile" accept=".json,application/json" hidden></label>
+    </div>
+  </section>
+  <section>
+    <button id="export">Export run log</button>
+    <span class="muted">redacted: no typed values, no URL queries</span>
+  </section>
+  <p id="notice" class="ok"></p>
+  <p id="error" class="error"></p>
+<script src="popup.js"></script>
+</body>
+</html>

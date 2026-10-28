@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import math
-import time
+import random
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -47,7 +47,7 @@ _ETA = 0.05   # opportunity-cost weight for successes
 _KAPPA = 0.30  # max failure-penalty magnitude
 
 # Fallback costs when token-level tracking is unavailable (uses tier defaults)
-_TIER_DEFAULT_COST = {0: 0.001, 1: 0.001, 2: 0.017, 3: 0.050}
+_TIER_DEFAULT_COST = {0: 0.001, 1: 0.001, 2: 0.003, 3: 0.017, 4: 0.050}
 
 
 @dataclass
@@ -58,23 +58,37 @@ class Episode:
     action_id maps to EscalationLevel:
         0 = GEMINI_FLASH
         1 = DEEPSEEK
-        2 = HAIKU
-        3 = SONNET (top tier — no Opus)
+        2 = OPENAI (GPT-4o-mini)
+        3 = HAIKU
+        4 = SONNET (top tier — no Opus)
     """
     episode_id: str
     task_id: str
-    action_id: int                  # 0-3
+    action_id: int                  # 0-4
     features: list[float]           # 10-dim feature vector
     success: bool
     cost_usd: float
-    latency_ms: float
-    reward: float                   # computed reward signal
+    latency_ms: float = 0.0
+    reward: float = 0.0             # computed reward signal
+    input_tokens: int = 0
+    output_tokens: int = 0
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
     task_action_text: str = ""      # human-readable task description (for debug)
     model_name: str = ""            # model name used
+    task_type: str = ""             # task type classification (bug_fix, new_feature, etc.)
     reward_breakdown: dict = field(default_factory=dict)  # tracked components
+
+    # ── Quality metrics (v2: added 2026-07) ──────────────────────────────────
+    first_pass_compile: bool = True     # did generated code compile on first try?
+    lines_added: int = 0                # lines added in this edit
+    lines_removed: int = 0              # lines removed in this edit
+    files_touched: int = 1              # number of files modified
+    review_effort: str = "quick_skim"   # estimated review effort: quick_skim | thorough | line_by_line
+    edit_precision: float = 1.0         # 0.0-1.0 estimate of edit correctness
+    estimated_manual_minutes: float = 0.0  # estimated time to do this manually
+    net_velocity_delta: float = 0.0     # minutes saved (negative = agent was slower)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -185,17 +199,14 @@ class ReplayGate:
     Only episodes that pass this gate trigger a weight update in LinUCBRouter.
     This prevents noisy or redundant episodes from degrading the bandit.
 
-    Scoring (each component ∈ [0, 1], threshold = 0.4):
-    ─────────────────────────────────────────────────────
-    1. Informativeness — |reward| > 0.1  (near-zero reward carries no signal)
-    2. Novelty         — Euclidean distance from recent buffer centroids
-                        (deduplicates near-identical tasks)
-    3. Boundary        — Episode is near a decision boundary (LinUCB exploits
-                        these most). Approximated by action diversity: episodes
-                        that use a non-majority action score higher.
+    Scoring (components ∈ [0, 1], weighted):
+    ─────────────────────────────────────────
+    1. Informativeness (×0.4) — |reward| magnitude (flat rewards carry no signal)
+    2. Novelty         (×0.2) — Euclidean distance from recent buffer (dedup)
+    3. Boundary        (×0.4) — Action diversity: non-majority actions score higher
 
-    Gate score = mean(informativeness, novelty, boundary)
-    Admitted if score >= threshold.
+    Adaptive threshold: starts strict (0.40) at cold-start, relaxes as data
+    accumulates → max(0.15, base - 0.01 * sqrt(total_episodes)).
     """
 
     def __init__(
@@ -204,15 +215,32 @@ class ReplayGate:
         novelty_window: int = 50,
         min_novelty_dist: float = 0.15,
     ) -> None:
-        self.threshold = threshold
+        self._base_threshold = threshold
         self._novelty_window = novelty_window
         self._min_novelty_dist = min_novelty_dist
         self._recent_features: list[list[float]] = []
         self._action_counts: list[int] = [0] * N_ACTIONS_REPLAY
+        self._total_episodes = 0
+        self._admitted_count = 0
+
+    @property
+    def threshold(self) -> float:
+        """Adaptive: tight at cold-start, relaxes as data volume grows."""
+        if self._total_episodes == 0:
+            return self._base_threshold
+        return max(0.15, self._base_threshold - 0.01 * self._total_episodes ** 0.5)
+
+    def admit_rate(self) -> float:
+        """Fraction of episodes admitted so far."""
+        if self._total_episodes == 0:
+            return 0.0
+        return self._admitted_count / self._total_episodes
 
     def score(self, episode: "Episode") -> float:
         """
         Returns gate score in [0, 1]. Call before updating LinUCB weights.
+        Weighted: inform (0.4) + novelty (0.2) + boundary (0.4).
+        Lowers novelty weight because coding tasks are inherently repetitive.
         """
         r = abs(episode.reward)
         informativeness = min(r / 1.0, 1.0)
@@ -230,11 +258,18 @@ class ReplayGate:
         total_acts = sum(self._action_counts) + 1
         majority_frac = max(self._action_counts) / total_acts if total_acts > 0 else 0
         a = episode.action_id
-        own_frac = self._action_counts[a] / total_acts if total_acts > 0 else 0
+        # Defensive: action_id may be out of range if a new escalation level
+        # was added without resizing _action_counts. Treat as "unknown action".
+        own_frac = (
+            self._action_counts[a] / total_acts
+            if (total_acts > 0 and 0 <= a < len(self._action_counts))
+            else 0.0
+        )
         boundary = 1.0 - own_frac / max(majority_frac, 1e-6)
         boundary = max(0.0, min(boundary, 1.0))
 
-        return (informativeness + novelty + boundary) / 3.0
+        # Weighted: boundary and informativeness dominate, novelty is gentle
+        return informativeness * 0.4 + novelty * 0.2 + boundary * 0.4
 
     def admit(self, episode: "Episode") -> bool:
         """
@@ -248,7 +283,15 @@ class ReplayGate:
         a = episode.action_id
         if 0 <= a < len(self._action_counts):
             self._action_counts[a] += 1
+        self._total_episodes += 1
         admitted = s >= self.threshold
+        if admitted:
+            self._admitted_count += 1
+        if self._total_episodes % 100 == 0:
+            logger.info(
+                "[replay_gate] %d episodes processed, admit rate=%.1f%%, threshold=%.3f",
+                self._total_episodes, self.admit_rate() * 100, self.threshold,
+            )
         logger.debug(
             "[replay_gate] score=%.3f admit=%s episode=%s",
             s, admitted, episode.episode_id[:8],
@@ -256,7 +299,7 @@ class ReplayGate:
         return admitted
 
 
-N_ACTIONS_REPLAY = 4  # mirrors ml_router.N_ACTIONS (avoid circular import)
+N_ACTIONS_REPLAY = 6  # mirrors ml_router.N_ACTIONS (avoid circular import)
 
 
 class RewardStore:
@@ -285,12 +328,35 @@ class RewardStore:
         cost_usd: float = 0.0,
         latency_ms: float = 0.0,
         model_name: str = "",
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        # ── Quality metrics (v2) ──────────────────────────────────────────
+        first_pass_compile: bool = True,
+        lines_added: int = 0,
+        lines_removed: int = 0,
+        files_touched: int = 1,
+        edit_precision: float = 1.0,
+        estimated_manual_minutes: float = 0.0,
     ) -> Episode:
         """
         Record a completed task attempt. Returns the stored Episode.
         """
         reward = compute_reward(success, action_id, cost_usd)
         breakdown = compute_reward_breakdown(success, action_id, cost_usd)
+
+        # Estimate review effort from lines changed
+        total_lines = lines_added + lines_removed
+        if total_lines <= 10:
+            review_effort = "quick_skim"
+        elif total_lines <= 50:
+            review_effort = "thorough"
+        else:
+            review_effort = "line_by_line"
+
+        # Net velocity: minutes saved (positive = agent was faster)
+        agent_minutes = (latency_ms / 1000.0) / 60.0
+        net_velocity_delta = estimated_manual_minutes - agent_minutes
+
         episode = Episode(
             episode_id=str(uuid.uuid4()),
             task_id=str(task.get("task_id", "unknown")),
@@ -298,11 +364,22 @@ class RewardStore:
             features=list(features),
             success=success,
             cost_usd=cost_usd,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
             latency_ms=latency_ms,
             reward=reward,
             task_action_text=str(task.get("action", ""))[:200],
             model_name=model_name,
             reward_breakdown=breakdown,
+            # Quality metrics
+            first_pass_compile=first_pass_compile,
+            lines_added=lines_added,
+            lines_removed=lines_removed,
+            files_touched=files_touched,
+            review_effort=review_effort,
+            edit_precision=edit_precision,
+            estimated_manual_minutes=estimated_manual_minutes,
+            net_velocity_delta=net_velocity_delta,
         )
         self._append(episode)
         logger.debug(
@@ -357,7 +434,7 @@ class RewardStore:
             by_action[a]["success"] += int(e.success)
             by_action[a]["total_reward"] += e.reward
 
-        action_names = ["gemini_flash", "deepseek", "haiku", "sonnet"]
+        action_names = ["gemini_flash", "deepseek", "openai", "haiku", "sonnet", "openrouter"]
         stats = {}
         for a_id, data in sorted(by_action.items()):
             name = action_names[a_id] if a_id < len(action_names) else str(a_id)
@@ -372,6 +449,55 @@ class RewardStore:
             "overall_success_rate": round(sum(e.success for e in episodes) / total, 3),
             "by_action": stats,
         }
+
+    def get_prioritized(self, n: int = 32, alpha: float = 0.6) -> list[Episode]:
+        """
+        Prioritised Experience Replay (PER) sampling.
+        Episodes with higher |reward| are sampled with probability proportional
+        to |reward|^alpha.  Falls back to uniform if all rewards are zero.
+        """
+        episodes = self.get_recent(min(n * 10, 500))
+        if not episodes:
+            return []
+        weights = [abs(e.reward) ** alpha for e in episodes]
+        total_w = sum(weights)
+        if total_w == 0:
+            return random.sample(episodes, min(n, len(episodes)))
+
+        # Weighted sampling WITHOUT replacement (Efraimidis-Spirakis): give each
+        # episode the key u ** (1 / w) and keep the n largest. Selection stays
+        # proportional to weight, but every draw is distinct — random.choices
+        # samples with replacement, so de-duplicating its output silently
+        # returned fewer than n episodes (~41% of draws at n=5 over 20 uniform
+        # episodes), starving the replay batch that trains the router.
+        keyed = [
+            (random.random() ** (1.0 / w), e)
+            for w, e in zip(weights, episodes)
+            if w > 0
+        ]
+        keyed.sort(key=lambda pair: pair[0], reverse=True)
+        chosen = [e for _, e in keyed[:n]]
+
+        # Weight 0 means |reward| == 0; those rank below any weighted episode but
+        # still count toward n when the weighted pool cannot fill the batch.
+        if len(chosen) < n:
+            picked = {id(e) for e in chosen}
+            chosen.extend(
+                e for w, e in zip(weights, episodes) if w <= 0 and id(e) not in picked
+            )
+        return chosen[:n]
+
+    def surprise_scores(self, window: int = 100) -> list[tuple[str, float]]:
+        """
+        Return (episode_id, surprise_score) for the last `window` episodes.
+        Surprise = |reward - rolling_mean_reward|  (deviation from expectation).
+        """
+        episodes = self.get_recent(window)
+        if not episodes:
+            return []
+        rewards = [e.reward for e in episodes]
+        mean = sum(rewards) / len(rewards)
+        return [(e.episode_id, abs(e.reward - mean)) for e in episodes]
 
     # ── Internal ───────────────────────────────────────────────────────────
 

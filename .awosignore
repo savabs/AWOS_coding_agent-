@@ -1,0 +1,26 @@
+# .awosignore — Files AWOS should never edit during dogfooding
+#
+# These are critical execution files. Editing them while running = crash risk.
+# Remove restrictions gradually as you gain confidence.
+
+# Core execution (never edit while running)
+scaffold/agent/orchestrator.py
+scaffold/agent/worker.py
+scaffold/agent/unified_agent.py
+awos.py
+
+# Safety system itself (don't let crane edit its own support)
+scaffold/agent/worktree.py
+scaffold/agent/runtime_session.py
+
+# Secrets
+.env
+.env.*
+
+# Git metadata
+.git/
+.gitignore
+
+# AWOS state (let AWOS manage this, but not via worker edits)
+.awos/sessions/
+.awos/budget.json

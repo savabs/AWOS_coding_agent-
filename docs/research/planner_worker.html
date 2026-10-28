@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Research: Planner-Worker Architecture — AWOS Agent</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+main{max-width:800px;margin:0 auto;padding:32px}
+h2{font-size:17px;font-weight:600;margin:24px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:monospace;font-size:12px}
+p code{background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border)}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+</style>
+</head>
+<body>
+
+<header>
+<h1>Research: Planner-Worker Architecture</h1>
+<p>Cost-optimized hierarchical agent orchestration for sub-$25/month token budgets</p>
+</header>
+
+<main>
+
+<h2>Problem Statement</h2>
+<p>Current token consumption is 20-100M/month. Traditional monolithic agent prompting wastes 60-80% of cost:</p>
+<ul>
+<li>Expensive model (Sonnet) does both reasoning AND coding in one prompt</li>
+<li>If coding fails, entire expensive context is re-run</li>
+<li>No parallelization; model types linearly</li>
+<li>Junior models unused (cheaper than Sonnet)</li>
+</ul>
+
+<h2>Core Insight: Separation of Concerns</h2>
+<p><strong>Planning is expensive. Execution is cheap.</strong></p>
+<ul>
+<li>Planner (Sonnet): Understand goal, create atomic blueprint → ~$0.03-0.05 per feature</li>
+<li>Worker (DeepSeek): Execute each micro-task → ~$0.001 per task</li>
+<li>Verifier (Local): Compile/lint, catch errors → free</li>
+</ul>
+
+<p class="callout">
+<strong>Why this works:</strong> Junior models excel at narrow, well-defined tasks. By giving DeepSeek only 50 lines of context + one instruction, its accuracy matches Sonnet on that specific task, at 1/18th the cost.
+</p>
+
+<h2>Cost Breakdown (Current vs Proposed)</h2>
+<table>
+<tr><th>Scenario</th><th>Monthly Tokens</th><th>Current (Copilot)</th><th>Planner-Worker (API)</th><th>Savings</th></tr>
+<tr><td>Low usage</td><td>20M</td><td>$40</td><td>$5.00</td><td>87.5%</td></tr>
+<tr><td>Mid usage</td><td>50M</td><td>$40</td><td>$12.50</td><td>68.8%</td></tr>
+<tr><td>High usage</td><td>100M</td><td>$40</td><td>$25.00</td><td>37.5%</td></tr>
+</table>
+
+<h2>Architecture Phases</h2>
+
+<h3>Phase 1: Observation (Context Gathering)</h3>
+<p>User provides goal. System loads STRUCT.xml (codebase map) and SOUL.xml (rules). No API calls yet.</p>
+
+<h3>Phase 2: Planning (Sonnet)</h3>
+<p>Send: Goal + context maps + constraints. Receive: Machine-readable JSON blueprint.</p>
+<pre>[
+  {"task_id": 1, "file": "src/ingestion.cpp", "action": "Add struct...", "complexity": "low"},
+  {"task_id": 2, "file": "src/radar.cpp", "action": "Update buffer...", "complexity": "medium"}
+]</pre>
+<p><strong>Cost:</strong> ~$0.03-0.05 per feature request</p>
+
+<h3>Phase 3: Execution (DeepSeek Worker Loop)</h3>
+<p>For each task in JSON: Extract task → Load 50-line context window → Send to DeepSeek → Receive SEARCH/REPLACE.</p>
+<p><strong>Cost:</strong> ~$0.001-0.002 per task</p>
+
+<h3>Phase 4: Verification (Local Compiler)</h3>
+<p>Apply SEARCH/REPLACE → Run <code>g++ / pytest</code> → If error, feed to worker for fix (retry cost ~$0.0001).</p>
+<p><strong>Cost:</strong> Free (local execution)</p>
+
+<h2>Why This Breaks Traditional Pricing</h2>
+<ul>
+<li><strong>Isolation of failures:</strong> If task 5 fails, only task 5 reruns ($0.0001), not the whole $0.60 feature</li>
+<li><strong>Parallelization:</strong> Tasks 1, 2, 3 can execute simultaneously via async calls → faster feature delivery</li>
+<li><strong>Micro-context:</strong> Junior models don't see 10k lines of irrelevant code → accuracy increases, cost decreases</li>
+<li><strong>Reusable plans:</strong> Same plan can be executed 10x (cost = 1 plan + 10 executions, not 10 full runs)</li>
+</ul>
+
+<h2>Implementation Requirements</h2>
+<ul>
+<li>Planner module: Sonnet API calls, structured output (JSON)</li>
+<li>Worker module: DeepSeek API calls, SEARCH/REPLACE parsing</li>
+<li>Verifier module: Local compiler/linter integration, error parsing</li>
+<li>Orchestrator module: Task loop, parallelization, cost tracking, retry logic</li>
+<li>Integration: Unified agent entry point for mode detection (plan vs execute)</li>
+</ul>
+
+<h2>Known Risks</h2>
+<ul>
+<li>Sonnet planning output must be valid JSON (parser needed)</li>
+<li>DeepSeek can hallucinate syntax; verifier must catch and retry</li>
+<li>Context windows are small; large features need multiple tasks</li>
+<li>API rate limits could delay parallelization</li>
+</ul>
+
+<h2>Success Metrics</h2>
+<ul>
+<li>Monthly cost <$25 for 100M token usage</li>
+<li>Feature delivery time same or faster than Sonnet-alone</li>
+<li>Syntax error rate <5% (caught by verifier)</li>
+<li>Plan accuracy >95% (matches delivered feature)</li>
+</ul>
+
+</main>
+
+</body>
+</html>

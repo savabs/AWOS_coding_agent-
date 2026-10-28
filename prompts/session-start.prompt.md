@@ -12,7 +12,7 @@ tools:
 
 # Session Start — Cold-Start Ritual
 
-Execute the following steps IN ORDER. Do not skip any step. Do not answer the user's question until this ritual is complete.
+Optional warm-up. Skip or reorder steps freely; there are no mandatory rituals.
 
 ## Step 1: Run Warmup Script
 

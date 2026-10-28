@@ -6,74 +6,569 @@ expensive planning (Sonnet) and cheap execution (DeepSeek) with verification.
 """
 
 import ast
+import contextlib
+import hashlib
 import logging
+import functools
 import os
+import re
 import time
 import uuid
-from typing import Any, Optional, Dict, List
+from collections import deque
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Callable, List, Optional
 
 logger = logging.getLogger(__name__)
 
-try:
-    from .planner import Planner
-    from .worker import Worker
-    from .verifier import Verifier
-    from .git_manager import GitManager
-    from .symbol_index import SymbolIndex
-    from .escalation_engine import EscalationEngine
-    from .example_store import ExampleStore
-    from .integration_reviewer import IntegrationReviewer
-    from .core.performance_tracker import ToolPerformanceTracker
-    from .core.reasoning import ReasoningTrace, ReasoningSession, ReasoningTraceStore
-    from .core.observability import ObservabilityStore, new_span, TaskSpan
-    from .task_decomposer import TaskDecomposer
-    from .dag_executor import DAGExecutor
-    from .agent_state_manager import AgentStateManager
-    from .reward_store import RewardStore, compute_reward
-    from .ml_router import build_ml_router, TaskFeatureExtractor
-    from .strategy_config import StrategyRouter
-    from .self_correction import SelfCorrectionEngine
-    from .skill_library import SkillLibrary
-    from .skill_library import SkillLibrary
-    from .test_runner import TestRunner
-    from .error_pattern_store import ErrorPatternStore, make_error_pattern
-    from .project_planner import ProjectPlanner
-    from .vector_memory import VectorMemory, VectorMemoryUnavailableError
-except ImportError:
-    from planner import Planner
-    from worker import Worker
-    from verifier import Verifier
-    from git_manager import GitManager
-    from symbol_index import SymbolIndex
-    from escalation_engine import EscalationEngine
-    from example_store import ExampleStore
-    from integration_reviewer import IntegrationReviewer
-    from core.performance_tracker import ToolPerformanceTracker
-    from core.reasoning import ReasoningTrace, ReasoningSession, ReasoningTraceStore
-    from core.observability import ObservabilityStore, new_span, TaskSpan
-    from task_decomposer import TaskDecomposer
-    from dag_executor import DAGExecutor
-    from agent_state_manager import AgentStateManager
-    from reward_store import RewardStore, compute_reward
-    from ml_router import build_ml_router, TaskFeatureExtractor
-    from strategy_config import StrategyRouter
-    from self_correction import SelfCorrectionEngine
-    from skill_library import SkillLibrary
-    from test_runner import TestRunner
-    from error_pattern_store import ErrorPatternStore, make_error_pattern
-    from project_planner import ProjectPlanner
+
+#: AWOS_EXECUTOR names: "pipeline" is the user-facing name of the default
+#: agent_loop path (planner → acceptance → one-shot → gates → capped repair).
+_EXECUTOR_ALIASES = {"pipeline": "agent_loop"}
+
+
+def executor_choice() -> str:
+    """
+    Which executor runs a task: loop (default when a sandbox is available) |
+    agent_loop ("pipeline") | react | worker. "loop" is the mini-style open
+    loop (loop_executor.py): one sandboxed bash tool until the model submits,
+    then the success gate. It became the default after the pre-registered H1d
+    run (docs/memory/runs/ladder_h1d_loop_2026-10-15.md). An explicit
+    AWOS_EXECUTOR always wins; unset under pytest keeps the pipeline, so the
+    existing pipeline tests mean what they did.
+    """
+    raw = os.getenv("AWOS_EXECUTOR", "").strip().lower()
+    if raw:
+        return _EXECUTOR_ALIASES.get(raw, raw)
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return "agent_loop"
+    return "loop" if _sandbox_possible() else "agent_loop"
+
+
+@functools.lru_cache(maxsize=1)
+def _sandbox_possible() -> bool:
+    """Whether the loop's sandbox can exist here (it refuses to run without one)."""
+    if (os.getenv("AWOS_SANDBOX") or "auto").strip().lower() == "none":
+        return False
     try:
-        from vector_memory import VectorMemory, VectorMemoryUnavailableError
+        from scaffold.agent import sandbox as _sb
+    except ImportError:  # pragma: no cover - flat import
+        import sandbox as _sb  # type: ignore
+    return _sb.seatbelt_available() or _sb.docker_available()
+
+
+def executor_label(choice: Optional[str] = None) -> str:
+    """The user-facing name of the active executor: pipeline | loop | <other>."""
+    choice = choice or executor_choice()
+    return "pipeline" if choice == "agent_loop" else choice
+
+
+def _is_test_file(path: str) -> bool:
+    name = os.path.basename(path)
+    parts = path.replace("\\", "/").split("/")
+    return (
+        name.startswith("test_")
+        or name.endswith("_test.py")
+        or name.endswith(".test.js")
+        or name.endswith(".test.ts")
+        or "tests" in parts[:-1]
+    )
+
+
+_INSPECT_ONLY = re.compile(
+    r"^\s*(review|explain|describe|analy[sz]e|investigate|inspect|check|verify|confirm|list|summari[sz]e)\b",
+    re.IGNORECASE,
+)
+_EDIT_WORDS = re.compile(
+    r"\b(fix|add|update|change|implement|create|write|make|move|refactor|migrate|remove|"
+    r"replace|rename|support|optimi[sz]e|speed|document|produce|generate|build|correct|edit)\w*",
+    re.IGNORECASE,
+)
+
+
+def _task_needs_edits(task: dict) -> bool:
+    """
+    Does this task require changing files? Default yes — a keyword whitelist
+    missed "Make it 5x faster" and let a no-op pass. Only a task that reads as
+    pure inspection, with no editing verb anywhere, needs no edits.
+    """
+    action = str(task.get("action", ""))
+    return not (_INSPECT_ONLY.search(action) and not _EDIT_WORDS.search(action))
+
+
+#: A verb of writing followed, within the same sentence, by "test(s)". Plain
+#: substrings matched "adds", "address" and "keep the tests passing", so an
+#: ordinary task whose tests stayed red passed as "fail as expected".
+_WRITES_TESTS = re.compile(
+    r"\b(?:add|write|create|reproduce)\b[^.;]*?\b(?:a |an |the |new |failing |regression |unit )*tests?\b",
+    re.IGNORECASE,
+)
+#: "Add X ... keep the tests passing" is about existing tests, not new ones.
+_EXISTING_TESTS = re.compile(r"\b(?:keep|existing|all|the)\s+(?:the\s+)?tests?\b", re.IGNORECASE)
+
+
+def _asks_for_tests(task: dict) -> bool:
+    """The task's own purpose is writing tests (e.g. a reproduction test)."""
+    action = str(task.get("action", ""))
+    for m in _WRITES_TESTS.finditer(action):
+        if not _EXISTING_TESTS.search(m.group(0)):
+            return True
+    return False
+
+
+def _one_shot_observe(one_shot_mod, shot, model, task_id) -> None:
+    """Observability only: one log line per failed block, and the attempt's
+    JSON record (.awos/one_shot/). Never raises, never changes the outcome."""
+    try:
+        failed = list(getattr(shot, "failed", None) or [])
+        if failed:
+            for line in one_shot_mod.failure_log_lines(failed):
+                print(line)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[ONE-SHOT] failure lines: %s", exc)
+    try:
+        one_shot_mod.write_one_shot_record(shot, model=model, task_id=task_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[ONE-SHOT] record: %s", exc)
+
+
+def _stable_prefix():
+    """The stable_prefix module (T7b, AWOS_STABLE_PREFIX)."""
+    try:
+        from . import stable_prefix
     except ImportError:
-        VectorMemory = None  # type: ignore
-        VectorMemoryUnavailableError = Exception  # type: ignore
+        import stable_prefix
+    return stable_prefix
+
+
+def _session_goal(ctx: Optional[dict]) -> str:
+    """The user's goal, verbatim (ReasoningSession.goal); '' when unknown."""
+    goal = getattr((ctx or {}).get("session"), "goal", "")
+    return goal.strip() if isinstance(goal, str) else ""
+
+
+def worker_task_text(task: dict, ctx: Optional[dict]) -> str:
+    """
+    What the worker (one shot, agent loop) is told to do. The user's goal is
+    always there verbatim: a single-task plan's action is the planner's
+    paraphrase, and on backupd jobs 2 and 5 it invented details (".tar.gz",
+    "modification time") and dropped requirements ("report it like
+    backupd's other errors") while the goal itself never reached the model.
+    The action is returned unchanged when it is the goal or already carries
+    it (the planner-skipped and merged-plan paths); otherwise it follows the
+    goal as a note the goal overrides.
+    """
+    action = str(task.get("action", "") or "").strip()
+    goal = _session_goal(ctx)
+    if not goal or goal in action:
+        return action
+    if not action:
+        return goal
+    total = int((ctx or {}).get("_total_tasks") or 1)
+    if total > 1:
+        note = (f"This task (step of a {total}-task plan toward the goal; planner's "
+                "wording, may be wrong; the goal above wins):")
+    else:
+        note = "Planner's note (may be wrong; the goal above wins):"
+    return f"Goal (verbatim):\n{goal}\n\n{note}\n{action}"
+
+
+def _not_ignored(root: str, paths: list) -> list:
+    """
+    `paths` minus what the project's .gitignore excludes: a command also
+    writes .coverage, build output and caches, and those are no edit. Outside
+    a git repo nothing can be judged ignored, so everything is kept.
+    """
+    if not paths:
+        return []
+    try:
+        from .sandbox import HOST_GIT_OPTS
+    except ImportError:
+        from sandbox import HOST_GIT_OPTS
+    import subprocess
+
+    rels = [os.path.relpath(p, root) for p in paths]
+    try:
+        proc = subprocess.run(
+            ["git", *HOST_GIT_OPTS, "-C", root, "check-ignore", "--stdin", "-z"],
+            input="\0".join(rels), capture_output=True, text=True, timeout=30,
+        )
+    except Exception as exc:
+        logger.debug("git check-ignore failed: %s", exc)
+        return list(paths)
+    if proc.returncode not in (0, 1):  # 128: not a repo
+        return list(paths)
+    ignored = set(filter(None, proc.stdout.split("\0")))
+    return [p for p, rel in zip(paths, rels) if rel not in ignored]
+
+
+#: Each attempt can use a full turn budget; past a few, a stuck task is
+#: stuck, and AWOS_AGENT_RETRIES=50 would multiply the turns spent by 51.
+MAX_AGENT_RETRIES = 3
+
+
+def _agent_retries() -> int:
+    """Extra agent-loop attempts after a resumable stop (AWOS_AGENT_RETRIES, default 1)."""
+    try:
+        return min(MAX_AGENT_RETRIES, max(0, int(os.getenv("AWOS_AGENT_RETRIES", "1"))))
+    except ValueError:
+        return 1
+
+
+def _single_task_max_files() -> int:
+    """
+    AWOS_SINGLE_TASK_MAX_FILES (default 4): a plan whose tasks touch at most
+    this many files runs as one task; 0 or less keeps the planner's split.
+    """
+    try:
+        return int(os.getenv("AWOS_SINGLE_TASK_MAX_FILES", "4"))
+    except ValueError:
+        return 4
+
+
+def _planner_mode() -> str:
+    """
+    AWOS_PLANNER: auto (default) | always | never. auto skips the planner
+    when the pre-plan exploration hit at most AWOS_PLANNER_MAX_FILES files;
+    an unknown value is treated as auto.
+    """
+    mode = os.getenv("AWOS_PLANNER", "auto").strip().lower()
+    return mode if mode in ("auto", "always", "never") else "auto"
+
+
+def _planner_max_files() -> int:
+    """AWOS_PLANNER_MAX_FILES (default 6): auto mode's small-goal threshold."""
+    try:
+        return int(os.getenv("AWOS_PLANNER_MAX_FILES", "6"))
+    except ValueError:
+        return 6
+
+
+def _planner_skip_reason(exploration: Optional[dict]) -> Optional[str]:
+    """
+    Why the planner is skipped for this goal, or None to run it.
+
+    Measured (ablation 2): the planner cost ~53 s per job and 71 of 72 plans
+    were collapsed into one task anyway. In auto mode a goal whose
+    exploration hit few files runs as one task; with no exploration data
+    there is nothing to judge by, so the planner runs.
+    """
+    mode = _planner_mode()
+    if mode == "always":
+        return None
+    if mode == "never":
+        return "AWOS_PLANNER=never — running as one task"
+    if not exploration or "hit_files" not in exploration:
+        return None
+    n_files = len(exploration.get("hit_files") or [])
+    max_files = _planner_max_files()
+    if n_files > max_files:
+        return None
+    return (
+        f"small goal ({n_files} file(s) hit ≤ AWOS_PLANNER_MAX_FILES={max_files}) "
+        "— running as one task"
+    )
+
+
+def _run_cost_cap() -> Optional[float]:
+    """AWOS_MAX_RUN_COST, read the way AgentLoop reads it; None when unset."""
+    raw = os.getenv("AWOS_MAX_RUN_COST", "").strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+#: AWOS_GOAL_BUDGET_USD default: what one goal may spend across all its tasks,
+#: retries, goal checks and follow-up rounds.
+DEFAULT_GOAL_BUDGET_USD = 2.00
+GOAL_BUDGET_REASON = "goal budget exhausted"
+#: Every planned task ran and passed, but the budget ran out before the goal
+#: check: nothing was left unstarted, the goal is only unverified.
+GOAL_CHECK_BUDGET_REASON = "goal check not run: goal budget exhausted"
+
+
+def _goal_budget() -> Optional[float]:
+    """AWOS_GOAL_BUDGET_USD (default $2.00); 0 or less turns the cap off."""
+    try:
+        budget = float(os.getenv("AWOS_GOAL_BUDGET_USD", "").strip() or DEFAULT_GOAL_BUDGET_USD)
+    except ValueError:
+        budget = DEFAULT_GOAL_BUDGET_USD
+    return budget if budget > 0 else None
+
+
+def _ledgers() -> list:
+    """
+    Every BudgetLedger in this process. The module is imported both as
+    `budget_ledger` (record_api_usage) and `scaffold.agent.budget_ledger`, and
+    each copy keeps its own singleton; spend lands in whichever one recorded it.
+    """
+    import sys
+    try:
+        from .budget_ledger import get_ledger
+    except ImportError:
+        from budget_ledger import get_ledger
+    found = {id(led): led for led in [get_ledger()]}
+    for name in ("budget_ledger", "scaffold.agent.budget_ledger"):
+        led = getattr(sys.modules.get(name), "_global_ledger", None)
+        if led is not None:
+            found[id(led)] = led
+    return list(found.values())
+
+
+def _ledger_spend_since(start: float) -> float:
+    """USD this process recorded to the budget ledger since `start` (epoch seconds)."""
+    from datetime import datetime
+
+    import json
+
+    since = datetime.fromtimestamp(start)
+    pid = os.getpid()
+    total, seen = 0.0, set()
+    for ledger in _ledgers():
+        for rec in getattr(ledger, "_records", []):
+            # A ledger loads .awos/budget.json when it is created, with what
+            # any concurrent run (a parallel long task) wrote since `start`:
+            # that spend is not this goal's.
+            if not isinstance(rec, dict) or rec.get("pid") != pid:
+                continue
+            # A ledger created after the other one wrote loads that record
+            # from .awos/budget.json too; counting it twice halved the cap.
+            # Timestamps carry microseconds, so equal records are one call.
+            key = json.dumps(rec, sort_keys=True, default=str)
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                if datetime.fromisoformat(rec["timestamp"]) >= since:
+                    total += float(rec.get("cost", 0) or 0)
+            except (KeyError, TypeError, ValueError):
+                continue
+    return total
+
+
+def _agent_resume_reason(outcome, verdict: dict, model_errors: int) -> Optional[str]:
+    """
+    Why a failed agent-loop attempt is worth continuing, or None when it is not.
+    A cost or budget stop is final — resuming would spend past the cap — and a
+    model error gets one more chance only, since a dead provider stays dead.
+    The caller also stops once the task's cost cap is used up across attempts.
+    """
+    stop = outcome.stop_reason
+    if verdict.get("green_stop"):
+        # Stopped after its edits turned the tests green: a resume only
+        # re-reads finished work (one ran 22 more turns to change nothing).
+        return None
+    if stop in ("no_progress", "wall_budget"):
+        # The attempt circled without changing anything, or used the run's
+        # wall-clock budget: a fresh prompt into the same dead end only spends
+        # more (one sqlparse attempt ran 130 idle turns). Fail with the reason.
+        return None
+    if stop == "max_turns":
+        return "it ran out of turns (max_turns)"
+    if stop == "repeated_tool_call":
+        return "it repeated the same tool call without progress (repeated_tool_call)"
+    if stop == "truncated":
+        return "its replies kept hitting the output limit (truncated); think briefly, then act"
+    if stop == "model_error":
+        if model_errors > 1:
+            return None
+        return f"the model call failed ({outcome.final_message[:200]})"
+    if stop not in ("completed", "acceptance_green"):
+        return None
+    if not verdict["success"]:
+        return "it finished without editing any file"
+    result = verdict["test_result"]
+    if result is not None and not getattr(result, "no_tests_found", True) and result.failed > 0:
+        return f"{result.failed} test(s) failed after its edits"
+    return None
+
+def _verdict_green(verdict: Optional[dict]) -> bool:
+    """The project's tests ran and passed (no new failure, at least one pass)."""
+    tr = (verdict or {}).get("test_result")
+    return (tr is not None and not getattr(tr, "no_tests_found", True)
+            and tr.failed == 0 and tr.errors == 0 and tr.passed > 0)
+
+
+_OFF_WORDS = ("0", "off", "false", "no")
+
+
+def _full_suite_gate_enabled() -> bool:
+    """AWOS_FULL_SUITE_GATE (default on): a green mapped verdict is confirmed
+    by one full visible-suite run before the task is reported solved."""
+    return os.getenv("AWOS_FULL_SUITE_GATE", "1").strip().lower() not in _OFF_WORDS
+
+
+def _verify_unchecked_enabled() -> bool:
+    """
+    AWOS_VERIFY_UNCHECKED (default on): a visible-green one-shot edit whose
+    acceptance gate is inactive gets a bounded verify loop before it is
+    accepted. Under pytest, unset means off (as AWOS_ACCEPTANCE does), so the
+    suites that pin the one-shot path never make an unscripted model call.
+    """
+    default = "0" if "PYTEST_CURRENT_TEST" in os.environ else "1"
+    return os.getenv("AWOS_VERIFY_UNCHECKED", default).strip().lower() not in _OFF_WORDS
+
+
+def _verify_turns() -> int:
+    """AWOS_VERIFY_TURNS (default 15): the verify loop's turn cap."""
+    try:
+        return max(1, int(os.getenv("AWOS_VERIFY_TURNS", "15")))
+    except ValueError:
+        return 15
+
+
+def _task_wall_s() -> float:
+    """The task's wall-clock budget (AWOS_AGENT_WALL_S, the agent loop's own
+    default); 0 or less: none."""
+    try:
+        return float(os.getenv("AWOS_AGENT_WALL_S", "1500"))
+    except ValueError:
+        return 1500.0
+
+
+def _failsafe_outcomes(fs: dict) -> list:
+    """Every AgentLoop outcome of an _acceptance_failsafe result (the bounded
+    repair plus any AWOS_REPAIR_EXTEND rounds), oldest first."""
+    if fs.get("outcomes"):
+        return list(fs["outcomes"])
+    return [fs["outcome"]] if fs.get("outcome") is not None else []
+
+
+#: An extra loop (verify, extra repair round) is not started with less
+#: wall clock than this left in the task's budget.
+_MIN_EXTRA_WALL_S = 30.0
+
+
+#: Stops after which a green verdict may be resumed for failing acceptance
+#: tests: not wall_budget / no_progress (final by the resume rules above).
+_ACCEPTANCE_RESUMABLE_STOPS = ("completed", "max_turns", "repeated_tool_call")
+
+
+def _acceptance_mode() -> str:
+    """AWOS_ACCEPTANCE: "0" off, "1" ablation C, "2" the fail-safe gate (C2)."""
+    try:
+        from .acceptance import acceptance_mode
+    except ImportError:
+        from acceptance import acceptance_mode
+    return acceptance_mode()
+
+
+def _tests_not_run_status(result) -> str:
+    """Status text when no test counts exist; says so when pytest crashed."""
+    if getattr(result, "infra_error", False):
+        env = getattr(result, "env_desc", "")
+        return (f"tests could not run ({getattr(result, 'infra_reason', '')[:200]})"
+                + (f" [env: {env}]" if env else ""))
+    return "no tests ran"
+
+
+try:
+    from .agent_state_manager import AgentStateManager
+    from .cheap_planner import CheapPlanner
+    from .confidence_calibrator import ConfidenceCalibrator
+    from .core.observability import ObservabilityStore, TaskSpan, new_span
+    from .core.performance_tracker import ToolPerformanceTracker
+    from .core.reasoning import ReasoningSession, ReasoningTrace, ReasoningTraceStore
+    from .critic_engine import CriticEngine, max_critic_rounds
+    from .dag_executor import DAGExecutor
+    from .error_pattern_store import ErrorPatternStore, make_error_pattern
+    from .escalation_engine import EscalationEngine, is_cheap_only
+    from .example_store import ExampleStore
+    from .exploration_phase import enrich_codebase_context, exploration_enabled, run_exploration
+    from .git_manager import GitManager
+    from .integration_reviewer import IntegrationReviewer
+    from .live_renderer import LiveRenderer
+    from .live_tool_synth import LiveToolSynthesizer
+    from .mcts_search import MCTSSearchEngine, write_and_run_tests
+    from .ml_router import TaskFeatureExtractor, build_ml_router
+    from .planner import Planner
+    from .post_mortem import FailureType, PostMortemEngine
+    from .project_planner import ProjectPlanner
+    from .prompt_evolver import PromptEvolver
+    from .react_worker import ReActWorker, react_worker_enabled
+    from .reward_store import RewardStore, compute_reward
+    from .scaffold_evolver import ScaffoldEvolver
+    from .self_correction import ErrorClass, SelfCorrectionEngine
+    from .skill_library import SkillLibrary
+    from .stability_gate import StabilityGate
+    from .strategy_config import StrategyRouter
+    from .symbol_index import SymbolIndex
+    from .task_decomposer import TaskDecomposer
+    from .task_schema import task_files
+    from .test_runner import TestRunner
+    from .verifier import Verifier
+    from .worker import Worker
+except ImportError:
+    from agent_state_manager import AgentStateManager
+    from cheap_planner import CheapPlanner
+    from confidence_calibrator import ConfidenceCalibrator
+    from core.observability import ObservabilityStore, new_span
+    from core.performance_tracker import ToolPerformanceTracker
+    from core.reasoning import ReasoningSession, ReasoningTrace, ReasoningTraceStore
+    from critic_engine import CriticEngine
+    from dag_executor import DAGExecutor
+    from error_pattern_store import ErrorPatternStore, make_error_pattern
+    from escalation_engine import EscalationEngine, is_cheap_only
+    from example_store import ExampleStore
+    from exploration_phase import enrich_codebase_context, exploration_enabled, run_exploration
+    from git_manager import GitManager
+    from integration_reviewer import IntegrationReviewer
+    from live_renderer import LiveRenderer
+    from live_tool_synth import LiveToolSynthesizer
+    from mcts_search import MCTSSearchEngine, write_and_run_tests
+    from ml_router import TaskFeatureExtractor, build_ml_router
+    from post_mortem import FailureType, PostMortemEngine
+    from project_planner import ProjectPlanner
+    from prompt_evolver import PromptEvolver
+    from react_worker import ReActWorker, react_worker_enabled
+    from reward_store import RewardStore, compute_reward
+    from scaffold_evolver import ScaffoldEvolver
+    from self_correction import ErrorClass, SelfCorrectionEngine
+    from skill_library import SkillLibrary
+    from stability_gate import StabilityGate
+    from strategy_config import StrategyRouter
+    from symbol_index import SymbolIndex
+    from task_decomposer import TaskDecomposer
+    from task_schema import task_files
+    from test_runner import TestRunner
+    from verifier import Verifier
+    from worker import Worker
+
+    try:
+        from multi_resolution_context import suggest_level  # noqa: F401
+    except ImportError:
+        suggest_level = None  # type: ignore
+
+
+def _new_components() -> dict:
+    """A run's component record before anything ran: every component is
+    "not_run" until its code path records otherwise."""
+    return {name: {"status": "not_run"} for name in (
+        "planner", "acceptance", "one_shot", "arbiter", "goal_check",
+        "integration_review", "notebook", "full_suite_gate", "verify", "repair_extend")}
+
+
+def _emit_components(comps: dict) -> None:
+    """The one `[COMPONENTS] {json}` line (a benchmark parses it per row) and,
+    in a benchmark child (AWOS_SERIES_ARM set), components.json in the cwd."""
+    import json
+    try:
+        line = json.dumps(comps, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        line = json.dumps({"error": "unserialisable components"})
+    print(f"[COMPONENTS] {line}", flush=True)
+    if os.getenv("AWOS_SERIES_ARM"):
+        try:
+            Path("components.json").write_text(line, encoding="utf-8")
+        except OSError:
+            pass
 
 
 class Orchestrator:
     """Orchestrates the full Planner-Worker-Verifier pipeline."""
-    
+
     def __init__(self, tracker=None):
         """
         Initialize Orchestrator.
@@ -81,7 +576,7 @@ class Orchestrator:
         Args:
             tracker: TokenTracker instance for cost monitoring (optional)
         """
-        self.planner = Planner()
+        self.planner = CheapPlanner()
         self.worker = Worker()
         self.verifier = Verifier()
         self.tracker = tracker
@@ -96,6 +591,14 @@ class Orchestrator:
         )
         self._gp_last_fit_at = 0  # episode count at last GP fit
         self._feature_extractor = TaskFeatureExtractor()
+
+        # ── Warm-start LinUCB from historical RewardStore data ───────────
+        replayed = self.ml_router.warm_start(self.reward_store, max_episodes=50)
+        logger.info(
+            "[orchestrator] warm-started LinUCB with %d episodes (ready=%s, updates=%d)",
+            replayed, self.ml_router.is_ready(), self.ml_router.total_updates(),
+        )
+
         self.escalation = EscalationEngine(
             monthly_budget=getattr(tracker, 'monthly_budget', 20.0) if tracker else 20.0,
             performance_tracker=self.performance,
@@ -112,48 +615,173 @@ class Orchestrator:
         self.test_runner = None
         self.error_store = ErrorPatternStore()
         self.obs_store = ObservabilityStore(persist_dir=".awos")
-        try:
-            self.vector_memory = VectorMemory()
-            logger.info("[VectorMemory] initialised")
-        except Exception as exc:
-            self.vector_memory = None
-            logger.warning("[VectorMemory] unavailable (%s) — semantic retrieval disabled", exc)
+        # VectorMemory pulls in sentence_transformers + ChromaDB + TensorFlow,
+        # adding 60s to every startup. ChromaDB's index is corrupted ("Failed
+        # to apply logs to the hnsw segment writer") on every attempt anyway.
+        # Skip it entirely until the ChromaDB issue is resolved.
+        self.vector_memory = None
         self.project_planner = ProjectPlanner(vector_memory=self.vector_memory)
-
-    def _cheap_call(self, prompt: str) -> str:
-        """
-        Fire a cheap LLM call for critique generation (Phase 5B ReflexionMemory).
-        Uses the worker's existing model client infrastructure with max_tokens=120.
-        Retries up to 3 times with exponential backoff (0.5s, 1s, 2s).
-        Returns empty string on any error — never raises.
-        """
-        delays = [0.5, 1.0, 2.0]
-        last_exc = None
-        for attempt in range(3):
+        self.critic = CriticEngine()
+        self.post_mortem = PostMortemEngine(self.error_store, model_caller=self._cheap_call)
+        self.calibrator = ConfidenceCalibrator()
+        self._prm = None
+        self._prm_last_fit_at = 0
+        self._session_count = 0
+        self.prompt_evolver = PromptEvolver(
+            store_path=".awos",
+            cheap_call=self._cheap_call,
+        )
+        self.live_tool_synth = LiveToolSynthesizer(
+            tools_dir=".awos/tools",
+            cheap_call=self._cheap_call,
+        )
+        self.scaffold_evolver = ScaffoldEvolver(
+            scaffold_root=".",
+            cheap_call=self._cheap_call,
+        )
+        self.stability_gate = StabilityGate(
+            project_root=".",
+            env_file=".env",
+        )
+        self._pause_requested = False
+        self._runtime_session = None
+        self._runtime_store = None
+        self._virtual_runtime = None
+        self._gui_bus = None  # GuiEventBus — set during execute_feature()
+        # Stagnation breaker
+        self._failure_history: deque = deque(maxlen=int(os.getenv("AWOS_STAGNATION_WINDOW", "10")))
+        self._stagnation_threshold = int(os.getenv("AWOS_STAGNATION_THRESHOLD", "3"))
+        self.react_worker = None
+        if react_worker_enabled():
             try:
-                worker = self.worker
-                # Try DeepSeek / OpenAI-compatible first (cheapest)
-                if hasattr(worker, "client") and worker.client is not None:
-                    response = worker.client.chat.completions.create(
-                        model="deepseek-chat",
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=120,
-                        temperature=0.3,
+                self.react_worker = ReActWorker()
+                logger.info("[ReActWorker] enabled (AWOS_REACT_WORKER=1)")
+            except ValueError as exc:
+                logger.warning("[ReActWorker] unavailable (%s) — patch worker fallback", exc)
+
+        # Multi-Resolution Context Pipeline
+        self.context_pipeline = None
+        self.semantic_retriever = None
+        if self.vector_memory is not None:
+            try:
+                from .multi_resolution_context import MultiResolutionContextPipeline
+                from .semantic_retriever import SemanticRetriever
+                self.semantic_retriever = SemanticRetriever(
+                    vector_memory=self.vector_memory,
+                )
+                self.context_pipeline = MultiResolutionContextPipeline(
+                    semantic_retriever=self.semantic_retriever,
+                )
+                self._suggest_context_level = suggest_level  # noqa: F821
+                logger.info("[MultiResContext] pipeline initialised")
+            except Exception as exc:
+                logger.warning("[MultiResContext] pipeline unavailable (%s)", exc)
+
+    def _runtime_session_enabled(self) -> bool:
+        return os.getenv("AWOS_RUNTIME_SESSION", "").lower() in ("1", "true", "yes")
+
+    def _cheap_route(self, chat_client) -> Optional[tuple]:
+        """
+        (client, model, extra kwargs) for a _cheap_call, or None when no
+        client is configured. The run's pinned model (the agent loop's model,
+        or AWOS_AGENT_MODEL) through OpenRouter when AWOS_AGENT_MODEL is set;
+        else the worker's clients in their old order. The client "anthropic"
+        marks the Messages-API fallback.
+        """
+        pinned = os.getenv("AWOS_AGENT_MODEL", "").strip()
+        if pinned:
+            model = getattr(self, "_last_agent_model", None) or pinned
+            client = chat_client(max_retries=0, model=model)
+            if client is not None:
+                return client, model, {}
+        worker = getattr(self, "worker", None)
+        # A pinned Claude model without OpenRouter goes to Anthropic directly,
+        # never to whichever other vendor key happens to be configured.
+        if pinned.startswith("claude-") and getattr(worker, "anthropic_client", None) is not None:
+            return "anthropic", pinned, {}
+        if getattr(worker, "opencode_client", None) is not None:
+            return worker.opencode_client, "qwen3.7-plus", {}
+        if getattr(worker, "client", None) is not None:
+            return worker.client, "deepseek-chat", {}
+        if getattr(worker, "openrouter_client", None) is not None:
+            return worker.openrouter_client, "openrouter/auto", {"extra_headers": {
+                "HTTP-Referer": "https://github.com/999-sbpatel/AWOS_coding_agent",
+                "X-OpenRouter-Title": "AWOS",
+            }}
+        if getattr(worker, "openai_client", None) is not None:
+            return worker.openai_client, "gpt-4o-mini", {}
+        if not is_cheap_only() and getattr(worker, "anthropic_client", None) is not None:
+            return "anthropic", "claude-haiku-4-5", {}
+        return None
+
+    def _cheap_call(self, prompt: str, role: str = "critique", *,
+                    raise_bad_reply: bool = False) -> str:
+        """
+        A cheap auxiliary LLM call (critique, post-mortem, prompt evolution,
+        tool synthesis, scaffold evolution). Also handed to those engines as
+        their `prompt -> str` caller, so `role` and `raise_bad_reply` are
+        optional.
+
+        Through providers.utility_chat: bounded reasoning, spend recorded
+        (request_type "cheap_<role>"), an empty or cut-off reply retried once
+        with reasoning off and then refused. One attempt plus one retry on a
+        transport error, with SDK retries off (it used to be 3 × 3 calls).
+
+        Returns "" on any failure; with raise_bad_reply=True an empty or
+        cut-off reply raises providers.ModelReplyError instead, so a caller
+        can tell "no answer" from an answer.
+        """
+        try:
+            from .providers import ModelReplyError, chat_client, utility_chat
+        except ImportError:
+            from providers import ModelReplyError, chat_client, utility_chat
+
+        messages = [{"role": "user", "content": prompt}]
+        last_exc = None
+        for attempt in range(2):
+            try:
+                route = self._cheap_route(chat_client)
+                if route is None:
+                    logger.debug("[Orchestrator] _cheap_call: no model client configured")
+                    return ""
+                client, model, extra = route
+                if client == "anthropic":
+                    response = self.worker.anthropic_client.messages.create(
+                        model=model,
+                        max_tokens=1024,
+                        messages=messages,
                     )
-                    return response.choices[0].message.content or ""
-                # Fallback: Anthropic Haiku
-                if hasattr(worker, "anthropic_client") and worker.anthropic_client is not None:
-                    response = worker.anthropic_client.messages.create(
-                        model="claude-haiku-4-5",
-                        max_tokens=120,
-                        messages=[{"role": "user", "content": prompt}],
-                    )
-                    return response.content[0].text or ""
+                    try:  # spend into the ledger, like utility_chat does
+                        from .providers import _record_utility_spend
+                    except ImportError:
+                        from providers import _record_utility_spend
+                    _record_utility_spend(f"cheap_{role}", model, response,
+                                          getattr(self, "tracker", None))
+                    try:
+                        from .claude_compat import message_text
+                    except ImportError:
+                        from claude_compat import message_text
+                    return message_text(response)
+                text, _info = utility_chat(
+                    client, role, model, messages,
+                    max_tokens=4096,
+                    tracker=getattr(self, "tracker", None),
+                    request_type=f"cheap_{role}",
+                    temperature=0.3,
+                    sdk_retries=0,
+                    **extra,
+                )
+                return text
+            except ModelReplyError as exc:
+                logger.warning("[Orchestrator] _cheap_call (%s) unusable reply: %s", role, exc)
+                if raise_bad_reply:
+                    raise
+                return ""
             except Exception as exc:
                 last_exc = exc
-                if attempt < 2:
-                    time.sleep(delays[attempt])
-        logger.error("[Orchestrator] _cheap_call failed after 3 retries: %s", last_exc)
+                if attempt == 0:
+                    time.sleep(0.5)
+        logger.error("[Orchestrator] _cheap_call failed after a retry: %s", last_exc)
         return ""
 
     def _update_task_node(self, task_id: Any, status: str, session_id: str) -> None:
@@ -180,7 +808,249 @@ class Orchestrator:
             gp.fit(episodes)
             self._gp_last_fit_at = total
             logger.info("[gp_world_model] fitted on %d episodes", total)
-    
+
+    def _maybe_train_prm(self) -> None:
+        """Trigger PRM training when 500+ MCTS traces have accumulated."""
+        try:
+            from .process_reward_model import MCTSTraceStore
+        except ImportError:
+            try:
+                from process_reward_model import MCTSTraceStore
+            except ImportError:
+                return
+        trace_store = MCTSTraceStore()
+        total_traces = trace_store.count()
+        if total_traces < 500:
+            return
+        if total_traces - self._prm_last_fit_at < 50:
+            return
+        try:
+            from .prm import ProcessRewardModel
+        except ImportError:
+            try:
+                from prm import ProcessRewardModel
+            except ImportError:
+                return
+        if self._prm is None:
+            self._prm = ProcessRewardModel()
+        traces = trace_store.get_recent(500)
+        self._prm.train(traces)
+        self._prm_last_fit_at = total_traces
+        logger.info("[prm] trained on %d MCTS traces", total_traces)
+
+    def _persist_worker_failure_pattern(self, task: dict, task_id: Any, error: str) -> None:
+        try:
+            from .providers import ModelReplyError
+        except ImportError:
+            from providers import ModelReplyError
+        try:
+            err_cls = self.self_correction.classify(error or "")
+            if err_cls == ErrorClass.UNKNOWN:
+                err_cls = ErrorClass.WORKER_FAIL
+            bad_reply: list = []
+
+            def _caller(prompt: str) -> str:
+                try:
+                    return self._cheap_call(prompt, role="critique", raise_bad_reply=True)
+                except ModelReplyError as exc:
+                    bad_reply.append(exc)
+                    raise
+
+            critique = self.self_correction.generate_critique(
+                task=task,
+                error=error or "worker failed",
+                error_class=err_cls,
+                model_caller=_caller,
+            )
+            if bad_reply:
+                # An empty or cut-off critique must not become a stored
+                # lesson that later prompts repeat.
+                logger.warning("[TASK %s] Failure pattern not saved: %s", task_id, bad_reply[0])
+                return
+            critique = critique or f"Worker failed: {error or 'unknown'}"
+            pattern = make_error_pattern(
+                task_id=str(task_id),
+                file_path=task.get("file", "unknown"),
+                error_type=err_cls.name,
+                error_msg=error or "worker failed",
+                critique=critique,
+            )
+            self.error_store.save(pattern)
+            logger.info("[TASK %s] Failure pattern saved: %s", task_id, err_cls.name)
+        except Exception as exc:
+            logger.debug("[ErrorPattern] persist failed: %s", exc)
+
+    def _replan_after_verify_fail(
+        self,
+        failed_task: dict,
+        verify_error: str,
+        codebase_context: dict,
+    ) -> list[dict]:
+        """Return revised task(s) after verifier rejection."""
+        try:
+            from .plan_actions import replan_task_after_verify_fail
+        except ImportError:
+            from plan_actions import replan_task_after_verify_fail
+        return replan_task_after_verify_fail(failed_task, verify_error)
+
+    def _failure_signature(self, failure_kind: str, error: str, file_path: str) -> str:
+        """
+        Hash (failure_kind, normalized_error, file) → 16-char hex.
+        
+        Normalization: digits → N, collapse whitespace, lowercase.
+        Used for stagnation detection.
+        """
+        norm = re.sub(r'\d+', 'N', error[:200].lower())
+        norm = re.sub(r'\s+', ' ', norm).strip()
+        payload = f"{failure_kind}:{norm}:{file_path}"
+        return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+    def _check_stagnation(self, result: dict) -> bool:
+        """
+        Check if same failure signature repeating >= threshold.
+        Returns True if stagnation detected (should pause).
+        """
+        if result.get("success"):
+            return False
+
+        failure_kind = result.get("failure_kind", "unknown")
+        error = result.get("verify_error") or result.get("worker_error", "")
+        file_path = result["task"].get("path") or result["task"].get("file", "")
+
+        sig = self._failure_signature(failure_kind, error[:200], file_path)
+        self._failure_history.append((sig, result["task_id"]))
+
+        sig_count = sum(1 for s, _ in self._failure_history if s == sig)
+
+        if sig_count >= self._stagnation_threshold:
+            logger.warning(
+                "[BREAKER] Stagnation detected: signature %s repeated %d times",
+                sig[:8], sig_count
+            )
+            return True
+
+        return False
+
+    def _log_mcts_trace(self, task: dict, task_id: Any, result, features: list) -> None:
+        try:
+            from .process_reward_model import MCTSTrace, MCTSTraceStore
+        except ImportError:
+            from process_reward_model import MCTSTrace, MCTSTraceStore
+        trace = MCTSTrace(
+            task_id=str(task_id),
+            task_action=(task.get("action") or "")[:200],
+            task_features=(list(features)[:10] if features is not None and len(features) else [0.0] * 10),
+            nodes=[
+                {
+                    "depth": 0,
+                    "state": "root",
+                    "reward": result.pass_rate,
+                    "is_terminal": bool(result.success),
+                    "static_ok": bool(result.search),
+                }
+            ],
+            winning_path=[0] if result.search else [],
+            total_rollouts=int(result.rollouts_used),
+            final_reward=float(result.pass_rate),
+        )
+        MCTSTraceStore().log_mcts_trace(trace)
+
+    def _critic_refine(self, task: dict, patch: dict, file_content: str,
+                       tracker, esc_decision, attempt: int, codebase_context: dict,
+                       sym_index) -> dict:
+        """P7: Run CriticEngine on the worker patch; return revised patch or original."""
+        if not self.critic.should_run(task=task, attempt=attempt):
+            return patch
+        try:
+            verdict = self.critic.critique(
+                task=task,
+                patch=patch,
+                file_content=file_content,
+                codebase_context=codebase_context,
+            )
+            logger.info(
+                "[critic] task=%s verdict=%s conf=%.2f hints=%d",
+                task.get("task_id", "?"), verdict.verdict,
+                verdict.confidence, len(verdict.hints),
+            )
+            if verdict.should_revise and verdict.hints:
+                revised = {
+                    **patch,
+                    "critic_hints": verdict.hints,
+                    "critic_confidence": verdict.confidence,
+                }
+                return revised
+        except Exception as _ce:
+            logger.warning("[critic] critique failed: %s", _ce)
+        return patch
+
+    def _compute_confidence(self, task: dict, patch: dict, esc_decision) -> object:
+        """P9: Fuse critic+GP+LinUCB+PRM signals; return ConfidenceReport or None."""
+        if self.calibrator is None:
+            return None
+        try:
+            return self._compute_confidence_impl(task, patch, esc_decision)
+        except Exception as _ce:
+            logger.debug("[confidence] failed: %s", _ce)
+            return None
+
+    def _compute_confidence_impl(self, task: dict, patch: dict, esc_decision) -> object:
+        critic_score = patch.get("critic_confidence") if patch else None
+        prm_raw = None
+        gp_score = None
+        linucb_score = None
+        try:
+            import numpy as np
+            features = self._feature_extractor.extract(
+                task, self.escalation.failure_count(str(task.get("task_id", "")))
+            )
+            linucb_score = float(self.ml_router.predict_success(np.array(features)))
+        except Exception:
+            pass
+        try:
+            gp = getattr(self.ml_router, '_gp', None)
+            if gp is not None and gp.is_fitted():
+                import numpy as np
+                features = self._feature_extractor.extract(
+                    task, self.escalation.failure_count(str(task.get("task_id", "")))
+                )
+                gp_score = float(gp.predict_proba(np.array(features).reshape(1, -1))[0])
+        except Exception:
+            pass
+        report = self.calibrator.fuse(
+            critic_score=critic_score,
+            prm_raw=prm_raw,
+            gp_score=gp_score,
+            linucb_score=linucb_score,
+        )
+        logger.info(
+            "[confidence] task=%s score=%.2f verdict=%s",
+            task.get("task_id", "?"), report.fused_score, report.verdict,
+        )
+        return report
+
+    def _pick_best_candidate(self, candidates: list, task: dict) -> dict:
+        """
+        P7: Select the best patch from a list of candidates.
+        Uses PRM scoring when ready, otherwise falls back to highest critic_confidence.
+        Returns the single candidate unchanged if only one is provided.
+        """
+        if len(candidates) <= 1:
+            return candidates[0]
+        if self._prm is not None and getattr(self._prm, "ready", False):
+            best = candidates[0]
+            best_score = -1.0
+            for c in candidates:
+                try:
+                    score = self._prm.predict(task, c)
+                    if score > best_score:
+                        best_score = score
+                        best = c
+                except Exception:
+                    pass
+            return best
+        return max(candidates, key=lambda c: c.get("_critic_confidence", 0.0))
+
     def execute_feature(
         self,
         goal: str,
@@ -189,6 +1059,101 @@ class Orchestrator:
         pre_planned_tasks: Optional[List] = None,
         use_parallel: bool = False,
         resume: bool = False,
+        session_id: Optional[str] = None,
+        auto_approve_plan: bool = False,
+        extra_context: str = "",
+        cancel_event=None,
+        on_runtime_session: Optional[Callable[[str], None]] = None,
+    ) -> dict:
+        """
+        Execute a complete feature request end-to-end (_execute_feature_impl)
+        and record which components actually ran: the result's "components"
+        dict (planner, acceptance, one_shot, arbiter, goal_check,
+        integration_review, notebook), one `[COMPONENTS] {json}` log line at
+        the end, and components.json in the cwd of a benchmark child
+        (AWOS_SERIES_ARM set).
+
+        The GUI chat (gui_chat._run_agent) also passes:
+          extra_context       prior chat turns, given to the model with the
+                              same channel as AWOS_EXPERIENCE context
+          cancel_event        a threading.Event; once set, the run stops after
+                              the current task, as a pause would
+          on_runtime_session  called with the RuntimeSession id once it exists
+        """
+        self._components = _new_components()
+        self._extra_context = (extra_context or "").strip()
+        self._cancel_event = cancel_event
+        self._on_runtime_session = on_runtime_session
+        report = None
+        try:
+            report = self._execute_feature_impl(
+                goal, codebase_root, codebase_context, pre_planned_tasks, use_parallel,
+                resume, session_id, auto_approve_plan,
+            )
+            return report
+        finally:
+            comps = self._finish_components(report)
+            if isinstance(report, dict):
+                report["components"] = comps
+            _emit_components(comps)
+
+    def _component(self, name: str, **fields) -> None:
+        """Merge `fields` into this run's record for component `name`."""
+        comps = getattr(self, "_components", None)
+        if comps is None:
+            comps = self._components = _new_components()
+        comps.setdefault(name, {}).update(fields)
+
+    def _component_add(self, name: str, **counts) -> None:
+        """Add numeric `counts` to component `name` (several tasks or calls)."""
+        comps = getattr(self, "_components", None)
+        if comps is None:
+            comps = self._components = _new_components()
+        entry = comps.setdefault(name, {})
+        for key, value in counts.items():
+            entry[key] = round((entry.get(key) or 0) + value, 6)
+
+    def _finish_components(self, report: Optional[dict]) -> dict:
+        """The run's components, with the planner and the integration review
+        read off the report (that is where they are decided)."""
+        comps = {k: dict(v) for k, v in (getattr(self, "_components", None)
+                                         or _new_components()).items()}
+        report = report if isinstance(report, dict) else {}
+        source = report.get("plan_source")
+        planner = comps.setdefault("planner", {})
+        if source in ("planner", "planner_fallback"):
+            planner.update(status="ok", source=source)
+        elif source == "goal_as_task":
+            errors = " | ".join(str(e) for e in report.get("planner_errors") or [])
+            planner.update(status="failed", source=source, error=errors[:300])
+        elif source:
+            planner.update(status="skipped", source=source)
+        review = report.get("integration_review")
+        if isinstance(review, dict) and comps.get("integration_review", {}).get(
+                "status") == "not_run":
+            if review.get("skipped"):
+                comps["integration_review"] = {
+                    "status": "skipped", "reason": str(review.get("skip_reason", ""))[:200]}
+            elif review.get("model_used"):
+                comps["integration_review"] = {
+                    "status": "ran", "model": review.get("model_used"),
+                    "passed": bool(review.get("passed", True)),
+                    "issues": len(review.get("issues") or [])}
+            else:
+                comps["integration_review"] = {"status": "skipped",
+                                               "reason": "run not successful"}
+        return comps
+
+    def _execute_feature_impl(
+        self,
+        goal: str,
+        codebase_root: str = ".",
+        codebase_context: Optional[dict] = None,
+        pre_planned_tasks: Optional[List] = None,
+        use_parallel: bool = False,
+        resume: bool = False,
+        session_id: Optional[str] = None,
+        auto_approve_plan: bool = False,
     ) -> dict:
         """
         Execute a complete feature request end-to-end.
@@ -210,9 +1175,17 @@ class Orchestrator:
                 "time_elapsed": 12.5
             }
         """
-        
+
         start_time = time.time()
         self.execution_log = []  # Reset log for each run
+        # AWOS_GOAL_BUDGET_USD counts the ledger's spend from here on.
+        self._goal_started_at, self._goal_budget_hit = start_time, False
+        #: True once the budget kept a task, a retry or a follow-up from running.
+        self._goal_budget_skipped_work = False
+        self._last_goal_verdict = None
+        self._run_files_changed: set = set()  # files kept by successful tasks this run
+        #: One compact action trace per agent-loop task: the notebook update's input.
+        self._notebook_traces: list = []
 
         # ── ReAct Trace Session ────────────────────────────────────────────────
         session = ReasoningSession(
@@ -221,10 +1194,13 @@ class Orchestrator:
         )
 
         # ── Phase 6: VectorMemory — index codebase for semantic retrieval ──
+        _vm_start = time.time()
         if self.vector_memory is not None:
             try:
                 _n = self.vector_memory.index_codebase(codebase_root)
                 logger.info("[VectorMemory] indexed %d chunks from %s", _n, codebase_root)
+                if self._gui_bus:
+                    self._gui_bus.emit_codebase_indexed(_n, time.time() - _vm_start)
             except Exception as _vm_exc:
                 logger.warning("[VectorMemory] index_codebase failed: %s", _vm_exc)
 
@@ -239,53 +1215,273 @@ class Orchestrator:
             len(self._active_goal_graph.nodes),
         )
 
+        repo_root = str(Path(codebase_root).resolve())
+
+        # ── RuntimeSession (early — before worktree / index / plan) ─────
+        if self._runtime_session_enabled():
+            try:
+                from .runtime_session import RuntimeSessionStore, SessionStatus
+            except ImportError:
+                from runtime_session import RuntimeSessionStore, SessionStatus
+            self._runtime_store = RuntimeSessionStore()
+            if session_id:
+                self._runtime_session = self._runtime_store.begin_resume(session_id)
+            elif resume:
+                latest = self._runtime_store.find_latest_for_goal(goal)
+                self._runtime_session = (
+                    self._runtime_store.begin_resume(latest.session_id)
+                    if latest
+                    else self._runtime_store.create(goal, repo_root)
+                )
+            else:
+                self._runtime_session = self._runtime_store.create(goal, repo_root)
+            self._runtime_session.status = SessionStatus.RUNNING
+            self._runtime_store.save(self._runtime_session)
+            _on_rs = getattr(self, "_on_runtime_session", None)
+            if _on_rs is not None:
+                try:
+                    _on_rs(self._runtime_session.session_id)
+                except Exception as _cb_exc:  # a GUI callback never breaks the run
+                    logger.debug("[SESSION] on_runtime_session failed: %s", _cb_exc)
+            print(
+                f"[SESSION] Runtime session {self._runtime_session.session_id} "
+                f"({self._runtime_session.status.value})"
+            )
+
+            # ── GuiEventBus: structured event streaming ──────────────────
+            try:
+                from .gui_events import GuiEventBus
+            except ImportError:
+                from gui_events import GuiEventBus
+            _session_id = self._runtime_session.session_id
+            self._gui_bus = GuiEventBus(_session_id, goal)
+            self._gui_bus.emit_session_start(goal, repo_root)
+            print(f"[EVENTS] GuiEventBus started for session {_session_id}")
+
+        # ── Worktree sandbox (optional) ─────────────────────────────────
+        self._virtual_runtime = None
+        if self._runtime_session and self._runtime_store:
+            try:
+                from .virtual_execution_runtime import VirtualExecutionRuntime
+            except ImportError:
+                from virtual_execution_runtime import VirtualExecutionRuntime
+            self._virtual_runtime = VirtualExecutionRuntime(
+                repo_root, self._runtime_session, self._runtime_store
+            )
+            effective_root = self._virtual_runtime.enter()
+            if effective_root != repo_root:
+                print(f"[WORKTREE] Isolated sandbox: {effective_root}")
+                codebase_root = effective_root
+                self._runtime_session.codebase_root = effective_root
+                self._runtime_store.save(self._runtime_session)
+
         # Set up git safety — branch or file backups
         git = GitManager(codebase_root)
         branch = git.setup(goal)
         if branch:
             print(f"[GIT] Working on branch '{branch}'")
         else:
-            print(f"[GIT] No git repo — using in-memory file backups")
-        
+            print("[GIT] No git repo — using in-memory file backups")
+
         # Auto-discover codebase context if not provided
         if codebase_context is None:
             codebase_context = self._discover_codebase_context(codebase_root)
-        
-        # Build symbol index for cross-file awareness (Phase 3)
-        sym_index = SymbolIndex(codebase_root)
-        sym_index.build()
+
+        # Build/Load symbol index for cross-file awareness (Phase 3)
+        _index_path = str(Path(".awos") / "symbol_index.json")
+        sym_index = None
+        try:
+            sym_index = SymbolIndex.load(_index_path)
+        except (AttributeError, FileNotFoundError):
+            pass  # load() removed or cache missing — build from scratch
+        if sym_index is not None:
+            # Loaded from cache — only reparse changed files
+            _changed = sym_index.rebuild_changed()
+            logger.info(
+                "[SymbolIndex] loaded from cache (%d changed, %d files)",
+                _changed, len(sym_index._cache),
+            )
+        else:
+            # Full build from scratch
+            sym_index = SymbolIndex(codebase_root)
+            sym_index.build()
+            try:
+                sym_index.save(_index_path)
+            except (AttributeError, OSError):
+                pass  # save() removed or I/O error — non-critical
+            logger.info("[SymbolIndex] built from scratch — %s", sym_index.summary())
         print(f"[SYMBOLS] {sym_index.summary()}")
-        
+
+        # ── Goal Clarification (Phase 1 & 3) — NEW ──────────────────────────
+        # Feature flag: AWOS_ENABLE_CLARIFICATION
+        if os.getenv("AWOS_ENABLE_CLARIFICATION", "").lower() in ("1", "true", "yes"):
+            try:
+                from .goal_clarifier import clarify_goal
+                from .plan_reviewer import review_plan
+
+                print("\n[CLARIFICATION] Analyzing goal...")
+                clarified = clarify_goal(goal, interactive=True)
+
+                if clarified.is_ambiguous and not clarified.clarifying_questions:
+                    # Questions were answered, use enriched goal
+                    goal = clarified.to_enriched_prompt()
+                    print("[CLARIFICATION] Goal clarified")
+                elif clarified.is_ambiguous:
+                    # Non-interactive or failed, proceed with original
+                    print("[CLARIFICATION] Warning: Goal may be ambiguous")
+
+                # Store clarified goal for plan review
+                _clarified_goal = clarified
+            except Exception as exc:
+                logger.warning("[CLARIFICATION] Failed (%s), proceeding with original goal", exc)
+                _clarified_goal = None
+        else:
+            _clarified_goal = None
+
+        # ── LiveRenderer: real-time terminal UI ────────────────────────────
+        _live = LiveRenderer()
+        _live.session_start(goal, n_files=getattr(sym_index, '_file_count', 0))
+
+        # ── Exploration phase (pre-plan grep/find) ─────────────────────────
+        _exploration_data: dict = {}
+        # AWOS_EXECUTOR=loop: no exploration, no planner — the model explores
+        # with its own shell (loop_executor.py).
+        _loop_executor = executor_choice() == "loop"
+        if exploration_enabled() and pre_planned_tasks is None and not _loop_executor:
+            print("\n[EXPLORE] Pre-plan repository scan...")
+            _exploration_data = run_exploration(goal, codebase_root)
+            codebase_context = enrich_codebase_context(codebase_context, _exploration_data)
+            n_hits = len(_exploration_data.get("grep_hits", []))
+            n_files = len(_exploration_data.get("hit_files", []))
+            print(f"[EXPLORE] {n_hits} grep hit(s) across {n_files} file(s)")
+
         # Phase 1: Planning — skip if caller already built a cheap plan
+        _plan_source, _planner_errors = "pre_planned", []
+        _plan_collapsed = False
         if pre_planned_tasks is not None:
             tasks = pre_planned_tasks
             print(f"\n[PLANNER] Using pre-built plan: {len(tasks)} tasks")
             for task in tasks:
                 print(f"  Task {task['task_id']}: {task['action']} (complexity: {task['complexity']})")
+        elif _loop_executor:
+            print("\n[PLANNER] skipped: AWOS_EXECUTOR=loop runs the goal as one task", flush=True)
+            plan = self._goal_as_single_task_plan(goal)
+            plan["reasoning"] = "planner skipped: AWOS_EXECUTOR=loop"
+            _plan_source = "skipped_by_executor"
+            tasks = plan["plan"]
         else:
-            print(f"\n[PLANNER] Breaking down goal: {goal}")
-            try:
-                plan = self.planner.plan(
-                    goal, codebase_context,
-                    tracker=self.tracker,
-                    existing_goal=self._active_goal_graph,
+            _skip_reason = (
+                _planner_skip_reason(_exploration_data)
+                if executor_choice() == "agent_loop" else None
+            )
+            if _skip_reason is not None:
+                # The task keeps no start file: grep hits include tests and
+                # keyword noise, and the prompt would present them as "Files
+                # to change". The exploration notes reach the prompt anyway.
+                print(f"\n[PLANNER] skipped: {_skip_reason}", flush=True)
+                plan = self._goal_as_single_task_plan(goal)
+                plan["reasoning"] = f"planner skipped: {_skip_reason}"
+                _plan_source = (
+                    "skipped_by_env" if _planner_mode() == "never" else "skipped_small_goal"
                 )
-            except Exception as e:
-                return {
-                    "success": False,
-                    "goal": goal,
-                    "tasks_completed": 0,
-                    "tasks_failed": 0,
-                    "total_cost": 0,
-                    "execution_log": self.execution_log,
-                    "errors": [f"Planning failed: {str(e)}"],
-                    "time_elapsed": time.time() - start_time
-                }
+            else:
+                print(f"\n[PLANNER] Breaking down goal: {goal}")
+                plan, _plan_source, _planner_errors = self._plan_goal(
+                    goal, codebase_context, _live
+                )
             tasks = plan.get("plan", [])
+            # A layer-by-layer split (model → service → CLI) of a small
+            # feature cost turns: task 1 did the whole goal, and each later
+            # task started cold, re-read it all and ran out of turns on the
+            # nudges. The agent loop can carry a small plan in one session;
+            # the Worker edits one file per task, so it keeps the split.
+            _max_files = _single_task_max_files()
+            if executor_choice() == "agent_loop":
+                collapsed = self._collapse_small_plan(goal, tasks, _max_files)
+                if collapsed is not None:
+                    print(
+                        f"[PLANNER] {len(tasks)} tasks touch {len(task_files(collapsed[0]))} "
+                        f"file(s) → running as one task (AWOS_SINGLE_TASK_MAX_FILES={_max_files})"
+                    )
+                    tasks = collapsed
+                    _plan_collapsed = True
             print(f"[PLANNER] Generated {len(tasks)} tasks:")
             for task in tasks:
                 print(f"  Task {task['task_id']}: {task['action']} (complexity: {task['complexity']})")
-        
+
+        # ── GuiEventBus: plan_generated ─────────────────────────────────────
+        if self._gui_bus:
+            self._gui_bus.emit_plan_generated(len(tasks), [
+                {"task_id": t["task_id"], "action": t["action"], "complexity": t.get("complexity", 0)}
+                for t in tasks
+            ])
+
+        # ── Plan Review Checkpoint (Phase 2) — NEW ───────────────────────────
+        # Feature flag: AWOS_ENABLE_PLAN_REVIEW
+        if os.getenv("AWOS_ENABLE_PLAN_REVIEW", "").lower() in ("1", "true", "yes"):
+            try:
+                from .plan_reviewer import review_plan
+
+                # Extract files and acceptance from clarified goal if available
+                files_to_modify = []
+                acceptance = None
+                if _clarified_goal:
+                    acceptance = _clarified_goal.acceptance_criteria
+                    # Try to extract files from tasks
+                    for task in tasks:
+                        file = task.get('file', task.get('files'))
+                        if file:
+                            if isinstance(file, list):
+                                files_to_modify.extend(file)
+                            else:
+                                files_to_modify.append(file)
+                    files_to_modify = list(set(files_to_modify)) if files_to_modify else None
+
+                # Review plan with user
+                review_result = review_plan(
+                    goal=goal,
+                    plan=tasks,
+                    files_to_modify=files_to_modify,
+                    acceptance_criteria=acceptance,
+                    interactive=True,
+                    auto_approve=auto_approve_plan,
+                )
+
+                if not review_result.approved:
+                    # Plan rejected or needs refinement
+                    if review_result.feedback:
+                        print(f"\n[PLAN REVIEW] Plan needs revision: {review_result.feedback}")
+                        print("[PLAN REVIEW] Please rerun with refined goal")
+                    elif review_result.rejection_reason:
+                        print(f"\n[PLAN REVIEW] Plan rejected: {review_result.rejection_reason}")
+
+                    return {
+                        "success": False,
+                        "goal": goal,
+                        "tasks_completed": 0,
+                        "tasks_failed": 0,
+                        "total_tasks": len(tasks),
+                        "total_cost": 0,
+                        "execution_log": self.execution_log,
+                        "errors": ["Plan not approved by user"],
+                        "plan_review_feedback": review_result.feedback or review_result.rejection_reason,
+                        "time_elapsed": time.time() - start_time
+                    }
+
+                print("\n[PLAN REVIEW] ✓ Plan approved, proceeding with execution")
+
+            except Exception as exc:
+                logger.warning("[PLAN REVIEW] Failed (%s), proceeding without review", exc)
+
+        _live.planning_done(
+            tasks,
+            model="CheapPlanner" if is_cheap_only() else self.planner.__class__.__name__,
+        )
+
+        if self._runtime_session and self._runtime_store:
+            self._runtime_session.progress.total_tasks = len(tasks)
+            self._runtime_store.save(self._runtime_session)
+
         # ── Phase 5C: Ensure every task has a GoalNode in the graph ──
         if hasattr(self, "_active_goal_graph") and self._active_goal_graph is not None:
             self.project_planner.ensure_task_nodes(
@@ -295,6 +1491,8 @@ class Orchestrator:
         # Phase 2: Execution with Retry + Simplification
         decomposition_depth = 0
         max_decomposition = 2
+        replan_depth = 0
+        max_replan = 1
         tasks_to_run = list(tasks)
         total_tasks_all_cycles = len(tasks)
 
@@ -302,7 +1500,15 @@ class Orchestrator:
         self._current_state = self.state_manager.load(goal)
         self.state_manager.add_session(self._current_state, session.session_id)
 
-        if resume and self._current_state["completed_task_ids"]:
+        if self._runtime_session and self._runtime_session.progress.completed_task_ids:
+            already_done = set(self._runtime_session.progress.completed_task_ids)
+            tasks_to_run = [t for t in tasks if t["task_id"] not in already_done]
+            print(
+                f"[RESUME] Skipping {len(tasks) - len(tasks_to_run)} already-completed task(s): "
+                f"{sorted(already_done)}"
+            )
+            total_tasks_all_cycles = len(tasks_to_run)
+        elif resume and self._current_state["completed_task_ids"]:
             already_done = set(self._current_state["completed_task_ids"])
             tasks_to_run = [t for t in tasks if t["task_id"] not in already_done]
             print(
@@ -330,6 +1536,16 @@ class Orchestrator:
         elif _reason:
             print(f"[BUDGET] {_reason}")
 
+        # AWOS_EXPERIENCE (ablation B): this repo's most similar past verified
+        # changes, for the one-shot context and the agent's first message.
+        _experience = self._experience_context(goal, codebase_root)
+        _caller_context = getattr(self, "_extra_context", "")
+        if _caller_context:
+            _caller_context = f"Earlier conversation with the user:\n{_caller_context}"
+        _extra = "\n\n".join(x for x in (_caller_context, _experience) if x)
+        if _extra:
+            _exploration_data = {**(_exploration_data or {}), "extra_context": _extra}
+
         # Bind context needed by _execute_single_task into a closure
         _ctx = dict(
             codebase_root=codebase_root,
@@ -337,6 +1553,12 @@ class Orchestrator:
             sym_index=sym_index,
             git=git,
             session=session,
+            _live=_live,
+            _total_tasks=len(tasks),
+            exploration=_exploration_data,
+            # Read once per goal; every agent-loop prompt of the goal carries it.
+            notebook=self._read_project_notebook(codebase_root),
+            experience=_experience,
         )
 
         while True:
@@ -346,15 +1568,91 @@ class Orchestrator:
             for r in results:
                 if r["success"]:
                     self.state_manager.mark_complete(self._current_state, r["task_id"])
+                    if self._runtime_session and self._runtime_store:
+                        self._runtime_store.checkpoint(
+                            self._runtime_session,
+                            completed_task_id=r["task_id"],
+                            total_tasks=len(tasks),
+                        )
                 else:
                     self.state_manager.mark_failed(self._current_state, r["task_id"])
+                    if self._runtime_session and self._runtime_store:
+                        self._runtime_store.checkpoint(
+                            self._runtime_session,
+                            failed_task_id=r["task_id"],
+                            total_tasks=len(tasks),
+                        )
+
+                    # ── Stagnation breaker ──────────────────────────────────
+                    if self._check_stagnation(r):
+                        print("\n[BREAKER] Stagnation detected: same error pattern repeating")
+                        print(f"[BREAKER] Task {r['task_id']} stuck — stopping")
+                        # Runtime sessions are optional; without one there is
+                        # nothing to pause, but the run must still stop.
+                        if self._runtime_session and self._runtime_store:
+                            from .runtime_session import SessionStatus
+                            self._runtime_session.pause_reason = "STAGNATION"
+                            print(f"[BREAKER] Review: awos sessions show {self._runtime_session.session_id}")
+                            self._runtime_store.finalize(self._runtime_session, SessionStatus.PAUSED)
+                        self._pause_requested = True
+                        tasks_completed = sum(1 for res in results if res["success"])
+                        tasks_failed = sum(1 for res in results if not res["success"])
+                        break
+
+            if self._goal_budget_exhausted():
+                # No replan or decomposition either: that is new work too.
+                tasks_completed = sum(1 for r in results if r["success"])
+                tasks_failed = sum(1 for r in results if not r["success"])
+                break
+
+            if self._cancel_requested():
+                if self._runtime_session and self._runtime_store:
+                    from .runtime_session import SessionStatus
+                    print("[SESSION] Pause requested — stopping after last checkpoint")
+                    self._runtime_store.finalize(self._runtime_session, SessionStatus.PAUSED)
+                tasks_completed = sum(1 for r in results if r["success"])
+                tasks_failed = sum(1 for r in results if not r["success"])
+                break
 
             cycle_completed = sum(1 for r in results if r["success"])
             cycle_failed = sum(1 for r in results if not r["success"])
             failed_tasks = [r["task"] for r in results if not r["success"]]
 
+            # ── Verify-fail → replan (before decomposition) ─────────────────
+            if replan_depth < max_replan and os.getenv("AWOS_REPLAN_DISABLE", "").lower() not in (
+                "1", "true", "yes",
+            ):
+                replanned: list[dict] = []
+                for r in results:
+                    if r.get("success") or r.get("failure_kind") != "verify_fail":
+                        continue
+                    task = r["task"]
+                    if task.get("_replan_attempted"):
+                        continue
+                    replanned.extend(
+                        self._replan_after_verify_fail(
+                            task, r.get("verify_error", ""), codebase_context,
+                        )
+                    )
+                if replanned:
+                    print(
+                        f"\n[REPLAN] Verify-fail → {len(replanned)} revised task(s) "
+                        f"(depth={replan_depth + 1}/{max_replan})"
+                    )
+                    tasks_to_run = replanned
+                    total_tasks_all_cycles += len(replanned)
+                    replan_depth += 1
+                    continue
+
             # ── Retry with Simplification ────────────────────────────────────
-            if failed_tasks and decomposition_depth < max_decomposition:
+            # Not for the agent loop: it reads, edits and tests a whole task
+            # itself, and a fragment of the task's wording ("Create script to
+            # load, clean,") is not simpler, only less clear.
+            if (
+                failed_tasks
+                and decomposition_depth < max_decomposition
+                and executor_choice() not in ("agent_loop", "loop")
+            ):
                 new_tasks = []
                 for task in failed_tasks:
                     new_tasks.extend(self.decomposer.decompose(task))
@@ -373,8 +1671,47 @@ class Orchestrator:
             tasks_failed = cycle_failed
             break
 
+        # ── Goal check: every task passing is not the goal being done ──────
+        goal_complete, goal_check_reasoning = True, ""
+        _gc_results: list = []
+        if tasks_failed == 0 and not self._pause_requested and not self._goal_budget_exhausted():
+            goal_complete, extra, goal_check_reasoning = self._goal_check_rounds(
+                goal, _ctx, use_parallel,
+            )
+            _gc_results = list(extra)
+            tasks_completed += sum(1 for r in extra if r["success"])
+            tasks_failed += sum(1 for r in extra if not r["success"] and not r.get("superseded"))
+            total_tasks_all_cycles += len(extra)
+        incomplete_reason = ""
+        if self._goal_budget_hit:
+            # Work left unstarted, or failed work not retried: not done. With
+            # every task run and passed, only the goal check was lost to the
+            # budget: the goal is unverified, not unfinished, and says so.
+            reason = (GOAL_BUDGET_REASON
+                      if self._goal_budget_skipped_work or tasks_failed
+                      else GOAL_CHECK_BUDGET_REASON)
+            goal_complete, incomplete_reason = False, reason
+            self.execution_log.append({"task_id": "goal_budget", "status": "failed",
+                                       "reason": reason})
+
         elapsed = time.time() - start_time
-        overall_success = tasks_failed == 0
+        overall_success = tasks_failed == 0 and goal_complete
+
+        # ── Project notebook: learn from this goal, after its goal check ──
+        # Not on the loop path: it makes no notebook call.
+        if _loop_executor:
+            self._component("notebook", status="skipped", reason="executor loop")
+        else:
+            self._update_project_notebook(goal, codebase_root, {
+                "success": overall_success,
+                "tasks_completed": tasks_completed,
+                "tasks_failed": tasks_failed,
+                "goal_check": self._goal_check_summary(goal_complete, goal_check_reasoning),
+                "incomplete_reason": incomplete_reason,
+            })
+        # ── Experience store + trajectory log: the goal's outcome is final ──
+        self._experience_goal_end(goal, codebase_root, start_time, overall_success,
+                                  list(results) + _gc_results)
 
         # ── Phase 1: Observability — print metrics summary after execution ──
         print()
@@ -410,14 +1747,58 @@ class Orchestrator:
         if _mx is not None:
             print(_mx)
 
-        # Finalize git state — keep branch on success, rollback on total failure
+        # Finalize git state — keep branch on success, rollback only on total failure
         if tasks_completed == 0 and tasks_failed > 0:
             print("[GIT] All tasks failed — performing full rollback")
-        git.finalize(overall_success)
-        
+            git.finalize(False, force_full_rollback=True)
+        else:
+            git.finalize(overall_success)
+
+        # ── LiveRenderer: session done ──────────────────────────────────
+        _total_cost = self.tracker.get_budget_status().get("total_cost", 0.0) if self.tracker else 0.0
+        _live.session_done(
+            completed=tasks_completed,
+            failed=tasks_failed,
+            total_cost=_total_cost,
+            elapsed=elapsed,
+        )
+
+        # ── EvalReport: auto-run health dashboard after every session ──
+        try:
+            from .eval_report import (
+                _analyse,
+                _feature_status,
+                _load_mcts_traces,
+                _load_skills,
+                _load_spans,
+                _render,
+            )
+        except ImportError:
+            try:
+                from eval_report import (
+                    _analyse,
+                    _feature_status,
+                    _load_mcts_traces,
+                    _load_skills,
+                    _load_spans,
+                    _render,
+                )
+            except ImportError:
+                _render = None
+        if _render is not None:
+            try:
+                _spans = _load_spans(".awos", 100)
+                _metrics = _analyse(_spans)
+                _features = _feature_status()
+                _skills_n = _load_skills(".awos")
+                _mcts_n = _load_mcts_traces(".awos")
+                _render(_metrics, _features, _skills_n, _mcts_n)
+            except Exception as _er:
+                logger.debug("[eval_report] skipped: %s", _er)
+
         # Phase 3: Summary
         print(f"\n{'='*60}")
-        print(f"EXECUTION SUMMARY")
+        print("EXECUTION SUMMARY")
         print(f"{'='*60}")
         print(f"Goal:            {goal}")
         print(f"Tasks Completed: {tasks_completed}/{total_tasks_all_cycles}")
@@ -425,20 +1806,34 @@ class Orchestrator:
         if decomposition_depth > 0:
             print(f"Decomposition:   {decomposition_depth} cycle(s)")
         print(f"Time Elapsed:    {elapsed:.1f}s")
-        
+
         if self.tracker:
             status = self.tracker.get_budget_status()
             print(f"Total Cost:      ${status.get('total_cost', 0):.4f}")
             print(f"Remaining Budget:{status.get('remaining_budget', 0):.2f}")
-        
+
         print(f"{'='*60}\n")
-        
-        # ── Integration Review (T4 model checks cross-task coherence) ────
+
+        # ── Integration Review (advisory cross-task coherence check) ────
+        # The run's agent model (or AWOS_REVIEW_MODEL); its spend is recorded
+        # to the ledger, so it counts toward the goal budget.
         review = {"passed": True, "issues": [], "suggestions": []}
-        if overall_success:
+        if _loop_executor:
+            # One task, judged by the success gate: nothing to cross-check.
+            review = {**review, "skipped": True, "skip_reason": "executor loop"}
+        elif overall_success:
             try:
-                review = self.integration_reviewer.review(codebase_root, self.execution_log)
-                if review.get("issues"):
+                # n_tasks gates AWOS_INTEGRATION_REVIEW=auto: a cross-task
+                # check has nothing to cross-check after one task.
+                review = self.integration_reviewer.review(
+                    codebase_root, self.execution_log,
+                    agent_model=getattr(self, "_last_agent_model", None),
+                    tracker=getattr(self, "tracker", None),
+                    n_tasks=tasks_completed + tasks_failed,
+                )
+                if review.get("skipped"):
+                    print(f"[INTEGRATION] Review skipped: {review.get('skip_reason', '')}")
+                elif review.get("issues"):
                     print(f"[INTEGRATION] {len(review['issues'])} issue(s) found")
                     for issue in review["issues"][:3]:
                         print(f"  - {issue}")
@@ -450,7 +1845,79 @@ class Orchestrator:
         self.trace_store.save(session)
 
         # ── Finalize goal state ─────────────────────────────────────────
+        if self._runtime_session and self._runtime_store:
+            try:
+                from .runtime_session import SessionStatus
+            except ImportError:
+                from runtime_session import SessionStatus
+            if self._virtual_runtime:
+                _term = self._runtime_session.status
+                if _term != SessionStatus.PAUSED:
+                    _term = SessionStatus.COMPLETED if overall_success else SessionStatus.FAILED
+                self._virtual_runtime.finalize(_term)
+            if self._runtime_session.status != SessionStatus.PAUSED:
+                self._runtime_store.finalize(
+                    self._runtime_session,
+                    SessionStatus.COMPLETED if overall_success else SessionStatus.FAILED,
+                )
+
         self.state_manager.finalize(self._current_state, overall_success)
+
+        # ── StabilityGate — auto-detect test suite health + update .env ──
+        self._session_count += 1
+        if self.stability_gate.should_check(self._session_count):
+            try:
+                _stable, _reason = self.stability_gate.run(verbose=False)
+                logger.info("[StabilityGate] %s — %s", "STABLE" if _stable else "UNSTABLE", _reason)
+            except Exception as _sg_exc:
+                logger.debug("[StabilityGate] probe skipped: %s", _sg_exc)
+
+        # ── Feature 1A: PromptEvolver — evolve worker guidelines ────────
+        if self.prompt_evolver.should_evolve(self._session_count):
+            try:
+                guidelines = self.prompt_evolver.evolve()
+                if guidelines:
+                    self.prompt_evolver.persist(guidelines, self._session_count)
+                    logger.info("[PromptEvolver] evolved guidelines persisted (session %d)", self._session_count)
+            except Exception as _pe:
+                logger.debug("[PromptEvolver] evolution skipped: %s", _pe)
+
+        # ── Feature 1C: ScaffoldEvolver — self-patch scaffold on high failure rate ──
+        _failure_rate = tasks_failed / max(tasks_completed + tasks_failed, 1)
+        if self.scaffold_evolver.should_evolve(_failure_rate):
+            try:
+                _mut = self.scaffold_evolver.evolve_once(self.error_store)
+                if _mut.accepted:
+                    logger.info("[ScaffoldEvolver] scaffold mutation ACCEPTED: %s", _mut.description)
+                else:
+                    logger.debug("[ScaffoldEvolver] mutation rejected: %s", _mut.rejection_reason)
+            except Exception as _se:
+                logger.debug("[ScaffoldEvolver] evolution skipped: %s", _se)
+
+        # ── Self-Learning Observability ─────────────────────────────────
+        try:
+            from scaffold.agent.self_learning_metrics import SelfLearningMetrics
+        except ImportError:
+            try:
+                from self_learning_metrics import SelfLearningMetrics
+            except ImportError:
+                SelfLearningMetrics = None
+        if SelfLearningMetrics is not None:
+            try:
+                SelfLearningMetrics().print_report()
+            except Exception as _slm_exc:
+                logger.debug("[SelfLearningMetrics] report skipped: %s", _slm_exc)
+
+        # ── GuiEventBus: session_done ────────────────────────────────────────
+        if self._gui_bus:
+            self._gui_bus.emit_session_done(
+                completed=tasks_completed,
+                failed=tasks_failed,
+                total_cost=sum(
+                    log.get("cost_usd", 0) for log in self.execution_log
+                ) if self.execution_log else 0.0,
+                elapsed=elapsed,
+            )
 
         return {
             "success": overall_success,
@@ -460,11 +1927,425 @@ class Orchestrator:
             "tasks_failed": tasks_failed,
             "total_tasks": len(tasks),
             "execution_log": self.execution_log,
-            "errors": [log["reason"] for log in self.execution_log if log["status"] == "failed"],
+            "errors": _planner_errors + [
+                log["reason"] for log in self.execution_log if log["status"] == "failed"
+            ],
             "time_elapsed": elapsed,
+            # "planner" | "planner_fallback" | "goal_as_task" | "pre_planned"
+            # | "skipped_small_goal" | "skipped_by_env" (AWOS_PLANNER gate)
+            "plan_source": _plan_source,
+            "plan_collapsed": _plan_collapsed,
+            "planner_errors": _planner_errors,
             "integration_review": review,
+            "goal_complete": goal_complete,
+            "goal_check_reasoning": goal_check_reasoning,
+            "goal_check": self._goal_check_summary(goal_complete, goal_check_reasoning),
+            "incomplete_reason": incomplete_reason,
+            "runtime_session_id": (
+                self._runtime_session.session_id if self._runtime_session else None
+            ),
+            "worktree_path": (
+                self._runtime_session.sandbox.worktree_path
+                if self._runtime_session and self._runtime_session.sandbox.enabled
+                else None
+            ),
         }
-    
+
+    # ── Planning ─────────────────────────────────────────────────────────────
+
+    def _plan_goal(self, goal: str, codebase_context: dict, live=None) -> tuple:
+        """
+        Plan `goal`: primary planner, then CheapPlanner, then the goal itself.
+
+        Returns (plan, source, errors). source is "planner", "planner_fallback"
+        or "goal_as_task"; errors holds one line per planner that failed.
+
+        A run once ended here with no output and no work: both planners
+        failed, the failure only went into the returned dict, and the job
+        recorded 0 turns. Now each failure is printed, and when no planner
+        produces a plan the goal runs as one task — the agent loop reads the
+        code and can carry a whole goal.
+        """
+        def _spinner(label):
+            return live.spinner(label) if live is not None else contextlib.nullcontext()
+
+        errors: list = []
+        try:
+            with _spinner("Planning…"):
+                if is_cheap_only():
+                    plan = CheapPlanner().plan(goal, codebase_context, tracker=self.tracker)
+                    print("[PLANNER] Cheap-only mode — CheapPlanner")
+                else:
+                    plan = self.planner.plan(
+                        goal, codebase_context,
+                        tracker=self.tracker,
+                        existing_goal=getattr(self, "_active_goal_graph", None),
+                    )
+            self._check_plan(plan)
+            return plan, "planner", errors
+        except Exception as primary_err:
+            errors.append(f"primary planner failed: {primary_err}")
+            logger.warning("[planner] primary planner failed (%s) — trying CheapPlanner", primary_err)
+            print(f"[PLANNER] ✗ primary planner failed: {primary_err}", flush=True)
+        # The primary is often a CheapPlanner itself, which already retries an
+        # empty reply; the fallback then only repeated the same failing call.
+        if is_cheap_only() or (isinstance(CheapPlanner, type)
+                               and isinstance(self.planner, CheapPlanner)):
+            print("[PLANNER] ✗ no other planner to try — running the whole goal as one task",
+                  flush=True)
+            return self._goal_as_single_task_plan(goal), "goal_as_task", errors
+        print("[PLANNER] trying CheapPlanner fallback…", flush=True)
+        try:
+            with _spinner("Planning (fallback)…"):
+                plan = CheapPlanner().plan(goal, codebase_context, tracker=self.tracker)
+            self._check_plan(plan)
+            print("[PLANNER] Fell back to CheapPlanner", flush=True)
+            return plan, "planner_fallback", errors
+        except Exception as fallback_err:
+            errors.append(f"fallback planner failed: {fallback_err}")
+            logger.error("[planner] fallback CheapPlanner failed (%s)", fallback_err)
+            print(f"[PLANNER] ✗ fallback CheapPlanner failed: {fallback_err}", flush=True)
+        print(
+            "[PLANNER] ✗ every planner failed — running the whole goal as one task",
+            flush=True,
+        )
+        return self._goal_as_single_task_plan(goal), "goal_as_task", errors
+
+    @staticmethod
+    def _check_plan(plan) -> None:
+        """A plan with no tasks is a planner failure, not a finished goal."""
+        tasks = plan.get("plan") if isinstance(plan, dict) else None
+        if not isinstance(tasks, list) or not tasks:
+            raise ValueError(f"planner returned no tasks: {str(plan)[:200]}")
+
+    @staticmethod
+    def _goal_as_single_task_plan(goal: str) -> dict:
+        """One task whose action is the goal; no start file (the agent finds it)."""
+        return {
+            "plan": [{"task_id": 1, "file": "", "action": goal, "complexity": "high"}],
+            "reasoning": "every planner failed; the goal runs as a single task",
+            "total_tasks": 1,
+        }
+
+    @staticmethod
+    def _collapse_small_plan(goal: str, tasks: list, max_files: int) -> Optional[list]:
+        """
+        The plan as one task when its tasks touch at most `max_files` distinct
+        files; None to keep it as planned (one task, max_files <= 0, or too
+        many files). The planner's tasks become an ordered checklist.
+
+        The checklist is marked as a suggestion: the planner sees names, not
+        code, and its guessed designs (a new helper printing its own message)
+        once overrode the codebase's existing pattern and failed the goal.
+        """
+        if max_files <= 0 or len(tasks) <= 1:
+            return None
+        files: list = []
+        for task in tasks:
+            for path in task_files(task):
+                if path not in files:
+                    files.append(path)
+        if len(files) > max_files:
+            return None
+        rank = {"low": 0, "medium": 1, "high": 2}
+        complexity = max(
+            (t.get("complexity", "low") for t in tasks),
+            key=lambda c: rank.get(str(c).lower(), 1),
+        )
+        steps = "\n".join(
+            f"{n}. {t.get('action', '')}"
+            + (f" ({', '.join(task_files(t))})" if task_files(t) else "")
+            for n, t in enumerate(tasks, 1)
+        )
+        task = {
+            "task_id": 1,
+            "file": files[0] if files else "",
+            "action": (
+                f"{goal}\n\n"
+                "Suggested steps (one session — do them all here). The goal above "
+                "is the requirement; these steps are a planner's guess made without "
+                "reading the code. Where the codebase already has a pattern for "
+                "something (a similar command, its messages, its output handling), "
+                "follow that pattern instead of a step's wording.\n"
+                f"{steps}"
+            ),
+            "complexity": complexity,
+        }
+        if len(files) > 1:
+            task["files"] = files
+        return [task]
+
+    # ── Goal completeness check ───────────────────────────────────────────────
+
+    def _goal_check_rounds(self, goal: str, ctx: dict, use_parallel: bool) -> tuple:
+        """
+        Ask a read-only reviewer whether the whole goal is done, and run what
+        it says is missing as follow-up tasks. Each task is judged alone, so
+        without this a migration that fixed 1 of 8 read sites "succeeded".
+
+        Returns (complete, follow-up results, reasoning). Only the agent-loop
+        executor gets the check; AWOS_GOAL_CHECK=0 turns it off and
+        AWOS_GOAL_CHECK_ROUNDS (default 2) caps the follow-up rounds.
+        """
+        if executor_choice() != "agent_loop" or os.getenv("AWOS_GOAL_CHECK", "1") == "0":
+            self._component("goal_check", status="skipped",
+                            reason=("AWOS_GOAL_CHECK=0" if os.getenv("AWOS_GOAL_CHECK", "1") == "0"
+                                    else f"executor {executor_choice()}"))
+            return True, [], ""
+        try:
+            from .goal_check import GoalChecker, goal_check_model, working_tree_changes
+        except ImportError:
+            from goal_check import GoalChecker, goal_check_model, working_tree_changes
+
+        try:
+            max_rounds = int(os.getenv("AWOS_GOAL_CHECK_ROUNDS", "2"))
+        except ValueError:
+            max_rounds = 2
+        worker_model = getattr(self, "_last_agent_model", None)
+        # Not the worker's model by default: a cheap worker judging its own
+        # goal said "All requirements satisfied" at 11 of 14 tests.
+        check_model = goal_check_model(worker_model)
+        print(f"[GOAL CHECK] checker model: {check_model or 'default'} "
+              f"(worker: {worker_model or '?'})")
+        checker = GoalChecker(
+            model=check_model,
+            tracker=getattr(self, "tracker", None),
+            can_continue=lambda: not self._goal_budget_exhausted(),
+            # A check's spend reaches the ledger only when it ends, so each
+            # one is capped at what the goal has left.
+            remaining_budget=self._goal_budget_remaining,
+        )
+        root = ctx["codebase_root"]
+        extra: list = []
+        round_no = 0
+        while True:
+            if self._goal_budget_exhausted():
+                return False, extra, GOAL_BUDGET_REASON
+            changed, diff = working_tree_changes(root)
+            if not changed:  # not a git repo: fall back to what the run recorded
+                changed = sorted(getattr(self, "_run_files_changed", set()))
+            verdict = checker.check(goal, root, changed, diff)
+            self._last_goal_verdict = verdict
+            self._component("goal_check", status="ran", model=check_model or "default",
+                            complete=bool(verdict.complete),
+                            verified=bool(getattr(verdict, "verified", False)),
+                            source=getattr(verdict, "source", "") or "fallback")
+            self._component_add("goal_check", checks=1)
+            # Where the verdict came from (tool / text / nudge_*; "" = fallback)
+            # tells a run log whether the checker actually decided.
+            via = f" [via {getattr(verdict, 'source', '') or 'fallback'}]"
+            if verdict.complete and (verdict.verified or round_no == 0):
+                # An unverified "complete" (checker crashed, ran out of
+                # turns, reply unparseable) is let through only on the first
+                # check, as advisory. It never supersedes failed follow-ups,
+                # and the log says UNVERIFIED so a run log cannot pass it off.
+                tag = "" if verdict.verified else "UNVERIFIED "
+                print(f"[GOAL CHECK] {tag}complete{via}: {verdict.reasoning[:200]}")
+                if verdict.verified:
+                    self._supersede_failed_follow_ups(extra)
+                return True, extra, verdict.reasoning
+            if verdict.complete:
+                # The checker found gaps earlier and cannot now confirm the
+                # follow-ups closed them: the run is not verified done.
+                print(f"[GOAL CHECK] UNVERIFIED after follow-ups{via}: {verdict.reasoning[:200]}")
+                break
+
+            print(f"[GOAL CHECK] incomplete ({len(verdict.missing)} item(s) missing){via}: "
+                  f"{verdict.reasoning[:200]}")
+            for item in verdict.missing:
+                print(f"[GOAL CHECK]   - {item['file'] or '?'}: {item['action'][:160]}")
+            if round_no >= max_rounds or not verdict.missing:
+                break
+            if self._goal_budget_exhausted():
+                self._goal_budget_skipped_work = True  # the follow-ups
+                return False, extra, GOAL_BUDGET_REASON
+            self.execution_log.append({
+                "task_id": f"goal_check_{round_no + 1}",
+                "status": "goal_incomplete",
+                "reason": verdict.reasoning[:300],
+            })
+            round_no += 1
+            follow_ups = [
+                {"task_id": f"gc{round_no}_{i}", "action": item["action"],
+                 "file": item["file"], "complexity": "low"}
+                for i, item in enumerate(verdict.missing, 1)
+            ]
+            results = self._run_task_batch(follow_ups, ctx, use_parallel)
+            extra.extend(results)
+            if self._pause_requested:
+                break
+            # A failed follow-up does not end the rounds: the checker can be
+            # wrong (a finished fix sent back as work), and a follow-up with
+            # nothing to do then stops on repeated_tool_call. The next check
+            # is the arbiter; the round cap bounds the spend.
+
+        state = "not verified complete" if verdict.complete else "incomplete"
+        reason = f"Goal {state} after {round_no} follow-up round(s): {verdict.reasoning}"
+        self.execution_log.append({"task_id": "goal_check", "status": "failed", "reason": reason})
+        return False, extra, reason
+
+    def _goal_check_summary(self, goal_complete: bool, reasoning: str) -> dict:
+        """
+        What the last goal check actually established, for the run's result:
+        a fail-open "complete" (no verdict, a crash) shows verified=False.
+        """
+        verdict = getattr(self, "_last_goal_verdict", None)
+        if verdict is None:
+            return {"verified": False, "source": "not_run", "complete": goal_complete,
+                    "reasoning": reasoning}
+        return {"verified": bool(verdict.verified),
+                "source": getattr(verdict, "source", "") or "fallback",
+                "complete": bool(verdict.complete),
+                "reasoning": verdict.reasoning}
+
+    # ── Project notebook ──────────────────────────────────────────────────────
+
+    # ── Experience store (AWOS_EXPERIENCE) + trajectory log ──────────────────
+
+    @staticmethod
+    def _experience_context(goal: str, codebase_root: str) -> str:
+        """Past verified changes like this goal; "" when off or none. Never raises."""
+        try:
+            try:
+                from .experience import experience_context
+            except ImportError:
+                from experience import experience_context
+            return experience_context(goal, codebase_root)[0]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[EXPERIENCE] retrieval failed: %s", exc)
+            return ""
+
+    def _experience_goal_end(self, goal: str, codebase_root: str, start_ts: float,
+                             success: bool, results: list) -> None:
+        """
+        The goal's outcome is final: append its trajectory (always) and, under
+        AWOS_EXPERIENCE with success and the last visible test run green, one
+        experience record. Advisory: never raises.
+        """
+        try:
+            try:
+                from . import experience as exp
+                from .goal_check import working_tree_changes
+            except ImportError:
+                import experience as exp
+                from goal_check import working_tree_changes
+            test_result = None
+            for r in results:
+                tr = (r.get("task") or {}).get("test_result") if isinstance(r, dict) else None
+                if tr is not None:
+                    test_result = tr
+            changed, diff = working_tree_changes(codebase_root)
+            if not changed:
+                changed = sorted(getattr(self, "_run_files_changed", set()))
+            cost = _ledger_spend_since(start_ts)
+            end_ts = time.time()
+            turns = len(exp.call_log_slice(start_ts, end_ts))
+            green = exp.is_green(test_result)
+            exp.write_trajectory(
+                goal=goal, model=getattr(self, "_last_agent_model", None),
+                verdict={"success": bool(success), "visible_tests_green": green,
+                         "test_status": (f"{getattr(test_result, 'passed', 0)} passed, "
+                                         f"{getattr(test_result, 'failed', 0)} failed")
+                         if test_result is not None else "no tests ran"},
+                files_changed=changed, diff=diff, start_ts=start_ts, end_ts=end_ts,
+                cost_usd=cost, turns=turns,
+            )
+            exp.save_record(codebase_root, goal=goal, files=changed, diff=diff,
+                            success=success, test_result=test_result,
+                            cost_usd=cost, turns=turns)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[EXPERIENCE] goal-end hook failed: %s", exc)
+
+    @staticmethod
+    def _read_project_notebook(codebase_root: str) -> str:
+        """This project's notebook for the goal's prompts; "" when off or none."""
+        try:
+            from .project_notebook import read_notebook
+        except ImportError:
+            from project_notebook import read_notebook
+        try:
+            return read_notebook(codebase_root)
+        except Exception as exc:
+            logger.warning("[notebook] read failed: %s", exc)
+            return ""
+
+    def _update_project_notebook(self, goal: str, codebase_root: str, outcome: dict) -> None:
+        """
+        One cheap call rewrites the project's notebook from this goal's traces
+        and outcome. Advisory: a failure keeps the old notebook, never the goal.
+        """
+        try:
+            from .project_notebook import (compact_trace, enabled, update_notebook,
+                                           verification_level)
+        except ImportError:
+            from project_notebook import (compact_trace, enabled, update_notebook,
+                                          verification_level)
+        if not enabled():
+            self._component("notebook", status="off")
+            return
+        traces = getattr(self, "_notebook_traces", None) or []
+        # The tests' state at the end: the last task's judged line. These are
+        # the project's own visible tests only, never proof the goal was met.
+        last = traces[-1].splitlines()[-1] if traces else ""
+        if "tests: " in last:
+            outcome = {**outcome, "tests": last.split("tests: ", 1)[1]}
+        # How far the job was checked, so the notebook cannot record an
+        # unverified job as a success.
+        outcome = {**outcome, "verification": verification_level(outcome)}
+        print(f"[notebook] job recorded as: {outcome['verification'][:160]}")
+        try:
+            new_text = update_notebook(codebase_root, goal, outcome, compact_trace(traces),
+                                       tracker=getattr(self, "tracker", None))
+            self._component("notebook", status="ran" if new_text else "skipped")
+        except Exception as exc:
+            logger.warning("[notebook] update failed: %s", exc)
+            self._component("notebook", status="failed", reason=str(exc)[:200])
+
+    # ── Per-goal budget ───────────────────────────────────────────────────────
+
+    def _goal_budget_exhausted(self) -> bool:
+        """
+        True once this goal's spend (the budget ledger since execute_feature
+        started) reaches AWOS_GOAL_BUDGET_USD. Asked before each task, retry
+        attempt, goal check and follow-up round; says so once.
+        """
+        if getattr(self, "_goal_budget_hit", False):
+            return True
+        started, budget = getattr(self, "_goal_started_at", None), _goal_budget()
+        if started is None or budget is None:
+            return False
+        spent = _ledger_spend_since(started)
+        if spent < budget:
+            return False
+        self._goal_budget_hit = True
+        print(f"[BUDGET] goal budget ${budget:.2f} reached — stopping (spent ${spent:.4f})")
+        return True
+
+    def _goal_budget_remaining(self) -> Optional[float]:
+        """USD this goal may still spend; None when there is no goal budget."""
+        started, budget = getattr(self, "_goal_started_at", None), _goal_budget()
+        if started is None or budget is None:
+            return None
+        return max(0.0, budget - _ledger_spend_since(started))
+
+    def _supersede_failed_follow_ups(self, extra: list) -> None:
+        """
+        The goal was verified complete, so a follow-up that failed was work
+        the goal did not need. Mark it superseded — in the result and the
+        execution log — so it neither counts as a failed task nor lands in
+        the run's errors, while the record of it running stays.
+        """
+        failed = {r["task_id"] for r in extra if not r["success"]}
+        if not failed:
+            return
+        for r in extra:
+            if r["task_id"] in failed:
+                r["superseded"] = True
+        for entry in self.execution_log:
+            if entry.get("task_id") in failed and entry.get("status") == "failed":
+                entry["status"] = "superseded"
+        print(f"[GOAL CHECK] {len(failed)} failed follow-up(s) superseded: goal verified complete")
+
     # ── Batch / Parallel Execution ─────────────────────────────────────────────
 
     def _run_task_batch(
@@ -485,6 +2366,11 @@ class Orchestrator:
             List of result dicts: {task_id, success, task}.
         """
         def run_one(task):
+            if self._goal_budget_exhausted():
+                # Not started, so neither passed nor failed; dropped below.
+                self._goal_budget_skipped_work = True
+                return {"task_id": task.get("task_id"), "success": False, "task": task,
+                        "budget_skipped": True}
             return self._execute_single_task(task, ctx)
 
         if use_parallel:
@@ -493,21 +2379,2157 @@ class Orchestrator:
                 f"[DAG] {len(tasks)} task(s) → {dag.wave_count} wave(s), "
                 f"parallelism_score={dag.parallelism_score:.2f}"
             )
-            return dag.execute(run_one)
+            return [r for r in dag.execute(run_one) if not r.get("budget_skipped")]
 
         # Sequential with context chaining (Ralph Loop pattern):
         # pass each task's applied change into the next task's context
         results = []
         prev_task_context: str = ""
         for task in tasks:
+            if self._cancel_requested():
+                break
             if prev_task_context:
                 task = {**task, "prev_task_context": prev_task_context}
             r = run_one(task)
+            if r.get("budget_skipped"):
+                break
             results.append(r)
             if r.get("success") and r.get("_applied_context"):
                 prev_task_context = r["_applied_context"]
                 logger.debug("[CHAIN] Passing context to next task: %s chars", len(prev_task_context))
+            if self._cancel_requested():
+                break
         return results
+
+    def _cancel_requested(self) -> bool:
+        """A pause, or the caller's cancel_event (GUI stop), ends the run at the
+        next task boundary; a cancel then goes down the pause path."""
+        event = getattr(self, "_cancel_event", None)
+        if event is not None and event.is_set() and not self._pause_requested:
+            print("[SESSION] Cancel requested — stopping after the current task")
+            self._pause_requested = True
+        return self._pause_requested
+
+    def _execute_task_via_react(
+        self,
+        task: dict,
+        ctx: dict,
+        *,
+        task_id,
+        file_path: str,
+        file_content: str,
+        esc_decision,
+        _span,
+        _strategy,
+        _task_ts: float,
+        _live_t,
+        _task_usage: dict,
+        budget_left: float,
+    ) -> dict:
+        """Execute one task via ReAct tool loop (grep → read → edit → test)."""
+        import time as _time
+
+        codebase_root = ctx["codebase_root"]
+        codebase_context = ctx["codebase_context"]
+        git = ctx["git"]
+        session = ctx["session"]
+        exploration = (ctx.get("exploration") or {}).get("exploration_summary", "")
+
+        print(f"[TASK {task_id}] ReAct worker ({esc_decision.spec.name})")
+        if _live_t:
+            _live_t.worker_start(1, esc_decision.spec.name)
+
+        # ── ReAct step callback: emit agent thinking + tool calls live ─────
+        _react_turn = 0
+
+        def _on_react_step(thought: str, action: str, action_input: dict,
+                           observation: str, success: bool, latency_ms: float) -> None:
+            nonlocal _react_turn
+            _react_turn += 1
+            if not self._gui_bus:
+                return
+            # Emit thinking for non-trivial thoughts
+            if thought and len(thought) > 5:
+                self._gui_bus.emit_agent_thinking(thought, _react_turn)
+            # Emit tool call
+            self._gui_bus.emit_agent_tool_call(
+                action=action,
+                action_input=action_input,
+                observation=observation,
+                success=success,
+                latency_ms=latency_ms,
+                turn=_react_turn,
+            )
+
+        react_result = self.react_worker.execute_task(
+            task=task,
+            file_content=file_content,
+            codebase_context=codebase_context,
+            project_root=codebase_root,
+            tracker=self.tracker,
+            model_spec=esc_decision.spec,
+            exploration_context=exploration,
+            step_callback=_on_react_step,
+        )
+        return self._record_tool_executor_result(
+            react_result,
+            task,
+            ctx,
+            tool_name="ReActWorker",
+            tag="REACT",
+            marker="react",
+            failure_kind="react_fail",
+            task_id=task_id,
+            esc_decision=esc_decision,
+            _span=_span,
+            _strategy=_strategy,
+            _task_ts=_task_ts,
+            _live_t=_live_t,
+            _task_usage=_task_usage,
+        )
+
+    def _execute_task_via_agent_loop(
+        self,
+        task: dict,
+        ctx: dict,
+        *,
+        task_id,
+        esc_decision,
+        _span,
+        _strategy,
+        _task_ts: float,
+        _live_t,
+        _task_usage: dict,
+    ) -> Optional[dict]:
+        """
+        Execute one task with AgentLoop (native tool calls), then verify it
+        with the project's own tests — the loop's success only means the model
+        stopped calling tools. Returns None when no model client can be built,
+        so the caller can fall back to the previous executor.
+        """
+        from types import SimpleNamespace
+
+        try:
+            from .agent_loop import AgentLoop, build_client_from_env, build_coding_registry
+            from .providers import openrouter_key, openrouter_model_id
+        except ImportError:
+            from agent_loop import AgentLoop, build_client_from_env, build_coding_registry
+            from providers import openrouter_key, openrouter_model_id
+
+        codebase_root = ctx["codebase_root"]
+        model = esc_decision.spec.model_id
+        if openrouter_key():
+            model = openrouter_model_id(model)
+        try:
+            client = build_client_from_env(model)
+        except Exception as exc:
+            logger.warning("[AgentLoop] no model client (%s); using the previous executor", exc)
+            return None
+
+        self._last_agent_model = model  # the goal check reuses the model that did the work
+        print(f"[TASK {task_id}] AgentLoop ({model})")
+        if _live_t:
+            _live_t.worker_start(1, esc_decision.spec.name)
+
+        def _on_event(kind: str, payload: dict) -> None:
+            if not self._gui_bus:
+                return
+            if kind == "turn" and payload.get("text"):
+                self._gui_bus.emit_agent_thinking(payload["text"], payload.get("turn", 0))
+            elif kind == "tool":
+                self._gui_bus.emit_agent_tool_call(
+                    action=payload.get("name", ""),
+                    action_input={},
+                    observation="",
+                    success=bool(payload.get("ok")),
+                    latency_ms=0.0,
+                )
+
+        needs_edits = _task_needs_edits(task)
+        # AWOS_MAX_RUN_COST is the task's budget, not each attempt's: every
+        # AgentLoop used to read it afresh, so a max_turns stop at $0.99 of a
+        # $1 cap resumed with another $1.
+        cost_cap = _run_cost_cap()
+        registry = build_coding_registry(codebase_root)
+        # AWOS_STATIC_GATE_TESTS (trick T3, docs/specs/static_gate.md): existing
+        # test files are read-only in the loop too, matching one_shot's rule.
+        try:
+            from . import static_gate as _sg
+        except ImportError:
+            import static_gate as _sg
+        _gate_mark = _sg.total_rejections()
+        _sg.new_task()
+        if _sg.tests_read_only() and not _asks_for_tests(task):
+            _edit = registry.get("edit_file") if hasattr(registry, "get") else None
+            if _edit is not None and hasattr(_edit, "protect_tests"):
+                _edit.protect_tests = True
+        # The same sandbox later runs the verification tests: code the model
+        # wrote (a conftest.py, say) must never execute on the host.
+        sandbox = getattr(registry, "sandbox", None)
+        retries_left = _agent_retries()
+        # AWOS_STABLE_PREFIX: a list prompt — the stable first message, then
+        # each piece of feedback as its own trailing message.
+        prompt = ([self._agent_loop_prompt_stable(task, ctx)] if _stable_prefix().enabled()
+                  else self._agent_loop_prompt(task, ctx))
+        files_changed: list = []
+        outcomes = []
+        # Per task: the full-suite gate's runs by tree hash (never twice on
+        # one tree) and the task's wall-clock start (extra loops' budget).
+        self._full_gate_cache = {}
+        self._task_t0 = time.monotonic()
+
+        # ── One shot first (AWOS_ONE_SHOT, ablation 3) ────────────────────
+        # One call with the relevant files preloaded, emitting SEARCH/REPLACE
+        # edits; if the tests then pass, the AgentLoop never runs. Otherwise,
+        # in a host job workspace, edits that left the tests red are reverted
+        # first (workspace_restore); green-but-incomplete edits stay and the
+        # loop continues from them.
+        # AWOS_ACCEPTANCE (ablation C): acceptance tests from the issue, kept
+        # only where they fail on this start state; they gate "done" below.
+        self._acceptance_suite = self._acceptance_prepare(task, ctx, model, codebase_root,
+                                                          sandbox)
+        acc = self._acceptance_suite
+        acc_cost = acc.cost_usd if acc is not None else 0.0
+        acc_in = acc.input_tokens if acc is not None else 0
+        acc_out = acc.output_tokens if acc is not None else 0
+        shot = self._one_shot_first(task, ctx, model, codebase_root, sandbox,
+                                    task_id, needs_edits)
+        shot_steps: list = []
+        shot_cost, shot_in, shot_out = acc_cost, acc_in, acc_out
+        if shot is not None:
+            shot_cost += shot["cost_usd"]
+            shot_in += shot["input_tokens"]
+            shot_out += shot["output_tokens"]
+            shot_steps = list(shot.get("steps") or [shot["step"]])
+            files_changed.extend(shot["applied"])
+            fell_back_note = ""
+            if shot["solved"]:
+                verdict = shot["verdict"]
+                extra = {}
+                if shot.get("acceptance_pending"):
+                    # AWOS_ACCEPTANCE=2: arbitrate, one bounded repair, and
+                    # the green one-shot edit restored if the repair fails.
+                    # verdict None: the acceptance tests ran first and failed,
+                    # so the project suite has not run yet; the fail-safe runs
+                    # it (judge) once, on whichever state it keeps.
+                    def _judge_shot(applied=list(files_changed)) -> dict:
+                        return self._judge_agent_attempt(
+                            task, SimpleNamespace(
+                                stop_reason="completed",
+                                final_message=f"One-shot edits to {', '.join(applied)}"),
+                            list(applied), needs_edits, codebase_root, sandbox, task_id)
+                    try:
+                        fs = self._acceptance_failsafe(
+                            task=task, failing=shot["acceptance_pending"][1],
+                            green_verdict=verdict, files_changed=files_changed,
+                            base_prompt=prompt, registry=registry, client=client,
+                            on_event=_on_event, cost_cap=cost_cap, spent=shot_cost,
+                            model=model, codebase_root=codebase_root, sandbox=sandbox,
+                            task_id=task_id, needs_edits=needs_edits,
+                            judge_base=None if verdict is not None else _judge_shot)
+                    except BaseException:
+                        registry.close()
+                        self._acceptance_cleanup(codebase_root)
+                        raise
+                    # Deferred suite, red (or nothing ran) on the one-shot
+                    # edit: not solved. Fall back to the agent loop as a red
+                    # one-shot always did (its edits reverted first).
+                    deferred_red = (verdict is None and not fs["repaired"]
+                                    and not _verdict_green(fs["verdict"]))
+                    if not deferred_red:
+                        registry.close()
+                        self._acceptance_cleanup(codebase_root)
+                    verdict = fs["verdict"]
+                    files_changed[:] = fs["files_changed"]
+                    shot_cost += fs["cost_usd"]
+                    shot_in += fs["input_tokens"]
+                    shot_out += fs["output_tokens"]
+                    for o in _failsafe_outcomes(fs):
+                        shot_cost += o.cost_usd
+                        shot_in += o.input_tokens
+                        shot_out += o.output_tokens
+                        shot_steps += self._agent_steps([o])
+                    extra = {"acceptance_repaired": fs["repaired"],
+                             "acceptance_restored": fs["restored"]}
+                    if deferred_red:
+                        fell_back_note = self._one_shot_deferred_fallback(
+                            shot, verdict, files_changed, codebase_root)
+                else:
+                    # AWOS_VERIFY_UNCHECKED (F2): no acceptance test checked
+                    # this edit; a bounded verify loop runs before it is
+                    # accepted, and the green one-shot state is restored if
+                    # the loop leaves the visible tests red.
+                    if (_verify_unchecked_enabled() and not (acc is not None and acc.active)
+                            and _verdict_green(verdict)):
+                        try:
+                            vf = self._verify_unchecked(
+                                task=task, ctx=ctx, verdict=verdict,
+                                files_changed=files_changed, registry=registry,
+                                client=client, on_event=_on_event, cost_cap=cost_cap,
+                                spent=shot_cost, model=model, codebase_root=codebase_root,
+                                sandbox=sandbox, task_id=task_id, needs_edits=needs_edits)
+                        except BaseException:
+                            registry.close()
+                            self._acceptance_cleanup(codebase_root)
+                            raise
+                        verdict = vf["verdict"]
+                        files_changed[:] = vf["files_changed"]
+                        if vf["outcome"] is not None:
+                            o = vf["outcome"]
+                            shot_cost += o.cost_usd
+                            shot_in += o.input_tokens
+                            shot_out += o.output_tokens
+                            shot_steps += self._agent_steps([o])
+                        extra = {"verify_ran": vf["ran"], "verify_restored": vf["restored"]}
+                    registry.close()
+                    self._acceptance_cleanup(codebase_root)
+            if shot["solved"] and not fell_back_note:
+                result = {
+                    "success": True,
+                    "summary": verdict["summary"],
+                    "error": "",
+                    "files_changed": list(files_changed),
+                    "steps": shot_steps,
+                    "test_result": verdict["test_result"],
+                    "input_tokens": shot_in,
+                    "output_tokens": shot_out,
+                    "cost_usd": shot_cost,
+                    "model_used": model,
+                    "one_shot": True,
+                    **extra,
+                    "_applied_context": self._agent_applied_context(task, files_changed, verdict),
+                }
+                if _sg.enabled():
+                    result["static_gate_rejections"] = _sg.total_rejections() - _gate_mark
+                    print(f"[STATIC-GATE] task {task_id}: "
+                          f"{result['static_gate_rejections']} rejection(s)")
+                return self._record_tool_executor_result(
+                    result, task, ctx,
+                    tool_name="OneShot", tag="ONE-SHOT", marker="one_shot",
+                    failure_kind="one_shot_fail", task_id=task_id,
+                    esc_decision=esc_decision, _span=_span, _strategy=_strategy,
+                    _task_ts=_task_ts, _live_t=_live_t, _task_usage=_task_usage,
+                )
+            if shot["note"]:
+                prompt = _stable_prefix().append_feedback(prompt, shot["note"])
+            if fell_back_note:
+                prompt = _stable_prefix().append_feedback(prompt, fell_back_note)
+        base_prompt = prompt
+
+        try:
+            while True:
+                spent = shot_cost + sum(o.cost_usd for o in outcomes)
+                outcome = AgentLoop(
+                    registry=registry,
+                    client=client,
+                    on_event=_on_event,
+                    # The loop pushes back if the model stops without editing on a
+                    # task that needs edits (AWOS_AGENT_MAX_TURNS sets the budget).
+                    # Not once an earlier attempt has edited: a resumed attempt
+                    # that finds the work done was nudged into edits it did not
+                    # need, and at a small turn budget ran out on the nudges.
+                    # Nor once an earlier task in this goal kept edits: a
+                    # later layer task that finds the work done must be free
+                    # to confirm it with the tests and stop.
+                    require_edits=(
+                        needs_edits and not files_changed
+                        and not getattr(self, "_run_files_changed", set())
+                    ),
+                    max_cost_usd=None if cost_cap is None else cost_cap - spent,
+                ).run(prompt)
+                outcomes.append(outcome)
+                self._record_agent_loop_spend(model, outcome)
+                # Files a command wrote count too (a generator script, sed -i):
+                # otherwise a task done through run_command was judged "no
+                # edits", resumed, failed, and its writes never rolled back.
+                for path in [*outcome.files_touched,
+                             *_not_ignored(codebase_root, getattr(outcome, "files_written", []))]:
+                    rel = os.path.relpath(path, codebase_root)
+                    if rel not in files_changed:
+                        files_changed.append(rel)
+                model_errors = sum(o.stop_reason == "model_error" for o in outcomes)
+                acc_feedback = ""
+                acc_summary = ""
+
+                def _judge_now(outcome=outcome) -> dict:
+                    return self._judge_agent_attempt(
+                        task, outcome, files_changed, needs_edits, codebase_root, sandbox,
+                        task_id)
+
+                # Cheap check first: with kept acceptance tests, they run (in
+                # seconds) before the project's suite; a failure goes straight
+                # to its repair/resume and the suite runs once they pass.
+                acc_pre = None
+                if (self._acceptance_first() and files_changed
+                        and outcome.stop_reason in _ACCEPTANCE_RESUMABLE_STOPS):
+                    acc_pre = (self._acceptance_check_detail(codebase_root, sandbox)
+                               if _acceptance_mode() == "2"
+                               else self._acceptance_check(codebase_root, sandbox) + ({},))
+                if acc_pre is not None and not acc_pre[0]:
+                    acc_summary = acc_pre[1]
+                    print(f"[ACCEPTANCE] checked first: {acc_summary}; the project test "
+                          "suite is deferred until they pass")
+                    if _acceptance_mode() == "2":
+                        fs = self._acceptance_failsafe(
+                            task=task, failing=acc_pre[3], green_verdict=None,
+                            files_changed=files_changed, base_prompt=base_prompt,
+                            registry=registry, client=client, on_event=_on_event,
+                            cost_cap=cost_cap,
+                            spent=shot_cost + sum(o.cost_usd for o in outcomes),
+                            model=model, codebase_root=codebase_root, sandbox=sandbox,
+                            task_id=task_id, needs_edits=needs_edits, judge_base=_judge_now)
+                        verdict = fs["verdict"]
+                        files_changed[:] = fs["files_changed"]
+                        shot_cost += fs["cost_usd"]
+                        shot_in += fs["input_tokens"]
+                        shot_out += fs["output_tokens"]
+                        outcomes.extend(_failsafe_outcomes(fs))
+                        # Repaired, or the kept edit is green: done, as before.
+                        # A red kept edit resumes as a red attempt always did.
+                        reason = (None if fs["repaired"]
+                                  else _agent_resume_reason(outcome, verdict, model_errors))
+                        if reason is None:
+                            break
+                    else:
+                        verdict = None
+                        reason = f"acceptance tests failing ({acc_summary})"
+                        acc_feedback = acc_pre[2]
+                else:
+                    verdict = _judge_now()
+                    reason = _agent_resume_reason(outcome, verdict, model_errors)
+                    if (acc_pre is None and reason is None and verdict["success"]
+                            and outcome.stop_reason in _ACCEPTANCE_RESUMABLE_STOPS):
+                        if _acceptance_mode() == "2":
+                            # Fail-safe gate: never an acceptance-triggered resume;
+                            # arbitrate, one bounded repair, restore if it fails.
+                            acc_ok, _, _, acc_failing = self._acceptance_check_detail(
+                                codebase_root, sandbox)
+                            if not acc_ok:
+                                fs = self._acceptance_failsafe(
+                                    task=task, failing=acc_failing, green_verdict=verdict,
+                                    files_changed=files_changed, base_prompt=base_prompt,
+                                    registry=registry, client=client, on_event=_on_event,
+                                    cost_cap=cost_cap,
+                                    spent=shot_cost + sum(o.cost_usd for o in outcomes),
+                                    model=model, codebase_root=codebase_root, sandbox=sandbox,
+                                    task_id=task_id, needs_edits=needs_edits)
+                                verdict = fs["verdict"]
+                                files_changed[:] = fs["files_changed"]
+                                shot_cost += fs["cost_usd"]
+                                shot_in += fs["input_tokens"]
+                                shot_out += fs["output_tokens"]
+                                outcomes.extend(_failsafe_outcomes(fs))
+                            break
+                        acc_ok, acc_summary, acc_feedback = self._acceptance_check(
+                            codebase_root, sandbox)
+                        if not acc_ok:
+                            reason = f"acceptance tests failing ({acc_summary})"
+                if reason is None or retries_left <= 0:
+                    if verdict is None:
+                        verdict = _judge_now()   # the suite gates the result once
+                    if acc_feedback:
+                        print(f"[ACCEPTANCE] still failing at the end ({acc_summary}); "
+                              "the visible-test verdict stands, edits kept")
+                    break
+                if cost_cap is not None:
+                    spent = shot_cost + sum(o.cost_usd for o in outcomes)
+                    turns = sum(o.turns for o in outcomes) or 1
+                    if cost_cap - spent < spent / turns:
+                        # Not even one more turn fits under the task's cap.
+                        print(f"[TASK {task_id}] AgentLoop not resumed: ${spent:.4f} of "
+                              f"the ${cost_cap:.4f} cap spent")
+                        if verdict is None:
+                            verdict = _judge_now()
+                        break
+                if self._goal_budget_exhausted():
+                    self._goal_budget_skipped_work = True
+                    print(f"[TASK {task_id}] AgentLoop not resumed: {GOAL_BUDGET_REASON}")
+                    if verdict is None:
+                        verdict = _judge_now()
+                    break
+                # One stop used to end the job. The edits so far stay in place
+                # (no rollback between attempts) and the next attempt resumes.
+                retries_left -= 1
+                print(f"[TASK {task_id}] AgentLoop resuming after: {reason}")
+                prompt = _stable_prefix().append_feedback(
+                    base_prompt,
+                    f"A previous attempt stopped: {reason}. "
+                    + f"It changed these files: {', '.join(files_changed) or 'none'}. "
+                    + "Test status: " + (verdict["test_status"] if verdict is not None
+                                         else "not run yet (the acceptance tests run first)")
+                    + ". "
+                    + "Continue from the current state of the files; do not start over."
+                    + (f"\n\n{acc_feedback}" if acc_feedback else "")
+                )
+        finally:
+            registry.close()  # a docker sandbox holds a container until closed
+            self._acceptance_cleanup(codebase_root)
+
+        traces = getattr(self, "_notebook_traces", None)
+        if traces is not None and outcomes:
+            try:
+                from .project_notebook import task_trace
+            except ImportError:
+                from project_notebook import task_trace
+            traces.append(task_trace(task, outcomes, verdict))
+
+        error = verdict["error"]
+        if error and len(outcomes) > 1:
+            error = f"{error} (after {len(outcomes)} attempts)"
+        result = {
+            "success": verdict["success"],
+            "summary": verdict["summary"],
+            "error": error,
+            "files_changed": files_changed,
+            "steps": shot_steps + [
+                SimpleNamespace(
+                    thought=turn.get("text", ""),
+                    action=",".join(c["name"] for c in turn.get("calls", [])),
+                    action_input={},
+                    observation="",
+                    success=all(c["ok"] for c in turn.get("calls", [])),
+                    latency_ms=0.0,
+                )
+                for o in outcomes
+                for turn in o.transcript
+            ],
+            "test_result": verdict["test_result"],
+            "input_tokens": shot_in + sum(o.input_tokens for o in outcomes),
+            "output_tokens": shot_out + sum(o.output_tokens for o in outcomes),
+            "cost_usd": shot_cost + sum(o.cost_usd for o in outcomes),
+            "model_used": model,
+            # The next task's prompt starts from this, not cold.
+            "_applied_context": self._agent_applied_context(task, files_changed, verdict),
+        }
+        if _sg.enabled():
+            result["static_gate_rejections"] = _sg.total_rejections() - _gate_mark
+            print(f"[STATIC-GATE] task {task_id}: "
+                  f"{result['static_gate_rejections']} rejection(s)")
+        return self._record_tool_executor_result(
+            result,
+            task,
+            ctx,
+            tool_name="AgentLoop",
+            tag="AGENT",
+            marker="agent_loop",
+            failure_kind="agent_loop_fail",
+            task_id=task_id,
+            esc_decision=esc_decision,
+            _span=_span,
+            _strategy=_strategy,
+            _task_ts=_task_ts,
+            _live_t=_live_t,
+            _task_usage=_task_usage,
+        )
+
+    # ── AWOS_EXECUTOR=loop ───────────────────────────────────────────────────
+
+    def _loop_gate(self, task: dict, files_changed: list, submission: str,
+                   needs_edits: bool, codebase_root: str, sandbox, task_id) -> dict:
+        """
+        The loop executor's success gate on the final tree: the same judge the
+        pipeline uses (mapped tests, then the full visible suite once per tree,
+        failures compared against the baseline so only NEW ones count).
+        retry=True (red with new failures, or no edit on a task that needs
+        one) sends the feedback back into the loop's conversation.
+        """
+        from types import SimpleNamespace
+
+        verdict = self._judge_agent_attempt(
+            task, SimpleNamespace(stop_reason="completed", final_message=submission or ""),
+            list(files_changed), needs_edits, codebase_root, sandbox, task_id)
+        tr = verdict.get("test_result")
+        ran = tr is not None and not getattr(tr, "no_tests_found", True)
+        new_failures = (tr.failed + tr.errors) if ran else 0
+        green = bool(verdict.get("success")) and new_failures == 0
+        feedback, retry = "", False
+        if ran and new_failures:
+            retry = True
+            out = (getattr(tr, "raw_output", "") or "").strip()
+            if len(out) > 6000:
+                out = "...\n" + out[-6000:]
+            feedback = (f"{verdict.get('test_status', '')}\n\n" + out).strip()
+        elif not verdict.get("success"):
+            # No edit on a task that needs one: one more chance, the model decides.
+            retry = True
+            feedback = (verdict.get("error") or "the submission was not accepted") + (
+                ". No file in the repository differs from the start; make the change "
+                "the task asks for, or explain why none is needed.")
+        print(f"[LOOP] gate on submit: {'green' if green else 'red'} — "
+              f"{verdict.get('test_status', '')}", flush=True)
+        return {"green": green, "retry": retry, "feedback": feedback, "verdict": verdict,
+                "new_failures": new_failures}
+
+    def _execute_task_via_loop(
+        self,
+        task: dict,
+        ctx: dict,
+        *,
+        task_id,
+        esc_decision,
+        _span,
+        _strategy,
+        _task_ts: float,
+        _live_t,
+        _task_usage: dict,
+    ) -> dict:
+        """
+        AWOS_EXECUTOR=loop: the goal goes verbatim to a mini-style open loop
+        (loop_executor.LoopExecutor: one sandboxed bash tool, the model works
+        until it submits). On a submit the success gate (_loop_gate) runs; red
+        with new failures goes back into the same conversation, up to
+        AWOS_LOOP_GATE_RETRIES times. The result has the same shape as the
+        agent loop's, so git tracking, the host's handoff, reports and
+        `awos fix` work unchanged.
+        """
+        from types import SimpleNamespace
+
+        try:
+            from . import loop_checkpoint as lc
+            from . import loop_executor as lx
+            from . import loop_route as lr
+            from .agent_loop import build_client_from_env
+            from .providers import openrouter_key, openrouter_model_id
+            from .sandbox import make_sandbox
+        except ImportError:
+            import loop_checkpoint as lc
+            import loop_executor as lx
+            import loop_route as lr
+            from agent_loop import build_client_from_env
+            from providers import openrouter_key, openrouter_model_id
+            from sandbox import make_sandbox
+
+        codebase_root = ctx["codebase_root"]
+        record = dict(tool_name="Loop", tag="LOOP", marker="loop_executor",
+                      failure_kind="loop_fail", task_id=task_id, esc_decision=esc_decision,
+                      _span=_span, _strategy=_strategy, _task_ts=_task_ts, _live_t=_live_t,
+                      _task_usage=_task_usage)
+
+        def _fail(reason: str) -> dict:
+            print(f"[TASK {task_id}] LOOP cannot run: {reason}")
+            self._component(lx.COMPONENT, status="failed", reason=reason[:300])
+            return self._record_tool_executor_result(
+                {"success": False, "summary": "", "error": reason, "files_changed": [],
+                 "steps": [], "test_result": None, "input_tokens": 0, "output_tokens": 0,
+                 "cost_usd": 0.0}, task, ctx, **record)
+
+        model = esc_decision.spec.model_id
+        if openrouter_key():
+            model = openrouter_model_id(model)
+        # AWOS_LOOP_ROUTE (loop_route.py, rea_synthesis A6): start on the
+        # cheapest rung and escalate one way; off = the one model as before.
+        # route_policy gates the rungs first: a forced decision skips the
+        # ladder, local_only drops remote rungs, cheap-only / an exhausted
+        # premium budget drops premium rungs (typed reasons, route log).
+        try:
+            from . import route_policy as rp
+        except ImportError:
+            import route_policy as rp
+        raw_ladder = lr.route_ladder()
+        local_only = rp.local_only_enabled()
+
+        def _premium_left():
+            try:
+                return self.escalation._premium_budget_remaining()
+            except Exception:  # noqa: BLE001 - unknown: no premium gate
+                return None
+
+        try:
+            from .escalation_engine import is_cheap_only as _cheap_only
+        except ImportError:
+            from escalation_engine import is_cheap_only as _cheap_only
+        ladder, route_skips = rp.filter_ladder(
+            raw_ladder, forced=bool(getattr(esc_decision, "forced", False)),
+            local_only=local_only, cheap_only=_cheap_only(), premium_left=_premium_left())
+        for _s in route_skips:
+            _s["step"] = 0
+            print(f"[TASK {task_id}] LOOP route: skipped {_s['skip']} ({_s['reason']})", flush=True)
+        if raw_ladder and not ladder and local_only \
+                and os.getenv("AWOS_PROVIDER", "").strip().lower() != "local":
+            lr.record_decisions([{"start": None, "step": 0}] + route_skips,
+                                goal_key=str(task_id), solved=False,
+                                stop_reason="no_allowed_rung", cost_usd=0.0, steps=0)
+            return _fail("local_only: every AWOS_LOOP_ROUTE rung is remote and the "
+                         "default provider is not local")
+        escalate, rung_steps = None, None
+        try:
+            client = lr.build_route_client(ladder[0]) if ladder else build_client_from_env(model)
+        except Exception as exc:  # noqa: BLE001
+            return _fail(f"no model client ({exc})")
+        model = str(getattr(client, "model", "") or model)
+        first_model = model
+        if len(ladder) > 1:
+            rest = list(ladder[1:])
+            rung_steps = lr.rung_steps()
+
+            def escalate(reason: str):
+                nonlocal model
+                while rest:
+                    spec = rest.pop(0)
+                    # The premium budget can run out mid-run: re-check it.
+                    _, late = rp.filter_ladder([spec], premium_left=_premium_left())
+                    if late:
+                        late[0]["step"] = None
+                        route_skips.extend(late)
+                        print(f"[TASK {task_id}] LOOP route: skipped {spec} "
+                              f"({late[0]['reason']})", flush=True)
+                        continue
+                    try:
+                        nxt = lr.build_route_client(spec)
+                    except Exception as exc:  # noqa: BLE001 - skip a rung we can't build
+                        print(f"[TASK {task_id}] LOOP route: skipped {spec} ({exc})", flush=True)
+                        continue
+                    print(f"[TASK {task_id}] LOOP route: {model} -> {nxt.model} ({reason})",
+                          flush=True)
+                    model = str(getattr(nxt, "model", "") or spec)
+                    self._last_agent_model = model
+                    return nxt
+                return None
+        sandbox = make_sandbox(codebase_root)
+        if sandbox is None:
+            # Commands never run on the bare host (AWOS_SANDBOX=none, or no backend).
+            return _fail("no sandbox for the bash tool (AWOS_SANDBOX: seatbelt or docker)")
+        registry = lx.build_loop_registry(sandbox)
+        self._last_agent_model = model
+        needs_edits = _task_needs_edits(task)
+        # Per task: the full-suite gate's runs by tree hash, the wall clock start.
+        self._full_gate_cache = {}
+        self._task_t0 = time.monotonic()
+        goal = _session_goal(ctx) or str(task.get("action", ""))
+        print(f"[TASK {task_id}] LOOP ({model}; max {lx.max_steps()} steps, "
+              f"{lx.gate_retries()} gate retries)", flush=True)
+        if _live_t:
+            _live_t.worker_start(1, esc_decision.spec.name)
+
+        def _on_call(reply, cost: float) -> None:
+            # Every call is spend the budget ledger (goal budget, host spend
+            # tracker) and the TokenTracker see at once, cache-aware.
+            if getattr(self, "tracker", None) is not None:
+                try:
+                    self.tracker.record(lx.COMPONENT, model, reply.input_tokens,
+                                        reply.output_tokens, cost)
+                except Exception:  # noqa: BLE001
+                    pass
+            try:
+                try:
+                    from .budget_ledger import get_ledger as _gl
+                except ImportError:
+                    from budget_ledger import get_ledger as _gl
+                _gl().record(request_type=lx.COMPONENT, model=model,
+                             input_tokens=reply.input_tokens,
+                             output_tokens=reply.output_tokens, cost=cost)
+            except Exception:  # noqa: BLE001
+                pass
+
+        def _path_filter(rels: list) -> list:
+            kept = _not_ignored(codebase_root, [os.path.join(codebase_root, r) for r in rels])
+            return [os.path.relpath(p, codebase_root) for p in kept]
+
+        def _gate(files_changed: list, submission: str) -> dict:
+            return self._loop_gate(task, files_changed, submission, needs_edits,
+                                   codebase_root, sandbox, task_id)
+
+        def _budget_hit() -> bool:
+            if self._goal_budget_exhausted():
+                self._goal_budget_skipped_work = True
+                return True
+            return False
+
+        cap = _run_cost_cap()
+        wall = _task_wall_s()
+        # The host sets AWOS_LOOP_CHECKPOINT_PATH (host/worker.py) when the job
+        # has its own worktree that survives a kill (loop_checkpoint.py, C9).
+        checkpoint = None
+        # The host passes the job's original goal (AWOS_LOOP_CHECKPOINT_GOAL):
+        # an auto-continue appends a NOTE to the goal, and the key must not
+        # change with it, or the attempt starts over instead of resuming. The
+        # NOTE is in <checkpoint>.note for the executor to append on resume.
+        key_goal = os.getenv("AWOS_LOOP_CHECKPOINT_GOAL", "").strip() or goal
+        task_key = lc.task_key(key_goal, first_model,
+                               bool(getattr(lx.wrap_for_loop(client), "text_protocol", False)),
+                               extra=str(task_id))
+        ckpt_path = os.getenv("AWOS_LOOP_CHECKPOINT_PATH", "").strip()
+        if ckpt_path and lc.checkpoint_enabled():
+            checkpoint = lc.LoopCheckpoint(ckpt_path, task_key)
+        try:
+            run = lx.LoopExecutor(
+                client, registry, goal, workspace=codebase_root, gate=_gate,
+                cost_cap=cap, wall_s=wall if wall > 0 else None,
+                budget_exhausted=_budget_hit, on_call=_on_call, path_filter=_path_filter,
+                checkpoint=checkpoint, escalate=escalate, rung_steps_=rung_steps,
+            ).run()
+        finally:
+            registry.close()  # a docker sandbox holds a container until closed
+        if raw_ladder:
+            # Labelled route decisions for calibrating ml_router (rea_synthesis A8),
+            # plus each skipped rung with its typed reason.
+            lr.record_decisions([{"start": first_model, "step": 0}] + list(run.escalations)
+                                + route_skips,
+                                goal_key=task_key, solved=run.success,
+                                stop_reason=run.stop_reason, cost_usd=run.cost_usd,
+                                steps=run.steps)
+
+        verdict = (run.gate or {}).get("verdict") or {}
+        test_result = verdict.get("test_result")
+        if run.stop_reason == "submitted":
+            error = ""
+        elif run.stop_reason == "gate_red":
+            error = (f"the success gate stayed red after {run.gate_retries} feedback "
+                     f"round(s): {verdict.get('test_status') or verdict.get('error') or ''}")
+        else:
+            error = f"loop stopped before a green submit: {run.stop_reason}"
+        print(f"[TASK {task_id}] LOOP {run.stop_reason}: {run.steps} step(s), "
+              f"{run.submits} submit(s), {run.gate_retries} gate retr(ies), "
+              f"${run.cost_usd:.4f}", flush=True)
+        self._component(lx.COMPONENT, **run.component())
+        result = {
+            "success": run.success,
+            "summary": (run.final_message or verdict.get("summary") or "")[:500],
+            "error": error,
+            "files_changed": list(run.files_changed),
+            "steps": [
+                SimpleNamespace(thought=t.get("text", ""),
+                                action="bash" if t.get("commands") else "",
+                                action_input={"commands": t.get("commands", [])},
+                                observation="", success=True, latency_ms=0.0)
+                for t in run.transcript
+            ],
+            "test_result": test_result,
+            "input_tokens": run.input_tokens,
+            "output_tokens": run.output_tokens,
+            "cost_usd": run.cost_usd,
+            "model_used": model,
+            # Which models did the work: _record_tool_executor_result credits
+            # the final rung, not esc_decision, when a ladder was used.
+            "route": ({"ladder": list(ladder), "skipped": route_skips,
+                       "first_model": first_model, "final_model": model,
+                       "escalations": len(getattr(run, "escalations", []) or [])}
+                      if raw_ladder else None),
+            "loop": run.component(),
+            "_applied_context": (self._agent_applied_context(task, run.files_changed, verdict)
+                                 if run.success and verdict else ""),
+        }
+        return self._record_tool_executor_result(result, task, ctx, **record)
+
+    def _one_shot_first(
+        self, task: dict, ctx: dict, model: str, codebase_root: str, sandbox,
+        task_id, needs_edits: bool,
+    ) -> Optional[dict]:
+        """
+        AWOS_ONE_SHOT: one call with the relevant files preloaded, emitting
+        SEARCH/REPLACE edits, then the project's tests as _judge_agent_attempt
+        runs them. None when off or no client could be built; else a dict:
+        solved, applied, verdict, note (for the AgentLoop prompt on fallback),
+        step (one turn for the trace), cost_usd, input_tokens, output_tokens.
+        Never raises: a failed call falls back with no edits.
+        """
+        from types import SimpleNamespace
+
+        try:
+            from . import one_shot as one_shot_mod
+        except ImportError:
+            import one_shot as one_shot_mod
+        if not one_shot_mod.one_shot_enabled():
+            self._component("one_shot", status="off")
+            return None
+        try:
+            client = one_shot_mod.one_shot_client(model)
+        except Exception as exc:  # noqa: BLE001
+            client = None
+            logger.warning("[ONE-SHOT] no client: %s", exc)
+        if client is None:
+            print("[ONE-SHOT] fell back to the agent loop: no OpenAI-shaped client configured")
+            self._component("one_shot", status="inactive", reason="no client")
+            return None
+
+        # Pre-attempt snapshot of the job workspace, so a failed attempt's
+        # edits can be undone before the agent loop (never the user's checkout).
+        try:
+            from . import workspace_restore as ws_restore
+        except ImportError:
+            import workspace_restore as ws_restore
+        snap = None
+        if ws_restore.restore_enabled() and ws_restore.is_job_workspace(codebase_root):
+            snap = ws_restore.snapshot(codebase_root)
+
+        task_text = worker_task_text(task, ctx)
+        files = task_files(task)
+        if files:
+            task_text += "\n\nFiles to change: " + ", ".join(files)
+        if task.get("prev_task_context"):
+            task_text += "\n\nThe previous task changed:\n" + str(task["prev_task_context"])[:2000]
+        try:
+            from . import best_of_n as bon_mod
+        except ImportError:
+            import best_of_n as bon_mod
+        n_shots = bon_mod.best_of_n()
+        # AWOS_STABLE_PREFIX: rank the shared repository section on the same
+        # verbatim goal the acceptance generator uses (its call runs first).
+        stable_kw = ({"goal": _session_goal(ctx) or str(task.get("action", ""))}
+                     if _stable_prefix().enabled() else {})
+        bon_verdict = None  # AWOS_BEST_OF_N > 1: the winner's verdict, already run
+        try:
+            if n_shots > 1:
+                def _bon_judge(applied: list) -> dict:
+                    return self._judge_agent_attempt(
+                        task,
+                        SimpleNamespace(stop_reason="completed",
+                                        final_message=f"One-shot edits to {', '.join(applied)}"),
+                        list(applied), needs_edits, codebase_root, sandbox, task_id)
+
+                def _bon_acceptance():
+                    suite = getattr(self, "_acceptance_suite", None)
+                    if suite is None or not suite.active:
+                        return None
+                    _, _, _, failing = self._acceptance_check_detail(codebase_root, sandbox)
+                    return len(suite.kept) - len(failing or {})
+
+                bon = bon_mod.run_best_of_n(
+                    n_shots, client=client, model=model, codebase_root=codebase_root,
+                    task_text=task_text, exploration=ctx.get("exploration"),
+                    tracker=getattr(self, "tracker", None),
+                    allow_test_edits=_asks_for_tests(task), judge=_bon_judge,
+                    acceptance_passed=_bon_acceptance, **stable_kw)
+                shot, bon_verdict = bon.shot, bon.verdict
+            else:
+                shot = one_shot_mod.run_one_shot(
+                    client, model, codebase_root, task_text, ctx.get("exploration"),
+                    tracker=getattr(self, "tracker", None),
+                    allow_test_edits=_asks_for_tests(task), **stable_kw,
+                )
+        except Exception as exc:  # noqa: BLE001 — run_one_shot should not raise
+            shot = one_shot_mod.OneShotResult(error=f"{type(exc).__name__}: {exc}", calls=1)
+
+        sections = getattr(shot, "context_sections", []) or []
+        print(f"[ONE-SHOT] call: {shot.input_tokens} in / {shot.output_tokens} out tokens, "
+              f"${shot.cost_usd:.4f}, {shot.elapsed_s:.1f}s; context {shot.context_tokens} "
+              f"tokens over {len(shot.context_files)} file(s)"
+              + (f" + sections of {len(sections)}" if sections else "")
+              + f"; {shot.blocks} block(s), "
+              f"{len(shot.applied)} file(s) changed, {len(shot.failed)} failed"
+              + ("; reply cut off (not retried)" if getattr(shot, "truncated", False) else ""))
+        if getattr(shot, "repair_calls", 0):
+            print(f"[ONE-SHOT] repair call: {shot.repaired} block(s) applied, "
+                  f"{shot.repair_failed} still failed"
+                  + (f" ({shot.repair_error})" if shot.repair_error else ""))
+        _one_shot_observe(one_shot_mod, shot, model, task_id)
+        verdict = None
+        green = False   # project tests green after the edits (partially correct by design)
+        acc_feedback = ""
+        acc_pending = None  # mode 2: (summary, failing detail) for the fail-safe gate
+        if shot.error:
+            reason = f"model call failed ({shot.error})"
+            logger.warning("[ONE-SHOT] %s", reason)
+        elif not shot.applied:
+            reason = ("no edit applied" + (f" ({len(shot.failed)} block(s) failed)"
+                                            if shot.failed else " (no SEARCH/REPLACE blocks)"))
+            if getattr(shot, "truncated", False):
+                reason += "; reply cut off"
+        else:
+            # Cheap check first: with kept acceptance tests, run them (~2 s)
+            # before the project's suite (mapped, else the whole suite: 36 s
+            # on astroid). Failing ones go straight to their repair; the suite
+            # runs once they pass, or after the repair (fail-safe gate).
+            acc_first = None
+            if bon_verdict is None and not shot.failed and self._acceptance_first():
+                if _acceptance_mode() == "2":
+                    acc_first = self._acceptance_check_detail(codebase_root, sandbox)
+                else:
+                    acc_first = self._acceptance_check(codebase_root, sandbox) + ({},)
+            deferred = acc_first is not None and not acc_first[0]
+            if deferred:
+                green = None   # unknown: the project tests have not run yet
+                print(f"[ACCEPTANCE] checked first: {acc_first[1]}; the project test suite "
+                      "is deferred until they pass")
+                if _acceptance_mode() == "2":
+                    reason = None
+                    acc_pending = (acc_first[1], acc_first[3])
+                else:
+                    reason = f"acceptance: {acc_first[1]}"
+                    acc_feedback = acc_first[2]
+            else:
+                verdict = bon_verdict if bon_verdict is not None else self._judge_agent_attempt(
+                    task,
+                    SimpleNamespace(stop_reason="completed",
+                                    final_message=f"One-shot edits to {', '.join(shot.applied)}"),
+                    list(shot.applied), needs_edits, codebase_root, sandbox, task_id,
+                )
+                tr = verdict["test_result"]
+                tests_ran = tr is not None and not getattr(tr, "no_tests_found", True)
+                green = tests_ran and tr.failed == 0 and tr.errors == 0 and tr.passed > 0
+            if deferred:
+                pass
+            elif green and not shot.failed and acc_first is not None:
+                reason = None   # the acceptance tests already passed above
+            elif green and not shot.failed:
+                reason = None
+                if _acceptance_mode() == "2":
+                    # Fail-safe gate: a green one-shot is never sent to the full
+                    # loop for acceptance; the caller arbitrates and repairs.
+                    acc_ok, acc_summary, _, acc_failing = self._acceptance_check_detail(
+                        codebase_root, sandbox)
+                    if not acc_ok:
+                        acc_pending = (acc_summary, acc_failing)
+                else:
+                    acc_ok, acc_summary, acc_feedback = self._acceptance_check(
+                        codebase_root, sandbox)
+                    if not acc_ok:
+                        reason = f"acceptance: {acc_summary}"
+            elif not tests_ran:
+                reason = verdict["test_status"]
+            elif not green:
+                reason = f"tests: {verdict['test_status']}"
+            elif getattr(shot, "truncated", False):
+                reason = "reply cut off (its complete blocks applied; the rest is missing)"
+            else:
+                reason = f"{len(shot.failed)} block(s) failed to apply"
+
+        solved = reason is None
+        repairs = int(getattr(shot, "repair_calls", 0) or 0)
+        self._component("one_shot", status="used", model=model,
+                        result="solved" if solved else "fell_back",
+                        **({} if solved else {"reason": str(reason)[:200]}))
+        self._component_add("one_shot", runs=1, calls=int(getattr(shot, "calls", 0) or 1),
+                            cost_usd=float(shot.cost_usd or 0.0))
+        step = SimpleNamespace(
+            thought=shot.reply[:2000],
+            action="one_shot",
+            action_input={},
+            observation="",
+            success=solved,
+            latency_ms=shot.elapsed_s * 1000.0,
+        )
+        # One turn per call: the repair call is a turn of its own.
+        steps = [step] + [
+            SimpleNamespace(thought=(getattr(shot, "repair_reply", "") or "")[:2000],
+                            action="one_shot_repair", action_input={}, observation="",
+                            success=solved, latency_ms=0.0)
+            for _ in range(repairs)
+        ]
+        out = {
+            "solved": solved, "applied": [] if shot.error else list(shot.applied),
+            "verdict": verdict, "note": "", "step": step, "steps": steps,
+            "cost_usd": shot.cost_usd, "input_tokens": shot.input_tokens,
+            "output_tokens": shot.output_tokens,
+            "acceptance_pending": acc_pending,
+        }
+        out["snapshot"] = snap   # a deferred-judge fall back restores from it
+        if solved:
+            calls = 1 + repairs
+            print(f"[ONE-SHOT] solved in {calls} call{'s' if calls > 1 else ''}"
+                  + (" (1 repair)" if repairs else "")
+                  + f" — {len(shot.applied)} file(s) changed, "
+                  + (f"tests {verdict['test_result'].passed} passed" if verdict is not None
+                     else "acceptance pending; project tests deferred"))
+            return out
+
+        print(f"[ONE-SHOT] fell back to the agent loop: {reason}")
+        if shot.error or not shot.applied:
+            return out  # nothing changed: the agent loop starts as it always did
+        if snap and green is False:
+            # Tests not green: the edits are not a base to build on. Put the
+            # files the attempt changed back as they were before it.
+            res = ws_restore.restore(codebase_root, snap, list(shot.applied))
+            print("[ONE-SHOT] restored the workspace to its pre-attempt state before the "
+                  f"agent loop: {len(res['restored'])} file(s) reverted, "
+                  f"{len(res['removed'])} removed"
+                  + (f", {len(res['skipped'])} skipped ({', '.join(res['skipped'][:5])})"
+                     if res["skipped"] else ""))
+            logger.info("[ONE-SHOT] restore %s", res)
+            out["applied"] = list(res["skipped"])   # only what is still in place
+            out["restored"] = res
+            parts = ["A first one-shot attempt already ran on this task and failed "
+                     f"({reason}). Its edits were reverted: the files are as they were "
+                     "before it."]
+            parts.append("It had tried changing: " + ", ".join(shot.applied) + ".")
+            tr = verdict["test_result"] if verdict else None
+            if tr is not None and getattr(tr, "raw_output", ""):
+                raw = tr.raw_output
+                trimmed = raw if len(raw) <= 2000 else "...\n" + raw[-2000:]
+                parts.append(f"Test output with its edits in place:\n{trimmed}")
+            parts.append("Work from the current files; do not assume its edits exist.")
+            out["note"] = "\n\n".join(parts)
+            return out
+        print("[ONE-SHOT] keeping the attempt's edits for the agent loop ("
+              + ("project tests are green; only the remaining gap is left" if green
+                 else "acceptance tests failing; project tests not run yet" if green is None
+                 else "restore off" if not ws_restore.restore_enabled()
+                 else "no job-workspace snapshot") + ")")
+        parts = ["A first one-shot attempt already ran on this task."]
+        parts.append("It changed these files: " + (", ".join(shot.applied) or "none") + ".")
+        if shot.failed:
+            parts.append("These edit blocks failed to apply:\n" + "\n".join(
+                f"- {f.get('path')}: {str(f.get('reason', ''))[:300]}" for f in shot.failed[:8]))
+        tr = verdict["test_result"] if verdict else None
+        if tr is not None and getattr(tr, "raw_output", ""):
+            raw = tr.raw_output
+            trimmed = raw if len(raw) <= 3000 else "...\n" + raw[-3000:]
+            parts.append(f"Test status after it: {verdict['test_status']}. Test output:\n{trimmed}")
+        elif verdict:
+            parts.append(f"Test status after it: {verdict['test_status']}.")
+        if acc_feedback:
+            parts.append(acc_feedback)
+        parts.append("Continue from the current state of the files (its edits are in place); "
+                     "do not start over. Fix what is still wrong and run the tests.")
+        out["note"] = "\n\n".join(parts)
+        return out
+
+    def _acceptance_prepare(self, task: dict, ctx: dict, model: str, codebase_root: str,
+                            sandbox):
+        """
+        AWOS_ACCEPTANCE=1: generate acceptance tests from the goal and keep the
+        ones that fail on the start state. None when off; never raises.
+        """
+        try:
+            from . import acceptance as acc_mod
+            from . import one_shot as one_shot_mod
+        except ImportError:
+            import acceptance as acc_mod
+            import one_shot as one_shot_mod
+        if not acc_mod.acceptance_enabled():
+            self._component("acceptance", status="off", mode=acc_mod.acceptance_mode())
+            return None
+        acc_mod.remove_leftovers(codebase_root)
+        # The user's goal verbatim: a planner action longer than the goal (job 2's
+        # was) used to win here and seed the tests with its invented details.
+        text = _session_goal(ctx) or str(task.get("action", ""))
+        self._acceptance_goal_text = text
+        self._acceptance_repair_used = False
+        try:
+            client = one_shot_mod.one_shot_client(model)
+            if client is None:
+                print("[ACCEPTANCE] gate inactive: no OpenAI-shaped client configured")
+                self._component("acceptance", status="inactive", reason="no client",
+                                mode=acc_mod.acceptance_mode())
+                return None
+            suite = acc_mod.build_suite(text, codebase_root, ctx.get("exploration"),
+                                        client=client, model=model, sandbox=sandbox,
+                                        tracker=getattr(self, "tracker", None))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[ACCEPTANCE] gate inactive: {type(exc).__name__}: {exc}")
+            self._component("acceptance", status="inactive", mode=acc_mod.acceptance_mode(),
+                            reason=f"{type(exc).__name__}: {exc}"[:200])
+            return None
+        self._component("acceptance", status="ran", mode=acc_mod.acceptance_mode(),
+                        active=bool(suite.active), model=model,
+                        **({"error": str(suite.error)[:200]} if suite.error else {}))
+        self._component_add("acceptance", runs=1, generated=int(suite.generated),
+                            kept=len(suite.kept), cost_usd=float(suite.cost_usd or 0.0))
+        dropped = ", ".join(f"{v} {k}" for k, v in suite.dropped.items())
+        print(f"[ACCEPTANCE] generated {suite.generated} tests, kept {len(suite.kept)} "
+              f"(failed on start), ${suite.cost_usd:.4f}"
+              + (f"; dropped: {dropped}" if dropped else "")
+              + (f"; {suite.error}" if suite.error else "")
+              + ("" if suite.active else "; gate inactive"))
+        if suite.active:
+            print(f"[ACCEPTANCE] kept: {', '.join(suite.kept)}")
+        return suite
+
+    def _one_shot_deferred_fallback(self, shot: dict, verdict: dict, files_changed: list,
+                                    codebase_root: str) -> str:
+        """
+        A one-shot whose acceptance tests ran first and failed, whose repair
+        did not pass, and whose deferred project-suite run is not green: as a
+        red one-shot always did, revert its edits in a job workspace (the
+        pre-attempt snapshot) and hand the agent loop a note. Returns the note
+        and updates files_changed to what is still in place.
+        """
+        try:
+            from . import workspace_restore as ws_restore
+        except ImportError:
+            import workspace_restore as ws_restore
+        status = verdict.get("test_status", "no tests ran")
+        print(f"[ONE-SHOT] fell back to the agent loop: tests: {status} (project suite "
+              "deferred behind the acceptance tests)")
+        self._component("one_shot", status="used", result="fell_back",
+                        reason=f"tests: {status}"[:200])
+        applied = list(shot.get("applied") or [])
+        snap = shot.get("snapshot")
+        parts = ["A first one-shot attempt already ran on this task and failed "
+                 f"(tests: {status})."]
+        if snap:
+            res = ws_restore.restore(codebase_root, snap, applied)
+            print("[ONE-SHOT] restored the workspace to its pre-attempt state before the "
+                  f"agent loop: {len(res['restored'])} file(s) reverted, "
+                  f"{len(res['removed'])} removed")
+            files_changed[:] = list(res["skipped"])
+            parts[0] += " Its edits were reverted: the files are as they were before it."
+            parts.append("It had tried changing: " + ", ".join(applied) + ".")
+        else:
+            parts.append("It changed these files: " + (", ".join(applied) or "none") + ".")
+        tr = verdict.get("test_result")
+        raw = getattr(tr, "raw_output", "") if tr is not None else ""
+        if raw:
+            trimmed = raw if len(raw) <= 2000 else "...\n" + raw[-2000:]
+            parts.append(f"Test output with its edits in place:\n{trimmed}")
+        parts.append("Work from the current files" + ("; do not assume its edits exist."
+                                                      if snap else "; do not start over."))
+        return "\n\n".join(parts)
+
+    def _acceptance_first(self) -> bool:
+        """
+        Cheap checks first (AWOS_ACCEPTANCE_FIRST, default on): with kept
+        acceptance tests, they run before the project's test suite after an
+        edit, and a failure skips the suite until they pass (or the repair is
+        done); the suite still gates success. Off ("0"): suite first, as before.
+        """
+        if os.getenv("AWOS_ACCEPTANCE_FIRST", "1").strip().lower() in ("0", "off", "false", "no"):
+            return False
+        suite = getattr(self, "_acceptance_suite", None)
+        return bool(suite is not None and suite.active and suite.kept)
+
+    def _acceptance_check(self, codebase_root: str, sandbox) -> tuple:
+        """(all_passed, summary, feedback); passes when the gate is inactive."""
+        suite = getattr(self, "_acceptance_suite", None)
+        if suite is None or not suite.active:
+            return True, "inactive", ""
+        try:
+            from .acceptance import run_acceptance
+        except ImportError:
+            from acceptance import run_acceptance
+        return run_acceptance(codebase_root, suite, sandbox)
+
+    @staticmethod
+    def _agent_steps(outcomes: list) -> list:
+        """One trace step per AgentLoop turn, as the agent-loop result records them."""
+        from types import SimpleNamespace
+        return [
+            SimpleNamespace(
+                thought=turn.get("text", ""),
+                action=",".join(c["name"] for c in turn.get("calls", [])),
+                action_input={}, observation="",
+                success=all(c["ok"] for c in turn.get("calls", [])),
+                latency_ms=0.0,
+            )
+            for o in outcomes
+            for turn in o.transcript
+        ]
+
+    def _acceptance_check_detail(self, codebase_root: str, sandbox) -> tuple:
+        """Mode 2: (all_passed, summary, feedback, {failing test: its failure text})."""
+        suite = getattr(self, "_acceptance_suite", None)
+        if suite is None or not suite.active:
+            return True, "inactive", "", {}
+        try:
+            from .acceptance import run_acceptance_detail
+        except ImportError:
+            from acceptance import run_acceptance_detail
+        return run_acceptance_detail(codebase_root, suite, sandbox)
+
+    def _acceptance_failsafe(
+        self, *, task: dict, failing: dict, green_verdict: dict, files_changed: list,
+        base_prompt: str, registry, client, on_event, cost_cap: Optional[float],
+        spent: float, model: str, codebase_root: str, sandbox, task_id,
+        needs_edits: bool, judge_base=None,
+    ) -> dict:
+        """
+        AWOS_ACCEPTANCE=2 (ablation C2): the visible suite is green and some
+        kept acceptance tests fail. Arbitrate them (one utility call), drop the
+        WRONG_TEST ones, and give CODE_INCOMPLETE ones exactly one bounded
+        repair (AWOS_ACCEPTANCE_REPAIR_TURNS turns). The visible-green state is
+        snapshotted first and put back unless the repair ends visible-green AND
+        acceptance-passing, so an acceptance failure can only add bounded work.
+        Returns {"verdict", "files_changed", "outcome" (the repair's or None),
+        "cost_usd", "input_tokens", "output_tokens" (arbitration), "repaired",
+        "restored"}. Never raises.
+
+        Cheap checks first: green_verdict None means the acceptance tests ran
+        before the project suite and failed, so the suite has not run;
+        `judge_base()` then runs it once, on whichever state is kept (the
+        caller's edit, or the repair's when that passes). After the repair the
+        kept acceptance tests run first; the suite only when they pass.
+        """
+        try:
+            from . import acceptance as acc_mod
+            from . import one_shot as one_shot_mod
+            from .agent_loop import AgentLoop, with_repair_effort
+        except ImportError:
+            import acceptance as acc_mod
+            import one_shot as one_shot_mod
+            from agent_loop import AgentLoop, with_repair_effort
+
+        out = {"verdict": green_verdict, "files_changed": list(files_changed),
+               "outcome": None, "cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0,
+               "repaired": False, "restored": False}
+
+        def finish(result: dict) -> dict:
+            if result["verdict"] is None and judge_base is not None:
+                print("[ACCEPTANCE] running the deferred project test suite on the kept edit")
+                result["verdict"] = judge_base()
+            return result
+
+        suite = getattr(self, "_acceptance_suite", None)
+        if suite is None or not suite.active or not failing:
+            return finish(out)
+
+        # 1. Arbitration: which failing tests are wrong, which find missing code.
+        try:
+            arb_client = one_shot_mod.one_shot_client(model)
+        except Exception:  # noqa: BLE001
+            arb_client = None
+        goal = getattr(self, "_acceptance_goal_text", "") or str(task.get("action", ""))
+        if arb_client is None:
+            arb = {"verdicts": {n: acc_mod.WRONG_TEST for n in failing}, "cost_usd": 0.0,
+                   "input_tokens": 0, "output_tokens": 0,
+                   "error": "no client (fail-safe: all WRONG_TEST)"}
+        else:
+            arb = acc_mod.arbitrate(goal, suite, failing, acc_mod.workspace_diff(codebase_root),
+                                    client=arb_client, model=model,
+                                    tracker=getattr(self, "tracker", None),
+                                    suite_checked=green_verdict is not None)
+        out["cost_usd"] = float(arb.get("cost_usd") or 0.0)
+        out["input_tokens"] = int(arb.get("input_tokens") or 0)
+        out["output_tokens"] = int(arb.get("output_tokens") or 0)
+        wrong = [n for n, v in arb["verdicts"].items() if v != acc_mod.CODE_INCOMPLETE]
+        incomplete = [n for n, v in arb["verdicts"].items() if v == acc_mod.CODE_INCOMPLETE]
+        self._component("arbiter", status="ran" if arb_client is not None else "inactive",
+                        **({"error": str(arb["error"])[:200]} if arb.get("error") else {}))
+        self._component_add("arbiter", runs=1, failing=len(failing), wrong_test=len(wrong),
+                            code_incomplete=len(incomplete), cost_usd=out["cost_usd"])
+        suite.kept = [n for n in suite.kept if n not in wrong]
+        print(f"[ACCEPTANCE] arbitration: {len(failing)} failing -> {len(wrong)} wrong_test, "
+              f"{len(incomplete)} code_incomplete, ${out['cost_usd']:.4f}"
+              + (f" ({arb['error']})" if arb.get("error") else ""))
+        if not incomplete:
+            print("[ACCEPTANCE] no code_incomplete test left; the visible-green result stands")
+            return finish(out)
+
+        # 2. Bounded repair: one per task, never a full loop.
+        if getattr(self, "_acceptance_repair_used", False):
+            print("[ACCEPTANCE] repair already used for this task; the visible-green "
+                  "result stands")
+            return finish(out)
+        spent += out["cost_usd"]
+        if cost_cap is not None and cost_cap - spent <= 0:
+            print(f"[ACCEPTANCE] no repair: ${spent:.4f} of the ${cost_cap:.4f} cap spent; "
+                  "the visible-green result stands")
+            return finish(out)
+        if self._goal_budget_exhausted():
+            print(f"[ACCEPTANCE] no repair: {GOAL_BUDGET_REASON}; the visible-green "
+                  "result stands")
+            return finish(out)
+        # 3. Never lose the green edit.
+        try:
+            snap = acc_mod.snapshot_workspace(codebase_root)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[ACCEPTANCE] no repair: snapshot failed ({exc}); the visible-green "
+                  "result stands")
+            return finish(out)
+        self._acceptance_repair_used = True
+        turns = acc_mod.repair_turns()
+        print(f"[TASK {task_id}] [ACCEPTANCE] bounded repair: {len(incomplete)} "
+              f"code_incomplete test(s), at most {turns} turns")
+        prompt = _stable_prefix().append_feedback(
+            base_prompt, acc_mod.repair_feedback(suite, {n: failing[n] for n in incomplete},
+                                   suite_checked=green_verdict is not None))
+        outcome = None
+        outcomes: list = []
+        repaired_green = False
+        rverdict = None
+        rfiles = list(files_changed)
+        acc_first = self._acceptance_first()
+        k = len(suite.kept)
+        # AWOS_REPAIR_EXTEND (F3): kept tests passing before the repair, to
+        # measure each round's progress against.
+        passing_before = k - len(incomplete)
+        extra_left = acc_mod.repair_extra_rounds()
+        round_no = 1
+
+        def _acceptance_done() -> Optional[str]:
+            # Early stop: after a turn that edited, only the kept acceptance
+            # tests (seconds); the project suite runs once, after the loop.
+            ok, summary, _, _ = self._acceptance_check_detail(codebase_root, sandbox)
+            return "acceptance_green" if ok and "could not run" not in summary else None
+
+        early_stop = os.getenv("AWOS_ACCEPTANCE_EARLY_STOP", "1").strip().lower() not in (
+            "0", "off", "false", "no")
+        while True:
+            acc_fail_detail = None
+            acc_ok = False
+            try:
+                outcome = AgentLoop(
+                    registry=registry, client=with_repair_effort(client), on_event=on_event,
+                    max_turns=turns, require_edits=False,
+                    max_cost_usd=None if cost_cap is None else cost_cap - spent,
+                    **({"done_check": _acceptance_done} if early_stop else {}),
+                ).run(prompt)
+                outcomes.append(outcome)
+                self._record_agent_loop_spend(model, outcome)
+                spent += float(getattr(outcome, "cost_usd", 0.0) or 0.0)
+                for path in [*outcome.files_touched,
+                             *_not_ignored(codebase_root, getattr(outcome, "files_written", []))]:
+                    rel = os.path.relpath(path, codebase_root)
+                    if rel not in rfiles:
+                        rfiles.append(rel)
+                if outcome.stop_reason == "acceptance_green":
+                    print(f"[ACCEPTANCE] repair stopped early after turn {outcome.turns} of "
+                          f"{turns}: the kept acceptance tests pass (acceptance_green); "
+                          "running the project test suite once")
+                    acc_ok = True    # just checked by the done check, nothing changed since
+                elif acc_first:
+                    chk = self._acceptance_check_detail(codebase_root, sandbox)
+                    acc_ok, acc_fail_detail = chk[0], chk[3]
+                    if not acc_ok:
+                        print("[ACCEPTANCE] repair: kept acceptance tests still failing; "
+                              "project test suite skipped")
+                else:
+                    acc_ok = None    # suite first, as before
+                if acc_ok is not False:
+                    rverdict = self._judge_agent_attempt(task, outcome, rfiles, needs_edits,
+                                                         codebase_root, sandbox, task_id)
+                    tr = rverdict["test_result"]
+                    tests_bad = (tr is not None and not getattr(tr, "no_tests_found", True)
+                                 and (tr.failed > 0 or tr.errors > 0))
+                    visible_green = (rverdict["success"] and not tests_bad
+                                     and outcome.stop_reason not in ("cost_cap", "budget_blocked")
+                                     and _agent_resume_reason(outcome, rverdict, 0) is None)
+                    if visible_green:
+                        if acc_ok is None:
+                            acc_ok = self._acceptance_check_detail(codebase_root, sandbox)[0]
+                        repaired_green = acc_ok
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[ACCEPTANCE] repair attempt raised: %s", exc)
+                break
+            if acc_ok is not False:
+                break
+            # F3: kept CODE_INCOMPLETE tests still fail at the turn cap. Keep
+            # repairing while each round makes progress and budget is left.
+            passing_now = self._repair_extend_decision(
+                round_no=round_no, extra_left=extra_left, k=k,
+                passing_before=passing_before, failing_now=acc_fail_detail,
+                outcome=outcome, cost_cap=cost_cap, spent=spent)
+            if passing_now is None:
+                break
+            extra_left -= 1
+            self._component("repair_extend", status="ran")
+            self._component_add("repair_extend", rounds=1)
+            print(f"[ACCEPTANCE] extra repair round {round_no}: {passing_now} of {k} kept "
+                  f"acceptance test(s) pass (up from {passing_before}); at most {turns} more "
+                  "turns")
+            round_no += 1
+            passing_before = passing_now
+            prompt = _stable_prefix().append_feedback(
+                base_prompt,
+                acc_mod.repair_feedback(suite, acc_fail_detail,
+                                        suite_checked=green_verdict is not None)
+                + "\n\nAn earlier repair round already edited the code (its edits are in "
+                f"place) and got {passing_now} of {k} acceptance tests passing. Continue "
+                "from the current state of the files; do not start over.")
+        out["outcome"] = outcome
+        out["outcomes"] = outcomes
+        stop = outcome.stop_reason if outcome is not None else "error"
+        n_turns = sum(int(getattr(o, "turns", 0) or 0) for o in outcomes)
+        rounds = f", {len(outcomes)} rounds" if len(outcomes) > 1 else ""
+        if repaired_green:
+            print(f"[ACCEPTANCE] repair passed ({stop}, {n_turns} turn(s){rounds})")
+            out.update(verdict=rverdict, files_changed=rfiles, repaired=True)
+            return out
+        touched = acc_mod.restore_workspace(snap)
+        print(f"[ACCEPTANCE] repair failed; restored the green edit ({stop}"
+              + (f", {n_turns} turn(s)" if outcome is not None else "") + rounds
+              + f"; {len(touched)} path(s) restored)")
+        out["restored"] = True
+        return finish(out)
+
+    def _task_wall_left(self) -> Optional[float]:
+        """Seconds left of the task's wall-clock budget; None when unbounded."""
+        wall = _task_wall_s()
+        t0 = getattr(self, "_task_t0", None)
+        if wall <= 0 or t0 is None:
+            return None
+        return wall - (time.monotonic() - t0)
+
+    def _repair_extend_decision(self, *, round_no: int, extra_left: int, k: int,
+                                passing_before: int, failing_now: Optional[dict], outcome,
+                                cost_cap: Optional[float], spent: float) -> Optional[int]:
+        """
+        AWOS_REPAIR_EXTEND (F3): after a repair round that ended with kept
+        acceptance tests still failing, the kept-passing count when one more
+        round should run, else None (logged). Another round needs rounds
+        left, per-test evidence, progress (more kept tests passing than
+        before the round), budget (task cost cap, goal budget) and wall clock.
+        """
+        if extra_left <= 0 or failing_now is None:
+            return None
+        passing_now = k - len(failing_now)
+        if passing_now <= passing_before:
+            print(f"[ACCEPTANCE] no extra repair round: round {round_no} made no progress "
+                  f"({passing_now} of {k} kept passing, {passing_before} before it)")
+            return None
+        stop = getattr(outcome, "stop_reason", "")
+        if stop in ("cost_cap", "budget_blocked"):
+            print(f"[ACCEPTANCE] no extra repair round: the round stopped on {stop}")
+            return None
+        if cost_cap is not None:
+            per_turn = (float(getattr(outcome, "cost_usd", 0.0) or 0.0)
+                        / max(1, int(getattr(outcome, "turns", 1) or 1)))
+            if cost_cap - spent <= 0 or cost_cap - spent < per_turn:
+                print(f"[ACCEPTANCE] no extra repair round: ${spent:.4f} of the "
+                      f"${cost_cap:.4f} cap spent")
+                return None
+        if self._goal_budget_exhausted():
+            print(f"[ACCEPTANCE] no extra repair round: {GOAL_BUDGET_REASON}")
+            return None
+        left = self._task_wall_left()
+        if left is not None and left < _MIN_EXTRA_WALL_S:
+            print(f"[ACCEPTANCE] no extra repair round: {max(0.0, left):.0f}s of the task's "
+                  "wall clock left")
+            return None
+        return passing_now
+
+    def _acceptance_cleanup(self, codebase_root: str) -> None:
+        """The acceptance tests never outlive their task, on disk or in memory."""
+        if getattr(self, "_acceptance_suite", None) is None:
+            return
+        self._acceptance_suite = None
+        try:
+            from .acceptance import remove_leftovers
+        except ImportError:
+            from acceptance import remove_leftovers
+        remove_leftovers(codebase_root)
+
+    def _record_agent_loop_spend(self, model: str, outcome) -> None:
+        """
+        Feed one attempt's spend to TokenTracker + BudgetLedger, as every other
+        executor does per call; without this the budget hard-stop never saw it.
+        """
+        try:
+            from .agent_loop import _price_for
+            from .usage_record import record_api_usage
+        except ImportError:
+            from agent_loop import _price_for
+            from usage_record import record_api_usage
+        price_in, price_out = _price_for(model) or (0.0, 0.0)
+        record_api_usage(
+            request_type="agent_loop",
+            model=model,
+            input_tokens=outcome.input_tokens,
+            output_tokens=outcome.output_tokens,
+            input_price=price_in,
+            output_price=price_out,
+            tracker=getattr(self, "tracker", None),
+        )
+
+    def _full_suite_gate(self, result, codebase_root: str, sandbox, task_id):
+        """
+        AWOS_FULL_SUITE_GATE (F1). The success judge runs name-mapped tests
+        and only ran the whole suite when the mapping found nothing; on
+        astroid_3286 17 mapped tests passed while the edit broke 61 others.
+        A green MAPPED result is now confirmed by one full visible-suite run
+        (full-suite timeout, baseline comparison: only new failures count,
+        marker recorded for the host). Returns the result the judge uses:
+        the full run's when it ran and finished (red: the attempt is not
+        green), else the mapped one (timeout / infra error: logged, kept).
+        Never runs the full suite twice on one tree in a task (cache by tree
+        hash; a green full-suite marker for the tree is reused). Never raises.
+        """
+        if result is None or not _full_suite_gate_enabled():
+            return result
+        mode = getattr(result, "mode", "")
+        if mode not in ("mapped", "full"):
+            return result
+        try:
+            from .test_runner import workspace_tree_hash
+        except ImportError:
+            from test_runner import workspace_tree_hash
+        cache = getattr(self, "_full_gate_cache", None)
+        if cache is None:
+            cache = self._full_gate_cache = {}
+        try:
+            tree = workspace_tree_hash(codebase_root)
+        except Exception:  # noqa: BLE001 - no hash: no reuse, still gated
+            tree = None
+        if mode == "full":
+            if tree:
+                cache.setdefault(tree, result)   # the judge's own full run counts
+            return result
+        if (not _verdict_green({"test_result": result})
+                or getattr(result, "timed_out", False) or getattr(result, "infra_error", False)):
+            return result
+        mapped_passed = result.passed
+        full = cache.get(tree) if tree else None
+        if full is not None:
+            print("[GATE] full suite already ran on this tree in this task; reusing its "
+                  f"result ({full.passed} passed, {full.failed + full.errors} failed)")
+        else:
+            runner = TestRunner(project_root=codebase_root, sandbox=sandbox)
+            marker_fn = getattr(runner, "full_suite_marker_green", None)
+            marker = marker_fn(tree) if callable(marker_fn) and tree else None
+            if isinstance(marker, dict):
+                print("[GATE] full suite: the full-suite marker records a green run on this "
+                      f"tree ({marker.get('passed')} passed); not run again")
+                self._component_add("full_suite_gate", reused=1)
+                return result
+            run_full = getattr(runner, "run_full_suite", None)
+            if not callable(run_full):
+                return result
+            print(f"[GATE] full suite: {mapped_passed} mapped test(s) passed; running the "
+                  "full visible suite once before reporting success")
+            self._component("full_suite_gate", status="ran")
+            self._component_add("full_suite_gate", runs=1)
+            try:
+                full = run_full()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[GATE] full suite could not run ({type(exc).__name__}: {exc}); "
+                      "keeping the mapped verdict")
+                return result
+            if not isinstance(getattr(full, "failed", None), int):
+                return result
+            if tree:
+                cache[tree] = full
+            if (not full.timed_out and not full.infra_error and not full.no_tests_found
+                    and (full.failed or full.errors)):
+                full.raw_output = (
+                    f"[awos] full visible suite after {mapped_passed} mapped test(s) passed: "
+                    f"{full.failed + full.errors} NEW failure(s) vs the base commit (the "
+                    "edit broke tests outside the mapped files)\n\n" + (full.raw_output or ""))
+        if full.timed_out or full.infra_error or full.no_tests_found:
+            why = ("timed out" if full.timed_out else
+                   f"could not run ({getattr(full, 'infra_reason', '') or 'infra error'})"
+                   if full.infra_error else "found no tests")
+            print(f"[GATE] full suite {why}; keeping the mapped verdict "
+                  f"({mapped_passed} mapped passed)")
+            self._component_add("full_suite_gate", inconclusive=1)
+            return result
+        if full.failed or full.errors:
+            print(f"[GATE] full suite red: {full.failed + full.errors} new failure(s) vs the "
+                  f"baseline ({full.passed} passed) although {mapped_passed} mapped test(s) "
+                  "passed; the attempt is not green")
+            self._component_add("full_suite_gate", red=1)
+            return full
+        print(f"[GATE] full suite green: {full.passed} passed")
+        self._component_add("full_suite_gate", green=1)
+        return full
+
+    def _verify_prompt(self, task: dict, ctx: dict, codebase_root: str) -> str:
+        """The verify loop's prompt (F2): goal verbatim, the current diff, the checklist."""
+        try:
+            from .acceptance import workspace_diff
+        except ImportError:
+            from acceptance import workspace_diff
+        diff = workspace_diff(codebase_root, limit=12000) or "(no diff available)"
+        return (
+            "# Verify a change against the issue\n\n"
+            + worker_task_text(task, ctx)
+            + "\n\nA first attempt already edited the code for this issue (diff below). The "
+            "project's visible tests pass with it, but no test checks this issue's own "
+            "requirements, so the change is unverified. Do not trust it; verify it:\n"
+            "1. List every requirement, example and expected output the issue states.\n"
+            "2. Check each one against the code: read the code, and run targeted tests "
+            "(run_tests) or small `python -c` checks that reproduce the issue's examples.\n"
+            "3. Fix anything missing or wrong with edit_file (do not edit existing tests), "
+            "and keep the visible tests passing.\n"
+            "4. When every requirement is verified, reply with a short summary and NO tool "
+            "calls.\n\n"
+            f"Current diff:\n```diff\n{diff}\n```"
+        )
+
+    def _verify_unchecked(
+        self, *, task: dict, ctx: dict, verdict: dict, files_changed: list, registry,
+        client, on_event, cost_cap: Optional[float], spent: float, model: str,
+        codebase_root: str, sandbox, task_id, needs_edits: bool,
+    ) -> dict:
+        """
+        AWOS_VERIFY_UNCHECKED (F2). The acceptance gate is inactive (0 tests
+        kept, start run timed out, generation failed, or acceptance off) and
+        the one-shot edit is visible-green: on click_3818 and
+        markdown-it-py_433 that shipped incomplete. Run a bounded verify
+        loop (AWOS_VERIFY_TURNS, within the task cost cap and wall clock, no
+        done check) on the edited workspace, then judge the final state
+        (with the F1 gate). If the loop leaves the visible tests red, the
+        one-shot snapshot is restored: never worse than the green one-shot.
+        Returns {"verdict", "files_changed", "outcome", "ran", "restored"}.
+        """
+        from types import SimpleNamespace
+
+        try:
+            from . import acceptance as acc_mod
+            from .agent_loop import AgentLoop
+            from .test_runner import workspace_tree_hash
+        except ImportError:
+            import acceptance as acc_mod
+            from agent_loop import AgentLoop
+            from test_runner import workspace_tree_hash
+        out = {"verdict": verdict, "files_changed": list(files_changed), "outcome": None,
+               "ran": False, "restored": False}
+        acc = getattr(self, "_acceptance_suite", None)
+        why = ("acceptance off" if acc is None
+               else acc.error or ("0 tests kept" if not acc.kept else "suite inactive"))
+        self._component("verify", status="considered", reason=str(why)[:200])
+        if cost_cap is not None and cost_cap - spent <= 0:
+            print(f"[VERIFY] skipped: ${spent:.4f} of the ${cost_cap:.4f} cap spent; the "
+                  "one-shot result stands")
+            return out
+        if self._goal_budget_exhausted():
+            print(f"[VERIFY] skipped: {GOAL_BUDGET_REASON}; the one-shot result stands")
+            return out
+        wall_left = self._task_wall_left()
+        if wall_left is not None and wall_left < _MIN_EXTRA_WALL_S:
+            print(f"[VERIFY] skipped: {max(0.0, wall_left):.0f}s of the task's wall clock "
+                  "left; the one-shot result stands")
+            return out
+        try:
+            snap = acc_mod.snapshot_workspace(codebase_root)
+            tree_before = workspace_tree_hash(codebase_root)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[VERIFY] skipped: snapshot failed ({exc}); the one-shot result stands")
+            return out
+        turns = _verify_turns()
+        print(f"[VERIFY] acceptance gate inactive ({why}); the one-shot edit is visible-green "
+              f"but unchecked against the issue: verify loop, at most {turns} turns")
+        out["ran"] = True
+        self._component("verify", status="ran", reason=str(why)[:200])
+        self._component_add("verify", runs=1)
+        try:
+            outcome = AgentLoop(
+                registry=registry, client=client, on_event=on_event, max_turns=turns,
+                require_edits=False,
+                max_cost_usd=None if cost_cap is None else cost_cap - spent,
+                **({"wall_s": wall_left} if wall_left is not None else {}),
+            ).run(self._verify_prompt(task, ctx, codebase_root))
+        except Exception as exc:  # noqa: BLE001
+            touched = acc_mod.restore_workspace(snap)
+            print(f"[VERIFY] the verify loop raised ({type(exc).__name__}: {exc}); restored "
+                  f"the green one-shot edit ({len(touched)} path(s))")
+            out["restored"] = bool(touched)
+            return out
+        out["outcome"] = outcome
+        self._record_agent_loop_spend(model, outcome)
+        self._component_add("verify", turns=int(getattr(outcome, "turns", 0) or 0),
+                            cost_usd=float(getattr(outcome, "cost_usd", 0.0) or 0.0))
+        vfiles = list(files_changed)
+        for path in [*outcome.files_touched,
+                     *_not_ignored(codebase_root, getattr(outcome, "files_written", []))]:
+            rel = os.path.relpath(path, codebase_root)
+            if rel not in vfiles:
+                vfiles.append(rel)
+        try:
+            unchanged = workspace_tree_hash(codebase_root) == tree_before
+        except Exception:  # noqa: BLE001
+            unchanged = False
+        if unchanged:
+            print(f"[VERIFY] done ({outcome.stop_reason}, {outcome.turns} turn(s)): no change "
+                  "needed; the one-shot edit stands")
+            self._component("verify", result="verified_unchanged")
+            return out
+        vverdict = self._judge_agent_attempt(
+            task, SimpleNamespace(stop_reason="completed",
+                                  final_message=(outcome.final_message or "")[:500]
+                                  or "Verified and fixed the one-shot edit"),
+            vfiles, needs_edits, codebase_root, sandbox, task_id)
+        if _verdict_green(vverdict):
+            print(f"[VERIFY] done ({outcome.stop_reason}, {outcome.turns} turn(s)): changed "
+                  f"{', '.join(vfiles)}; visible tests green ({vverdict['test_status']})")
+            self._component("verify", result="fixed")
+            out.update(verdict=vverdict, files_changed=vfiles)
+            return out
+        touched = acc_mod.restore_workspace(snap)
+        print(f"[VERIFY] the verify loop left the visible tests red ({vverdict['test_status']}); "
+              f"restored the green one-shot edit ({len(touched)} path(s))")
+        self._component("verify", result="restored")
+        out["restored"] = True
+        return out
+
+    def _judge_agent_attempt(
+        self, task: dict, outcome, files_changed: list, needs_edits: bool,
+        codebase_root: str, sandbox, task_id,
+    ) -> dict:
+        """
+        Verify an attempt with the project's own tests — the loop's success
+        only means the model stopped calling tools. `files_changed` spans every
+        attempt so far, since earlier attempts' edits are kept.
+        """
+        writes_tests = (
+            bool(files_changed)
+            and all(_is_test_file(f) for f in files_changed)
+            and _asks_for_tests(task)
+        )
+
+        # Verify independently of what the model claimed — including when it
+        # edited nothing: an earlier task may already have done the work.
+        test_result = None
+        if files_changed or needs_edits:
+            try:
+                test_result = TestRunner(project_root=codebase_root, sandbox=sandbox).run(
+                    changed_files=files_changed or task_files(task)
+                )
+            except Exception as exc:
+                logger.warning("[TASK %s] TestRunner error: %s", task_id, exc)
+            # AWOS_FULL_SUITE_GATE (F1): a green verdict from name-mapped
+            # tests is confirmed by the full visible suite, once per tree.
+            test_result = self._full_suite_gate(test_result, codebase_root, sandbox, task_id)
+
+        tests_ran = test_result is not None and not getattr(test_result, "no_tests_found", True)
+        test_status = (
+            f"{test_result.passed} passed, {test_result.failed + test_result.errors} failed"
+            + (f" (+{len(test_result.preexisting)} pre-existing failure(s) at the base "
+               "commit, not counted)" if getattr(test_result, "preexisting", None) else "")
+            if tests_ran
+            else _tests_not_run_status(test_result)
+        )
+        # "Nothing left to do" is only credible when an earlier task in this run
+        # changed files. On new work the old tests pass before anything is done —
+        # that let a no-op "complete" 4 of 5 long tasks in the baseline.
+        already_satisfied = (
+            not files_changed
+            and needs_edits
+            and bool(getattr(self, "_run_files_changed", set()))
+            and tests_ran
+            and test_result.failed == 0
+            and test_result.passed > 0
+        )
+
+        # A turn-budget, repeat or wall-clock stop after its edits turned the
+        # tests green is finished work; resuming it spent 20+ turns re-reading it.
+        green_stop = (
+            outcome.stop_reason in ("max_turns", "repeated_tool_call", "wall_budget")
+            and bool(files_changed)
+            and tests_ran
+            and test_result.failed == 0
+            and test_result.passed > 0
+        )
+
+        # acceptance_green: the bounded repair stopped once its kept
+        # acceptance tests passed (AgentLoop done_check); a finish like
+        # "completed", judged by the same tests below.
+        completed = outcome.stop_reason in ("completed", "acceptance_green")
+        summary = outcome.final_message[:500]
+        if green_stop:
+            success, error = True, ""
+            summary = (
+                f"Stopped on {outcome.stop_reason} after its tests passed "
+                f"({test_result.passed} passed). {summary}"
+            )
+        elif not completed:
+            success, error = False, f"AgentLoop stopped: {outcome.stop_reason}"
+        elif files_changed or not needs_edits:
+            success, error = True, ""
+        elif already_satisfied:
+            success, error = True, ""
+            summary = f"Already satisfied — {test_result.passed} test(s) pass with no change needed."
+        else:
+            success, error = False, "AgentLoop finished without editing any file"
+
+        if writes_tests and tests_ran and test_result.failed > 0:
+            # A task that adds tests for unfixed behaviour is red by design;
+            # the goal's final state, not this step, is what gets judged.
+            summary = f"Added tests; {test_result.failed} fail as expected until the fix lands. {summary}"
+            test_result = None
+
+        return {
+            "success": success,
+            "error": error,
+            "summary": summary,
+            "test_result": test_result,
+            "test_status": test_status,
+            "green_stop": green_stop,
+        }
+
+    @staticmethod
+    def _agent_applied_context(task: dict, files_changed: list, verdict: dict) -> str:
+        """What a finished agent-loop task did, for the next task's prompt."""
+        if not verdict.get("success"):
+            return ""
+        return (
+            f"PREVIOUS TASK COMPLETED: {str(task.get('action', ''))[:300]}\n"
+            f"  Files changed: {', '.join(files_changed) or 'none'}\n"
+            f"  Tests: {verdict.get('test_status', 'no tests ran')}\n"
+            f"  Summary: {str(verdict.get('summary', ''))[:400]}"
+        )
+
+    @staticmethod
+    def _agent_loop_prompt(task: dict, ctx: dict) -> str:
+        parts = [worker_task_text(task, ctx)]
+        files = task_files(task)
+        if files:
+            parts.append("Files to change: " + ", ".join(files))
+        if task.get("prev_task_context"):
+            parts.append(
+                "The previous task changed:\n" + str(task["prev_task_context"])[:2000]
+                + "\n\nIf earlier tasks already did what this task asks, confirm it "
+                "with run_tests and finish without editing."
+            )
+        exploration = (ctx.get("exploration") or {}).get("exploration_summary", "")
+        if exploration:
+            parts.append("Exploration notes:\n" + str(exploration)[:3000])
+        if ctx.get("notebook"):
+            try:
+                from .project_notebook import prompt_section
+            except ImportError:
+                from project_notebook import prompt_section
+            parts.append(prompt_section(ctx["notebook"]))
+        if ctx.get("experience"):
+            parts.append(str(ctx["experience"]))
+        parts.append(
+            "Read what you need, make the change with edit_file, and run the "
+            "tests to check your work."
+        )
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def _agent_loop_prompt_stable(task: dict, ctx: dict) -> str:
+        """
+        AWOS_STABLE_PREFIX: the same parts as _agent_loop_prompt, most stable
+        first — exploration notes and notebook (shared by every task of the
+        goal), then the task (goal verbatim first), files, previous task,
+        experience. Feedback never goes here: it follows as new messages.
+        """
+        parts = []
+        exploration = (ctx.get("exploration") or {}).get("exploration_summary", "")
+        if exploration:
+            parts.append("Exploration notes:\n" + str(exploration)[:3000])
+        if ctx.get("notebook"):
+            try:
+                from .project_notebook import prompt_section
+            except ImportError:
+                from project_notebook import prompt_section
+            parts.append(prompt_section(ctx["notebook"]))
+        parts.append("# Task\n\n" + worker_task_text(task, ctx))
+        files = task_files(task)
+        if files:
+            parts.append("Files to change: " + ", ".join(files))
+        if task.get("prev_task_context"):
+            parts.append(
+                "The previous task changed:\n" + str(task["prev_task_context"])[:2000]
+                + "\n\nIf earlier tasks already did what this task asks, confirm it "
+                "with run_tests and finish without editing."
+            )
+        if ctx.get("experience"):
+            parts.append(str(ctx["experience"]))
+        parts.append(
+            "Read what you need, make the change with edit_file, and run the "
+            "tests to check your work."
+        )
+        return "\n\n".join(parts)
+
+    def _record_tool_executor_result(
+        self,
+        result: dict,
+        task: dict,
+        ctx: dict,
+        *,
+        tool_name: str,
+        tag: str,
+        marker: str,
+        failure_kind: str,
+        task_id,
+        esc_decision,
+        _span,
+        _strategy,
+        _task_ts: float,
+        _live_t,
+        _task_usage: dict,
+    ) -> dict:
+        """
+        Book-keeping shared by the tool-driving executors (ReAct, AgentLoop):
+        traces, git tracking or rollback, tests, reward, escalation, span, GUI.
+
+        `result` has ReActWorker's shape: success, summary, error,
+        files_changed (relative paths), steps, test_result, token/cost fields.
+        """
+        import time as _time
+
+        codebase_root = ctx["codebase_root"]
+        git = ctx["git"]
+        session = ctx["session"]
+
+        try:
+            from .usage_record import merge_result_usage
+        except ImportError:
+            from usage_record import merge_result_usage
+        merge_result_usage(_task_usage, result)
+
+        steps = result.get("steps") or []
+        for step in steps:
+            trace = ReasoningTrace(
+                thought=getattr(step, "thought", ""),
+                action=getattr(step, "action", ""),
+                action_input=getattr(step, "action_input", {}),
+                observation=getattr(step, "observation", "")[:500],
+                success=getattr(step, "success", False),
+                latency_ms=getattr(step, "latency_ms", 0.0),
+                model=result.get("model_used", esc_decision.spec.name),
+            )
+            session.add_trace(trace)
+
+        success = bool(result.get("success"))
+        test_result = result.get("test_result")
+        files_changed = result.get("files_changed") or []
+
+        # Failing tests must fail the task before keep-or-rollback is decided
+        # below; checked afterwards, the edits that broke them were kept.
+        if (
+            success
+            and test_result is not None
+            and not getattr(test_result, "no_tests_found", True)
+            and test_result.failed > 0
+        ):
+            success = False
+            result["error"] = result.get("error") or (
+                f"{test_result.failed} test(s) failed after the edit"
+            )
+
+        # ── GuiEventBus: file_edit for each changed file ──────────────────
+        if self._gui_bus:
+            for rel in files_changed:
+                self._gui_bus.emit_file_edit(
+                    path=rel,
+                    status="modified",
+                    lines_added=0,  # Will be detailed in follow-up
+                    lines_removed=0,
+                )
+
+        if _live_t:
+            _live_t.worker_done(success, n_edits=len(files_changed))
+
+        if success:
+            print(f"[TASK {task_id}] {tag} OK: {result.get('summary', 'done')[:200]}")
+            for rel in files_changed:
+                abs_path = os.path.join(codebase_root, rel)
+                git.record_modified(abs_path)
+            # Kept edits this run — the evidence a later no-op task may cite.
+            if not hasattr(self, "_run_files_changed"):
+                self._run_files_changed = set()
+            self._run_files_changed.update(files_changed)
+            self._update_task_node(task_id, "completed", session.session_id)
+            self.execution_log.append({
+                "task_id": task_id,
+                "status": "completed",
+                "reason": f"{tool_name}: {result.get('summary', 'completed')[:120]}",
+            })
+            self.performance.record(
+                tool=tool_name,
+                model=esc_decision.spec.name,
+                task_type=self.performance._classify_task_type(task.get("action", "")),
+                success=True,
+                latency_ms=(_time.time() - _task_ts) * 1000,
+                cost=float(_task_usage.get("cost_usd", 0)) or esc_decision.spec.cost_per_req,
+            )
+        else:
+            err = result.get("error", f"{tool_name} failed")
+            print(f"[TASK {task_id}] {tag} FAILED: {err}")
+            for rel in files_changed:
+                git.rollback_file(os.path.join(codebase_root, rel))
+            self._update_task_node(task_id, "failed", session.session_id)
+            self.execution_log.append({
+                "task_id": task_id,
+                "status": "failed",
+                "reason": err,
+            })
+            self._persist_worker_failure_pattern(task, task_id, err)
+            self.performance.record(
+                tool=tool_name,
+                model=esc_decision.spec.name,
+                task_type=self.performance._classify_task_type(task.get("action", "")),
+                success=False,
+                latency_ms=(_time.time() - _task_ts) * 1000,
+                cost=float(_task_usage.get("cost_usd", 0)) or esc_decision.spec.cost_per_req,
+                error_type=failure_kind,
+            )
+
+        if test_result is not None and not getattr(test_result, "no_tests_found", True):
+            print(
+                f"[TASK {task_id}] Tests: {test_result.passed} passed, "
+                f"{test_result.failed} failed (pass_rate={test_result.pass_rate:.2%})"
+            )
+            if _live_t:
+                _live_t.test_result(test_result.passed, test_result.passed + test_result.failed)
+            # ── GuiEventBus: test_result ────────────────────────────────
+            if self._gui_bus:
+                self._gui_bus.emit_test_result(
+                    test_name=task.get("action", f"task_{task_id}"),
+                    passed=test_result.failed == 0,
+                    duration=test_result.duration_sec if hasattr(test_result, 'duration_sec') else 0.0,
+                    output=test_result.output if hasattr(test_result, 'output') else "",
+                )
+            task["test_result"] = test_result
+            if test_result.failed > 0:
+                success = False
+        elif getattr(test_result, "infra_error", False):
+            # The edit stays: a test runner that crashed is no evidence
+            # against it, and rolling it back discarded correct work.
+            print(f"[TASK {task_id}] {_tests_not_run_status(test_result)}")
+            task["test_result"] = test_result
+
+        # Routing credit: when an AWOS_LOOP_ROUTE ladder did the work, the
+        # escalation decision's arm did not; credit the final rung's model
+        # when it is on the escalation ladder, else skip the arm credit.
+        _credit_spec = esc_decision.spec
+        _route = result.get("route") if isinstance(result.get("route"), dict) else None
+        if _route is not None and _route.get("ladder"):
+            try:
+                from . import route_policy as _rp
+            except ImportError:
+                import route_policy as _rp
+            _ct = _rp.credit_target(_route.get("final_model") or result.get("model_used", ""))
+            if _ct["action"] == "credit_rung":
+                _credit_spec = _ct["spec"]
+                _credit = {"action": "credit_rung", "model": _ct["model"],
+                           "spec": _credit_spec.name, "level": _credit_spec.level.name}
+            else:
+                _credit_spec = None
+                _credit = {"action": "skip", "model": _ct["model"], "reason": _ct["reason"]}
+            _route["credit"] = _credit
+            self._component("route_credit", **_credit)
+            print(f"[TASK {task_id}] route credit: {_credit}")
+
+        _cost = float(_task_usage.get("cost_usd", 0)) or (_credit_spec or esc_decision.spec).cost_per_req
+        _aid = (_credit_spec or esc_decision.spec).level.value
+        if success and test_result is not None and not test_result.no_tests_found and not test_result.timed_out:
+            _reward = compute_reward(test_result.pass_rate, _aid, _cost)
+            _success = test_result.pass_rate >= 1.0
+        else:
+            _reward = compute_reward(success, _aid, _cost)
+            _success = success
+
+        if _credit_spec is not None:
+            _features = self._feature_extractor.extract(task, self.escalation.failure_count(str(task_id)))
+            self.reward_store.store(
+                task=task, action_id=_aid, features=_features, success=_success,
+                cost_usd=_cost, model_name=_credit_spec.name,
+                input_tokens=int(_task_usage.get("input_tokens", 0)),
+                output_tokens=int(_task_usage.get("output_tokens", 0)),
+            )
+            self.escalation.record_outcome(str(task_id), _credit_spec.level, _success, task=task,
+                                           reward=_reward)
+        else:
+            # Failure history only (retries still escalate); task=None trains no arm.
+            self.escalation.record_outcome(str(task_id), esc_decision.spec.level, _success,
+                                           task=None, reward=_reward)
+        self.strategy_router.update(task, _strategy.name, _reward)
+
+        _span.complete_ts = _time.time()
+        _span.success = _success
+        _span.attempt_count = len(steps) or 1
+        _span.input_tokens = int(_task_usage.get("input_tokens", 0))
+        _span.context_level = int(_task_usage.get("context_level", 0))
+        _span.context_tokens = int(_task_usage.get("context_tokens", 0))
+        _span.output_tokens = int(_task_usage.get("output_tokens", 0))
+        _span.cost_usd = _cost
+        _span.strategy = _strategy.name
+        self.obs_store.record(_span)
+        print(_span.one_liner())
+
+        if _live_t:
+            _live_t.task_done(_success, elapsed=_time.time() - _task_ts)
+
+        # ── GuiEventBus: task_complete ──────────────────────────────────────
+        if self._gui_bus:
+            self._gui_bus.emit_task_complete(
+                task_id=task_id,
+                success=_success,
+                cost_usd=_cost,
+                n_edits=len(files_changed),
+                error="" if _success else (result.get("error", "")),
+            )
+
+        out = {"task_id": task_id, "success": _success, "task": task, marker: True}
+        if _success and result.get("_applied_context"):
+            out["_applied_context"] = result["_applied_context"]  # chained by _run_task_batch
+        if not _success:
+            out["failure_kind"] = failure_kind
+            out["verify_error"] = result.get("error", "")
+        return out
 
     def _execute_single_task(self, task: dict, ctx: dict) -> dict:
         """
@@ -527,7 +4549,29 @@ class Orchestrator:
         session = ctx["session"]
 
         task_id = task["task_id"]
+
+        # Resolve short filenames to full paths intelligently
+        from .file_resolver import resolve_file
+        task = {**task, "file": str(task.get("file") or "").strip()}
+        try:
+            if task["file"]:
+                resolved_file = resolve_file(task["file"], project_root=codebase_root)
+                task = {**task, "file": resolved_file}  # Update task with resolved path
+        except (FileNotFoundError, ValueError):
+            # Not found, or ambiguous: try the original path (might be already full)
+            pass
+
         file_path = os.path.join(codebase_root, task["file"])
+        # The agent loop finds its own files; "file" is only where to start. A
+        # follow-up with no file, or a placeholder like "multiple files", must
+        # still run — it used to crash the run (IsADirectoryError on the root)
+        # or fail as file_not_found without the agent ever looking.
+        _agent_executor = executor_choice() in ("agent_loop", "loop")
+        _no_single_file = not task["file"] or os.path.isdir(file_path)
+
+        _live_t = ctx.get("_live")           # LiveRenderer (optional)
+        _total_t = ctx.get("_total_tasks", 1)
+        _task_ts = time.time()
 
         # ── Phase 1: Observability — stamp arrival time ─────────────────────
         _span = new_span(
@@ -539,20 +4583,47 @@ class Orchestrator:
 
         print(f"\n[TASK {task_id}] Executing: {task['action']}")
         print(f"           File: {task['file']}")
+        if _live_t:
+            _live_t.task_start(task_id, _total_t, task)
 
-        # Load file content
-        try:
-            with open(file_path, "r") as f:
-                file_content = f.read()
-            git.backup_file(file_path)
-        except FileNotFoundError:
-            print(f"[TASK {task_id}] ERROR: File not found")
-            self.execution_log.append({
-                "task_id": task_id,
-                "status": "failed",
-                "reason": f"File not found: {file_path}",
-            })
-            return {"task_id": task_id, "success": False, "task": task}
+        # Detect if this is a file creation task
+        action_lower = task['action'].lower()
+        is_create_task = any(keyword in action_lower for keyword in [
+            'initialize', 'create', 'add new', 'generate new', 'write new'
+        ])
+
+        # Load or initialize file content
+        if _agent_executor and (_no_single_file or not Path(file_path).is_file()):
+            file_content = ""
+            task = {**task, "_is_new_file": False}
+        elif is_create_task and not Path(file_path).exists():
+            # Creating new file - use empty content and ensure parent dir exists
+            print(f"[TASK {task_id}] Creating new file")
+            Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+            file_content = ""
+            # Mark task as new file creation for worker
+            task = {**task, "_is_new_file": True}
+            # No need to backup non-existent file
+        else:
+            task = {**task, "_is_new_file": False}
+            # Modifying existing file - read current content
+            try:
+                with open(file_path, "r") as f:
+                    file_content = f.read()
+                git.backup_file(file_path)
+            except (FileNotFoundError, IsADirectoryError):
+                print(f"[TASK {task_id}] ERROR: File not found")
+                self.execution_log.append({
+                    "task_id": task_id,
+                    "status": "failed",
+                    "reason": f"File not found: {file_path}",
+                })
+                return {
+                    "task_id": task_id,
+                    "success": False,
+                    "task": task,
+                    "failure_kind": "file_not_found",
+                }
 
         # Auto-fit GPWorldModel if enough episodes have accumulated
         self._maybe_fit_gp()
@@ -566,8 +4637,27 @@ class Orchestrator:
             task=task,
             failure_count=self.escalation.failure_count(str(task_id)),
             budget_remaining=budget_left,
+            dead_providers=self.worker._dead_providers,
         )
         print(f"[TASK {task_id}] {self.escalation.summary(esc_decision)}")
+
+        # ── GuiEventBus: model_routed + task_start ──────────────────────────
+        if self._gui_bus:
+            _spec = esc_decision.spec
+            self._gui_bus.emit_model_routed(
+                model_name=_spec.name,
+                tier=f"T{_spec.level.value}",
+                reason=esc_decision.reason,
+                cost_estimate=_spec.cost_per_req,
+                provider=_spec.provider,
+            )
+            self._gui_bus.emit_task_start(
+                task_id=task_id,
+                action=task.get("action", ""),
+                file=task.get("file", ""),
+                model_name=_spec.name,
+                model_reason=esc_decision.reason,
+            )
 
         # ── Phase 1: Observability — stamp routing decision ─────────────────
         import time as _time
@@ -586,14 +4676,19 @@ class Orchestrator:
                 "status": "failed",
                 "reason": f"Budget block: {_reason}",
             })
-            return {"task_id": task_id, "success": False, "task": task}
+            return {
+                "task_id": task_id,
+                "success": False,
+                "task": task,
+                "failure_kind": "budget_block",
+            }
         elif _reason:
             print(f"[BUDGET] {_reason}")
 
-        # Worker attempts
         worker_success = False
         max_attempts = 3
         search_replace = None
+        _task_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cost_usd": 0.0, "context_level": 0, "context_tokens": 0}
 
         _strategy = self.strategy_router.select(task)
         logger.debug("[strategy] task=%s → strategy=%s", task_id, _strategy.name)
@@ -601,6 +4696,30 @@ class Orchestrator:
         _task = task          # working copy; correction hints injected on each failure
         _last_error = ""      # error text from previous attempt
         _last_error_class = None  # ErrorClass from previous failure (for store retrieval)
+
+        # ── Multi-Resolution Context: build tiered assembly ──────────────
+        _context_assembly = None
+        if self.context_pipeline is not None:
+            try:
+                _level = (
+                    self._suggest_context_level(_task)
+                    if hasattr(self, "_suggest_context_level")
+                    else 2
+                )
+                _context_assembly = self.context_pipeline.build(
+                    task=_task,
+                    level=_level,
+                    file_content=file_content,
+                )
+                logger.info(
+                    "[MultiResContext] level=%d tokens=%d",
+                    _context_assembly.level,
+                    _context_assembly.estimated_tokens,
+                )
+                _task_usage["context_level"] = _context_assembly.level
+                _task_usage["context_tokens"] = _context_assembly.estimated_tokens
+            except Exception as _ctx_exc:
+                logger.debug("[MultiResContext] build skipped: %s", _ctx_exc)
 
         # ── Phase 6: VectorMemory — retrieve relevant code chunks ──────────
         _vector_chunks = []
@@ -613,6 +4732,53 @@ class Orchestrator:
         # ── Phase 1: Observability — stamp worker start ───────────────────
         _span.worker_start_ts = _time.time()
         _span.strategy = _strategy.name
+
+        # ── Executor selection (AWOS_EXECUTOR) ────────────────────────────
+        _executor = executor_choice()
+        if _executor == "loop":
+            # AWOS_EXECUTOR=loop: the mini-style open loop (loop_executor.py).
+            return self._execute_task_via_loop(
+                task,
+                ctx,
+                task_id=task_id,
+                esc_decision=esc_decision,
+                _span=_span,
+                _strategy=_strategy,
+                _task_ts=_task_ts,
+                _live_t=_live_t,
+                _task_usage=_task_usage,
+            )
+        if _executor == "agent_loop":
+            _loop_result = self._execute_task_via_agent_loop(
+                task,
+                ctx,
+                task_id=task_id,
+                esc_decision=esc_decision,
+                _span=_span,
+                _strategy=_strategy,
+                _task_ts=_task_ts,
+                _live_t=_live_t,
+                _task_usage=_task_usage,
+            )
+            if _loop_result is not None:
+                return _loop_result
+            # No model client could be built: fall through to the previous path.
+
+        if _executor != "worker" and self.react_worker is not None and react_worker_enabled():
+            return self._execute_task_via_react(
+                task,
+                ctx,
+                task_id=task_id,
+                file_path=file_path,
+                file_content=file_content,
+                esc_decision=esc_decision,
+                _span=_span,
+                _strategy=_strategy,
+                _task_ts=_task_ts,
+                _live_t=_live_t,
+                _task_usage=_task_usage,
+                budget_left=budget_left,
+            )
 
         for attempt in range(1, max_attempts + 1):
             if attempt > 1:
@@ -653,18 +4819,40 @@ class Orchestrator:
                     top_n      = 3,
                 )
 
+                # ── Feature 1B: LiveToolSynthesizer — synthesize helper tool on failure ──
+                _tool_output = ""
+                try:
+                    _synth_tool = self.live_tool_synth.reflect(
+                        task=task, error=_last_error, attempt=attempt,
+                    )
+                    if _synth_tool:
+                        logger.info("[LiveToolSynth] new tool synthesized: %s", _synth_tool.name)
+                        _tool_output = self.live_tool_synth.run_tool(_synth_tool, task)
+                    else:
+                        _existing = self.live_tool_synth.find_relevant_tool(task)
+                        if _existing:
+                            _tool_output = self.live_tool_synth.run_tool(_existing, task)
+                except Exception as _lts_exc:
+                    logger.debug("[LiveToolSynth] skipped: %s", _lts_exc)
+
                 _task = {
                     **task,
                     "error_context":  _hint.format_for_prompt(),
                     "past_critiques": _past,
+                    "tool_output":    _tool_output,
                 }
                 print(
                     f"[TASK {task_id}] Retry {attempt}: "
                     f"{esc_decision.spec.name} + correction [{_hint.approach_name}]"
                     + (f" + {len(_past)} past critique(s)" if _past else "")
+                    + (" + tool output" if _tool_output else "")
                 )
+                if _live_t:
+                    _live_t.retry_notice(attempt, _last_error, _hint.approach_name)
 
             print(f"[TASK {task_id}] Worker attempt {attempt}/{max_attempts} via {esc_decision.spec.name}")
+            if _live_t:
+                _live_t.worker_start(attempt, esc_decision.spec.name)
 
             try:
                 search_replace = self.worker.execute_task(
@@ -679,20 +4867,97 @@ class Orchestrator:
                     strategy=_strategy,
                     skill_library=self.skill_library,
                     vector_chunks=_vector_chunks,
+                    prompt_evolver=self.prompt_evolver,
+                    context_assembly=_context_assembly,
                 )
+                try:
+                    from .usage_record import merge_result_usage
+                except ImportError:
+                    from usage_record import merge_result_usage
+                merge_result_usage(_task_usage, search_replace)
                 if search_replace.get("success"):
+                    # ── P7: Critic self-play ────────────────────────────
+                    try:
+                        search_replace = self._critic_refine(
+                            task=_task,
+                            patch=search_replace,
+                            file_content=file_content,
+                            tracker=self.tracker,
+                            esc_decision=esc_decision,
+                            attempt=attempt,
+                            codebase_context=codebase_context,
+                            sym_index=sym_index,
+                        )
+                    except Exception as _ce:
+                        logger.warning("[critic_refine] skipped: %s", _ce)
+                    # ── P9: Confidence gating ──────────────────────────
+                    _conf = self._compute_confidence(_task, search_replace, esc_decision)
+                    if _conf is not None and _conf.should_abort:
+                        print(f"[TASK {task_id}] CONF-ABORT attempt {attempt}: {_conf.explanation}")
+                        _last_error = f"Low confidence ({_conf.fused_score:.0%})"
+                        self.escalation.record_outcome(str(task_id), esc_decision.spec.level, False)
+                        if _live_t:
+                            _live_t.worker_done(False, error=_last_error)
+                        continue
                     worker_success = True
                     self.escalation.record_outcome(str(task_id), esc_decision.spec.level, True)
-                    print(f"[TASK {task_id}] Worker generated SEARCH/REPLACE")
+                    _conf_str = f"[conf={_conf.fused_score:.0%}]" if _conf is not None else ""
+                    print(f"[TASK {task_id}] Worker generated patch {_conf_str}")
+                    if _live_t:
+                        _live_t.worker_done(True, n_edits=len(search_replace.get("extra_edits", [])) + 1)
                     break
                 else:
                     _last_error = search_replace.get("error", "unknown output format")
                     self.escalation.record_outcome(str(task_id), esc_decision.spec.level, False)
                     print(f"[TASK {task_id}] Worker failed: {_last_error}")
+                    if _live_t:
+                        _live_t.worker_done(False, error=_last_error)
             except Exception as exc:
                 _last_error = str(exc)
                 self.escalation.record_outcome(str(task_id), esc_decision.spec.level, False)
                 print(f"[TASK {task_id}] Worker error: {exc}")
+                if _live_t:
+                    _live_t.worker_done(False, error=str(exc))
+
+        # ── MCTS fallback — search + verify after worker failure (default on) ──
+        if not worker_success:
+            try:
+                from .mcts_policy import mcts_rollout_budget, should_run_mcts_fallback
+            except ImportError:
+                from mcts_policy import mcts_rollout_budget, should_run_mcts_fallback
+            if should_run_mcts_fallback(task, worker_failed=True):
+                self._persist_worker_failure_pattern(task, task_id, _last_error)
+                try:
+                    logger.info("[MCTS] Activating search fallback for task %s", task_id)
+                    _mcts = MCTSSearchEngine(
+                        generate_fn=self.worker._generate_n_patches,
+                        evaluate_fn=write_and_run_tests,
+                        max_rollouts=mcts_rollout_budget(task),
+                        n_branches=3,
+                        project_root=codebase_root,
+                    )
+                    _mcts_result = _mcts.search(_task, file_content, codebase_context)
+                    _mcts_features = self._feature_extractor.extract(
+                        task, self.escalation.failure_count(str(task_id))
+                    )
+                    self._log_mcts_trace(task, task_id, _mcts_result, _mcts_features)
+                    if _mcts_result.search:
+                        search_replace = {
+                            "success": True,
+                            "search": _mcts_result.search,
+                            "replace": _mcts_result.replace,
+                            "reasoning": _mcts_result.reasoning,
+                            "model_used": "mcts",
+                        }
+                        worker_success = True
+                        print(
+                            f"[TASK {task_id}] MCTS recovered patch "
+                            f"(pass_rate={_mcts_result.pass_rate:.0%}, "
+                            f"{_mcts_result.rollouts_used} rollouts)"
+                        )
+                    self._maybe_train_prm()
+                except Exception as _mcts_exc:
+                    logger.warning("[MCTS] fallback failed: %s", _mcts_exc)
 
         if not worker_success:
             print(f"[TASK {task_id}] Worker failed after {max_attempts} attempts")
@@ -703,24 +4968,48 @@ class Orchestrator:
             })
             self._update_task_node(task_id, "failed", session.session_id)
             # ── Log to RewardStore & update ML router ─────────────────────
-            _cost = esc_decision.spec.cost_per_req
+            _cost = float(_task_usage.get("cost_usd", 0)) or esc_decision.spec.cost_per_req
             _aid = esc_decision.spec.level.value
             _reward = compute_reward(False, _aid, _cost)
             _features = self._feature_extractor.extract(task, self.escalation.failure_count(str(task_id)))
-            self.reward_store.store(task=task, action_id=_aid, features=_features, success=False, cost_usd=_cost, model_name=esc_decision.spec.name)
+            self.reward_store.store(
+                task=task, action_id=_aid, features=_features, success=False,
+                cost_usd=_cost, model_name=esc_decision.spec.name,
+                input_tokens=int(_task_usage.get("input_tokens", 0)),
+                output_tokens=int(_task_usage.get("output_tokens", 0)),
+            )
             self.escalation.record_outcome(str(task_id), esc_decision.spec.level, False, task=task, reward=_reward)
+            self._maybe_fit_gp()
+            self._maybe_train_prm()
+            # ── P8: final WORKER_FAIL reflection ───────────────────────
+            try:
+                self.post_mortem.reflect(task, _last_error, FailureType.WORKER_FAIL)
+            except Exception as _pme:
+                logger.debug("[post_mortem] final worker_fail reflect: %s", _pme)
             # ── Phase 1: Observability — record failed span (worker gave up) ──
             _span.complete_ts = _time.time()
             _span.success = False
             _span.attempt_count = max_attempts
+            _span.input_tokens = int(_task_usage.get("input_tokens", 0))
+            _span.context_level = int(_task_usage.get("context_level", 0))
+            _span.context_tokens = int(_task_usage.get("context_tokens", 0))
+            _span.output_tokens = int(_task_usage.get("output_tokens", 0))
             _span.cost_usd = _cost
             self.obs_store.record(_span)
             print(_span.one_liner())
-            return {"task_id": task_id, "success": False, "task": task}
+            if _live_t:
+                _live_t.task_done(False, elapsed=time.time() - _task_ts)
+            return {
+                "task_id": task_id,
+                "success": False,
+                "task": task,
+                "failure_kind": "worker_fail",
+            }
 
         # Verifier attempts
         verify_success = False
         max_verify_attempts = 2
+        _verify_error = ""
 
         for verify_attempt in range(1, max_verify_attempts + 1):
             print(f"[TASK {task_id}] Verifying (attempt {verify_attempt}/{max_verify_attempts})")
@@ -735,6 +5024,8 @@ class Orchestrator:
             if result["success"] and result["applied"]:
                 print(f"[TASK {task_id}] VERIFIED: Change applied successfully")
                 verify_success = True
+                if _live_t:
+                    _live_t.verify_result(True)
                 break
             elif result.get("needs_retry") and verify_attempt < max_verify_attempts:
                 print(f"[TASK {task_id}] Verification failed, retrying worker with error context")
@@ -747,6 +5038,7 @@ class Orchestrator:
                         tracker=self.tracker,
                         attempt=verify_attempt + 1,
                         symbol_index=sym_index,
+                        context_assembly=_context_assembly,
                     )
                     if search_replace.get("success"):
                         continue
@@ -754,7 +5046,18 @@ class Orchestrator:
                     print(f"[TASK {task_id}] Worker retry failed: {exc}")
                     break
             else:
-                print(f"[TASK {task_id}] VERIFICATION FAILED: {result.get('errors', ['unknown'])[0]}")
+                _verify_err = str(result.get("errors", ["unknown"])[0])
+                if _verify_err == "unknown" and result.get("error_context"):
+                    _verify_err = str(result["error_context"])[:400]
+                _verify_error = _verify_err
+                print(f"[TASK {task_id}] VERIFICATION FAILED: {_verify_err}")
+                if _live_t:
+                    _live_t.verify_result(False, issues=[_verify_err])
+                # ── P8: verify failure reflection ──────────────────────
+                try:
+                    self.post_mortem.reflect(task, _verify_err, FailureType.VERIFY_FAIL)
+                except Exception as _pme:
+                    logger.debug("[post_mortem] verify_fail reflect: %s", _pme)
                 break
 
         # ── Phase 6: VectorMemory — store task outcome ─────────────────────
@@ -796,7 +5099,7 @@ class Orchestrator:
                 task_type=self.performance._classify_task_type(task.get("action", "")),
                 success=True,
                 latency_ms=_latency_ms,
-                cost=esc_decision.spec.cost_per_req,
+                cost=float(_task_usage.get("cost_usd", 0)) or esc_decision.spec.cost_per_req,
             )
         else:
             self._update_task_node(task_id, "failed", session.session_id)
@@ -814,7 +5117,7 @@ class Orchestrator:
                 task_type=self.performance._classify_task_type(task.get("action", "")),
                 success=False,
                 latency_ms=_latency_ms,
-                cost=esc_decision.spec.cost_per_req,
+                cost=float(_task_usage.get("cost_usd", 0)) or esc_decision.spec.cost_per_req,
                 error_type="verification_failed",
             )
 
@@ -823,19 +5126,33 @@ class Orchestrator:
         if verify_success:
             try:
                 self.test_runner = TestRunner(project_root=codebase_root)
-                test_result = self.test_runner.run(changed_files=[task["file"]])
+                # Every file the task touched, so a multi-file change is covered
+                # by the tests for all of it rather than only its primary file.
+                test_result = self.test_runner.run(changed_files=task_files(task))
                 task["test_result"] = test_result
                 if not test_result.no_tests_found:
                     print(
                         f"[TASK {task_id}] Tests: {test_result.passed} passed, "
                         f"{test_result.failed} failed (pass_rate={test_result.pass_rate:.2%})"
                     )
+                    if _live_t:
+                        _live_t.test_result(test_result.passed, test_result.passed + test_result.failed)
+                    # ── P8: test failure reflection ─────────────────────
+                    if test_result.failed > 0:
+                        try:
+                            self.post_mortem.reflect(
+                                task,
+                                f"{test_result.failed} test(s) failed (pass_rate={test_result.pass_rate:.0%})",
+                                FailureType.TEST_FAIL,
+                            )
+                        except Exception as _pme:
+                            logger.debug("[post_mortem] test_fail reflect: %s", _pme)
             except Exception as exc:
                 logger.warning("[TASK %s] TestRunner error: %s", task_id, exc)
                 task["test_result"] = None
 
         # ── Log to RewardStore & update ML router ──────────────────────────
-        _cost = esc_decision.spec.cost_per_req
+        _cost = float(_task_usage.get("cost_usd", 0)) or esc_decision.spec.cost_per_req
         _aid = esc_decision.spec.level.value
 
         # Use test pass rate as reward signal when available, else fall back to syntax-only
@@ -847,8 +5164,15 @@ class Orchestrator:
             _success = verify_success
 
         _features = self._feature_extractor.extract(task, self.escalation.failure_count(str(task_id)))
-        self.reward_store.store(task=task, action_id=_aid, features=_features, success=_success, cost_usd=_cost, model_name=esc_decision.spec.name)
+        self.reward_store.store(
+            task=task, action_id=_aid, features=_features, success=_success,
+            cost_usd=_cost, model_name=esc_decision.spec.name,
+            input_tokens=int(_task_usage.get("input_tokens", 0)),
+            output_tokens=int(_task_usage.get("output_tokens", 0)),
+        )
         self.escalation.record_outcome(str(task_id), esc_decision.spec.level, _success, task=task, reward=_reward)
+        self._maybe_fit_gp()
+        self._maybe_train_prm()
 
         # ── Update StrategyRouter with outcome ──────────────────────────────
         self.strategy_router.update(task, _strategy.name, _reward)
@@ -857,6 +5181,10 @@ class Orchestrator:
         _span.complete_ts = _time.time()
         _span.success = _success
         _span.attempt_count = attempt  # loop var holds the attempt number where worker succeeded
+        _span.input_tokens = int(_task_usage.get("input_tokens", 0))
+        _span.context_level = int(_task_usage.get("context_level", 0))
+        _span.context_tokens = int(_task_usage.get("context_tokens", 0))
+        _span.output_tokens = int(_task_usage.get("output_tokens", 0))
         _span.cost_usd = _cost
         self.obs_store.record(_span)
         print(_span.one_liner())
@@ -885,27 +5213,38 @@ class Orchestrator:
                 f"{search_replace.get('replace', '')[:500]}"
             )
 
-        return {"task_id": task_id, "success": verify_success, "task": task, "_applied_context": _applied_context}
+        if _live_t:
+            _live_t.task_done(verify_success, elapsed=time.time() - _task_ts)
+        out = {
+            "task_id": task_id,
+            "success": verify_success,
+            "task": task,
+            "_applied_context": _applied_context,
+        }
+        if not verify_success:
+            out["failure_kind"] = "verify_fail"
+            out["verify_error"] = _verify_error
+        return out
 
     def _discover_codebase_context(self, codebase_root: str) -> dict:
         """Auto-discover codebase structure with actual class/function symbols."""
         modules = []
         files = []
         symbols = []  # class/function names for richer planning context
-        
+
         root = Path(codebase_root)
-        
+
         for py_file in root.rglob("*.py"):
             if "__pycache__" in str(py_file) or ".git" in str(py_file):
                 continue
-            
+
             rel_path = str(py_file.relative_to(codebase_root))
             files.append(rel_path)
-            
+
             if "__init__.py" not in str(py_file):
                 module_name = rel_path.replace(".py", "").replace("/", ".")
                 modules.append(module_name)
-            
+
             # Extract top-level class and function names via AST
             try:
                 source = py_file.read_text(errors="ignore")
@@ -918,11 +5257,11 @@ class Orchestrator:
                             symbols.append(f"{rel_path}::def {node.name}")
             except (SyntaxError, Exception):
                 pass
-        
+
         architecture = "Python project with modular structure"
         if (root / "scaffold").exists():
             architecture = "AWOS-based Python agent framework (planner/worker/verifier pattern)"
-        
+
         return {
             "modules": ", ".join(modules[:8]) + ("..." if len(modules) > 8 else ""),
             "files": files[:30],

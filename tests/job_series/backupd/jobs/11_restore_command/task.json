@@ -1,0 +1,7 @@
+{
+  "id": "11_restore_command",
+  "goal": "Restoring is still manual unzipping. Please add `backupd restore NAME DEST`, where NAME is a backup's file name or `latest`, and DEST is the folder to restore into; DEST should be understood the same way backupd understands paths in its settings (I use things like ~/restores/today). DEST must be new or an empty folder: never overwrite or mix with existing files, refuse instead. For safety, an archive containing absolute paths or `..` must be refused before anything is extracted. On success print `restored N files from <archive name> to <DEST>`. Unknown or damaged backups and refused destinations fail like backupd's other errors (one line naming the archive or folder, exit status 1). Like verify, it only needs the backup folder to be configured, and each restore should be recorded in the log like verify does.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

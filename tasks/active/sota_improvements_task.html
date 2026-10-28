@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AWOS SOTA Improvements — Master Task File</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 1100px; margin: 0 auto; padding: 2rem; color: #1a1a2e; background: #f8f9fa; }
+  h1 { color: #0d1b2a; border-bottom: 3px solid #1d3557; padding-bottom: 0.5rem; }
+  h2 { color: #1d3557; border-left: 4px solid #457b9d; padding-left: 0.75rem; margin-top: 2.5rem; }
+  h3 { color: #2c3e50; margin-top: 1.5rem; }
+  .meta { background: #1d3557; color: #a8dadc; padding: 1rem 1.5rem; border-radius: 8px; margin-bottom: 2rem; font-size: 0.9rem; }
+  .meta span { margin-right: 2rem; }
+  .phase { background: #fff; border: 2px solid #dee2e6; border-radius: 8px; margin: 1.5rem 0; overflow: hidden; }
+  .phase-header { padding: 0.75rem 1.5rem; font-weight: bold; font-size: 1.05rem; display: flex; justify-content: space-between; align-items: center; }
+  .p0-header { background: #fde8e8; border-bottom: 2px solid #e63946; color: #c0392b; }
+  .p1-header { background: #e8f8ee; border-bottom: 2px solid #2dc653; color: #1a7a37; }
+  .p2-header { background: #e8f0ff; border-bottom: 2px solid #457b9d; color: #1d3557; }
+  .p3-header { background: #f3e8ff; border-bottom: 2px solid #9b59b6; color: #6c2f8e; }
+  .phase-body { padding: 1.25rem 1.5rem; }
+  .task-row { display: flex; align-items: flex-start; gap: 1rem; padding: 0.6rem 0; border-bottom: 1px solid #f0f0f0; }
+  .task-row:last-child { border-bottom: none; }
+  .task-check { font-size: 1.2rem; min-width: 1.5rem; }
+  .task-content { flex: 1; }
+  .task-title { font-weight: 600; color: #1d3557; }
+  .task-detail { font-size: 0.85rem; color: #666; margin-top: 0.2rem; }
+  .task-files { font-size: 0.8rem; background: #f0f4f8; padding: 0.2rem 0.5rem; border-radius: 4px; display: inline-block; margin-top: 0.2rem; font-family: monospace; }
+  .task-effort { min-width: 3rem; font-size: 0.8rem; color: #888; text-align: right; }
+  .summary-table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+  .summary-table th { background: #1d3557; color: white; padding: 0.6rem 1rem; text-align: left; }
+  .summary-table td { padding: 0.6rem 1rem; border-bottom: 1px solid #dee2e6; }
+  .summary-table tr:nth-child(even) td { background: #f1f3f5; }
+  .rules-box { background: #fff8e1; border: 1px solid #ffc107; border-radius: 6px; padding: 1.25rem; margin: 1rem 0; }
+  .done { color: #2dc653; }
+  .pending { color: #999; }
+  .in-progress { color: #f39c12; }
+  code { background: #e9ecef; padding: 0.1rem 0.3rem; border-radius: 3px; font-family: monospace; font-size: 0.85rem; }
+  ul li { margin: 0.3rem 0; }
+  .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 10px; font-size: 0.75rem; font-weight: bold; }
+  .badge-red { background: #fde8e8; color: #c0392b; border: 1px solid #e63946; }
+  .badge-green { background: #e8f8ee; color: #1a7a37; border: 1px solid #2dc653; }
+  .badge-blue { background: #e8f0ff; color: #1d3557; border: 1px solid #457b9d; }
+  .badge-purple { background: #f3e8ff; color: #6c2f8e; border: 1px solid #9b59b6; }
+</style>
+</head>
+<body>
+
+<h1>🗂 AWOS SOTA Improvements — Master Task File</h1>
+<div class="meta">
+  <span>📅 Created: 2026-05-22</span>
+  <span>⏱ Total: 39h</span>
+  <span>📊 Status: Planned</span>
+  <span>🎯 Goal: Close gap with Claude Code / SWE-bench SOTA</span>
+</div>
+
+<div class="rules-box">
+  <strong>🔒 Implementation Rules:</strong>
+  <ul>
+    <li>Complete P0 entirely before starting P1. P1 builds on P0's edit format.</li>
+    <li>P2 and P3 can be started after P1 is stable.</li>
+    <li>Run full test suite after every feature: <code>pytest tests/ -q</code></li>
+    <li>Zero regressions required before moving to next tier.</li>
+    <li>Each atomic step must be verified independently before proceeding.</li>
+  </ul>
+</div>
+
+<!-- ======================================== P0 ========================================= -->
+<h2>🔴 P0 — Edit Reliability (7h total)</h2>
+<p>Spec: <a href="../specs/p0_structured_edit_spec.html">docs/specs/p0_structured_edit_spec.html</a></p>
+
+<div class="phase">
+  <div class="phase-header p0-header">
+    <span>P0 — Structured Edit Format &amp; Edit Reliability</span>
+    <span><span class="badge badge-red">CRITICAL</span> 7h</span>
+  </div>
+  <div class="phase-body">
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P0-1: Add EditInstruction, EditRequest, EditResult dataclasses</div>
+        <div class="task-detail">New dataclasses for structured edit operations. Must be importable by both worker.py and verifier.py.</div>
+        <div class="task-files">scaffold/agent/models.py or new scaffold/agent/edit_models.py</div>
+      </div>
+      <div class="task-effort">0.5h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P0-2: Add apply_edits() to Verifier with multiple-match detection</div>
+        <div class="task-detail">New method: takes EditRequest, applies edits sequentially. Counts occurrences before apply. Returns EditResult with per-edit errors. Includes _find_nearest_match() helper using difflib.</div>
+        <div class="task-files">scaffold/agent/verifier.py</div>
+      </div>
+      <div class="task-effort">2h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P0-3: Add _parse_json_edits() to Worker + update _parse_response() with fallback</div>
+        <div class="task-detail">New method parses {"edits": [...]} JSON. Updated _parse_response() tries JSON first, falls back to SEARCH/REPLACE, returns empty on both fail. Strips markdown code fences defensively.</div>
+        <div class="task-files">scaffold/agent/worker.py</div>
+      </div>
+      <div class="task-effort">1.5h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P0-4: Update _build_prompt() to use JSON output format instruction</div>
+        <div class="task-detail">Add JSON output schema instruction to worker prompt. Keep SEARCH/REPLACE instruction as fallback comment. Change prompt wording from "Use SEARCH/REPLACE blocks" to "Respond with JSON edits array".</div>
+        <div class="task-files">scaffold/agent/worker.py</div>
+      </div>
+      <div class="task-effort">0.5h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P0-5: Update _get_file_context() for full-file-when-small logic</div>
+        <div class="task-detail">Files ≤ 300 lines: show entire content. Files > 300 lines: show header (lines 1-30) + relevant section + tail (last 20 lines). Add note "X lines total" to help LLM understand file scope.</div>
+        <div class="task-files">scaffold/agent/worker.py</div>
+      </div>
+      <div class="task-effort">1h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P0-6: Update orchestrator to read full file content before passing to execute_task()</div>
+        <div class="task-detail">In _execute_single_task(): read file from disk before calling worker.execute_task(). Pass file_content parameter. Handle file-not-found (new file creation). Store read content for validation.</div>
+        <div class="task-files">scaffold/agent/orchestrator.py</div>
+      </div>
+      <div class="task-effort">0.5h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P0-7: Write tests/test_structured_edit.py (14 tests)</div>
+        <div class="task-detail">All 14 tests listed in P0 spec: JSON parse, apply, multi-match, create file, fallback, quote normalization, trailing newline. All must pass. Zero regressions in existing suite.</div>
+        <div class="task-files">tests/test_structured_edit.py</div>
+      </div>
+      <div class="task-effort">1h</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ======================================== P1 ========================================= -->
+<h2>🟠 P1 — Verification &amp; Architecture (9h total)</h2>
+<p>Spec: <a href="../specs/p1_verifier_architect_spec.html">docs/specs/p1_verifier_architect_spec.html</a> | Prerequisite: P0 complete</p>
+
+<div class="phase">
+  <div class="phase-header p1-header">
+    <span>P1 — Test Execution, Architect+Editor Split, Context Compaction</span>
+    <span><span class="badge badge-green">HIGH</span> 9h</span>
+  </div>
+  <div class="phase-body">
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P1-1: Add TestResult dataclass + _discover_test_file()</div>
+        <div class="task-detail">TestResult dataclass with ran/passed/failed/errors/output/score fields. _discover_test_file() checks 4 candidate paths then grep fallback. Returns None gracefully if not found.</div>
+        <div class="task-files">scaffold/agent/verifier.py</div>
+      </div>
+      <div class="task-effort">1h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P1-2: Add run_tests() to Verifier</div>
+        <div class="task-detail">Runs pytest with -x -q --tb=short --timeout=30. Captures stdout+stderr. Parses pytest output for pass/fail counts. Handles subprocess.TimeoutExpired cleanly. Truncates output to last 2000 chars.</div>
+        <div class="task-files">scaffold/agent/verifier.py</div>
+      </div>
+      <div class="task-effort">1h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P1-3: Wire test execution into orchestrator retry loop</div>
+        <div class="task-detail">After file write: call verifier.run_tests(). If tests fail: append test output to task["past_critiques"]. If tests pass: set result["test_verified"]=True. If no test file: no penalty.</div>
+        <div class="task-files">scaffold/agent/orchestrator.py</div>
+      </div>
+      <div class="task-effort">0.5h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P1-4: Add architect prompt builder to Worker</div>
+        <div class="task-detail">_build_architect_prompt(): structured prompt asking for plain-text change instructions. Output format: "## Analysis" + "## Changes Required" with exact file quotes. Max 2048 tokens response.</div>
+        <div class="task-files">scaffold/agent/worker.py</div>
+      </div>
+      <div class="task-effort">1h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P1-5: Add editor prompt builder + _execute_with_architect_split()</div>
+        <div class="task-detail">_build_editor_prompt(): takes architect output + file content, asks ONLY for JSON edits. _execute_with_architect_split(): architect call → editor call → parse JSON. Falls back to direct if editor fails 2x.</div>
+        <div class="task-files">scaffold/agent/worker.py</div>
+      </div>
+      <div class="task-effort">1.5h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P1-6: Add TaskSummary + SessionState dataclasses</div>
+        <div class="task-detail">TaskSummary: task_id, action, file, status, new_symbols, key_change, test_result. SessionState: feature_goal, completed_tasks, modified_files, current_task_index, total_tasks. to_context_block() method.</div>
+        <div class="task-files">scaffold/agent/models.py or new scaffold/agent/session_state.py</div>
+      </div>
+      <div class="task-effort">0.5h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P1-7: Wire SessionState into orchestrator execute_feature()</div>
+        <div class="task-detail">Init SessionState at start of execute_feature(). Inject session_context into task dict. Update session_state after each task. maybe_compact() after each task. _extract_new_symbols() from edit diff.</div>
+        <div class="task-files">scaffold/agent/orchestrator.py</div>
+      </div>
+      <div class="task-effort">1h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P1-8: Write tests/test_p1_improvements.py (13 tests)</div>
+        <div class="task-detail">All 13 tests from P1 spec. Includes test discovery, test execution (mock subprocess), architect/editor prompts, session state, compaction. Zero regressions.</div>
+        <div class="task-files">tests/test_p1_improvements.py</div>
+      </div>
+      <div class="task-effort">1.5h</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ======================================== P2 ========================================= -->
+<h2>🟡 P2 — Performance &amp; Parallelism (11h total)</h2>
+<p>Spec: <a href="../specs/p2_performance_spec.html">docs/specs/p2_performance_spec.html</a> | Prerequisite: P1 stable</p>
+
+<div class="phase">
+  <div class="phase-header p2-header">
+    <span>P2 — Prompt Cache, Parallel Sampling, Worktree, Condensed History</span>
+    <span><span class="badge badge-blue">MEDIUM</span> 11h</span>
+  </div>
+  <div class="phase-body">
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P2-1: Module-level Planner singleton + get_planner() factory</div>
+        <div class="task-detail">Thread-safe singleton with double-check locking. Cached system block built once at init. _classify_goal_complexity() routes simple goals to Haiku. Preserve existing plan() interface exactly.</div>
+        <div class="task-files">scaffold/agent/planner.py</div>
+      </div>
+      <div class="task-effort">1.5h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P2-1b: Restructure worker prompt into three cached blocks (A/B/C)</div>
+        <div class="task-detail">Block A: stable worker instructions + JSON format spec → cache_control ephemeral. Block B: file content + RAG context, built once per task → cache_control ephemeral. Block C: dynamic action + past_critiques → no cache. Must be byte-identical for A and B on all retries of same task.</div>
+        <div class="task-files">scaffold/agent/worker.py</div>
+      </div>
+      <div class="task-effort">1.5h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P2-1c: Add MAX_CONTEXT_TOKENS budget + _build_file_and_rag_context() + _estimate_tokens() + _truncate_to_tokens()</div>
+        <div class="task-detail">MAX_FILE_TOKENS=2000, MAX_RAG_TOKENS=1500, MAX_CONTEXT_TOKENS=4000. _build_file_and_rag_context() enforces budget before building Block B. _estimate_tokens() uses words×1.3. _truncate_to_tokens() truncates from end with note. Add test: context never exceeds budget.</div>
+        <div class="task-files">scaffold/agent/worker.py</div>
+      </div>
+      <div class="task-effort">1h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P2-2: Update orchestrator to use get_planner() instead of Planner()</div>
+        <div class="task-detail">Replace all Planner() instantiation with get_planner(). Verify the system block is bytes-identical across calls (log cache hit/miss). Add reset_planner() for tests.</div>
+        <div class="task-files">scaffold/agent/orchestrator.py</div>
+      </div>
+      <div class="task-effort">0.5h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P2-3: Add PatchCandidate dataclass + _sample_candidates()</div>
+        <div class="task-detail">PatchCandidate: edits, new_content, reasoning, temperature, test_result, syntax_ok, score. _sample_candidates(): ThreadPoolExecutor with N workers, varied temperatures. Returns list of valid candidates only.</div>
+        <div class="task-files">scaffold/agent/worker.py</div>
+      </div>
+      <div class="task-effort">2h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P2-4: Add _score_candidate() + parallel sampling orchestration</div>
+        <div class="task-detail">_score_candidate(): weights 0.7*tests + 0.2*syntax + 0.1*edit_applied. Wire into orchestrator: if task.complexity=="high", use sampling. Select best by score. Gate behind AWOS_PARALLEL_SAMPLING=true env var.</div>
+        <div class="task-files">scaffold/agent/orchestrator.py, scaffold/agent/worker.py</div>
+      </div>
+      <div class="task-effort">1.5h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P2-5: Add WorktreeManager class</div>
+        <div class="task-detail">create_worktree(), get_diff(), commit_worktree(), merge_to_main(), cleanup_worktree(). Checks git availability at init. Falls back gracefully if not a git repo. try/finally cleanup guarantee.</div>
+        <div class="task-files">scaffold/agent/worktree.py (new)</div>
+      </div>
+      <div class="task-effort">2.5h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P2-6: Wire worktree into execute_feature() (opt-in)</div>
+        <div class="task-detail">Gate behind AWOS_USE_WORKTREE=true. create → execute → diff → commit → cleanup in try/finally. Surface diff in result dict. Ensure stale worktrees are cleaned on startup.</div>
+        <div class="task-files">scaffold/agent/orchestrator.py</div>
+      </div>
+      <div class="task-effort">0.5h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P2-7: Condensed history builder + injection into worker prompt</div>
+        <div class="task-detail">_build_task_history_context(): last 3 tasks full summary, older compressed to 1 line each. Max 600 tokens. Extract from SessionState. Inject as "## Previous Task Results" section in worker prompt.</div>
+        <div class="task-files">scaffold/agent/orchestrator.py, scaffold/agent/worker.py</div>
+      </div>
+      <div class="task-effort">1h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P2-8: Write tests/test_p2_improvements.py (13 tests)</div>
+        <div class="task-detail">All 13 tests: singleton, system block stability, routing, sampling, worktree CRUD, condensed history. Worktree tests need git binary — skip gracefully if unavailable.</div>
+        <div class="task-files">tests/test_p2_improvements.py</div>
+      </div>
+      <div class="task-effort">1.5h</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ======================================== P3 ========================================= -->
+<h2>🟣 P3 — SOTA Advanced Features (12h total)</h2>
+<p>Spec: <a href="../specs/p3_advanced_spec.html">docs/specs/p3_advanced_spec.html</a> | Prerequisite: P1 stable</p>
+
+<div class="phase">
+  <div class="phase-header p3-header">
+    <span>P3 — LSP Feedback, Auto Skills, Enhanced Repo Map</span>
+    <span><span class="badge badge-purple">ADVANCED</span> 12h</span>
+  </div>
+  <div class="phase-body">
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P3-1: Add LintDiagnostic dataclass + RuffLinter class</div>
+        <div class="task-detail">LintDiagnostic: file/line/col/code/message/severity. RuffLinter.lint_file(): subprocess ruff --output-format=json. Limit to 15 diagnostics. Silent fallback if ruff not installed.</div>
+        <div class="task-files">scaffold/agent/lint_pipeline.py (new)</div>
+      </div>
+      <div class="task-effort">1h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P3-2: Add DiagnosticPipeline + ruff_autofix()</div>
+        <div class="task-detail">DiagnosticPipeline.check(): write to temp file, run ruff, return diagnostics. ruff_autofix(): apply ruff --fix to content, return fixed string. Blocking codes: E999, F821, F811.</div>
+        <div class="task-files">scaffold/agent/lint_pipeline.py</div>
+      </div>
+      <div class="task-effort">1h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P3-3: Wire DiagnosticPipeline into verification flow</div>
+        <div class="task-detail">After edits applied, before file write: run diagnostic pipeline. If blocking error codes found: append to past_critiques and retry. Apply autofix for non-blocking issues before write.</div>
+        <div class="task-files">scaffold/agent/orchestrator.py</div>
+      </div>
+      <div class="task-effort">0.5h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P3-4: Add SkillExtractor class + _generate_skill() via cheap LLM</div>
+        <div class="task-detail">SkillExtractor: maybe_extract_skill() checks score threshold, _compute_skill_key() normalizes action, _generate_skill() calls cheap LLM for Markdown skill description. _save_skill() writes to .awos/skills/.</div>
+        <div class="task-files">scaffold/agent/skill_manager.py (new)</div>
+      </div>
+      <div class="task-effort">2h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P3-5: Add SkillLibrary.get_relevant_skills() + wire into worker prompt</div>
+        <div class="task-detail">SkillLibrary.get_relevant_skills(): keyword overlap scoring, top-k retrieval. Wire into Worker._build_prompt(): inject as "## Relevant Skills" section. Wire extraction into orchestrator after task success.</div>
+        <div class="task-files">scaffold/agent/skill_manager.py, scaffold/agent/worker.py, scaffold/agent/orchestrator.py</div>
+      </div>
+      <div class="task-effort">1.5h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P3-6: Add CallSite dataclass + CallGraphIndex</div>
+        <div class="task-detail">CallSite: caller_file/class/function/callee_name/line. CallGraphIndex: index_file() via AST CallVisitor. who_calls() and what_calls() lookup methods. _rebuild_indexes() called after each file indexed.</div>
+        <div class="task-files">scaffold/agent/memory/codebase_index.py or new call_graph.py</div>
+      </div>
+      <div class="task-effort">2h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P3-7: Add query_with_graph() to CodebaseIndex + wire into orchestrator</div>
+        <div class="task-detail">CodebaseIndex.query_with_graph(): base semantic search + cross-ref section from call graph. Wire into orchestrator: build call graph at init, pass to worker context query.</div>
+        <div class="task-files">scaffold/agent/memory/codebase_index.py, scaffold/agent/orchestrator.py</div>
+      </div>
+      <div class="task-effort">1.5h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P3-8: Write tests/test_p3_improvements.py (16 tests)</div>
+        <div class="task-detail">All 16 tests from P3 spec: ruff lint/autofix, diagnostic pipeline, skill extract/retrieve, call graph index/query. Skip ruff tests if binary unavailable.</div>
+        <div class="task-files">tests/test_p3_improvements.py</div>
+      </div>
+      <div class="task-effort">2.5h</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ======================================== P1.5 ========================================= -->
+<h2>� P1.5 — Hierarchical Fault Localization (5h) — NEW</h2>
+<p>Spec: <a href="../specs/p1_5_hierarchical_localization_spec.html">docs/specs/p1_5_hierarchical_localization_spec.html</a> | Prerequisite: P1 complete | Based on: Agentless (ICLR 2025)</p>
+
+<div class="phase">
+  <div class="phase-header" style="background:#fff3cd;border-bottom:2px solid #e67e22;color:#a04000;">
+    <span>P1.5 — Agentless-Style 3-Level Localization (file → skeleton → edit location)</span>
+    <span><span class="badge" style="background:#e67e22;color:white;border:none;">HIGH</span> 5h</span>
+  </div>
+  <div class="phase-body">
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P1.5-1: Add EditLocation + LocalizationResult dataclasses</div>
+        <div class="task-detail">EditLocation: file/start_line/end_line/symbol_name/confidence/reason. LocalizationResult: task_action, suspicious_files, suspicious_symbols, edit_locations, total_context_tokens.</div>
+        <div class="task-files">scaffold/agent/fault_localizer.py (new)</div>
+      </div>
+      <div class="task-effort">0.5h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P1.5-2: Implement _build_repo_structure() + _localize_files() (Level 1)</div>
+        <div class="task-detail">_build_repo_structure(): recursive rglob .py, skip pycache/venv. _localize_files(): cheap LLM call with repo structure → JSON array of suspicious files. Filter non-existent paths.</div>
+        <div class="task-files">scaffold/agent/fault_localizer.py</div>
+      </div>
+      <div class="task-effort">1h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P1.5-3: Implement _build_skeleton() + _localize_symbols() (Level 2)</div>
+        <div class="task-detail">_build_skeleton(): AST parse → extract class/function headers + docstring first line only, no bodies. _localize_symbols(): cheap LLM with all skeletons → [["file","symbol"]] pairs. Max top_n=8 symbols.</div>
+        <div class="task-files">scaffold/agent/fault_localizer.py</div>
+      </div>
+      <div class="task-effort">1.5h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P1.5-4: Implement _extract_symbol_body() + _localize_edit_lines() (Level 3)</div>
+        <div class="task-detail">_extract_symbol_body(): AST walk to find named function/class, return (body, start_line, end_line). _localize_edit_lines(): mid-tier LLM with function bodies → EditLocation list with confidence scores.</div>
+        <div class="task-files">scaffold/agent/fault_localizer.py</div>
+      </div>
+      <div class="task-effort">1h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P1.5-5: Wire FaultLocalizer into orchestrator + update worker prompt Block B</div>
+        <div class="task-detail">In _execute_single_task(): call localizer.localize() before worker call. If edit_locations found: inject format_for_worker() as task["focused_context"]. In worker._build_file_and_rag_context(): if focused_context present, use it instead of raw RAG.</div>
+        <div class="task-files">scaffold/agent/orchestrator.py, scaffold/agent/worker.py</div>
+      </div>
+      <div class="task-effort">0.5h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P1.5-6: Write tests/test_fault_localizer.py (12 tests)</div>
+        <div class="task-detail">All 12 tests from spec: repo structure, skeleton, symbol body extraction, all 3 localization levels, format_for_worker, empty project graceful fallback.</div>
+        <div class="task-files">tests/test_fault_localizer.py</div>
+      </div>
+      <div class="task-effort">0.5h</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ======================================== P4 ========================================= -->
+<h2>🔴 P4 — MCTS Patch Search Engine (12h) — NEW</h2>
+<p>Spec: <a href="../specs/p4_mcts_prm_spec.html">docs/specs/p4_mcts_prm_spec.html</a> | Prerequisite: P2 stable | Gate: <code>AWOS_MCTS=true</code> | Based on: SWE-Search (ICLR 2025) +23% improvement</p>
+
+<div class="phase">
+  <div class="phase-header" style="background:#fde8e8;border-bottom:2px solid #c0392b;color:#7b241c;">
+    <span>P4 — Monte Carlo Tree Search with UCT + Execution Rewards</span>
+    <span><span class="badge badge-red">ADVANCED</span> 12h</span>
+  </div>
+  <div class="phase-body">
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P4-1: Add MCTSNode dataclass with UCT formula + is_pruned()</div>
+        <div class="task-detail">Fields: state/parent/children/visit_count/value_sum/is_terminal/reward/depth/static_ok/llm_reasoning. Properties: value (avg), uct_score(c_puct=1.41). is_pruned() returns True if static_ok=False.</div>
+        <div class="task-files">scaffold/agent/mcts_search.py (new)</div>
+      </div>
+      <div class="task-effort">1h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P4-2: Implement _select() + _apply_edits() + _evaluate() with tiered scoring</div>
+        <div class="task-detail">_select(): traverse tree via UCT, skip pruned/terminal. _apply_edits(): try to apply edit list, return None on failure. _evaluate(): Stage 1 AST parse, Stage 2 PRM if available, Stage 3 pytest. Reward table: pass=1.0, partial=0.3+0.7×ratio, syntax fail=-0.2.</div>
+        <div class="task-files">scaffold/agent/mcts_search.py</div>
+      </div>
+      <div class="task-effort">2.5h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P4-3: Implement _expand() with ThreadPoolExecutor K=3 at temperatures 0.6/0.8/1.0</div>
+        <div class="task-detail">_expand(): K LLM samples in parallel via ThreadPoolExecutor. _sample_patch(): single LLM call at given temperature. _build_expansion_context(): task + file + parent state + parent reasoning. Returns list of MCTSNode children.</div>
+        <div class="task-files">scaffold/agent/mcts_search.py</div>
+      </div>
+      <div class="task-effort">2h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P4-4: Implement _backpropagate() + _best_leaf() + search() main loop</div>
+        <div class="task-detail">_backpropagate(): propagate child rewards up to root via parent pointer. _best_leaf(): DFS for best non-pruned leaf. search(): SELECT→EXPAND→SIMULATE→EVALUATE→BACKPROP loop with early stop on perfect solution. Returns (edits, reward).</div>
+        <div class="task-files">scaffold/agent/mcts_search.py</div>
+      </div>
+      <div class="task-effort">2h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P4-5: Add MCTSTrace dataclass + log_mcts_trace() + get_mcts_traces() to RewardStore</div>
+        <div class="task-detail">MCTSTrace: task_id/action/features/nodes/winning_path/total_rollouts/final_reward/timestamp. log_mcts_trace() appends to .awos/mcts_traces.jsonl. get_mcts_traces(min_count=500) returns [] if below threshold.</div>
+        <div class="task-files">scaffold/agent/reward_store.py</div>
+      </div>
+      <div class="task-effort">1h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P4-6: Wire MCTSSearchEngine into orchestrator behind AWOS_MCTS=true gate</div>
+        <div class="task-detail">In _execute_single_task(): if AWOS_MCTS and (complexity>=6 or attempt>=2): use MCTSSearchEngine. Pass prm=self.prm (None until P5). Log MCTSTrace after each search. Fallback to standard worker on exception.</div>
+        <div class="task-files">scaffold/agent/orchestrator.py</div>
+      </div>
+      <div class="task-effort">1h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P4-7: Write tests/test_mcts_search.py (14 tests)</div>
+        <div class="task-detail">All 14 tests from spec: UCT formula, selection, pruning, apply_edits, evaluate tiering, backprop, search returns best, early stop, trace logging, trace threshold.</div>
+        <div class="task-files">tests/test_mcts_search.py</div>
+      </div>
+      <div class="task-effort">2.5h</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ======================================== P5 ========================================= -->
+<h2>🟣 P5 — Process Reward Model (8h) — NEW, Requires 500+ MCTS Episodes</h2>
+<p>Spec: <a href="../specs/p4_mcts_prm_spec.html#p5-design">docs/specs/p4_mcts_prm_spec.html#p5-design</a> | Prerequisite: P4 + 500+ traces | Based on: CodePRM (ACL 2025)</p>
+
+<div class="phase">
+  <div class="phase-header p3-header">
+    <span>P5 — Small MLP Process Reward Model (3-layer, trains in &lt;30s on CPU)</span>
+    <span><span class="badge badge-purple">DATA-GATED</span> 8h</span>
+  </div>
+  <div class="phase-body">
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P5-1: Add ProcessRewardModel with _encode_task() + _encode_patch() feature builders</div>
+        <div class="task-detail">_encode_task(): 10-dim matching TaskFeatureExtractor. _encode_patch(): 20-dim heuristic (no LLM — fast). Total input: 35-dim. WEIGHTS_PATH=.awos/prm_weights.pkl. ready=False until trained or loaded.</div>
+        <div class="task-files">scaffold/agent/process_reward_model.py (new)</div>
+      </div>
+      <div class="task-effort">1.5h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P5-2: Implement MLP _init_weights() + _forward() + _sgd_train()</div>
+        <div class="task-detail">Xavier initialization. 3-layer MLP: 35→256→64→1. ReLU activations. Sigmoid output. Mini-batch SGD (batch=32, lr=0.001, epochs=50). Binary cross-entropy loss. Full backprop chain. No external ML deps — pure numpy.</div>
+        <div class="task-files">scaffold/agent/process_reward_model.py</div>
+      </div>
+      <div class="task-effort">2.5h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P5-3: Implement train() + _build_training_data() + save/load weights</div>
+        <div class="task-detail">train(): calls reward_store.get_mcts_traces(500), returns False if insufficient. _build_training_data(): convert MCTSTrace nodes to (X, y) — label=1 if node is on winning path. _save_weights()/  _load_if_exists() via pickle.</div>
+        <div class="task-files">scaffold/agent/process_reward_model.py</div>
+      </div>
+      <div class="task-effort">1.5h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P5-4: Wire PRM into orchestrator init + MCTSSearchEngine + periodic retraining</div>
+        <div class="task-detail">Orchestrator.__init__: self.prm = ProcessRewardModel(). After every 200 new traces: self.prm.train(self.reward_store). MCTSSearchEngine already accepts prm= — no change needed there. Log prm.ready status in observability span.</div>
+        <div class="task-files">scaffold/agent/orchestrator.py</div>
+      </div>
+      <div class="task-effort">1h</div>
+    </div>
+
+    <div class="task-row">
+      <div class="task-check pending">☐</div>
+      <div class="task-content">
+        <div class="task-title">P5-5: Write tests/test_process_reward_model.py (10 tests)</div>
+        <div class="task-detail">All 10 tests from spec: predict-not-ready, feature dimensions, forward range, train-below-threshold, train-sufficient, save-load roundtrip, better-on-good-patches, MCTS uses PRM, MCTS ignores when not ready.</div>
+        <div class="task-files">tests/test_process_reward_model.py</div>
+      </div>
+      <div class="task-effort">1.5h</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ======================================== SUMMARY ========================================= -->
+<h2>📊 Combined Summary (All Phases)</h2>
+
+<table class="summary-table">
+  <tr><th>Tier</th><th>Steps</th><th>Effort</th><th>Expected Impact</th><th>Prerequisite</th></tr>
+  <tr><td>� P0</td><td>7</td><td>7h</td><td>Fix edit root cause. First-attempt success: 40% → 75%</td><td>None</td></tr>
+  <tr><td>🟠 P1</td><td>8</td><td>9h</td><td>Test-verified results. Automated retry with context</td><td>P0 complete</td></tr>
+  <tr><td>🟠 P1.5</td><td>6</td><td>5h</td><td>60-80% context reduction. Better edit targeting (Agentless proven)</td><td>P1 complete</td></tr>
+  <tr><td>🟡 P2</td><td>10</td><td>14h</td><td>85-90% cost reduction. Majority-vote reranking. Worktree isolation</td><td>P1 stable</td></tr>
+  <tr><td>🟣 P3</td><td>8</td><td>12h</td><td>Ruff lint loop. Skill reuse. Call graph context</td><td>P1 stable</td></tr>
+  <tr><td>🔴 P4</td><td>7</td><td>12h</td><td>+23% hard task improvement (SWE-Search verified). MCTS tree search</td><td>P2 stable</td></tr>
+  <tr><td>🟣 P5</td><td>5</td><td>8h</td><td>4-5× search speedup. PRM replaces pytest on intermediate nodes</td><td>P4 + 500 traces</td></tr>
+  <tr><td><strong>TOTAL</strong></td><td><strong>51 steps</strong></td><td><strong>67h</strong></td><td><strong>AWOS approaches SWE-bench SOTA architecture</strong></td><td>—</td></tr>
+</table>
+
+<h3>📐 Execution Order</h3>
+<p style="font-family: monospace; background: #f8f9fa; padding: 1rem; border-radius: 6px; font-size: 0.9rem;">
+P0 → P1 → P1.5 → P2 (parallel with P3) → P4 → P5 (data-gated)
+</p>
+
+<h2>📂 Spec References</h2>
+<ul>
+  <li><strong>Research</strong>: <a href="../research/sota_improvements.html">docs/research/sota_improvements.html</a></li>
+  <li><strong>P0 Spec</strong>: <a href="../specs/p0_structured_edit_spec.html">docs/specs/p0_structured_edit_spec.html</a></li>
+  <li><strong>P1 Spec</strong>: <a href="../specs/p1_verifier_architect_spec.html">docs/specs/p1_verifier_architect_spec.html</a></li>
+  <li><strong>P1.5 Spec</strong>: <a href="../specs/p1_5_hierarchical_localization_spec.html">docs/specs/p1_5_hierarchical_localization_spec.html</a> ⭐ NEW</li>
+  <li><strong>P2 Spec</strong>: <a href="../specs/p2_performance_spec.html">docs/specs/p2_performance_spec.html</a></li>
+  <li><strong>P3 Spec</strong>: <a href="../specs/p3_advanced_spec.html">docs/specs/p3_advanced_spec.html</a></li>
+  <li><strong>P4+P5 Spec</strong>: <a href="../specs/p4_mcts_prm_spec.html">docs/specs/p4_mcts_prm_spec.html</a> ⭐ NEW</li>
+</ul>
+
+<hr style="margin: 3rem 0; border-color: #dee2e6;">
+<p style="color: #888; font-size: 0.85rem;">Master Task | AWOS SOTA Improvements (Combined) | Updated 2026-05-22 | 51 atomic steps | 67h total</p>
+
+</body>
+</html>

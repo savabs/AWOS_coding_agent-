@@ -1,0 +1,38 @@
+{
+ "ops": [
+  {
+   "op": "move",
+   "src": "receipts/shopping_list.txt",
+   "dst": "receipts/a.txt"
+  },
+  {
+   "op": "write_file",
+   "path": "receipts/a.txt",
+   "content": "overwrite"
+  }
+ ],
+ "dry_run": [
+  {
+   "index": 0,
+   "op": {
+    "op": "move",
+    "src": "receipts/shopping_list.txt",
+    "dst": "receipts/a.txt"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 1,
+   "op": {
+    "op": "write_file",
+    "path": "receipts/a.txt",
+    "content": "overwrite"
+   },
+   "ok": false,
+   "message": "file already exists (no overwrite)",
+   "blocked_by": "precondition"
+  }
+ ]
+}

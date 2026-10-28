@@ -1,0 +1,102 @@
+[
+{"slug": "invoice", "tag": "Bills", "recipe": {"awos_recipe": 1,
+ "name": "Download this month's invoice",
+ "description": "Opens the billing page of a utility account, picks the month you name and saves the invoice PDF to Downloads.",
+ "start_url": "https://billing.example.com/account",
+ "params": [{"name": "month", "label": "Month", "example": "October 2026", "kind": "text"}],
+ "steps": [
+  {"action": "click", "loc": {"tag": "a", "name": "Billing & payments"}},
+  {"action": "click", "loc": {"tag": "a", "name": "Invoices"}},
+  {"action": "select", "loc": {"tag": "select", "label": "Billing period"}, "value": "{{month}}"},
+  {"action": "click", "loc": {"tag": "button", "name": "Download PDF"}}
+ ],
+ "checks": {"goal": "The invoice PDF for the chosen month is saved.", "expect_text": ["Invoice"], "expect_url": null,
+            "expect_download": {"name_regex": "^invoice.*\\.pdf$"}},
+ "created_with": "AWOS Replay example"}},
+
+{"slug": "csv-report", "tag": "Reports", "recipe": {"awos_recipe": 1,
+ "name": "Export last week's sales as CSV",
+ "description": "Opens the reports area of a shop dashboard, sets the date range to last week and exports the sales table as a CSV file.",
+ "start_url": "https://dashboard.example.com/reports",
+ "params": [],
+ "steps": [
+  {"action": "click", "loc": {"tag": "a", "name": "Sales"}},
+  {"action": "click", "loc": {"tag": "button", "name": "Date range"}},
+  {"action": "click", "loc": {"tag": "button", "name": "Last week"}},
+  {"action": "click", "loc": {"tag": "button", "name": "Export"}},
+  {"action": "click", "loc": {"tag": "button", "name": "CSV"}}
+ ],
+ "checks": {"goal": "A CSV of last week's sales is downloaded.", "expect_text": ["Last week"], "expect_url": "/reports/sales",
+            "expect_download": {"name_regex": "\\.csv$"}},
+ "created_with": "AWOS Replay example"}},
+
+{"slug": "timesheet", "tag": "Forms", "recipe": {"awos_recipe": 1,
+ "name": "Fill the weekly timesheet, stop before Submit",
+ "description": "Fills a standard 5 x 8 hour week on a timesheet portal and stops on the review screen, so you check it and press Submit yourself.",
+ "start_url": "https://hr.example.org/timesheets",
+ "params": [{"name": "project", "label": "Project code", "example": "PRJ-1042", "kind": "text"}],
+ "steps": [
+  {"action": "click", "loc": {"tag": "button", "name": "New timesheet"}},
+  {"action": "fill", "loc": {"tag": "input", "label": "Project code"}, "value": "{{project}}"},
+  {"action": "fill", "loc": {"tag": "input", "label": "Monday"}, "value": "8"},
+  {"action": "fill", "loc": {"tag": "input", "label": "Tuesday"}, "value": "8"},
+  {"action": "fill", "loc": {"tag": "input", "label": "Wednesday"}, "value": "8"},
+  {"action": "fill", "loc": {"tag": "input", "label": "Thursday"}, "value": "8"},
+  {"action": "fill", "loc": {"tag": "input", "label": "Friday"}, "value": "8"},
+  {"action": "fill", "loc": {"tag": "textarea", "label": "Notes"}, "ask": true},
+  {"action": "click", "loc": {"tag": "button", "name": "Review"}}
+ ],
+ "checks": {"goal": "The review screen shows 40 hours, ready for you to submit.", "expect_text": ["Total 40 h", "Submit"],
+            "expect_url": null, "expect_download": null},
+ "created_with": "AWOS Replay example"}},
+
+{"slug": "order-status", "tag": "Orders", "recipe": {"awos_recipe": 1,
+ "name": "Check an order's delivery status",
+ "description": "Looks up an order number on a store's order-tracking page and reads back the current status.",
+ "start_url": "https://shop.example.net/orders/track",
+ "params": [{"name": "order", "label": "Order number", "example": "100-2245-77", "kind": "text"},
+            {"name": "zip", "label": "Postcode on the order", "example": "94016", "kind": "text"}],
+ "steps": [
+  {"action": "fill", "loc": {"tag": "input", "label": "Order number"}, "value": "{{order}}"},
+  {"action": "fill", "loc": {"tag": "input", "label": "Billing postcode"}, "value": "{{zip}}"},
+  {"action": "click", "loc": {"tag": "button", "name": "Track order"}},
+  {"action": "read", "loc": {"tag": "p", "name": "Delivery status"}}
+ ],
+ "checks": {"goal": "The tracking page for the order is open and shows a status.", "expect_text": ["Status"],
+            "expect_url": "/orders/track/", "expect_download": null},
+ "created_with": "AWOS Replay example"}},
+
+{"slug": "job-alert", "tag": "Alerts", "recipe": {"awos_recipe": 1,
+ "name": "New job listings for a search",
+ "description": "Runs a job search sorted by newest, limited to the last 7 days, so you see what was posted since last time.",
+ "start_url": "https://jobs.example.com/",
+ "params": [{"name": "role", "label": "Job title", "example": "data analyst", "kind": "text"},
+            {"name": "city", "label": "City", "example": "Pune", "kind": "text"}],
+ "steps": [
+  {"action": "fill", "loc": {"tag": "input", "placeholder": "Job title or keyword"}, "value": "{{role}}"},
+  {"action": "fill", "loc": {"tag": "input", "placeholder": "City"}, "value": "{{city}}"},
+  {"action": "click", "loc": {"tag": "button", "name": "Search"}},
+  {"action": "select", "loc": {"tag": "select", "label": "Sort by"}, "value": "Newest"},
+  {"action": "click", "loc": {"tag": "label", "name": "Posted in the last 7 days"}}
+ ],
+ "checks": {"goal": "A results list sorted by newest is shown.", "expect_text": ["results", "Newest"],
+            "expect_url": "/search", "expect_download": null},
+ "created_with": "AWOS Replay example"}},
+
+{"slug": "inventory", "tag": "Inventory", "recipe": {"awos_recipe": 1,
+ "name": "Update stock for one product",
+ "description": "Finds a product by its SKU in a store back office and sets the stock count. It stops for your OK before saving.",
+ "start_url": "https://admin.example.org/products",
+ "params": [{"name": "sku", "label": "SKU", "example": "MUG-BLUE-350", "kind": "text"},
+            {"name": "qty", "label": "New stock count", "example": "24", "kind": "text"}],
+ "steps": [
+  {"action": "fill", "loc": {"tag": "input", "placeholder": "Search products"}, "value": "{{sku}}"},
+  {"action": "click", "loc": {"tag": "a", "name": "Edit"}},
+  {"action": "click", "loc": {"tag": "a", "name": "Inventory"}},
+  {"action": "fill", "loc": {"tag": "input", "label": "Quantity in stock"}, "value": "{{qty}}"},
+  {"action": "click", "loc": {"tag": "button", "name": "Save"}, "danger": true}
+ ],
+ "checks": {"goal": "The product page shows the new stock count.", "expect_text": ["Saved"],
+            "expect_url": null, "expect_download": null},
+ "created_with": "AWOS Replay example"}}
+]

@@ -1,0 +1,61 @@
+{
+  "root_id": "g_18d338443536",
+  "nodes": {
+    "g_18d338443536": {
+      "goal_id": "g_18d338443536",
+      "description": "add docstring to divide",
+      "parent_ids": [],
+      "child_ids": [
+        "g_1689be6d0e2f"
+      ],
+      "tasks": [],
+      "status": "in_progress",
+      "created_at": "2026-09-22T19:57:26Z",
+      "updated_at": "2026-09-22T19:57:26Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_6b14ee39"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_1689be6d0e2f": {
+      "goal_id": "g_1689be6d0e2f",
+      "description": "Add detailed docstring to the divide function only",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "src/math_utils.py",
+          "action": "Add detailed docstring to the divide function only",
+          "complexity": "low",
+          "must_not": [
+            "modify any other function",
+            "change any function body"
+          ]
+        }
+      ],
+      "status": "failed",
+      "created_at": "2026-09-22T19:57:26Z",
+      "updated_at": "2026-09-22T20:01:28Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_6b14ee39",
+        "orch_3181bccd",
+        "orch_9e788163",
+        "orch_c851ed2f",
+        "orch_9c48dbf9",
+        "orch_f671518c",
+        "orch_35dec56b",
+        "orch_658e7e5b",
+        "orch_06e62cc8",
+        "orch_cbebad19",
+        "orch_8b39950d",
+        "orch_bfcd3ae2"
+      ],
+      "failure_count": 12,
+      "critique_ids": []
+    }
+  }
+}

@@ -1,0 +1,1144 @@
+#!/usr/bin/env python3
+"""
+harness_aider.py — run Aider (a market coding harness) on one job-series job.
+
+Same calling convention as `scripts/job_series.py _child`:
+
+    python scripts/harness_aider.py <job_dir> <project_dir> --model <model id> [--provider auto|openrouter|anthropic]
+
+Provider (--provider, default auto): a bare Anthropic id (claude-haiku-5-5, no
+"/") runs on Anthropic directly as litellm's anthropic/<id> with
+ANTHROPIC_API_KEY and Aider's prompt caching on (--cache-prompts), priced from
+ANTHROPIC_PRICES; any id with a "/" (deepseek/deepseek-v4-flash,
+anthropic/claude-sonnet-5.5) runs through OpenRouter with OPENROUTER_API_KEY.
+
+cwd must be the arm's state dir. The key comes from AWOS_JOB_DOTENV (the source
+.env, set by job_series) or, for old run dirs, the state dir's .env.
+Reads <job_dir>/task.json, runs Aider once, non-interactively (`--message`), in
+<project_dir> on the goal, streams Aider's output to stdout, and writes
+./report.json:
+
+    {"success": bool,     # aider exited 0, was not killed, got >= 1 model response
+     "usage": {"cost_usd", "turns", "input_tokens", "output_tokens", "models"},
+     "harness": "aider", "aider_version": str,
+     "killed": null | "timeout" | "cost", "exit_code": int | null,
+     "cost_source": ..., "aider_test_outcome": bool | null, ...}
+
+Empty model responses: Aider prints "Empty response received from LLM" when a
+call returns no text (Haiku 5.5 thinks by default; a call that spends the whole
+max_tokens on thinking comes back empty with finish_reason=length) and ends its
+run without retrying. The launcher records that call's usage (Aider itself
+skips it), and the harness resets the project (git) and runs Aider again, up to
+AWOS_AIDER_EMPTY_RETRIES (default 2) more times with a doubling backoff
+(AWOS_AIDER_RETRY_BACKOFF_S, default 10 s). If the last attempt still ends
+empty, report.json has "invalid_reason": "empty_model_response" and the log a
+`[harness_aider] invalid_run reason=empty_model_response` line: job_series
+scores that run INVALID (infrastructure), never "not solved". Retried attempts
+are listed in "failed_attempts" with their cost ("retry_cost_usd").
+
+`turns` = model responses with content. Aider gets no conventions file, no chat history and
+no memory of earlier jobs: it is the no-memory baseline.
+
+Files in the chat (--add-files, default auto): Aider only edits files that are
+"in the chat"; started with none, it answers the goal with "please add these
+files to the chat" and, run non-interactively, often never edits at all (run
+20260929T131340 j08/j11/j12, 20260930T170402 j03/j04/j06). AWOS's agent can read
+any file, so for a fair start `auto` adds every non-test source file (editable)
+and the visible tests (--read, read-only) while they fit a token budget, else
+only the sources, else the sources that define what the goal names, whole, up
+to --relevant-cap-tokens (select_files "relevant"; pyparsing/more-itertools
+runs of 2026-10-06 asked to add files without it), else none (repo map +
+Aider's own requests). A run that ends
+with no edits is reported as `aider_no_edit` (see no_edit_reason). Its history files go to
+the state dir; its repo-map cache is removed from the project after the run.
+
+Model setup: Aider 0.86 ships no settings for DeepSeek V4 / Claude Sonnet 5.x
+and would fall back to the "whole" edit format; we hand it the settings it ships
+for each model's nearest sibling (see model_settings) and the OpenRouter price
+(model_metadata), with the weak/editor model pinned to the same model.
+
+Aider lives in its own venv (default ~/.awos-harness/aider-venv; override with
+AWOS_AIDER_VENV). AWOS_AIDER_CMD (a shell-split command prefix) replaces the
+launcher entirely; tests use it to substitute a fake aider.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shlex
+import shutil
+import signal
+import subprocess
+import sys
+import threading
+import time
+import urllib.request
+from pathlib import Path
+
+DEFAULT_VENV = Path.home() / ".awos-harness" / "aider-venv"
+# Seconds kept back from the job's timeout_min, so report.json is written
+# before the runner's own wall-clock kill.
+TIMEOUT_MARGIN_S = 30
+KEY_ENV = "OPENROUTER_API_KEY"
+ANTHROPIC_KEY_ENV = "ANTHROPIC_API_KEY"
+# provider -> (litellm model prefix, key env var)
+PROVIDERS = {
+    "openrouter": ("openrouter/", KEY_ENV),
+    "anthropic": ("anthropic/", ANTHROPIC_KEY_ENV),
+}
+# Anthropic direct prices, USD per million tokens, flat (no long-context tier):
+# the same figures AWOS bills itself (scaffold/agent/agent_loop.py PRICES and
+# providers.py CACHE_PRICE_FACTORS: read 0.1x, 5-min write 1.25x of input).
+# litellm's own table adds a 5x tier above 100k prompt tokens, so the harness
+# computes the cost from exact token counts instead of trusting Aider's figure.
+ANTHROPIC_PRICES: dict[str, dict[str, float]] = {
+    "claude-haiku-5-5": {"input": 0.10, "output": 0.50, "cache_read": 0.01, "cache_write": 0.125},
+    "claude-haiku-4-5": {"input": 1.00, "output": 5.00, "cache_read": 0.10, "cache_write": 1.25},
+}
+ENV_FILE_NAME = "aider.env"          # written per run in the state dir, removed after
+USAGE_TAG = "[aider-usage] "
+FINAL_TAG = "[aider-final] "
+
+# Runs Aider's own CLI entry point with two additions: Coder.max_reflections
+# (automatic follow-up rounds per message: file adds, lint and test fixes; stock
+# Aider is 3 and has no flag for it) and one exact usage line per model response
+# (Aider's own "Tokens: ... Cost: ..." line is rounded to 1k tokens / 1 cent).
+LAUNCHER = r'''
+import json, sys
+n = int(sys.argv.pop(1))
+from aider.coders import base_coder
+C = base_coder.Coder
+C.max_reflections = n
+def _rec(self, completion, cost, finish=None):
+    u = getattr(completion, "usage", None)
+    hit = (getattr(u, "prompt_cache_hit_tokens", 0) or getattr(u, "cache_read_input_tokens", 0) or 0) if u else 0
+    or_cost = getattr(u, "cost", None) if u else None
+    empty = not (self.partial_response_content or "").strip() and not self.partial_response_function_call
+    rec = {
+        "prompt_tokens": int(getattr(u, "prompt_tokens", 0) or 0) if u else None,
+        "completion_tokens": int(getattr(u, "completion_tokens", 0) or 0) if u else None,
+        "cache_hit_tokens": int(hit),
+        "cache_write_tokens": int(getattr(u, "cache_creation_input_tokens", 0) or 0) if u else 0,
+        "cost": float(cost),
+        "session_cost": float(self.total_cost),
+        "openrouter_cost": float(or_cost) if isinstance(or_cost, (int, float)) else None,
+        "empty": bool(empty),
+    }
+    if finish:
+        rec["finish_reason"] = finish
+    print("[aider-usage] " + json.dumps(rec), flush=True)
+_calc = C.calculate_and_show_tokens_and_cost
+def calc(self, messages, completion=None):
+    before = self.total_cost
+    out = _calc(self, messages, completion)
+    _rec(self, completion, self.total_cost - before)
+    return out
+C.calculate_and_show_tokens_and_cost = calc
+_sso = C.show_send_output
+def sso(self, completion):
+    try:
+        return _sso(self, completion)
+    except base_coder.FinishReasonLength:
+        # Aider skips its cost line for a response cut at max_tokens (on Haiku 5.5
+        # often all thinking, no text: "Empty response received from LLM"); the
+        # call is still billed, so record its usage here.
+        _rec(self, completion, 0.0, finish="length")
+        raise
+C.show_send_output = sso
+_run = C.run
+def run(self, *a, **k):
+    try:
+        return _run(self, *a, **k)
+    finally:
+        print("[aider-final] " + json.dumps({
+            "test_outcome": self.test_outcome, "lint_outcome": self.lint_outcome,
+            "reflections": self.num_reflections, "edit_format": self.edit_format,
+            "edited": sorted(self.aider_edited_files or []),
+            "in_chat": sorted(self.get_inchat_relative_files()),
+            "read_only": sorted(self.get_rel_fname(f) for f in (self.abs_read_only_fnames or [])),
+        }), flush=True)
+C.run = run
+from aider.main import main
+sys.exit(main())
+'''
+
+# ── usage parsing ─────────────────────────────────────────────────────────────
+
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+_TOKENS = re.compile(r"Tokens:\s*(?P<body>.*?received)")
+_TOKEN_PART = re.compile(r"(?P<num>[\d.,]+)\s*(?P<unit>[kKmM]?)\s+(?P<what>sent|received|cache hit|cache write)")
+_API_ERROR = re.compile(r"litellm\.\w+Error\b.*")
+_COST = re.compile(r"Cost:\s*\$(?P<msg>[\d.,]+)\s*message,\s*\$(?P<sess>[\d.,]+)\s*session")
+
+
+def _num(text: str, unit: str = "") -> int:
+    value = float(text.replace(",", ""))
+    return int(round(value * {"k": 1e3, "m": 1e6}.get(unit.lower(), 1)))
+
+
+# The model asking the (absent) user to put files in the chat: "Please add
+# `a.py` to the chat", "ask me to *add them to the chat*".
+# Within one sentence: a "." only ends it when followed by a space (not in a.py).
+_ASK_TO_ADD = re.compile(r"\badd\b(?:[^.?!]|[.?!](?=\S)){0,160}?\bto\s+(?:the|this)\s+chat\b", re.I)
+# Aider's own start-up banner when many files are pre-added. It is not the model
+# asking for files; it once matched _ASK_TO_ADD and mislabelled all 7
+# asked_for_files_it_had runs of the B2 experiment (2026-10-11).
+_BANNER_ASK = re.compile(r"Warning:\s+it's\s+best\s+to\s+only\s+add\s+files\s+that\s+need\s+"
+                         r"changes\s+to\s+the\s+chat\.?", re.I)
+# Aider's message when a model call came back with no text (on Haiku 5.5: the
+# whole max_tokens budget spent on thinking). Aider does not retry it and its
+# run ends there: the harness retries the invocation, then reports it invalid.
+EMPTY_RESPONSE_MARKER = "Empty response received from LLM"
+TOKEN_LIMIT_MARKER = "has hit a token limit!"
+ATTEMPT_TAG = "[harness_aider] attempt "
+INVALID_TAG = "[harness_aider] invalid_run reason="
+EMPTY_REASON = "empty_model_response"
+_APPLIED = re.compile(r"^Applied edit to (\S+)")
+NO_EDIT_TAG = "aider_no_edit"
+# Reasons that say the harness left Aider without the code, not that the
+# model failed: job_series treats these as an invalid run.
+# harness_crashed is set by job_series when the harness died before its no-edit line.
+NO_EDIT_SETUP_REASONS = ("no_files_in_chat", "asked_to_add_files", "no_model_response",
+                         "harness_crashed", EMPTY_REASON)
+
+
+def asked_to_add_files(text: str) -> bool:
+    """True if the text asks for files to be added to the chat (line wraps ok).
+    Aider's own "only add files that need changes to the chat" banner is ignored."""
+    return bool(_ASK_TO_ADD.search(_BANNER_ASK.sub(" ", " ".join(text.split()))))
+
+
+def no_edit_reason(final: dict | None, applied: list[str], asked: bool,
+                   preloaded: bool = False, api_error: str | None = None,
+                   turns: int | None = None, empty: bool = False) -> str | None:
+    """Why Aider ended without editing anything, or None if it edited.
+
+    empty_model_response - the model's last response had no content (Aider
+                          prints "Empty response received from LLM" and stops):
+                          the provider's doing, invalid like no_model_response
+    no_model_response   - not one model response came back and Aider printed a
+                          provider error (e.g. a 400 for a request parameter the
+                          model rejects): the harness's setup, never the model's work
+    no_files_in_chat    - Aider's final state had no file in the chat
+    asked_to_add_files  - Aider started without the code (nothing pre-added) and
+                          the model's answer was a request to add files
+    asked_for_files_it_had - the harness pre-added the code, yet the model asked
+                          for files instead of editing: the model's failure
+    no_edits            - the model had the files and did not edit
+
+    no_model_response and the next two are the harness's doing
+    (NO_EDIT_SETUP_REASONS); the last two are fair results for the model.
+    """
+    final = final or {}
+    if final.get("edited") or applied:
+        return None
+    if empty:
+        return EMPTY_REASON
+    if api_error and turns == 0:
+        return "no_model_response"
+    if final and not final.get("in_chat"):
+        return "no_files_in_chat"
+    if asked:
+        return "asked_for_files_it_had" if preloaded else "asked_to_add_files"
+    return "no_edits"
+
+
+def last_attempt(log_text: str) -> str:
+    """The part of a harness log after its last `[harness_aider] attempt` line
+    (the whole text for logs from before retries existed)."""
+    i = log_text.rfind(ATTEMPT_TAG)
+    return log_text if i < 0 else log_text[i:]
+
+
+def ended_with_empty_response(log_text: str) -> bool:
+    """For one job's harness log: did the final Aider attempt end on an empty
+    model response (and was not killed)? Works on logs from before the exact
+    `empty` usage flag and the invalid_run line existed."""
+    text = last_attempt(log_text)
+    if "[harness_aider] hit the" in text or "; stopping aider" in text:
+        return False
+    t = UsageTracker()
+    for line in text.splitlines():
+        t.feed(re.sub(r"^\+\d+:\d\d ", "", line))
+    return t.ended_empty
+
+
+class UsageTracker:
+    """Accumulates Aider's per-response usage.
+
+    Two sources: the launcher's exact `[aider-usage] {json}` lines, and Aider's
+    own human line (rounded), printed after each model response:
+      Tokens: 2.3k sent, 1.1k cache hit, 150 received. Cost: $0.0012 message, $0.0034 session.
+    (the Cost part may be on the next line, or absent when the price is unknown).
+    Exact lines win when present; the human lines are the fallback.
+    """
+
+    def __init__(self, prices: dict | None = None) -> None:
+        # USD per million tokens (ANTHROPIC_PRICES entry): when set, the cost is
+        # computed from the exact token counts at these prices.
+        self.prices = prices
+        self.exact: list[dict] = []
+        self.text_turns = 0
+        self.text_in = 0
+        self.text_out = 0
+        self.text_hit = 0
+        self.text_session_cost: float | None = None
+        self.final: dict = {}
+        self.api_error: str | None = None   # first provider error Aider printed
+        self.applied: list[str] = []         # "Applied edit to <file>" lines
+        self.asked_to_add = False            # model asked for files to be added
+        self._prev = ""                      # previous line, for wrapped asks
+        self.empty_responses = 0             # "Empty response received from LLM" lines
+        self.token_limit = False             # Aider printed "has hit a token limit!"
+        self._last = None                    # "response" | "empty": the last model event
+        self._empty_open = False
+
+    def feed(self, line: str) -> bool:
+        """Parse one output line; True if it carried usage."""
+        line = _ANSI.sub("", line).strip()
+        if not self.asked_to_add and asked_to_add_files(f"{self._prev} {line}"):
+            self.asked_to_add = True
+        self._prev = line
+        a = _APPLIED.match(line)
+        if a and a.group(1) not in self.applied:
+            self.applied.append(a.group(1))
+        if EMPTY_RESPONSE_MARKER in line:
+            self.empty_responses += 1
+            self._last = "empty"
+            self._empty_open = True
+        if TOKEN_LIMIT_MARKER in line:
+            self.token_limit = True
+        if line.startswith(USAGE_TAG):
+            try:
+                rec = json.loads(line[len(USAGE_TAG):])
+            except ValueError:
+                return False
+            self.exact.append(rec)
+            # Aider prints its "Empty response" warning before the usage line of
+            # the same call, so an empty call leaves _last at "empty".
+            if rec.get("empty"):
+                self._last = "empty"
+            else:
+                self._last = "response"
+            return True
+        if line.startswith(FINAL_TAG):
+            try:
+                self.final = json.loads(line[len(FINAL_TAG):])
+            except ValueError:
+                pass
+            return False
+        if self.api_error is None:
+            e = _API_ERROR.search(line)
+            if e:
+                self.api_error = e.group(0)[:200]
+        hit = False
+        m = _TOKENS.search(line)
+        if m:
+            parts = list(_TOKEN_PART.finditer(m.group("body")))
+            if parts:
+                hit = True
+                self.text_turns += 1
+                if not self.exact:
+                    # Old logs (no exact lines): this Tokens line closes the call;
+                    # an "Empty response" printed since the last one makes it empty.
+                    self._last = "empty" if self._empty_open else "response"
+                self._empty_open = False
+                for p in parts:
+                    n = _num(p.group("num"), p.group("unit"))
+                    what = p.group("what")
+                    if what == "sent":
+                        self.text_in += n
+                    elif what == "received":
+                        self.text_out += n
+                    elif what == "cache hit":
+                        self.text_hit += n
+        c = _COST.search(line)
+        if c:
+            self.text_session_cost = float(c.group("sess").replace(",", ""))
+            hit = True
+        return hit
+
+    @property
+    def ended_empty(self) -> bool:
+        """The last model call came back with no content (Aider ends the run there)."""
+        return self._last == "empty"
+
+    @property
+    def turns(self) -> int:
+        """Model responses with content (an empty response is billed, not a turn)."""
+        if self.exact:
+            return sum(1 for r in self.exact if not r.get("empty"))
+        return self.text_turns
+
+    @property
+    def input_tokens(self) -> int:
+        if self.exact:
+            return sum(int(r.get("prompt_tokens") or 0) for r in self.exact)
+        return self.text_in
+
+    @property
+    def output_tokens(self) -> int:
+        if self.exact:
+            return sum(int(r.get("completion_tokens") or 0) for r in self.exact)
+        return self.text_out
+
+    @property
+    def cache_hit_tokens(self) -> int:
+        if self.exact:
+            return sum(int(r.get("cache_hit_tokens") or 0) for r in self.exact)
+        return self.text_hit
+
+    def cost(self) -> tuple[float, str]:
+        """(cost_usd, source). OpenRouter's billed cost if it came back on every
+        response, else (with prices) the exact tokens at those prices, else
+        Aider's own computation from the price table.
+
+        With prices, litellm's prompt_tokens for Anthropic already include the
+        cache reads and writes, so uncached input = prompt - read - write."""
+        if self.exact and self.prices:
+            p, total = self.prices, 0.0
+            for r in self.exact:
+                prompt = int(r.get("prompt_tokens") or 0)
+                read = int(r.get("cache_hit_tokens") or 0)
+                write = int(r.get("cache_write_tokens") or 0)
+                total += (max(0, prompt - read - write) * p["input"] + read * p["cache_read"]
+                          + write * p["cache_write"]
+                          + int(r.get("completion_tokens") or 0) * p["output"]) / 1e6
+            return total, "token_price_table"
+        if self.exact:
+            billed = [r.get("openrouter_cost") for r in self.exact]
+            if all(isinstance(b, (int, float)) for b in billed):
+                return float(sum(billed)), "openrouter_billed"
+            return float(self.exact[-1].get("session_cost") or 0.0), "aider_price_table"
+        if self.text_session_cost is not None:
+            return self.text_session_cost, "aider_text_rounded"
+        return 0.0, "unknown"
+
+    def usage(self, model: str) -> dict:
+        return {
+            "cost_usd": round(self.cost()[0], 6),
+            "turns": self.turns,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "models": [model],
+        }
+
+
+# ── setup ─────────────────────────────────────────────────────────────────────
+
+
+def read_env_file(path: Path) -> dict:
+    """KEY=VALUE lines (optionally `export`, quoted). Values are never printed."""
+    out: dict = {}
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return out
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):]
+        key, _, value = line.partition("=")
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        out[key.strip()] = value
+    return out
+
+
+_PROVIDER_VAR = re.compile(r"_(API_KEY|API_BASE|BASE_URL|API_VERSION|API_TYPE)$|^OR_API_KEY$")
+
+
+def child_env(parent: dict, dotenv: dict, key_env: str = KEY_ENV) -> dict:
+    """Aider's environment: the parent's, minus Aider's own switches (AIDER_*) and
+    every other provider's key/base URL (litellm and Aider pick those up, e.g. an
+    OPENAI_BASE_URL pointing at OpenRouter with another key), plus the OpenRouter
+    key (the environment's if set, else the source .env, as job_series does).
+    key_env names the provider's key (OPENROUTER_API_KEY or ANTHROPIC_API_KEY);
+    every other provider variable is dropped."""
+    env = {k: v for k, v in parent.items()
+           if not k.startswith("AIDER_") and (k == key_env or not _PROVIDER_VAR.search(k))}
+    if not env.get(key_env) and dotenv.get(key_env):
+        env[key_env] = dotenv[key_env]
+    env["PYTHONUNBUFFERED"] = "1"
+    # Aider opens troubleshooting pages (e.g. token-limits.html) in a browser
+    # when a provider limit is hit, and --yes-always auto-confirms. An unattended
+    # benchmark must never pop windows on the owner's desktop: point Python's
+    # webbrowser module at a no-op command. Does not change Aider's behaviour.
+    env["BROWSER"] = "true"
+    return env
+
+
+def model_timeout_s() -> float:
+    """Per-request model timeout: AWOS's own (scaffold/agent/providers.py:
+    AWOS_MODEL_TIMEOUT_S, default 120 s), so a hung call costs both harnesses
+    the same. Aider retries a timed-out call with backoff."""
+    try:
+        value = float(os.environ.get("AWOS_MODEL_TIMEOUT_S", 120))
+    except ValueError:
+        return 120.0
+    return value if value > 0 else 120.0
+
+
+def write_key_file(state: Path, key: str | None, key_env: str = KEY_ENV) -> Path:
+    """The --env-file Aider loads last: only the arm's provider key, owner-only."""
+    path = state / ENV_FILE_NAME
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        if key:
+            f.write(f"{key_env}={key}\n")
+    return path
+
+
+def model_metadata(model: str, models_list: list[dict]) -> dict | None:
+    """litellm-style metadata for openrouter/<model> from OpenRouter's model list,
+    so Aider knows the price and context window."""
+    entry = next((m for m in models_list if m.get("id") == model), None)
+    if not entry:
+        return None
+    p = entry.get("pricing", {})
+    top = entry.get("top_provider") or {}
+    max_out = int(top.get("max_completion_tokens") or 32768)
+    meta = {
+        "max_input_tokens": int(entry.get("context_length") or 128000),
+        "max_tokens": max_out,
+        "max_output_tokens": max_out,
+        "input_cost_per_token": float(p.get("prompt") or 0),
+        "output_cost_per_token": float(p.get("completion") or 0),
+        "litellm_provider": "openrouter",
+        "mode": "chat",
+    }
+    if p.get("input_cache_read"):
+        meta["cache_read_input_token_cost"] = float(p["input_cache_read"])
+    return {f"openrouter/{model}": meta}
+
+
+def resolve_provider(model: str, requested: str = "auto") -> str:
+    """auto: a bare claude-* id (no "/") is Anthropic direct; anything else OpenRouter."""
+    if requested != "auto":
+        return requested
+    return "anthropic" if "/" not in model and model.startswith("claude-") else "openrouter"
+
+
+def aider_model_name(model: str, provider: str = "openrouter") -> str:
+    """The id Aider/litellm takes: openrouter/<id> or anthropic/<id>."""
+    prefix = PROVIDERS[provider][0]
+    return model if model.startswith(prefix) else prefix + model
+
+
+def anthropic_prices(model: str) -> dict | None:
+    bare = model.rsplit("/", 1)[-1]
+    return ANTHROPIC_PRICES.get(bare) or ANTHROPIC_PRICES.get(bare.replace(".", "-"))
+
+
+def anthropic_metadata(model: str) -> dict | None:
+    """litellm metadata for anthropic/<model> at ANTHROPIC_PRICES (flat), so Aider
+    knows the model is priced and prints a cost; None if the price is unknown."""
+    p = anthropic_prices(model)
+    if not p:
+        return None
+    return {aider_model_name(model, "anthropic"): {
+        "max_input_tokens": 200000, "max_tokens": 128000, "max_output_tokens": 128000,
+        "input_cost_per_token": p["input"] / 1e6, "output_cost_per_token": p["output"] / 1e6,
+        "cache_read_input_token_cost": p["cache_read"] / 1e6,
+        "cache_creation_input_token_cost": p["cache_write"] / 1e6,
+        "litellm_provider": "anthropic", "mode": "chat", "supports_prompt_caching": True,
+    }}
+
+
+def fetch_openrouter_models(timeout: float = 20.0) -> list[dict]:
+    try:
+        with urllib.request.urlopen("https://openrouter.ai/api/v1/models", timeout=timeout) as r:
+            return json.load(r).get("data", [])
+    except Exception as exc:  # noqa: BLE001 — offline: Aider just won't know the price
+        print(f"[harness_aider] could not fetch OpenRouter's model list: {exc}", flush=True)
+        return []
+
+
+def model_settings(model: str, provider: str = "openrouter") -> list[dict]:
+    """Aider model settings for openrouter/<model>, copied from what Aider 0.86
+    ships for the nearest sibling it knows; weak and editor model = the same model,
+    so every call goes to the model under test.
+
+    max_tokens per response = AWOS's agent-loop cap (AWOS_AGENT_MAX_OUTPUT_TOKENS,
+    default 16384) instead of the sibling's 64k: in a live run a non-streamed
+    DeepSeek V4 Flash reply ran 10+ minutes with the 64k cap, and OpenRouter's
+    keep-alives mean the per-request timeout never fires on it."""
+    name = aider_model_name(model, provider)
+    s: dict = {"name": name, "edit_format": "diff", "use_repo_map": True,
+               "weak_model_name": name, "editor_model_name": name,
+               "editor_edit_format": "editor-diff",
+               "extra_params": {"max_tokens": max_output_tokens()}}
+    if "deepseek" in model:        # as openrouter/deepseek/deepseek-chat-v3-0324
+        s.update(reminder="sys", examples_as_sys_msg=True)
+    elif "claude" in model:        # as openrouter/anthropic/claude-sonnet-4.5
+        s.update(examples_as_sys_msg=False, cache_control=True,
+                 accepts_settings=["thinking_tokens"])
+        if provider == "anthropic" and re.search(r"claude-[a-z]+-5", model):
+            # The 5.x models reject `temperature` (live 400, 2026-10-11:
+            # "`temperature` is deprecated for this model"); Aider sends 0 by default.
+            s["use_temperature"] = False
+    return [s]
+
+
+def _env_number(name: str, default, cast=float):
+    try:
+        value = cast(os.environ.get(name, default))
+    except ValueError:
+        return default
+    return value if value >= 0 else default
+
+
+def empty_retries() -> int:
+    """Extra Aider invocations after one that ended in an empty model response
+    (AWOS_AIDER_EMPTY_RETRIES, default 2)."""
+    return int(_env_number("AWOS_AIDER_EMPTY_RETRIES", 2, int))
+
+
+def retry_backoff_s() -> float:
+    """Wait before the first such retry, doubled each time (AWOS_AIDER_RETRY_BACKOFF_S, default 10)."""
+    return float(_env_number("AWOS_AIDER_RETRY_BACKOFF_S", 10.0))
+
+
+def job_cost_cap(spec_cap: float) -> float:
+    """The job's cost cap, lowered to job_series' AWOS_JOB_MAX_COST_USD (what is
+    left of a series budget) when that is smaller."""
+    try:
+        env_cap = float(os.environ.get("AWOS_JOB_MAX_COST_USD", ""))
+    except ValueError:
+        return spec_cap
+    return min(spec_cap, env_cap) if env_cap > 0 else spec_cap
+
+
+def _git_out(project: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(project), *args], capture_output=True,
+                          text=True, timeout=60)
+
+
+def project_resettable(project: Path) -> bool:
+    """True if project is the top of a git work tree with a commit and nothing
+    uncommitted or untracked, so reset_project puts it back exactly."""
+    try:
+        head = _git_out(project, "rev-parse", "--verify", "-q", "HEAD")
+        top = _git_out(project, "rev-parse", "--show-toplevel")
+        if head.returncode or top.returncode or Path(top.stdout.strip()).resolve() != project.resolve():
+            return False
+        st = _git_out(project, "status", "--porcelain", "--untracked-files=all")
+        return st.returncode == 0 and not st.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def reset_project(project: Path) -> None:
+    """Back to the starting commit: drop Aider's edits and any new files."""
+    _git_out(project, "reset", "-q", "--hard", "HEAD")
+    _git_out(project, "clean", "-q", "-f", "-d")
+
+
+def attempt_summary(tracker: "UsageTracker", model: str, code: int | None, secs: float) -> dict:
+    """One Aider invocation that ended in an empty response, and what it cost."""
+    u = tracker.usage(model)
+    return {"reason": EMPTY_REASON, "cost_usd": u["cost_usd"], "cost_source": tracker.cost()[1],
+            "turns": u["turns"], "input_tokens": u["input_tokens"],
+            "output_tokens": u["output_tokens"], "empty_responses": tracker.empty_responses,
+            "usage_recorded": bool(tracker.exact), "exit_code": code,
+            "minutes": round(secs / 60, 2)}
+
+
+def max_output_tokens() -> int:
+    try:
+        value = int(os.environ.get("AWOS_AGENT_MAX_OUTPUT_TOKENS", 16384))
+    except ValueError:
+        return 16384
+    return value if value > 0 else 16384
+
+
+def _yaml(settings: list[dict]) -> str:
+    """JSON is valid YAML; Aider reads its settings file with yaml.safe_load."""
+    return json.dumps(settings, indent=2)
+
+
+def aider_prefix(max_reflections: int) -> list[str]:
+    override = os.environ.get("AWOS_AIDER_CMD")
+    if override:
+        return shlex.split(override)
+    venv = Path(os.environ.get("AWOS_AIDER_VENV", DEFAULT_VENV))
+    return [str(venv / "bin" / "python"), "-c", LAUNCHER, str(max_reflections)]
+
+
+def aider_version(prefix: list[str]) -> str:
+    try:
+        proc = subprocess.run([*prefix, "--version"], capture_output=True, text=True, timeout=120)
+        m = re.search(r"\d+\.\d+[\w.+-]*", proc.stdout)
+        return m.group(0) if m else "unknown"
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+
+
+def build_command(prefix: list[str], model: str, goal: str, state: Path, test_cmd: str,
+                  settings_file: Path | None = None, metadata_file: Path | None = None,
+                  edit_format: str | None = None, map_tokens: int | None = None,
+                  files: list[str] | None = None, request_timeout: float | None = None,
+                  read_files: list[str] | None = None, provider: str = "openrouter") -> list[str]:
+    """Aider argv. The API key is never in it (it goes through the environment)."""
+    cmd = [
+        *prefix,
+        "--model", aider_model_name(model, provider),
+        "--message", goal,
+        "--yes-always",                 # accept "add file to chat?", "fix test errors?"
+        "--no-auto-commits",            # the runner judges the working tree
+        "--no-dirty-commits",
+        "--test-cmd", test_cmd,
+        "--auto-test",
+        "--no-gitignore",               # don't add .aider* to the project's .gitignore
+        "--no-show-model-warnings",
+        "--no-check-update",
+        "--no-show-release-notes",
+        "--no-analytics",
+        "--no-pretty",
+        "--no-stream",                  # exact usage per response
+        "--no-fancy-input",
+        "--no-suggest-shell-commands",  # nobody is there to run them
+        "--no-detect-urls",
+        "--no-restore-chat-history",
+        "--chat-history-file", str(state / "aider.chat.history.md"),
+        "--input-history-file", str(state / "aider.input.history"),
+        "--llm-history-file", str(state / "aider.llm.history"),
+        # Aider loads ~/.env, the repo's .env, ./.env, then this file, each
+        # overriding the last; ours holds only the arm's key so it wins over a
+        # stale ~/.env. The key is never in argv.
+        "--env-file", str(state / ENV_FILE_NAME),
+        "--encoding", "utf-8",
+    ]
+    if provider == "anthropic":
+        # AWOS caches its stable prefix on Anthropic too (docs/specs/prompt_caching.md);
+        # stock Aider does the same with this flag.
+        cmd += ["--cache-prompts"]
+    if settings_file is not None:
+        cmd += ["--model-settings-file", str(settings_file)]
+    if metadata_file is not None:
+        cmd += ["--model-metadata-file", str(metadata_file)]
+    if edit_format:
+        cmd += ["--edit-format", edit_format]
+    if request_timeout:
+        cmd += ["--timeout", f"{request_timeout:g}"]
+    if map_tokens is not None:
+        cmd += ["--map-tokens", str(map_tokens)]
+    for f in read_files or []:
+        cmd += ["--read", f]
+    return cmd + list(files or [])
+
+
+def _py_files(project: Path) -> list[str]:
+    """Tracked .py files (git), else every .py file outside hidden/cache dirs."""
+    try:
+        proc = subprocess.run(["git", "-C", str(project), "ls-files", "*.py"],
+                              capture_output=True, text=True, timeout=30)
+        if proc.returncode == 0 and proc.stdout.strip():
+            return sorted(f for f in proc.stdout.splitlines() if f)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return sorted(str(p.relative_to(project)) for p in project.rglob("*.py")
+                  if not any(part.startswith(".") or part == "__pycache__"
+                             for part in p.relative_to(project).parts))
+
+
+def is_test_file(rel: str) -> bool:
+    p = Path(rel)
+    return ("tests" in p.parts[:-1] or "test" in p.parts[:-1] or p.name.startswith("test_")
+            or p.name.endswith("_test.py") or p.name == "conftest.py")
+
+
+def source_files(project: Path) -> list[str]:
+    """Tracked non-test .py files: what a user would /add for a small project."""
+    return [f for f in _py_files(project) if not is_test_file(f)]
+
+
+def test_files(project: Path) -> list[str]:
+    """Tracked test .py files (the project's visible tests)."""
+    return [f for f in _py_files(project) if is_test_file(f)]
+
+
+# Chat budget for --add-files auto, in estimated tokens (bytes / 4). The job
+# series' projects are ~10k tokens with their tests; Flash has a 1M context.
+DEFAULT_FILE_BUDGET_TOKENS = 40000
+# Hard cap for the "relevant" fallback: the source files that define what the
+# goal names go in whole even when one of them alone is over the budget (a
+# huge core module, e.g. pyparsing/core.py ~63k tokens), up to this cap.
+DEFAULT_RELEVANT_CAP_TOKENS = 120000
+
+
+def estimate_tokens(project: Path, files: list[str]) -> int:
+    total = 0
+    for f in files:
+        try:
+            total += (project / f).stat().st_size
+        except OSError:
+            pass
+    return total // 4
+
+
+_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
+_CODE = re.compile(r"```.*?(?:```|\Z)|`[^`\n]+`", re.S)
+_DEFINES = re.compile(r"^[ \t]*(?:async[ \t]+)?(?:def|class)[ \t]+([A-Za-z_]\w*)"
+                      r"|^([A-Za-z_]\w*)[ \t]*(?::[^=\n]*)?=(?!=)", re.M)
+
+
+def goal_identifiers(goal: str) -> tuple[set[str], set[str]]:
+    """(title identifiers, all identifiers) the goal names as code.
+
+    Code-shaped words: anything inside `backticks` or ``` fences, plus words
+    with an underscore or an inner capital (match_previous_expr, parseString).
+    Title = the goal's first line (the issue title), the strongest signal.
+    """
+    goal = goal or ""
+
+    def code_words(text: str) -> set[str]:
+        words = {w for m in _CODE.finditer(text) for w in _IDENT.findall(m.group(0))}
+        words |= {w for w in _IDENT.findall(text)
+                  if "_" in w.strip("_") or re.search(r"[a-z][A-Z]", w)}
+        return words
+
+    title = goal.strip().split("\n", 1)[0]
+    return code_words(title), code_words(goal)
+
+
+def relevant_sources(project: Path, src: list[str], goal: str) -> list[str]:
+    """Sources that define (def/class/module-level name) what the goal names,
+    most relevant first.
+
+    The files defining an identifier of the goal's title (the issue title names
+    the function to fix: match_previous_expr, value_chain, backoff) if any;
+    else the files defining a distinctive goal identifier - one defined in at
+    most 2 sources, so `expr = ...` in 40 example scripts does not count.
+    Ranked by title identifiers defined, then by rarity-weighted names, then path.
+    """
+    title_ids, all_ids = goal_identifiers(goal)
+    if not all_ids:
+        return []
+    defs: dict[str, set[str]] = {}
+    for rel in src:
+        try:
+            text = (project / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        hits = {a or b for a, b in _DEFINES.findall(text)} & all_ids
+        if hits:
+            defs[rel] = hits
+    df: dict[str, int] = {}
+    for hits in defs.values():
+        for name in hits:
+            df[name] = df.get(name, 0) + 1
+    if any(hits & title_ids for hits in defs.values()):
+        keep = {rel: hits for rel, hits in defs.items() if hits & title_ids}
+    else:
+        keep = {rel: {n for n in hits if df[n] <= 2} for rel, hits in defs.items()}
+        keep = {rel: hits for rel, hits in keep.items() if hits}
+    # Rarer names weigh more: a name only this file defines counts 1, one of 2 counts 1/2.
+    return sorted(keep, key=lambda rel: (-len(keep[rel] & title_ids),
+                                         -sum(1 / df[n] for n in keep[rel]), rel))
+
+
+def relevant_tests(project: Path, tests: list[str], edit: list[str], goal: str) -> list[str]:
+    """Tests that name an edited module's stem in their path or mention a goal
+    title identifier (any goal identifier when the title names none), most
+    relevant first; unrelated tests are left out."""
+    title_ids, all_ids = goal_identifiers(goal)
+    wanted = title_ids or all_ids
+    stems = {Path(rel).stem for rel in edit if Path(rel).stem != "__init__"}
+    stems |= {Path(rel).parent.name for rel in edit if Path(rel).stem == "__init__"}
+    scored = []
+    for rel in tests:
+        try:
+            text = (project / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        named = any(s and s in Path(rel).stem for s in stems)
+        mentioned = len(set(_IDENT.findall(text)) & wanted)
+        if named or mentioned:
+            scored.append((not named, -mentioned, rel))
+    return [rel for *_, rel in sorted(scored)]
+
+
+def select_files(project: Path, mode: str = "auto",
+                 budget_tokens: int = DEFAULT_FILE_BUDGET_TOKENS, goal: str = "",
+                 cap_tokens: int = DEFAULT_RELEVANT_CAP_TOKENS,
+                 ) -> tuple[list[str], list[str], str]:
+    """(editable files, read-only files, how) Aider starts with in its chat.
+
+    auto: sources + tests (read-only) if both fit the budget; else sources only
+    if they fit; else "relevant": the sources that define what the goal names
+    (relevant_sources), most relevant first, each added whole while the total
+    stays under cap_tokens, even if one file alone is over the budget (else
+    Aider asks to add it and never edits); then tests read-only, only while the
+    total stays under the budget (tests are dropped first). No relevant source
+    fits: nothing (Aider works from its repo map and asks for files).
+    src: every source file, no budget. none: nothing.
+    """
+    if mode == "none":
+        return [], [], "none"
+    src = source_files(project)
+    if mode == "src":
+        return src, [], "src"
+    tests = test_files(project)
+    src_tokens = estimate_tokens(project, src)
+    if src and src_tokens + estimate_tokens(project, tests) <= budget_tokens:
+        return src, tests, "src+tests"
+    if src and src_tokens <= budget_tokens:
+        return src, [], "src"
+    edit, used = [], 0
+    for rel in relevant_sources(project, src, goal):
+        cost = estimate_tokens(project, [rel])
+        if used + cost <= cap_tokens:
+            edit.append(rel)
+            used += cost
+    if not edit:
+        return [], [], "repo_map"
+    read = []
+    for rel in relevant_tests(project, tests, edit, goal):
+        cost = estimate_tokens(project, [rel])
+        if used + cost <= budget_tokens:
+            read.append(rel)
+            used += cost
+    return edit, read, "relevant"
+
+
+# ── run ───────────────────────────────────────────────────────────────────────
+
+
+def run_aider(cmd: list[str], cwd: Path, env: dict, timeout_s: float, max_cost: float,
+              tracker: UsageTracker, out=None) -> tuple[int | None, str | None]:
+    """Run cmd, stream its output, kill on timeout or once the session cost passes
+    max_cost. Returns (exit code, or None if killed; the kill reason, or None)."""
+    out = out or sys.stdout
+    proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                            bufsize=1, errors="replace", start_new_session=True)
+    killed: list[str] = []
+    lock = threading.Lock()
+
+    def kill(reason: str) -> None:
+        with lock:
+            if killed:
+                return
+            killed.append(reason)
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            proc.kill()
+
+    def pump() -> None:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            out.write(line)
+            out.flush()
+            if tracker.feed(line) and tracker.cost()[0] > max_cost and not killed:
+                out.write(f"[harness_aider] session cost ${tracker.cost()[0]:.4f} > cap "
+                          f"${max_cost:.2f}; stopping aider\n")
+                out.flush()
+                kill("cost")
+
+    reader = threading.Thread(target=pump, daemon=True)
+    reader.start()
+    try:
+        proc.wait(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        out.write(f"[harness_aider] hit the {timeout_s:.0f}s limit; stopping aider\n")
+        kill("timeout")
+        proc.wait()
+    reader.join(timeout=10)
+    if killed:
+        return None, killed[0]
+    return proc.returncode, None
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("job_dir")
+    ap.add_argument("project_dir")
+    ap.add_argument("--model", required=True,
+                    help="model id: OpenRouter (deepseek/deepseek-v4-flash) or Anthropic direct "
+                         "(claude-haiku-5-5)")
+    ap.add_argument("--provider", choices=["auto", "openrouter", "anthropic"], default="auto",
+                    help="auto (default): bare claude-* ids go to Anthropic directly, ids with a "
+                         "'/' to OpenRouter")
+    ap.add_argument("--max-reflections", type=int, default=3,
+                    help="automatic follow-up rounds per message (stock Aider: 3)")
+    ap.add_argument("--add-files", choices=["auto", "src", "none"], default="auto",
+                    help="auto (default): every non-test source file plus the visible tests "
+                         "read-only, under --file-budget-tokens (else sources only, else the sources "
+                         "defining what the goal names, under --relevant-cap-tokens, else none); "
+                         "src: every non-test .py file, no budget; none: Aider picks files from "
+                         "its repo map and asks for them")
+    ap.add_argument("--file-budget-tokens", type=int, default=DEFAULT_FILE_BUDGET_TOKENS,
+                    help="estimated-token budget for --add-files auto")
+    ap.add_argument("--relevant-cap-tokens", type=int, default=DEFAULT_RELEVANT_CAP_TOKENS,
+                    help="when sources are over the budget, auto still adds the sources that "
+                         "define what the goal names (whole), up to this many estimated tokens")
+    ap.add_argument("--edit-format", default=None, help="override the edit format (default diff)")
+    ap.add_argument("--map-tokens", type=int, default=None, help="repo map budget (Aider default: by context size)")
+    ap.add_argument("--request-timeout", type=float, default=None,
+                    help="per model call, seconds (default: AWOS_MODEL_TIMEOUT_S or 120, as AWOS)")
+    ap.add_argument("--test-cmd", default=None,
+                    help="default: '<this python> -m pytest -q -p no:cacheprovider'")
+    ap.add_argument("--no-price-lookup", action="store_true",
+                    help="don't fetch OpenRouter's model list (Aider then prints no cost)")
+    args = ap.parse_args(argv)
+
+    job_dir, project = Path(args.job_dir).resolve(), Path(args.project_dir).resolve()
+    state = Path.cwd()
+    spec = json.loads((job_dir / "task.json").read_text(encoding="utf-8"))
+    goal = spec["goal"]
+    max_cost = job_cost_cap(float(spec.get("max_cost_usd", 1.0)))
+    timeout_s = max(60.0, float(spec.get("timeout_min", 30)) * 60 - TIMEOUT_MARGIN_S)
+
+    # job_series points AWOS_JOB_DOTENV at the source .env (no per-arm copy).
+    dotenv = Path(os.environ.get("AWOS_JOB_DOTENV") or state / ".env")
+    provider = resolve_provider(args.model, args.provider)
+    key_env = PROVIDERS[provider][1]
+    model_name = aider_model_name(args.model, provider)
+    env = child_env(os.environ, read_env_file(dotenv), key_env)
+
+    prefix = aider_prefix(args.max_reflections)
+    version = aider_version(prefix)
+    settings_file = state / "aider.model.settings.yml"
+    settings_file.write_text(_yaml(model_settings(args.model, provider)), encoding="utf-8")
+    metadata_file = None
+    prices = anthropic_prices(args.model) if provider == "anthropic" else None
+    if provider == "anthropic":
+        meta = anthropic_metadata(args.model)
+    else:
+        meta = None if args.no_price_lookup else model_metadata(args.model, fetch_openrouter_models())
+    if meta:
+        metadata_file = state / "aider.model.metadata.json"
+        metadata_file.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    test_cmd = args.test_cmd or f"{shlex.quote(sys.executable)} -m pytest -q -p no:cacheprovider"
+    files, read_files, files_how = select_files(project, args.add_files, args.file_budget_tokens,
+                                              goal, args.relevant_cap_tokens)
+    request_timeout = args.request_timeout or model_timeout_s()
+    cmd = build_command(prefix, args.model, goal, state, test_cmd, settings_file, metadata_file,
+                        args.edit_format, args.map_tokens, files, request_timeout, read_files,
+                        provider)
+
+    print(f"[harness_aider] aider {version} model={model_name} provider={provider} "
+          f"key={'set' if env.get(key_env) else 'MISSING'} price={'known' if meta else 'unknown'} "
+          f"max_reflections={args.max_reflections} add_files={args.add_files}:{files_how}"
+          f"({len(files)} edit, {len(read_files)} read-only, "
+          f"~{estimate_tokens(project, files + read_files)} tokens) "
+          f"cost_cap=${max_cost} timeout={timeout_s:.0f}s project={project}", flush=True)
+    started = time.monotonic()
+    retries, backoff = empty_retries(), retry_backoff_s()
+    # A retry starts Aider again on the job's starting tree, so it needs a
+    # project that git can put back exactly (job_series commits it before the child).
+    can_reset = project_resettable(project)
+    failed: list[dict] = []          # attempts that ended empty and were retried
+    env_file = write_key_file(state, env.get(key_env), key_env)
+    try:
+        for attempt in range(1, retries + 2):
+            tracker = UsageTracker(prices)
+            print(f"{ATTEMPT_TAG}{attempt}/{retries + 1}", flush=True)
+            spent = sum(f["cost_usd"] for f in failed)
+            attempt_started = time.monotonic()
+            code, killed = run_aider(cmd, project, env, timeout_s - (attempt_started - started),
+                                     max_cost - spent, tracker)
+            # Aider's repo-map cache: not the project's work, and it would count as a
+            # changed file in the runner's metrics.
+            shutil.rmtree(project / ".aider.tags.cache.v4", ignore_errors=True)
+            if killed or not tracker.ended_empty or attempt > retries:
+                break
+            summary = attempt_summary(tracker, args.model, code, time.monotonic() - attempt_started)
+            delay = backoff * 2 ** (attempt - 1)
+            left_s = timeout_s - (time.monotonic() - started)
+            why = ("the project can't be reset (not a clean git tree)" if not can_reset
+                   else f"under {delay + 60:.0f}s of the time limit left" if left_s < delay + 60
+                   else "cost cap reached" if spent + summary["cost_usd"] >= max_cost
+                   else None)
+            if why:
+                print(f"[harness_aider] {EMPTY_REASON} on attempt {attempt}; not retrying: {why}",
+                      flush=True)
+                break
+            failed.append(summary)
+            print(f"[harness_aider] {EMPTY_REASON} on attempt {attempt} "
+                  f"(cost ${summary['cost_usd']:.4f}, {summary['output_tokens']} output tokens); "
+                  f"resetting the project and retrying in {delay:.0f}s", flush=True)
+            reset_project(project)
+            time.sleep(delay)
+    finally:
+        env_file.unlink(missing_ok=True)
+    minutes = round((time.monotonic() - started) / 60, 2)
+    cost, cost_source = tracker.cost()
+    empty = bool(tracker.ended_empty and not killed)
+    invalid_reason = EMPTY_REASON if empty else None
+    no_edit = no_edit_reason(tracker.final, tracker.applied, tracker.asked_to_add,
+                             preloaded=bool(files), api_error=tracker.api_error,
+                             turns=tracker.turns, empty=empty)
+    if invalid_reason:
+        # Greppable: job_series reads this line and scores the run INVALID
+        # (infrastructure), never "not solved".
+        print(f"{INVALID_TAG}{invalid_reason} attempts={len(failed) + 1} "
+              f"empty_responses={tracker.empty_responses} token_limit={tracker.token_limit}",
+              flush=True)
+    if no_edit:
+        # Loud and greppable: a run with no edits must never pass as a quiet failure.
+        print(f"[harness_aider] {NO_EDIT_TAG} reason={no_edit} preloaded={len(files)} "
+              f"in_chat={len(tracker.final.get('in_chat') or [])} "
+              f"asked_to_add_files={tracker.asked_to_add} killed={killed}", flush=True)
+
+    report = {
+        # Aider exits 0 even when every model call failed; no response = no run.
+        "success": bool(code == 0 and not killed and tracker.turns > 0 and not empty),
+        "api_error": tracker.api_error,
+        "usage": tracker.usage(args.model),
+        "harness": "aider",
+        "aider_version": version,
+        "provider": provider,
+        "model": model_name,
+        "prices_per_mtok": prices,
+        "cache_prompts": provider == "anthropic",
+        "cache_write_tokens": sum(int(r.get("cache_write_tokens") or 0) for r in tracker.exact),
+        "killed": killed,
+        "exit_code": code,
+        "cost_source": cost_source,
+        # A killed run's in-flight model call is billed by OpenRouter but never
+        # reported to us, so cost_usd is a lower bound then.
+        "cost_is_lower_bound": bool(killed or (code is not None and code < 0)),
+        "cache_hit_tokens": tracker.cache_hit_tokens,
+        "aider_test_outcome": tracker.final.get("test_outcome"),
+        "aider_reflections": tracker.final.get("reflections"),
+        "edit_format": tracker.final.get("edit_format"),
+        "files_edited": tracker.final.get("edited"),
+        "files_in_chat": tracker.final.get("in_chat"),
+        "files_read_only": tracker.final.get("read_only"),
+        "files_applied": tracker.applied,
+        NO_EDIT_TAG: no_edit,
+        "asked_to_add_files": tracker.asked_to_add,
+        "max_reflections": args.max_reflections,
+        "request_timeout_s": request_timeout,
+        "add_files": args.add_files,
+        "files_selection": files_how,
+        "files_added": files,
+        "files_read": read_files,
+        "minutes": minutes,
+        # Empty-response handling. usage/turns describe the final attempt; earlier
+        # attempts that ended empty were retried, are billed, and are listed here.
+        "empty_response": empty,
+        "empty_responses": tracker.empty_responses,
+        "token_limit_hit": tracker.token_limit,
+        "invalid_reason": invalid_reason,
+        "attempts": len(failed) + 1,
+        "failed_attempts": failed,
+        "retry_cost_usd": round(sum(f["cost_usd"] for f in failed), 6),
+    }
+    (state / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    print(f"[harness_aider] done exit={code} killed={killed} turns={tracker.turns} "
+          f"cost=${cost:.4f} ({cost_source}) tokens={tracker.input_tokens}/{tracker.output_tokens} "
+          f"aider_tests={tracker.final.get('test_outcome')} {minutes} min", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

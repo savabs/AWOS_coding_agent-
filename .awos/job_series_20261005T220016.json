@@ -1,0 +1,170 @@
+{
+  "series": "real_cachetools_423",
+  "timestamp": "20261005T220016",
+  "arms": [
+    "off"
+  ],
+  "jobs": [
+    1
+  ],
+  "dry_run": false,
+  "resumed": false,
+  "repeat": 1,
+  "model_pin": {
+    "model": "deepseek/deepseek-v4-flash",
+    "blocked_ladder_ids": [
+      "deepseek-v4-pro"
+    ],
+    "env": {
+      "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+      "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+      "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+      "AWOS_GOAL_CHECK": "0"
+    },
+    "routing": {
+      "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+      "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+      "AWOS_ONE_SHOT": "1"
+    }
+  },
+  "provenance": {
+    "git": {
+      "sha": "6e1f36fad70bc5a6d0012644210d9dcfe836e705",
+      "branch": "claude/bench-run",
+      "dirty": true,
+      "dirty_paths": [
+        "awos/budget.json"
+      ]
+    },
+    "config": {
+      "sha256": "922e32ea65e002d4b6fdd8c8ee10a676f6d540718c1208a9b0193342befc829a",
+      "series_sha256": "f9c24e67d006cf00b1724dadd37a57af8f87aca0ee3bc589f30d0c03e3f39171"
+    },
+    "started_at": "2026-10-05T16:30:16Z",
+    "finished_at": "2026-10-05T16:31:35Z"
+  },
+  "preflight": {
+    "status": "ok",
+    "jobs": {
+      "1": []
+    },
+    "invalid_jobs": [],
+    "seconds": 9.7
+  },
+  "valid": true,
+  "violations": [
+    {
+      "severity": "warn",
+      "check": "billing_mismatch",
+      "arm": "off",
+      "job": null,
+      "repeat": 1,
+      "detail": "billed $0.0032 vs logged $0.0008 (76% apart)"
+    }
+  ],
+  "run_dir": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261005T220016",
+  "stopped": null,
+  "results": [
+    {
+      "arm": "off",
+      "job": 1,
+      "id": "01_rrcache_empty_popitem",
+      "dir": "01_rrcache_empty_popitem",
+      "solved": true,
+      "hidden_passed": 29,
+      "hidden_failed": 0,
+      "failing_tests": [],
+      "hidden_summary": "29 passed in 0.03s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "skipped_small_goal",
+      "files_changed": 1,
+      "llm_calls": 1,
+      "input_tokens": 23692,
+      "output_tokens": 931,
+      "cost_usd": 0.002273,
+      "notebook_cost_usd": 0,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 1,
+      "usage_source": "ledger",
+      "billed_usd": 0.00323,
+      "minutes": 0.25,
+      "timed_out": false,
+      "notebook_chars": 0,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "462155c7082afa2830d1e4e8944a5dc5a6265b4ec38bc0269c07738d9c99e1c4",
+        "project_files": 27,
+        "task_sha256": "bdd215e0dfadd096b6378683fc4a3f3825665d48cbfade7ee770128ba192456d",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/.awos-harness/real_series/real_cachetools_423/jobs/01_rrcache_empty_popitem",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261005T220016/off/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_INTEGRATION_REVIEW": null,
+          "AWOS_NOTEBOOK": "0",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_ONE_SHOT": "1",
+          "AWOS_ONE_SHOT_BUDGET_TOKENS": null,
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER": null,
+          "AWOS_PLANNER_MAX_FILES": null,
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "off",
+          "AWOS_SESSION_ID": "db1b6098ba8ccff74b507837"
+        },
+        "recorded_at": "2026-10-05T16:30:33Z"
+      },
+      "repeat": 1
+    }
+  ],
+  "summary": {
+    "off": {
+      "all": {
+        "jobs": 1,
+        "solved": 1,
+        "solve_rate": 1.0,
+        "mean_cost_usd": 0.0023,
+        "mean_billed_usd": 0.0032,
+        "mean_turns": 1.0,
+        "mean_minutes": 0.25
+      },
+      "jobs_1_6": {
+        "jobs": 1,
+        "solved": 1,
+        "solve_rate": 1.0,
+        "mean_cost_usd": 0.0023,
+        "mean_billed_usd": 0.0032,
+        "mean_turns": 1.0,
+        "mean_minutes": 0.25
+      },
+      "jobs_7_12": {
+        "jobs": 0,
+        "solved": 0,
+        "solve_rate": null,
+        "mean_cost_usd": null,
+        "mean_billed_usd": null,
+        "mean_turns": null,
+        "mean_minutes": null
+      }
+    },
+    "dropped_jobs": {}
+  },
+  "health": {
+    "path": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261005T220016/health.json",
+    "fatal": 0,
+    "warn": 1
+  },
+  "report": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261005T220016/report.md"
+}

@@ -1,0 +1,21 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Map</title></head>
+<body>
+<!-- like openstreetmap.org: "Copyright" is a client-side route. The click fetches the sidebar (slow), then
+     pushState()s the new URL and renders it a moment later; nothing reloads. -->
+<nav><a id="copyright" href="/copyright_static.html">Copyright</a> <a href="help.html">Help</a></nav>
+<div id="main"><p>The map is here.</p></div>
+<script>
+  document.getElementById('copyright').addEventListener('click', function (e) {
+    e.preventDefault();
+    setTimeout(function () {
+      history.pushState({}, '', '/spa_copyright');
+      document.getElementById('main').innerHTML = '<p>Loading...</p>';
+      setTimeout(function () {
+        document.getElementById('main').innerHTML = '<h1>Copyright and License</h1><p>Licensed under the Open Database License.</p>';
+        document.title = 'Copyright';
+      }, 700);
+    }, 1200);
+  });
+</script>
+</body></html>

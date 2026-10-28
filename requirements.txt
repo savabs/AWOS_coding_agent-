@@ -2,17 +2,30 @@ aider-chat>=0.86.2
 anthropic>=0.101.0
 python-dotenv>=1.2.1
 
+# DeepSeek access — worker.py and unified_agent.py use the OpenAI-compatible
+# client against the DeepSeek endpoint, so this is a hard import, not optional.
+openai>=1.0.0
+
+# LinUCB bandit / GP world model in ml_router.py
+numpy>=1.24
+
 # AWOS v2 Blueprint — Layer 1 Cartographer (Tree-Sitter)
-tree-sitter==0.21.0
-tree-sitter-python==0.21.0
-tree-sitter-cpp==0.21.0
-tree-sitter-rust==0.21.0
+# Must be >=0.22: cartographer.py, symbol_index.py and struct_builder.py all use
+# the newer binding API — Parser(lang) and Language(module.language()) — which
+# does not exist in 0.21.x. (0.21 also had no tree-sitter-rust release.)
+# No upper cap: aider-chat pins tree-sitter==0.25.2 exactly, and a cap here
+# makes the two unresolvable. Verified working against 0.23.2 and 0.25.2.
+tree-sitter>=0.23
+tree-sitter-python>=0.23
+tree-sitter-cpp>=0.23
+tree-sitter-rust>=0.23
 
 # File watching for incremental STRUCT.xml sync
 watchdog>=3.0.0
 
 # Content hashing for incremental cache invalidation
-xxhash>=4.4.1
+# (>=4.4.1 was unsatisfiable — 4.0.1 is the newest release on PyPI)
+xxhash>=4.0
 
 # ── Agentic tool dependencies ──────────────────────────────────────────────
 
@@ -34,8 +47,11 @@ tavily-python>=0.3.0
 # HuggingFace Hub — model/dataset search and download
 huggingface-hub>=0.22.0
 
-# Google Generative AI — Gemini Flash for CheapPlanner
-google-generativeai>=0.5.0
+# Google Gen AI SDK — Gemini Flash for CheapPlanner.
+# cheap_planner.py does `from google import genai`, which ships in google-genai.
+# The older google-generativeai package provides google.generativeai instead and
+# does NOT satisfy that import.
+google-genai>=1.0.0
 
 # ── AWOS v3 Persistent Memory ────────────────────────────────────────────────
 chromadb>=0.6.0
@@ -46,3 +62,9 @@ sentence-transformers>=3.0.0
 
 # MCP server SDK
 mcp>=1.0.0
+
+# ── Test tooling ─────────────────────────────────────────────────────────────
+# pytest.ini sets `--timeout=10`, so the timeout plugin is required to run the
+# suite at all — without it pytest aborts on an unrecognised argument.
+pytest>=7.4
+pytest-timeout>=2.1

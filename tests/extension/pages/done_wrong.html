@@ -1,0 +1,12 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Saved</title></head>
+<body>
+<h1>Done</h1>
+<!-- a success banner with a wrong detail: the plan is always "basic" whatever was chosen -->
+<p id="msg"></p>
+<script>
+  var q = new URLSearchParams(location.search);
+  document.getElementById('msg').textContent =
+    'Profile saved for ' + (q.get('fullname') || '?') + ' <' + (q.get('email') || '?') + '> on plan basic';
+</script>
+</body></html>

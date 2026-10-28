@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>CLI reference · AWOS docs</title>
+<meta name="description" content="The awos session, one-shot tasks, doctor, and the submit, serve, status, cancel, unblock and keys commands.">
+<link rel="canonical" href="https://awos.tirramind.com/docs/cli/">
+<meta property="og:title" content="CLI reference · AWOS docs">
+<meta property="og:description" content="The awos session, one-shot tasks, doctor, and the submit, serve, status, cancel, unblock and keys commands.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://awos.tirramind.com/docs/cli/">
+<meta name="robots" content="index,follow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap">
+  <a class="brand" href="/" aria-label="AWOS Replay home">AWOS<span>.</span> <small>Replay</small></a>
+  <nav class="links" aria-label="Main">
+    <a class="wide" href="/#how">How it works</a>
+    <a href="/recipes/">Recipes</a>
+    <a class="wide" href="/#pricing">Pricing</a>
+    <a class="wide" href="/coding-agent/">Coding agent</a>
+    <a href="/docs/" aria-current="page">Docs</a>
+  </nav>
+  <a class="btn primary" href="/#waitlist">Join the waitlist</a>
+</div></header>
+<main id="main" class="wrap"><div class="docs-layout">
+<nav class="docs-side" aria-label="Docs">
+<h2>Docs</h2>
+<ul>
+<li><a href="/docs/">Overview</a></li>
+<li><a href="/docs/quickstart/">Quickstart</a></li>
+<li><a href="/docs/fix-github/">Fix a GitHub issue or PR</a></li>
+<li><a href="/docs/concepts/">Concepts</a></li>
+<li><a href="/docs/models-and-cost/">Models and cost</a></li>
+<li><a href="/docs/cli/" aria-current="page">CLI reference</a></li>
+<li><a href="/docs/security/">Security and privacy</a></li>
+<li><a href="/docs/faq/">FAQ</a></li>
+</ul>
+</nav>
+<article class="doc">
+<div class="eyebrow">Docs · CLI reference</div>
+<h1>CLI reference</h1>
+<p class="lede">The commands you use day to day. Run any of them with <code>--help</code> for the same information in your terminal.</p>
+<pre><code>awos                              <span class="c"># interactive session in the current repo</span>
+awos "GOAL"                       <span class="c"># one task: run it, then review</span>
+awos fix URL [--dry-run] [--budget USD] [--pr|--push]   <span class="c"># fix a GitHub issue or a PR's failing checks</span>
+awos doctor [--json]              <span class="c"># check your setup (spends nothing)</span>
+awos submit --repo PATH [--budget USD] [--privacy local_only|cloud_ok] "GOAL"
+awos serve --worker [--once] [--poll SECONDS]
+awos status [--digest] [JOB_ID]
+awos cancel JOB_ID
+awos unblock JOB_ID
+awos keys [--json]</code></pre>
+
+<h2 id="session"><code>awos</code></h2>
+<p>Opens an interactive session inside a git repository. Type tasks in plain English; each one is queued and run by the background worker, which AWOS starts for you if it is not already running. Progress appears above the prompt while you keep typing. When a job finishes, press <b>d</b> (diff), <b>m</b> (merge into your current branch), <b>r</b> (reject), <b>f</b> (follow-up from this branch) or <b>o</b> (open report). Slash commands: <code>/status</code>, <code>/diff ID</code>, <code>/merge ID</code>, <code>/reject ID</code>, <code>/follow ID</code>, <code>/open ID</code>, <code>/cancel ID</code>, <code>/watch</code>, <code>/keys</code>, <code>/help</code>, <code>/quit</code>. Ctrl-C leaves the session; background jobs keep running.</p>
+<p><code>awos "GOAL"</code> does the same for a single task: it queues the goal, shows progress until it finishes, and then offers the same review keys. The goal must contain a space, so a mistyped command is never run as a paid job.</p>
+
+<h2 id="fix"><code>awos fix</code></h2>
+<p>Run inside your clone of a GitHub repository, with the <code>gh</code> CLI logged in. An issue URL (<code>.../issues/N</code>) becomes a job whose result is the local branch <code>awos/issue-N-&lt;slug&gt;</code>; a pull request URL (<code>.../pull/N</code>) checks out the PR, reads its failing CI logs and puts the fix on <code>awos/pr-N-fix</code> on top of the PR head. Flags: <code>--dry-run</code> (print the goal and commands, run nothing), <code>--budget USD</code>, <code>--pr</code> (issue: push and open a draft PR), <code>--push</code> (PR: push the fix branch), <code>--allow-dirty</code>, <code>--goal TEXT</code>. Nothing is pushed without <code>--pr</code> or <code>--push</code>. See <a href="/docs/fix-github/">Fix a GitHub issue or PR</a>.</p>
+
+<h2 id="doctor"><code>awos doctor</code></h2>
+<p>Checks Python, git, your model key (without spending), the local model server, the current repo and its test command, the job folder, and whether the worker is running. Each problem comes with a one-line fix. It exits 0 when everything required is OK.</p>
+
+<h2 id="submit"><code>awos submit</code></h2>
+<p>Queue a job and print its id.</p>
+<pre><code>awos submit --repo . --budget 0.50 "Add a --dry-run flag to the import command"</code></pre>
+<table>
+  <thead><tr><th>Argument</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>GOAL</code></td><td>What to get done. Quote it if it has spaces.</td></tr>
+    <tr><td><code>--repo PATH</code></td><td>The git repository the job works on. Puts the job in the background worker's queue.</td></tr>
+    <tr><td><code>--budget USD</code></td><td>Most the job may spend, in US dollars. Default 1.0; <code>0</code> means no cap.</td></tr>
+    <tr><td><code>--privacy local_only|cloud_ok</code></td><td><code>local_only</code> blanks cloud API keys for this job so it can only use a local model. Default <code>cloud_ok</code>.</td></tr>
+  </tbody>
+</table>
+
+<h2 id="serve"><code>awos serve --worker</code></h2>
+<p>Run the background worker: take queued jobs one at a time until stopped.</p>
+<table>
+  <thead><tr><th>Flag</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>--worker</code></td><td>Run the queue worker. Without it, <code>awos serve</code> starts the local web dashboard instead.</td></tr>
+    <tr><td><code>--once</code></td><td>Exit when the queue is empty.</td></tr>
+    <tr><td><code>--poll SECONDS</code></td><td>Seconds between queue checks. Default 2.</td></tr>
+  </tbody>
+</table>
+
+<h2 id="status"><code>awos status</code></h2>
+<p>List the queue's jobs, or show one job when you pass its id.</p>
+<table>
+  <thead><tr><th>Argument</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>JOB_ID</code></td><td>Show one job's record.</td></tr>
+    <tr><td><code>--digest</code></td><td>A short summary for humans: what is running, what is queued, what finished since the last digest, what is blocked (with the action to take), and today's spend.</td></tr>
+  </tbody>
+</table>
+
+<h2 id="cancel"><code>awos cancel</code></h2>
+<p>Cancel a job. A queued job is cancelled at once; a running job stops at its next step. A job that already finished is left as it is.</p>
+<pre><code>awos cancel &lt;id&gt;</code></pre>
+
+<h2 id="unblock"><code>awos unblock</code></h2>
+<p>Re-queue a job that is blocked on credentials, after you fix the key. The attempt the block used is refunded. The worker also does this on its own once the keys check out again.</p>
+<pre><code>awos unblock &lt;id&gt;</code></pre>
+
+<h2 id="keys"><code>awos keys</code></h2>
+<p>Check each configured model provider without spending anything. Each check is a free, read-only request; key values are never printed.</p>
+<table>
+  <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>ok</code></td><td>The provider answered and accepted the credential.</td></tr>
+    <tr><td><code>unauthorized</code></td><td>401 or 403: the key is wrong, revoked or out of credit.</td></tr>
+    <tr><td><code>unreachable</code></td><td>No answer: offline, DNS, timeout or a server error.</td></tr>
+    <tr><td><code>not-configured</code></td><td>No key set (for a local model: no server and no URL set).</td></tr>
+  </tbody>
+</table>
+<p><code>--json</code> prints the same result as JSON.</p>
+
+<h2 id="env">Environment variables</h2>
+<table>
+  <thead><tr><th>Variable</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>ANTHROPIC_API_KEY</code></td><td>Key for the default cloud model.</td></tr>
+    <tr><td><code>AWOS_PROVIDER=local</code></td><td>Use your local model server.</td></tr>
+    <tr><td><code>AWOS_HOST_DIR</code></td><td>Where the queue, job folders and reports live. Default <code>~/.awos/host</code>.</td></tr>
+  </tbody>
+</table>
+<nav class="pager" aria-label="Docs pages"><a class="prev" href="/docs/models-and-cost/"><small>Previous</small>Models and cost</a><a class="next" href="/docs/security/"><small>Next</small>Security and privacy</a></nav>
+</article>
+</div></main>
+<footer class="site"><div class="wrap">
+  <span>AWOS Replay. Show it once, it does it forever. Open source. Built in India.</span>
+  <nav aria-label="Footer">
+    <a href="/#how">How it works</a>
+    <a href="/recipes/">Recipes</a>
+    <a href="/replay/privacy/">Privacy policy</a>
+    <a href="/#waitlist">Waitlist</a>
+    <a href="/coding-agent/">Coding agent</a>
+    <a href="/docs/">Coding agent docs</a>
+    <a href="/access/">Team early access</a>
+  </nav>
+</div></footer>
+</body>
+</html>

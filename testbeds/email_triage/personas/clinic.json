@@ -1,0 +1,103 @@
+{
+  "_comment": "Held-out persona for the email-triage testbed. Fictional: every name, practice, company and domain is invented (.example TLD; one lookalike uses .test). Only 'public' is copied into the agent-visible mailbox; 'rules' are private preferences the agent must learn from calibration feedback.",
+  "public": {
+    "name": "Teresa Okafor-Vance",
+    "email": "teresa@harborlanefp.example",
+    "role": "Office manager of Harbor Lane Family Practice (a four-provider primary care clinic)",
+    "location": "Portland, Oregon, USA",
+    "timezone": "America/Los_Angeles"
+  },
+  "practice": {"name": "Harbor Lane Family Practice", "domain": "harborlanefp.example",
+               "owner": {"name": "Dr. Malcolm Osei", "address": "malcolm.osei@harborlanefp.example", "role": "Physician and practice owner"}},
+  "staff": [
+    {"name": "Dr. Ines Albright", "address": "ines.albright@harborlanefp.example", "role": "Associate physician"},
+    {"name": "Kiara Benally", "address": "kiara.benally@harborlanefp.example", "role": "Front desk lead"},
+    {"name": "Hector Ruiz", "address": "hector.ruiz@harborlanefp.example", "role": "Medical assistant"},
+    {"name": "Grace Lindqvist", "address": "grace.lindqvist@harborlanefp.example", "role": "Billing specialist"}
+  ],
+  "vendors": [
+    {"name": "ChartWell", "domain": "chartwell.example", "kind": "EHR and practice-management system"},
+    {"name": "VoxLine", "domain": "voxline.example", "kind": "phone and fax service"},
+    {"name": "PayRoster", "domain": "payroster.example", "kind": "payroll"},
+    {"name": "MedStock Supply", "domain": "medstock.example", "kind": "medical supplies"},
+    {"name": "TempGuard", "domain": "tempguard.example", "kind": "vaccine fridge monitoring"},
+    {"name": "RemindRx", "domain": "remindrx.example", "kind": "patient appointment reminders"}
+  ],
+  "payers": [
+    {"name": "Cascade Mutual Health", "domain": "cascademutual.example",
+     "bulletins": {"address": "bulletin@news.cascademutual.example"}}
+  ],
+  "people": [
+    {"name": "Daniel Vance", "address": "dan.vance@mailhaven.example", "relation": "husband"},
+    {"name": "Ridgeview Middle School Health Office", "address": "healthoffice@ridgeviewms.example", "relation": "son's school nurse"},
+    {"name": "Beatrice Lam", "address": "beatrice@lamhealthlaw.example", "relation": "practice's attorney"},
+    {"name": "Owen Fairbanks", "address": "owen@fairbankscpa.example", "relation": "practice's accountant"},
+    {"name": "Simone Draper", "address": "simone@peoplefirsthr.example", "relation": "HR consultant"},
+    {"name": "Lucia Brandt", "address": "lucia.brandt@postbox.example", "relation": "friend, former coworker"}
+  ],
+  "services_used": ["ChartWell", "VoxLine", "PayRoster", "MedStock Supply", "TempGuard", "RemindRx", "Officely", "Willamette Community Bank"],
+  "services_not_used": ["FedPay Express", "QuickBooks-style apps", "any gift-card vendor"],
+  "newsletters_read": [
+    {"name": "Practice Manager Brief", "address": "editor@practicebrief.example"},
+    {"name": "CodeWatch Billing Updates", "address": "updates@codewatch.example"}
+  ],
+  "newsletters_ignored": [
+    {"name": "Wellness Glow Daily", "address": "glow@wellnessglow.example"},
+    {"name": "HealthTech Disruptors", "address": "hello@healthdisruptors.example"},
+    {"name": "MedInvest Pulse", "address": "pulse@medinvestpulse.example"}
+  ],
+  "rules": [
+    {"id": "vip_physician",
+     "feedback": "Dr. Osei owns the practice. Whatever Malcolm asks me for is urgent and he expects an answer, even if it is two lines from his phone.",
+     "hints": [
+       {"when": {"from_address": "malcolm.osei@harborlanefp.example"}, "set": {"importance": 3, "category": "urgent_action", "needs_reply": true}}
+     ]},
+    {"id": "staff_coverage",
+     "feedback": "When one of our staff calls out or needs a shift covered, that is urgent: I have to find coverage before the clinic opens, and I reply to confirm.",
+     "hints": [
+       {"when": {"from_domain": "harborlanefp.example", "is_list": false, "body_any": ["out sick", "calling out", "cover my shift", "coverage for", "can't come in"]}, "set": {"importance": 3, "category": "urgent_action", "needs_reply": true}}
+     ]},
+    {"id": "payer",
+     "feedback": "Cascade Mutual is our biggest insurer. A claim denial or a credentialing deadline from them is urgent because appeal windows are short. Their provider bulletins I read carefully, they change how we bill.",
+     "hints": [
+       {"when": {"from_domain": "cascademutual.example", "text_any": ["denied", "denial", "appeal", "credentialing"]}, "set": {"importance": 3, "category": "urgent_action", "needs_reply": false}},
+       {"when": {"from_domain": "news.cascademutual.example"}, "set": {"importance": 2, "category": "important_read", "needs_reply": false}}
+     ]},
+    {"id": "vip_family",
+     "feedback": "Mail from my husband Daniel or from my son's school health office always comes first. If they ask something it is urgent and I answer right away.",
+     "hints": [
+       {"when": {"from_address": "dan.vance@mailhaven.example"}, "set": {"importance": 3, "category": "urgent_action", "needs_reply": true}},
+       {"when": {"from_address": "healthoffice@ridgeviewms.example"}, "set": {"importance": 3, "category": "urgent_action", "needs_reply": true}}
+     ]},
+    {"id": "newsletter_valued",
+     "feedback": "Practice Manager Brief and CodeWatch Billing Updates are worth a skim. Low priority, not junk.",
+     "hints": [
+       {"when": {"from_domain_any": ["practicebrief.example", "codewatch.example"]}, "set": {"importance": 1, "category": "newsletter", "needs_reply": false}}
+     ]},
+    {"id": "newsletter_ignore",
+     "feedback": "Wellness Glow Daily, HealthTech Disruptors and MedInvest Pulse are noise I never open. Importance zero.",
+     "hints": [
+       {"when": {"from_domain_any": ["wellnessglow.example", "healthdisruptors.example", "medinvestpulse.example"]}, "set": {"importance": 0, "category": "newsletter", "needs_reply": false}}
+     ]},
+    {"id": "urgent_promo",
+     "feedback": "Sales mail that yells URGENT, FINAL NOTICE or ACT NOW is still just sales. Promo, importance zero.",
+     "hints": [
+       {"when": {"is_list": true, "subject_any": ["urgent", "final notice", "act now", "last call"], "from_domain_not_any": ["news.cascademutual.example", "cascademutual.example"]}, "set": {"importance": 0, "category": "promo", "needs_reply": false}}
+     ]},
+    {"id": "recruiters",
+     "feedback": "Staffing agencies recruiting me or poaching our nurses are a waste of my time, even the ones that say urgent. Social, importance zero.",
+     "hints": [
+       {"when": {"from_domain_any": ["carestaffpro.example", "medtalentlink.example"]}, "set": {"importance": 0, "category": "social", "needs_reply": false}}
+     ]},
+    {"id": "lookalike",
+     "feedback": "ChartWell only ever writes from chartwell.example. Anything using the ChartWell name from another address is a fake: phishing.",
+     "hints": [
+       {"when": {"from_name_any": ["chartwell"], "from_domain_not_any": ["chartwell.example"]}, "set": {"importance": 0, "category": "spam_phishing", "needs_reply": false, "suspicious": true}}
+     ]},
+    {"id": "local_signin",
+     "feedback": "New sign-in notices from Portland are me logging in at the clinic or at home. Just FYI.",
+     "hints": [
+       {"when": {"subject_any": ["sign-in", "new login", "signed in"], "body_any": ["portland"]}, "set": {"importance": 1, "category": "fyi", "needs_reply": false}}
+     ]}
+  ]
+}

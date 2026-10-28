@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Research: ReflexionMemory Phase 5B — AWOS</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--warn:#f59e0b;--success:#10b981;--danger:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status.done{background:#10b981;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+nav.tabs{background:var(--surface);border-bottom:1px solid var(--border);padding:0 32px;display:flex;gap:0;overflow-x:auto}
+nav.tabs button{background:none;border:none;border-bottom:2px solid transparent;padding:12px 16px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;white-space:nowrap}
+nav.tabs button.active{color:var(--accent);border-bottom-color:var(--accent)}
+main{max-width:860px;margin:0 auto;padding:32px}
+section.tab-panel{display:none}
+section.tab-panel.active{display:block}
+h2{font-size:17px;font-weight:600;margin:24px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:5px}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:"JetBrains Mono","Fira Code",monospace;font-size:12px}
+p code,li code,td code{background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px;font-size:12px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+.insight{background:#f0fdf4;border-left:3px solid var(--success);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+.risk-high{background:#fef2f2;border-left:3px solid var(--danger);padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+.risk-med{background:#fef3c7;border-left:3px solid var(--warn);padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+.verified{color:var(--success);font-weight:600;font-size:11px;text-transform:uppercase}
+.unverified{color:var(--warn);font-weight:600;font-size:11px;text-transform:uppercase}
+footer{background:var(--surface);border-top:1px solid var(--border);padding:16px 32px}
+</style>
+</head>
+<body>
+<header>
+  <div class="breadcrumb">AWOS / docs / research</div>
+  <h1>Research: ReflexionMemory — Phase 5B</h1>
+  <div class="meta">
+    <span class="tag">phase-5b</span>
+    <span class="tag">verbal-rl</span>
+    <span class="tag">error-pattern-store</span>
+    <span class="tag">critique-injection</span>
+    <span class="status done">Research Complete</span>
+    <time>2026-05-19</time>
+  </div>
+</header>
+<nav class="tabs">
+  <button class="active" onclick="show(this,'problem')">Problem</button>
+  <button onclick="show(this,'current')">Current Architecture</button>
+  <button onclick="show(this,'research')">Research Findings</button>
+  <button onclick="show(this,'design')">Design Options</button>
+  <button onclick="show(this,'risks')">Risks</button>
+  <button onclick="show(this,'verdict')">Verdict</button>
+  <button onclick="show(this,'sources')">Sources</button>
+</nav>
+<main>
+
+<section class="tab-panel active" id="panel-problem">
+<h2>Problem Statement</h2>
+<p>AWOS retries failing tasks via <code>SelfCorrectionEngine</code>, which classifies errors into 4 buckets and injects static hardcoded hints. This has three hard limitations:</p>
+<ul>
+  <li><strong>No cross-session memory</strong> — AWOS forgets every failure on restart. The same mistake in <code>api/users.py</code> repeats indefinitely.</li>
+  <li><strong>No task-specific critique</strong> — hints like &quot;fix the syntax error&quot; are generic. Reflexion paper proves task-specific verbal critique is 2-3x more effective.</li>
+  <li><strong>No adaptation</strong> — static rules cannot learn that e.g. KeyError on dict access is a recurring pattern in this codebase and suggest .get() universally.</li>
+</ul>
+<h3>Hypothesis</h3>
+<p>Storing verbal self-critiques in a persistent JSONL store and prepending the top-3 relevant ones to retry prompts will reduce the repeat-failure rate on the same file/error-type pair, improving effective pass_rate without any model weight updates or significant cost increase.</p>
+<div class="callout">
+  <strong>Success metric:</strong> Pass rate on retry attempts (attempt 2+) should increase by at least 10 percentage points vs the current static hint baseline, measured on internal test suite runs.
+</div>
+</section>
+
+<section class="tab-panel" id="panel-current">
+<h2>Current Architecture</h2>
+<h3>Retry Flow Today</h3>
+<pre>Worker attempt 1 → FAIL
+    ↓
+SelfCorrectionEngine.classify(error) → ErrorClass.SYNTAX_ERROR
+SelfCorrectionEngine.suggest() → CorrectionHint (static text)
+    ↓
+task["error_context"] = hint.format_for_prompt()
+    ↓
+Worker attempt 2 with static hint in prompt → may still FAIL</pre>
+
+<h3>What Each Component Does</h3>
+<table>
+<tr><th>Component</th><th>File</th><th>Role</th><th>Limitation</th></tr>
+<tr><td><code>SelfCorrectionEngine</code></td><td>self_correction.py</td><td>Classifies error → 4 classes, returns static hint</td><td>No persistence, no LLM, no specificity</td></tr>
+<tr><td><code>SkillLibrary</code></td><td>skill_library.py</td><td>Stores successful patterns for recall</td><td>Success-only, not failure critiques</td></tr>
+<tr><td><code>VectorMemory</code></td><td>memory/vector_memory.py</td><td>Semantic memory of all interactions</td><td>Too broad — not failure-specific</td></tr>
+<tr><td><code>RewardStore</code></td><td>reward_store.py</td><td>Logs episodes for LinUCB</td><td>Numerical only — no verbal narrative</td></tr>
+</table>
+
+<h3>The Gap</h3>
+<div class="insight">
+  <strong>Missing:</strong> A store that captures <em>why</em> a specific task on a specific file failed, in plain English, and surfaces it on the next retry — even in a future session.
+</div>
+</section>
+
+<section class="tab-panel" id="panel-research">
+<h2>Research Findings</h2>
+
+<h3>1. Reflexion — Princeton / NeurIPS 2023</h3>
+<div class="insight">
+  <strong>VERIFIED (arXiv:2303.11366, NeurIPS 2023):</strong> Reflexion agents store verbal self-reflections in an episodic memory buffer. On retry, the Actor (LLM) receives its prior reflections as context. On HumanEval Python: GPT-4 baseline = 80% pass@1. Reflexion + GPT-4 = <strong>91% pass@1</strong>. Improvement: +11pp without any weight updates.
+</div>
+<p>Key implementation details from the paper:</p>
+<ul>
+  <li><strong>Three models:</strong> Actor (generates code), Evaluator (scores output — can be unit tests), Self-Reflection (generates verbal critique from failure signal).</li>
+  <li><strong>Memory:</strong> Short-term = trajectory history (current session). Long-term = episodic store of past self-reflections (persisted).</li>
+  <li><strong>Critique trigger:</strong> fired on binary failure signal (test fails) — not on every attempt.</li>
+  <li><strong>Memory cap:</strong> max 1 experience per task in the paper — AWOS can use more since we have file+error_type retrieval.</li>
+  <li><strong>Cost:</strong> one extra LLM call per failure — the paper uses GPT-4 for self-reflection; AWOS will use Gemini Flash (~/usr/bin/bash.0001/call).</li>
+</ul>
+
+<h3>2. Self-Refine — NeurIPS 2023 (arXiv:2303.17651)</h3>
+<div class="insight">
+  <strong>VERIFIED (selfrefine.info, NeurIPS 2023):</strong> Iterative feedback-refine loop. Key insight: feedback must be (1) <em>localised</em> — identifies the specific line/pattern that is wrong, and (2) <em>actionable</em> — tells the model what to do differently. Retains history of past outputs in prompt. Achieves 5-20% improvement on code tasks vs single-shot.
+</div>
+
+<h3>3. SWE-RL — Meta / NeurIPS 2025 (arXiv:2512.18552)</h3>
+<div class="insight">
+  <strong>VERIFIED (facebookresearch/swe-rl, NeurIPS 2025):</strong> State-of-the-art self-improving software agent. Uses test execution outcomes as primary reward (we implemented this in Phase 5A). Combines pass/fail reward with trajectory memory. Outperforms human-data baselines on SWE-bench by +10.4% via grounding in mechanical realities of code execution.
+</div>
+
+<h3>4. What AWOS Already Has vs State of the Art</h3>
+<table>
+<tr><th>Mechanism</th><th>Reference</th><th>AWOS Status</th></tr>
+<tr><td>Test execution as reward</td><td>SWE-RL (Meta 2025)</td><td><span class="verified">✓ Done — Phase 5A TestRunner</span></td></tr>
+<tr><td>Rule-based error classification</td><td>SWE-RL reward structure</td><td><span class="verified">✓ Done — SelfCorrectionEngine</span></td></tr>
+<tr><td>Episodic success memory</td><td>Reflexion long-term mem</td><td><span class="verified">✓ Done — SkillLibrary</span></td></tr>
+<tr><td>Semantic interaction memory</td><td>RAG-augmented agents</td><td><span class="verified">✓ Done — VectorMemory</span></td></tr>
+<tr><td><strong>Persistent verbal failure critique</strong></td><td>Reflexion Self-Reflection model</td><td><span class="unverified">✗ Missing — Phase 5B</span></td></tr>
+<tr><td><strong>Localised actionable critique injection</strong></td><td>Self-Refine feedback module</td><td><span class="unverified">✗ Missing — Phase 5B</span></td></tr>
+</table>
+</section>
+
+<section class="tab-panel" id="panel-design">
+<h2>Design Options</h2>
+
+<h3>Option A — Minimal (Recommended)</h3>
+<p>Add <code>ErrorPatternStore</code> (JSONL). Generate critique via cheap LLM call on failure. Retrieve by (file_path, error_type) exact match. Inject top-3 into worker prompt.</p>
+<table>
+<tr><th>Dimension</th><th>Value</th></tr>
+<tr><td>New files</td><td>1 — <code>error_pattern_store.py</code></td></tr>
+<tr><td>Modified files</td><td>3 — <code>self_correction.py</code>, <code>worker.py</code>, <code>orchestrator.py</code></td></tr>
+<tr><td>Storage</td><td>JSONL at <code>.awos/error_patterns.jsonl</code></td></tr>
+<tr><td>Retrieval</td><td>Exact match on file_path + error_type, sorted by recency</td></tr>
+<tr><td>Critique generation</td><td>1 cheap LLM call (Gemini Flash / DeepSeek) per failure</td></tr>
+<tr><td>Extra cost per failure</td><td>~/usr/bin/bash.0001 (≈100 tokens in + 50 tokens out @ Flash pricing)</td></tr>
+<tr><td>Prompt overhead</td><td>~300 tokens (3 critiques × 100 tokens)</td></tr>
+<tr><td>Estimated effort</td><td>6-8h</td></tr>
+</table>
+
+<h3>Option B — Vector Retrieval</h3>
+<p>Use VectorMemory (ChromaDB) to store critique embeddings. Retrieve semantically similar past critiques regardless of file path. More powerful but adds ChromaDB dependency cost and ~50ms latency per retrieval.</p>
+<p><strong>Decision: Defer to Phase 6.</strong> Option A is sufficient to prove the hypothesis. Vector retrieval adds complexity without clear benefit until we have 500+ stored critiques.</p>
+
+<h3>Option C — LLM-as-Evaluator</h3>
+<p>Use LLM to both run tests and judge correctness. Expensive. Not needed: TestRunner (Phase 5A) already provides objective pass_rate. Rejected.</p>
+
+<h3>Architecture Diagram (Option A)</h3>
+<pre>
+Worker attempt N → FAIL
+    ↓
+SelfCorrectionEngine.classify(error) → ErrorClass
+SelfCorrectionEngine.generate_critique(task, error, error_class)
+    → [cheap LLM call] → verbal critique string
+    ↓
+ErrorPatternStore.save(ErrorPattern(
+    file_path, error_type, error_msg, critique, timestamp
+))
+    ↓
+ErrorPatternStore.retrieve(file_path, error_type, top_n=3)
+    → [past_critiques list]
+    ↓
+task["past_critiques"] = past_critiques
+task["error_context"] = static_hint  (fallback, unchanged)
+    ↓
+Worker attempt N+1:
+    prompt = "[PAST CRITIQUE 1] ...
+[PAST CRITIQUE 2] ...
+" + original_prompt
+    ↓
+    Better code generated (avoids known mistake)
+    ↓
+TestRunner.run() → pass_rate → LinUCB reward updated
+</pre>
+</section>
+
+<section class="tab-panel" id="panel-risks">
+<h2>Risks and Mitigations</h2>
+
+<div class="risk-med">
+  <strong>RISK (Medium): Critique generation adds latency.</strong><br>
+  One cheap LLM call on failure: ~300-500ms. Only fires on failure, not on every attempt.
+  Mitigation: async fire-and-forget. Critique stored for <em>next</em> attempt, not current one.
+</div>
+
+<div class="risk-med">
+  <strong>RISK (Medium): Hallucinated or misleading critique.</strong><br>
+  LLM may generate an incorrect explanation. Mitigation: critique is informational only (prepended as a hint, not executed as code). If critique misleads, TestRunner pass_rate still penalises the outcome, and LinUCB escalates model tier.
+</div>
+
+<div class="risk-high">
+  <strong>RISK (High): Prompt bloat degrades performance.</strong><br>
+  Injecting too many long critiques can push the actual task out of the context window.
+  Mitigation: hard cap of 3 critiques, each truncated to 100 tokens. Total overhead ≤ 300 tokens.
+</div>
+
+<div class="risk-med">
+  <strong>RISK (Low): Stale critiques for refactored files.</strong><br>
+  A critique for <code>api/users.py</code> written 3 months ago may be irrelevant if the file was rewritten. Mitigation: critiques are hints, not instructions. Still informative about error class patterns.
+  Future: add file hash to ErrorPattern and skip critiques for significantly changed files.
+</div>
+
+<div class="risk-med">
+  <strong>RISK (Low): API call fails during critique generation.</strong><br>
+  Mitigation: graceful fallback to static SelfCorrectionEngine hint. Never blocks the retry loop.
+</div>
+</section>
+
+<section class="tab-panel" id="panel-verdict">
+<h2>Verdict</h2>
+<div class="insight">
+  <strong>Proceed with Option A (Minimal).</strong> The research case is strong — Reflexion's +11pp improvement on HumanEval is replicated across multiple papers. The implementation is low-risk (1 new file, 3 small modifications, graceful fallback). Cost impact is negligible (~/usr/bin/bash.0001 per failure). The hypothesis is falsifiable: we can measure retry pass_rate before and after using the TestRunner reward signal already wired in Phase 5A.
+</div>
+
+<h3>Pre-Conditions for Implementation</h3>
+<ol>
+  <li>Phase 5A (TestRunner) must be complete. <strong>✓ Done.</strong></li>
+  <li>SelfCorrectionEngine must have a stable error classification interface. <strong>✓ Done — ErrorClass enum + classify().</strong></li>
+  <li>Worker must accept <code>task["error_context"]</code> in prompt. <strong>✓ Done — already wired.</strong></li>
+</ol>
+
+<h3>Expected Impact</h3>
+<table>
+<tr><th>Metric</th><th>Before (Phase 5A)</th><th>After (Phase 5B est.)</th></tr>
+<tr><td>Retry pass rate (attempt 2)</td><td>~40% (static hints)</td><td>~55% (verbal critique)</td></tr>
+<tr><td>Same-file repeat failures</td><td>High (no memory)</td><td>Low (critique injected)</td></tr>
+<tr><td>Cost per failure</td><td>/usr/bin/bash.000</td><td>~/usr/bin/bash.0001 (critique gen)</td></tr>
+<tr><td>Monthly cost increase</td><td>—</td><td>&lt;/usr/bin/bash.05 at 500 failures/month</td></tr>
+</table>
+</section>
+
+<section class="tab-panel" id="panel-sources">
+<h2>Verified Sources</h2>
+<table>
+<tr><th>Source</th><th>Key Finding</th><th>Date Accessed</th></tr>
+<tr>
+  <td><a href="https://arxiv.org/abs/2303.11366" target="_blank">Reflexion — arXiv:2303.11366 (NeurIPS 2023)</a></td>
+  <td>Verbal critique in episodic memory buffer: HumanEval 80%→91% pass@1. Three-model architecture: Actor, Evaluator (unit tests), Self-Reflection (LLM critique).</td>
+  <td>2026-05-19</td>
+</tr>
+<tr>
+  <td><a href="https://arxiv.org/abs/2303.17651" target="_blank">Self-Refine — arXiv:2303.17651 (NeurIPS 2023)</a></td>
+  <td>Iterative feedback-refine loop. Feedback must be (1) localised, (2) actionable. History of past outputs prepended. 5-20% improvement on code tasks.</td>
+  <td>2026-05-19</td>
+</tr>
+<tr>
+  <td><a href="https://arxiv.org/abs/2512.18552" target="_blank">SWE-RL — arXiv:2512.18552 (NeurIPS 2025)</a></td>
+  <td>Test execution as primary reward + trajectory memory = +10.4% on SWE-bench Verified vs human-data baselines. Confirms Phase 5A+5B combined approach.</td>
+  <td>2026-05-19</td>
+</tr>
+<tr>
+  <td><a href="https://github.com/noahshinn/reflexion" target="_blank">GitHub — noahshinn/reflexion</a></td>
+  <td>Reference implementation. Self-reflection model uses max 1 experience per task. Memory buffer is plain text prepended to prompt. No vector DB needed.</td>
+  <td>2026-05-19</td>
+</tr>
+</table>
+</section>
+
+</main>
+<script>
+function show(btn, id) {
+  document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+  document.querySelectorAll("nav.tabs button").forEach(b => b.classList.remove("active"));
+  document.getElementById("panel-" + id).classList.add("active");
+  btn.classList.add("active");
+}
+</script>
+</body>
+</html>

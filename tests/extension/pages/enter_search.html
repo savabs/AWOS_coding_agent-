@@ -1,0 +1,16 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Search</title></head>
+<body>
+<!-- Enter submits: a form with a search field (no click on its button), and a JS search box (no form) whose
+     keydown handler navigates -->
+<form id="f" action="search_result.html" method="get" role="search">
+  <label for="q">Find</label> <input id="q" name="q" type="text">
+  <button type="submit">Search</button>
+</form>
+<div role="search"><input id="js" aria-label="Jump to" type="text"></div>
+<script>
+  document.getElementById('js').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); location.href = 'search_result.html?q=' + encodeURIComponent('js:' + e.target.value); }
+  });
+</script>
+</body></html>

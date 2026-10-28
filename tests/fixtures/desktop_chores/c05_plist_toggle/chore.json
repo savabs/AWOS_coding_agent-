@@ -1,0 +1,55 @@
+{
+  "id": "c05_plist_toggle",
+  "title": "Toggle a preference in a plist",
+  "instruction": "In Preferences/com.example.viewer.plist set ShowHiddenFiles to true and RecentLimit to 25.",
+  "rung": "shell",
+  "start": {
+    "plists": {
+      "Preferences/com.example.viewer.plist": {
+        "ShowHiddenFiles": false,
+        "RecentLimit": 10,
+        "Theme": "dark"
+      }
+    }
+  },
+  "probes": [
+    {
+      "id": "hidden_on",
+      "getter": {
+        "type": "plist_value",
+        "path": "Preferences/com.example.viewer.plist",
+        "key": "ShowHiddenFiles"
+      },
+      "comparator": {
+        "op": "equals",
+        "expected": true
+      }
+    },
+    {
+      "id": "recent_25",
+      "getter": {
+        "type": "plist_value",
+        "path": "Preferences/com.example.viewer.plist",
+        "key": "RecentLimit"
+      },
+      "comparator": {
+        "op": "equals",
+        "expected": 25
+      }
+    }
+  ],
+  "invariants": [
+    {
+      "id": "theme_kept",
+      "getter": {
+        "type": "plist_value",
+        "path": "Preferences/com.example.viewer.plist",
+        "key": "Theme"
+      },
+      "comparator": {
+        "op": "equals",
+        "expected": "dark"
+      }
+    }
+  ]
+}

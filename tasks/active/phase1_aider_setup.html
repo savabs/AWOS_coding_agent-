@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task: Phase 1 Aider Setup — token_effectivenes</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--success:#10b981;--warn:#f59e0b;--danger:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status-badge{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status-active{background:#f59e0b;color:#fff}
+.status-done{background:#10b981;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+main{max-width:800px;margin:0 auto;padding:32px}
+.meta-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin-bottom:24px;display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:13px}
+.meta-card .key{color:var(--muted);font-weight:600}
+h2{font-size:17px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:20px 0 8px}
+p{margin-bottom:12px}
+.step{display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border-radius:6px;margin:6px 0;border:1px solid var(--border);background:var(--surface)}
+.step.done{background:#f0fdf4;border-color:#bbf7d0}
+.step.active{background:var(--accent-light);border-color:#c7d2fe}
+.step.blocked{background:#fef2f2;border-color:#fecaca}
+.step input[type=checkbox]{flex-shrink:0;margin-top:3px;width:16px;height:16px;accent-color:var(--success)}
+.step .step-body{flex:1}
+.step .step-num{font-size:11px;color:var(--muted);margin-bottom:2px;font-family:monospace}
+.step .step-title{font-weight:600;font-size:14px;margin-bottom:4px}
+.step .step-exit{font-size:12px;color:var(--muted);font-style:italic;margin-top:4px}
+.step .step-exit strong{color:var(--text);font-style:normal}
+.step .step-notes{font-size:13px;margin-top:4px;color:var(--muted)}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px;background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px}
+.progress-bar{background:var(--surface2);border-radius:8px;height:8px;margin:8px 0;overflow:hidden}
+.progress-bar .fill{background:var(--success);height:100%;border-radius:8px;width:0%}
+.progress-label{font-size:12px;color:var(--muted);margin-bottom:4px}
+.phase-divider{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--accent);padding:8px 0 4px;border-top:2px solid var(--accent-light);margin-top:20px}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb">token_effectivenes / tasks / active</div>
+  <h1>Task: Phase 1 — Aider + Claude API Token-Efficient Setup</h1>
+  <div class="meta">
+    <span class="tag">doc/task</span>
+    <span class="tag">phase/1</span>
+    <span class="tag">topic/token-efficiency</span>
+    <span class="tag">topic/aider</span>
+    <span class="tag">status/active</span>
+    <span class="status-badge status-active">IN PROGRESS</span>
+    <time>2026-05-13</time>
+  </div>
+</header>
+
+<main>
+
+<div class="meta-card">
+  <span class="key">Goal</span>      <span>Aider + Claude API running with token-optimal config; token tracking scripts in place; first baseline measurement recorded.</span>
+  <span class="key">Spec</span>      <span><a href="../../docs/specs/token_efficiency_spec.html">docs/specs/token_efficiency_spec.html</a></span>
+  <span class="key">Research</span>  <span><a href="../../docs/research/token_efficiency.html">docs/research/token_efficiency.html</a></span>
+  <span class="key">Phase</span>     <span>1</span>
+  <span class="key">Started</span>   <span>2026-05-13</span>
+  <span class="key">Completed</span> <span>—</span>
+</div>
+
+<div class="progress-label">Progress: 0 / 10 steps</div>
+<div class="progress-bar"><div class="fill" id="prog" style="width:0%"></div></div>
+
+<!-- ═══ PHASE 1 ═══ -->
+<div class="phase-divider">Phase 1 — Install &amp; Configure</div>
+
+<div class="step active">
+  <input type="checkbox" id="s11">
+  <div class="step-body">
+    <div class="step-num">1.1</div>
+    <div class="step-title">Install Aider and Anthropic SDK</div>
+    <div class="step-notes">Run: <code>pip install aider-chat anthropic python-dotenv</code></div>
+    <div class="step-exit"><strong>Exit:</strong> <code>aider --version</code> succeeds. <code>python -c "import anthropic"</code> succeeds.</div>
+  </div>
+</div>
+
+<div class="step">
+  <input type="checkbox" id="s12">
+  <div class="step-body">
+    <div class="step-num">1.2</div>
+    <div class="step-title">Create .env with ANTHROPIC_API_KEY</div>
+    <div class="step-notes">Create <code>.env</code> at project root. Confirm <code>.env</code> is in <code>.gitignore</code>.</div>
+    <div class="step-exit"><strong>Exit:</strong> <code>python -c "from dotenv import load_dotenv; import os; load_dotenv(); print(bool(os.getenv('ANTHROPIC_API_KEY')))"</code> prints <code>True</code>.</div>
+  </div>
+</div>
+
+<div class="step">
+  <input type="checkbox" id="s13">
+  <div class="step-body">
+    <div class="step-num">1.3</div>
+    <div class="step-title">Create .aider.conf.yml (token-optimal defaults)</div>
+    <div class="step-notes">
+      Key settings: <code>model: claude-sonnet-4-5</code>, <code>weak-model: claude-haiku-3-5</code>,
+      <code>cache-prompts: true</code>, <code>cache-keepalive-pings: 3</code>,
+      <code>map-tokens: 512</code>, <code>map-refresh: files</code>,
+      <code>max-chat-history-tokens: 6144</code>, <code>llm-history-file: .aider.llm.history</code>
+    </div>
+    <div class="step-exit"><strong>Exit:</strong> <code>aider --exit</code> shows claude-sonnet-4-5 and "prompt cache" in model info.</div>
+  </div>
+</div>
+
+<div class="step">
+  <input type="checkbox" id="s14">
+  <div class="step-body">
+    <div class="step-num">1.4</div>
+    <div class="step-title">Create .aiderignore (lean repo map)</div>
+    <div class="step-notes">Exclude: <code>docs/</code>, <code>wiki/</code>, <code>*.html</code>, <code>*.md</code>, <code>__pycache__/</code>, <code>.git/</code>, <code>*.log</code></div>
+    <div class="step-exit"><strong>Exit:</strong> <code>aider --show-repo-map --exit</code> does not list any .html or .md files.</div>
+  </div>
+</div>
+
+<div class="step">
+  <input type="checkbox" id="s15">
+  <div class="step-body">
+    <div class="step-num">1.5</div>
+    <div class="step-title">Create CONVENTIONS.md and add to .aider.conf.yml as read file</div>
+    <div class="step-notes">
+      Compressed AWOS rules for Aider: &lt;100 lines, machine-dense, no prose.
+      Must cover: workflow rules, atomic decomposition, memory protocol, security checklist.
+      Add <code>read: CONVENTIONS.md</code> to <code>.aider.conf.yml</code>.
+      Target token count: 1100–2000 tokens (must exceed 1024 minimum for caching).
+    </div>
+    <div class="step-exit"><strong>Exit:</strong> <code>aider --show-prompts --exit</code> includes CONVENTIONS.md content. Token count via <code>python -c "import anthropic; c=anthropic.Anthropic(); print(c.messages.count_tokens(model='claude-sonnet-4-5',messages=[{'role':'user','content':open('CONVENTIONS.md').read()}]).input_tokens)"</code> &gt; 1024.</div>
+  </div>
+</div>
+
+<!-- ═══ PHASE 2 ═══ -->
+<div class="phase-divider">Phase 2 — Token Measurement</div>
+
+<div class="step">
+  <input type="checkbox" id="s21">
+  <div class="step-body">
+    <div class="step-num">2.1</div>
+    <div class="step-title">Create scripts/token_report.py</div>
+    <div class="step-notes">
+      Parse <code>.aider.llm.history</code>. Output: per-request breakdown + totals for:
+      input tokens, cache reads, cache writes, output tokens, estimated cost.
+      Accept <code>--history FILE</code> arg.
+    </div>
+    <div class="step-exit"><strong>Exit:</strong> <code>python scripts/token_report.py</code> runs without error.</div>
+  </div>
+</div>
+
+<div class="step">
+  <input type="checkbox" id="s22">
+  <div class="step-body">
+    <div class="step-num">2.2</div>
+    <div class="step-title">Create scripts/prewarm_cache.py</div>
+    <div class="step-notes">
+      Call Claude API with <code>max_tokens=0</code> + <code>cache_control</code> on CONVENTIONS.md system block.
+      Print <code>cache_creation_input_tokens</code> from response. Load API key from <code>.env</code>.
+    </div>
+    <div class="step-exit"><strong>Exit:</strong> Script prints <code>cache_creation_input_tokens > 0</code>.</div>
+  </div>
+</div>
+
+<div class="step">
+  <input type="checkbox" id="s23">
+  <div class="step-body">
+    <div class="step-num">2.3</div>
+    <div class="step-title">Create requirements.txt</div>
+    <div class="step-notes">Pin: <code>aider-chat</code>, <code>anthropic</code>, <code>python-dotenv</code> with current versions.</div>
+    <div class="step-exit"><strong>Exit:</strong> <code>pip install -r requirements.txt</code> succeeds in a clean venv.</div>
+  </div>
+</div>
+
+<div class="step">
+  <input type="checkbox" id="s24">
+  <div class="step-body">
+    <div class="step-num">2.4</div>
+    <div class="step-title">Run baseline Aider session and record metrics</div>
+    <div class="step-notes">
+      Use <code>--no-stream</code> to expose cache stats. Do one representative task.
+      Run <code>python scripts/token_report.py</code>. Record in a checkpoint: total tokens,
+      cache hit rate, estimated cost per session.
+    </div>
+    <div class="step-exit"><strong>Exit:</strong> Checkpoint written to <code>docs/memory/</code> with baseline numbers. <code>memories/repo/project_structure.md</code> updated with actual cache hit rate.</div>
+  </div>
+</div>
+
+<!-- ═══ PHASE 3 ═══ -->
+<div class="phase-divider">Phase 3 — Advanced Optimizations</div>
+
+<div class="step">
+  <input type="checkbox" id="s31">
+  <div class="step-body">
+    <div class="step-num">3.1</div>
+    <div class="step-title">Add Makefile with 'make dev' target</div>
+    <div class="step-notes">
+      <code>make dev</code> = pre-warm cache → launch Aider. One command to start every session correctly.
+    </div>
+    <div class="step-exit"><strong>Exit:</strong> <code>make dev</code> pre-warms cache (prints confirmation) then opens Aider.</div>
+  </div>
+</div>
+
+<div class="step">
+  <input type="checkbox" id="s32">
+  <div class="step-body">
+    <div class="step-num">3.2</div>
+    <div class="step-title">Evaluate architect mode on a real task</div>
+    <div class="step-notes">
+      Enable: <code>architect: true</code>, <code>editor-model: claude-haiku-3-5</code> in <code>.aider.conf.yml</code>.
+      Run same task as baseline. Compare output token counts and quality.
+      Decide: use architect mode for tasks above N changed lines.
+    </div>
+    <div class="step-exit"><strong>Exit:</strong> Decision documented. <code>.aider.conf.yml</code> reflects chosen mode.</div>
+  </div>
+</div>
+
+<h2>Resume Protocol</h2>
+<div class="callout">
+  Read this file + <a href="../../memories/repo/project_structure.md">project_structure.md</a>.
+  Find the first unchecked step. That is the next action.
+  Reference spec step in <a href="../../docs/specs/token_efficiency_spec.html">token_efficiency_spec.html</a> for detailed exit conditions.
+</div>
+
+<h2>Related</h2>
+<p>
+  Research: <a href="../../docs/research/token_efficiency.html">docs/research/token_efficiency.html</a><br>
+  Spec: <a href="../../docs/specs/token_efficiency_spec.html">docs/specs/token_efficiency_spec.html</a><br>
+  Project state: <a href="../../memories/repo/project_structure.md">memories/repo/project_structure.md</a>
+</p>
+
+</main>
+
+<script>
+// Update progress bar based on checked checkboxes
+function updateProgress() {
+  const total = document.querySelectorAll('.step input[type=checkbox]').length;
+  const done = document.querySelectorAll('.step input[type=checkbox]:checked').length;
+  document.getElementById('prog').style.width = (done/total*100) + '%';
+  document.querySelector('.progress-label').textContent = `Progress: ${done} / ${total} steps`;
+}
+document.querySelectorAll('.step input[type=checkbox]').forEach(cb => {
+  cb.addEventListener('change', () => {
+    cb.closest('.step').classList.toggle('done', cb.checked);
+    updateProgress();
+  });
+});
+</script>
+</body>
+</html>

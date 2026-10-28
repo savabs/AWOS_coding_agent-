@@ -1,0 +1,7 @@
+{
+  "id": "03_cli_handlers_refactor",
+  "goal": "Housekeeping before we add more commands: `main()` in backupd/cli.py has grown into one long if-chain over the command name. Give every command its own handler function named cmd_<command> (cmd_run, cmd_status, cmd_due, cmd_show_config, cmd_list) that takes the parsed arguments and returns the exit code, and register each one on its subparser with set_defaults(handler=...) so that main() just calls args.handler(args). Logging setup and the error handling (the messages and exit codes for configuration errors and other errors) stay in main(), in one place. Nothing the user sees may change: same output, same exit codes for every command.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

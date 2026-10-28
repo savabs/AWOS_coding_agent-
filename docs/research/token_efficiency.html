@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Research: Token Efficiency — token_effectivenes</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--warn:#f59e0b}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status.active{background:#f59e0b;color:#fff}
+.status.done{background:#10b981;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+nav.tabs{background:var(--surface);border-bottom:1px solid var(--border);padding:0 32px;display:flex;gap:0;overflow-x:auto}
+nav.tabs button{background:none;border:none;border-bottom:2px solid transparent;padding:12px 16px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;white-space:nowrap}
+nav.tabs button.active{color:var(--accent);border-bottom-color:var(--accent)}
+main{max-width:900px;margin:0 auto;padding:32px}
+section.tab-panel{display:none}
+section.tab-panel.active{display:block}
+h2{font-size:17px;font-weight:600;margin:24px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px}
+p code,li code,td code{background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px;font-size:12px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+.risk-high{background:#fef2f2;border-left:3px solid #ef4444;padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+.risk-med{background:#fef3c7;border-left:3px solid var(--warn);padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+.big-number{font-size:32px;font-weight:700;color:var(--accent)}
+.saving{font-size:11px;color:#10b981;font-weight:600;text-transform:uppercase}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb">token_effectivenes / docs / research</div>
+  <h1>Research: Token Efficiency with Aider + Claude API</h1>
+  <div class="meta">
+    <span class="tag">doc/research</span>
+    <span class="tag">phase/1</span>
+    <span class="tag">topic/token-efficiency</span>
+    <span class="tag">topic/aider</span>
+    <span class="tag">topic/caching</span>
+    <span class="status active">active</span>
+    <time>2026-05-13</time>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="active" onclick="show('context',this)">Context</button>
+  <button onclick="show('pricing',this)">Pricing</button>
+  <button onclick="show('caching',this)">Caching</button>
+  <button onclick="show('aider',this)">Aider Config</button>
+  <button onclick="show('strategies',this)">All Strategies</button>
+  <button onclick="show('related',this)">Related</button>
+</nav>
+
+<main>
+
+<!-- ═══ CONTEXT ═══ -->
+<section id="context" class="tab-panel active">
+  <h2>Why This Matters</h2>
+  <p>GitHub Copilot is moving from credit-based pricing to <strong>token-based pricing from June 1, 2026</strong>. Every input and output token now directly maps to cost. The prior mental model (1 credit ≈ 1 task) is gone.</p>
+  <p>The strategic response: migrate to <strong>Aider + Claude API</strong>, where we have full control over every token. We can cache aggressively, select models per task, compress prompts, and measure everything.</p>
+
+  <div class="callout">
+    <strong>Core equation:</strong> Cost = (input_tokens × $input_rate) + (output_tokens × $output_rate)<br>
+    Cache reads replace fresh input at <strong>10% of the cost</strong>. Output tokens cost 5× more than input.
+    So: maximize cache hits, minimize output verbosity.
+  </div>
+
+  <h2>Key Insight: Where Tokens Come From in Aider</h2>
+  <p>Every Aider request sends:</p>
+  <ol>
+    <li><strong>System prompt</strong> — AWOS rules / coding conventions (large, stable → ideal for caching)</li>
+    <li><strong>Repo map</strong> — summary of the codebase (medium, semi-stable)</li>
+    <li><strong>Read-only files</strong> (added with <code>--read</code>) — stable reference context</li>
+    <li><strong>Editable files</strong> (in chat) — changes each turn</li>
+    <li><strong>Chat history</strong> — grows each turn, summarized by weak model</li>
+    <li><strong>User message</strong> — small, always fresh</li>
+  </ol>
+  <p>Items 1–3 are <em>stable</em> — prime candidates for caching. Items 4–6 change frequently.</p>
+</section>
+
+<!-- ═══ PRICING ═══ -->
+<section id="pricing" class="tab-panel">
+  <h2>Claude API Pricing (verified 2026-05-13)</h2>
+  <table>
+    <tr><th>Model</th><th>Input $/MTok</th><th>Cache Write $/MTok (5-min)</th><th>Cache Read $/MTok</th><th>Output $/MTok</th></tr>
+    <tr><td><strong>claude-sonnet-4-5</strong> (recommended)</td><td>$3.00</td><td>$3.75</td><td><strong>$0.30</strong></td><td>$15.00</td></tr>
+    <tr><td>claude-haiku-3-5 (cheap tasks)</td><td>$0.80</td><td>$1.00</td><td><strong>$0.08</strong></td><td>$4.00</td></tr>
+    <tr><td>claude-haiku-4-5</td><td>$1.00</td><td>$1.25</td><td><strong>$0.10</strong></td><td>$5.00</td></tr>
+    <tr><td>claude-opus-4-5</td><td>$5.00</td><td>$6.25</td><td><strong>$0.50</strong></td><td>$25.00</td></tr>
+  </table>
+  <p>Source: <a href="https://platform.claude.com/docs/en/docs/build-with-claude/prompt-caching">Anthropic prompt caching docs</a></p>
+
+  <h2>Cache Economics</h2>
+  <div class="callout">
+    <strong>Cache read vs fresh input ratio: 10:1 savings</strong><br>
+    If your system prompt is 2,000 tokens and you make 20 requests per session:<br>
+    • Without cache: 20 × 2000 × $3.00/MTok = <strong>$0.12</strong><br>
+    • With cache: 1 write × $3.75/MTok + 19 reads × $0.30/MTok = $0.0075 + $0.0114 = <strong>$0.019</strong><br>
+    • <span class="saving">84% savings on that context alone</span>
+  </div>
+
+  <h2>Minimum Cache Thresholds</h2>
+  <table>
+    <tr><th>Model</th><th>Minimum tokens to cache</th></tr>
+    <tr><td>claude-sonnet-4-5, sonnet-3.7</td><td>1,024 tokens</td></tr>
+    <tr><td>claude-sonnet-4-5+, sonnet-4-6+</td><td>2,048 tokens</td></tr>
+    <tr><td>claude-haiku-3-5</td><td>2,048 tokens</td></tr>
+    <tr><td>claude-haiku-4-5</td><td>4,096 tokens</td></tr>
+  </table>
+  <p><strong>Implication:</strong> Your system prompt + conventions must exceed the threshold. If close, pad to reach it — the savings justify the extra tokens.</p>
+
+  <h2>Cache TTL Options</h2>
+  <ul>
+    <li><strong>5-minute TTL (default)</strong>: 1.25× write cost. Refreshed free when hit. Good for active sessions.</li>
+    <li><strong>1-hour TTL</strong>: 2× write cost. Good when requests are spaced >5 min apart.</li>
+  </ul>
+  <p>Aider uses 5-minute TTL with <code>--cache-keepalive-pings N</code> to prevent expiry (pings every 5 min up to N times).</p>
+</section>
+
+<!-- ═══ CACHING ═══ -->
+<section id="caching" class="tab-panel">
+  <h2>How Claude Prompt Caching Works</h2>
+  <p>Cache is keyed to the exact prefix up to a <code>cache_control</code> breakpoint. The cache prefix must be <strong>100% identical</strong> across requests — any change invalidates it.</p>
+
+  <h3>Cache Ordering (Claude processes in this order)</h3>
+  <ol>
+    <li><code>tools</code> definitions</li>
+    <li><code>system</code> prompt</li>
+    <li><code>messages</code> (conversation history)</li>
+  </ol>
+  <p>Changes to tools invalidate all subsequent caches. Changes to system prompt invalidate message cache. Changes to messages only invalidate message cache.</p>
+
+  <h3>What Can Be Cached</h3>
+  <ul>
+    <li>Tool definitions</li>
+    <li>System messages (entire system prompt)</li>
+    <li>Text in message history</li>
+    <li>Images and documents in messages</li>
+    <li>Tool results</li>
+  </ul>
+
+  <h3>What CANNOT Be Cached</h3>
+  <ul>
+    <li>Thinking blocks (cached indirectly as part of conversation, not directly)</li>
+    <li>Empty text blocks</li>
+    <li>Sub-content blocks (citations sub-blocks)</li>
+  </ul>
+
+  <h3>Automatic vs Explicit Caching</h3>
+  <table>
+    <tr><th>Mode</th><th>How to use</th><th>Best for</th></tr>
+    <tr><td>Automatic</td><td>Top-level <code>cache_control: {type: ephemeral}</code></td><td>Multi-turn conversations — cache breakpoint moves forward automatically</td></tr>
+    <tr><td>Explicit breakpoints</td><td><code>cache_control</code> on individual content blocks (max 4)</td><td>Fine-grained control; different sections cached at different frequencies</td></tr>
+  </table>
+
+  <h3>Cache Invalidation Gotchas</h3>
+  <div class="risk-high">
+    <strong>Never put dynamic content before a cache breakpoint.</strong> Timestamps, per-request context, user messages — these change every call and bust the cache. Put <code>cache_control</code> on the last <em>static</em> block, not on the varying one.
+  </div>
+  <div class="risk-med">
+    <strong>Tool definition changes bust the entire cache.</strong> Keep tool definitions stable during a session. Don't add/remove tools between requests.
+  </div>
+  <div class="risk-med">
+    <strong>Growing conversations: use the 20-block lookback window.</strong> If a conversation grows by &gt;20 blocks between requests without a mid-conversation breakpoint, you'll miss the cache. Add explicit breakpoints at stable points.
+  </div>
+
+  <h3>Pre-Warming the Cache</h3>
+  <p>Send a request with <code>max_tokens=0</code> before users/work begins. This writes the cache without generating output (0 output tokens billed). Do this at session start.</p>
+  <pre><code>client.messages.create(
+    model="claude-sonnet-4-5",
+    max_tokens=0,                          # no output generated
+    system=[{
+        "type": "text",
+        "text": CONVENTIONS_TEXT,
+        "cache_control": {"type": "ephemeral"}
+    }],
+    messages=[{"role": "user", "content": "warmup"}]
+)</code></pre>
+
+  <h3>Tracking Cache Performance</h3>
+  <p>Response usage fields to monitor:</p>
+  <ul>
+    <li><code>cache_read_input_tokens</code>: tokens served from cache (cost 10%)</li>
+    <li><code>cache_creation_input_tokens</code>: tokens written to cache (cost 125%)</li>
+    <li><code>input_tokens</code>: tokens after last cache breakpoint (cost 100%)</li>
+  </ul>
+  <p>Total input = cache_read + cache_creation + input_tokens</p>
+</section>
+
+<!-- ═══ AIDER CONFIG ═══ -->
+<section id="aider" class="tab-panel">
+  <h2>Aider Token-Efficiency Options (verified from aider.chat/docs)</h2>
+
+  <h3>Cache Settings</h3>
+  <table>
+    <tr><th>Option</th><th>Value</th><th>Effect</th></tr>
+    <tr><td><code>--cache-prompts</code></td><td>true</td><td>Enable Claude prompt caching (off by default)</td></tr>
+    <tr><td><code>--cache-keepalive-pings N</code></td><td>3–5</td><td>Ping every 5 min, up to N times, to keep cache alive</td></tr>
+    <tr><td><code>--no-stream</code></td><td>—</td><td>Needed to see cache stats in token report; slight UX tradeoff</td></tr>
+  </table>
+
+  <h3>Repo Map Settings</h3>
+  <table>
+    <tr><th>Option</th><th>Recommended</th><th>Effect</th></tr>
+    <tr><td><code>--map-tokens N</code></td><td>512–1024</td><td>Reduce repo map size (default ~1024-2048). Use 0 to disable entirely on focused work.</td></tr>
+    <tr><td><code>--map-refresh</code></td><td>files</td><td>Refresh map only when files change (not on every message)</td></tr>
+    <tr><td><code>--map-multiplier-no-files</code></td><td>1</td><td>Don't double map when no files in context (default 2×)</td></tr>
+  </table>
+
+  <h3>History / Context Settings</h3>
+  <table>
+    <tr><th>Option</th><th>Recommended</th><th>Effect</th></tr>
+    <tr><td><code>--max-chat-history-tokens N</code></td><td>4096–8192</td><td>Summarize history when it exceeds N tokens (saves repeated history cost)</td></tr>
+    <tr><td><code>--weak-model MODEL</code></td><td>claude-haiku-3-5</td><td>Use cheap model for commit messages and history summarization</td></tr>
+  </table>
+
+  <h3>Model Tiering</h3>
+  <table>
+    <tr><th>Mode</th><th>Config</th><th>Token Cost</th></tr>
+    <tr><td>Standard</td><td><code>--model claude-sonnet-4-5</code></td><td>$3/$15 per MTok in/out</td></tr>
+    <tr><td>Budget</td><td><code>--model claude-haiku-3-5</code></td><td>$0.80/$4 per MTok in/out</td></tr>
+    <tr><td>Architect mode</td><td><code>--architect --editor-model claude-haiku-3-5</code></td><td>Sonnet plans, Haiku writes diffs. 5× output savings.</td></tr>
+  </table>
+
+  <h3>Read-Only Context</h3>
+  <p>Use <code>--read FILE</code> (or <code>/read-only FILE</code> in chat) for files that should be in context but not edited. Aider organizes these separately and they benefit from caching. Don't add files to the editable set unless you plan to edit them — editable files get larger prompts.</p>
+
+  <h3>Recommended .aider.conf.yml for Token Efficiency</h3>
+  <pre><code># .aider.conf.yml — token-optimal config
+model: claude-sonnet-4-5
+weak-model: claude-haiku-3-5
+cache-prompts: true
+cache-keepalive-pings: 3
+map-tokens: 512
+map-refresh: files
+map-multiplier-no-files: 1
+max-chat-history-tokens: 6144
+analytics-disable: true
+llm-history-file: .aider.llm.history
+dark-mode: true</code></pre>
+
+  <h3>.aiderignore (keep repo map lean)</h3>
+  <pre><code># .aiderignore — exclude from repo map to save tokens
+docs/
+*.html
+*.md
+node_modules/
+__pycache__/
+*.pyc
+.git/
+dist/
+build/
+*.log</code></pre>
+  <p>Excluding documentation from the repo map means Aider won't spend tokens describing your HTML/MD files every request. Add them back with <code>--read</code> explicitly when needed.</p>
+</section>
+
+<!-- ═══ STRATEGIES ═══ -->
+<section id="strategies" class="tab-panel">
+  <h2>Complete Token Efficiency Strategy Map</h2>
+
+  <h3>Strategy 1: Claude Prompt Caching (highest ROI)</h3>
+  <ul>
+    <li>Enable: <code>--cache-prompts</code> in Aider</li>
+    <li>Savings: 84%+ on system prompt tokens per session</li>
+    <li>Keep warm: <code>--cache-keepalive-pings 3</code></li>
+    <li>Pre-warm: run <code>scripts/prewarm_cache.py</code> at session start</li>
+    <li>Risk: cache busted if system prompt changes mid-session</li>
+  </ul>
+
+  <h3>Strategy 2: Repo Map Minimization</h3>
+  <ul>
+    <li>Set <code>--map-tokens 512</code> (or 0 for single-file work)</li>
+    <li>Maintain lean <code>.aiderignore</code> to exclude docs, HTML, test fixtures</li>
+    <li>Use <code>--map-refresh files</code> not <code>always</code></li>
+    <li>Savings: repo map can be 1000–3000 tokens per request — this cuts 50–75%</li>
+  </ul>
+
+  <h3>Strategy 3: Context Window Discipline</h3>
+  <ul>
+    <li>Only add files you plan to edit in this session: <code>/add FILE</code></li>
+    <li>Drop files when done: <code>/drop FILE</code></li>
+    <li>Use <code>/read-only</code> for reference files (cached separately, cheaper)</li>
+    <li>Set <code>--max-chat-history-tokens 6144</code> — history is summarized, not truncated</li>
+  </ul>
+
+  <h3>Strategy 4: Model Tiering</h3>
+  <ul>
+    <li>Haiku for: commit messages, quick Q&A, boilerplate generation, simple edits</li>
+    <li>Sonnet for: architecture decisions, complex logic, debugging</li>
+    <li>Architect mode for: large multi-file refactors (Sonnet plans → Haiku writes)</li>
+    <li>Never use Opus unless explicitly needed — 10× Haiku cost for marginal gain</li>
+  </ul>
+
+  <h3>Strategy 5: Output Token Minimization</h3>
+  <p>Output tokens cost 5× more than input. Minimize them by:</p>
+  <ul>
+    <li>Ask for diffs, not full file rewrites (<code>diff</code> edit format is Aider's default for Sonnet)</li>
+    <li>Avoid "explain your reasoning" unless debugging</li>
+    <li>Use concise conventions file (no verbose prose)</li>
+    <li>Prefer yes/no or code-only responses where possible</li>
+  </ul>
+
+  <h3>Strategy 6: Conventions File Compression</h3>
+  <ul>
+    <li>The AWOS <code>.github/copilot-instructions.md</code> is ~700 lines. Aider doesn't need all of it.</li>
+    <li>Create <code>CONVENTIONS.md</code>: 50–100 lines of dense, machine-optimized rules</li>
+    <li>Load with <code>--read CONVENTIONS.md</code> (cached, read-only)</li>
+    <li>This single file gets cached on first request and costs $0.30/MTok after that</li>
+  </ul>
+
+  <h3>Strategy 7: Batch API for Non-Urgent Work</h3>
+  <ul>
+    <li>Anthropic's Batch API gives 50% discount on both input and output tokens</li>
+    <li>Tradeoff: responses take up to 24 hours (async)</li>
+    <li>Use for: code review, documentation generation, test case creation</li>
+    <li>Not suitable for interactive development</li>
+  </ul>
+
+  <h3>Strategy 8: Token Tracking and Feedback Loop</h3>
+  <ul>
+    <li>Enable: <code>--llm-history-file .aider.llm.history</code></li>
+    <li>Parse with <code>scripts/token_report.py</code> to get: total tokens, cache hit rate, cost estimate</li>
+    <li>Review weekly — identify which tasks are token-heavy and optimize them</li>
+    <li>Target: cache hit rate &gt; 70% for system prompt tokens</li>
+  </ul>
+
+  <h2>Risk Register</h2>
+  <div class="risk-high">
+    <strong>HIGH: Cache invalidation from dynamic system prompt content.</strong>
+    If CONVENTIONS.md or tool definitions change mid-session, entire cache busted.
+    Mitigation: freeze CONVENTIONS.md per session. Only update between sessions.
+  </div>
+  <div class="risk-med">
+    <strong>MED: Cache miss on first request.</strong>
+    First request always pays write cost (125%). Need &gt;2 requests per session to break even.
+    Mitigation: pre-warm cache at session start with prewarm script.
+  </div>
+  <div class="risk-med">
+    <strong>MED: Haiku quality degradation for complex tasks.</strong>
+    Haiku is cheaper but less capable. Wrong model selection can cause retries, costing more.
+    Mitigation: clear task-complexity guidelines. Default Sonnet for all code changes.
+  </div>
+</section>
+
+<!-- ═══ RELATED ═══ -->
+<section id="related" class="tab-panel">
+  <h2>Related Files</h2>
+  <table>
+    <tr><th>File</th><th>Relationship</th></tr>
+    <tr><td><a href="../specs/token_efficiency_spec.html">docs/specs/token_efficiency_spec.html</a></td><td>Implementation spec derived from this research</td></tr>
+    <tr><td><a href="../../tasks/active/phase1_aider_setup.html">tasks/active/phase1_aider_setup.html</a></td><td>Active task: atomic setup steps</td></tr>
+    <tr><td><a href="../../memories/repo/project_structure.md">memories/repo/project_structure.md</a></td><td>Canonical project metrics and cost table</td></tr>
+  </table>
+
+  <h2>Sources (verified)</h2>
+  <ul>
+    <li><a href="https://platform.claude.com/docs/en/docs/build-with-claude/prompt-caching">Anthropic Prompt Caching Docs</a> — pricing, mechanics, best practices</li>
+    <li><a href="https://aider.chat/docs/config/options.html">Aider Options Reference</a> — all CLI flags</li>
+    <li><a href="https://aider.chat/docs/usage/caching.html">Aider Caching Guide</a> — Aider-specific caching behaviour</li>
+  </ul>
+</section>
+
+</main>
+
+<script>
+function show(id, btn) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('nav.tabs button').forEach(b => b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  btn.classList.add('active');
+}
+</script>
+</body>
+</html>

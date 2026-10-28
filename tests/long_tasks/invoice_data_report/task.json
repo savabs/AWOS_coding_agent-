@@ -1,0 +1,8 @@
+{
+  "name": "invoice_data_report",
+  "kind": "data",
+  "goal": "Here are three months of invoice exports from our billing system (the data/ folder, June to August 2026). Give me reports/top_customers.csv with our 10 biggest customers by total billed in EUR, and reports/duplicate_invoices.csv listing invoices that were billed twice (or more). The exports aren't perfectly clean. README.md describes the columns, the currency-rate file and exactly what the two reports should look like.",
+  "max_turns": 150,
+  "max_cost_usd": 1.0,
+  "timeout_min": 30
+}

@@ -1,7 +1,7 @@
 """ToolPerformanceTracker: Records success/failure rates per tool, model, task type.
 
 Enables data-driven escalation and self-improvement by tracking empirical
-performance across the 5-tier model ladder and all task types.
+performance across the 6-tier model ladder and all task types.
 
 Storage: .awos/performance.json (append-only JSONL, auto-rolled monthly).
 """

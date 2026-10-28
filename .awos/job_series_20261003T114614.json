@@ -1,0 +1,1612 @@
+{
+  "series": "backupd",
+  "timestamp": "20261003T114614",
+  "arms": [
+    "off",
+    "on"
+  ],
+  "jobs": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+  ],
+  "dry_run": false,
+  "resumed": false,
+  "repeat": 1,
+  "model_pin": {
+    "model": "deepseek/deepseek-v4-flash",
+    "blocked_ladder_ids": [
+      "deepseek-v4-pro"
+    ],
+    "env": {
+      "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+      "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+      "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+      "AWOS_GOAL_CHECK": "0"
+    },
+    "routing": {
+      "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+      "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0"
+    }
+  },
+  "provenance": {
+    "git": {
+      "sha": "4b07411a386a33c80a9a011defb87c3afbab4263",
+      "branch": "claude/bench-run",
+      "dirty": true,
+      "dirty_paths": [
+        "awos/budget.json"
+      ]
+    },
+    "config": {
+      "sha256": "de4fc2d7cb5827fac81b98f3478b0fdd6eecf69afefd5e1ea548e4ed7e1cd4e5",
+      "series_sha256": "b3e1f5a0def418215cf72ce2a23e53bf1e7b7a78c261144baccd17d98b18c53f"
+    },
+    "started_at": "2026-10-03T06:16:14Z",
+    "finished_at": "2026-10-03T08:37:28Z"
+  },
+  "preflight": {
+    "status": "ok",
+    "jobs": {
+      "1": [],
+      "2": [],
+      "3": [],
+      "4": [],
+      "5": [],
+      "6": [],
+      "7": [],
+      "8": [],
+      "9": [],
+      "10": [],
+      "11": [],
+      "12": []
+    },
+    "invalid_jobs": [],
+    "seconds": 22.5
+  },
+  "valid": true,
+  "violations": [
+    {
+      "severity": "warn",
+      "check": "state_write_retry",
+      "arm": "on",
+      "job": 5,
+      "repeat": 1,
+      "detail": "notebook reply truncated (finish_reason=length), retried"
+    },
+    {
+      "severity": "warn",
+      "check": "state_write_retry",
+      "arm": "on",
+      "job": 6,
+      "repeat": 1,
+      "detail": "notebook reply truncated (finish_reason=length), retried"
+    },
+    {
+      "severity": "warn",
+      "check": "state_write_retry",
+      "arm": "on",
+      "job": 10,
+      "repeat": 1,
+      "detail": "notebook reply truncated (finish_reason=length), retried"
+    }
+  ],
+  "run_dir": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614",
+  "stopped": null,
+  "results": [
+    {
+      "arm": "off",
+      "job": 1,
+      "id": "01_missing_source_error",
+      "dir": "01_missing_source_error",
+      "solved": true,
+      "hidden_passed": 7,
+      "hidden_failed": 0,
+      "failing_tests": [],
+      "hidden_summary": "7 passed in 0.15s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 1,
+      "llm_calls": 2,
+      "input_tokens": 94674,
+      "output_tokens": 4298,
+      "cost_usd": 0.009187,
+      "notebook_cost_usd": 0,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 14,
+      "usage_source": "ledger",
+      "billed_usd": 0.0,
+      "minutes": 2.38,
+      "timed_out": false,
+      "notebook_chars": 0,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "557e5dd8b23a93bc2c5f968dc99f0bb46f7327fc9c795fbde57ab29f4446b24a",
+        "project_files": 23,
+        "task_sha256": "b548dfba9ed3b71291fd538f6968fffc543dc49bb0b7ceafd20ce8e6df35de07",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/01_missing_source_error",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/off/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "0",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "off",
+          "AWOS_SESSION_ID": "ce75c0e858b053b844f86a47"
+        },
+        "recorded_at": "2026-10-03T06:16:40Z"
+      },
+      "repeat": 1
+    },
+    {
+      "arm": "on",
+      "job": 1,
+      "id": "01_missing_source_error",
+      "dir": "01_missing_source_error",
+      "solved": false,
+      "hidden_passed": 6,
+      "hidden_failed": 1,
+      "failing_tests": [
+        "tests/test_hidden_j01_missing_source.py::test_run_backup_raises_project_error"
+      ],
+      "hidden_summary": "1 failed, 6 passed in 0.18s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 2,
+      "llm_calls": 4,
+      "input_tokens": 107739,
+      "output_tokens": 14766,
+      "cost_usd": 0.012202,
+      "notebook_cost_usd": 0.000186,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 14,
+      "usage_source": "ledger",
+      "billed_usd": 0.005616,
+      "minutes": 3.05,
+      "timed_out": false,
+      "notebook_chars": 1201,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "557e5dd8b23a93bc2c5f968dc99f0bb46f7327fc9c795fbde57ab29f4446b24a",
+        "project_files": 23,
+        "task_sha256": "b548dfba9ed3b71291fd538f6968fffc543dc49bb0b7ceafd20ce8e6df35de07",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/01_missing_source_error",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/on/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "1",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "on",
+          "AWOS_SESSION_ID": "031448a28169a9198baef4ff"
+        },
+        "recorded_at": "2026-10-03T06:19:39Z"
+      },
+      "repeat": 1
+    },
+    {
+      "arm": "off",
+      "job": 2,
+      "id": "02_list_backups",
+      "dir": "02_list_backups",
+      "solved": true,
+      "hidden_passed": 8,
+      "hidden_failed": 0,
+      "failing_tests": [],
+      "hidden_summary": "8 passed in 0.07s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 1,
+      "llm_calls": 2,
+      "input_tokens": 119994,
+      "output_tokens": 5130,
+      "cost_usd": 0.011587,
+      "notebook_cost_usd": 0,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 17,
+      "usage_source": "ledger",
+      "billed_usd": 0.014331,
+      "minutes": 3.43,
+      "timed_out": false,
+      "notebook_chars": 0,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "17c10cbd0452a8eee90eee5a8b63eb97a1960a99f81e25e7265b28537cda90d7",
+        "project_files": 23,
+        "task_sha256": "655fa621d8baeaba800b8cfaed858ce234ef725deb3db26d432a82710645d15e",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/02_list_backups",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/off/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "0",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "off",
+          "AWOS_SESSION_ID": "3e235ba4faa8f03d3ae941c0"
+        },
+        "recorded_at": "2026-10-03T06:23:18Z"
+      },
+      "repeat": 1
+    },
+    {
+      "arm": "on",
+      "job": 2,
+      "id": "02_list_backups",
+      "dir": "02_list_backups",
+      "solved": true,
+      "hidden_passed": 8,
+      "hidden_failed": 0,
+      "failing_tests": [],
+      "hidden_summary": "8 passed in 0.07s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 1,
+      "llm_calls": 4,
+      "input_tokens": 146633,
+      "output_tokens": 12050,
+      "cost_usd": 0.015183,
+      "notebook_cost_usd": 0.000738,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 16,
+      "usage_source": "ledger",
+      "billed_usd": 0.005928,
+      "minutes": 3.89,
+      "timed_out": false,
+      "notebook_chars": 2001,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "17c10cbd0452a8eee90eee5a8b63eb97a1960a99f81e25e7265b28537cda90d7",
+        "project_files": 23,
+        "task_sha256": "655fa621d8baeaba800b8cfaed858ce234ef725deb3db26d432a82710645d15e",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/02_list_backups",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/on/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "1",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "on",
+          "AWOS_SESSION_ID": "17a6e347b14e382234e062d5"
+        },
+        "recorded_at": "2026-10-03T06:28:11Z"
+      },
+      "repeat": 1
+    },
+    {
+      "arm": "off",
+      "job": 3,
+      "id": "03_cli_handlers_refactor",
+      "dir": "03_cli_handlers_refactor",
+      "solved": true,
+      "hidden_passed": 14,
+      "hidden_failed": 0,
+      "failing_tests": [],
+      "hidden_summary": "14 passed in 0.08s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 1,
+      "llm_calls": 2,
+      "input_tokens": 142510,
+      "output_tokens": 9062,
+      "cost_usd": 0.014287,
+      "notebook_cost_usd": 0,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 17,
+      "usage_source": "ledger",
+      "billed_usd": 0.00737,
+      "minutes": 1.86,
+      "timed_out": false,
+      "notebook_chars": 0,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "61ec2f8a356a6b98c3a4ecb601c6e5321ac980d2ff738a35842446beead46a89",
+        "project_files": 23,
+        "task_sha256": "038684338a23567cca1371e2d16b010e3128fc9f527a13748f120cf4d48cdf7c",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/03_cli_handlers_refactor",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/off/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "0",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "off",
+          "AWOS_SESSION_ID": "44c55bf96f1d569195499738"
+        },
+        "recorded_at": "2026-10-03T06:32:39Z"
+      },
+      "repeat": 1
+    },
+    {
+      "arm": "on",
+      "job": 3,
+      "id": "03_cli_handlers_refactor",
+      "dir": "03_cli_handlers_refactor",
+      "solved": true,
+      "hidden_passed": 14,
+      "hidden_failed": 0,
+      "failing_tests": [],
+      "hidden_summary": "14 passed in 0.08s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 1,
+      "llm_calls": 4,
+      "input_tokens": 33604,
+      "output_tokens": 8377,
+      "cost_usd": 0.004473,
+      "notebook_cost_usd": 0.000313,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 5,
+      "usage_source": "ledger",
+      "billed_usd": 0.006027,
+      "minutes": 1.79,
+      "timed_out": false,
+      "notebook_chars": 2622,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "61ec2f8a356a6b98c3a4ecb601c6e5321ac980d2ff738a35842446beead46a89",
+        "project_files": 23,
+        "task_sha256": "038684338a23567cca1371e2d16b010e3128fc9f527a13748f120cf4d48cdf7c",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/03_cli_handlers_refactor",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/on/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "1",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "on",
+          "AWOS_SESSION_ID": "7b9b67ba4ce6c055b731df4c"
+        },
+        "recorded_at": "2026-10-03T06:35:20Z"
+      },
+      "repeat": 1
+    },
+    {
+      "arm": "off",
+      "job": 4,
+      "id": "04_min_free_space",
+      "dir": "04_min_free_space",
+      "solved": true,
+      "hidden_passed": 12,
+      "hidden_failed": 0,
+      "failing_tests": [],
+      "hidden_summary": "12 passed in 0.08s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 6,
+      "llm_calls": 3,
+      "input_tokens": 478741,
+      "output_tokens": 13609,
+      "cost_usd": 0.045017,
+      "notebook_cost_usd": 0,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 40,
+      "usage_source": "ledger",
+      "billed_usd": 0.009796,
+      "minutes": 5.61,
+      "timed_out": false,
+      "notebook_chars": 0,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "7de47633b75cfbdcd2ad2c8d0e01ab454ff97fadc574fed1f2277cb88653909b",
+        "project_files": 23,
+        "task_sha256": "6259ffa05023e49e60c4e3992666ec5791dfb04dc6a961fe2cf03d8985740ee2",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/04_min_free_space",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/off/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "0",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "off",
+          "AWOS_SESSION_ID": "159cc5de83f1b83eb3c07127"
+        },
+        "recorded_at": "2026-10-03T06:37:44Z"
+      },
+      "repeat": 1
+    },
+    {
+      "arm": "on",
+      "job": 4,
+      "id": "04_min_free_space",
+      "dir": "04_min_free_space",
+      "solved": false,
+      "hidden_passed": 9,
+      "hidden_failed": 3,
+      "failing_tests": [
+        "tests/test_hidden_j04_min_free_space.py::test_not_enough_space_refuses_the_run",
+        "tests/test_hidden_j04_min_free_space.py::test_env_can_lower_the_limit",
+        "tests/test_hidden_j04_min_free_space.py::test_env_can_raise_the_limit"
+      ],
+      "hidden_summary": "3 failed, 9 passed in 0.16s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 7,
+      "llm_calls": 5,
+      "input_tokens": 611875,
+      "output_tokens": 39863,
+      "cost_usd": 0.061513,
+      "notebook_cost_usd": 0.000878,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 48,
+      "usage_source": "ledger",
+      "billed_usd": 0.039342,
+      "minutes": 6.88,
+      "timed_out": false,
+      "notebook_chars": 3327,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "7de47633b75cfbdcd2ad2c8d0e01ab454ff97fadc574fed1f2277cb88653909b",
+        "project_files": 23,
+        "task_sha256": "6259ffa05023e49e60c4e3992666ec5791dfb04dc6a961fe2cf03d8985740ee2",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/04_min_free_space",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/on/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "1",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "on",
+          "AWOS_SESSION_ID": "d14a52f642b5cbb8627e5e70"
+        },
+        "recorded_at": "2026-10-03T06:43:57Z"
+      },
+      "repeat": 1
+    },
+    {
+      "arm": "off",
+      "job": 5,
+      "id": "05_partial_archive_bug",
+      "dir": "05_partial_archive_bug",
+      "solved": false,
+      "hidden_passed": 2,
+      "hidden_failed": 4,
+      "failing_tests": [
+        "tests/test_hidden_j05_partial_archive.py::test_failed_write_leaves_nothing_behind[true-ZipFile-write]",
+        "tests/test_hidden_j05_partial_archive.py::test_failed_write_leaves_nothing_behind[false-TarFile-add]",
+        "tests/test_hidden_j05_partial_archive.py::test_monitoring_still_sees_the_previous_backup",
+        "tests/test_hidden_j05_partial_archive.py::test_run_backup_raises_project_error"
+      ],
+      "hidden_summary": "4 failed, 2 passed in 0.15s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 1,
+      "llm_calls": 2,
+      "input_tokens": 165425,
+      "output_tokens": 9663,
+      "cost_usd": 0.016433,
+      "notebook_cost_usd": 0,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 17,
+      "usage_source": "ledger",
+      "billed_usd": 0.007417,
+      "minutes": 5.23,
+      "timed_out": false,
+      "notebook_chars": 0,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "06e62140f5bae5f178e044725530dc1412ca67854a06640055dffd318f5aca83",
+        "project_files": 23,
+        "task_sha256": "e062105ba5a5c158894f60a1db3ce14856f01d09241fed14978a993015346bb5",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/05_partial_archive_bug",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/off/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "0",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "off",
+          "AWOS_SESSION_ID": "f0abfa60332daaee19897186"
+        },
+        "recorded_at": "2026-10-03T06:51:27Z"
+      },
+      "repeat": 1
+    },
+    {
+      "arm": "on",
+      "job": 5,
+      "id": "05_partial_archive_bug",
+      "dir": "05_partial_archive_bug",
+      "solved": true,
+      "hidden_passed": 6,
+      "hidden_failed": 0,
+      "failing_tests": [],
+      "hidden_summary": "6 passed in 0.08s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 4,
+      "llm_calls": 5,
+      "input_tokens": 302035,
+      "output_tokens": 24943,
+      "cost_usd": 0.031296,
+      "notebook_cost_usd": 0.001384,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 25,
+      "usage_source": "ledger",
+      "billed_usd": 0.018848,
+      "minutes": 4.68,
+      "timed_out": false,
+      "notebook_chars": 3417,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "06e62140f5bae5f178e044725530dc1412ca67854a06640055dffd318f5aca83",
+        "project_files": 23,
+        "task_sha256": "e062105ba5a5c158894f60a1db3ce14856f01d09241fed14978a993015346bb5",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/05_partial_archive_bug",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/on/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "1",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "on",
+          "AWOS_SESSION_ID": "44a95c5e9b49c24f3dec58e1"
+        },
+        "recorded_at": "2026-10-03T06:57:17Z"
+      },
+      "repeat": 1
+    },
+    {
+      "arm": "off",
+      "job": 6,
+      "id": "06_status_report",
+      "dir": "06_status_report",
+      "solved": false,
+      "hidden_passed": 2,
+      "hidden_failed": 5,
+      "failing_tests": [
+        "tests/test_hidden_j06_status.py::test_report_dict",
+        "tests/test_hidden_j06_status.py::test_text_layout",
+        "tests/test_hidden_j06_status.py::test_json_view",
+        "tests/test_hidden_j06_status.py::test_json_env_wins_over_ini",
+        "tests/test_hidden_j06_status.py::test_no_backups"
+      ],
+      "hidden_summary": "5 failed, 2 passed in 0.11s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 2,
+      "llm_calls": 3,
+      "input_tokens": 133726,
+      "output_tokens": 9316,
+      "cost_usd": 0.013551,
+      "notebook_cost_usd": 0,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 17,
+      "usage_source": "ledger",
+      "billed_usd": 0.011257,
+      "minutes": 4.04,
+      "timed_out": false,
+      "notebook_chars": 0,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "ebc8a19f550ecd019c0a6323c798e19df06d36cc44ab9431b5803cd8ba215dc5",
+        "project_files": 23,
+        "task_sha256": "29ea270c0be69bb74160703db6f3cacda507f2ea8eb29b4be2313d85b33e47a1",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/06_status_report",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/off/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "0",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "off",
+          "AWOS_SESSION_ID": "a7bf551d967aa1f855c1eaf8"
+        },
+        "recorded_at": "2026-10-03T07:02:35Z"
+      },
+      "repeat": 1
+    },
+    {
+      "arm": "on",
+      "job": 6,
+      "id": "06_status_report",
+      "dir": "06_status_report",
+      "solved": false,
+      "hidden_passed": 3,
+      "hidden_failed": 4,
+      "failing_tests": [
+        "tests/test_hidden_j06_status.py::test_report_dict",
+        "tests/test_hidden_j06_status.py::test_json_view",
+        "tests/test_hidden_j06_status.py::test_json_env_wins_over_ini",
+        "tests/test_hidden_j06_status.py::test_no_backups"
+      ],
+      "hidden_summary": "4 failed, 3 passed in 0.11s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 2,
+      "llm_calls": 5,
+      "input_tokens": 161788,
+      "output_tokens": 29182,
+      "cost_usd": 0.019564,
+      "notebook_cost_usd": 0.001288,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 16,
+      "usage_source": "ledger",
+      "billed_usd": 0.008107,
+      "minutes": 4.85,
+      "timed_out": false,
+      "notebook_chars": 3417,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "ebc8a19f550ecd019c0a6323c798e19df06d36cc44ab9431b5803cd8ba215dc5",
+        "project_files": 23,
+        "task_sha256": "29ea270c0be69bb74160703db6f3cacda507f2ea8eb29b4be2313d85b33e47a1",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/06_status_report",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/on/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "1",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "on",
+          "AWOS_SESSION_ID": "7414ae169294154e1923d622"
+        },
+        "recorded_at": "2026-10-03T07:07:13Z"
+      },
+      "repeat": 1
+    },
+    {
+      "arm": "off",
+      "job": 7,
+      "id": "07_verify_command",
+      "dir": "07_verify_command",
+      "solved": false,
+      "hidden_passed": 9,
+      "hidden_failed": 1,
+      "failing_tests": [
+        "tests/test_hidden_j07_verify.py::test_corrupted_zip_member_is_reported"
+      ],
+      "hidden_summary": "1 failed, 9 passed in 0.12s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 1,
+      "llm_calls": 2,
+      "input_tokens": 175473,
+      "output_tokens": 5924,
+      "cost_usd": 0.016666,
+      "notebook_cost_usd": 0,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 18,
+      "usage_source": "ledger",
+      "billed_usd": 0.017227,
+      "minutes": 5.07,
+      "timed_out": false,
+      "notebook_chars": 0,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "0f825936037cff1a7b3e3aa8de86ab9b79950eaae8738482ed40602f10090dbb",
+        "project_files": 23,
+        "task_sha256": "5e3f41a84b0b5c6f5cc2acfa903779082b247c04cf25a666294ff2826a4d6abd",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/07_verify_command",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/off/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "0",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "off",
+          "AWOS_SESSION_ID": "4da66671960feeeaa25b010b"
+        },
+        "recorded_at": "2026-10-03T07:12:41Z"
+      },
+      "repeat": 1
+    },
+    {
+      "arm": "on",
+      "job": 7,
+      "id": "07_verify_command",
+      "dir": "07_verify_command",
+      "solved": true,
+      "hidden_passed": 10,
+      "hidden_failed": 0,
+      "failing_tests": [],
+      "hidden_summary": "10 passed in 0.08s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 2,
+      "llm_calls": 3,
+      "input_tokens": 189994,
+      "output_tokens": 9151,
+      "cost_usd": 0.018529,
+      "notebook_cost_usd": 0.000537,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 18,
+      "usage_source": "ledger",
+      "billed_usd": 0.01315,
+      "minutes": 5.72,
+      "timed_out": false,
+      "notebook_chars": 3417,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "0f825936037cff1a7b3e3aa8de86ab9b79950eaae8738482ed40602f10090dbb",
+        "project_files": 23,
+        "task_sha256": "5e3f41a84b0b5c6f5cc2acfa903779082b247c04cf25a666294ff2826a4d6abd",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/07_verify_command",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/on/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "1",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "on",
+          "AWOS_SESSION_ID": "c633d120250eaf7529c99c58"
+        },
+        "recorded_at": "2026-10-03T07:18:23Z"
+      },
+      "repeat": 1
+    },
+    {
+      "arm": "off",
+      "job": 8,
+      "id": "08_exclude_dir_patterns",
+      "dir": "08_exclude_dir_patterns",
+      "solved": true,
+      "hidden_passed": 6,
+      "hidden_failed": 0,
+      "failing_tests": [],
+      "hidden_summary": "6 passed in 0.08s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 1,
+      "llm_calls": 2,
+      "input_tokens": 72862,
+      "output_tokens": 7200,
+      "cost_usd": 0.007759,
+      "notebook_cost_usd": 0,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 10,
+      "usage_source": "ledger",
+      "billed_usd": 0.002076,
+      "minutes": 4.27,
+      "timed_out": false,
+      "notebook_chars": 0,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "e47dad9a9f678f6c51639042ec5f1626d16d7ed70c99035636ffcbcfc5b386f8",
+        "project_files": 23,
+        "task_sha256": "4916ec656be1667019e78eaa3de66b6cefe2dce4646d631c369e9877e4477a30",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/08_exclude_dir_patterns",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/off/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "0",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "off",
+          "AWOS_SESSION_ID": "f115d23e8b0b7127bab4affc"
+        },
+        "recorded_at": "2026-10-03T07:24:51Z"
+      },
+      "repeat": 1
+    },
+    {
+      "arm": "on",
+      "job": 8,
+      "id": "08_exclude_dir_patterns",
+      "dir": "08_exclude_dir_patterns",
+      "solved": true,
+      "hidden_passed": 6,
+      "hidden_failed": 0,
+      "failing_tests": [],
+      "hidden_summary": "6 passed in 0.07s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 1,
+      "llm_calls": 3,
+      "input_tokens": 107175,
+      "output_tokens": 18768,
+      "cost_usd": 0.012861,
+      "notebook_cost_usd": 0.000449,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 11,
+      "usage_source": "ledger",
+      "billed_usd": 0.009874,
+      "minutes": 4.23,
+      "timed_out": false,
+      "notebook_chars": 3417,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "e47dad9a9f678f6c51639042ec5f1626d16d7ed70c99035636ffcbcfc5b386f8",
+        "project_files": 23,
+        "task_sha256": "4916ec656be1667019e78eaa3de66b6cefe2dce4646d631c369e9877e4477a30",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/08_exclude_dir_patterns",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/on/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "1",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "on",
+          "AWOS_SESSION_ID": "ce4d3eb5c254df37bd5b097a"
+        },
+        "recorded_at": "2026-10-03T07:29:44Z"
+      },
+      "repeat": 1
+    },
+    {
+      "arm": "off",
+      "job": 9,
+      "id": "09_failure_notifications",
+      "dir": "09_failure_notifications",
+      "solved": false,
+      "hidden_passed": 13,
+      "hidden_failed": 1,
+      "failing_tests": [
+        "tests/test_hidden_j09_notify_on.py::test_unreachable_mail_server_does_not_hide_the_error"
+      ],
+      "hidden_summary": "1 failed, 13 passed in 0.13s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 7,
+      "llm_calls": 4,
+      "input_tokens": 710277,
+      "output_tokens": 25715,
+      "cost_usd": 0.067766,
+      "notebook_cost_usd": 0,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 57,
+      "usage_source": "ledger",
+      "billed_usd": 0.040238,
+      "minutes": 12.44,
+      "timed_out": false,
+      "notebook_chars": 0,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "3a06d69bc3c28a86fee97fe6ebd87efd042ad030f6b040130f146624d083e1b7",
+        "project_files": 23,
+        "task_sha256": "6b870f0ea06369f9f73b39f28f4c012d0380ea9897b2592c6e25d99097b00e1d",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/09_failure_notifications",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/off/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "0",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "off",
+          "AWOS_SESSION_ID": "0490000fb6698da242f5093a"
+        },
+        "recorded_at": "2026-10-03T07:34:34Z"
+      },
+      "repeat": 1
+    },
+    {
+      "arm": "on",
+      "job": 9,
+      "id": "09_failure_notifications",
+      "dir": "09_failure_notifications",
+      "solved": false,
+      "hidden_passed": 11,
+      "hidden_failed": 156,
+      "failing_tests": [
+        "tests/test_hidden_j09_notify_on.py::test_failed_run[always-1]",
+        "tests/test_hidden_j09_notify_on.py::test_failed_run[failure-1]",
+        "tests/test_hidden_j09_notify_on.py::test_space_failure_is_mailed"
+      ],
+      "hidden_summary": "3 failed, 11 passed in 0.15s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 4,
+      "llm_calls": 3,
+      "input_tokens": 477049,
+      "output_tokens": 15824,
+      "cost_usd": 0.045258,
+      "notebook_cost_usd": 0.000552,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 35,
+      "usage_source": "ledger",
+      "billed_usd": 0.033287,
+      "minutes": 14.32,
+      "timed_out": false,
+      "notebook_chars": 3417,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "3a06d69bc3c28a86fee97fe6ebd87efd042ad030f6b040130f146624d083e1b7",
+        "project_files": 23,
+        "task_sha256": "6b870f0ea06369f9f73b39f28f4c012d0380ea9897b2592c6e25d99097b00e1d",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/09_failure_notifications",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/on/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "1",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "on",
+          "AWOS_SESSION_ID": "edfb21bdb85dabb908553692"
+        },
+        "recorded_at": "2026-10-03T07:47:37Z"
+      },
+      "repeat": 1
+    },
+    {
+      "arm": "off",
+      "job": 10,
+      "id": "10_keep_last",
+      "dir": "10_keep_last",
+      "solved": false,
+      "hidden_passed": 9,
+      "hidden_failed": 1,
+      "failing_tests": [
+        "tests/test_hidden_j10_keep_last.py::test_bad_values_are_config_errors[-1]"
+      ],
+      "hidden_summary": "1 failed, 9 passed in 0.11s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 6,
+      "llm_calls": 3,
+      "input_tokens": 228378,
+      "output_tokens": 17132,
+      "cost_usd": 0.023358,
+      "notebook_cost_usd": 0,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 20,
+      "usage_source": "ledger",
+      "billed_usd": 0.011129,
+      "minutes": 3.41,
+      "timed_out": false,
+      "notebook_chars": 0,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "f2b7b3320917467053f17b74b7cf24ef79b19ebcb455d7bd9c4948a1ec8bd732",
+        "project_files": 23,
+        "task_sha256": "b424ded2dff3122b773e12febff9c170e6f5501a749220560d30c8f9741a47ac",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/10_keep_last",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/off/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "0",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "off",
+          "AWOS_SESSION_ID": "2459bc8560d88780db4d3415"
+        },
+        "recorded_at": "2026-10-03T08:02:33Z"
+      },
+      "repeat": 1
+    },
+    {
+      "arm": "on",
+      "job": 10,
+      "id": "10_keep_last",
+      "dir": "10_keep_last",
+      "solved": false,
+      "hidden_passed": 9,
+      "hidden_failed": 1,
+      "failing_tests": [
+        "tests/test_hidden_j10_keep_last.py::test_bad_values_are_config_errors[-1]"
+      ],
+      "hidden_summary": "1 failed, 9 passed in 0.12s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 4,
+      "llm_calls": 5,
+      "input_tokens": 230736,
+      "output_tokens": 16721,
+      "cost_usd": 0.023495,
+      "notebook_cost_usd": 0.001332,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 21,
+      "usage_source": "ledger",
+      "billed_usd": 0.003375,
+      "minutes": 4.16,
+      "timed_out": false,
+      "notebook_chars": 3417,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "f2b7b3320917467053f17b74b7cf24ef79b19ebcb455d7bd9c4948a1ec8bd732",
+        "project_files": 23,
+        "task_sha256": "b424ded2dff3122b773e12febff9c170e6f5501a749220560d30c8f9741a47ac",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/10_keep_last",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/on/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "1",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "on",
+          "AWOS_SESSION_ID": "7a7e0a16ffbddabf3f1d588f"
+        },
+        "recorded_at": "2026-10-03T08:06:41Z"
+      },
+      "repeat": 1
+    },
+    {
+      "arm": "off",
+      "job": 11,
+      "id": "11_restore_command",
+      "dir": "11_restore_command",
+      "solved": false,
+      "hidden_passed": 3,
+      "hidden_failed": 9,
+      "failing_tests": [
+        "tests/test_hidden_j11_restore.py::test_restore_latest",
+        "tests/test_hidden_j11_restore.py::test_restore_named_tar_into_empty_dir",
+        "tests/test_hidden_j11_restore.py::test_dest_paths_are_expanded_like_settings",
+        "tests/test_hidden_j11_restore.py::test_refuses_non_empty_destination",
+        "tests/test_hidden_j11_restore.py::test_refuses_file_as_destination",
+        "tests/test_hidden_j11_restore.py::test_unsafe_archives_extract_nothing[make_zip-backup-20200313-000000.zip-members0]",
+        "tests/test_hidden_j11_restore.py::test_unsafe_archives_extract_nothing[make_tar-backup-20200313-000000.tar-members1]",
+        "tests/test_hidden_j11_restore.py::test_unsafe_archives_extract_nothing[make_tar-backup-20200313-000000.tar-members2]",
+        "tests/test_hidden_j11_restore.py::test_restore_is_logged"
+      ],
+      "hidden_summary": "9 failed, 3 passed in 0.20s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 2,
+      "llm_calls": 2,
+      "input_tokens": 256053,
+      "output_tokens": 8267,
+      "cost_usd": 0.024252,
+      "notebook_cost_usd": 0,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 26,
+      "usage_source": "ledger",
+      "billed_usd": 0.027872,
+      "minutes": 5.55,
+      "timed_out": false,
+      "notebook_chars": 0,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "8e8564285b2e7a38dcd621d979d84b5d3b3679a9f61906eb3d9975a3dffc0053",
+        "project_files": 23,
+        "task_sha256": "44e70a7c6f9fcbba3380ae23ebf1cd55d70563a62ff4584ff1c9cef9a258dfda",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/11_restore_command",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/off/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "0",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "off",
+          "AWOS_SESSION_ID": "53926a402c6e0a5d27a0e755"
+        },
+        "recorded_at": "2026-10-03T08:11:27Z"
+      },
+      "repeat": 1
+    },
+    {
+      "arm": "on",
+      "job": 11,
+      "id": "11_restore_command",
+      "dir": "11_restore_command",
+      "solved": false,
+      "hidden_passed": 11,
+      "hidden_failed": 1,
+      "failing_tests": [
+        "tests/test_hidden_j11_restore.py::test_damaged_backup"
+      ],
+      "hidden_summary": "1 failed, 11 passed, 2 warnings in 0.17s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 3,
+      "llm_calls": 3,
+      "input_tokens": 223090,
+      "output_tokens": 8805,
+      "cost_usd": 0.021414,
+      "notebook_cost_usd": 0.000498,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 20,
+      "usage_source": "ledger",
+      "billed_usd": 0.012482,
+      "minutes": 6.27,
+      "timed_out": false,
+      "notebook_chars": 3417,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "8e8564285b2e7a38dcd621d979d84b5d3b3679a9f61906eb3d9975a3dffc0053",
+        "project_files": 23,
+        "task_sha256": "44e70a7c6f9fcbba3380ae23ebf1cd55d70563a62ff4584ff1c9cef9a258dfda",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/11_restore_command",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/on/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "1",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "on",
+          "AWOS_SESSION_ID": "511a375ba5723a417dbe3277"
+        },
+        "recorded_at": "2026-10-03T08:17:35Z"
+      },
+      "repeat": 1
+    },
+    {
+      "arm": "off",
+      "job": 12,
+      "id": "12_prune_command",
+      "dir": "12_prune_command",
+      "solved": true,
+      "hidden_passed": 9,
+      "hidden_failed": 0,
+      "failing_tests": [],
+      "hidden_summary": "9 passed in 0.08s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 2,
+      "llm_calls": 3,
+      "input_tokens": 331825,
+      "output_tokens": 14543,
+      "cost_usd": 0.032107,
+      "notebook_cost_usd": 0,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 27,
+      "usage_source": "ledger",
+      "billed_usd": 0.011387,
+      "minutes": 5.23,
+      "timed_out": false,
+      "notebook_chars": 0,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "ec1f46522205e06290ab58f7d24c38ecef643c1a4ee74d547bc2d083150f1953",
+        "project_files": 23,
+        "task_sha256": "77fdeb288f43cc013fe005e3f34cd806ccfe1d9043e85fae1582997fd80b74bc",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/12_prune_command",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/off/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "0",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "off",
+          "AWOS_SESSION_ID": "af6aa959ca570432d1a386ec"
+        },
+        "recorded_at": "2026-10-03T08:24:27Z"
+      },
+      "repeat": 1
+    },
+    {
+      "arm": "on",
+      "job": 12,
+      "id": "12_prune_command",
+      "dir": "12_prune_command",
+      "solved": true,
+      "hidden_passed": 9,
+      "hidden_failed": 0,
+      "failing_tests": [],
+      "hidden_summary": "9 passed in 0.09s",
+      "visible_tests_ok": true,
+      "visible_failing": [],
+      "orchestrator_success": true,
+      "plan_source": "planner",
+      "files_changed": 2,
+      "llm_calls": 3,
+      "input_tokens": 213477,
+      "output_tokens": 12955,
+      "cost_usd": 0.021292,
+      "notebook_cost_usd": 0.000526,
+      "models": [
+        "deepseek/deepseek-v4-flash"
+      ],
+      "turns": 17,
+      "usage_source": "ledger",
+      "billed_usd": 0.025242,
+      "minutes": 6.67,
+      "timed_out": false,
+      "notebook_chars": 3417,
+      "invalid": false,
+      "invalid_reason": null,
+      "attempts": 1,
+      "inputs": {
+        "project_sha256": "ec1f46522205e06290ab58f7d24c38ecef643c1a4ee74d547bc2d083150f1953",
+        "project_files": 23,
+        "task_sha256": "77fdeb288f43cc013fe005e3f34cd806ccfe1d9043e85fae1582997fd80b74bc",
+        "cmd": [
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.venv/bin/python",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/scripts/job_series.py",
+          "_child",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/tests/job_series/backupd/jobs/12_prune_command",
+          "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/on/project"
+        ],
+        "env": {
+          "AWOS_AGENT_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_GOAL_CHECK": "0",
+          "AWOS_NOTEBOOK": "1",
+          "AWOS_NOTEBOOK_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_OPENROUTER_ALLOW_FALLBACKS": "0",
+          "AWOS_OPENROUTER_PROVIDER": "deepinfra,gmicloud,novita,siliconflow",
+          "AWOS_PLANNER_MODEL": "deepseek/deepseek-v4-flash",
+          "AWOS_SERIES_ARM": "on",
+          "AWOS_SESSION_ID": "a4f70bbd4b1768fd264bede5"
+        },
+        "recorded_at": "2026-10-03T08:30:16Z"
+      },
+      "repeat": 1
+    }
+  ],
+  "summary": {
+    "off": {
+      "all": {
+        "jobs": 12,
+        "solved": 6,
+        "solve_rate": 0.5,
+        "mean_cost_usd": 0.0235,
+        "mean_billed_usd": 0.0133,
+        "mean_turns": 23.3333,
+        "mean_minutes": 4.8767
+      },
+      "jobs_1_6": {
+        "jobs": 6,
+        "solved": 4,
+        "solve_rate": 0.6667,
+        "mean_cost_usd": 0.0183,
+        "mean_billed_usd": 0.0084,
+        "mean_turns": 20.3333,
+        "mean_minutes": 3.7583
+      },
+      "jobs_7_12": {
+        "jobs": 6,
+        "solved": 2,
+        "solve_rate": 0.3333,
+        "mean_cost_usd": 0.0287,
+        "mean_billed_usd": 0.0183,
+        "mean_turns": 26.3333,
+        "mean_minutes": 5.995
+      }
+    },
+    "on": {
+      "all": {
+        "jobs": 12,
+        "solved": 6,
+        "solve_rate": 0.5,
+        "mean_cost_usd": 0.0239,
+        "mean_billed_usd": 0.0151,
+        "mean_turns": 20.5,
+        "mean_minutes": 5.5425
+      },
+      "jobs_1_6": {
+        "jobs": 6,
+        "solved": 3,
+        "solve_rate": 0.5,
+        "mean_cost_usd": 0.024,
+        "mean_billed_usd": 0.014,
+        "mean_turns": 20.6667,
+        "mean_minutes": 4.19
+      },
+      "jobs_7_12": {
+        "jobs": 6,
+        "solved": 3,
+        "solve_rate": 0.5,
+        "mean_cost_usd": 0.0238,
+        "mean_billed_usd": 0.0162,
+        "mean_turns": 20.3333,
+        "mean_minutes": 6.895
+      }
+    },
+    "dropped_jobs": {}
+  },
+  "health": {
+    "path": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/health.json",
+    "fatal": 0,
+    "warn": 3
+  },
+  "report": "/Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20261003T114614/report.md"
+}

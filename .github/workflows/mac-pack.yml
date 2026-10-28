@@ -1,0 +1,120 @@
+# Month-end Document Pack v0.1 on free GitHub-hosted macOS runners
+# (each runner is itself a disposable macOS VM, kern.hv_vmm_present=1).
+#   1. unit tests: testbed + the pack runner / teach suites (fake AX runtime, real 127.0.0.1 portals)
+#   2. the HTTP-level dry run (oracle PASSES every variant, every bad solution FAILS)
+#   3. LIVE mode in real Safari, per variant (baseline / traps / drift):
+#        teach  a scripted owner demonstrates each mock portal once (2026-08) -> pack/teach.py skills
+#        run    pack core + the live runner (pack/runner.py, --wait-for-human) for 2026-09; the scripted
+#               owner signs in / hands captcha + OTP to the human desk when the runner pauses
+#        check  pack report + zip, doc_pack verify.py
+#      with a fixed-length screen recording, screenshots and the pack reports uploaded.
+# No model calls, no secrets, no paid APIs.
+# Launch: push a branch named bench-cloud/mac-pack-<anything>.
+name: mac-pack
+
+on:
+  push:
+    branches: ["bench-cloud/mac-pack-**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mac-pack-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  pack:
+    strategy:
+      fail-fast: false
+      max-parallel: 2          # keep the other free macOS slots for the owner
+      matrix:
+        variant: [baseline, traps, drift]
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      V: ${{ matrix.variant }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Deps
+        run: |
+          pip install -q -r requirements.txt pytest pytest-timeout pyobjc-framework-ApplicationServices \
+            pyobjc-framework-Quartz pyobjc-framework-Cocoa
+
+      - name: Machine facts
+        shell: bash
+        run: |
+          set +e
+          mkdir -p out
+          { sw_vers; uname -m; echo "hv_vmm_present=$(sysctl -n kern.hv_vmm_present)"; python --version
+            defaults read /Applications/Safari.app/Contents/Info CFBundleShortVersionString
+            python -c "import sys; sys.path.insert(0, 'testbeds/doc_pack'); import dp_pdf; print('pdf backend', dp_pdf.backend())"
+          } 2>&1 | tee out/machine_$V.txt
+
+      - name: Unit tests (testbed + pack runner / teach)
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m pytest tests/test_testbed_doc_pack.py tests/test_pack_runner.py tests/test_pack_core.py \
+            tests/test_pack_policy.py tests/test_live_checkpoint.py -q -p no:cacheprovider 2>&1 | tee out/pytest_$V.txt
+
+      - name: HTTP-level dry run (oracle + bad solutions, all variants)
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set -o pipefail
+          python testbeds/doc_pack/run.py --dry-run --root "$RUNNER_TEMP/dp_dry" 2>&1 | tee out/dry_run_$V.txt
+
+      # The runner is a disposable VM; these settings only touch it.
+      - name: Guest hygiene (Safari prompts, no auto-open of downloaded files)
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set +e
+          osascript -e 'quit app "Safari"' 2>/dev/null; sleep 1
+          C="$HOME/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari"
+          for D in com.apple.Safari "$C"; do
+            for K in AutoFillPasswords CanPromptForPushNotifications AutoOpenSafeDownloads; do
+              defaults write "$D" "$K" -bool false; echo "write $D $K exit=$? now=$(defaults read "$D" "$K" 2>&1)"
+            done
+          done
+          mkdir -p "$HOME/Downloads"
+          true
+
+      - name: Pack live mode in real Safari (${{ matrix.variant }})
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set +e
+          screencapture -v -V 1500 -x out/video_pack_$V.mov & REC=$!
+          sleep 2
+          python testbeds/doc_pack/run.py live --variant $V --root "$RUNNER_TEMP/dp_live_$V" --out out \
+            2>&1 | tee out/live_$V.log
+          RC=${PIPESTATUS[0]}
+          echo "live exit=$RC" | tee -a out/live_$V.log
+          sleep 2; kill -INT $REC 2>/dev/null; wait $REC 2>/dev/null
+          screencapture -x out/screen_after_$V.png || echo "screencapture failed"
+          R="$RUNNER_TEMP/dp_live_$V"
+          mkdir -p out/harness_$V out/skills_$V out/pack_$V
+          cp "$R"/run/harness/requests.jsonl "$R"/run/harness/transcript.txt "$R"/run/harness/truth.json out/harness_$V/ 2>/dev/null
+          cp -R "$R"/skills/. out/skills_$V/ 2>/dev/null
+          cp "$R"/teach/demo_*.json out/skills_$V/ 2>/dev/null
+          cp "$R"/run/Pack/*_document_pack.zip out/pack_$V/ 2>/dev/null
+          ls -lR "$R/run/sandbox/outbox" "$R/run/Pack" > out/pack_$V/listing.txt 2>&1
+          grep '^SUMMARY' out/live_$V.log >> "$GITHUB_STEP_SUMMARY"
+          exit $RC
+
+      - name: Upload
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-pack-${{ matrix.variant }}
+          path: out/
+          if-no-files-found: warn

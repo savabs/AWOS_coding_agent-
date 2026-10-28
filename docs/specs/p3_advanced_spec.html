@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>P3 Spec — LSP Feedback, Auto Skills, Enhanced Repo Map</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 1100px; margin: 0 auto; padding: 2rem; color: #1a1a2e; background: #f8f9fa; }
+  h1 { color: #0d1b2a; border-bottom: 3px solid #9b59b6; padding-bottom: 0.5rem; }
+  h2 { color: #1d3557; border-left: 4px solid #9b59b6; padding-left: 0.75rem; margin-top: 2.5rem; }
+  h3 { color: #2c3e50; margin-top: 1.5rem; }
+  h4 { color: #9b59b6; margin-top: 1rem; }
+  .meta { background: #1d3557; color: #a8dadc; padding: 1rem 1.5rem; border-radius: 8px; margin-bottom: 2rem; font-size: 0.9rem; }
+  .meta span { margin-right: 2rem; }
+  .code-block { background: #0d1b2a; color: #a8dadc; padding: 1rem 1.5rem; border-radius: 6px; font-family: 'Courier New', monospace; font-size: 0.85rem; overflow-x: auto; margin: 1rem 0; line-height: 1.6; }
+  .key { background: #f3e8ff; border-left: 4px solid #9b59b6; padding: 1rem 1.5rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .step { background: #fff; border-left: 4px solid #9b59b6; padding: 1rem 1.5rem; margin: 0.75rem 0; border-radius: 0 6px 6px 0; }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+  th { background: #1d3557; color: white; padding: 0.6rem 1rem; text-align: left; }
+  td { padding: 0.6rem 1rem; border-bottom: 1px solid #dee2e6; vertical-align: top; }
+  tr:nth-child(even) td { background: #f1f3f5; }
+  .warn { background: #fff3cd; border: 1px solid #ffc107; padding: 0.75rem 1rem; border-radius: 4px; margin: 0.75rem 0; }
+  .ok { background: #d4edda; border: 1px solid #28a745; padding: 0.75rem 1rem; border-radius: 4px; margin: 0.75rem 0; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1rem 0; }
+  .card { background: #fff; border: 1px solid #dee2e6; border-radius: 6px; padding: 1.25rem; }
+  .tag { display: inline-block; background: #9b59b6; color: white; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.75rem; margin: 0.1rem; }
+  .test-case { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 0.75rem 1rem; margin: 0.5rem 0; }
+  ul li, ol li { margin: 0.4rem 0; }
+  .interface { background: #1d3557; color: #e8f4f8; padding: 1.5rem; border-radius: 8px; font-family: monospace; font-size: 0.85rem; line-height: 1.8; }
+  .toc { background: #fff; border: 1px solid #dee2e6; border-radius: 6px; padding: 1.5rem; margin-bottom: 2rem; }
+  .toc a { color: #1d3557; text-decoration: none; }
+  .skill-example { background: #f9f0ff; border: 1px solid #ce93d8; border-radius: 6px; padding: 1rem; margin: 1rem 0; font-family: monospace; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+
+<h1>🚀 P3 Spec — LSP Feedback Loop, Auto Skills, Enhanced Repo Map</h1>
+<div class="meta">
+  <span>📅 2026-05-22</span>
+  <span>🎯 Priority: P3 (SOTA Features)</span>
+  <span>⏱ Est. 12h total</span>
+  <span>📂 Files: verifier.py, worker.py, codebase_index.py, orchestrator.py</span>
+  <span>📊 Expected: Near-instant error detection, cross-session skill reuse</span>
+</div>
+
+<div class="toc">
+  <strong>Contents</strong>
+  <ul>
+    <li><a href="#p31">1. P3.1 — LSP/Ruff Feedback Loop (4h)</a></li>
+    <li><a href="#p32">2. P3.2 — Auto Skill Generation (4h)</a></li>
+    <li><a href="#p33">3. P3.3 — Enhanced Repo Map (4h)</a></li>
+    <li><a href="#tests">4. Test Plan</a></li>
+    <li><a href="#integration">5. Cross-feature Integration</a></li>
+  </ul>
+</div>
+
+<!-- ========================================================= -->
+<h2 id="p31">1. P3.1 — LSP / Ruff Feedback Loop</h2>
+
+<h3>1.1 Motivation</h3>
+<div class="key">
+  <strong>From Claude Code's LSP registry analysis:</strong> After every file write, Claude Code's LSP server immediately emits diagnostics (type errors, undefined names, missing imports). The agent sees these in the NEXT turn — without running any code. This is why Claude Code can fix type errors in 1-2 turns that would take AWOS 5+ tries via LLM self-eval.
+</div>
+
+<p>For AWOS, we implement two levels:</p>
+<ul>
+  <li><strong>Level 1 — Ruff (quick win, 1h)</strong>: Fast linting via subprocess. Free, instant, catches ~80% of common errors.</li>
+  <li><strong>Level 2 — Pyright (full LSP, 3h)</strong>: Type checking. Catches type mismatches, undefined attributes, wrong signatures.</li>
+</ul>
+
+<h3>1.2 Level 1: Ruff Diagnostics</h3>
+<div class="code-block">
+import subprocess
+import json
+
+@dataclass
+class LintDiagnostic:
+    file: str
+    line: int
+    col: int
+    code: str         # e.g. "E501", "F401", "E303"
+    message: str
+    severity: str     # "error" | "warning"
+
+class RuffLinter:
+    """Fast linting via ruff. Returns structured diagnostics."""
+
+    MAX_DIAGNOSTICS = 15  # Match Claude Code's limit
+
+    def lint_file(self, file_path: str) -> list[LintDiagnostic]:
+        """Run ruff on a file and return structured diagnostics."""
+        try:
+            result = subprocess.run(
+                ["ruff", "check", "--output-format=json", "--quiet", file_path],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            # ruff returns JSON even on errors
+            if not result.stdout.strip():
+                return []
+
+            raw = json.loads(result.stdout)
+            diagnostics = []
+            for item in raw[:self.MAX_DIAGNOSTICS]:
+                diagnostics.append(LintDiagnostic(
+                    file=item["filename"],
+                    line=item["location"]["row"],
+                    col=item["location"]["column"],
+                    code=item["code"],
+                    message=item["message"],
+                    severity="error" if item["code"][0] == "E" else "warning",
+                ))
+            return diagnostics
+
+        except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
+            return []  # ruff not installed or timeout — silent fallback
+
+    def format_for_prompt(self, diagnostics: list[LintDiagnostic]) -> str:
+        """Format diagnostics for injection into retry prompt."""
+        if not diagnostics:
+            return ""
+
+        lines = ["## Linting Diagnostics (ruff):"]
+        for d in diagnostics:
+            lines.append(f"  Line {d.line}:{d.col} [{d.code}] {d.message}")
+        lines.append("")
+        lines.append("Fix these issues in your edit.")
+        return '\n'.join(lines)
+</div>
+
+<h3>1.3 Level 2: Pyright Type Checking</h3>
+<div class="code-block">
+class PyrightChecker:
+    """Type checking via pyright. More expensive but catches type errors."""
+
+    def check_file(self, file_path: str, project_root: str) -> list[LintDiagnostic]:
+        """Run pyright on a file and return type diagnostics."""
+        try:
+            result = subprocess.run(
+                ["pyright", "--outputjson", file_path],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                cwd=project_root,
+            )
+            data = json.loads(result.stdout)
+            diagnostics = []
+
+            for diag in data.get("generalDiagnostics", [])[:10]:
+                if diag["severity"] in ("error", "warning"):
+                    diagnostics.append(LintDiagnostic(
+                        file=diag["file"],
+                        line=diag["range"]["start"]["line"] + 1,
+                        col=diag["range"]["start"]["character"],
+                        code=f"PY{diag.get('rule', 'type')}",
+                        message=diag["message"],
+                        severity=diag["severity"],
+                    ))
+            return diagnostics
+
+        except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
+            return []
+</div>
+
+<h3>1.4 Integration: DiagnosticPipeline</h3>
+<div class="code-block">
+class DiagnosticPipeline:
+    """
+    Runs syntax + ruff + optional pyright on a file.
+    Returns unified diagnostic list.
+    """
+    def __init__(self, use_pyright: bool = False):
+        self.ruff = RuffLinter()
+        self.pyright = PyrightChecker() if use_pyright else None
+
+    def check(self, file_path: str, content: str, project_root: str) -> list[LintDiagnostic]:
+        """Write content to tmp file, run all checks, return diagnostics."""
+        import tempfile
+
+        # Write to temp file for analysis (don't write to actual file yet)
+        with tempfile.NamedTemporaryFile(
+            mode='w', suffix='.py', delete=False, dir=Path(file_path).parent
+        ) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        try:
+            diagnostics = []
+            diagnostics.extend(self.ruff.lint_file(tmp_path))
+            if self.pyright:
+                diagnostics.extend(self.pyright.check_file(tmp_path, project_root))
+            return diagnostics
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+</div>
+
+<h3>1.5 Integration into Verification Flow</h3>
+<p>After applying edits (P0), before writing to disk:</p>
+<div class="code-block">
+# In _execute_single_task, after edits applied:
+
+# Stage 1: Syntax
+syntax_ok = verifier.check_syntax(new_content)
+if not syntax_ok:
+    task["past_critiques"].append("[SYNTAX ERROR]\n" + syntax_error)
+    continue  # retry
+
+# Stage 2: Lint diagnostics (NEW)
+pipeline = DiagnosticPipeline(use_pyright=False)
+lint_diags = pipeline.check(task["file"], new_content, project_root)
+critical_diags = [d for d in lint_diags if d.severity == "error"]
+
+if critical_diags:
+    task["past_critiques"].append(
+        pipeline.format_for_prompt(critical_diags)
+    )
+    # Don't immediately retry — allow non-critical warnings through
+    # Only block on errors (F821=undefined-name, E999=syntax)
+    blocking_codes = {"E999", "F821", "F811"}
+    if any(d.code in blocking_codes for d in critical_diags):
+        continue  # retry
+
+# Stage 3: Write to disk (only after passing lint)
+write_file(task["file"], new_content)
+
+# Stage 4: Test execution (P1)
+test_result = verifier.run_tests(task["file"], project_root)
+</div>
+
+<h3>1.6 Ruff Auto-Fix (Bonus)</h3>
+<p>Many ruff issues (import order, whitespace) are auto-fixable. Apply fixes before writing:</p>
+<div class="code-block">
+def ruff_autofix(self, content: str) -> str:
+    """Apply ruff auto-fixes to content. Returns fixed content."""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+    try:
+        subprocess.run(
+            ["ruff", "check", "--fix", "--quiet", tmp_path],
+            capture_output=True, timeout=5
+        )
+        return Path(tmp_path).read_text()
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return content  # fallback: return original
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+</div>
+
+<!-- ========================================================= -->
+<h2 id="p32">2. P3.2 — Auto Skill Generation</h2>
+
+<h3>2.1 What Skills Are</h3>
+<p>Skills are reusable patterns extracted from successful task executions. Claude Code uses <code>.claude/skills/</code> — Markdown files with YAML frontmatter. Hermes Agent auto-creates <code>SKILL.md</code> files. AWOS already has <code>skill_library</code> wired in <code>worker.py</code> — but nothing populates it.</p>
+
+<h3>2.2 Skill File Format</h3>
+<p>We use the same Markdown+YAML frontmatter pattern as Claude Code:</p>
+<div class="skill-example">
+---
+title: "Add method to dataclass and wire to orchestrator"
+tags: [dataclass, method, orchestrator, wiring]
+complexity: medium
+success_rate: 0.87
+last_used: "2026-05-22"
+usage_count: 4
+---
+
+## When to use
+Use this skill when: adding a new method to an existing dataclass/class AND
+wiring it into the orchestrator's execution summary or reporting section.
+
+## Key locations to check
+1. The dataclass definition (usually in its own file)
+2. The orchestrator's `_execute_single_task()` method (where to call)
+3. The orchestrator's `execute_feature()` summary block (where to display)
+
+## Pattern
+1. Add method to the class with clear docstring
+2. Find the orchestrator's execution summary block (search for "EXECUTION SUMMARY")
+3. Add call: `self.performance.new_method()` in the summary block
+4. Ensure the instance variable name matches (check `__init__`)
+
+## Common pitfalls
+- Instance variable might be `self.performance` not `self.tracker` — verify in `__init__`
+- Summary block might be inside a try/except — add inside it
+- The method might already exist under a different name — grep first
+</div>
+
+<h3>2.3 Skill Extraction Logic</h3>
+<div class="code-block">
+class SkillExtractor:
+    """Extract reusable patterns from successful task executions."""
+
+    SKILLS_DIR = ".awos/skills"
+    MIN_CONFIDENCE = 0.8  # Only extract if task score >= this
+
+    def maybe_extract_skill(
+        self,
+        task: dict,
+        result: dict,
+        session_context: SessionState,
+        cheap_llm_caller,
+    ) -> str | None:
+        """
+        Extract a skill from a successful task if pattern is reusable.
+        Returns skill file path if created, None otherwise.
+        """
+        # Only extract from high-confidence successes
+        score = result.get("score", 0)
+        if score < self.MIN_CONFIDENCE:
+            return None
+
+        # Check if a similar skill already exists
+        skill_key = self._compute_skill_key(task)
+        existing = self._find_similar_skill(skill_key)
+        if existing:
+            # Update existing skill's success_rate and usage_count
+            self._update_skill_stats(existing, success=True)
+            return existing
+
+        # Extract new skill via cheap LLM call
+        skill_content = self._generate_skill(task, result, cheap_llm_caller)
+        if not skill_content:
+            return None
+
+        # Save to .awos/skills/
+        return self._save_skill(skill_key, skill_content)
+
+    def _generate_skill(
+        self,
+        task: dict,
+        result: dict,
+        cheap_llm_caller,
+    ) -> str | None:
+        """Call cheap LLM to generate skill description."""
+        prompt = f"""
+Extract a reusable skill pattern from this successful coding task.
+
+Task: {task['action']}
+File: {task['file']}
+Complexity: {task['complexity']}
+What changed: {result.get('key_change', '')}
+New symbols created: {result.get('new_symbols', [])}
+
+Write a concise skill description in this YAML+Markdown format:
+---
+title: "[skill title]"
+tags: [tag1, tag2, tag3]
+complexity: {task['complexity']}
+---
+
+## When to use
+[1-2 sentences describing when this skill applies]
+
+## Pattern
+[3-5 numbered steps that describe the general pattern]
+
+## Common pitfalls
+[1-3 common mistakes to avoid]
+
+Be concise. Maximum 200 words. Focus on the PATTERN, not this specific task.
+"""
+        try:
+            return cheap_llm_caller(prompt, max_tokens=400)
+        except Exception:
+            return None
+
+    def _compute_skill_key(self, task: dict) -> str:
+        """Compute a normalized key for deduplication."""
+        # Normalize action to pattern signature
+        action = task["action"].lower()
+        # Strip specific names — keep the pattern
+        import re
+        normalized = re.sub(r'`[^`]+`', '<symbol>', action)
+        normalized = re.sub(r'"[^"]+"', '<name>', normalized)
+        return hashlib.md5(normalized.encode()).hexdigest()[:12]
+
+    def _save_skill(self, key: str, content: str) -> str:
+        """Save skill to .awos/skills/{key}.md"""
+        skills_dir = Path(self.SKILLS_DIR)
+        skills_dir.mkdir(parents=True, exist_ok=True)
+
+        # Extract title from frontmatter for filename
+        title_match = re.search(r'title:\s*"([^"]+)"', content)
+        title = title_match.group(1) if title_match else key
+        filename = re.sub(r'[^a-z0-9_-]', '_', title.lower())[:40]
+
+        skill_path = skills_dir / f"{filename}_{key[:6]}.md"
+        skill_path.write_text(content)
+        return str(skill_path)
+</div>
+
+<h3>2.4 Skill Retrieval at Task Time</h3>
+<div class="code-block">
+class SkillLibrary:
+    """Load and match skills for a given task."""
+
+    SKILLS_DIR = ".awos/skills"
+
+    def get_relevant_skills(self, task: dict, top_k: int = 2) -> list[str]:
+        """Return top-k most relevant skill contents for a task."""
+        skills_dir = Path(self.SKILLS_DIR)
+        if not skills_dir.exists():
+            return []
+
+        skill_files = list(skills_dir.glob("*.md"))
+        if not skill_files:
+            return []
+
+        # Score each skill by keyword overlap with task action
+        task_words = set(task["action"].lower().split())
+        scored = []
+
+        for sf in skill_files:
+            try:
+                content = sf.read_text()
+                skill_words = set(content.lower().split())
+                overlap = len(task_words & skill_words) / max(len(task_words), 1)
+                scored.append((overlap, content))
+            except Exception:
+                continue
+
+        # Return top-k by overlap score
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [content for _, content in scored[:top_k] if _ > 0.1]
+</div>
+
+<h3>2.5 Integration into Worker</h3>
+<div class="code-block">
+# In _build_prompt():
+skill_contents = self.skill_library.get_relevant_skills(task)
+if skill_contents:
+    skill_section = "## Relevant Skills from Past Successes:\n"
+    for skill in skill_contents:
+        skill_section += skill + "\n---\n"
+else:
+    skill_section = ""
+
+# After task success — in orchestrator:
+self.skill_extractor.maybe_extract_skill(task, result, session_state, self._cheap_call)
+</div>
+
+<!-- ========================================================= -->
+<h2 id="p33">3. P3.3 — Enhanced Repo Map</h2>
+
+<h3>3.1 Current State</h3>
+<p>AWOS already has <code>CodebaseIndex</code> (AST-based, 66 files, 693 chunks). This is ahead of most open-source agents. The enhancement adds <strong>cross-reference tracking</strong> and a <strong>dependency graph</strong> that the worker can query for "what calls this" and "what does this call".</p>
+
+<h3>3.2 New: Call Graph Index</h3>
+<div class="code-block">
+@dataclass
+class CallSite:
+    caller_file: str
+    caller_class: str | None
+    caller_function: str
+    callee_name: str   # Name of function/method being called
+    line: int
+
+class CallGraphIndex:
+    """
+    Build a call graph from AST analysis.
+    Answers: who calls function X? what does function Y call?
+    """
+
+    def __init__(self):
+        self.call_sites: list[CallSite] = []
+        self._callers: dict[str, list[CallSite]] = {}  # callee_name → [CallSite]
+        self._callees: dict[str, list[str]] = {}       # caller_key → [callee_names]
+
+    def index_file(self, file_path: str) -> None:
+        """Extract all call sites from a Python file."""
+        try:
+            source = Path(file_path).read_text()
+            tree = ast.parse(source)
+        except (SyntaxError, OSError):
+            return
+
+        class CallVisitor(ast.NodeVisitor):
+            def __init__(self_, current_file):
+                self_.current_file = current_file
+                self_.current_class = None
+                self_.current_function = None
+                self_.sites = []
+
+            def visit_ClassDef(self_, node):
+                old = self_.current_class
+                self_.current_class = node.name
+                self_.generic_visit(node)
+                self_.current_class = old
+
+            def visit_FunctionDef(self_, node):
+                old = self_.current_function
+                self_.current_function = node.name
+                self_.generic_visit(node)
+                self_.current_function = old
+
+            visit_AsyncFunctionDef = visit_FunctionDef
+
+            def visit_Call(self_, node):
+                callee = self_._get_call_name(node.func)
+                if callee and self_.current_function:
+                    self_.sites.append(CallSite(
+                        caller_file=self_.current_file,
+                        caller_class=self_.current_class,
+                        caller_function=self_.current_function,
+                        callee_name=callee,
+                        line=node.lineno,
+                    ))
+                self_.generic_visit(node)
+
+            def _get_call_name(self_, node) -> str | None:
+                if isinstance(node, ast.Name):
+                    return node.id
+                if isinstance(node, ast.Attribute):
+                    return node.attr
+                return None
+
+        visitor = CallVisitor(file_path)
+        visitor.visit(tree)
+        self.call_sites.extend(visitor.sites)
+        self._rebuild_indexes()
+
+    def _rebuild_indexes(self) -> None:
+        """Rebuild lookup indexes from call_sites."""
+        self._callers.clear()
+        self._callees.clear()
+        for site in self.call_sites:
+            # callee → callers
+            if site.callee_name not in self._callers:
+                self._callers[site.callee_name] = []
+            self._callers[site.callee_name].append(site)
+
+            # caller function → callees
+            caller_key = f"{site.caller_file}::{site.caller_function}"
+            if caller_key not in self._callees:
+                self._callees[caller_key] = []
+            self._callees[caller_key].append(site.callee_name)
+
+    def who_calls(self, function_name: str) -> list[CallSite]:
+        """Find all places where function_name is called."""
+        return self._callers.get(function_name, [])
+
+    def what_calls(self, file_path: str, function_name: str) -> list[str]:
+        """Find all functions that function_name calls."""
+        key = f"{file_path}::{function_name}"
+        return list(set(self._callees.get(key, [])))
+</div>
+
+<h3>3.3 Public API Surface Extraction</h3>
+<div class="code-block">
+@dataclass
+class PublicAPI:
+    file: str
+    module_name: str
+    exports: list[str]    # Functions/classes with no leading _
+    docstrings: dict[str, str]  # name → first line of docstring
+
+class APIExtractor:
+    def extract(self, file_path: str) -> PublicAPI:
+        """Extract the public API surface of a Python file."""
+        source = Path(file_path).read_text()
+        tree = ast.parse(source)
+        module_name = Path(file_path).stem
+
+        exports = []
+        docstrings = {}
+
+        for node in ast.iter_child_nodes(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                if not node.name.startswith('_'):
+                    exports.append(node.name)
+                    # Extract first line of docstring
+                    if (node.body and isinstance(node.body[0], ast.Expr)
+                            and isinstance(node.body[0].value, ast.Constant)):
+                        docstrings[node.name] = node.body[0].value.value.split('\n')[0].strip()
+
+        return PublicAPI(
+            file=file_path,
+            module_name=module_name,
+            exports=exports,
+            docstrings=docstrings,
+        )
+</div>
+
+<h3>3.4 Enhanced Context Query</h3>
+<p>New method on <code>CodebaseIndex</code>: given a task action + target file, return enriched context including callers/callees:</p>
+<div class="code-block">
+def query_with_graph(
+    self,
+    action: str,
+    target_file: str,
+    call_graph: CallGraphIndex,
+) -> str:
+    """
+    Enhanced context query that includes call graph information.
+    """
+    # Base semantic search (existing)
+    base_results = self.query_code(action, n_results=5)
+
+    # Find symbols mentioned in action
+    symbols = self._extract_symbols_from_action(action)
+
+    # For each symbol, find who calls it and what it calls
+    cross_ref_lines = []
+    for symbol in symbols[:3]:  # Limit to 3 symbols
+        callers = call_graph.who_calls(symbol)
+        if callers:
+            caller_strs = [
+                f"{c.caller_file.split('/')[-1]}::{c.caller_function}:{c.line}"
+                for c in callers[:5]
+            ]
+            cross_ref_lines.append(f"  '{symbol}' called from: {', '.join(caller_strs)}")
+
+    if cross_ref_lines:
+        cross_ref = "## Cross-file References:\n" + '\n'.join(cross_ref_lines)
+    else:
+        cross_ref = ""
+
+    return base_results + "\n\n" + cross_ref
+</div>
+
+<!-- ========================================================= -->
+<h2 id="tests">4. Test Plan</h2>
+
+<h3>Test File: <code>tests/test_p3_improvements.py</code></h3>
+
+<div class="test-case"><strong>test_ruff_lint_clean_file</strong> — clean Python file → empty diagnostic list</div>
+<div class="test-case"><strong>test_ruff_lint_undefined_name</strong> — file with undefined variable → F821 diagnostic returned</div>
+<div class="test-case"><strong>test_ruff_lint_not_installed</strong> — ruff binary missing → empty list, no exception</div>
+<div class="test-case"><strong>test_ruff_format_for_prompt</strong> — 3 diagnostics → formatted string with line numbers</div>
+<div class="test-case"><strong>test_ruff_autofix_import_order</strong> — disordered imports → ruff fixes them, content returned</div>
+<div class="test-case"><strong>test_diagnostic_pipeline_blocking_codes</strong> — E999 (syntax) in lint → retry triggered</div>
+<div class="test-case"><strong>test_diagnostic_pipeline_warning_passes</strong> — E501 (line too long) → write proceeds anyway</div>
+<div class="test-case"><strong>test_skill_extract_creates_file</strong> — high-score task → skill file created in .awos/skills/</div>
+<div class="test-case"><strong>test_skill_extract_below_threshold</strong> — score &lt; 0.8 → no skill file created</div>
+<div class="test-case"><strong>test_skill_library_retrieval</strong> — task action matches skill keywords → skill returned</div>
+<div class="test-case"><strong>test_skill_library_empty_dir</strong> — no skills dir → returns empty list, no exception</div>
+<div class="test-case"><strong>test_call_graph_who_calls</strong> — index file with known calls → who_calls("known_func") returns callers</div>
+<div class="test-case"><strong>test_call_graph_what_calls</strong> — index function with calls → what_calls returns callee list</div>
+<div class="test-case"><strong>test_call_graph_multiple_files</strong> — two files calling same function → both appear in who_calls()</div>
+<div class="test-case"><strong>test_api_extractor_exports</strong> — file with public/private functions → only public in exports</div>
+<div class="test-case"><strong>test_query_with_graph</strong> — query including symbol found in graph → cross-ref section present</div>
+
+<!-- ========================================================= -->
+<h2 id="integration">5. Cross-feature Integration Summary</h2>
+
+<p>How all P0–P3 features compose together in the final execution pipeline:</p>
+
+<div class="code-block">
+## Full Execution Pipeline (P0 + P1 + P2 + P3):
+
+execute_feature(goal):
+  1. Plan tasks (P2.1 cached planner)
+  2. Create git worktree (P2.3, if enabled)
+  3. Init session_state (P1.3)
+
+  for each task:
+    4. Read full file content (P0.2)
+    5. Query enhanced repo map (P3.3)
+    6. Retrieve relevant skills (P3.2)
+    7. Condense session history (P2.4)
+
+    for attempt in range(max_retries):
+      8. Architect call: what to change (P1.2)
+      9. Editor call: JSON edits (P0.1)
+      10. Parse JSON edits (P0.1)
+      11. Validate: not-found, multi-match (P0.3)
+      12. Ruff lint pre-check (P3.1)
+      13. Apply edits to content
+      14. Syntax check
+      15. Write to disk
+      16. Run tests (P1.1)
+      17. If fail → add test output + lint diags as critiques → retry
+      18. If pass → break
+
+    19. Update session_state (P1.3)
+    20. Extract skill if successful (P3.2)
+    21. Record span (observability)
+
+  22. Commit worktree if success (P2.3)
+  23. Print session summary
+</div>
+
+<hr style="margin: 3rem 0; border-color: #dee2e6;">
+<p style="color: #888; font-size: 0.85rem;">P3 Spec | AWOS Coding Agent | 2026-05-22 | Total effort: 12h | Research: docs/research/sota_improvements.html</p>
+
+</body>
+</html>

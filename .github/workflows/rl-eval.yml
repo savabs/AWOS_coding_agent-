@@ -1,0 +1,242 @@
+# Computer-use RL baseline evaluation (docs/research/rl_cua_2026-10-22/BASELINE_PROTOCOL.md)
+# on free ubuntu-latest runners: CPU llama.cpp serving a GGUF + headless Chromium +
+# `python -m scaffold.rl.harness`. Matrix = model x source x shard. No secrets: GGUFs are
+# public HF downloads pinned by revision and sha256 (ci/rl_eval.env).
+#
+# Launch: push to a branch named bench-cloud/rl-eval-<anything> (defaults from
+# ci/rl_eval.env), or Actions -> rl-eval -> Run workflow (inputs override the defaults):
+#   gh workflow run rl-eval.yml --ref <branch> -f models=all -f sources="miniwob factory" -f split=eval -f n=
+name: rl-eval
+
+on:
+  push:
+    branches: ["bench-cloud/rl-eval-**"]
+  workflow_dispatch:
+    inputs:
+      models:
+        description: 'Model labels from ci/rl_eval.env MODEL_SPECS (space-separated) or "all"'
+        default: "all"
+        type: string
+      sources:
+        description: "Task sources (space-separated): miniwob factory"
+        default: "miniwob factory"
+        type: string
+      split:
+        description: "eval (= miniwob holdout, factory ood) | holdout | ood | train"
+        default: "eval"
+        type: string
+      n:
+        description: "Max tasks per (model, source) before sharding; empty = whole split"
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rl-eval-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.cfg.outputs.matrix }}
+      models: ${{ steps.cfg.outputs.models }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: cfg
+        name: Build the matrix from ci/rl_eval.env (+ dispatch inputs)
+        shell: bash
+        env:
+          IN_MODELS: ${{ inputs.models }}
+          IN_SOURCES: ${{ inputs.sources }}
+          IN_SPLIT: ${{ inputs.split }}
+          IN_N: ${{ inputs.n }}
+        run: |
+          set -euo pipefail
+          python3 scripts/rl/ci_matrix.py ci/rl_eval.env --models "$IN_MODELS" --sources "$IN_SOURCES" \
+            --split "$IN_SPLIT" --n "$IN_N" >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
+  model:
+    needs: config
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.config.outputs.models) }}
+    steps:
+      - name: Cache the GGUF
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/models/${{ matrix.file }}
+          key: gguf-${{ matrix.file }}-${{ matrix.rev }}
+      - name: Download the GGUF once (pinned revision, sha256-checked)
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ matrix.repo }}
+          FILE: ${{ matrix.file }}
+          REV: ${{ matrix.rev }}
+          SHA: ${{ matrix.sha256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/models
+          case "$REPO" in
+            gh-release:*)   # our trained GGUF: all shards of the release (llama-server -m <first> loads the rest)
+              gh release download "$REV" --repo "${REPO#gh-release:}" --dir ~/models --clobber \
+                --pattern "$(basename "${FILE%-00001-of-*}" .gguf)*.gguf" ;;   # sharded or single file
+            *) curl -fL --retry 5 -o ~/models/"$FILE" "https://huggingface.co/$REPO/resolve/$REV/$FILE" ;;
+          esac
+          echo "$SHA  $HOME/models/$FILE" | sha256sum -c -
+          ls -lh ~/models
+
+  run:
+    needs: [config, model]
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 16      # the free account limit is 20 jobs (macOS included): keep 4 for other work
+      matrix: ${{ fromJSON(needs.config.outputs.matrix) }}
+    env:
+      MODEL: ${{ matrix.model }}
+      SOURCE: ${{ matrix.source }}
+      SPLIT: ${{ matrix.split }}
+      SHARD: ${{ matrix.shard }}
+      SHARDS: ${{ matrix.shards }}
+      N: ${{ matrix.n }}
+      GGUF_REPO: ${{ matrix.repo }}
+      GGUF_FILE: ${{ matrix.file }}
+      GGUF_REV: ${{ matrix.rev }}
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Python deps + Playwright Chromium
+        run: |
+          pip install -r requirements.txt
+          pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Restore the GGUF
+        id: gguf
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/models/${{ matrix.file }}
+          key: gguf-${{ matrix.file }}-${{ matrix.rev }}
+
+      # The repo cache holds 10 GB and the four GGUFs are ~15.5 GB, so an entry can be
+      # evicted between the model job and this one: download it here then (same pin + sha256).
+      - name: Download the GGUF on a cache miss (pinned revision, sha256-checked)
+        # a released (trained) GGUF can be split in shards and only the first is cached: always download it
+        if: steps.gguf.outputs.cache-hit != 'true' || startsWith(matrix.repo, 'gh-release:')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ matrix.sha256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/models
+          case "$GGUF_REPO" in
+            gh-release:*)
+              gh release download "$GGUF_REV" --repo "${GGUF_REPO#gh-release:}" --dir ~/models --clobber \
+                --pattern "$(basename "${GGUF_FILE%-00001-of-*}" .gguf)*.gguf" ;;   # sharded or single file
+            *) curl -fL --retry 5 -o ~/models/"$GGUF_FILE" "https://huggingface.co/$GGUF_REPO/resolve/$GGUF_REV/$GGUF_FILE" ;;
+          esac
+          echo "$SHA  $HOME/models/$GGUF_FILE" | sha256sum -c -
+
+      - name: MiniWoB++ html (pinned commit, cached)
+        id: miniwob
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/awos-rl/miniwob
+          key: miniwob-a7658beb68e1d3572329e06734c5822bd284ddc8
+      - name: Fetch MiniWoB++ (cache miss)
+        if: steps.miniwob.outputs.cache-hit != 'true'
+        run: bash scripts/rl/fetch_miniwob.sh
+
+      - name: llama.cpp (official CPU build)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          source ci/rl_eval.env
+          mkdir -p ~/llama && cd ~/llama
+          gh release download "$LLAMA_TAG" --repo ggml-org/llama.cpp --pattern "llama-$LLAMA_TAG-bin-ubuntu-x64.tar.gz" --clobber
+          tar -xzf "llama-$LLAMA_TAG-bin-ubuntu-x64.tar.gz"
+          BIN=$(find ~/llama -name llama-server -type f | head -1)
+          chmod +x "$BIN"
+          echo "LLAMA_BIN=$BIN" >> "$GITHUB_ENV"
+          echo "LLAMA_TAG=$LLAMA_TAG" >> "$GITHUB_ENV"
+          "$BIN" --version || true
+
+      - name: Start llama-server (CPU, NP parallel slots)
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ci/rl_eval.env
+          echo "NP=$NP" >> "$GITHUB_ENV"
+          echo "AWOS_LOCAL_TIMEOUT_S=$AWOS_LOCAL_TIMEOUT_S" >> "$GITHUB_ENV"
+          LD_LIBRARY_PATH="$(dirname "$LLAMA_BIN"):${LD_LIBRARY_PATH:-}" nohup "$LLAMA_BIN" \
+            -m ~/models/$GGUF_FILE --alias "$MODEL" --host 127.0.0.1 --port 8080 \
+            -ngl 0 -t "$(nproc)" -c "$((CTX_PER_SLOT * NP))" -np "$NP" --jinja --reasoning off \
+            --cache-prompt --temp 0 --metrics \
+            > ~/llama-server.log 2>&1 &
+          for i in $(seq 1 120); do
+            curl -s -m 2 http://127.0.0.1:8080/health | grep -q ok && break; sleep 5
+          done
+          curl -s http://127.0.0.1:8080/health
+
+      - name: Run the shard (scaffold.rl.harness run + summarize)
+        shell: bash
+        run: |
+          set -uo pipefail
+          # Collection runs (RFT data) set SAMPLES / TEMPERATURE / SEED in ci/rl_eval.env; eval runs leave them unset.
+          eval "$(grep -E '^(SAMPLES|TEMPERATURE|SEED)=' ci/rl_eval.env || true)"
+          export SAMPLES="${SAMPLES:-}" TEMPERATURE="${TEMPERATURE:-}" SEED="${SEED:-}"
+          bash scripts/rl/ci_run_shard.sh
+          RC=$?
+          NAME="${MODEL}__${SOURCE}__${SPLIT}__shard${SHARD}of${SHARDS}"
+          cp ~/llama-server.log "runs/rl/$NAME/" || true
+          exit $RC
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rl-${{ matrix.model }}-${{ matrix.source }}-${{ matrix.split }}-s${{ matrix.shard }}of${{ matrix.shards }}
+          path: runs/rl/**
+          if-no-files-found: warn
+
+  summary:
+    needs: run
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: rl-*
+      - name: Merge baselines
+        run: python3 scripts/rl/merge_baselines.py artifacts --out artifacts/BASELINE.md --json artifacts/baseline.json | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rl-baseline-summary
+          path: |
+            artifacts/BASELINE.md
+            artifacts/baseline.json
+          if-no-files-found: warn

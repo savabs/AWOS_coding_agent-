@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spec: ProjectPlanner (Phase 5C) — AWOS</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--success:#10b981;--warn:#f59e0b;--danger:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status.active{background:#f59e0b;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+main{max-width:800px;margin:0 auto;padding:32px}
+h2{font-size:17px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px}
+p code,li code,td code{background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px;font-size:12px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.step{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin:10px 0}
+.step .step-num{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:4px}
+.step .step-title{font-weight:600;margin-bottom:6px}
+.step .exit{font-size:12px;color:var(--muted);margin-top:6px;font-style:italic}
+.step .exit strong{color:var(--text)}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+footer{background:var(--surface);border-top:1px solid var(--border);padding:16px 32px;display:flex;justify-content:flex-end;gap:12px}
+.copy-btn{background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:500}
+.copy-btn.secondary{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb">AWOS / docs / specs</div>
+  <h1>Spec: ProjectPlanner — Persistent Goal DAG</h1>
+  <div class="meta">
+    <span class="tag">doc/spec</span>
+    <span class="tag">phase/5C</span>
+    <span class="tag">topic/project-planner</span>
+    <span class="status active">active</span>
+    <time>2026-05-19</time>
+  </div>
+</header>
+
+<main>
+
+<h2>Goal</h2>
+<p>Give AWOS persistent memory of multi-session projects by maintaining a Goal DAG at <code>.awos/goals/</code>, so that when the user resumes work on a project the agent knows which tasks are complete, which failed, and which are still pending — without re-running completed work or losing failure history.</p>
+
+<div class="callout">
+<strong>Governing research:</strong> <a href="../research/project_planner.html">project_planner.html</a><br>
+<strong>Task file:</strong> <a href="../../tasks/active/project_planner_task.html">project_planner_task.html</a>
+</div>
+
+<h2>Files Affected</h2>
+<table>
+<tr><th>File</th><th>Change type</th><th>Description</th></tr>
+<tr><td><code>scaffold/agent/project_planner.py</code></td><td>CREATE</td><td>New module: GoalNode, GoalGraph, ProjectPlanner classes. All persistence and graph logic lives here.</td></tr>
+<tr><td><code>scaffold/agent/orchestrator.py</code></td><td>MODIFY</td><td>Add <code>self.project_planner = ProjectPlanner()</code> in <code>__init__</code>. Call <code>project_planner.load_or_create_goal()</code> at start of <code>execute_feature()</code>. Call <code>project_planner.update_node_status()</code> after each task outcome in <code>_execute_single_task()</code>.</td></tr>
+<tr><td><code>scaffold/agent/planner.py</code></td><td>MODIFY</td><td>Add optional <code>existing_goal: GoalGraph | None = None</code> param to <code>plan()</code>. If provided, skip tasks whose IDs are already in the graph as completed nodes.</td></tr>
+<tr><td><code>tests/test_project_planner.py</code></td><td>CREATE</td><td>Unit tests: GoalNode, GoalGraph, ProjectPlanner save/load/update/merge, edge cases.</td></tr>
+</table>
+
+<h2>Interface Contract</h2>
+
+<h3>GoalNode Dataclass</h3>
+<pre>
+@dataclass
+class GoalNode:
+    goal_id:       str            # UUID4 prefixed with "g_"
+    description:   str            # user-supplied goal description
+    parent_ids:    list[str]      # empty list for root nodes
+    child_ids:     list[str]      # populated when decomposition creates children
+    tasks:         list[dict]     # Planner task dicts assigned to this node
+    status:        str            # "pending" | "in_progress" | "completed"
+                                  # | "failed" | "stalled" | "blocked"
+    created_at:    str            # ISO 8601 UTC
+    updated_at:    str            # ISO 8601 UTC
+    completed_at:  str | None     # ISO 8601 UTC or None
+    session_ids:   list[str]      # session UUIDs that touched this node
+    failure_count: int            # incremented on each failed attempt (default 0)
+    critique_ids:  list[str]      # ErrorPattern task_ids from Phase 5B ReflexionMemory
+</pre>
+
+<h3>GoalGraph Class</h3>
+<pre>
+class GoalGraph:
+    root_id: str                  # ID of the root GoalNode
+    nodes: dict[str, GoalNode]    # goal_id → GoalNode
+
+    def add_node(node: GoalNode) -> None
+    def get_node(goal_id: str) -> GoalNode | None
+    def pending_nodes() -> list[GoalNode]   # topological order, no pending parents
+    def all_complete() -> bool
+    def to_dict() -> dict                   # for JSON serialisation
+    @classmethod
+    def from_dict(data: dict) -> GoalGraph  # deserialise from JSON
+</pre>
+
+<h3>ProjectPlanner Class</h3>
+<pre>
+class ProjectPlanner:
+    def __init__(self, goals_dir: str = ".awos/goals")
+
+    def load_or_create_goal(
+        self,
+        description: str,
+        session_id: str,
+    ) -> GoalGraph:
+        """
+        Find an open goal matching description (Jaccard >= 0.4),
+        or create a new root GoalNode and persist it.
+        Returns the loaded or newly created GoalGraph.
+        """
+
+    def update_node_status(
+        self,
+        graph: GoalGraph,
+        goal_id: str,
+        new_status: str,
+        task_id: str | None = None,
+        critique_id: str | None = None,
+    ) -> None:
+        """
+        Update a node status. Propagates completion/failure to parents/children.
+        Writes atomically to .awos/goals/{graph.root_id}.json.
+        Updates INDEX.json.
+        """
+
+    def append_nodes(
+        self,
+        graph: GoalGraph,
+        new_nodes: list[GoalNode],
+        parent_id: str,
+    ) -> GoalGraph:
+        """
+        Append new child nodes under parent_id. Used when:
+        - A new request extends an existing goal (goal merge)
+        - TaskDecomposer creates sub-tasks from a failing node
+        """
+
+    def get_pending_graphs(self) -> list[GoalGraph]:
+        """Return all non-completed GoalGraphs from INDEX.json."""
+
+    def summary(self) -> dict:
+        """Return {total, by_status, oldest_open} from INDEX.json."""
+</pre>
+
+<h2>Implementation Steps</h2>
+
+<div class="step">
+  <div class="step-num">Step 1</div>
+  <div class="step-title">Create <code>scaffold/agent/project_planner.py</code> with GoalNode, GoalGraph, ProjectPlanner</div>
+  <p>Implement the three classes with full docstrings. Include: <code>GoalNode.now_timestamp()</code>, <code>GoalNode.new_id()</code>, <code>GoalGraph.pending_nodes()</code> via topological sort, <code>ProjectPlanner._jaccard(a, b)</code> for keyword overlap, <code>ProjectPlanner._atomic_write(path, data)</code> using .tmp + rename, <code>ProjectPlanner._load_index()</code>, <code>ProjectPlanner._save_index()</code>.</p>
+  <div class="exit"><strong>Exit condition:</strong> <code>python3 -c "from scaffold.agent.project_planner import ProjectPlanner; p = ProjectPlanner('/tmp/test_goals'); print('ok')"</code> prints <code>ok</code> with no errors.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 2</div>
+  <div class="step-title">Implement <code>load_or_create_goal()</code> with Jaccard goal matching and INDEX.json management</div>
+  <p>Scan <code>INDEX.json</code> for open goals. For each, compute Jaccard overlap of word-tokenised descriptions (lowercase, strip punctuation, ignore stop-words: "a", "an", "the", "and", "or", "to", "in", "of", "for", "with"). If best score >= 0.4, load and return that graph. Otherwise create root node with new UUID, persist, update index, return new graph.</p>
+  <div class="exit"><strong>Exit condition:</strong> Calling <code>load_or_create_goal("Add OAuth2 auth")</code> twice returns the same <code>goal_id</code> both times. Calling it with "Add rate limiting" returns a different <code>goal_id</code>.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 3</div>
+  <div class="step-title">Implement <code>update_node_status()</code> with propagation and atomic write</div>
+  <p>Update the node in memory. If status == "completed": check if all siblings are complete → update parent. If status == "failed": increment <code>failure_count</code>. If <code>failure_count</code> >= 2: mark child nodes as "blocked". Write to <code>{root_id}.json.tmp</code> then rename to <code>{root_id}.json</code>. Update <code>INDEX.json</code> with new status + updated_at.</p>
+  <div class="exit"><strong>Exit condition:</strong> After calling <code>update_node_status(graph, node_id, "completed")</code>, re-loading the graph from disk shows the node status as "completed" and <code>completed_at</code> is set.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 4</div>
+  <div class="step-title">Implement <code>append_nodes()</code> for goal extension and decomposition expansion</div>
+  <p>Validate parent_id exists in graph. Set <code>new_node.parent_ids = [parent_id]</code>. Append new_node.goal_id to <code>parent.child_ids</code>. Add to <code>graph.nodes</code>. Persist. Return updated graph. Guard: if <code>len(graph.nodes) >= 200</code>, raise <code>GoalGraphFullError</code>.</p>
+  <div class="exit"><strong>Exit condition:</strong> After appending 2 child nodes under a root, <code>graph.pending_nodes()</code> returns only the 2 children (root is "in_progress"), in topological order.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 5</div>
+  <div class="step-title">Wire <code>ProjectPlanner</code> into <code>Orchestrator.__init__</code> and <code>execute_feature()</code></div>
+  <p>In <code>__init__</code>: add <code>self.project_planner = ProjectPlanner()</code>. In <code>execute_feature(goal, ...)</code>: at the top, call <code>self._active_goal_graph = self.project_planner.load_or_create_goal(goal, session_id=uuid.uuid4().hex)</code>. Log: <code>"[ProjectPlanner] goal_id=%s status=%s"</code>. No other changes to execute_feature logic in this step.</p>
+  <div class="exit"><strong>Exit condition:</strong> Running <code>Orchestrator().execute_feature("test feature")</code> creates a <code>.awos/goals/</code> directory with one JSON file and one <code>INDEX.json</code>. Existing tests still pass (166+ tests).</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 6</div>
+  <div class="step-title">Wire <code>update_node_status()</code> into <code>Orchestrator._execute_single_task()</code> after each task outcome</div>
+  <p>After <code>worker_success = True</code>: call <code>self.project_planner.update_node_status(self._active_goal_graph, node_id, "completed", task_id=task_id)</code>. After max_attempts exhausted: call with <code>"failed"</code>. Guard with <code>if hasattr(self, "_active_goal_graph")</code> so the method works standalone. Map task_id to goal_id via a helper <code>_find_node_for_task(graph, task_id)</code>.</p>
+  <div class="exit"><strong>Exit condition:</strong> After a successful task execution, the corresponding node in <code>.awos/goals/{goal_id}.json</code> has status <code>"completed"</code>. After a failed task, status is <code>"failed"</code> and <code>failure_count</code> == 1.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 7</div>
+  <div class="step-title">Add <code>existing_goal</code> param to <code>Planner.plan()</code> to skip already-completed tasks</div>
+  <p>Add <code>existing_goal: GoalGraph | None = None</code> parameter. If provided, after generating task list, filter out any task whose description closely matches a completed node description (Jaccard >= 0.5). Log skipped tasks: <code>"[Planner] skipping task (already complete in goal graph): %s"</code>. Fully backward-compatible — default is None.</p>
+  <div class="exit"><strong>Exit condition:</strong> Calling <code>planner.plan(goal, existing_goal=graph)</code> where graph has 2 completed nodes returns a task list that does NOT include those 2 tasks. Calling without <code>existing_goal</code> returns the full list.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 8</div>
+  <div class="step-title">Write <code>tests/test_project_planner.py</code> with full coverage of all public methods</div>
+  <p>Test classes: <code>TestGoalNode</code>, <code>TestGoalGraph</code>, <code>TestProjectPlannerSaveLoad</code>, <code>TestGoalMatching</code>, <code>TestStatusPropagation</code>, <code>TestAppendNodes</code>, <code>TestEdgeCases</code>. All use <code>tmp_path</code> fixture so no disk pollution.</p>
+  <div class="exit"><strong>Exit condition:</strong> <code>pytest tests/test_project_planner.py -v</code> reports 25+ tests passing, 0 failures.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">Step 9</div>
+  <div class="step-title">Run full test suite — zero regressions</div>
+  <p>Run all existing tests plus the new test file. Confirm 0 regressions against the 166 previously passing tests.</p>
+  <div class="exit"><strong>Exit condition:</strong> <code>pytest tests/ -v --tb=short</code> shows 190+ tests passing (166 existing + 25+ new), 0 failures, 0 errors.</div>
+</div>
+
+<h2>Edge Cases</h2>
+<ul>
+  <li><strong>Empty INDEX.json or missing goals dir:</strong> <code>load_or_create_goal()</code> creates the dir and a fresh index. Never raises.</li>
+  <li><strong>Corrupt .json file (partial write crash):</strong> On load, catch JSONDecodeError → log warning → treat as non-existent → create new goal. The .tmp pattern prevents most corruption.</li>
+  <li><strong>goal_id collision (UUID):</strong> Statistically impossible with UUID4 (2^122 space). No guard needed.</li>
+  <li><strong>Node not found in <code>_find_node_for_task()</code>:</strong> Return None, log warning. Do not raise — must not block the retry loop.</li>
+  <li><strong>Graph has 200+ nodes:</strong> <code>append_nodes()</code> raises <code>GoalGraphFullError</code>. Orchestrator catches it, logs, continues without appending.</li>
+  <li><strong>User calls <code>execute_feature()</code> without a goal string:</strong> Use <code>goal = "unnamed_goal"</code> as fallback — always creates a new graph.</li>
+  <li><strong>Jaccard match on very short descriptions (1-2 words):</strong> Short descriptions are inherently high-overlap. Apply minimum description length guard: descriptions shorter than 3 meaningful words always create a new goal.</li>
+</ul>
+
+<h2>Testing Plan</h2>
+<table>
+<tr><th>Test</th><th>Input</th><th>Expected Output</th><th>File</th></tr>
+<tr><td><code>test_create_goal_creates_file</code></td><td><code>load_or_create_goal("Add OAuth")</code></td><td>JSON file created at <code>tmp/.awos/goals/g_*.json</code></td><td>test_project_planner.py</td></tr>
+<tr><td><code>test_load_returns_same_goal_id</code></td><td>Call twice with "Add OAuth auth"</td><td>Both calls return same <code>goal_id</code></td><td>test_project_planner.py</td></tr>
+<tr><td><code>test_different_goal_creates_new</code></td><td>"Add OAuth", then "Add rate limiting"</td><td>Two different goal_ids</td><td>test_project_planner.py</td></tr>
+<tr><td><code>test_update_completed_persists</code></td><td><code>update_node_status(..., "completed")</code></td><td>Reloaded graph shows <code>status=="completed"</code></td><td>test_project_planner.py</td></tr>
+<tr><td><code>test_failure_increments_count</code></td><td><code>update_node_status(..., "failed")</code> twice</td><td><code>failure_count == 2</code></td><td>test_project_planner.py</td></tr>
+<tr><td><code>test_pending_nodes_topological</code></td><td>Graph: root → child1 → child2</td><td><code>pending_nodes()</code> returns [child1] (child2 blocked by child1)</td><td>test_project_planner.py</td></tr>
+<tr><td><code>test_append_nodes_links_parent</code></td><td>Append 2 nodes under root</td><td>Root.child_ids contains both new IDs</td><td>test_project_planner.py</td></tr>
+<tr><td><code>test_graph_full_raises</code></td><td>Append 201st node</td><td><code>GoalGraphFullError</code> raised</td><td>test_project_planner.py</td></tr>
+<tr><td><code>test_corrupt_file_handled</code></td><td>Corrupt the JSON file, then load</td><td>No exception; new goal created</td><td>test_project_planner.py</td></tr>
+<tr><td><code>test_planner_skips_completed_tasks</code></td><td><code>plan(goal, existing_goal=graph)</code> with 1 completed node</td><td>Returned task list excludes completed task description</td><td>test_project_planner.py</td></tr>
+<tr><td><code>test_summary_counts</code></td><td>3 goals: 1 completed, 1 failed, 1 pending</td><td><code>summary()["by_status"]</code> matches</td><td>test_project_planner.py</td></tr>
+</table>
+
+<h2>Related</h2>
+<ul>
+  <li><a href="../research/project_planner.html">project_planner.html</a> — research backing this spec</li>
+  <li><a href="../../tasks/active/project_planner_task.html">project_planner_task.html</a> — execution checklist</li>
+  <li><a href="../research/reflexion_memory.html">reflexion_memory.html</a> — Phase 5B (critique_ids in GoalNode)</li>
+</ul>
+
+</main>
+
+<footer>
+  <button class="copy-btn secondary" onclick="copyJSON()">Copy Steps as JSON</button>
+  <button class="copy-btn" onclick="copyPrompt()">Copy as Prompt</button>
+</footer>
+<script>
+function copyPrompt(){navigator.clipboard.writeText('# Spec: ProjectPlanner
+
+'+document.querySelector('main').innerText).then(()=>{const b=document.querySelector('.copy-btn:last-child');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy as Prompt',1500)})}
+function copyJSON(){const steps=[...document.querySelectorAll('.step')].map((s,i)=>({step:i+1,title:s.querySelector('.step-title').innerText,exit:s.querySelector('.exit').innerText.replace('Exit condition:','').trim()}));navigator.clipboard.writeText(JSON.stringify({doc:'spec',steps},null,2)).then(()=>{const b=document.querySelector('.copy-btn.secondary');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy Steps as JSON',1500)})}
+</script>
+</body>
+</html>

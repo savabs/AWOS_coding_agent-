@@ -1,0 +1,122 @@
+# WebJudge-7B on Kaggle (free T4 x2) over the judge-layout output of an rl-web-kaggle run: stage the runs + the
+# judge kernel (kaggle/web-judge/stage.py), push (kaggle_driver), wait, fetch results.json -> artifact.
+# Settings: ci/rl_web_judge_kaggle.env. Launch: push to bench-cloud/rl-wj7b-<anything> (a prefix no other workflow matches).
+name: rl-web-judge-kaggle
+
+on:
+  push:
+    branches: ["bench-cloud/rl-wj7b-**"]
+
+permissions:
+  contents: read
+  actions: read          # download the rl-web-kaggle run's artifacts
+
+jobs:
+  judge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Settings (ci/rl_web_judge_kaggle.env)
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ci/rl_web_judge_kaggle.env
+          for k in SOURCE_RUN SOURCE_ENC_RELEASE MODELS SPLIT N_TASKS KERNEL_SLUG DATASET_SLUG CONFIG; do echo "$k=${!k}" >> "$GITHUB_ENV"; done
+          [ -n "$KAGGLE_USERNAME" ] || { echo "::error::KAGGLE_USERNAME secret not set"; exit 1; }
+          pip install -q kaggle==2.2.4
+      - name: Download the runs (judge layout) and take the first N_TASKS of each
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BENCH_DATA_KEY: ${{ secrets.BENCH_DATA_KEY }}
+        run: |
+          set -euo pipefail
+          ARGS=()
+          for m in $MODELS; do
+            if [ -n "${SOURCE_ENC_RELEASE:-}" ]; then
+              # runs made outside CI (the home-network run in the sandbox VM): an AES-256 (openssl, pbkdf2) tarball
+              # on a release of this PUBLIC repo; only this job can read it (BENCH_DATA_KEY secret)
+              test -n "$BENCH_DATA_KEY" || { echo "::error::BENCH_DATA_KEY secret not set"; exit 1; }
+              gh release download "$SOURCE_ENC_RELEASE" --repo "$GITHUB_REPOSITORY" -p "$m-$SPLIT.tar.gz.enc" -D enc --clobber
+              mkdir -p "art/$m"
+              openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:BENCH_DATA_KEY \
+                -in "enc/$m-$SPLIT.tar.gz.enc" | tar -xzf - -C "art/$m"
+            else
+              gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" -n "rl-web-merged-$m-$SPLIT" -D "art/$m"
+              bash scripts/ci_unseal.sh "art/$m"
+            fi
+            J=$(find "art/$m" -type d -name judge | head -1)
+            [ -n "$J" ] || { echo "::error::no judge/ folder in rl-web-merged-$m-$SPLIT"; exit 1; }
+            if [ "$N_TASKS" -gt 0 ]; then
+              mkdir -p "sub/$m"
+              find "$J" -mindepth 1 -maxdepth 1 -type d | sort | head -n "$N_TASKS" | while read -r t; do cp -r "$t" "sub/$m/"; done
+              J="sub/$m"
+            fi
+            echo "$m: $(find "$J" -name result.json | wc -l) episodes"
+            ARGS+=("$m=$J")
+          done
+          printf '%s\n' "${ARGS[@]}" > runs.txt
+      - name: Stage (dataset + kernel) and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t RUNS < runs.txt
+          SETS=(); for kv in $CONFIG; do SETS+=(--set "$kv"); done
+          PYTHONPATH=. python kaggle/web-judge/stage.py --out stage-wj --runs "${RUNS[@]}" --user "$KAGGLE_USERNAME" ${SETS[@]+"${SETS[@]}"}
+          # the stage writes the default slugs; point both at the configured ones
+          python3 - <<'PY'
+          import json, os
+          u, k, d = os.environ["KAGGLE_USERNAME"], os.environ["KERNEL_SLUG"], os.environ["DATASET_SLUG"]
+          p = "stage-wj/dataset/dataset-metadata.json"; m = json.load(open(p)); m.update(id=f"{u}/{d}", title=d)
+          json.dump(m, open(p, "w"), indent=1)
+          p = "stage-wj/kernel/kernel-metadata.json"; m = json.load(open(p))
+          m.update(id=f"{u}/{k}", title=k, dataset_sources=[f"{u}/{d}"]); json.dump(m, open(p, "w"), indent=1)
+          json.dump({"dataset": f"{u}/{d}", "kernel": f"{u}/{k}"}, open("stage-wj/stage.json", "w"))
+          PY
+          PYTHONPATH=. python -c "from pathlib import Path; from scaffold.rl.train import kaggle_driver as kd; print(kd.push(Path('stage-wj'), message='web-judge'))"
+      - name: Wait for the judge kernel
+        id: wait
+        shell: bash
+        run: |
+          set -uo pipefail
+          TOPIC=$(python3 -c "import re;s=open('kaggle/rl-sft/train.py').read();print(re.search(r'\"ntfy_topic\": \"([^\"]*)\"',s).group(1))")
+          PYTHONPATH=. python -m scaffold.rl.train.kaggle_driver wait --kernel "$KAGGLE_USERNAME/$KERNEL_SLUG" --timeout-min 320 \
+            --ntfy-topic "$TOPIC" | tee wait.log
+          S=$(tail -1 wait.log); echo "status=$S" >> "$GITHUB_OUTPUT"
+          [ "$S" = "complete" ]
+      - name: Fetch results
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          PYTHONPATH=. python -m scaffold.rl.train.kaggle_driver fetch --kernel "$KAGGLE_USERNAME/$KERNEL_SLUG" --out judge_out || true
+          ls -la judge_out || true
+          f=$(find judge_out -name results.json | head -1)
+          if [ -n "$f" ]; then
+            python3 - "$f" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json, sys
+          r = json.load(open(sys.argv[1]))
+          print("### WebJudge-7B results\n\n```\n" + json.dumps(r.get("summary", r), indent=1)[:6000] + "\n```")
+          PY
+          fi
+          find judge_out -name "*.log" -exec tail -n 40 {} \; || true
+      - name: Seal the results (public repo; verdicts carry the task texts)
+        if: always()
+        shell: bash
+        env:
+          BENCH_DATA_KEY: ${{ secrets.BENCH_DATA_KEY }}
+        run: bash scripts/ci_seal.sh judge_out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rl-web-judge-kaggle
+          path: judge_out/
+          retention-days: 30

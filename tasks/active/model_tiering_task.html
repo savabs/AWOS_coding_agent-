@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task: Model Tiering Implementation — token_effectivenes</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--success:#10b981;--warn:#f59e0b;--danger:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status-badge{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status-active{background:#f59e0b;color:#fff}
+.status-done{background:#10b981;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+main{max-width:800px;margin:0 auto;padding:32px}
+.meta-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin-bottom:24px;display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:13px}
+.meta-card .key{color:var(--muted);font-weight:600}
+h2{font-size:17px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:20px 0 8px}
+.step{display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border-radius:6px;margin:6px 0;border:1px solid var(--border);background:var(--surface)}
+.step.done{background:#f0fdf4;border-color:#bbf7d0}
+.step.active{background:var(--accent-light);border-color:#c7d2fe}
+.step input[type=checkbox]{flex-shrink:0;margin-top:3px;width:16px;height:16px;accent-color:var(--success)}
+.step .step-body{flex:1}
+.step .step-num{font-size:11px;color:var(--muted);margin-bottom:2px;font-family:monospace}
+.step .step-title{font-weight:600;font-size:14px;margin-bottom:4px}
+.step .step-exit{font-size:12px;color:var(--muted);font-style:italic}
+.step .step-exit strong{color:var(--text);font-style:normal}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px;background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px}
+.progress-bar{background:var(--surface2);border-radius:8px;height:8px;margin:8px 0;overflow:hidden}
+.progress-bar .fill{background:var(--success);height:100%;border-radius:8px;transition:.3s}
+.progress-label{font-size:12px;color:var(--muted);margin-bottom:4px}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb">token_effectivenes / tasks / active</div>
+  <h1>Task: Model Tiering — Multi-Provider Routing</h1>
+  <div class="meta">
+    <span class="tag">doc/task</span>
+    <span class="tag">phase/2</span>
+    <span class="tag">topic/model-tiering</span>
+    <span class="status-badge status-active">active</span>
+    <time>2026-05-13</time>
+  </div>
+</header>
+
+<main>
+
+<div class="meta-card">
+  <span class="key">Spec</span><span><a href="../specs/model_tiering_spec.html">docs/specs/model_tiering_spec.html</a></span>
+  <span class="key">Research</span><span><a href="../research/model_tiering.html">docs/research/model_tiering.html</a></span>
+  <span class="key">Goal</span><span>Enable 5-tier model routing via Makefile targets. DeepSeek + Gemini as cheap alternatives to Claude.</span>
+  <span class="key">Files</span><span>.env, scripts/token_report.py, Makefile, CONVENTIONS.md, memories/repo/project_structure.md</span>
+</div>
+
+<div class="progress-label">Progress: <span id="pct">0%</span></div>
+<div class="progress-bar"><div class="fill" id="fill" style="width:0%"></div></div>
+
+<h2>Phase 1 — Configuration</h2>
+
+<div class="step active" id="s1-1">
+  <input type="checkbox" onchange="mark('s1-1',this)">
+  <div class="step-body">
+    <div class="step-num">1.1</div>
+    <div class="step-title">Add DEEPSEEK_API_KEY + GEMINI_API_KEY to .env</div>
+    <div class="step-exit"><strong>Exit:</strong> <code>grep DEEPSEEK_API_KEY .env</code> returns line; no secrets in git.</div>
+  </div>
+</div>
+
+<div class="step" id="s1-2">
+  <input type="checkbox" onchange="mark('s1-2',this)">
+  <div class="step-body">
+    <div class="step-num">1.2</div>
+    <div class="step-title">Expand PRICING dict in scripts/token_report.py (Gemini + DeepSeek)</div>
+    <div class="step-exit"><strong>Exit:</strong> <code>python3 -c "import scripts.token_report as t; print([k for k in t.PRICING if 'deepseek' in k])"</code> prints deepseek-chat.</div>
+  </div>
+</div>
+
+<div class="step" id="s1-3">
+  <input type="checkbox" onchange="mark('s1-3',this)">
+  <div class="step-body">
+    <div class="step-num">1.3</div>
+    <div class="step-title">Add 4 tier targets to Makefile (dev-cheap, dev-think, dev-mid, dev-pro) + help target</div>
+    <div class="step-exit"><strong>Exit:</strong> <code>make help</code> lists all 8 targets with descriptions.</div>
+  </div>
+</div>
+
+<div class="step" id="s1-4">
+  <input type="checkbox" onchange="mark('s1-4',this)">
+  <div class="step-body">
+    <div class="step-num">1.4</div>
+    <div class="step-title">Add MODEL ROUTING section to CONVENTIONS.md</div>
+    <div class="step-exit"><strong>Exit:</strong> <code>grep "MODEL ROUTING" CONVENTIONS.md</code> finds 1 match. File still ≥1024 tokens.</div>
+  </div>
+</div>
+
+<div class="step" id="s1-5">
+  <input type="checkbox" onchange="mark('s1-5',this)">
+  <div class="step-body">
+    <div class="step-num">1.5</div>
+    <div class="step-title">Update memories/repo/project_structure.md with multi-provider model table</div>
+    <div class="step-exit"><strong>Exit:</strong> File contains deepseek-chat and gemini-2.5-flash entries in cost table.</div>
+  </div>
+</div>
+
+<h2>Verification Steps (after all above done)</h2>
+
+<div class="step" id="sv-1">
+  <input type="checkbox" onchange="mark('sv-1',this)">
+  <div class="step-body">
+    <div class="step-num">V1</div>
+    <div class="step-title">Add DeepSeek API key to .env, run: <code>aider --model deepseek/deepseek-chat --message "say hi"</code></div>
+    <div class="step-exit"><strong>Exit:</strong> Aider responds without error. Record cost in project_structure.md.</div>
+  </div>
+</div>
+
+<div class="step" id="sv-2">
+  <input type="checkbox" onchange="mark('sv-2',this)">
+  <div class="step-body">
+    <div class="step-num">V2</div>
+    <div class="step-title">Add Gemini API key, run: <code>aider --model gemini/gemini-2.5-flash --message "say hi"</code></div>
+    <div class="step-exit"><strong>Exit:</strong> Aider responds. Free tier confirmed working.</div>
+  </div>
+</div>
+
+<div class="step" id="sv-3">
+  <input type="checkbox" onchange="mark('sv-3',this)">
+  <div class="step-body">
+    <div class="step-num">V3</div>
+    <div class="step-title">Run <code>make dev-cheap</code> — confirms end-to-end tier 2 workflow</div>
+    <div class="step-exit"><strong>Exit:</strong> Aider launches with deepseek-chat model, CONVENTIONS.md loaded as read-only context.</div>
+  </div>
+</div>
+
+<div class="callout" style="margin-top:24px">
+  <strong>Next session action:</strong> Obtain DeepSeek API key from platform.deepseek.com and Gemini key from aistudio.google.com, fill .env, run verification steps V1–V3.
+</div>
+
+</main>
+
+<script>
+const STEPS = ['s1-1','s1-2','s1-3','s1-4','s1-5','sv-1','sv-2','sv-3'];
+function mark(id, cb) {
+  const el = document.getElementById(id);
+  if (cb.checked) { el.classList.add('done'); el.classList.remove('active'); }
+  else { el.classList.remove('done'); }
+  const done = STEPS.filter(s => document.getElementById(s).classList.contains('done')).length;
+  const pct = Math.round(done/STEPS.length*100);
+  document.getElementById('pct').textContent = pct+'%';
+  document.getElementById('fill').style.width = pct+'%';
+}
+</script>
+</body>
+</html>

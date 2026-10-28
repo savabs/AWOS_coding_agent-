@@ -1,0 +1,12 @@
+{
+  "id": "stage1_pei_benchmark_v1",
+  "updated": "2026-06-21",
+  "cases_dir": "tests/fixtures/benchmark",
+  "env": {
+    "AWOS_CHEAP_ONLY": "true",
+    "AWOS_PREMIUM_BUDGET": "0",
+    "AWOS_LEARNING_DISABLE": "true",
+    "AWOS_USE_WORKTREE": "false",
+    "AWOS_MONTHLY_BUDGET": "5"
+  }
+}

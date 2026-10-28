@@ -1,0 +1,73 @@
+From 9c904ca220c2a553f9a6fe01f8e95291b39293cc Mon Sep 17 00:00:00 2001
+From: AWOS host <awos-host@localhost>
+Date: Tue, 13 Oct 2026 19:21:40 +0530
+Subject: [PATCH] awos: Fix https://github.com/python/mypy/issues/22194 : error
+ messages show du
+
+AWOS-Job: d5c4f655b66e474d9e7cac10b97c7e39
+---
+ mypy/messages.py                       | 18 ++++++++++++++++--
+ test-data/unit/check-type-aliases.test | 10 ++++++++++
+ 2 files changed, 26 insertions(+), 2 deletions(-)
+
+diff --git a/mypy/messages.py b/mypy/messages.py
+index b58c9e7..143a0e8 100644
+--- a/mypy/messages.py
++++ b/mypy/messages.py
+@@ -2672,8 +2672,22 @@ def format_type_inner(
+     def format_list(types: Sequence[Type]) -> str:
+         return ", ".join(format(typ) for typ in types)
+ 
++    def flatten_union_items(types: Sequence[Type]) -> list[Type]:
++        flat: list[Type] = []
++        for typ in types:
++            proper = get_proper_type(typ)
++            if isinstance(proper, UnionType):
++                flat.extend(flatten_union_items(proper.items))
++            else:
++                flat.append(typ)
++        return flat
++
+     def format_union_items(types: Sequence[Type]) -> list[str]:
+-        formatted = [format(typ) for typ in types if format(typ) != "None"]
++        flat = flatten_union_items(types)
++        # Deduplicate formatted items, keeping first-occurrence order.
++        formatted = list(
++            dict.fromkeys(format(typ) for typ in flat if format(typ) != "None")
++        )
+         if len(formatted) > MAX_UNION_ITEMS and verbosity == 0:
+             more = len(formatted) - MAX_UNION_ITEMS // 2
+             formatted = formatted[: MAX_UNION_ITEMS // 2]
+@@ -2681,7 +2695,7 @@ def format_type_inner(
+             more = 0
+         if more:
+             formatted.append(f"<{more} more items>")
+-        if any(format(typ) == "None" for typ in types):
++        if any(format(typ) == "None" for typ in flat):
+             formatted.append("None")
+         return formatted
+ 
+diff --git a/test-data/unit/check-type-aliases.test b/test-data/unit/check-type-aliases.test
+index 3f712ea..40d8d4b 100644
+--- a/test-data/unit/check-type-aliases.test
++++ b/test-data/unit/check-type-aliases.test
+@@ -16,6 +16,16 @@ f(()) # E: Argument 1 to "f" has incompatible type "tuple[()]"; expected "int |
+ [targets __main__, __main__.f]
+ [builtins fixtures/tuple.pyi]
+ 
++[case testOverlappingUnionAliasNoDuplicateItems]
++from typing import Optional, Union
++from typing_extensions import TypeAlias
++TextInput: TypeAlias = str
++ImageInput: TypeAlias = Optional[str]
++SingleInput: TypeAlias = Union[TextInput, ImageInput]
++def f(si: SingleInput) -> None: ...
++f(1) # E: Argument 1 to "f" has incompatible type "int"; expected "str | None"
++[builtins fixtures/tuple.pyi]
++
+ [case testTupleTypeAlias]
+ from typing import Tuple
+ T = Tuple[int, str]
+-- 
+2.50.1 (Apple Git-155)
+

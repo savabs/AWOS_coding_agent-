@@ -1,0 +1,219 @@
+# Claude teacher episodes on the live web (docs/specs/web_teacher.md): Mind2Web TRAIN tasks (Online-Mind2Web
+# excluded: scaffold/rl/web/m2w_tasks.py) run by `python -m scaffold.rl.web run --model anthropic:<id>` (MicroAgent's
+# own prompt + grammar contract, scaffold/rl/web/teacher.py) on free ubuntu-latest runners, with a HARD USD cap.
+# Output: trajectories.jsonl + judge/<task_id>/ per shard, merged as artifact rl-web-merged-<MODEL_LABEL>-train,
+# sealed with BENCH_DATA_KEY (public repo). Judge it with rl-web-judge-kaggle (WebJudge-7B), then
+# scaffold.rl.train.web_teacher_data turns the judged successes into SFT rows.
+# Settings: ci/rl_teach.env (DRY_RUN=1 by default: no API key is passed and nothing is spent).
+# Secrets: HF_TOKEN (Online-Mind2Web, for the exclusion), BENCH_DATA_KEY, ANTHROPIC_API_KEY (only when DRY_RUN=0).
+#
+# Launch: push to a branch named bench-cloud/rl-teach-<anything>. bench-cloud/rl-** is excluded from the paid
+# ladder workflow (.github/workflows/ladder.yml) and no other workflow matches rl-teach-**.
+name: rl-teach
+
+on:
+  push:
+    branches: ["bench-cloud/rl-teach-**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rl-teach-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  tasks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      matrix: ${{ steps.cfg.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: pip install -r requirements.txt
+      - id: cfg
+        name: Settings (ci/rl_teach.env) and the shard matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ci/rl_teach.env
+          python3 -c "import json,sys; n=int(sys.argv[1]); print('matrix='+json.dumps({'shard': list(range(1, n+1))}))" "$SHARDS" >> "$GITHUB_OUTPUT"
+          echo "DRY_RUN=$DRY_RUN TEACHER=$TEACHER MAX_USD=$MAX_USD N_TASKS=$N_TASKS SHARDS=$SHARDS WORKERS=$WORKERS" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Online-Mind2Web task file (gated; HF_TOKEN; never printed, never committed)
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          set -euo pipefail
+          [ -n "$HF_TOKEN" ] || { echo "::error::HF_TOKEN secret is empty"; exit 1; }
+          PYTHONPATH=. python - <<'PY'
+          import os
+          from pathlib import Path
+          from scaffold.rl.web.source import download, load_entries
+          p = download(Path(os.environ["RUNNER_TEMP"]) / "om2w" / "Online_Mind2Web.json")
+          print(f"{len(load_entries(p))} Online-Mind2Web tasks")
+          PY
+      - name: Cache the Mind2Web train task headers
+        id: hcache
+        uses: actions/cache@v4
+        with:
+          path: m2w_headers.jsonl
+          key: m2w-headers-${{ hashFiles('ci/rl_teach.env', 'scaffold/rl/web/m2w_tasks.py') }}
+      - name: Mind2Web train task headers (streamed; the HTML is never stored)
+        if: steps.hcache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ci/rl_teach.env
+          : > m2w_headers.jsonl
+          for N in $M2W_SHARDS; do
+            curl -sfL --retry 5 "https://huggingface.co/datasets/osunlp/Mind2Web/resolve/$M2W_REVISION/data/train/train_$N.json" \
+              | PYTHONPATH=. python -m scaffold.rl.web.m2w_tasks headers - >> m2w_headers.jsonl
+          done
+          wc -l m2w_headers.jsonl
+      - name: Build the teacher task file (deterministic sample, Online-Mind2Web excluded)
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ci/rl_teach.env
+          mkdir -p teach
+          PYTHONPATH=. python -m scaffold.rl.web.m2w_tasks build --headers m2w_headers.jsonl \
+            --exclude "$RUNNER_TEMP/om2w/Online_Mind2Web.json" --exclude-websites "$EXCLUDE_WEBSITES" \
+            --n "$N_TASKS" --repeats "$REPEATS" --seed "$SEED" --out teach/tasks.json | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Seal the task file (public repo)
+        env:
+          BENCH_DATA_KEY: ${{ secrets.BENCH_DATA_KEY }}
+        run: bash scripts/ci_seal.sh teach
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rl-teach-tasks
+          path: teach/**
+
+  run:
+    needs: tasks
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 10      # the free account limit is 20 jobs (macOS included): keep the rest for other work
+      matrix: ${{ fromJSON(needs.tasks.outputs.matrix) }}
+    env:
+      SHARD: ${{ matrix.shard }}
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Python deps + Playwright Chromium
+        run: |
+          pip install -r requirements.txt
+          pip install playwright
+          python -m playwright install --with-deps chromium
+      - uses: actions/download-artifact@v4
+        with:
+          name: rl-teach-tasks
+          path: teach
+      - name: Unseal the task file
+        env:
+          BENCH_DATA_KEY: ${{ secrets.BENCH_DATA_KEY }}
+        run: bash scripts/ci_unseal.sh teach
+      - name: Run the shard (scaffold.rl.web run --model anthropic:...)
+        shell: bash
+        env:
+          ANTHROPIC_KEY_SECRET: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -uo pipefail
+          source ci/rl_teach.env
+          NAME="${MODEL_LABEL}__web-train__shard${SHARD}of${SHARDS}"
+          OUT="runs/web/$NAME"
+          mkdir -p "$OUT"
+          # this shard's share of the run's cap (the runner divides it again by WORKERS)
+          export AWOS_TEACHER_MAX_USD=$(python3 -c "import sys; print(float(sys.argv[1]) / int(sys.argv[2]))" "$MAX_USD" "$SHARDS")
+          if [ "$DRY_RUN" = "0" ]; then
+            [ -n "$ANTHROPIC_KEY_SECRET" ] || { echo "::error::ANTHROPIC_API_KEY secret is empty"; exit 1; }
+            export ANTHROPIC_API_KEY="$ANTHROPIC_KEY_SECRET"
+          else
+            export AWOS_TEACHER_DRY=1          # no key in the environment, no network call to Anthropic
+          fi
+          unset ANTHROPIC_KEY_SECRET
+          export PYTHONPATH="$PWD"
+          python -m scaffold.rl.web run --model "$TEACHER" --model-label "$MODEL_LABEL" --split train \
+            --tasks-json teach/tasks.json --shard "$SHARD/$SHARDS" --max-steps "$MAX_STEPS" \
+            --max-seconds "$MAX_SECONDS" --workers "$WORKERS" --out "$OUT/" 2>&1 | tee "$OUT/harness.log"
+          RC=${PIPESTATUS[0]}
+          python -m scaffold.rl.web validate "$OUT/judge" | tee "$OUT/validate.txt" || true
+          python3 - "$OUT/summary.json" "$AWOS_TEACHER_MAX_USD" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import json, sys
+          s = json.load(open(sys.argv[1]))["overall"]
+          print(f"shard spend ${s.get('usd', 0.0):.4f} of ${float(sys.argv[2]):.4f}; episodes {s.get('episodes')}, "
+                f"blocked {s.get('blocked')}, answered {s.get('answered')}, steps/episode {s.get('steps_per_episode')}")
+          PY
+          exit $RC
+      - name: Seal the results (public repo)
+        if: always()
+        env:
+          BENCH_DATA_KEY: ${{ secrets.BENCH_DATA_KEY }}
+        run: bash scripts/ci_seal.sh runs/web
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rl-teach-s${{ matrix.shard }}
+          path: runs/web/**
+          if-no-files-found: warn
+
+  summary:
+    needs: run
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: rl-teach-s*
+      - name: Merge the shards (trajectories.jsonl + judge/), summarize, total spend
+        shell: bash
+        env:
+          BENCH_DATA_KEY: ${{ secrets.BENCH_DATA_KEY }}
+        run: |
+          set -uo pipefail
+          source ci/rl_teach.env
+          bash scripts/ci_unseal.sh artifacts || exit 1
+          export PYTHONPATH="$PWD"
+          dest="merged/${MODEL_LABEL}__train"
+          mkdir -p "$dest/judge"
+          for d in artifacts/rl-teach-s*/*/; do
+            cat "$d/trajectories.jsonl" >> "$dest/trajectories.jsonl" 2>/dev/null || true
+            cp -r "$d"/judge/* "$dest/judge/" 2>/dev/null || true
+            [ -f "$dest/run.json" ] || cp "$d/run.json" "$dest/run.json" 2>/dev/null || true
+          done
+          python -m scaffold.rl.web summarize "$dest" > /dev/null
+          python -m scaffold.rl.web validate "$dest/judge" | tee "$dest/validate.txt" || true
+          { echo "## $MODEL_LABEL (train, DRY_RUN=$DRY_RUN, cap \$$MAX_USD)"; cat "$dest/summary.md"; } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Seal the merged results (public repo)
+        env:
+          BENCH_DATA_KEY: ${{ secrets.BENCH_DATA_KEY }}
+        run: bash scripts/ci_seal.sh merged
+      - name: Artifact name for rl-web-judge-kaggle (rl-web-merged-<MODEL_LABEL>-train)
+        id: name
+        shell: bash
+        run: |
+          source ci/rl_teach.env
+          echo "artifact=rl-web-merged-${MODEL_LABEL}-train" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.name.outputs.artifact }}
+          path: merged/**
+          if-no-files-found: warn

@@ -1,0 +1,14 @@
+{
+  "goal": "In file scaffold/agent/budget_ledger.py add a one-line comment above get_status explaining it returns month-to-date budget status",
+  "goal_hash": "fcb6b5a6bc",
+  "started_at": "2026-06-12T13:13:38",
+  "last_updated": "2026-06-12T13:13:44",
+  "completed_task_ids": [
+    1
+  ],
+  "failed_task_ids": [],
+  "session_ids": [
+    "orch_62461cf7"
+  ],
+  "status": "complete"
+}

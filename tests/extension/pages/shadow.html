@@ -1,0 +1,28 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Docs</title></head>
+<body>
+<!-- like developer.mozilla.org: the search is a web component; every control lives in an OPEN shadow root -->
+<h1>Docs</h1>
+<doc-search></doc-search>
+<script>
+  customElements.define('doc-search', class extends HTMLElement {
+    connectedCallback() {
+      var r = this.attachShadow({ mode: 'open' });
+      r.innerHTML = '<button id="open" type="button">Search</button>'
+        + '<div id="box" hidden><input id="q" role="combobox" aria-label="Search the docs" autocomplete="off">'
+        + '<div id="list" role="listbox"></div></div>';
+      r.getElementById('open').addEventListener('click', function () { r.getElementById('box').hidden = false; r.getElementById('q').focus(); });
+      r.getElementById('q').addEventListener('input', function (e) {
+        var v = e.target.value.toLowerCase(), list = r.getElementById('list');
+        list.innerHTML = '';
+        ['Array.prototype.map()', 'Array.prototype.filter()', 'Map'].filter(function (t) { return v && t.toLowerCase().indexOf(v) >= 0; })
+          .forEach(function (t) {
+            var o = document.createElement('div'); o.setAttribute('role', 'option'); o.tabIndex = 0; o.textContent = t;
+            o.addEventListener('click', function () { location.href = 'shadow_done.html?p=' + encodeURIComponent(t); });
+            list.appendChild(o);
+          });
+      });
+    }
+  });
+</script>
+</body></html>

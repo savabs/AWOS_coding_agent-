@@ -59,6 +59,15 @@ class TestClassify:
     def test_case_insensitive(self):
         assert self.engine.classify("SYNTAXERROR: BAD CODE") == ErrorClass.SYNTAX_ERROR
 
+    def test_file_not_found(self):
+        assert self.engine.classify("File not found: docs/missing.py") == ErrorClass.FILE_NOT_FOUND
+
+    def test_verify_fail(self):
+        assert self.engine.classify("Verification failed: patch did not apply") == ErrorClass.VERIFY_FAIL
+
+    def test_worker_fail(self):
+        assert self.engine.classify("gauntlet G3 forced worker failure") == ErrorClass.WORKER_FAIL
+
 
 # ── CorrectionHint format ─────────────────────────────────────────────────────
 
@@ -189,6 +198,7 @@ def refresh_token(token):
 
 # ── Orchestrator smoke test ───────────────────────────────────────────────────
 
+@pytest.mark.integration
 class TestOrchestratorHasSelfCorrection:
     def test_orchestrator_initializes_self_correction(self, monkeypatch):
         from scaffold.agent import planner as _planner_mod

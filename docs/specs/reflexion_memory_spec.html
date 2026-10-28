@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spec: ReflexionMemory Phase 5B — AWOS</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--success:#10b981;--warn:#f59e0b;--danger:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status.ready{background:#f59e0b;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+main{max-width:860px;margin:0 auto;padding:32px}
+h2{font-size:17px;font-weight:600;margin:24px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:5px}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:"JetBrains Mono","Fira Code",monospace;font-size:12px}
+p code,li code,td code{background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px;font-size:12px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+.decision{background:#f0fdf4;border-left:3px solid var(--success);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+.warn-box{background:#fef3c7;border-left:3px solid var(--warn);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+.step{border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin:10px 0;background:var(--surface)}
+.step-num{font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;margin-bottom:4px}
+.step-title{font-weight:600;margin-bottom:6px}
+.step-exit{font-size:13px;color:var(--muted)}
+.step-notes{font-size:12px;color:var(--muted);margin-top:4px;font-style:italic}
+</style>
+</head>
+<body>
+<header>
+  <div class="breadcrumb">AWOS / docs / specs</div>
+  <h1>Spec: ReflexionMemory — Phase 5B</h1>
+  <div class="meta">
+    <span class="tag">phase-5b</span>
+    <span class="tag">error-pattern-store</span>
+    <span class="tag">critique-injection</span>
+    <span class="status ready">Ready to Implement</span>
+    <time>2026-05-19</time>
+  </div>
+</header>
+
+<main>
+
+<h2>Goal</h2>
+<p>Upgrade AWOS from static rule-based retry hints to <strong>adaptive verbal critique memory</strong>. After every failure, generate a task-specific verbal critique using a cheap LLM, persist it cross-session, and inject relevant past critiques into retry prompts — preventing the same mistake from repeating.</p>
+
+<div class="callout">
+  <strong>Research basis:</strong> Reflexion (NeurIPS 2023) — verbal critique memory improves HumanEval pass@1 from 80% to 91% without weight updates.
+  Self-Refine (NeurIPS 2023) — localised + actionable feedback achieves 5-20% code task improvement.
+  Full research: <a href="../research/reflexion_memory.html">reflexion_memory.html</a>
+</div>
+
+<h2>Affected Files</h2>
+<table>
+<tr><th>File</th><th>Change</th></tr>
+<tr><td><code>scaffold/agent/error_pattern_store.py</code></td><td><strong>NEW</strong> — ErrorPattern dataclass + ErrorPatternStore class</td></tr>
+<tr><td><code>scaffold/agent/self_correction.py</code></td><td>MODIFY — add <code>generate_critique()</code> method (cheap LLM call)</td></tr>
+<tr><td><code>scaffold/agent/worker.py</code></td><td>MODIFY — prepend [PAST CRITIQUE] blocks when <code>task["past_critiques"]</code> present</td></tr>
+<tr><td><code>scaffold/agent/orchestrator.py</code></td><td>MODIFY — wire store + inject after worker failure</td></tr>
+<tr><td><code>tests/test_reflexion_memory.py</code></td><td><strong>NEW</strong> — unit + integration tests</td></tr>
+</table>
+
+<h2>Interface Contract</h2>
+
+<h3>ErrorPattern dataclass</h3>
+<pre>
+@dataclass
+class ErrorPattern:
+    task_id:    str   # task["task_id"]
+    file_path:  str   # relative path, e.g. "api/users.py"
+    error_type: str   # ErrorClass.name, e.g. "SYNTAX_ERROR"
+    error_msg:  str   # raw error string, truncated to 300 chars
+    critique:   str   # LLM-generated verbal critique, 1-3 sentences
+    timestamp:  str   # ISO 8601, e.g. "2026-05-19T08:31:00Z"
+</pre>
+
+<h3>ErrorPatternStore public API</h3>
+<pre>
+class ErrorPatternStore:
+    def __init__(self, store_path: str = ".awos/error_patterns.jsonl"): ...
+
+    def save(self, pattern: ErrorPattern) -> None:
+        """Append pattern to JSONL store. Thread-safe (file lock)."""
+
+    def retrieve(
+        self,
+        file_path: str,
+        error_type: str,
+        top_n: int = 3
+    ) -> list[ErrorPattern]:
+        """Return top_n most recent patterns matching file_path + error_type."""
+
+    def summary(self) -> dict:
+        """Return {total: int, by_type: dict, by_file: dict}."""
+</pre>
+
+<h3>SelfCorrectionEngine addition</h3>
+<pre>
+def generate_critique(
+    self,
+    task: dict,
+    error: str,
+    error_class: ErrorClass,
+    model_caller: Callable[[str], str],  # injected — any cheap LLM wrapper
+) -> str:
+    """
+    Generate a verbal critique using a cheap LLM call.
+    Prompt = error_class name + error_msg + task action + file snippet.
+    Returns 1-3 sentence critique string. Never raises — returns empty string on failure.
+    """
+</pre>
+
+<h3>Worker prompt injection</h3>
+<pre>
+# In Worker.execute_task(), before building system prompt:
+past_critiques = task.get("past_critiques", [])
+critique_block = ""
+for i, ep in enumerate(past_critiques[:3], 1):
+    critique_block += f"[PAST CRITIQUE {i} — {ep.error_type}]
+{ep.critique[:400]}
+
+"
+
+# Prepend critique_block to system_prompt if non-empty
+if critique_block:
+    system_prompt = critique_block + system_prompt
+</pre>
+
+<h3>Orchestrator wiring</h3>
+<pre>
+# After worker failure (attempt > 1 already has static hint):
+if not worker_success:
+    critique = self.self_correction.generate_critique(
+        task, _last_error, error_class, model_caller=self._cheap_call
+    )
+    if critique:
+        pattern = ErrorPattern(
+            task_id=str(task_id), file_path=task["file"],
+            error_type=error_class.name, error_msg=_last_error[:300],
+            critique=critique, timestamp=datetime.utcnow().isoformat() + "Z"
+        )
+        self.error_store.save(pattern)
+
+# Before each retry attempt:
+past = self.error_store.retrieve(task["file"], error_class.name, top_n=3)
+_task = {**task, "past_critiques": past, "error_context": hint.format_for_prompt()}
+</pre>
+
+<h2>Implementation Steps</h2>
+
+<div class="step">
+  <div class="step-num">STEP 1</div>
+  <div class="step-title">Create scaffold/agent/error_pattern_store.py</div>
+  <div class="step-exit"><strong>Exit:</strong> Module imports cleanly. ErrorPattern and ErrorPatternStore have correct fields. <code>save()</code> appends to JSONL. <code>retrieve()</code> returns matching records sorted by recency.</div>
+  <div class="step-notes">Storage: .awos/error_patterns.jsonl. Use filelock (stdlib portalocker or fcntl) for thread safety.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">STEP 2</div>
+  <div class="step-title">Add generate_critique() to SelfCorrectionEngine</div>
+  <div class="step-exit"><strong>Exit:</strong> Unit test — mock LLM caller returns a string; generate_critique() returns it. If model_caller raises, returns empty string (no exception).</div>
+  <div class="step-notes">Prompt template: "You are a code review assistant. A coding agent failed with error [X] while editing [file]. Task: [action]. Error: [msg]. Write 1-3 sentences explaining WHY this failed and what the agent should do differently. Be specific."</div>
+</div>
+
+<div class="step">
+  <div class="step-num">STEP 3</div>
+  <div class="step-title">Wire generate_critique() + ErrorPatternStore.save() in Orchestrator</div>
+  <div class="step-exit"><strong>Exit:</strong> After worker failure, error_patterns.jsonl receives a new record. If LLM call fails, JSONL is unchanged (no partial write). Log line printed: [TASK X] Critique generated and saved.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">STEP 4</div>
+  <div class="step-title">Wire ErrorPatternStore.retrieve() + inject into task dict before retry</div>
+  <div class="step-exit"><strong>Exit:</strong> task["past_critiques"] is populated (may be empty list) before each retry attempt.</div>
+  <div class="step-notes">Retrieval key: (task["file"], error_class.name). Returns [] if store is empty or no match.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">STEP 5</div>
+  <div class="step-title">Modify Worker.execute_task() to prepend [PAST CRITIQUE] blocks</div>
+  <div class="step-exit"><strong>Exit:</strong> Unit test — task with past_critiques populated produces a prompt containing "[PAST CRITIQUE 1]". Task without past_critiques produces identical prompt to current behaviour.</div>
+  <div class="step-notes">Inject at the top of the system prompt section, before the task description. Cap at 3 critiques × 400 chars each.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">STEP 6</div>
+  <div class="step-title">Add cheap LLM caller helper to Orchestrator</div>
+  <div class="step-exit"><strong>Exit:</strong> _cheap_call(prompt) fires Gemini Flash or DeepSeek R2 with max_tokens=100. Returns string. On timeout/error returns empty string.</div>
+  <div class="step-notes">Reuse existing worker model call infrastructure. No new API clients needed.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">STEP 7</div>
+  <div class="step-title">Write tests/test_reflexion_memory.py</div>
+  <div class="step-exit"><strong>Exit:</strong> All tests pass. Coverage: save/retrieve (4), generate_critique (3), prompt injection (2), orchestrator integration (2), edge cases (3).</div>
+  <div class="step-notes">Expected: ~14 tests total. Use tmp_path for JSONL store. Mock LLM caller. No real API calls in tests.</div>
+</div>
+
+<div class="step">
+  <div class="step-num">STEP 8</div>
+  <div class="step-title">Run full test suite — zero regressions</div>
+  <div class="step-exit"><strong>Exit:</strong> pytest tests/ (excluding known broken sprint files) returns 0 failures. All existing 145 tests still pass.</div>
+</div>
+
+<h2>Edge Cases</h2>
+<table>
+<tr><th>Case</th><th>Behaviour</th></tr>
+<tr><td>No past critiques for this file/error_type</td><td>task["past_critiques"] = []. Worker prompt unchanged.</td></tr>
+<tr><td>LLM critique call fails / times out</td><td>Log warning. critique = "". No save() call. Static hint still injected.</td></tr>
+<tr><td>Store file does not exist</td><td>save() creates it. retrieve() returns [].</td></tr>
+<tr><td>Critique is very long (model ignores max_tokens)</td><td>Truncate to 400 chars before injection.</td></tr>
+<tr><td>Multiple failures on same file (hundreds of critiques)</td><td>retrieve() returns only top_n=3 most recent. No performance issue.</td></tr>
+<tr><td>Concurrent Orchestrator instances</td><td>File lock on append. No corruption.</td></tr>
+</table>
+
+<h2>Design Decisions</h2>
+<div class="decision">
+  <strong>Decision 1:</strong> JSONL over SQLite. Consistent with RewardStore (JSONL). Zero dependencies. Human-readable. append-only = no corruption on crash.
+</div>
+<div class="decision">
+  <strong>Decision 2:</strong> Exact match retrieval (file_path + error_type) over vector search. Sufficient for Phase 5B. Vector search deferred to Phase 6 when we have 500+ critiques to justify ChromaDB overhead.
+</div>
+<div class="decision">
+  <strong>Decision 3:</strong> Critique generated after failure, stored, then retrieved on the <em>next</em> attempt (not the same attempt). This avoids adding latency to the current retry and matches Reflexion paper's architecture.
+</div>
+<div class="warn-box">
+  <strong>Cost guard:</strong> generate_critique() is only called after worker failure (attempt > 1 threshold configurable). At 500 failures/month @ /usr/bin/bash.0001 each = /usr/bin/bash.05/month. Negligible.
+</div>
+
+<h2>Testing Plan</h2>
+<table>
+<tr><th>Class</th><th>Tests</th></tr>
+<tr><td>TestErrorPatternStore</td><td>save_creates_file, save_appends, retrieve_empty, retrieve_match, retrieve_no_match, retrieve_top_n_limit, retrieve_sorted_by_recency, summary_counts</td></tr>
+<tr><td>TestGenerateCritique</td><td>returns_string_on_success, returns_empty_on_llm_failure, prompt_contains_error_class</td></tr>
+<tr><td>TestPromptInjection</td><td>with_critiques_prepends_block, without_critiques_unchanged</td></tr>
+<tr><td>TestIntegration</td><td>full_pipeline_save_retrieve_inject, no_critiques_no_overhead</td></tr>
+</table>
+
+</main>
+</body>
+</html>

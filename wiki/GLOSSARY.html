@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Glossary — AWOS Wiki</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--warn:#f59e0b}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:22px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+time{font-size:12px;opacity:.5;margin-left:auto}
+.search-bar{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 32px;display:flex;gap:12px;align-items:center}
+.search-bar input{flex:1;border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-size:14px;background:var(--surface2)}
+.search-bar input:focus{outline:none;border-color:var(--accent)}
+.cat-filters{display:flex;gap:6px;flex-wrap:wrap}
+.cat-btn{background:var(--surface2);border:1px solid var(--border);border-radius:14px;padding:4px 12px;font-size:12px;cursor:pointer;color:var(--muted)}
+.cat-btn.active,.cat-btn:hover{background:var(--accent-light);border-color:var(--accent);color:var(--accent)}
+main{max-width:860px;margin:0 auto;padding:32px}
+.cat-section{margin-bottom:36px}
+.cat-section h2{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:16px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+.term{margin-bottom:20px;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:8px;transition:.1s}
+.term:hover{border-color:var(--accent)}
+.term .name{font-weight:700;font-size:15px;color:var(--accent);margin-bottom:4px}
+.term .aka{font-size:12px;color:var(--muted);margin-bottom:6px;font-style:italic}
+.term .def{font-size:14px;line-height:1.6;margin-bottom:6px}
+.term .ref{font-size:12px;color:var(--muted)}
+.term .ref a{color:var(--accent)}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px;background:var(--surface2);padding:1px 5px;border-radius:3px}
+.hidden{display:none}
+footer{background:var(--surface);border-top:1px solid var(--border);padding:16px 32px;display:flex;justify-content:flex-end;gap:12px}
+.copy-btn{background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:500}
+.copy-btn:hover{background:#4338ca}
+.copy-btn.secondary{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb">AWOS / wiki</div>
+  <h1>Glossary</h1>
+  <div class="meta">
+    <span class="tag">doc/wiki</span>
+    <span class="tag">topic/glossary</span>
+    <time>2026-05-13</time>
+  </div>
+</header>
+
+<div class="search-bar">
+  <input type="text" id="search" placeholder="Search terms…" oninput="filterTerms()">
+  <div class="cat-filters" id="cats">
+    <button class="cat-btn active" onclick="filterCat(this,'all')">All</button>
+    <button class="cat-btn" onclick="filterCat(this,'workflow')">Workflow</button>
+    <button class="cat-btn" onclick="filterCat(this,'memory')">Memory</button>
+    <button class="cat-btn" onclick="filterCat(this,'tool')">Tool</button>
+    <button class="cat-btn" onclick="filterCat(this,'arch')">Architecture</button>
+    <button class="cat-btn" onclick="filterCat(this,'debug')">Debug</button>
+    <button class="cat-btn" onclick="filterCat(this,'graph')">Knowledge Graph</button>
+  </div>
+</div>
+
+<main id="main">
+
+<div class="cat-section" data-cat="workflow">
+<h2>Core Workflow Terms</h2>
+
+<div class="term" data-cat="workflow" data-name="awos">
+<div class="name">AWOS (Agent Workflow Operating System)</div>
+<div class="def">The living doctrine document defining how agents and humans collaborate on complex projects. Covers planning, memory, tool use, math, security, and session management. Canonical file: <code>AWOS.md</code>.</div>
+<div class="ref">See: <a href="../AWOS.md">AWOS.md</a></div>
+</div>
+
+<div class="term" data-cat="workflow" data-name="research spec task triad preflight">
+<div class="name">Research → Spec → Task Triad</div>
+<div class="def">The three mandatory artifacts before any implementation: a research note (<code>docs/research/</code>), a specification (<code>docs/specs/</code>), and a task file (<code>tasks/active/</code>). Together they form the implementation contract and execution checklist.</div>
+</div>
+
+<div class="term" data-cat="workflow" data-name="preflight gate">
+<div class="name">Preflight Gate</div>
+<div class="def">The check that all three triad artifacts exist and are current before any implementation code is written. Fail-closed: no triad = no implementation.</div>
+</div>
+
+<div class="term" data-cat="workflow" data-name="atomic step">
+<div class="name">Atomic Step</div>
+<div class="def">A step so small it changes one thing, tests one thing, and proves one thing. If the description contains "and," it is probably not atomic. Apply the one-line test, "and" test, and revert test before executing.</div>
+</div>
+
+<div class="term" data-cat="workflow" data-name="leaf node blast radius">
+<div class="name">Leaf Node</div>
+<div class="def">A component that nothing else depends on. Ideal target for agent-owned implementation because the blast radius is small if it is wrong.</div>
+</div>
+
+<div class="term" data-cat="workflow" data-name="write gate">
+<div class="name">Write-Gate Protocol</div>
+<div class="def">The rule that a decision is not complete until it exists in a canonical file in the same turn as approval. Deferred writes are forbidden — if the session ends first, the decision is lost.</div>
+</div>
+
+<div class="term" data-cat="workflow" data-name="single owner fact drift">
+<div class="name">Single-Owner Rule</div>
+<div class="def">Each fact lives in exactly one canonical file. All other files link to it; copies are forbidden. Prevents fact drift.</div>
+</div>
+
+<div class="term" data-cat="workflow" data-name="fact drift">
+<div class="name">Fact Drift</div>
+<div class="def">When the same fact is copied to multiple files and the copies diverge over time. Prevented by the Single-Owner Rule. Detected by <code>scripts/fact_lint.py</code>.</div>
+</div>
+
+<div class="term" data-cat="workflow" data-name="html first artifacts">
+<div class="name">HTML-First Artifacts</div>
+<div class="def">All output artifacts (research notes, specs, task files, ADRs, wiki pages, checkpoints) are primary HTML files with a thin Markdown stub for Obsidian indexing. Plain MD remains OK for: README, stubs, append-only logs, doctrine docs.</div>
+<div class="ref">See: <a href="../AWOS.md">AWOS.md §5.7</a></div>
+</div>
+
+</div>
+
+<div class="cat-section" data-cat="memory">
+<h2>Memory Terms</h2>
+
+<div class="term" data-cat="memory" data-name="working memory context window">
+<div class="name">Working Memory</div>
+<div class="def">The current context window — everything the agent "has in mind" right now. Finite (typically 8K–200K tokens). Cleared between sessions unless serialised. The most expensive resource in an agentic system.</div>
+</div>
+
+<div class="term" data-cat="memory" data-name="episodic memory checkpoint">
+<div class="name">Episodic Memory</div>
+<div class="def">Immutable timestamped log of events: what happened, when. The history layer. AWOS canonical files: checkpoint files, debug log. Never edited after writing.</div>
+</div>
+
+<div class="term" data-cat="memory" data-name="semantic memory fact">
+<div class="name">Semantic Memory</div>
+<div class="def">Named fact store: what is known, with confidence levels (verified / inferred / uncertain). AWOS canonical files: <code>memories/repo/project_structure.md</code>, runbooks. Updated when facts change.</div>
+</div>
+
+<div class="term" data-cat="memory" data-name="procedural memory runbook protocol">
+<div class="name">Procedural Memory</div>
+<div class="def">Numbered, atomic, executable instructions for recurring tasks. AWOS canonical files: <code>protocols/*.md</code>, <code>docs/&lt;platform&gt;_runbook.md</code>. "Do the usual thing" is not a procedure.</div>
+</div>
+
+<div class="term" data-cat="memory" data-name="checkpoint session">
+<div class="name">Checkpoint</div>
+<div class="def">A session summary written at the end of a work segment. Immutable after writing — it is a historical record, not a living document. Must include: what changed, what is blocked, source of truth for next session.</div>
+</div>
+
+</div>
+
+<div class="cat-section" data-cat="tool">
+<h2>Tool Terms</h2>
+
+<div class="term" data-cat="tool" data-name="tool result envelope">
+<div class="name">Tool Result Envelope</div>
+<div class="def">The standard wrapper all tools must return: <code>{success: bool, text: str, data: dict, error: str, latency_ms: float}</code>. Non-conforming results must be normalised at the boundary before the agent processes them.</div>
+</div>
+
+<div class="term" data-cat="tool" data-name="tool registry dispatch">
+<div class="name">Tool Registry</div>
+<div class="def">The component that registers, validates, and dispatches tool calls. Tools are not called by raw name string — all execution flows through the registry. Tool descriptions must be unambiguous.</div>
+</div>
+
+<div class="term" data-cat="tool" data-name="cache ttl">
+<div class="name">Cache TTL</div>
+<div class="def">Time-to-live for cached tool results. Default: 6 hours. Prevents redundant external API calls while allowing freshness.</div>
+</div>
+
+<div class="term" data-cat="tool" data-name="idempotent check before write">
+<div class="name">Idempotent Tool Design</div>
+<div class="def">Tools that modify state must produce the same result when called twice with the same arguments. Non-idempotent tools must use a check-before-write pattern to prevent duplicate side effects.</div>
+</div>
+
+</div>
+
+<div class="cat-section" data-cat="arch">
+<h2>Agent Architecture Terms</h2>
+
+<div class="term" data-cat="arch" data-name="react reason act observation">
+<div class="name">ReAct</div>
+<div class="def">Agent loop that interleaves Thought → Action → Observation in a single context window. Default for single-agent task execution. Traces exceeding 5 tool calls must be checkpointed.</div>
+<div class="ref">See: <a href="AGENTIC_CONCEPTS.html">AGENTIC_CONCEPTS.html §1.1</a></div>
+</div>
+
+<div class="term" data-cat="arch" data-name="plan execute planner executor">
+<div class="name">Plan-and-Execute</div>
+<div class="def">Architecture separating a planner (creates full task graph) from executors (run each step). Maps to the Research → Spec → Task triad. Planner re-evaluates on executor failure.</div>
+<div class="ref">See: <a href="AGENTIC_CONCEPTS.html">AGENTIC_CONCEPTS.html §1.2</a></div>
+</div>
+
+<div class="term" data-cat="arch" data-name="reflexion self critique reflection retry">
+<div class="name">Reflexion</div>
+<div class="def">Post-attempt self-critique written to episodic memory, prepended on retry. Operationalised by the DEBUG_PROTOCOL two-failed-attempt rule. Limit to 3 cycles before escalating.</div>
+<div class="ref">See: <a href="AGENTIC_CONCEPTS.html">AGENTIC_CONCEPTS.html §1.3</a></div>
+</div>
+
+<div class="term" data-cat="arch" data-name="lats language agent tree search mcts">
+<div class="name">LATS (Language Agent Tree Search)</div>
+<div class="def">Monte Carlo Tree Search over the agent action space. Requires a well-calibrated value function. High compute cost — k=5, depth=4 = 625 LLM calls. Never run locally (P1 — compute rule).</div>
+<div class="ref">See: <a href="AGENTIC_CONCEPTS.html">AGENTIC_CONCEPTS.html §1.4</a></div>
+</div>
+
+<div class="term" data-cat="arch" data-name="critic actor review score">
+<div class="name">Critic-Actor</div>
+<div class="def">Two-role pattern: Actor generates output; Critic scores with structured feedback (<code>{score, blocking_issues, suggestions}</code>). Actor never self-approves. Maximum 3 revision cycles; escalate if score does not improve.</div>
+<div class="ref">See: <a href="AGENTIC_CONCEPTS.html">AGENTIC_CONCEPTS.html §1.5</a></div>
+</div>
+
+<div class="term" data-cat="arch" data-name="orchestrator worker multi agent">
+<div class="name">Orchestrator-Worker</div>
+<div class="def">One orchestrator manages the plan; stateless workers run subtasks. Workers communicate only through the orchestrator — never directly. Orchestrator validates worker output before passing downstream.</div>
+<div class="ref">See: <a href="AGENTIC_CONCEPTS.html">AGENTIC_CONCEPTS.html §6.1</a></div>
+</div>
+
+<div class="term" data-cat="arch" data-name="context budget tokens">
+<div class="name">Context Budget</div>
+<div class="def">Token allocation across system prompt (~500–2000), task instructions (~500–1000), retrieved knowledge (~2000–5000), tool results (~1000–3000), reasoning trace (~1000–4000), output buffer (~500–2000). Tool results exceeding 1000 tokens must be compressed before appending.</div>
+<div class="ref">See: <a href="AGENTIC_CONCEPTS.html">AGENTIC_CONCEPTS.html §7.1</a></div>
+</div>
+
+<div class="term" data-cat="arch" data-name="ratchet state best score">
+<div class="name">Ratchet State</div>
+<div class="def">A persisted record of the best-known metric that blocks any checkpoint regressing it. Canonical file: <code>data/ratchet_state.json</code>. This is semantic memory — update after every successful training run.</div>
+<div class="ref">See: <a href="AGENTIC_CONCEPTS.html">AGENTIC_CONCEPTS.html §5.5</a></div>
+</div>
+
+<div class="term" data-cat="arch" data-name="evaluation gate eval stage gating">
+<div class="name">Evaluation Gate</div>
+<div class="def">Boolean criterion blocking stage progression until a falsifiable, reproducible metric threshold is met. Defined before training begins — never adjusted post-hoc. A gate that always passes must have its bar raised.</div>
+<div class="ref">See: <a href="AGENTIC_CONCEPTS.html">AGENTIC_CONCEPTS.html §5.4</a></div>
+</div>
+
+<div class="term" data-cat="arch" data-name="chain of thought cot reasoning">
+<div class="name">Chain-of-Thought (CoT)</div>
+<div class="def">Reasoning pattern: agent writes step-by-step reasoning before producing the final answer. Required for all non-trivial decisions. Decisions that required multi-step reasoning must be checkpointed (Write-Gate).</div>
+</div>
+
+<div class="term" data-cat="arch" data-name="tree of thought tot branches prune">
+<div class="name">Tree-of-Thought (ToT)</div>
+<div class="def">Reasoning pattern: generate and evaluate multiple candidate thoughts at each step; prune weak branches. Cost O(k<sup>d</sup>). Use selectively for high-stakes design decisions where errors are expected to be random, not correlated.</div>
+</div>
+
+</div>
+
+<div class="cat-section" data-cat="debug">
+<h2>Debugging Terms</h2>
+
+<div class="term" data-cat="debug" data-name="debug protocol six steps">
+<div class="name">Debug Protocol</div>
+<div class="def">A 6-step procedure activated after 2 failed fix attempts: Reproduce → Instrument → Hypothesize → Verify → Fix → Regress. After steps 1–4, if the hypothesis is wrong — go back to step 3 with new evidence. Do not guess.</div>
+<div class="ref">See: <a href="../protocols/DEBUG_PROTOCOL.md">DEBUG_PROTOCOL.md</a></div>
+</div>
+
+<div class="term" data-cat="debug" data-name="two failed attempt rule stop patching">
+<div class="name">Two-Failed-Attempt Rule</div>
+<div class="def">After 2 unsuccessful fixes on the same problem, mandatory switch to the debug protocol. No 3rd attempt without completing Steps 1–4. A hard rule — a fix that was not researched is a guess.</div>
+</div>
+
+<div class="term" data-cat="debug" data-name="local falsifiable hypothesis">
+<div class="name">Local Falsifiable Hypothesis</div>
+<div class="def">Before any bug fix edit, state: "I think the bug is at [location] because [reasoning]" and "This check would disconfirm it: [check]." Forces honest verification before touching code.</div>
+</div>
+
+</div>
+
+<div class="cat-section" data-cat="graph">
+<h2>Knowledge Graph Terms</h2>
+
+<div class="term" data-cat="graph" data-name="wiki link obsidian">
+<div class="name">Wiki Link</div>
+<div class="def">An Obsidian-style cross-reference: <code>[[filename]]</code> or <code>[[filename|display text]]</code>. Obsidian resolves by filename stem — no path prefix needed. Survives file moves; bare paths do not.</div>
+</div>
+
+<div class="term" data-cat="graph" data-name="frontmatter yaml tags">
+<div class="name">Frontmatter</div>
+<div class="def">YAML metadata block at the top of every Markdown file between <code>---</code> delimiters. Mandatory fields: <code>title</code> and <code>tags</code>. Enforced by <code>scripts/obsidian_lint.py</code>.</div>
+</div>
+
+<div class="term" data-cat="graph" data-name="tag taxonomy doc status phase topic layer">
+<div class="name">Tag Taxonomy</div>
+<div class="def">Hierarchical tags with <code>/</code> separators. Categories: <code>doc/</code> (type: research, spec, task, adr, checkpoint, wiki), <code>status/</code> (active, done), <code>phase/</code> (N), <code>topic/</code> (slug), <code>layer/</code> (slug).</div>
+</div>
+
+<div class="term" data-cat="graph" data-name="backlink incoming link">
+<div class="name">Backlink</div>
+<div class="def">A link from document B to document A. In Obsidian, visible in the backlinks panel. Programmatically discoverable: <code>grep -r "[[filename]]" docs/ tasks/ wiki/</code>.</div>
+</div>
+
+<div class="term" data-cat="graph" data-name="orphan no incoming links">
+<div class="name">Orphan</div>
+<div class="def">A Markdown file with no incoming wiki links. Advisory finding (LK02) from <code>scripts/obsidian_lint.py</code>. Not necessarily wrong, but worth reviewing.</div>
+</div>
+
+<div class="term" data-cat="graph" data-name="adr architecture decision record">
+<div class="name">ADR (Architecture Decision Record)</div>
+<div class="def">A document capturing a significant design decision: context, options considered, decision, rationale, consequences. Numbered sequentially in <code>docs/adr/</code>. Never deleted — only superseded.</div>
+</div>
+
+</div>
+
+</main>
+
+<footer>
+  <button class="copy-btn secondary" onclick="copyAll()">Copy All as JSON</button>
+  <button class="copy-btn" onclick="copyVisible()">Copy Visible as Prompt</button>
+</footer>
+
+<script>
+let activeCat = 'all';
+function filterCat(btn, cat) {
+  activeCat = cat;
+  document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  applyFilters();
+}
+function filterTerms() { applyFilters(); }
+function applyFilters() {
+  const q = document.getElementById('search').value.toLowerCase();
+  document.querySelectorAll('.term').forEach(t => {
+    const matchCat = activeCat === 'all' || t.dataset.cat === activeCat;
+    const matchQ = !q || t.dataset.name.includes(q) || t.innerText.toLowerCase().includes(q);
+    t.classList.toggle('hidden', !(matchCat && matchQ));
+  });
+  document.querySelectorAll('.cat-section').forEach(s => {
+    const visible = [...s.querySelectorAll('.term')].some(t => !t.classList.contains('hidden'));
+    s.style.display = visible ? '' : 'none';
+  });
+}
+function copyAll() {
+  const terms = {};
+  document.querySelectorAll('.term').forEach(t => {
+    terms[t.querySelector('.name').innerText] = t.querySelector('.def').innerText;
+  });
+  navigator.clipboard.writeText(JSON.stringify(terms, null, 2))
+    .then(() => { const b = document.querySelector('.copy-btn.secondary'); b.textContent = 'Copied!'; setTimeout(() => b.textContent = 'Copy All as JSON', 1500); });
+}
+function copyVisible() {
+  const visible = [...document.querySelectorAll('.term:not(.hidden)')].map(t =>
+    `**${t.querySelector('.name').innerText}**\n${t.querySelector('.def').innerText}`
+  ).join('\n\n');
+  navigator.clipboard.writeText('# AWOS Glossary\n\n' + visible)
+    .then(() => { const b = document.querySelector('.copy-btn:last-child'); b.textContent = 'Copied!'; setTimeout(() => b.textContent = 'Copy Visible as Prompt', 1500); });
+}
+</script>
+</body>
+</html>

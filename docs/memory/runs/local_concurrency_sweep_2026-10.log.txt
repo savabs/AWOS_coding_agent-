@@ -1,0 +1,35 @@
+== np1-r8: -np 1 -c 12288 
+.gguf --alias qwen3.5-9b --host 127.0.0.1 --port 8080 -ngl 99 -c 12288 -np 1 -fa on --jinja --reasoning off --cache-prompt --cache-reuse 256 --temp 0.7 --top-p 0.8 --top-k 20 --min-p 0 --metrics
+pid 12188, log /Users/becmachlean/.cache/awos-models/llama-server.8080.log; waiting for /health ...
+ready: http://127.0.0.1:8080/v1  model=qwen3.5-9b
+use:   AWOS_PROVIDER=local AWOS_LOCAL_MODEL=qwen3.5-9b
+ 
+{"np": 1, "ctx_total": 12288, "ctx_per_slot": 12288, "extra_args": "", "n_requests": 8, "prompt_tokens": [1999, 1999, 1999, 1999, 1999, 1999, 1999, 1999], "n_predict": 256, "wall_s": 353.95, "generated_tokens": 2048, "aggregate_gen_tps": 5.79, "aggregate_total_tps": 50.97, "latency_mean_s": 199.74, "latency_max_s": 353.95, "latency_min_s": 44.76, "rss_idle_mb": 5909.2, "rss_peak_mb": 6279.5, "footprint_idle_mb": 598.0, "footprint_peak_mb": 2328.0, "system_free_pct_min": 18, "swap_used_mb_before": 0.0, "swap_used_mb_after": 1090.38, "battery": "51%; charging; 2:39 remaining present: true", "server_buffers": ["srv    load_model: initializing, n_slots = 1, n_ctx_slot = 12288, kv_unified = 'false'"], "at": "2026-10-11T15:22:08", "key": "np1-r8"}
+== np2-r8: -np 2 -c 24576 
+.gguf --alias qwen3.5-9b --host 127.0.0.1 --port 8080 -ngl 99 -c 24576 -np 2 -fa on --jinja --reasoning off --cache-prompt --cache-reuse 256 --temp 0.7 --top-p 0.8 --top-k 20 --min-p 0 --metrics
+pid 17898, log /Users/becmachlean/.cache/awos-models/llama-server.8080.log; waiting for /health ...
+ready: http://127.0.0.1:8080/v1  model=qwen3.5-9b
+use:   AWOS_PROVIDER=local AWOS_LOCAL_MODEL=qwen3.5-9b
+ 
+{"np": 2, "ctx_total": 24576, "ctx_per_slot": 12288, "extra_args": "", "n_requests": 8, "prompt_tokens": [1999, 1999, 1999, 1999, 1999, 1999, 1999, 1999], "n_predict": 256, "wall_s": 288.06, "generated_tokens": 2048, "aggregate_gen_tps": 7.11, "aggregate_total_tps": 62.63, "latency_mean_s": 182.6, "latency_max_s": 288.06, "latency_min_s": 71.0, "rss_idle_mb": 6463.9, "rss_peak_mb": 7087.5, "footprint_idle_mb": 988.0, "footprint_peak_mb": 2657.0, "system_free_pct_min": 18, "swap_used_mb_before": 1090.38, "swap_used_mb_after": 1154.62, "battery": "54%; charging; 2:35 remaining present: true", "server_buffers": ["srv    load_model: initializing, n_slots = 2, n_ctx_slot = 12288, kv_unified = 'false'"], "at": "2026-10-11T15:27:04", "key": "np2-r8"}
+== np4-r8: -np 4 -c 49152 
+.gguf --alias qwen3.5-9b --host 127.0.0.1 --port 8080 -ngl 99 -c 49152 -np 4 -fa on --jinja --reasoning off --cache-prompt --cache-reuse 256 --temp 0.7 --top-p 0.8 --top-k 20 --min-p 0 --metrics
+pid 21230, log /Users/becmachlean/.cache/awos-models/llama-server.8080.log; waiting for /health ...
+ready: http://127.0.0.1:8080/v1  model=qwen3.5-9b
+use:   AWOS_PROVIDER=local AWOS_LOCAL_MODEL=qwen3.5-9b
+ 
+{"np": 4, "ctx_total": 49152, "ctx_per_slot": 12288, "extra_args": "", "n_requests": 8, "prompt_tokens": [1999, 1999, 1999, 1999, 1999, 1999, 1999, 1999], "n_predict": 256, "wall_s": 215.59, "generated_tokens": 2048, "aggregate_gen_tps": 9.5, "aggregate_total_tps": 83.68, "latency_mean_s": 169.02, "latency_max_s": 215.58, "latency_min_s": 108.11, "rss_idle_mb": 7235.4, "rss_peak_mb": 7997.8, "footprint_idle_mb": 1909.0, "footprint_peak_mb": 3292.0, "system_free_pct_min": 15, "swap_used_mb_before": 1154.62, "swap_used_mb_after": 1298.25, "battery": "56%; charging; 2:33 remaining present: true", "server_buffers": ["srv    load_model: initializing, n_slots = 4, n_ctx_slot = 12288, kv_unified = 'false'"], "at": "2026-10-11T15:30:46", "key": "np4-r8"}
+== np8-r8: -np 8 -c 98304 
+.gguf --alias qwen3.5-9b --host 127.0.0.1 --port 8080 -ngl 99 -c 98304 -np 8 -fa on --jinja --reasoning off --cache-prompt --cache-reuse 256 --temp 0.7 --top-p 0.8 --top-k 20 --min-p 0 --metrics
+pid 23013, log /Users/becmachlean/.cache/awos-models/llama-server.8080.log; waiting for /health ...
+ready: http://127.0.0.1:8080/v1  model=qwen3.5-9b
+use:   AWOS_PROVIDER=local AWOS_LOCAL_MODEL=qwen3.5-9b
+ 
+{"np": 8, "ctx_total": 98304, "ctx_per_slot": 12288, "extra_args": "", "n_requests": 8, "prompt_tokens": [1999, 1999, 1999, 1999, 1999, 1999, 1999, 1999], "n_predict": 256, "wall_s": 201.39, "generated_tokens": 2048, "aggregate_gen_tps": 10.17, "aggregate_total_tps": 89.58, "latency_mean_s": 200.61, "latency_max_s": 201.39, "latency_min_s": 199.43, "rss_idle_mb": 8970.7, "rss_peak_mb": 9135.0, "footprint_idle_mb": 3650.0, "footprint_peak_mb": 4558.0, "system_free_pct_min": 9, "swap_used_mb_before": 1258.25, "swap_used_mb_after": 1997.81, "battery": "58%; charging; 2:19 remaining present: true", "server_buffers": ["srv    load_model: initializing, n_slots = 8, n_ctx_slot = 12288, kv_unified = 'false'"], "at": "2026-10-11T15:34:13", "key": "np8-r8"}
+== np8-kvu-r8: -np 8 -c 32768 --kv-unified
+ qwen3.5-9b --host 127.0.0.1 --port 8080 -ngl 99 -c 32768 -np 8 -fa on --jinja --reasoning off --cache-prompt --cache-reuse 256 --temp 0.7 --top-p 0.8 --top-k 20 --min-p 0 --metrics --kv-unified
+pid 24331, log /Users/becmachlean/.cache/awos-models/llama-server.8080.log; waiting for /health ...
+ready: http://127.0.0.1:8080/v1  model=qwen3.5-9b
+use:   AWOS_PROVIDER=local AWOS_LOCAL_MODEL=qwen3.5-9b
+ 
+{"np": 8, "ctx_total": 32768, "ctx_per_slot": 32768, "extra_args": "--kv-unified", "n_requests": 8, "prompt_tokens": [1999, 1999, 1999, 1999, 1999, 1999, 1999, 1999], "n_predict": 256, "wall_s": 223.99, "generated_tokens": 2048, "aggregate_gen_tps": 9.14, "aggregate_total_tps": 80.54, "latency_mean_s": 223.04, "latency_max_s": 223.97, "latency_min_s": 221.72, "rss_idle_mb": 7022.8, "rss_peak_mb": 7963.6, "footprint_idle_mb": 1573.0, "footprint_peak_mb": 2539.0, "system_free_pct_min": 16, "swap_used_mb_before": 1957.81, "swap_used_mb_after": 2067.31, "battery": "60%; charging; 2:24 remaining present: true", "server_buffers": ["srv    load_model: initializing, n_slots = 8, n_ctx_slot = 32768, kv_unified = 'true'"], "at": "2026-10-11T15:38:04", "key": "np8-kvu-r8"}

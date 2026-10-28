@@ -1,0 +1,19 @@
+{
+  "goal": "In scaffold/agent/worker.py add a short # comment above _try_cheap_fallback explaining it tries alternate cheap providers",
+  "goal_hash": "4d50fa52c3",
+  "started_at": "2026-06-12T14:05:30",
+  "last_updated": "2026-06-12T14:09:50",
+  "completed_task_ids": [
+    1,
+    2
+  ],
+  "failed_task_ids": [],
+  "session_ids": [
+    "orch_d4ed4f19",
+    "orch_30e212fe",
+    "orch_3bd52f0c",
+    "orch_656cc950",
+    "orch_78834691"
+  ],
+  "status": "complete"
+}

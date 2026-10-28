@@ -130,7 +130,7 @@ class TreeSitterCartographer:
             if node.type in ('function_definition', 'class_definition'):
                 name = None
                 for child in node.children:
-                    if child.type == 'name':
+                    if child.type in ('identifier', 'name'):
                         name = child.text.decode('utf-8')
                         break
                 

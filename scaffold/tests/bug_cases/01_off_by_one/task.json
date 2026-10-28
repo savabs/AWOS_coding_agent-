@@ -1,0 +1,7 @@
+{
+  "task_id": "bench_01",
+  "file": "buggy.py",
+  "action": "Fix the off-by-one errors in find_max and sum_range. find_max misses the last element because the range stops one short. sum_range excludes the end value because range(start, end) should be range(start, end + 1).",
+  "complexity": "low",
+  "error_context": "FAILED test_find_max_last_element_is_largest - assert 3 == 10\nFAILED test_sum_range_basic - assert 10 == 15\n  File \"buggy.py\", line 4, in find_max\n  File \"buggy.py\", line 11, in sum_range"
+}

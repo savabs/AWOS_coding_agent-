@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>P0 Spec — Structured Edit Format &amp; Edit Reliability</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 1100px; margin: 0 auto; padding: 2rem; color: #1a1a2e; background: #f8f9fa; }
+  h1 { color: #0d1b2a; border-bottom: 3px solid #e63946; padding-bottom: 0.5rem; }
+  h2 { color: #1d3557; border-left: 4px solid #e63946; padding-left: 0.75rem; margin-top: 2.5rem; }
+  h3 { color: #2c3e50; margin-top: 1.5rem; }
+  h4 { color: #e63946; margin-top: 1rem; }
+  .meta { background: #1d3557; color: #a8dadc; padding: 1rem 1.5rem; border-radius: 8px; margin-bottom: 2rem; font-size: 0.9rem; }
+  .meta span { margin-right: 2rem; }
+  .spec-box { background: #fff; border: 2px solid #1d3557; padding: 1.5rem; border-radius: 8px; margin: 1rem 0; }
+  .code-block { background: #0d1b2a; color: #a8dadc; padding: 1rem 1.5rem; border-radius: 6px; font-family: 'Courier New', monospace; font-size: 0.85rem; overflow-x: auto; margin: 1rem 0; line-height: 1.6; }
+  .before-after { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+  .before { border: 2px solid #e63946; border-radius: 6px; padding: 1rem; }
+  .after { border: 2px solid #2dc653; border-radius: 6px; padding: 1rem; }
+  .before h4 { color: #e63946; margin-top: 0; }
+  .after h4 { color: #2dc653; margin-top: 0; }
+  .step { background: #fff; border-left: 4px solid #457b9d; padding: 1rem 1.5rem; margin: 0.75rem 0; border-radius: 0 6px 6px 0; }
+  .step .step-num { font-weight: bold; color: #457b9d; margin-right: 0.5rem; }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+  th { background: #1d3557; color: white; padding: 0.6rem 1rem; text-align: left; }
+  td { padding: 0.6rem 1rem; border-bottom: 1px solid #dee2e6; vertical-align: top; }
+  tr:nth-child(even) td { background: #f1f3f5; }
+  .tag { display: inline-block; background: #457b9d; color: white; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.75rem; margin: 0.1rem; }
+  .tag-red { background: #e63946; }
+  .tag-green { background: #2dc653; }
+  .warn { background: #fff3cd; border: 1px solid #ffc107; padding: 0.75rem 1rem; border-radius: 4px; margin: 0.75rem 0; }
+  .ok { background: #d4edda; border: 1px solid #28a745; padding: 0.75rem 1rem; border-radius: 4px; margin: 0.75rem 0; }
+  .danger { background: #f8d7da; border: 1px solid #dc3545; padding: 0.75rem 1rem; border-radius: 4px; margin: 0.75rem 0; }
+  .test-case { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 1rem; margin: 0.5rem 0; }
+  .test-case code { background: #e9ecef; padding: 0.1rem 0.3rem; border-radius: 3px; font-family: monospace; }
+  ul li, ol li { margin: 0.4rem 0; }
+  .interface { background: #1d3557; color: #e8f4f8; padding: 1.5rem; border-radius: 8px; font-family: monospace; font-size: 0.85rem; line-height: 1.8; }
+  .toc { background: #fff; border: 1px solid #dee2e6; border-radius: 6px; padding: 1.5rem; margin-bottom: 2rem; }
+  .toc a { color: #1d3557; text-decoration: none; }
+</style>
+</head>
+<body>
+
+<h1>⚙️ P0 Spec — Structured Edit Format &amp; Edit Reliability</h1>
+<div class="meta">
+  <span>📅 2026-05-22</span>
+  <span>🎯 Priority: P0 (Critical)</span>
+  <span>⏱ Est. 7h total</span>
+  <span>📂 Files: worker.py, verifier.py, orchestrator.py</span>
+  <span>📊 Expected: L3 score 50 → 80+</span>
+</div>
+
+<div class="toc">
+  <strong>Contents</strong>
+  <ul>
+    <li><a href="#problem">1. Problem Statement</a></li>
+    <li><a href="#p01">2. P0.1 — JSON Structured Edit Format (4h)</a></li>
+    <li><a href="#p02">3. P0.2 — Read-Before-Write Enforcement (2h)</a></li>
+    <li><a href="#p03">4. P0.3 — Multiple-Match Detection (1h)</a></li>
+    <li><a href="#interfaces">5. New Interfaces &amp; Data Structures</a></li>
+    <li><a href="#tests">6. Test Plan</a></li>
+    <li><a href="#migration">7. Migration Strategy</a></li>
+    <li><a href="#risks">8. Risks &amp; Mitigations</a></li>
+  </ul>
+</div>
+
+<!-- ===================================================== -->
+<h2 id="problem">1. Problem Statement</h2>
+
+<p>AWOS's edit pipeline is fragile because it parses free-form text blocks from LLM responses. The three root failure modes, each causing distinct failure signatures in eval:</p>
+
+<table>
+  <tr><th>Failure Mode</th><th>Root Cause</th><th>Symptom in Eval</th><th>Frequency</th></tr>
+  <tr><td>SEARCH block not found</td><td>LLM reconstructs from snippet, not exact file</td><td>verifier fails, task score 0</td><td>~40% of L3 failures</td></tr>
+  <tr><td>Wrong location applied</td><td>Multiple matches, first match selected silently</td><td>Wrong code modified, test fails</td><td>~20% of L3 failures</td></tr>
+  <tr><td>Parse failure</td><td>LLM emits malformed block delimiters</td><td>No edit applied, silent pass or score 0</td><td>~15% of failures</td></tr>
+  <tr><td>Context drift</td><td>Snippet extraction misses surrounding code</td><td>old_string references code not in snippet</td><td>~25% of L3 failures</td></tr>
+</table>
+
+<div class="danger">
+  <strong>The fundamental problem:</strong> The LLM writes SEARCH blocks based on a <em>snippet</em> of the file, not the full content. Claude Code enforces: you MUST read the full file before editing. AWOS currently passes a compressed context_snippet. This is the root cause of L3 multi-file failures.
+</div>
+
+<!-- ===================================================== -->
+<h2 id="p01">2. P0.1 — JSON Structured Edit Format</h2>
+
+<h3>2.1 Motivation</h3>
+<p>Claude Code, Cursor, and all major production coding agents use <strong>structured JSON tool calls</strong> for edits — not text block parsing. The LLM emits machine-readable JSON; the tool validates and applies it. This eliminates an entire class of parsing errors.</p>
+
+<div class="before-after">
+  <div class="before">
+    <h4>❌ Current AWOS approach</h4>
+    <p>LLM emits freeform text:</p>
+    <div class="code-block" style="font-size:0.75rem;">
+&lt;&lt;&lt;&lt;&lt;&lt;&lt; SEARCH
+def old_method(self):
+    pass
+=======
+def old_method(self):
+    return True
+&gt;&gt;&gt;&gt;&gt;&gt;&gt; REPLACE</div>
+    <p>AWOS then regex-parses this text. Fails if LLM omits spaces, changes quote style, gets delimiters slightly wrong.</p>
+  </div>
+  <div class="after">
+    <h4>✅ New approach (like Claude Code)</h4>
+    <p>LLM emits structured JSON:</p>
+    <div class="code-block" style="font-size:0.75rem;">
+{
+  "edits": [
+    {
+      "old_string": "def old_method(self):\n    pass",
+      "new_string": "def old_method(self):\n    return True"
+    }
+  ]
+}</div>
+    <p>Worker validates JSON schema, checks old_string exists, applies. Zero regex parsing.</p>
+  </div>
+</div>
+
+<h3>2.2 New Prompt Format for LLM</h3>
+<p>The worker prompt will instruct the LLM to respond in this exact JSON schema:</p>
+<div class="code-block">
+## OUTPUT FORMAT
+Respond ONLY with valid JSON. No markdown, no explanation, just JSON:
+
+{
+  "reasoning": "One sentence explaining the change",
+  "edits": [
+    {
+      "old_string": "exact text from the file to replace (can be multiple lines)",
+      "new_string": "replacement text"
+    }
+  ]
+}
+
+RULES:
+- old_string MUST be an exact substring of the file content shown above
+- Include enough surrounding context (2-3 lines) to be unique in the file
+- If adding new code with no replacement, use the line just before the insertion as old_string, and include it in new_string too
+- For a new file (empty), set old_string to "" and new_string to the full content
+- Multiple edits are applied in order — earlier edits affect later ones
+</div>
+
+<h3>2.3 Worker Changes — <code>execute_task()</code> Flow</h3>
+
+<div class="step"><span class="step-num">Step 1</span> <strong>Full file read</strong>: Before calling LLM, always read the full file content (not snippet). Store it as <code>full_content</code>.</div>
+<div class="step"><span class="step-num">Step 2</span> <strong>Context extraction</strong>: Extract relevant portion (unchanged) — but also pass <code>full_content</code> to the verifier.</div>
+<div class="step"><span class="step-num">Step 3</span> <strong>LLM call with JSON schema</strong>: Prompt includes file content + JSON output instructions.</div>
+<div class="step"><span class="step-num">Step 4</span> <strong>JSON parse response</strong>: <code>json.loads(response)</code> — no regex. If fails → structured error + retry.</div>
+<div class="step"><span class="step-num">Step 5</span> <strong>Pass EditRequest to verifier</strong>: <code>EditRequest(file_path, full_content, edits=[...])</code></div>
+<div class="step"><span class="step-num">Step 6</span> <strong>Verifier applies &amp; validates</strong>: Verifier checks each edit, applies sequentially, returns modified content.</div>
+<div class="step"><span class="step-num">Step 7</span> <strong>Write to disk</strong>: Only after all edits validated successfully.</div>
+
+<h3>2.4 Detailed Code Spec — <code>_parse_llm_response()</code></h3>
+<div class="code-block">
+def _parse_llm_response(self, response_text: str) -> list[dict]:
+    """
+    Parse JSON edit response from LLM.
+    Returns list of {old_string, new_string} dicts.
+    Raises ValueError with actionable message on failure.
+    """
+    # Strip markdown if present (defensive)
+    text = response_text.strip()
+    if text.startswith("```"):
+        # Extract content between first ``` and last ```
+        lines = text.split("\n")
+        start = 1 if lines[0].startswith("```") else 0
+        end = len(lines) - 1 if lines[-1].strip() == "```" else len(lines)
+        text = "\n".join(lines[start:end])
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"LLM response is not valid JSON: {e}\nResponse was:\n{text[:500]}")
+
+    if "edits" not in data:
+        raise ValueError(f"JSON response missing 'edits' key. Got keys: {list(data.keys())}")
+
+    edits = data["edits"]
+    if not isinstance(edits, list) or len(edits) == 0:
+        raise ValueError(f"'edits' must be a non-empty list, got: {type(edits)}")
+
+    for i, edit in enumerate(edits):
+        if "old_string" not in edit or "new_string" not in edit:
+            raise ValueError(f"Edit {i} missing 'old_string' or 'new_string': {edit}")
+
+    return edits
+</div>
+
+<h3>2.5 Backward Compatibility</h3>
+<div class="warn">
+  <strong>Strategy:</strong> Keep the existing <code>_parse_search_replace()</code> as a fallback for models that still emit SEARCH/REPLACE blocks. Try JSON parse first; if it fails, try legacy SEARCH/REPLACE parse; if both fail, return structured error to LLM.
+</div>
+<div class="code-block">
+def _parse_response(self, response_text: str) -> list[dict]:
+    """Try JSON first, fall back to SEARCH/REPLACE."""
+    # 1. Try JSON
+    try:
+        return self._parse_json_edits(response_text)
+    except ValueError:
+        pass
+    # 2. Try legacy SEARCH/REPLACE blocks
+    try:
+        return self._parse_search_replace(response_text)
+    except ValueError:
+        pass
+    # 3. Both failed — return empty (will trigger error + retry)
+    return []
+</div>
+
+<!-- ===================================================== -->
+<h2 id="p02">3. P0.2 — Read-Before-Write Enforcement</h2>
+
+<h3>3.1 Problem</h3>
+<p>Currently, <code>_extract_context()</code> returns a <em>snippet</em> (200-300 lines) of the file, not the full content. The LLM writes edits based on this snippet. When the LLM's <code>old_string</code> references code outside the snippet (or code that differs even slightly from the snippet), the edit fails.</p>
+
+<div class="danger">
+  In the L3 task "Add snapshot() to ToolPerformanceTracker + wire to Orchestrator", the orchestrator.py file is ~900 lines. The snippet extraction was finding a ~200 line window. The constructor where <code>self.performance</code> is initialized (line ~80) and the execution summary (line ~750) are both critical but likely outside the snippet. The LLM is writing edit blocks it can't reliably anchor.
+</div>
+
+<h3>3.2 Solution: Full File Read + Smart Context Injection</h3>
+
+<p>New approach in <code>execute_task()</code>:</p>
+
+<div class="code-block">
+def execute_task(self, task, file_content, ...):
+    # FULL content always read first
+    full_file_content = file_content  # caller already provides this
+
+    # Smart context: extract the MOST RELEVANT section for display
+    # but always anchor edits against full_file_content
+    display_context = self._extract_context(full_file_content, task["action"])
+
+    # Build prompt with display_context for readability
+    # but edits are validated against full_file_content
+    prompt = self._build_prompt(
+        task=task,
+        display_context=display_context,
+        full_content_line_count=len(full_file_content.split('\n')),
+        ...
+    )
+
+    # ... LLM call ...
+
+    # ALWAYS validate against FULL content
+    return self._apply_and_verify(
+        full_content=full_file_content,
+        edits=parsed_edits,
+        task=task,
+    )
+</div>
+
+<h3>3.3 Prompt Change — Include File Header + Tail</h3>
+<p>The prompt template must clearly show the LLM where the context comes from in the full file:</p>
+<div class="code-block">
+## FILE: {task['file']} ({total_lines} lines total)
+
+### File Header (lines 1-{header_end}):
+{header_content}
+
+### Relevant Section (lines {start}-{end}):
+{relevant_context}
+
+### File Tail (lines {tail_start}-{total_lines}):
+{tail_content}
+
+NOTE: Your old_string MUST be an exact substring of this file's content.
+The full file has {total_lines} lines. Only part is shown above.
+</div>
+
+<h3>3.4 When File is Small (&lt; 300 lines)</h3>
+<p>If the target file is under 300 lines: include the ENTIRE file in the prompt. No extraction needed. This is the highest-reliability path.</p>
+<div class="code-block">
+MAX_FULL_FILE_LINES = 300  # Below this, show entire file
+
+def _get_file_context(self, full_content: str, action: str) -> str:
+    lines = full_content.split('\n')
+    if len(lines) &lt;= MAX_FULL_FILE_LINES:
+        return full_content  # Show everything
+    else:
+        return self._extract_smart_context(full_content, action)
+</div>
+
+<!-- ===================================================== -->
+<h2 id="p03">4. P0.3 — Multiple-Match Detection</h2>
+
+<h3>4.1 Problem</h3>
+<p>If <code>old_string</code> appears multiple times in a file (e.g., a common pattern like <code>return None</code> or <code>self.x = None</code>), the current code applies the edit to the first match silently. This can corrupt the wrong part of the file.</p>
+
+<h3>4.2 Solution: Count Before Apply</h3>
+<div class="code-block">
+def _apply_single_edit(
+    self,
+    content: str,
+    old_string: str,
+    new_string: str,
+    replace_all: bool = False,
+    edit_index: int = 0,
+) -> tuple[str, str | None]:
+    """
+    Returns (new_content, error_message).
+    error_message is None on success.
+    """
+    if old_string == "":
+        # File creation — valid only if content is also empty
+        if content.strip() != "":
+            return content, "Cannot use empty old_string on non-empty file"
+        return new_string, None
+
+    count = content.count(old_string)
+
+    if count == 0:
+        # Find nearest match for helpful error
+        nearest = self._find_nearest_match(content, old_string)
+        return content, (
+            f"Edit {edit_index}: old_string not found in file.\n"
+            f"Nearest match found:\n---\n{nearest}\n---\n"
+            f"Ensure old_string exactly matches file content including whitespace."
+        )
+
+    if count > 1 and not replace_all:
+        # Show all match locations for debugging
+        locations = self._find_all_match_lines(content, old_string)
+        return content, (
+            f"Edit {edit_index}: old_string found {count} times in file "
+            f"(lines: {locations}). "
+            f"Add more surrounding context to make it unique, "
+            f"or set replace_all=true to replace all occurrences."
+        )
+
+    if replace_all:
+        return content.replace(old_string, new_string), None
+    else:
+        return content.replace(old_string, new_string, 1), None
+</div>
+
+<h3>4.3 Find Nearest Match Helper</h3>
+<div class="code-block">
+def _find_nearest_match(self, content: str, old_string: str) -> str:
+    """Find closest matching line using difflib for helpful error messages."""
+    import difflib
+    target_lines = old_string.strip().split('\n')
+    content_lines = content.split('\n')
+
+    # Find the line in content most similar to first line of old_string
+    first_target = target_lines[0].strip()
+    best_ratio = 0.0
+    best_idx = 0
+
+    for i, line in enumerate(content_lines):
+        ratio = difflib.SequenceMatcher(None, first_target, line.strip()).ratio()
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_idx = i
+
+    # Show window around best match
+    start = max(0, best_idx - 2)
+    end = min(len(content_lines), best_idx + len(target_lines) + 2)
+    return '\n'.join(content_lines[start:end])
+</div>
+
+<!-- ===================================================== -->
+<h2 id="interfaces">5. New Interfaces &amp; Data Structures</h2>
+
+<h3>5.1 EditRequest Dataclass</h3>
+<div class="interface">
+@dataclass
+class EditInstruction:
+    old_string: str
+    new_string: str
+    replace_all: bool = False
+
+@dataclass
+class EditRequest:
+    file_path: str
+    full_content: str          # Full file content at time of LLM call
+    edits: list[EditInstruction]
+    task_id: int | None = None
+    reasoning: str = ""        # LLM's explanation (for debugging)
+</div>
+
+<h3>5.2 EditResult Dataclass</h3>
+<div class="interface">
+@dataclass
+class EditResult:
+    success: bool
+    new_content: str | None    # Modified content if success
+    errors: list[str]          # Per-edit error messages
+    edits_applied: int         # Count of successfully applied edits
+    edits_total: int
+    nearest_matches: list[str] # For each failed edit, nearest match found
+</div>
+
+<h3>5.3 Updated Verifier Interface</h3>
+<p>The <code>Verifier.apply_edits(request: EditRequest) → EditResult</code> method replaces <code>_apply_search_replace()</code>:</p>
+<div class="interface">
+class Verifier:
+    def apply_edits(self, request: EditRequest) -> EditResult:
+        """
+        Apply structured edits to file content.
+        Validates each edit, applies sequentially.
+        Returns EditResult with success/failure details.
+        """
+        ...
+
+    def verify_result(self, original: str, result: str, task: dict) -> VerificationResult:
+        """Existing method — unchanged."""
+        ...
+</div>
+
+<!-- ===================================================== -->
+<h2 id="tests">6. Test Plan</h2>
+
+<h3>6.1 Unit Tests — <code>tests/test_structured_edit.py</code></h3>
+
+<div class="test-case">
+  <strong>test_json_parse_valid</strong><br>
+  Input: valid JSON with <code>edits</code> array → <code>_parse_json_edits()</code> returns list of dicts
+</div>
+<div class="test-case">
+  <strong>test_json_parse_markdown_stripped</strong><br>
+  Input: JSON wrapped in ```json ... ``` → still parses correctly
+</div>
+<div class="test-case">
+  <strong>test_json_parse_missing_edits_key</strong><br>
+  Input: <code>{"result": "..."}</code> → raises ValueError with helpful message
+</div>
+<div class="test-case">
+  <strong>test_apply_edit_exact_match</strong><br>
+  <code>old_string</code> exact match in file → applied correctly, new content returned
+</div>
+<div class="test-case">
+  <strong>test_apply_edit_not_found</strong><br>
+  <code>old_string</code> not in file → error with nearest match hint
+</div>
+<div class="test-case">
+  <strong>test_apply_edit_multiple_matches</strong><br>
+  <code>old_string</code> appears 3 times, replace_all=False → error with count + line numbers
+</div>
+<div class="test-case">
+  <strong>test_apply_edit_replace_all</strong><br>
+  <code>old_string</code> appears 3 times, replace_all=True → all 3 replaced
+</div>
+<div class="test-case">
+  <strong>test_apply_multiple_edits_sequential</strong><br>
+  Two edits: second edit operates on content modified by first
+</div>
+<div class="test-case">
+  <strong>test_apply_create_new_file</strong><br>
+  <code>old_string=""</code>, file is empty → new content written
+</div>
+<div class="test-case">
+  <strong>test_full_file_read_small_file</strong><br>
+  File &lt;300 lines → full content shown in prompt (no extraction)
+</div>
+<div class="test-case">
+  <strong>test_full_file_read_large_file</strong><br>
+  File &gt;300 lines → header + relevant section + tail shown, full content used for validation
+</div>
+<div class="test-case">
+  <strong>test_fallback_search_replace</strong><br>
+  JSON parse fails → fallback to SEARCH/REPLACE parsing still works
+</div>
+<div class="test-case">
+  <strong>test_quote_normalization</strong><br>
+  <code>old_string</code> with curly quotes matches file with straight quotes (and vice versa)
+</div>
+<div class="test-case">
+  <strong>test_trailing_newline_strip</strong><br>
+  <code>old_string</code> without trailing \n matches file content that has trailing \n after it
+</div>
+
+<h3>6.2 Integration Test — Existing L3 Task</h3>
+<p>Run the "Add snapshot() + wire to Orchestrator" L3 task with new edit format. Expected: score jumps from 50 → 80+.</p>
+
+<!-- ===================================================== -->
+<h2 id="migration">7. Migration Strategy</h2>
+
+<h3>7.1 File Changes Summary</h3>
+<table>
+  <tr><th>File</th><th>Change</th><th>Breaking?</th></tr>
+  <tr><td><code>scaffold/agent/worker.py</code></td><td>Add <code>_parse_json_edits()</code>, update <code>_parse_response()</code> to try JSON first, update <code>_build_prompt()</code> JSON format, update <code>_get_file_context()</code> for full-file</td><td>No — fallback preserved</td></tr>
+  <tr><td><code>scaffold/agent/verifier.py</code></td><td>Add <code>apply_edits(EditRequest)</code>, add multiple-match check, add nearest-match error helper</td><td>No — new method, old method unchanged</td></tr>
+  <tr><td><code>scaffold/agent/orchestrator.py</code></td><td>Pass full file content to worker; read file before passing to execute_task</td><td>Minor — orchestrator already reads files</td></tr>
+  <tr><td><code>scaffold/agent/models.py</code> (new or existing)</td><td>Add <code>EditInstruction</code>, <code>EditRequest</code>, <code>EditResult</code> dataclasses</td><td>No — additive</td></tr>
+</table>
+
+<h3>7.2 Rollout Sequence</h3>
+<ol>
+  <li>Add dataclasses (<code>EditInstruction</code>, <code>EditRequest</code>, <code>EditResult</code>)</li>
+  <li>Add <code>apply_edits()</code> to <code>Verifier</code> with multiple-match check</li>
+  <li>Add <code>_parse_json_edits()</code> to <code>Worker</code> + update <code>_parse_response()</code> with fallback</li>
+  <li>Update <code>_build_prompt()</code> to use JSON output format instruction</li>
+  <li>Update <code>_get_file_context()</code> for full-file-when-small logic</li>
+  <li>Update <code>orchestrator.py</code> to always read full file before <code>execute_task()</code></li>
+  <li>Run tests: all 14 new + all existing must pass</li>
+</ol>
+
+<!-- ===================================================== -->
+<h2 id="risks">8. Risks &amp; Mitigations</h2>
+
+<table>
+  <tr><th>Risk</th><th>Likelihood</th><th>Mitigation</th></tr>
+  <tr><td>LLM doesn't follow JSON format consistently</td><td>Medium</td><td>Fallback to SEARCH/REPLACE; JSON is simpler than SEARCH blocks so models actually follow it more reliably</td></tr>
+  <tr><td>Large files (&gt;300 lines) increase token cost</td><td>Medium</td><td>Smart context still used for display; full file only for validation. Token increase: ~15%</td></tr>
+  <tr><td>Sequential edits: edit 2 breaks after edit 1 applied</td><td>Low</td><td>Apply edits sequentially; if edit N fails, report clearly which edit failed and what the file looks like at that point</td></tr>
+  <tr><td>Trailing newline behavior differs by OS</td><td>Low</td><td>Normalize to \n on read; strip trailing \n from old_string before comparison</td></tr>
+  <tr><td>Regression in L4 (which currently passes)</td><td>Low</td><td>Full fallback to SEARCH/REPLACE preserved; run eval on both L1-L4 before merging</td></tr>
+</table>
+
+<hr style="margin: 3rem 0; border-color: #dee2e6;">
+<p style="color: #888; font-size: 0.85rem;">P0 Spec | AWOS Coding Agent | 2026-05-22 | Total effort: 7h | Next: P1 Spec (Verifier + Architect)</p>
+
+</body>
+</html>

@@ -1,0 +1,22 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Release 1.0</title>
+<style>body { font: 14px sans-serif; } .tall { height: 3200px; background: linear-gradient(#fff, #eef); }</style></head>
+<body>
+<!-- like a GitHub release page: the asset list is a lazy fragment that loads only when scrolled into view -->
+<h1>Release 1.0</h1>
+<p><a id="home" href="help.html">Home</a></p>
+<div class="tall">Release notes ...</div>
+<h2>Assets</h2>
+<div id="assets"><span id="sentinel">Loading assets...</span></div>
+<script>
+  var io = new IntersectionObserver(function (es) {
+    if (!es.some(function (e) { return e.isIntersecting; })) return;
+    io.disconnect();
+    setTimeout(function () {                      // the fragment fetch
+      document.getElementById('assets').innerHTML =
+        '<ul><li><a id="asset" href="lazy_done.html?f=sha256sum.txt">sha256sum.txt</a></li></ul>';
+    }, 300);
+  });
+  io.observe(document.getElementById('sentinel'));
+</script>
+</body></html>

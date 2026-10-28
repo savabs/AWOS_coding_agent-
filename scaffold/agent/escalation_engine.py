@@ -1,39 +1,56 @@
 """
-EscalationEngine: 5-tier model ladder with complexity, budget, and failure gates.
+EscalationEngine: 6-tier model ladder with complexity, budget, and failure gates.
 
 Philosophy:
   Start cheap. Escalate on evidence.
   A small model with great context beats a large model with poor context.
-  Opus is NOT banned — it's budget-gated. If you need it, AWOS will use it.
+  Opus is BANNED — too expensive at any scale.
+  Sonnet is restricted — ~10% of requests max, complexity 8+ or 3+ failures.
 
 Ladder (cheapest → most powerful):
-  L0  Gemini 2.5 Flash-Lite  $0.001/req  — routing, simple Q&A
-  L1  DeepSeek V4 Flash       $0.001/req  — default worker
-  L2  Claude Haiku 4.5        $0.017/req  — retry after L1 fail
-  L3  Claude Sonnet 4.6       $0.050/req  — complex tasks or repeated failures
-  L4  Claude Opus 4.6         $0.960/req  — budget-gated premium
+  L0  Gemini 2.5 Flash-Lite      $0.001/req  — routing, simple Q&A
+  L1  DeepSeek V4 Flash           $0.001/req  — default worker
+  L2  OpenRouter                 $0.002/req  — 200+ model catalog (one key)
+  L3  GPT-4o-mini (OpenAI)        $0.003/req  — fallback (uses existing credits)
+  L4  Claude Haiku 4.5            $0.017/req  — BLOCKED when AWOS_CHEAP_ONLY=true
+  L5  Claude Sonnet 4.6           $0.050/req  — BLOCKED when AWOS_CHEAP_ONLY=true
 
-Escalation gates (all must pass to jump a level):
-  - Complexity gate:  task score >= threshold for that level
-  - Failure gate:     failure count >= threshold for that level
-  - Budget gate:      remaining budget >= minimum required for that level
-  - Explicit gate:    user asked for premium / forced via API
+Cheap-only mode (AWOS_CHEAP_ONLY=true):
+  Premium tiers (Haiku, Sonnet) are halted. Intelligence comes from context, skills, and
+  rotating among Gemini / DeepSeek / OpenRouter / GPT-4o-mini on retry — not escalation.
+  OpenRouter (L5) is always available — it is a cheap provider with diverse model access.
 """
 
-from dataclasses import dataclass, field
+import logging
+import os
+from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
+
+logger = logging.getLogger(__name__)
+
 try:
     from .reward_store import ReplayGate
 except ImportError:
     from reward_store import ReplayGate
 
 
+
 class EscalationLevel(Enum):
     GEMINI_FLASH  = 0   # Router / simple answers
     DEEPSEEK      = 1   # Default code worker
-    HAIKU         = 2   # Retry tier
-    SONNET        = 3   # Complex / architecture (top tier, no Opus)
+    OPENAI        = 2   # GPT-4o-mini fallback (uses existing OpenAI credits)
+    HAIKU         = 3   # Retry tier (Anthropic Claude Haiku)
+    SONNET        = 4   # Severely restricted (top tier, Opus banned)
+    OPENROUTER    = 5   # Unified access to 200+ models (one API key)
+    OPENCODE      = 6   # OpenCode Go — primary coding model
+
+
+# Models that are currently dead (404 / rate-limited / no working key).
+# Empty now — all dead models (gemini, gpt-4o-mini, claude) were removed
+# from the LADDER entirely. Leave the filter mechanism in place so a
+# future dead model can be blocked with a single-line addition here.
+MODELS_UNAVAILABLE: set[str] = set()
 
 
 @dataclass
@@ -42,7 +59,7 @@ class ModelSpec:
     level: EscalationLevel
     name: str                   # Human-readable
     model_id: str               # API identifier
-    provider: str               # "anthropic" | "deepseek" | "google"
+    provider: str               # "anthropic" | "deepseek" | "google" | "openrouter"
     cost_per_req: float         # Estimated $USD per average request
     input_price:  float         # $/MTok input
     output_price: float         # $/MTok output
@@ -52,23 +69,12 @@ class ModelSpec:
 
 
 LADDER: list[ModelSpec] = [
-    ModelSpec(
-        level=EscalationLevel.GEMINI_FLASH,
-        name="Gemini 2.5 Flash-Lite",
-        model_id="gemini-2.0-flash",
-        provider="google",
-        cost_per_req=0.001,
-        input_price=0.10,
-        output_price=0.40,
-        min_complexity=0,
-        min_budget_remaining=0.0,
-        min_failures=0,
-    ),
+    # L0: Default worker — DeepSeek V4 Flash (cheap, fast, good enough for most subtasks)
     ModelSpec(
         level=EscalationLevel.DEEPSEEK,
         name="DeepSeek V4 Flash",
-        model_id="deepseek-chat",
-        provider="deepseek",
+        model_id="deepseek-v4-flash",
+        provider="opencode",
         cost_per_req=0.001,
         input_price=0.14,
         output_price=0.28,
@@ -76,33 +82,104 @@ LADDER: list[ModelSpec] = [
         min_budget_remaining=0.0,
         min_failures=0,
     ),
+    # L1: Escalation — DeepSeek V4 Pro (stronger reasoning, used when Flash fails
+    #     or task complexity is high)
     ModelSpec(
-        level=EscalationLevel.HAIKU,
-        name="Claude Haiku 4.5",
-        model_id="claude-haiku-4-5",
-        provider="anthropic",
-        cost_per_req=0.017,
-        input_price=1.00,
-        output_price=5.00,
-        min_complexity=5,
-        min_budget_remaining=1.0,
-        min_failures=1,
-    ),
-    ModelSpec(
-        level=EscalationLevel.SONNET,
-        name="Claude Sonnet 4.6",
-        model_id="claude-sonnet-4-6",
-        provider="anthropic",
-        cost_per_req=0.050,
-        input_price=3.00,
-        output_price=15.00,
-        min_complexity=7,
-        min_budget_remaining=3.0,
-        min_failures=2,
+        level=EscalationLevel.OPENCODE,
+        name="DeepSeek V4 Pro",
+        model_id="deepseek-v4-pro",
+        provider="opencode",
+        cost_per_req=0.002,
+        input_price=0.44,
+        output_price=0.88,
+        min_complexity=6,  # Only for complex tasks
+        min_budget_remaining=0.0,
+        min_failures=1,     # Use after 1 Flash failure
     ),
 ]
 
+#: $/MTok (input, output) for ids AWOS_LADDER may put on the ladder.
+_LADDER_PRICES = {
+    "claude-haiku-5-5": (0.10, 0.50),
+    "claude-sonnet-5-5": (2.00, 10.00),
+    "claude-haiku-4-5": (1.00, 5.00),
+    "claude-sonnet-4-6": (3.00, 15.00),
+}
+
+
+def _apply_ladder_env() -> None:
+    """
+    AWOS_LADDER="model0[,model1]" puts these ids on the ladder's rungs (L0 the
+    default worker, L1 the escalation); one id fills both. E.g.
+    AWOS_LADDER=claude-haiku-5-5 runs every routed call on Haiku 5.5 through
+    the direct Anthropic client (OPENROUTER_API_KEY unset). Levels and arm
+    indices are unchanged, so routing and learned weights keep working.
+    """
+    from dataclasses import replace
+
+    ids = [m.strip() for m in os.getenv("AWOS_LADDER", "").split(",") if m.strip()]
+    if not ids:
+        return
+    ids = (ids + [ids[-1]] * len(LADDER))[:len(LADDER)]
+    for i, (spec, mid) in enumerate(zip(LADDER, ids)):
+        price_in, price_out = _LADDER_PRICES.get(mid, (spec.input_price, spec.output_price))
+        provider = "anthropic" if mid.startswith("claude-") else spec.provider
+        LADDER[i] = replace(spec, name=mid, model_id=mid, provider=provider,
+                            input_price=price_in, output_price=price_out)
+
+
+_apply_ladder_env()
 LEVEL_MAP: dict[EscalationLevel, ModelSpec] = {m.level: m for m in LADDER}
+
+
+# ── LinUCB arm ids ────────────────────────────────────────────────────────────
+# The learned router's arm id for a rung is its INDEX in LADDER — decide()
+# selects LADDER[arm] and record_outcome() trains the same arm. It is never
+# EscalationLevel.value (sparse: Flash=1, Pro=6), which reward_store keeps
+# as the episode's action_id; arm_for_level_value() translates those.
+
+def arm_for_level(level: EscalationLevel) -> Optional[int]:
+    """Ladder index (LinUCB arm id) of ``level``, or None if not on the ladder."""
+    for i, spec in enumerate(LADDER):
+        if spec.level == level:
+            return i
+    return None
+
+
+def arm_for_level_value(value: int) -> Optional[int]:
+    """Arm id for a stored EscalationLevel.value, or None if not on the ladder."""
+    try:
+        return arm_for_level(EscalationLevel(int(value)))
+    except (ValueError, TypeError):
+        return None
+
+CHEAP_ONLY_MAX_LEVEL = EscalationLevel.OPENCODE
+_CHEAP_ROTATION = [
+    EscalationLevel.DEEPSEEK,
+    EscalationLevel.OPENCODE,
+]
+
+
+def is_cheap_only() -> bool:
+    """True when premium models are halted (env flag or zero premium budget)."""
+    if os.getenv("AWOS_CHEAP_ONLY", "false").lower() in ("1", "true", "yes"):
+        return True
+    pb = os.getenv("AWOS_PREMIUM_BUDGET", "")
+    return pb == "0"
+
+
+def max_allowed_level() -> EscalationLevel:
+    return CHEAP_ONLY_MAX_LEVEL if is_cheap_only() else EscalationLevel.OPENCODE
+
+
+def allowed_ladder() -> list[ModelSpec]:
+    """Return ladder tiers allowed in current mode.
+    
+    Always includes OpenRouter (level 5) — it is a cheap provider with wide model
+    access and works in both cheap-only and premium modes.
+    """
+    cap = max_allowed_level().value
+    return [s for s in LADDER if s.level.value <= cap or s.level == EscalationLevel.OPENROUTER]
 
 
 @dataclass
@@ -139,6 +216,9 @@ class EscalationEngine:
         self._performance = performance_tracker
         self._ml_router = ml_router          # LinUCBRouter | None
         self._feature_extractor = None
+        # Premium budget: separate cap on Anthropic spend (default: no cap = None)
+        _pb = os.getenv("AWOS_PREMIUM_BUDGET", "")
+        self._premium_budget = float(_pb) if _pb else None
         if ml_router is not None:
             try:
                 from scaffold.agent.ml_router import TaskFeatureExtractor
@@ -148,6 +228,15 @@ class EscalationEngine:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
+    def _effective_budget(self, spec: ModelSpec, budget_remaining: float) -> float:
+        """Return effective budget for a model, accounting for premium cap."""
+        if not self._is_premium_model(spec):
+            return budget_remaining
+        premium_rem = self._premium_budget_remaining()
+        if premium_rem is None:
+            return budget_remaining
+        return min(budget_remaining, premium_rem)
+
     def decide(
         self,
         task: dict,
@@ -155,6 +244,7 @@ class EscalationEngine:
         budget_remaining: Optional[float] = None,
         force_level: Optional[EscalationLevel] = None,
         user_wants_best: bool = False,
+        dead_providers: Optional[set] = None,
     ) -> EscalationDecision:
         """
         Choose the right model tier for this task.
@@ -168,32 +258,57 @@ class EscalationEngine:
         """
         if budget_remaining is None:
             budget_remaining = self.monthly_budget
+        if dead_providers is None:
+            dead_providers = set()
 
         complexity_score = self._score_complexity(task)
 
-        # Hard override
+        # Hard override (capped in cheap-only mode)
         if force_level is not None:
-            spec = LEVEL_MAP[force_level]
+            cap = max_allowed_level()
+            spec = LEVEL_MAP.get(force_level)
+            if spec is None:
+                # A level the enum still names (HAIKU, SONNET, ...) but that is no
+                # longer on the ladder: use the best allowed rung, not a KeyError.
+                spec = LEVEL_MAP[cap]
+                reason = f"Forced {force_level.name} is not on the ladder — using {spec.name}"
+                if is_cheap_only():
+                    reason += " [cheap-only]"
+            elif spec.level.value > cap.value:
+                spec = LEVEL_MAP[cap]
+                reason = f"Force blocked above {cap.name} — cheap-only mode"
+            else:
+                reason = f"Forced to {spec.name}"
             return EscalationDecision(
                 spec=spec,
-                reason=f"Forced to {spec.name}",
+                reason=reason,
                 complexity_score=complexity_score,
                 failure_count=failure_count,
                 budget_remaining=budget_remaining,
                 forced=True,
             )
 
-        # User explicitly wants best available
-        if user_wants_best and budget_remaining >= LEVEL_MAP[EscalationLevel.SONNET].min_budget_remaining:
-            spec = LEVEL_MAP[EscalationLevel.SONNET]
+        # User explicitly wants best available (capped in cheap-only mode)
+        best_level = max_allowed_level()
+        best_spec = LEVEL_MAP[best_level]
+        if user_wants_best and self._effective_budget(best_spec, budget_remaining) >= best_spec.min_budget_remaining:
+            label = "cheap-only best" if is_cheap_only() else "best available"
             return EscalationDecision(
-                spec=spec,
-                reason="User requested best available (Sonnet)",
+                spec=best_spec,
+                reason=f"User requested {label} ({best_spec.name})",
                 complexity_score=complexity_score,
                 failure_count=failure_count,
                 budget_remaining=budget_remaining,
                 forced=True,
             )
+
+        ladder = allowed_ladder()
+        # Filter out models in MODELS_UNAVAILABLE. This is the single source
+        # of truth — see the set definition above. Without this filter, the
+        # failure-driven escalation walk would still pick dead models (e.g.
+        # gpt-4o-mini after 2 failures) and burn budget on guaranteed failures.
+        ladder = [s for s in ladder if s.model_id not in MODELS_UNAVAILABLE]
+        worker_ladder = list(ladder)  # all models are eligible for worker tasks now
 
         # ── Performance veto (empirical success matrix) ──────────────────
         # Runs BEFORE LinUCB so strong empirical evidence overrides the bandit.
@@ -201,7 +316,7 @@ class EscalationEngine:
         _perf_override: Optional[ModelSpec] = None
         if self._performance is not None:
             task_type = self._performance._classify_task_type(task.get("action", ""))
-            default_model_names = [spec.name for spec in LADDER[1:]]  # skip Gemini router
+            default_model_names = [spec.name for spec in worker_ladder]
             best_name, best_rate = self._performance.best_model_for(
                 task_type=task_type,
                 candidates=default_model_names,
@@ -210,14 +325,20 @@ class EscalationEngine:
             )
             if best_name is not None and best_rate is not None:
                 default_stats = self._performance.get_stats(
-                    model=LADDER[1].name, task_type=task_type, window=50
+                    model=worker_ladder[0].name if worker_ladder else LADDER[1].name,
+                    task_type=task_type,
+                    window=50,
                 )
                 default_rate = default_stats.get("success_rate") or 1.0
                 if default_rate < 0.50 and best_rate > default_rate:
-                    for spec in LADDER:
-                        if spec.name == best_name and budget_remaining >= spec.min_budget_remaining:
-                            _perf_override = spec
-                            break
+                    for spec in ladder:
+                        if spec.name == best_name and self._effective_budget(spec, budget_remaining) >= spec.min_budget_remaining:
+                            # Honor the dead-model filter even for perf vetoes.
+                            # Empirical data may be stale (the model was alive
+                            # when the data was collected).
+                            if spec.model_id not in MODELS_UNAVAILABLE:
+                                _perf_override = spec
+                                break
 
         # ── LinUCB ML router (learned policy) ────────────────────────────
         if (
@@ -226,12 +347,33 @@ class EscalationEngine:
             and self._ml_router.is_ready()
         ):
             features = self._feature_extractor.extract(task, failure_count)
+            cap = max_allowed_level().value
+            # The mask also filters MODELS_UNAVAILABLE — learned policy
+            # would otherwise pick a dead model that was valid when the
+            # weights were trained.
             budget_mask = [
-                budget_remaining >= spec.min_budget_remaining
+                spec.level.value <= cap
+                and self._effective_budget(spec, budget_remaining) >= spec.min_budget_remaining
+                and spec.model_id not in MODELS_UNAVAILABLE
                 for spec in LADDER
             ]
             action_id = self._ml_router.select(features, budget_mask=budget_mask)
+            if not 0 <= action_id < len(LADDER):
+                # Weights learned on a longer, older ladder can name a rung that
+                # no longer exists; that crashed every task with IndexError.
+                logger.warning(
+                    "[escalation] LinUCB picked action %s but the ladder has %d rungs; "
+                    "using the first allowed rung", action_id, len(LADDER),
+                )
+                action_id = next((i for i, ok in enumerate(budget_mask) if ok), 0)
             ml_spec = LADDER[action_id]
+            if ml_spec.model_id in MODELS_UNAVAILABLE or ml_spec.level.value > cap:
+                # The learned policy picked something dead or above cap.
+                # Fall back to the cheapest non-dead available level.
+                for s in LADDER:
+                    if s.level.value <= cap and s.model_id not in MODELS_UNAVAILABLE:
+                        ml_spec = s
+                        break
             # Apply performance veto if empirical data is stronger
             if _perf_override is not None and _perf_override.level.value > ml_spec.level.value:
                 return EscalationDecision(
@@ -259,11 +401,14 @@ class EscalationEngine:
             and _perf_override is None
         ):
             task_type = self._performance._classify_task_type(task.get("action", ""))
-            default_model_names = [spec.name for spec in LADDER[1:]]
+            default_model_names = [spec.name for spec in worker_ladder]
             recommended = self._performance.recommend_model(task_type, default_model_names)
             if recommended:
-                for spec in LADDER:
-                    if spec.name == recommended and budget_remaining >= spec.min_budget_remaining:
+                for spec in ladder:
+                    if spec.name == recommended and self._effective_budget(spec, budget_remaining) >= spec.min_budget_remaining:
+                        # Honor the dead-model filter here too.
+                        if spec.model_id in MODELS_UNAVAILABLE:
+                            continue
                         return EscalationDecision(
                             spec=spec,
                             reason=f"Performance hint (cold-start): {spec.name} has highest empirical success for {task_type}",
@@ -272,14 +417,34 @@ class EscalationEngine:
                             budget_remaining=budget_remaining,
                         )
 
-        # Walk down the ladder from most capable, find highest affordable level
-        chosen = LEVEL_MAP[EscalationLevel.DEEPSEEK]  # safe default
-        reason = "Default DeepSeek worker"
+        # Cheap-only: rotate among cheap tiers on retry instead of escalating
+        if is_cheap_only() and failure_count > 0:
+            rotated = self._rotate_cheap(failure_count, dead_providers)
+            if rotated is not None:
+                return EscalationDecision(
+                    spec=rotated,
+                    reason=f"Cheap-only rotation after {failure_count} failure(s) — {rotated.name}",
+                    complexity_score=complexity_score,
+                    failure_count=failure_count,
+                    budget_remaining=budget_remaining,
+                )
 
-        for spec in reversed(LADDER[1:]):  # Skip Gemini (routing only)
+        # Walk down the ladder from most capable, find highest affordable level
+        # Default: lowest non-dead tier (usually DeepSeek, but skip if tripped)
+        chosen = LEVEL_MAP[EscalationLevel.DEEPSEEK]  # fallback
+        reason = "Default DeepSeek worker"
+        for _s in worker_ladder:
+            if _s.provider not in dead_providers:
+                chosen = _s
+                reason = f"Default {_s.name} (lowest available)"
+                break
+
+        for spec in reversed(worker_ladder):
+            if spec.provider in dead_providers:
+                continue  # skip tripped provider
             qualifies_complexity = complexity_score >= spec.min_complexity
             qualifies_failures   = failure_count   >= spec.min_failures
-            qualifies_budget     = budget_remaining >= spec.min_budget_remaining
+            qualifies_budget     = self._effective_budget(spec, budget_remaining) >= spec.min_budget_remaining
 
             if qualifies_budget and (qualifies_complexity or qualifies_failures):
                 chosen = spec
@@ -296,6 +461,9 @@ class EscalationEngine:
             chosen = _perf_override
             _task_type = task.get("complexity", "unknown")
             reason = f"Performance veto: {_perf_override.name} has higher empirical rate for task_type={_task_type}"
+
+        if is_cheap_only():
+            reason = f"{reason} [cheap-only]"
 
         return EscalationDecision(
             spec=chosen,
@@ -319,17 +487,19 @@ class EscalationEngine:
         self._task_history[task_id].append({"level": level.value, "success": success})
 
         # ── Update LinUCB with this outcome (gated by ReplayGate) ─────────
+        # Train the arm decide() selects for this rung: its LADDER index.
+        arm = arm_for_level(level)
         if (
             self._ml_router is not None
             and self._feature_extractor is not None
             and task is not None
+            and arm is not None
         ):
             failure_count = self.failure_count(task_id)
             features = self._feature_extractor.extract(task, failure_count)
             _reward = reward if reward is not None else (1.0 if success else 0.0)
 
             # Build a minimal Episode-like object for the gate
-            from dataclasses import dataclass as _dc
             _gate = getattr(self, '_replay_gate', None)
             if _gate is None:
                 self._replay_gate = ReplayGate()
@@ -340,11 +510,11 @@ class EscalationEngine:
             ep = _Ep()
             ep.reward = _reward
             ep.features = list(features)
-            ep.action_id = level.value
+            ep.action_id = arm
             ep.episode_id = task_id
 
             if _gate.admit(ep):
-                self._ml_router.update(features, level.value, _reward)
+                self._ml_router.update(features, arm, _reward)
 
     def failure_count(self, task_id: str) -> int:
         """Count consecutive failures for a task."""
@@ -362,6 +532,15 @@ class EscalationEngine:
         self._task_history.pop(task_id, None)
 
     # ── Complexity Scoring ────────────────────────────────────────────────────
+
+    def _rotate_cheap(self, failure_count: int, dead_providers: set) -> Optional[ModelSpec]:
+        """Rotate among cheap tiers on retry — squeeze intelligence from context, not price."""
+        for i in range(len(_CHEAP_ROTATION)):
+            level = _CHEAP_ROTATION[(failure_count - 1 + i) % len(_CHEAP_ROTATION)]
+            spec = LEVEL_MAP[level]
+            if spec.provider not in dead_providers:
+                return spec
+        return LEVEL_MAP[EscalationLevel.DEEPSEEK]
 
     def _score_complexity(self, task: dict) -> int:
         """
@@ -392,6 +571,46 @@ class EscalationEngine:
             boost -= 1
 
         return max(1, min(10, base + boost))
+
+    def _premium_budget_remaining(self) -> float | None:
+        """Remaining premium budget, or None if no cap is set."""
+        if self._premium_budget is None:
+            return None
+        try:
+            from scaffold.agent.budget_ledger import get_ledger
+            spent = get_ledger().get_premium_spent()
+            return max(0.0, self._premium_budget - spent)
+        except Exception:
+            return self._premium_budget
+
+    def _is_premium_model(self, spec: ModelSpec) -> bool:
+        """Check if a model spec is an Anthropic (premium) model."""
+        return spec.provider == "anthropic"
+
+    def routing_status(self) -> dict:
+        """Return LinUCB routing observability snapshot for diagnostics.
+
+        Returns a dict with ready state, update count, learned weights per action,
+        cheap-only mode, and known dead providers (empty when no calls recorded).
+        """
+        status: dict = {
+            "linucb_ready": False,
+            "linucb_updates": 0,
+            "actions": {},
+            "is_cheap_only": is_cheap_only(),
+            "dead_providers": [],
+        }
+
+        if self._ml_router is not None:
+            status["linucb_ready"] = self._ml_router.is_ready()
+            status["linucb_updates"] = self._ml_router.total_updates()
+            try:
+                summary = self._ml_router.summary()
+                status["actions"] = summary.get("learned_weights", {})
+            except Exception:
+                pass
+
+        return status
 
     def summary(self, decision: EscalationDecision) -> str:
         """Human-readable decision summary."""

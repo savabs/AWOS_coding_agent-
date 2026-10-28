@@ -1,0 +1,282 @@
+# Online-Mind2Web on the live web (docs/specs/web_harness.md): CPU llama.cpp serving a GGUF from
+# MODEL_SPECS (ci/rl_eval.env) + headless Chromium + `python -m scaffold.rl.web`, sharded across free
+# ubuntu-latest runners. Output per shard: trajectories.jsonl + judge/<task_id>/ (the Online-Mind2Web
+# submission layout WebJudge reads). Success is scored afterwards by the judge (scaffold/rl/web_judge).
+# Secret: HF_TOKEN (the gated task file). Settings: ci/rl_web.env (no secrets).
+#
+# Launch: push to a branch named bench-cloud/rl-web-<anything> (defaults from ci/rl_web.env), or
+# Actions -> rl-web -> Run workflow:  gh workflow run rl-web.yml --ref <branch> -f models=qwen3.5-4b -f split=dev
+# (bench-cloud/rl-** is excluded from the paid ladder workflow, see .github/workflows/ladder.yml.)
+name: rl-web
+
+on:
+  push:
+    # rl-web-judge-** and rl-web-kaggle-** are their own workflows (rl-web-judge.yml, rl-web-kaggle.yml)
+    branches: ["bench-cloud/rl-web-**", "!bench-cloud/rl-web-judge-**", "!bench-cloud/rl-web-kaggle-**"]
+  workflow_dispatch:
+    inputs:
+      models:
+        description: 'Model labels from ci/rl_eval.env MODEL_SPECS (space-separated) or "all"'
+        default: ""
+        type: string
+      split:
+        description: "dev (fixed 100) | all (300)"
+        default: ""
+        type: string
+      shards:
+        description: "Runner jobs per model (empty = ci/rl_web.env SHARDS)"
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rl-web-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.cfg.outputs.matrix }}
+      models: ${{ steps.cfg.outputs.models }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: cfg
+        name: Build the matrix from ci/rl_web.env (+ dispatch inputs)
+        shell: bash
+        env:
+          IN_MODELS: ${{ inputs.models }}
+          IN_SPLIT: ${{ inputs.split }}
+          IN_SHARDS: ${{ inputs.shards }}
+        run: |
+          set -euo pipefail
+          python3 scripts/rl/web_matrix.py ci/rl_web.env --specs ci/rl_eval.env --models "$IN_MODELS" \
+            --split "$IN_SPLIT" --shards "$IN_SHARDS" >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
+  model:
+    needs: config
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.config.outputs.models) }}
+    steps:
+      - name: Cache the GGUF
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/models/${{ matrix.file }}
+          key: gguf-${{ matrix.file }}-${{ matrix.rev }}
+      - name: Download the GGUF once (pinned revision, sha256-checked)
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ matrix.repo }}
+          FILE: ${{ matrix.file }}
+          REV: ${{ matrix.rev }}
+          SHA: ${{ matrix.sha256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/models
+          case "$REPO" in
+            gh-release:*)
+              gh release download "$REV" --repo "${REPO#gh-release:}" --dir ~/models --clobber \
+                --pattern "$(basename "${FILE%-00001-of-*}" .gguf)*.gguf" ;;
+            *) curl -fL --retry 5 -o ~/models/"$FILE" "https://huggingface.co/$REPO/resolve/$REV/$FILE" ;;
+          esac
+          echo "$SHA  $HOME/models/$FILE" | sha256sum -c -
+          ls -lh ~/models
+
+  run:
+    needs: [config, model]
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 12      # the free account limit is 20 jobs (macOS included): keep the rest for other work
+      matrix: ${{ fromJSON(needs.config.outputs.matrix) }}
+    env:
+      MODEL: ${{ matrix.model }}
+      SPLIT: ${{ matrix.split }}
+      SHARD: ${{ matrix.shard }}
+      SHARDS: ${{ matrix.shards }}
+      GGUF_REPO: ${{ matrix.repo }}
+      GGUF_FILE: ${{ matrix.file }}
+      GGUF_REV: ${{ matrix.rev }}
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Python deps + Playwright Chromium
+        run: |
+          pip install -r requirements.txt
+          pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Online-Mind2Web task file (gated; HF_TOKEN secret)
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$HF_TOKEN" ]; then echo "::error::HF_TOKEN secret is empty (see .github/workflows/rl-hf-check.yml)"; exit 1; fi
+          python - <<'PY'
+          from scaffold.rl.web.source import download, load_entries
+          p = download()
+          print(f"{p}: {len(load_entries(p))} tasks")
+          PY
+
+      - name: Restore the GGUF
+        id: gguf
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/models/${{ matrix.file }}
+          key: gguf-${{ matrix.file }}-${{ matrix.rev }}
+
+      - name: Download the GGUF on a cache miss (pinned revision, sha256-checked)
+        if: steps.gguf.outputs.cache-hit != 'true' || startsWith(matrix.repo, 'gh-release:')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ matrix.sha256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/models
+          case "$GGUF_REPO" in
+            gh-release:*)
+              gh release download "$GGUF_REV" --repo "${GGUF_REPO#gh-release:}" --dir ~/models --clobber \
+                --pattern "$(basename "${GGUF_FILE%-00001-of-*}" .gguf)*.gguf" ;;
+            *) curl -fL --retry 5 -o ~/models/"$GGUF_FILE" "https://huggingface.co/$GGUF_REPO/resolve/$GGUF_REV/$GGUF_FILE" ;;
+          esac
+          echo "$SHA  $HOME/models/$GGUF_FILE" | sha256sum -c -
+
+      - name: llama.cpp (official CPU build)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          source ci/rl_web.env
+          mkdir -p ~/llama && cd ~/llama
+          gh release download "$LLAMA_TAG" --repo ggml-org/llama.cpp --pattern "llama-$LLAMA_TAG-bin-ubuntu-x64.tar.gz" --clobber
+          tar -xzf "llama-$LLAMA_TAG-bin-ubuntu-x64.tar.gz"
+          BIN=$(find ~/llama -name llama-server -type f | head -1)
+          chmod +x "$BIN"
+          echo "LLAMA_BIN=$BIN" >> "$GITHUB_ENV"
+          echo "LLAMA_TAG=$LLAMA_TAG" >> "$GITHUB_ENV"
+
+      - name: Start llama-server (CPU, NP parallel slots)
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ci/rl_web.env
+          echo "NP=$NP" >> "$GITHUB_ENV"
+          echo "AWOS_LOCAL_TIMEOUT_S=$AWOS_LOCAL_TIMEOUT_S" >> "$GITHUB_ENV"
+          LD_LIBRARY_PATH="$(dirname "$LLAMA_BIN"):${LD_LIBRARY_PATH:-}" nohup "$LLAMA_BIN" \
+            -m ~/models/$GGUF_FILE --alias "$MODEL" --host 127.0.0.1 --port 8080 \
+            -ngl 0 -t "$(nproc)" -c "$((CTX_PER_SLOT * NP))" -np "$NP" --jinja --reasoning off \
+            --cache-prompt --temp 0 --metrics \
+            > ~/llama-server.log 2>&1 &
+          for i in $(seq 1 120); do
+            curl -s -m 2 http://127.0.0.1:8080/health | grep -q ok && break; sleep 5
+          done
+          curl -s http://127.0.0.1:8080/health
+
+      - name: Run the shard (scaffold.rl.web run)
+        shell: bash
+        run: |
+          set -uo pipefail
+          eval "$(grep -E '^(MAX_STEPS|MAX_SECONDS)=' ci/rl_web.env)"    # SPLIT / SHARDS come from the matrix
+          NAME="${MODEL}__web-${SPLIT}__shard${SHARD}of${SHARDS}"
+          OUT="runs/web/$NAME"
+          mkdir -p "$OUT"
+          export AWOS_LOCAL_BASE_URL=http://127.0.0.1:8080/v1 AWOS_LOCAL_MODEL="$MODEL" PYTHONPATH="$PWD"
+          python -m scaffold.rl.web run --model local --model-label "$MODEL" --split "$SPLIT" \
+            --shard "$SHARD/$SHARDS" --max-steps "$MAX_STEPS" --max-seconds "$MAX_SECONDS" --workers "$NP" \
+            --out "$OUT/" 2>&1 | tee "$OUT/harness.log"
+          RC=${PIPESTATUS[0]}
+          python -m scaffold.rl.web validate "$OUT/judge" | tee "$OUT/validate.txt" || true
+          cp ~/llama-server.log "$OUT/" || true
+          { echo "### $NAME"; cat "$OUT/summary.md" 2>/dev/null; } >> "$GITHUB_STEP_SUMMARY"
+          exit $RC
+
+      - name: Seal the results (public repo; task texts + screenshots are gated data)
+        if: always()
+        env:
+          BENCH_DATA_KEY: ${{ secrets.BENCH_DATA_KEY }}
+        run: bash scripts/ci_seal.sh runs/web
+
+      - name: Upload results (trajectories + judge layout)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rl-web-${{ matrix.model }}-${{ matrix.split }}-s${{ matrix.shard }}of${{ matrix.shards }}
+          path: runs/web/**
+          if-no-files-found: warn
+
+  summary:
+    needs: run
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: rl-web-*
+      - name: Merge shards per model (trajectories.jsonl + judge/) and summarize
+        shell: bash
+        env:
+          BENCH_DATA_KEY: ${{ secrets.BENCH_DATA_KEY }}
+        run: |
+          set -uo pipefail
+          bash scripts/ci_unseal.sh artifacts || exit 1
+          export PYTHONPATH="$PWD"
+          for d in artifacts/rl-web-*/*/; do
+            name=$(basename "$d"); model="${name%%__*}"; rest="${name#*__}"; split="${rest%%__*}"
+            dest="merged/${model}__${split}"
+            mkdir -p "$dest/judge"
+            cat "$d/trajectories.jsonl" >> "$dest/trajectories.jsonl" 2>/dev/null || true
+            cp -r "$d"/judge/* "$dest/judge/" 2>/dev/null || true
+            [ -f "$dest/run.json" ] || cp "$d/run.json" "$dest/run.json" 2>/dev/null || true
+          done
+          for m in merged/*/; do
+            python -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["shard"]=None; d["tasks"]=None; json.dump(d, open(p, "w"), indent=2)' \
+              "$m/run.json" 2>/dev/null || true
+            python -m scaffold.rl.web summarize "$m" > /dev/null
+            python -m scaffold.rl.web validate "$m/judge" | tee "$m/validate.txt" || true
+            { echo "## $(basename "$m")"; cat "$m/summary.md"; } | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+      - name: The dev split ids (to commit as scaffold/rl/web/data/dev_ids.json)
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          set -uo pipefail
+          export PYTHONPATH="$PWD"
+          python -m scaffold.rl.web freeze-dev --dest merged/dev_ids.json || true
+          git diff --no-index --stat scaffold/rl/web/data/dev_ids.json merged/dev_ids.json || true
+      - name: Seal the merged results (public repo)
+        env:
+          BENCH_DATA_KEY: ${{ secrets.BENCH_DATA_KEY }}
+        run: bash scripts/ci_seal.sh merged
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rl-web-merged
+          path: merged/**
+          if-no-files-found: warn

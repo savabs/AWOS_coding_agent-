@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Spec: Self-Verification Engine</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:900px;margin:40px auto;line-height:1.6}
+h1{border-bottom:2px solid #333}
+h2{margin-top:2em}
+code{background:#f4f4f4;padding:2px 6px;border-radius:4px}
+pre{background:#f4f4f4;padding:12px;border-radius:6px;overflow-x:auto}
+table{border-collapse:collapse;width:100%;margin:1em 0}
+th,td{border:1px solid #ccc;padding:8px}
+th{background:#f0f0f0}
+</style>
+</head>
+<body>
+<h1>Spec: Self-Verification Engine (Phase 7)</h1>
+<p><strong>Goal:</strong> Add an in-memory pre-flight verification step between Worker generation and Verifier disk application. Catch syntax, import, and contract errors before expensive I/O.</p>
+
+<h2>Affected Files</h2>
+<ul>
+<li><code>scaffold/agent/self_verification.py</code> — NEW: <code>SelfVerificationEngine</code></li>
+<li><code>scaffold/agent/worker.py</code> — wire self-verify after parsing SEARCH/REPLACE</li>
+<li><code>scaffold/agent/verifier.py</code> — extract shared contract logic into helper</li>
+<li><code>tests/test_self_verification.py</code> — NEW: test suite</li>
+</ul>
+
+<h2>Interface Contract</h2>
+
+<h3>SelfVerificationEngine</h3>
+<pre>
+class SelfVerificationEngine:
+    """In-memory pre-flight verifier. Never writes to disk."""
+
+    def verify(
+        self,
+        original_content: str,
+        search_replace: dict,
+        file_path: str,
+        task_spec: dict | None = None,
+    ) -> VerificationResult:
+        """
+        Simulate the SEARCH/REPLACE and run fast checks.
+
+        Returns:
+            VerificationResult(
+                passed: bool,
+                stage: str,          # e.g. "syntax", "import", "contract"
+                errors: list[str],
+                error_context: str,  # formatted for worker retry prompt
+            )
+        """
+</pre>
+
+<h3>VerificationResult dataclass</h3>
+<pre>
+@dataclass
+class VerificationResult:
+    passed: bool
+    stage: str              # which check failed (or "all" if passed)
+    errors: list[str]
+    error_context: str      # human-readable prompt injection text
+</pre>
+
+<h3>Check Stages (run in order — fail fast)</h3>
+<ol>
+<li><strong>Search string exists</strong> — SEARCH must appear literally in original_content.</li>
+<li><strong>Replace produces unique match</strong> — SEARCH must appear exactly once (or warn on ambiguity).</li>
+<li><strong>AST parse of modified content</strong> — <code>ast.parse()</code> the post-replacement text.</li>
+<li><strong>Import resolution</strong> — top-level <code>import</code> / <code>from ... import</code> names must be resolvable (stdlib + local modules; warn only on third-party).</li>
+<li><strong>Contract compliance</strong> — <code>function_signature</code>, <code>constraints</code>, <code>must_not</code> from task_spec.</li>
+</ol>
+
+<h2>Integration Points</h2>
+
+<h3>Worker.execute_task()</h3>
+<p>After parsing SEARCH/REPLACE from model output, before returning:</p>
+<pre>
+result = parse_search_replace(response_text)
+
+# Phase 7: Self-verification
+sv = SelfVerificationEngine()
+sv_result = sv.verify(
+    original_content=file_content,
+    search_replace=result,
+    file_path=file_path,
+    task_spec=task,
+)
+if not sv_result.passed:
+    if attempt &lt; 2:
+        return self.execute_task(
+            task={**task, "error_context": sv_result.error_context},
+            file_content=file_content,
+            ...,
+            attempt=attempt + 1,
+        )
+    else:
+        return {"success": False, "error": sv_result.error_context}
+</pre>
+
+<h3>Verifier._check_contract_compliance()</h3>
+<p>Extract into a standalone module-level helper so both <code>SelfVerificationEngine</code> and <code>Verifier</code> use the same logic:</p>
+<pre>
+# scaffold/agent/verifier.py
+def check_contract_compliance(content: str, task: dict | None) -> list[str]:
+    """Shared contract checker used by SelfVerificationEngine and Verifier."""
+</pre>
+
+<h2>Implementation Steps</h2>
+<ol>
+<li><strong>Extract contract helper</strong> — move <code>_check_contract_compliance</code> from <code>Verifier</code> to module-level <code>check_contract_compliance()</code>. Update <code>Verifier</code> to call it.</li>
+<li><strong>Create <code>scaffold/agent/self_verification.py</code></strong> — implement <code>SelfVerificationEngine</code> with 5 check stages. Each stage returns early on failure (fail fast).</li>
+<li><strong>Wire into Worker</strong> — after <code>parse_search_replace</code>, call <code>SelfVerificationEngine.verify()</code>. If fail, retry with error_context.</li>
+<li><strong>Write tests</strong> — <code>tests/test_self_verification.py</code> with 15+ tests covering each stage and integration.</li>
+<li><strong>Run full suite</strong> — zero regressions required.</li>
+</ol>
+
+<h2>Edge Cases</h2>
+<ul>
+<li><strong>Empty SEARCH</strong> — caught by stage 1, returns <code>passed=False</code>.</li>
+<li><strong>Multiple SEARCH matches</strong> — stage 2 warns; Verifier handles ambiguous replace on disk.</li>
+<li><strong>Dynamic/optional imports</strong> — stage 4 only flags <em>unresolvable</em> stdlib + local imports; third-party imports are warnings, not errors.</li>
+<li><strong>No task_spec</strong> — stage 5 is skipped gracefully.</li>
+<li><strong>Non-Python files</strong> — AST check is skipped for <code>.py</code> only; other stages run regardless.</li>
+</ul>
+
+<h2>Testing Plan</h2>
+<ul>
+<li>Unit tests for each check stage (syntax, import, contract, search exists).</li>
+<li>Integration test: Worker.execute_task() with self-verify enabled.</li>
+<li>Regression test: full existing suite passes (291+ tests).</li>
+</ul>
+
+</body>
+</html>

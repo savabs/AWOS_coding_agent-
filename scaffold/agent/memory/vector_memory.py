@@ -17,6 +17,15 @@ import chromadb
 from chromadb.config import Settings as ChromaSettings
 from fastembed import TextEmbedding
 
+
+def _redact_at_rest(obj):
+    """secret_scan.redact_obj: no key format or owner env secret is persisted."""
+    try:
+        from ..secret_scan import redact_obj
+    except ImportError:
+        from secret_scan import redact_obj
+    return redact_obj(obj)
+
 logger = logging.getLogger(__name__)
 
 
@@ -59,6 +68,8 @@ class VectorMemory:
         metadata: dict[str, Any],
     ) -> None:
         """Store an interaction with its embedding."""
+        text = _redact_at_rest(text)          # no key or owner secret persisted
+        metadata = _redact_at_rest(dict(metadata))
         doc_id = self._make_id(metadata)
         embedding = self._embed(text)
 

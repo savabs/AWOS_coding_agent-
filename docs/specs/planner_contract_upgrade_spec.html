@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Planner Contract Upgrade — Spec</title></head>
+<body style="font-family:sans-serif;max-width:800px;margin:2em auto">
+<h1>Planner Contract Upgrade — Spec</h1>
+<p><strong>Goal:</strong> Planner emits machine-enforceable contracts so Worker executes deterministically.</p>
+
+<h2>New Task Schema</h2>
+<pre><code>{
+  "task_id": 1,
+  "file": "src/auth.py",
+  "action": "Add JWT verify function",
+  "complexity": "medium",
+  "function_signature": "def verify_jwt(token: str) -> Optional[UserClaims]:",
+  "interface_contract": "Must be callable as: user = verify_jwt(request.headers['Authorization'])",
+  "constraints": [
+    "Raise AuthError if token expired",
+    "Return None if blacklisted in Redis"
+  ],
+  "must_not": [
+    "Invent new error types beyond AuthError",
+    "Add imports beyond jwt, redis, typing.Optional"
+  ],
+  "example_call": "user = verify_jwt('Bearer eyJ...')",
+  "expected_output_shape": "Return UserClaims dataclass or None"
+}
+</code></pre>
+
+<h2>Implementation Steps</h2>
+<ol>
+<li><strong>1.1</strong> Update Planner system prompt to request contract fields</li>
+<li><strong>1.2</strong> Update Planner validation to accept optional contract fields (backwards compat)</li>
+<li><strong>1.3</strong> Update Worker prompt to inject contract into instructions</li>
+<li><strong>1.4</strong> Update Verifier: if task has <code>function_signature</code>, verify generated code contains it</li>
+<li><strong>1.5</strong> Smoke test: run Planner on "add auth middleware", verify contracts appear</li>
+<li><strong>1.6</strong> Update Orchestrator to pass full task dict through (already does, confirm)</li>
+</ol>
+
+<h2>Testing Plan</h2>
+<ul>
+<li>Planner produces contracts on a sample goal (no API key: mock)</li>
+<li>Worker prompt includes contract section when present</li>
+<li>Verifier catches missing signature when contract specifies one</li>
+</ul>
+
+<h2>Edge Cases</h2>
+<ul>
+<li>Contract fields absent → old behavior unchanged</li>
+<li>Contract contradicts existing code → Verifier soft-fail, log warning</li>
+<li>Sonnet refuses to emit contracts for vague goals → graceful degradation</li>
+</ul>
+</body>
+</html>

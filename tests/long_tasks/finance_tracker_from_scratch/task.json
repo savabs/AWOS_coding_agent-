@@ -1,0 +1,8 @@
+{
+  "name": "finance_tracker_from_scratch",
+  "kind": "greenfield",
+  "goal": "Build the finance tracker described in README.md from scratch in the fintrack/ package: importing both bank CSV formats, duplicate detection, rule-based categorization, SQLite storage, monthly reports, budgets, export and the python -m fintrack command line. README.md is the full spec - follow its module names, function signatures, output formats and exit codes exactly, use only the standard library, and add tests as you go.",
+  "max_turns": 150,
+  "max_cost_usd": 2.0,
+  "timeout_min": 90
+}

@@ -1,0 +1,18 @@
+[job_series] series=ordertool jobs=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] arms=['off', 'on'] dry_run=False
+[job_series] model pinned: deepseek/deepseek-v4-flash (ladder blocks ['deepseek-v4-pro']; env ['AWOS_AGENT_MODEL', 'AWOS_GOAL_CHECK', 'AWOS_NOTEBOOK_MODEL'])
+[job_series] .env copied from: /Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.env
+[job_series] off log:  tail -f /Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20260926T123741/off/run.log
+[job_series] on log:  tail -f /Users/becmachlean/Projects/AWOS_coding_agent/.claude/worktrees/bench-run/.awos/job_series/20260926T123741/on/run.log
+[off j01] SOLVED — hidden 9/9 · own tests ok · 17 turns · $0.0139 · 1.86 min · notebook 0 chars
+[on j01] SOLVED — hidden 9/9 · own tests ok · 13 turns · $0.0118 · 2.62 min · notebook 1499 chars
+[off j02] SOLVED — hidden 7/7 · own tests ok · 34 turns · $0.0277 · 4.14 min · notebook 0 chars
+[on j02] SOLVED — hidden 7/7 · own tests ok · 32 turns · $0.0341 · 5.08 min · notebook 2173 chars
+[off j03] not solved — hidden 2/9 · own tests ok · 49 turns · $0.0374 · 4.68 min · notebook 0 chars
+[on j03] not solved — hidden 8/9 · own tests ok · 40 turns · $0.0280 · 3.93 min · notebook 3419 chars
+[off j04] not solved — hidden 8/13 · own tests ok · 56 turns · $0.0529 · 6.69 min · notebook 0 chars
+[on j04] not solved — hidden 9/13 · own tests ok · 78 turns · $0.0682 · 9.85 min · notebook 3419 chars
+[off j05] SOLVED — hidden 8/8 · own tests ok · 19 turns · $0.0136 · 1.74 min · notebook 0 chars
+[on j05] SOLVED — hidden 8/8 · own tests ok · 7 turns · $0.0056 · 1.75 min · notebook 3489 chars
+[off j06] SOLVED — hidden 7/7 · own tests ok · 58 turns · $0.0617 · 5.67 min · notebook 0 chars
+[on j06] SOLVED — hidden 7/7 · own tests ok · 32 turns · $0.0284 · 2.81 min · notebook 3433 chars
+[off j07] SOLVED — hidden 8/8 · own tests ok · 20 turns · $0.0147 · 3.13 min · notebook 0 chars

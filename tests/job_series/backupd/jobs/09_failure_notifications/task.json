@@ -1,0 +1,7 @@
+{
+  "id": "09_failure_notifications",
+  "goal": "Right now backupd mails us after every successful backup, but says nothing when a backup fails, which is exactly when we need to hear about it. Add a setting `notify_on` in the [notify] section (APP_NOTIFY_ON in the container, like every other setting) with the values `always` (the default: a mail after every run, successful or failed), `failure` (only when a run fails) and `never`, case-insensitive; any other value is a configuration error like other bad settings. A failed run (e.g. missing source directory, not enough disk space, archive write failure) should send a mail with the subject `backup failed` and the error message in the body, and then still fail exactly as it does today. If the failure mail itself can't be sent, that must not hide the real error. Runs skipped because they weren't due send nothing. Show the setting in show-config and document it in the README.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

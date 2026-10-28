@@ -1,0 +1,332 @@
+{
+ "ops": [
+  {
+   "op": "mkdir",
+   "path": "receipts/2025-11"
+  },
+  {
+   "op": "mkdir",
+   "path": "receipts/2025-12"
+  },
+  {
+   "op": "mkdir",
+   "path": "receipts/2026-01"
+  },
+  {
+   "op": "mkdir",
+   "path": "receipts/2026-02"
+  },
+  {
+   "op": "mkdir",
+   "path": "receipts/2026-03"
+  },
+  {
+   "op": "move",
+   "src": "receipts/IMG_2041.txt",
+   "dst": "receipts/2026-03/2026-03-25_starbucks_28.86.txt"
+  },
+  {
+   "op": "move",
+   "src": "receipts/IMG_2077.txt",
+   "dst": "receipts/2026-02/2026-02-24_staples_32.23.txt"
+  },
+  {
+   "op": "move",
+   "src": "receipts/IMG_3310.pdf",
+   "dst": "receipts/2026-02/2026-02-01_staples_52.73.pdf"
+  },
+  {
+   "op": "move",
+   "src": "receipts/INV_0042.txt",
+   "dst": "receipts/2026-01/2026-01-01_amazon_92.74.txt"
+  },
+  {
+   "op": "move",
+   "src": "receipts/Receipt (3).txt",
+   "dst": "receipts/2025-11/2025-11-28_whole-foods_169.04.txt"
+  },
+  {
+   "op": "move",
+   "src": "receipts/Scan 14.txt",
+   "dst": "receipts/2025-12/2025-12-26_staples_84.46.txt"
+  },
+  {
+   "op": "move",
+   "src": "receipts/doc_scan_2.txt",
+   "dst": "receipts/2026-03/2026-03-10_starbucks_30.98.txt"
+  },
+  {
+   "op": "move",
+   "src": "receipts/download.pdf",
+   "dst": "receipts/2026-01/2026-01-29_uber_38.44.pdf"
+  },
+  {
+   "op": "move",
+   "src": "receipts/invoice-final-FINAL.pdf",
+   "dst": "receipts/2026-03/2026-03-16_shell_55.14.pdf"
+  },
+  {
+   "op": "move",
+   "src": "receipts/photo copy.txt",
+   "dst": "receipts/2026-03/2026-03-03_shell_25.49.txt"
+  },
+  {
+   "op": "move",
+   "src": "receipts/receipt(1).txt",
+   "dst": "receipts/2026-03/2026-03-26_adobe_89.90.txt"
+  },
+  {
+   "op": "move",
+   "src": "receipts/receipt.txt",
+   "dst": "receipts/2026-03/2026-03-21_uber_7.36.txt"
+  },
+  {
+   "op": "move",
+   "src": "receipts/scan0001.pdf",
+   "dst": "receipts/2025-11/2025-11-29_whole-foods_62.51.pdf"
+  },
+  {
+   "op": "move",
+   "src": "receipts/statement.pdf",
+   "dst": "receipts/2026-01/2026-01-17_uber_12.77.pdf"
+  },
+  {
+   "op": "move",
+   "src": "receipts/untitled.txt",
+   "dst": "receipts/2025-12/2025-12-24_home-depot_78.12.txt"
+  },
+  {
+   "op": "write_file",
+   "path": "receipts/summary.csv",
+   "content": "vendor,count,total\namazon,1,92.74\nadobe,1,89.90\nhome-depot,1,78.12\nshell,2,80.63\nstarbucks,2,59.84\nstaples,3,169.42\nuber,3,58.57\nwhole-foods,2,231.55\n"
+  }
+ ],
+ "dry_run": [
+  {
+   "index": 0,
+   "op": {
+    "op": "mkdir",
+    "path": "receipts/2025-11"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 1,
+   "op": {
+    "op": "mkdir",
+    "path": "receipts/2025-12"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 2,
+   "op": {
+    "op": "mkdir",
+    "path": "receipts/2026-01"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 3,
+   "op": {
+    "op": "mkdir",
+    "path": "receipts/2026-02"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 4,
+   "op": {
+    "op": "mkdir",
+    "path": "receipts/2026-03"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 5,
+   "op": {
+    "op": "move",
+    "src": "receipts/IMG_2041.txt",
+    "dst": "receipts/2026-03/2026-03-25_starbucks_28.86.txt"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 6,
+   "op": {
+    "op": "move",
+    "src": "receipts/IMG_2077.txt",
+    "dst": "receipts/2026-02/2026-02-24_staples_32.23.txt"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 7,
+   "op": {
+    "op": "move",
+    "src": "receipts/IMG_3310.pdf",
+    "dst": "receipts/2026-02/2026-02-01_staples_52.73.pdf"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 8,
+   "op": {
+    "op": "move",
+    "src": "receipts/INV_0042.txt",
+    "dst": "receipts/2026-01/2026-01-01_amazon_92.74.txt"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 9,
+   "op": {
+    "op": "move",
+    "src": "receipts/Receipt (3).txt",
+    "dst": "receipts/2025-11/2025-11-28_whole-foods_169.04.txt"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 10,
+   "op": {
+    "op": "move",
+    "src": "receipts/Scan 14.txt",
+    "dst": "receipts/2025-12/2025-12-26_staples_84.46.txt"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 11,
+   "op": {
+    "op": "move",
+    "src": "receipts/doc_scan_2.txt",
+    "dst": "receipts/2026-03/2026-03-10_starbucks_30.98.txt"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 12,
+   "op": {
+    "op": "move",
+    "src": "receipts/download.pdf",
+    "dst": "receipts/2026-01/2026-01-29_uber_38.44.pdf"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 13,
+   "op": {
+    "op": "move",
+    "src": "receipts/invoice-final-FINAL.pdf",
+    "dst": "receipts/2026-03/2026-03-16_shell_55.14.pdf"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 14,
+   "op": {
+    "op": "move",
+    "src": "receipts/photo copy.txt",
+    "dst": "receipts/2026-03/2026-03-03_shell_25.49.txt"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 15,
+   "op": {
+    "op": "move",
+    "src": "receipts/receipt(1).txt",
+    "dst": "receipts/2026-03/2026-03-26_adobe_89.90.txt"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 16,
+   "op": {
+    "op": "move",
+    "src": "receipts/receipt.txt",
+    "dst": "receipts/2026-03/2026-03-21_uber_7.36.txt"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 17,
+   "op": {
+    "op": "move",
+    "src": "receipts/scan0001.pdf",
+    "dst": "receipts/2025-11/2025-11-29_whole-foods_62.51.pdf"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 18,
+   "op": {
+    "op": "move",
+    "src": "receipts/statement.pdf",
+    "dst": "receipts/2026-01/2026-01-17_uber_12.77.pdf"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 19,
+   "op": {
+    "op": "move",
+    "src": "receipts/untitled.txt",
+    "dst": "receipts/2025-12/2025-12-24_home-depot_78.12.txt"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 20,
+   "op": {
+    "op": "write_file",
+    "path": "receipts/summary.csv",
+    "content": "vendor,count,total\namazon,1,92.74\nadobe,1,89.90\nhome-depot,1,78.12\nshell,2,80.63\nstarbucks,2,59.84\nstaples,3,169.42\nuber... (150 chars)"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  }
+ ]
+}

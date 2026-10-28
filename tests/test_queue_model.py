@@ -224,19 +224,19 @@ class TestRegretTracker:
         assert state.total_episodes == 7
 
     def test_oracle_is_best_action(self):
-        # action 3 (sonnet) always gets 0.9, others get 0.1
+        # action 4 (sonnet) always gets 0.9, others get 0.1
         eps = (
             [_make_episode(0, 0.1)] * 5 +
             [_make_episode(1, 0.1)] * 5 +
-            [_make_episode(3, 0.9)] * 5
+            [_make_episode(4, 0.9)] * 5
         )
         state = RegretTracker.from_episodes(eps)
-        assert state.oracle_action_id == 3
+        assert state.oracle_action_id == 4
         assert state.oracle_action_name == "sonnet"
         assert abs(state.oracle_mean_reward - 0.9) < 0.01
 
     def test_cumulative_regret_is_nonnegative(self):
-        eps = [_make_episode(i % 4, 0.5) for i in range(20)]
+        eps = [_make_episode(i % 5, 0.5) for i in range(20)]
         state = RegretTracker.from_episodes(eps)
         assert state.cumulative_regret >= 0.0
 
@@ -264,7 +264,7 @@ class TestRegretTracker:
         assert state_large.theoretical_bound > state_small.theoretical_bound
 
     def test_display_returns_string(self):
-        eps = [_make_episode(i % 4, 0.5 + i * 0.01) for i in range(20)]
+        eps = [_make_episode(i % 5, 0.5 + i * 0.01) for i in range(20)]
         state = RegretTracker.from_episodes(eps)
         text = state.display()
         assert isinstance(text, str)

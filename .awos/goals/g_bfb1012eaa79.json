@@ -1,0 +1,49 @@
+{
+  "root_id": "g_bfb1012eaa79",
+  "nodes": {
+    "g_bfb1012eaa79": {
+      "goal_id": "g_bfb1012eaa79",
+      "description": "create docs/example_uncensored_agent_guide.md about building uncensored local LLM agents with Ollama and open weights",
+      "parent_ids": [],
+      "child_ids": [
+        "g_eb0a7cda9fac"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-14T12:18:23Z",
+      "updated_at": "2026-06-14T12:18:57Z",
+      "completed_at": "2026-06-14T12:18:57Z",
+      "session_ids": [
+        "orch_e24cdb3d"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_eb0a7cda9fac": {
+      "goal_id": "g_eb0a7cda9fac",
+      "description": "Create a guide for building uncensored local LLM agents using Ollama and open-weight models within the AWOS framework.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "create_file",
+          "path": "docs/example_uncensored_agent_guide.md",
+          "action": "Create a guide for building uncensored local LLM agents using Ollama and open-weight models within the AWOS framework.",
+          "content_hint": "Sections should include: Introduction to uncensored local LLM agents; Prerequisites (Ollama, AWOS framework); Setting up Ollama with open-weight uncensored models; Configuring AWOS agents to use local Ollama models; Step-by-step example of an agent interaction demonstrating uncensored behavior; Important considerations and responsible use.",
+          "complexity": "medium",
+          "file": "docs/example_uncensored_agent_guide.md"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-14T12:18:36Z",
+      "updated_at": "2026-06-14T12:18:57Z",
+      "completed_at": "2026-06-14T12:18:57Z",
+      "session_ids": [
+        "orch_e24cdb3d"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

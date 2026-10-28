@@ -1,0 +1,25 @@
+{
+  "id": "stage1_phase_d_clawcode_v1",
+  "title": "Phase D — Real Repo Proof (clawcode)",
+  "updated": "2026-06-25",
+  "codebase_root": "/home/becmachlean/2024/projects/clawcode",
+  "env": {
+    "AWOS_USE_WORKTREE": "true",
+    "AWOS_RUNTIME_SESSION": "true",
+    "AWOS_CHEAP_ONLY": "true",
+    "AWOS_PREMIUM_BUDGET": "0",
+    "AWOS_MONTHLY_BUDGET": "20",
+    "AWOS_LEARNING_DISABLE": "true"
+  },
+  "plan_file": "stage1_phase_d_clawcode.plan.json",
+  "goal": "Phase D real-repo proof on clawcode: fourteen low-risk docstring and README edits in worktree sandbox (one file per task). Uses fixed plan — planner skipped. Keep all tests green.",
+  "success_criteria": [
+    "Session rs_* completed with 12+ of 14 tasks",
+    "Target repo main branch clean — changes only in clawcode/.awos/worktrees/",
+    "pytest tests/ passes in worktree (22 tests)",
+    "Wall time 30+ minutes OR pause/resume exercised",
+    "awos stats shows cache telemetry from the run",
+    "awos worker diff shows reviewable sandbox changes"
+  ],
+  "pause_hint": "Ctrl+C after task 6–8 — then: awos mission status --clawcode && awos sessions resume rs_<id>"
+}

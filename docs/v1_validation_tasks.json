@@ -1,0 +1,148 @@
+{
+  "suite": "v1_self_validation",
+  "description": "Small safe goals on the AWOS repo itself — proves cheap-only PEI before agency outreach.",
+  "target_count": 20,
+  "updated": "2026-06-17",
+  "tasks": [
+    {
+      "id": "v1-01",
+      "goal": "In scaffold/agent/usage_record.py add a concise module-level docstring if one is missing or too short",
+      "file": "scaffold/agent/usage_record.py",
+      "kind": "docstring",
+      "symbol": "module"
+    },
+    {
+      "id": "v1-02",
+      "goal": "In scaffold/agent/escalation_engine.py add a one-line docstring to is_cheap_only() explaining it returns True when premium models are halted",
+      "file": "scaffold/agent/escalation_engine.py",
+      "kind": "docstring",
+      "symbol": "is_cheap_only"
+    },
+    {
+      "id": "v1-03",
+      "goal": "In scaffold/agent/budget_ledger.py add a one-line comment above get_status explaining it returns month-to-date budget status",
+      "file": "scaffold/agent/budget_ledger.py",
+      "kind": "comment_above",
+      "symbol": "get_status"
+    },
+    {
+      "id": "v1-04",
+      "goal": "In scaffold/agent/worker.py add a short # comment above _try_cheap_fallback explaining it tries alternate cheap providers",
+      "file": "scaffold/agent/worker.py",
+      "kind": "comment_above",
+      "symbol": "_try_cheap_fallback"
+    },
+    {
+      "id": "v1-05",
+      "goal": "In scaffold/agent/run_diagnostics.py add a short # comment above print_visual_diff explaining it shows the applied patch in the terminal",
+      "file": "scaffold/agent/run_diagnostics.py",
+      "kind": "comment_above",
+      "symbol": "print_visual_diff"
+    },
+    {
+      "id": "v1-06",
+      "goal": "In scaffold/agent/verifier.py add a one-line docstring to _check_edit_fidelity explaining it rejects edits that miss comment-above or symbol-placement goals",
+      "file": "scaffold/agent/verifier.py",
+      "kind": "docstring",
+      "symbol": "_check_edit_fidelity"
+    },
+    {
+      "id": "v1-07",
+      "goal": "In scaffold/agent/usage_record.py add a short # comment above merge_result_usage explaining it merges worker API usage into a task accumulator",
+      "file": "scaffold/agent/usage_record.py",
+      "kind": "comment_above",
+      "symbol": "merge_result_usage"
+    },
+    {
+      "id": "v1-08",
+      "goal": "In scaffold/agent/run_diagnostics.py add a one-line docstring to TaskDiagnostic.record explaining it appends a stage entry to the diagnostic trace",
+      "file": "scaffold/agent/run_diagnostics.py",
+      "kind": "docstring",
+      "symbol": "TaskDiagnostic.record"
+    },
+    {
+      "id": "v1-09",
+      "goal": "In scaffold/agent/cheap_planner.py add a short # comment above _normalize_plan_paths explaining it fixes bare filenames to scaffold/agent paths",
+      "file": "scaffold/agent/cheap_planner.py",
+      "kind": "comment_above",
+      "symbol": "_normalize_plan_paths"
+    },
+    {
+      "id": "v1-10",
+      "goal": "In scaffold/agent/integration_reviewer.py add a one-line docstring to _is_cheap_only explaining it reads AWOS_CHEAP_ONLY from the environment",
+      "file": "scaffold/agent/integration_reviewer.py",
+      "kind": "docstring",
+      "symbol": "_is_cheap_only"
+    },
+    {
+      "id": "v1-11",
+      "goal": "In scaffold/agent/orchestrator.py add a one-line docstring to _cheap_call explaining it calls the cheap LLM tier with retries",
+      "file": "scaffold/agent/orchestrator.py",
+      "kind": "docstring",
+      "symbol": "_cheap_call"
+    },
+    {
+      "id": "v1-12",
+      "goal": "In scaffold/agent/pei_report.py add a short module-level docstring explaining PEI uses tokens as the primary cost measure",
+      "file": "scaffold/agent/pei_report.py",
+      "kind": "docstring",
+      "symbol": "module"
+    },
+    {
+      "id": "v1-13",
+      "goal": "In scaffold/agent/prompt_evolver.py add a one-line docstring to should_evolve explaining it triggers prompt evolution every N sessions",
+      "file": "scaffold/agent/prompt_evolver.py",
+      "kind": "docstring",
+      "symbol": "should_evolve"
+    },
+    {
+      "id": "v1-14",
+      "goal": "In scaffold/agent/stability_gate.py add a one-line docstring to should_check explaining it gates scaffold evolution checks by session count",
+      "file": "scaffold/agent/stability_gate.py",
+      "kind": "docstring",
+      "symbol": "should_check"
+    },
+    {
+      "id": "v1-15",
+      "goal": "In scaffold/agent/escalation_engine.py add a short # comment above max_allowed_level explaining it caps the model ladder in cheap-only mode",
+      "file": "scaffold/agent/escalation_engine.py",
+      "kind": "comment_above",
+      "symbol": "max_allowed_level"
+    },
+    {
+      "id": "v1-16",
+      "goal": "In scaffold/agent/runtime_session.py add a one-line docstring to RuntimeSessionStore.list_sessions explaining it returns durable sessions sorted by updated time",
+      "file": "scaffold/agent/runtime_session.py",
+      "kind": "docstring",
+      "symbol": "list_sessions"
+    },
+    {
+      "id": "v1-17",
+      "goal": "In scaffold/agent/learning_policy.py add a one-line docstring to apply_kernel_defaults explaining it enables runtime sessions, learning, and MCTS unless opted out",
+      "file": "scaffold/agent/learning_policy.py",
+      "kind": "docstring",
+      "symbol": "apply_kernel_defaults"
+    },
+    {
+      "id": "v1-18",
+      "goal": "In scaffold/agent/mcts_policy.py add a one-line docstring to mcts_enabled explaining it controls whether MCTS fallback runs after worker failure",
+      "file": "scaffold/agent/mcts_policy.py",
+      "kind": "docstring",
+      "symbol": "mcts_enabled"
+    },
+    {
+      "id": "v1-19",
+      "goal": "In scaffold/agent/worktree.py add a one-line docstring to register_worktree explaining it reattaches a persisted worktree path for session resume",
+      "file": "scaffold/agent/worktree.py",
+      "kind": "docstring",
+      "symbol": "register_worktree"
+    },
+    {
+      "id": "v1-20",
+      "goal": "In scaffold/agent/token_tracker.py add a one-line docstring to check_guard explaining it blocks requests when the monthly budget cap is exceeded",
+      "file": "scaffold/agent/token_tracker.py",
+      "kind": "docstring",
+      "symbol": "check_guard"
+    }
+  ]
+}

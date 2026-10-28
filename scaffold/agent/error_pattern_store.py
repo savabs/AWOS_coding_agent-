@@ -19,6 +19,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
+
+def _redact_at_rest(obj):
+    """secret_scan.redact_obj: no key format or owner env secret is persisted."""
+    try:
+        from .secret_scan import redact_obj
+    except ImportError:
+        from secret_scan import redact_obj
+    return redact_obj(obj)
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_STORE_PATH = ".awos/error_patterns.jsonl"
@@ -64,11 +73,11 @@ class ErrorPatternStore:
         """Append a new ErrorPattern to the JSONL store. Never raises."""
         try:
             with open(self._path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(asdict(pattern)) + "\n")
+                f.write(json.dumps(_redact_at_rest(asdict(pattern))) + "\n")
                 f.flush()
         except Exception:
             logger.exception("Failed to save error pattern")
-            record = asdict(pattern)
+            record = _redact_at_rest(asdict(pattern))
             line = json.dumps(record, ensure_ascii=False) + "\n"
             with open(self._path, "a", encoding="utf-8") as fh:
                 fh.write(line)
@@ -172,6 +181,25 @@ class ErrorPatternStore:
             return []
         matches.sort(key=lambda p: p.timestamp, reverse=True)
         return matches[:top_n]
+
+    def list_all(self, limit: int = 200) -> List[ErrorPattern]:
+        """Return up to `limit` most recent ErrorPatterns across all files/types."""
+        if not self._path.exists():
+            return []
+        records: List[ErrorPattern] = []
+        try:
+            lines = self._path.read_text(encoding="utf-8").splitlines()
+            for line in lines[-limit:]:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(ErrorPattern(**json.loads(line)))
+                except (json.JSONDecodeError, TypeError):
+                    continue
+        except Exception as exc:
+            logger.warning("[ErrorPatternStore] list_all failed: %s", exc)
+        return records
 
     def summary(self) -> dict:
         """Return {total, by_type, by_file} counts. Returns empty dict on error."""

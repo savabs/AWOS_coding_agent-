@@ -1,3 +1,9 @@
+---
+title: "Quick Start — Bootstrap a Project in 5 Minutes"
+tags:
+  - doc/wiki
+---
+
 # Quick Start — Bootstrap a Project in 5 Minutes
 
 ---

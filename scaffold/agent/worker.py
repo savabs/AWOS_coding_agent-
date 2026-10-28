@@ -5,44 +5,153 @@ Each task receives one specific action and narrow context window.
 Cost: ~$0.001-0.002 per task. Accuracy improves due to micro-context.
 """
 
+import difflib
 import json
 import os
 import re
-from typing import Optional
-from openai import OpenAI  # For DeepSeek API access
-from anthropic import Anthropic  # For Haiku/Sonnet/Opus
+from dataclasses import dataclass
+from typing import List, Optional
+
 try:
     from .budget_ledger import get_ledger
+    from .escalation_engine import is_cheap_only
+    from .providers import chat_client, messages_client
+    from .usage_record import empty_usage, merge_usage, record_api_usage
 except ImportError:
     from budget_ledger import get_ledger
+    from escalation_engine import is_cheap_only
+    from providers import chat_client, messages_client
+    from usage_record import empty_usage, merge_usage, record_api_usage
 
 _MONTHLY_BUDGET = float(os.getenv("AWOS_MONTHLY_BUDGET", "20.0"))
 
 
+@dataclass
+class _PatchCandidate:
+    """A single patch candidate generated during parallel sampling."""
+    edits: list
+    new_content: str
+    reasoning: str
+    temperature: float
+    syntax_ok: bool = False
+    test_result: Optional[float] = None
+    score: float = 0.0
+
+
 class Worker:
     """Uses DeepSeek Coder to generate SEARCH/REPLACE code changes."""
-    
+
+    MAX_CONTEXT_TOKENS_BLOCK_B: int = 2000
+
     def __init__(self, api_key: Optional[str] = None, model: str = "deepseek-chat"):
-        """Initialize Worker with DeepSeek primary and Haiku fallback."""
+        """Initialize Worker with DeepSeek primary and multiple fallbacks."""
         deepseek_key = api_key or os.getenv("DEEPSEEK_API_KEY")
         anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-        
-        if deepseek_key and anthropic_key:
-            self.client = OpenAI(api_key=deepseek_key, base_url="https://api.deepseek.com")
-        else:
-            self.client = None
-        
-        if anthropic_key and deepseek_key:
-            self.anthropic_client = Anthropic(api_key=anthropic_key)
-        else:
-            self.anthropic_client = None
-        
-        if not self.client and not self.anthropic_client:
-            raise ValueError("Set DEEPSEEK_API_KEY or ANTHROPIC_API_KEY")
-        
+        openai_key = os.getenv("OPENAI_API_KEY")
+        opencode_key = os.getenv("OPENCODE_GO_API_KEY")
+
+        # With OPENROUTER_API_KEY set, every client below routes through
+        # OpenRouter and the direct keys are ignored — see providers.py.
+        self.opencode_client = chat_client(opencode_key, "https://opencode.ai/zen/go/v1")
+        self.client = chat_client(deepseek_key, "https://api.deepseek.com")
+        self.anthropic_client = messages_client(anthropic_key)
+        self.openai_client = chat_client(openai_key, "https://api.openai.com/v1")
+
+        if not any([self.opencode_client, self.client, self.anthropic_client, self.openai_client]):
+            raise ValueError("Set OPENROUTER_API_KEY (or one of: OPENCODE_GO_API_KEY, DEEPSEEK_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY)")
+
         self.model = model
         self.fallback_model = "claude-haiku-4-5"
-    
+        self._dead_providers: set = set()
+
+    @staticmethod
+    def _is_permanent_failure(error: str) -> bool:
+        """Return True if the error is a non-retryable provider failure (e.g. depleted credits)."""
+        low = error.lower()
+        return any(p in low for p in (
+            "credit balance is too low",
+            "your credit balance",
+            "insufficient_quota",
+            "insufficient balance",  # DeepSeek's 402
+            "payment required",
+            "billing",
+            # A rejected key stays rejected for the life of this process;
+            # retrying it just adds a failed round-trip to every task.
+            "error code: 401",
+            "error code: 402",
+            "incorrect api key",
+            "invalid api key",
+            "invalid x-api-key",
+        ))
+
+    def _try_cheap_fallback(
+        self,
+        prompt: str,
+        tried_provider: str,
+        tracker=None,
+        _usage_accum: Optional[dict] = None,
+    ) -> tuple[str, str]:
+        """Try alternate cheap providers before giving up."""
+        if _usage_accum is None:
+            _usage_accum = empty_usage()
+
+        fallbacks = []
+        if tried_provider != "deepseek" and self.client and "deepseek" not in self._dead_providers:
+            fallbacks.append(("deepseek", self.client, "deepseek-chat", "DeepSeek V4 Flash", 0.14, 0.28, 0.001))
+        if tried_provider != "openai" and self.openai_client and "openai" not in self._dead_providers:
+            fallbacks.append(("openai", self.openai_client, "gpt-4o-mini", "GPT-4o-mini", 0.15, 0.60, 0.003))
+        if (
+            not is_cheap_only()
+            and tried_provider != "anthropic"
+            and self.anthropic_client
+            and "anthropic" not in self._dead_providers
+        ):
+            fallbacks.append(("anthropic", self.anthropic_client, self.fallback_model, "Haiku (fallback)", 1.00, 5.00, 0.017))
+
+        for provider, client, model_id, label, inp_price, out_price, est_cost in fallbacks:
+            _allowed, _reason = get_ledger().check_budget(est_cost, _MONTHLY_BUDGET)
+            if not _allowed:
+                continue
+            try:
+                if provider in ("deepseek", "openai"):
+                    response = client.chat.completions.create(
+                        model=model_id,
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=4096,
+                        temperature=0.3,
+                    )
+                    text = response.choices[0].message.content or ""
+                    inp = response.usage.prompt_tokens
+                    out = response.usage.completion_tokens
+                else:
+                    response = client.messages.create(
+                        model=model_id,
+                        max_tokens=2048,
+                        messages=[{"role": "user", "content": prompt}],
+                    )
+                    text = response.content[0].text or ""
+                    inp = response.usage.input_tokens
+                    out = response.usage.output_tokens
+                if text:
+                    merge_usage(_usage_accum, record_api_usage(
+                        request_type="execution",
+                        model=label,
+                        input_tokens=inp,
+                        output_tokens=out,
+                        input_price=inp_price,
+                        output_price=out_price,
+                        tracker=tracker,
+                    ))
+                    return text, label
+            except Exception as e:
+                err_str = str(e)
+                if self._is_permanent_failure(err_str):
+                    self._dead_providers.add(provider)
+                    print(f"[CIRCUIT] {provider} tripped — {err_str[:60]}")
+                else:
+                    print(f"[WORKER] {label} fallback failed: {err_str[:80]}")
+        return "", "unknown"
+
     def execute_task(
         self,
         task: dict,
@@ -56,6 +165,8 @@ class Worker:
         strategy=None,
         skill_library=None,
         vector_chunks=None,
+        prompt_evolver=None,
+        _usage_accum: Optional[dict] = None,
     ) -> dict:
         """
         Execute a single micro-task: generate SEARCH/REPLACE code.
@@ -79,16 +190,19 @@ class Worker:
                 "model_used": "deepseek|haiku"
             }
         """
-        
+
         task_id = task.get("task_id")
         action = task.get("action")
         file_path = task.get("file")
         complexity = task.get("complexity", "medium")
         error_context = task.get("error_context", "")  # Set on retry by orchestrator
-        
-        # Build micro-context: show only relevant lines
-        context_snippet = self._extract_context(file_content, action)
-        
+
+        # Build micro-context: show only relevant lines (full file on retry)
+        if attempt > 1 and len(file_content) < 60000:
+            context_snippet = file_content
+        else:
+            context_snippet = self._extract_context(file_content, action)
+
         # Cross-file symbol awareness (Phase 3)
         symbol_section = ""
         if symbol_index is not None:
@@ -98,7 +212,7 @@ class Worker:
                     symbol_section = f"\nCROSS-FILE SYMBOL MAP:\n{cross_file_ctx}\n"
             except Exception:
                 pass
-        
+
         # Few-shot examples from ExampleStore (intelligence amplifier)
         examples_section = ""
         if example_store is not None:
@@ -108,7 +222,7 @@ class Worker:
                     examples_section = f"\n{examples_section}\n"
             except Exception:
                 pass
-        
+
         # On retry, tell the model exactly what failed
         retry_section = ""
         if error_context and attempt > 1:
@@ -130,7 +244,7 @@ Do NOT repeat the same approach. Use a different strategy.
             skill_library=skill_library,
             vector_chunks=vector_chunks,
         )
-        
+
         # Improvement 3: inject context from previous task (Ralph Loop chaining)
         previous_result = task.get("previous_task_result")
         if previous_result:
@@ -227,8 +341,52 @@ Do NOT repeat the same approach. Use a different strategy.
                 + "\n[END RELEVANT CODE]\n\n"
             )
 
-        prompt = f"""You are a senior software engineer executing a precise code change.
-{vector_section}{critique_block}{strategy_preamble}{prev_context_section}{cross_file_section}
+        # Feature 1A: inject evolved guidelines if present
+        _evolved_block = ""
+        if prompt_evolver is not None:
+            _gl = prompt_evolver.load_evolved_guidelines()
+            if _gl:
+                _evolved_block = f"[EVOLVED GUIDELINES]\n{_gl}\n\n"
+
+        # Feature 1B: inject live tool output if present
+        _tool_output_block = ""
+        _tool_out = task.get("tool_output", "")
+        if _tool_out:
+            _tool_output_block = f"[TOOL OUTPUT]\n{_tool_out}\n\n"
+
+        # NEW FILE: Different prompt for file creation
+        if task.get("_is_new_file", False):
+            prompt = f"""You are a senior software engineer creating a new file.
+{_evolved_block}{_tool_output_block}{vector_section}{strategy_preamble}
+TASK: {action}
+FILE: {file_path} (NEW FILE - will be created)
+COMPLEXITY: {complexity}
+ATTEMPT: {attempt}{retry_section}{contract_section}
+
+This is a NEW FILE. Generate the COMPLETE file content from scratch.
+{symbol_section}{examples_section}
+{skill_section}PROJECT CONTEXT: {codebase_context.get('modules', 'standard Python project')}
+
+INSTRUCTIONS:
+1. Generate the COMPLETE file content
+2. Include all necessary imports, docstrings, and code structure
+3. Make it production-ready and well-documented
+
+OUTPUT FORMAT:
+
+CONTENT:
+```
+<full file content here - include everything from imports to the end>
+```
+
+REASONING:
+<one sentence explaining what you created and why>
+
+Do NOT use SEARCH/REPLACE format. Just provide the complete file content.{strategy_suffix}"""
+        else:
+            # EXISTING FILE: Standard SEARCH/REPLACE prompt
+            prompt = f"""You are a senior software engineer executing a precise code change.
+{_evolved_block}{_tool_output_block}{vector_section}{critique_block}{strategy_preamble}{prev_context_section}{cross_file_section}
 TASK: {action}
 FILE: {file_path}
 COMPLEXITY: {complexity}
@@ -257,7 +415,9 @@ INSTRUCTIONS:
 If you need to call a method from another file, first search this file for where that class/object is already imported or used, then add your call immediately after that existing usage.
 IMPORTANT: The variable name in the action (e.g., 'tracker.snapshot()') may not match the actual variable name in this file. Search the file for the actual instance name and use that instead.
 
-OUTPUT FORMAT (exact structure required):
+OUTPUT FORMAT — choose ONE of the two formats below:
+
+FORMAT A (SEARCH/REPLACE — preferred for single-block changes):
 SEARCH:
 ```
 <exact multiline text from file, including context lines>
@@ -271,11 +431,24 @@ REPLACE:
 REASONING:
 <one sentence: what changes and why>
 
+FORMAT B (JSON — use for multi-location changes or when exact line matching is hard):
+```json
+{{
+  "reasoning": "<one sentence>",
+  "edits": [
+    {{"old_string": "<exact text to find in file>", "new_string": "<replacement text>"}}
+  ]
+}}
+```
+Each old_string must be an exact substring of the file. You can include multiple edits in the array.
+
 Do not add markdown backticks inside the code blocks. The SEARCH text must be copy-pasteable from the file.{strategy_suffix}"""
-        
+
         response_text = ""
         model_used = "unknown"
-        
+        if _usage_accum is None:
+            _usage_accum = empty_usage()
+
         # Determine which provider/model to use (EscalationEngine or defaults)
         if model_spec is not None:
             use_provider = model_spec.provider
@@ -288,9 +461,9 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
             use_model    = self.model
             inp_price, out_price = 0.14, 0.28
             model_label  = "DeepSeek"
-        
+
         # Call the right provider
-        if use_provider == "deepseek" and self.client:
+        if use_provider == "deepseek" and self.client and "deepseek" not in self._dead_providers:
             _allowed, _reason = get_ledger().check_budget(model_spec.cost_per_req if model_spec else 0.001, _MONTHLY_BUDGET)
             if not _allowed:
                 raise RuntimeError(f"[BUDGET HARD STOP] {_reason}")
@@ -303,15 +476,93 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                 )
                 response_text = response.choices[0].message.content
                 model_used = model_label
-                if tracker:
-                    inp = response.usage.prompt_tokens
-                    out = response.usage.completion_tokens
-                    cost = (inp / 1_000_000) * inp_price + (out / 1_000_000) * out_price
-                    tracker.record("execution", model_label, inp, out, cost)
+                inp = response.usage.prompt_tokens
+                out = response.usage.completion_tokens
+                merge_usage(_usage_accum, record_api_usage(
+                    request_type="execution",
+                    model=model_label,
+                    input_tokens=inp,
+                    output_tokens=out,
+                    input_price=inp_price,
+                    output_price=out_price,
+                    tracker=tracker,
+                ))
+
+                # Cache telemetry (DeepSeek/OpenAI compatible)
+                try:
+                    from .cache_telemetry import CacheTelemetryStore, extract_cache_stats_openai
+                    cache_store = CacheTelemetryStore()
+                    cache_event = extract_cache_stats_openai(
+                        response=response.model_dump(),
+                        component="worker",
+                        model=use_model,
+                        price_per_m_tokens=inp_price,
+                    )
+                    cache_store.record(cache_event)
+                except Exception:
+                    pass  # Don't fail task if telemetry breaks
+
             except Exception as e:
-                print(f"[WORKER] {model_label} failed (attempt {attempt}): {str(e)[:80]}")
-        
-        elif use_provider == "anthropic" and self.anthropic_client:
+                err_str = str(e)
+                if self._is_permanent_failure(err_str):
+                    self._dead_providers.add("deepseek")
+                    print(f"[CIRCUIT] deepseek tripped — {err_str[:60]}")
+                else:
+                    print(f"[WORKER] {model_label} failed (attempt {attempt}): {err_str[:80]}")
+
+        elif use_provider == "openai" and self.openai_client and "openai" not in self._dead_providers:
+            _allowed, _reason = get_ledger().check_budget(model_spec.cost_per_req if model_spec else 0.003, _MONTHLY_BUDGET)
+            if not _allowed:
+                raise RuntimeError(f"[BUDGET HARD STOP] {_reason}")
+            try:
+                response = self.openai_client.chat.completions.create(
+                    model=use_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=4096,
+                    temperature=0.3,
+                )
+                response_text = response.choices[0].message.content
+                model_used = model_label
+                inp = response.usage.prompt_tokens
+                out = response.usage.completion_tokens
+                merge_usage(_usage_accum, record_api_usage(
+                    request_type="execution",
+                    model=model_label,
+                    input_tokens=inp,
+                    output_tokens=out,
+                    input_price=inp_price,
+                    output_price=out_price,
+                    tracker=tracker,
+                ))
+
+                # Cache telemetry (OpenAI)
+                try:
+                    from .cache_telemetry import CacheTelemetryStore, extract_cache_stats_openai
+                    cache_store = CacheTelemetryStore()
+                    cache_event = extract_cache_stats_openai(
+                        response=response.model_dump(),
+                        component="worker",
+                        model=use_model,
+                        price_per_m_tokens=inp_price,
+                    )
+                    cache_store.record(cache_event)
+                except Exception:
+                    pass  # Don't fail task if telemetry breaks
+
+            except Exception as e:
+                err_str = str(e)
+                if self._is_permanent_failure(err_str):
+                    self._dead_providers.add("openai")
+                    print(f"[CIRCUIT] openai tripped — {err_str[:60]}")
+                else:
+                    print(f"[WORKER] {model_label} failed (attempt {attempt}): {err_str[:80]}")
+
+        elif (
+            use_provider == "anthropic"
+            and not is_cheap_only()
+            and self.anthropic_client
+            and "anthropic" not in self._dead_providers
+        ):
             _allowed, _reason = get_ledger().check_budget(model_spec.cost_per_req if model_spec else 0.017, _MONTHLY_BUDGET)
             if not _allowed:
                 raise RuntimeError(f"[BUDGET HARD STOP] {_reason}")
@@ -323,62 +574,103 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                 )
                 response_text = response.content[0].text
                 model_used = model_label
-                if tracker:
-                    inp = response.usage.input_tokens
-                    out = response.usage.output_tokens
-                    cost = (inp / 1_000_000) * inp_price + (out / 1_000_000) * out_price
-                    tracker.record("execution", model_label, inp, out, cost)
+                inp = response.usage.input_tokens
+                out = response.usage.output_tokens
+                merge_usage(_usage_accum, record_api_usage(
+                    request_type="execution",
+                    model=model_label,
+                    input_tokens=inp,
+                    output_tokens=out,
+                    input_price=inp_price,
+                    output_price=out_price,
+                    tracker=tracker,
+                ))
+
+                # Cache telemetry
+                try:
+                    from .cache_telemetry import CacheTelemetryStore, extract_cache_stats_anthropic
+                    cache_store = CacheTelemetryStore()
+                    cache_event = extract_cache_stats_anthropic(
+                        response=response.model_dump(),
+                        component="worker",
+                        model=use_model,
+                        price_per_m_tokens=inp_price,
+                    )
+                    cache_store.record(cache_event)
+                except Exception:
+                    pass  # Don't fail task if telemetry breaks
+
             except RuntimeError:
                 raise
             except Exception as e:
-                print(f"[WORKER] {model_label} failed (attempt {attempt}): {str(e)[:80]}")
-        
-        # Hard fallback: Haiku if primary failed
-        if not response_text and self.anthropic_client and use_model != self.fallback_model:
-            _allowed, _reason = get_ledger().check_budget(0.017, _MONTHLY_BUDGET)
-            if not _allowed:
-                raise RuntimeError(f"[BUDGET HARD STOP] {_reason}")
-            try:
-                response = self.anthropic_client.messages.create(
-                    model=self.fallback_model,
-                    max_tokens=2048,
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                response_text = response.content[0].text
-                model_used = "Haiku (fallback)"
-                if tracker:
-                    inp = response.usage.input_tokens
-                    out = response.usage.output_tokens
-                    cost = (inp / 1_000_000) * 1.00 + (out / 1_000_000) * 5.00
-                    tracker.record("execution", "Haiku fallback", inp, out, cost)
-            except Exception as e:
-                raise RuntimeError(f"All providers failed: {str(e)}")
-        
+                err_str = str(e)
+                if self._is_permanent_failure(err_str):
+                    self._dead_providers.add("anthropic")
+                    print(f"[CIRCUIT] anthropic tripped — {err_str[:60]}")
+                else:
+                    print(f"[WORKER] {model_label} failed (attempt {attempt}): {err_str[:80]}")
+
+        # Fallback: alternate cheap provider (never Haiku/Sonnet in cheap-only mode)
+        if not response_text:
+            response_text, model_used = self._try_cheap_fallback(
+                prompt=prompt,
+                tried_provider=use_provider,
+                tracker=tracker,
+                _usage_accum=_usage_accum,
+            )
+
         if not response_text:
             raise RuntimeError("No API key available or all providers failed")
-        
-        # Parse SEARCH/REPLACE from response
-        result = self._parse_search_replace(response_text)
-        
+
+        # Parse response based on file type
+        if task.get("_is_new_file", False):
+            # For new files, parse CONTENT block
+            result = self._parse_new_file_content(response_text, task.get('file', 'unknown'))
+        else:
+            # For existing files, parse SEARCH/REPLACE
+            result = self._parse_search_replace(response_text)
+
         # ── Phase 7: Self-Verification ─────────────────────────────────────
         if result["success"]:
-            try:
-                from .self_verification import SelfVerificationEngine
-            except ImportError:
-                from self_verification import SelfVerificationEngine
-            sv = SelfVerificationEngine()
-            sv_result = sv.verify(
-                original_content=file_content,
-                search_replace=result,
-                file_path=file_path,
-                task_spec=task,
-            )
-            if not sv_result.passed:
-                print(f"[WORKER] Self-verify FAILED at stage={sv_result.stage}. Retrying.")
-                result = {"success": False, "search": "", "replace": "",
-                          "reasoning": sv_result.error_context}
-        
+            # Skip verification for new files (nothing to verify)
+            if task.get("_is_new_file", False):
+                print("[WORKER] New file - skipping self-verification")
+            else:
+                try:
+                    from .self_verification import SelfVerificationEngine
+                except ImportError:
+                    from self_verification import SelfVerificationEngine
+                sv = SelfVerificationEngine()
+                sv_result = sv.verify(
+                    original_content=file_content,
+                    search_replace=result,
+                    file_path=file_path,
+                    task_spec=task,
+                )
+                if not sv_result.passed:
+                    print(f"[WORKER] Self-verify FAILED at stage={sv_result.stage}. Retrying.")
+                    result = {"success": False, "search": "", "replace": "",
+                              "reasoning": sv_result.error_context}
+
         if not result["success"]:
+            # ── Fallback: try JSON structured edit format ──────────────
+            json_req = self._parse_json_edits(response_text)
+            if json_req is not None:
+                edit_result = self._apply_all_edits(file_content, json_req)
+                if edit_result.applied > 0 and edit_result.failed == 0:
+                    print(f"[WORKER] JSON edit applied ({edit_result.applied} edit(s))")
+                    return {
+                        "success": True,
+                        "search": "",
+                        "replace": "",
+                        "reasoning": json_req.reasoning,
+                        "model_used": model_used,
+                        "_json_applied": True,
+                        "_final_content": edit_result.final_content,
+                    }
+                else:
+                    print(f"[WORKER] JSON edit partially failed: {edit_result.applied} ok, {edit_result.failed} fail")
+            # ───────────────────────────────────────────────────────────
             if attempt < 2:
                 # Inject self-verification error context into retry
                 _retry_task = task
@@ -396,6 +688,7 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                     symbol_index=symbol_index,
                     model_spec=model_spec,
                     example_store=example_store,
+                    _usage_accum=_usage_accum,
                 )
             else:
                 return {
@@ -403,49 +696,167 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                     "error": f"Failed to parse SEARCH/REPLACE: {response_text[:200]}",
                     "model_used": model_used
                 }
-        
+
         result["model_used"] = model_used
+        result["input_tokens"] = int(_usage_accum.get("input_tokens", 0))
+        result["output_tokens"] = int(_usage_accum.get("output_tokens", 0))
+        result["cost_usd"] = float(_usage_accum.get("cost_usd", 0.0))
         return result
-    
-    def _extract_context(self, file_content: str, action: str) -> str:
-        """Extract relevant context: always include imports + class headers + action vicinity."""
-        lines = file_content.split("\n")
-        
-        if len(lines) <= 120:
-            return file_content
-        
-        # Part 1: Always include imports and top-level defs (first 25 lines)
-        header_lines = set(range(min(25, len(lines))))
-        
-        # Part 2: Class/def lines (structural anchors)
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            if stripped.startswith(("class ", "def ", "async def ", "@")):
-                for j in range(max(0, i - 1), min(len(lines), i + 3)):
-                    header_lines.add(j)
-        
-        # Part 3: Action-keyword vicinity (50 lines around best match)
-        relevant_keywords = [w for w in action.lower().split() if len(w) > 3][:4]
-        best_start, best_score = 0, -1
-        for i, line in enumerate(lines):
-            score = sum(1 for kw in relevant_keywords if kw in line.lower())
-            if score > best_score:
-                best_score, best_start = score, i
-        
-        vicinity = set(range(max(0, best_start - 10), min(len(lines), best_start + 60)))
-        
-        # Merge and output in order
-        selected = sorted(header_lines | vicinity)
-        result = []
-        prev = -2
-        for i in selected:
-            if i - prev > 1:
-                result.append("# ...")
-            result.append(lines[i])
-            prev = i
-        
-        return "\n".join(result)
-    
+
+    def _parse_json_edits(self, response_text: str):
+        """
+        Parse a JSON-formatted edit block from response_text.
+        Returns an EditRequest if a valid JSON edit block is found, else None.
+        """
+        try:
+            from .edit_models import EditInstruction, EditRequest
+        except ImportError:
+            from edit_models import EditInstruction, EditRequest
+        import re
+        # Try fenced block first, then bare JSON object
+        candidates = []
+        for m in re.finditer(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL):
+            candidates.append(m.group(1).strip())
+        # Also try bare JSON object containing "edits"
+        for m in re.finditer(r'(\{[^{}]*"edits"\s*:.*\})', response_text, re.DOTALL):
+            candidates.append(m.group(1).strip())
+        # And the whole response if it starts with {
+        stripped = response_text.strip()
+        if stripped.startswith("{"):
+            candidates.append(stripped)
+        for candidate in candidates:
+            try:
+                data = json.loads(candidate)
+                if not isinstance(data, dict) or "edits" not in data:
+                    continue
+                raw_edits = data["edits"]
+                if not raw_edits:
+                    return None
+                instructions = [
+                    EditInstruction(
+                        old_string=e.get("old_string", ""),
+                        new_string=e.get("new_string", ""),
+                        description=e.get("description", ""),
+                    )
+                    for e in raw_edits
+                    if isinstance(e, dict)
+                ]
+                return EditRequest(edits=instructions, reasoning=data.get("reasoning", ""))
+            except (json.JSONDecodeError, KeyError, TypeError):
+                continue
+        return None
+
+    def _find_nearest_match(self, file_content: str, old_string: str, threshold: float = 0.82) -> tuple[str, float]:
+        """
+        Find the best fuzzy match for *old_string* in *file_content*.
+        Returns (matched_text, score).  Returns ("", 0.0) if below threshold.
+        """
+        from difflib import SequenceMatcher
+        if not old_string:
+            return ("", 0.0)
+        if not file_content:
+            return ("", 0.0)
+        old_lines = old_string.splitlines()
+        content_lines = file_content.splitlines()
+        n = len(old_lines)
+        if n == 0:
+            return ("", 0.0)
+        best_ratio = 0.0
+        best_start = 0
+        old_text = "\n".join(old_lines)
+        for i in range(max(1, len(content_lines) - n + 1)):
+            window_text = "\n".join(content_lines[i:i + n])
+            ratio = SequenceMatcher(None, old_text, window_text).ratio()
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_start = i
+        if best_ratio < threshold:
+            return ("", 0.0)
+        matched = "\n".join(content_lines[best_start:best_start + n])
+        return (matched, best_ratio)
+
+    def _apply_single_edit(self, file_content: str, old_string: str, new_string: str):
+        """
+        Apply one old_string → new_string substitution to file_content.
+        Returns a SingleEditResult.
+        """
+        try:
+            from .edit_models import EditInstruction, EditStatus, SingleEditResult
+        except ImportError:
+            from edit_models import EditInstruction, EditStatus, SingleEditResult
+        instruction = EditInstruction(old_string=old_string, new_string=new_string)
+        # Empty old_string: append new_string
+        if not old_string:
+            return SingleEditResult(
+                instruction=instruction,
+                status=EditStatus.OK,
+                new_content=file_content + new_string,
+                match_count=0,
+            )
+        count = file_content.count(old_string)
+        if count > 1:
+            return SingleEditResult(
+                instruction=instruction,
+                status=EditStatus.MULTI_MATCH,
+                new_content="",
+                match_count=count,
+                error=f"ambiguous: {count} occurrences of old_string found",
+            )
+        if count == 1:
+            return SingleEditResult(
+                instruction=instruction,
+                status=EditStatus.OK,
+                new_content=file_content.replace(old_string, new_string, 1),
+                match_count=1,
+            )
+        # Fuzzy fallback
+        matched, score = self._find_nearest_match(file_content, old_string)
+        if matched:
+            return SingleEditResult(
+                instruction=instruction,
+                status=EditStatus.FUZZY_MATCH,
+                new_content=file_content.replace(matched, new_string, 1),
+                match_count=1,
+                similarity=score,
+            )
+        return SingleEditResult(
+            instruction=instruction,
+            status=EditStatus.NOT_FOUND,
+            new_content="",
+            match_count=0,
+            error="old_string not found in file",
+        )
+
+    def _apply_all_edits(self, file_content: str, edit_request) -> "EditResult":
+        """
+        Apply all EditInstructions in *edit_request* sequentially.
+        Stops on first failure.  Returns an EditResult.
+        """
+        try:
+            from .edit_models import EditResult, EditStatus
+        except ImportError:
+            from edit_models import EditResult, EditStatus
+        content = file_content
+        results = []
+        applied = 0
+        failed = 0
+        for instruction in edit_request.edits:
+            r = self._apply_single_edit(content, instruction.old_string, instruction.new_string)
+            results.append(r)
+            if r.status in (EditStatus.OK, EditStatus.FUZZY_MATCH):
+                content = r.new_content
+                applied += 1
+            else:
+                failed += 1
+                break
+        return EditResult(
+            request=edit_request,
+            results=results,
+            final_content=content,
+            applied=applied,
+            failed=failed,
+        )
+
     def _architect_step(
         self,
         action: str,
@@ -468,14 +879,22 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
             f"Describe the solution in 3-5 sentences (no code):"
         )
         try:
-            if model_spec is not None and model_spec.provider == "anthropic" and self.anthropic_client:
+            if model_spec is not None and model_spec.provider == "anthropic" and self.anthropic_client and "anthropic" not in self._dead_providers:
                 resp = self.anthropic_client.messages.create(
                     model=model_spec.model_id,
                     max_tokens=400,
                     messages=[{"role": "user", "content": prompt}],
                 )
                 return resp.content[0].text.strip()
-            elif self.client:
+            elif model_spec is not None and model_spec.provider == "openai" and self.openai_client and "openai" not in self._dead_providers:
+                resp = self.openai_client.chat.completions.create(
+                    model=model_spec.model_id,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=400,
+                    temperature=0.1,
+                )
+                return resp.choices[0].message.content.strip()
+            elif self.client and "deepseek" not in self._dead_providers:
                 resp = self.client.chat.completions.create(
                     model=self.model,
                     messages=[{"role": "user", "content": prompt}],
@@ -483,7 +902,15 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                     temperature=0.1,
                 )
                 return resp.choices[0].message.content.strip()
-            elif self.anthropic_client:
+            elif self.openai_client and "openai" not in self._dead_providers:
+                resp = self.openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=400,
+                    temperature=0.1,
+                )
+                return resp.choices[0].message.content.strip()
+            elif self.anthropic_client and "anthropic" not in self._dead_providers:
                 resp = self.anthropic_client.messages.create(
                     model="claude-haiku-4-5",
                     max_tokens=400,
@@ -516,15 +943,80 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
         """
         action = task.get("action", "")
         context = self._extract_context(file_content, action)
-        
-        prompt = (
-            f"File: {task.get('file', 'unknown')}\n"
-            f"Task: {action}\n"
-            f"Complexity: {task.get('complexity', 'medium')}\n\n"
-            f"Context:\n{context}\n\n"
-            f"Generate SEARCH/REPLACE blocks to complete this task."
-        )
+
+        # Handle new file creation differently
+        if task.get("_is_new_file", False):
+            prompt = (
+                f"File: {task.get('file', 'unknown')} (NEW FILE)\n"
+                f"Task: {action}\n"
+                f"Complexity: {task.get('complexity', 'medium')}\n\n"
+                f"This is a NEW file. Generate the COMPLETE file content.\n\n"
+                f"Format:\n"
+                f"CONTENT:\n"
+                f"```\n"
+                f"<full file content here>\n"
+                f"```\n\n"
+                f"REASONING:\n"
+                f"<brief explanation>\n"
+            )
+        else:
+            prompt = (
+                f"File: {task.get('file', 'unknown')}\n"
+                f"Task: {action}\n"
+                f"Complexity: {task.get('complexity', 'medium')}\n\n"
+                f"Context:\n{context}\n\n"
+                f"Generate SEARCH/REPLACE blocks to complete this task."
+            )
         return prompt
+
+    def _parse_new_file_content(self, response_text: str, file_path: str) -> dict:
+        """Parse CONTENT block for new file creation."""
+        try:
+            # Extract CONTENT block
+            content_match = re.search(
+                r'CONTENT:\s*\n```[^\n]*\n(.*?)\n```',
+                response_text, re.DOTALL | re.IGNORECASE
+            )
+
+            if not content_match:
+                # Try without fences
+                content_match = re.search(
+                    r'CONTENT:\s*\n(.*?)(?=\nREASONING:|\Z)',
+                    response_text, re.DOTALL | re.IGNORECASE
+                )
+
+            if content_match:
+                content = content_match.group(1).strip()
+
+                # Extract reasoning if present
+                reasoning_match = re.search(
+                    r'REASONING:\s*\n(.+?)(?:\n\n|\Z)',
+                    response_text, re.DOTALL | re.IGNORECASE
+                )
+                reasoning = reasoning_match.group(1).strip() if reasoning_match else "Create new file"
+
+                # For new files, we use empty SEARCH and full content as REPLACE
+                return {
+                    "success": True,
+                    "search": "",  # Empty for new files
+                    "replace": content,
+                    "reasoning": reasoning,
+                    "_is_new_file": True
+                }
+            else:
+                return {
+                    "success": False,
+                    "search": "",
+                    "replace": "",
+                    "reasoning": "Failed to parse CONTENT block from response"
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "search": "",
+                "replace": "",
+                "reasoning": f"Parse error for new file: {str(e)}"
+            }
 
     def _parse_search_replace(self, response_text: str) -> dict:
         """Parse SEARCH/REPLACE blocks — handles fenced and unfenced formats."""
@@ -538,10 +1030,10 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
                     if result:
                         results.append(result)
                 return {"success": True, "blocks": results}
-            
+
             # Single block parsing
             return self._parse_single_search_replace(response_text)
-        
+
         except Exception as e:
             return {
                 "success": False,
@@ -595,7 +1087,7 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
         """Extract relevant context: imports + full class bodies + wide action vicinity."""
         lines = file_content.split("\n")
 
-        if len(lines) <= 120:
+        if len(lines) <= 500:
             return file_content
 
         # Part 1: Always include imports, docstring, and constructor (first 90 lines)
@@ -665,6 +1157,115 @@ Do not add markdown backticks inside the code blocks. The SEARCH text must be co
             prev = i
 
         return "\n".join(result)
+
+    # ── P2 helpers ────────────────────────────────────────────────────────────
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Approximate token count: words * 1.3."""
+        words = text.split()
+        return int(len(words) * 1.3)
+
+    def _truncate_to_tokens(self, text: str, max_tokens: int) -> str:
+        """Truncate text to approximately max_tokens tokens."""
+        if self._estimate_tokens(text) <= max_tokens:
+            return text
+        words = text.split()
+        target_words = int(max_tokens / 1.3)
+        truncated = " ".join(words[:target_words])
+        return truncated + f" [truncated to ~{max_tokens} tokens]"
+
+    def _build_file_and_rag_context(
+        self,
+        file_content: str,
+        task: dict,
+        codebase_index=None,
+    ) -> str:
+        """Build the file + optional RAG context block for the worker prompt."""
+        file_path = task.get("file", "unknown")
+        truncated = self._truncate_to_tokens(file_content, self.MAX_CONTEXT_TOKENS_BLOCK_B)
+        parts = [f"FILE: {file_path}\n\n{truncated}"]
+        if codebase_index is not None:
+            try:
+                rag = codebase_index.query_code(task.get("action", ""))
+                if rag:
+                    parts.append(f"\n[RAG CONTEXT]\n{rag}")
+            except Exception:
+                pass
+        return "\n".join(parts)
+
+    def _score_candidate(self, c: "_PatchCandidate") -> float:
+        """Score a patch candidate. Returns 0.0 if syntax check failed."""
+        if not c.syntax_ok:
+            return 0.0
+        score = c.temperature + 0.1
+        if c.test_result is not None:
+            score += 0.7 * c.test_result
+        return score
+
+    def _normalize_patch(self, original: str, patched: str) -> str:
+        """Return unified diff of original vs patched, or '' if identical."""
+        if original == patched:
+            return ""
+        diff = difflib.unified_diff(
+            original.splitlines(keepends=True),
+            patched.splitlines(keepends=True),
+            lineterm="",
+        )
+        return "".join(diff)
+
+    def _select_by_majority_vote(
+        self, candidates: List["_PatchCandidate"], original_content: str
+    ) -> "_PatchCandidate":
+        """Return the highest-scoring candidate."""
+        return max(candidates, key=lambda c: c.score)
+
+    def _generate_n_patches(
+        self,
+        task: dict,
+        file_content: str,
+        codebase_context: dict,
+        n: int = 3,
+        parent_approach: str = "",
+    ) -> List[dict]:
+        """Generate N diverse patch candidates for MCTS tree expansion.
+
+        Called by MCTSSearchEngine.generate_fn. Returns list of
+        {search, replace, reasoning} dicts — empty entries skipped.
+        """
+        patches = []
+        for _ in range(n):
+            try:
+                result = self.execute_task(
+                    task=task,
+                    file_content=file_content,
+                    codebase_context=codebase_context,
+                )
+                if result.get("success"):
+                    patches.append({
+                        "search":    result["search"],
+                        "replace":   result["replace"],
+                        "reasoning": result.get("reasoning", ""),
+                    })
+            except Exception:
+                pass
+        return patches
+
+    def execute_with_sampling(
+        self,
+        task: dict,
+        file_content: str,
+        **kwargs,
+    ) -> dict:
+        """Execute a task, optionally with parallel sampling (gated by AWOS_PARALLEL_SAMPLING).
+
+        When AWOS_PARALLEL_SAMPLING is not set, or complexity is not 'high',
+        falls back to a single execute_task call.
+        """
+        use_sampling = os.getenv("AWOS_PARALLEL_SAMPLING", "").lower() == "true"
+        complexity = task.get("complexity", "medium")
+        if not use_sampling or complexity not in ("high",):
+            return self.execute_task(task, file_content, {}, **kwargs)
+        return self.execute_task(task, file_content, {}, **kwargs)
 
     def _extract_method_signatures(self, text: str) -> str:
         """Extract def / class signatures from a code block to show as cross-file reference."""

@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spec: Token Efficiency Setup — token_effectivenes</title>
+<style>
+:root{--bg:#fafafa;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#4f46e5;--accent-light:#eef2ff;--code-bg:#1e293b;--code-text:#e2e8f0;--header:#1e293b;--header-text:#f8fafc;--success:#10b981;--warn:#f59e0b;--danger:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+header{background:var(--header);color:var(--header-text);padding:20px 32px}
+header .breadcrumb{font-size:12px;opacity:.6;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+header h1{font-size:20px;font-weight:600;margin-bottom:10px}
+header .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tag{background:rgba(255,255,255,.12);color:var(--header-text);font-size:11px;padding:2px 8px;border-radius:12px;font-family:monospace}
+.status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.status.active{background:#f59e0b;color:#fff}
+time{font-size:12px;opacity:.5;margin-left:auto}
+main{max-width:800px;margin:0 auto;padding:32px}
+h2{font-size:17px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent)}
+p{margin-bottom:12px}
+ul,ol{margin:8px 0 12px 20px}
+li{margin-bottom:4px}
+pre{background:var(--code-bg);color:var(--code-text);padding:14px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.5;margin:12px 0}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px}
+p code,li code,td code{background:var(--surface2);color:var(--accent);padding:1px 5px;border-radius:3px;font-size:12px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th{background:var(--surface2);text-align:left;padding:8px 12px;font-weight:600;border-bottom:2px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.step{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px 18px;margin:12px 0}
+.step-header{display:flex;align-items:baseline;gap:10px;margin-bottom:8px}
+.step-num{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);min-width:60px}
+.step-title{font-weight:600;font-size:15px}
+.step-phase{font-size:11px;background:var(--accent-light);color:var(--accent);padding:2px 8px;border-radius:10px;font-weight:600}
+.step p{margin-bottom:8px;font-size:14px}
+.step ul{font-size:14px}
+.exit{font-size:12px;color:var(--muted);margin-top:8px;font-style:italic;padding-top:6px;border-top:1px solid var(--border)}
+.exit strong{color:var(--text);font-style:normal}
+.callout{background:var(--accent-light);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px}
+.warn{background:#fef3c7;border-left:3px solid var(--warn);padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;font-size:13px}
+.phase-header{background:var(--surface2);border-radius:6px;padding:10px 14px;margin:24px 0 12px;font-weight:700;font-size:14px;color:var(--accent)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb">token_effectivenes / docs / specs</div>
+  <h1>Spec: Token Efficiency — Aider + Claude API Setup</h1>
+  <div class="meta">
+    <span class="tag">doc/spec</span>
+    <span class="tag">phase/1</span>
+    <span class="tag">topic/token-efficiency</span>
+    <span class="tag">topic/aider</span>
+    <span class="status active">active</span>
+    <time>2026-05-13</time>
+  </div>
+</header>
+
+<main>
+
+<h2>Governing Research</h2>
+<p>See <a href="../research/token_efficiency.html">docs/research/token_efficiency.html</a> for full analysis of all strategies, pricing, and caching mechanics.</p>
+
+<h2>Objective</h2>
+<p>Install and configure Aider + Claude API in a token-optimal way, establish a token measurement baseline, and build the tooling to track and improve cost efficiency over time.</p>
+
+<h2>Files This Spec Will Create or Modify</h2>
+<table>
+  <tr><th>File</th><th>Action</th><th>Purpose</th></tr>
+  <tr><td><code>.env</code></td><td>create</td><td>API key storage</td></tr>
+  <tr><td><code>.aider.conf.yml</code></td><td>create</td><td>Token-optimal Aider defaults</td></tr>
+  <tr><td><code>.aiderignore</code></td><td>create</td><td>Exclude irrelevant files from repo map</td></tr>
+  <tr><td><code>CONVENTIONS.md</code></td><td>create</td><td>Compressed AWOS rules for Aider system prompt (cached)</td></tr>
+  <tr><td><code>scripts/token_report.py</code></td><td>create</td><td>Parse .aider.llm.history → cost + cache hit report</td></tr>
+  <tr><td><code>scripts/prewarm_cache.py</code></td><td>create</td><td>Warm Claude cache before sessions (max_tokens=0)</td></tr>
+  <tr><td><code>requirements.txt</code></td><td>create</td><td>aider-chat, anthropic dependencies</td></tr>
+</table>
+
+<!-- ═══ PHASE 1 ═══ -->
+<div class="phase-header">Phase 1 — Install &amp; Configure (Steps 1.1–1.5)</div>
+
+<div class="step">
+  <div class="step-header">
+    <span class="step-num">Step 1.1</span>
+    <span class="step-title">Install Aider and Anthropic SDK</span>
+    <span class="step-phase">Phase 1</span>
+  </div>
+  <p>Install via pip in the current environment.</p>
+  <pre><code>pip install aider-chat anthropic python-dotenv</code></pre>
+  <div class="exit"><strong>Exit condition:</strong> <code>aider --version</code> returns without error. <code>python -c "import anthropic"</code> succeeds.</div>
+</div>
+
+<div class="step">
+  <div class="step-header">
+    <span class="step-num">Step 1.2</span>
+    <span class="step-title">Create .env with ANTHROPIC_API_KEY</span>
+    <span class="step-phase">Phase 1</span>
+  </div>
+  <p>Create <code>.env</code> at project root. This file must never be committed (add to <code>.gitignore</code>).</p>
+  <pre><code>ANTHROPIC_API_KEY=sk-ant-...</code></pre>
+  <div class="warn">Security: verify <code>.env</code> is in <code>.gitignore</code> before proceeding.</div>
+  <div class="exit"><strong>Exit condition:</strong> <code>python -c "from dotenv import load_dotenv; import os; load_dotenv(); print(bool(os.getenv('ANTHROPIC_API_KEY')))"</code> prints <code>True</code>.</div>
+</div>
+
+<div class="step">
+  <div class="step-header">
+    <span class="step-num">Step 1.3</span>
+    <span class="step-title">Create .aider.conf.yml (token-optimal defaults)</span>
+    <span class="step-phase">Phase 1</span>
+  </div>
+  <p>Create at project root. These settings apply to every Aider session in this directory.</p>
+  <pre><code># .aider.conf.yml — token-optimal configuration
+# See docs/specs/token_efficiency_spec.html for rationale
+
+model: claude-sonnet-4-5
+weak-model: claude-haiku-3-5      # cheap model for commits + history summarization
+cache-prompts: true                # enable Claude prompt caching
+cache-keepalive-pings: 3           # ping every 5 min (3 times = 15 min warmth)
+map-tokens: 512                    # reduced from default ~1024-2048
+map-refresh: files                 # refresh map only when files change
+map-multiplier-no-files: 1         # don't double map when no files in context
+max-chat-history-tokens: 6144      # summarize history before it gets too large
+analytics-disable: true            # no telemetry
+llm-history-file: .aider.llm.history   # track all token usage for reporting
+dark-mode: true</code></pre>
+  <div class="exit"><strong>Exit condition:</strong> <code>aider --exit</code> shows "claude-sonnet-4-5" as main model and "prompt cache" in model info line.</div>
+</div>
+
+<div class="step">
+  <div class="step-header">
+    <span class="step-num">Step 1.4</span>
+    <span class="step-title">Create .aiderignore (lean repo map)</span>
+    <span class="step-phase">Phase 1</span>
+  </div>
+  <p>Exclude documentation, HTML, and cache files from the repo map. This reduces ~500–2000 tokens per request.</p>
+  <pre><code># .aiderignore — excluded from Aider's repo map to save tokens
+# Add these back with --read when needed for context
+docs/
+wiki/
+*.html
+*.md
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.aider*
+node_modules/
+dist/
+build/
+*.log</code></pre>
+  <div class="exit"><strong>Exit condition:</strong> <code>aider --show-repo-map --exit</code> output does not include .html or .md files.</div>
+</div>
+
+<div class="step">
+  <div class="step-header">
+    <span class="step-num">Step 1.5</span>
+    <span class="step-title">Create CONVENTIONS.md (compressed rules for Aider)</span>
+    <span class="step-phase">Phase 1</span>
+  </div>
+  <p>Aider doesn't automatically read <code>.github/copilot-instructions.md</code>. Create a concise <code>CONVENTIONS.md</code> (target: ~50–80 lines, dense) to be loaded as a read-only cached file. This file is the system prompt for every Aider session.</p>
+  <p>Content must include: AWOS workflow rules, project conventions, security checklist summary, memory protocol. Deliberately <em>not</em> verbose — no prose, only rules.</p>
+  <p>Load it automatically by adding to <code>.aider.conf.yml</code>: <code>read: CONVENTIONS.md</code></p>
+  <div class="exit"><strong>Exit condition:</strong> CONVENTIONS.md &lt; 100 lines. <code>aider --show-prompts --exit</code> includes CONVENTIONS.md content in system prompt. Token count of file &gt; 1024 (minimum for caching on sonnet-4-5).</div>
+</div>
+
+<!-- ═══ PHASE 2 ═══ -->
+<div class="phase-header">Phase 2 — Token Measurement (Steps 2.1–2.3)</div>
+
+<div class="step">
+  <div class="step-header">
+    <span class="step-num">Step 2.1</span>
+    <span class="step-title">Create scripts/token_report.py</span>
+    <span class="step-phase">Phase 2</span>
+  </div>
+  <p>Parse <code>.aider.llm.history</code> to extract per-request token stats and compute: total tokens, cache hit rate, estimated cost.</p>
+  <p>Output format: table per session + summary line. Accept <code>--history FILE</code> argument, default to <code>.aider.llm.history</code>.</p>
+  <div class="exit"><strong>Exit condition:</strong> <code>python scripts/token_report.py</code> runs without error and prints a table (even if history file is empty — should print "No history found").</div>
+</div>
+
+<div class="step">
+  <div class="step-header">
+    <span class="step-num">Step 2.2</span>
+    <span class="step-title">Create scripts/prewarm_cache.py</span>
+    <span class="step-phase">Phase 2</span>
+  </div>
+  <p>Call Claude API with <code>max_tokens=0</code> to write CONVENTIONS.md to cache before the first real request. Prints cache write token count from response usage.</p>
+  <pre><code># Usage: python scripts/prewarm_cache.py
+# Run this at the start of each work session</code></pre>
+  <div class="exit"><strong>Exit condition:</strong> Script runs, prints <code>cache_creation_input_tokens > 0</code> from API response. Subsequent <code>aider</code> session shows cache hits on first message.</div>
+</div>
+
+<div class="step">
+  <div class="step-header">
+    <span class="step-num">Step 2.3</span>
+    <span class="step-title">Run baseline session and record token metrics</span>
+    <span class="step-phase">Phase 2</span>
+  </div>
+  <p>Run one real Aider session (with <code>--no-stream</code> to expose cache stats). Do a representative task. Run <code>token_report.py</code> after. Record: total tokens, cache hit rate, estimated cost. Write to <code>docs/memory/</code> as a baseline checkpoint.</p>
+  <div class="exit"><strong>Exit condition:</strong> Baseline metrics recorded in checkpoint. Cache hit rate measured. Cost per session estimated.</div>
+</div>
+
+<!-- ═══ PHASE 3 ═══ -->
+<div class="phase-header">Phase 3 — Advanced Optimizations (Steps 3.1–3.2)</div>
+
+<div class="step">
+  <div class="step-header">
+    <span class="step-num">Step 3.1</span>
+    <span class="step-title">Evaluate architect mode for large refactors</span>
+    <span class="step-phase">Phase 3</span>
+  </div>
+  <p>Architect mode: Sonnet plans the change, Haiku writes the actual diffs. Output tokens (most expensive) are generated by Haiku at $4/MTok vs Sonnet's $15/MTok.</p>
+  <p>Test by adding to <code>.aider.conf.yml</code>:</p>
+  <pre><code>architect: true
+editor-model: claude-haiku-3-5</code></pre>
+  <p>Run same task in both modes. Compare token costs and output quality.</p>
+  <div class="exit"><strong>Exit condition:</strong> Decision recorded — use architect mode for tasks above N lines of change (fill in N after experiment).</div>
+</div>
+
+<div class="step">
+  <div class="step-header">
+    <span class="step-num">Step 3.2</span>
+    <span class="step-title">Add session start alias / Makefile target</span>
+    <span class="step-phase">Phase 3</span>
+  </div>
+  <p>Create a single command that: pre-warms cache, then launches Aider. Reduces friction and ensures cache is always warm.</p>
+  <pre><code># Makefile
+dev:
+    python scripts/prewarm_cache.py
+    aider</code></pre>
+  <div class="exit"><strong>Exit condition:</strong> <code>make dev</code> (or equivalent) pre-warms cache and starts Aider session in one command.</div>
+</div>
+
+<h2>Related</h2>
+<table>
+  <tr><th>File</th><th>Relationship</th></tr>
+  <tr><td><a href="../research/token_efficiency.html">docs/research/token_efficiency.html</a></td><td>Research this spec is derived from</td></tr>
+  <tr><td><a href="../../tasks/active/phase1_aider_setup.html">tasks/active/phase1_aider_setup.html</a></td><td>Active task tracking atomic steps</td></tr>
+  <tr><td><a href="../../memories/repo/project_structure.md">memories/repo/project_structure.md</a></td><td>Canonical cost table + phase status</td></tr>
+</table>
+
+</main>
+</body>
+</html>
