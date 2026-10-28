@@ -67,9 +67,9 @@ function fieldRow(r, s, k) {
   make.onclick = function () {
     make.remove();
     var guess = stepLabel(s).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').replace(/^(\d)/, 'p$1').slice(0, 32) || 'value';
-    var name = el('input', { class: 'pname', placeholder: 'name (e.g. month)', value: guess });
-    var label = el('input', { class: 'plabel', placeholder: 'Question (e.g. Which month)', value: stepLabel(s) });
-    var example = el('input', { class: 'pexample', placeholder: 'Example shown to others (e.g. October 2026)' });
+    var name = el('input', { class: 'pname', placeholder: 'name (e.g. customer)', value: guess });
+    var label = el('input', { class: 'plabel', placeholder: 'Question (e.g. Which customer)', value: stepLabel(s) });
+    var example = el('input', { class: 'pexample', placeholder: 'Example shown to others (e.g. Grace Hopper)' });
     var save = el('button', { class: 'psave small primary' }, 'Save param');
     save.onclick = function () {
       call({ type: 'set_param', id: r.id, step: k, param: { name: name.value.trim(), label: label.value.trim(), example: example.value.trim(), kind: 'text' } })
@@ -171,16 +171,20 @@ function renderRecordings() {
     li.appendChild(row);
 
     var chk = details(r.id + ':checks', 'Goal + checks');
-    var goal = el('input', { class: 'goal', placeholder: 'Goal: what must be true at the end (e.g. October statement downloaded)', value: r.goal || '' });
+    var goal = el('input', { class: 'goal', placeholder: 'Goal: what must be true at the end (e.g. marketing e-mails are off)', value: r.goal || '' });
     var texts = el('input', { class: 'texts', placeholder: 'Expect text on final page (comma separated)', value: (r.expect.texts || []).join(', ') });
     var url = el('input', { class: 'url', placeholder: 'Final URL (origin+path, * allowed; blank = no check)', value: r.expect.urlPattern || '' });
-    var dl = el('input', { class: 'dl', placeholder: 'Expect a download named like (regex, e.g. statement.*\\.pdf)', value: (r.expectDownload && r.expectDownload.nameRegex) || '' });
+    var dl = el('input', { class: 'dl', placeholder: 'Expect a download named like (regex, e.g. report.*\\.csv)', value: (r.expectDownload && r.expectDownload.nameRegex) || '' });
     var save = el('button', { class: 'save' }, 'Save goal + checks');
     save.onclick = function () {
       call({ type: 'save_recording', id: r.id, goal: goal.value.trim(), expectDownload: { nameRegex: dl.value.trim() },
              expect: { urlPattern: url.value.trim(), texts: texts.value.split(',').map(function (s) { return s.trim(); }).filter(Boolean) } }).then(refresh);
     };
-    [goal, texts, url, dl, save].forEach(function (x) { chk.appendChild(x); });
+    var lockl = el('label', { class: 'cloudlock' }), lock = el('input', { type: 'checkbox', class: 'nocloud' });
+    lock.checked = !!r.noCloud;
+    lock.onchange = function () { call({ type: 'set_recipe_cloud_lock', id: r.id, on: lock.checked }).then(refresh); };
+    lockl.appendChild(lock); lockl.appendChild(document.createTextNode(' Never use cloud for this recipe (repair / verify stay on this computer)'));
+    [goal, texts, url, dl, save, lockl].forEach(function (x) { chk.appendChild(x); });
     li.appendChild(chk);
 
     var typed = r.steps.map(function (s, k) { return [s, k]; }).filter(function (p) { return p[0].action === 'fill' || p[0].action === 'select'; });
@@ -267,7 +271,115 @@ function render() {
   renderImport(); renderRecordings(); renderRun();
 }
 
-async function refresh() { state = await call({ type: 'get_state' }); render(); }
+// ---- Tell it ---------------------------------------------------------------------------------------------
+var EXAMPLES = [
+  'Compare the price of the same product in two shops and tell me the cheaper one',
+  'Fill this job application up to, not including, Submit',
+  'Book the first free appointment slot next week, stop before confirming',
+  'Turn off marketing e-mails in my profile settings',
+  'Add Grace Hopper (grace@example.com) as a new lead in the CRM',
+  'Look up order 4417 in the admin table and tell me its status',
+  'Check whether train IC 512 is on time today',
+  'Collect the opening hours, phone number and address from this site',
+  'Draft a listing for a used bike, do not post it',
+  'Unsubscribe me from this newsletter',
+];
+var tell = null, tellCfg = null, lastTellSig = '', tellConfirmFor = '';
+$('tellexample').textContent = 'e.g. ' + EXAMPLES[Math.floor(Math.random() * EXAMPLES.length)];
+
+function renderTell() {
+  var t = tell, busy = t && t.status !== 'ended';
+  $('tellbar').hidden = !!busy;
+  $('tellpanel').hidden = !t;
+  if (tellCfg) {
+    $('tellbrain').textContent = tellCfg.agentBrain === 'claude'
+      ? 'Brain: Claude (' + tellCfg.agentClaudeModel + ', your key). Each step sends the page text and button names to Anthropic. Change in Options.'
+      : 'Brain: local model on this computer (' + tellCfg.agentModel + '). Page data never leaves this Mac.';
+  }
+  if (!t) return;
+  var sig = JSON.stringify([t.status, t.feed.length, t.pending && t.pending.nonce, t.takeover]);
+  if (sig === lastTellSig) return;
+  lastTellSig = sig;
+  $('tellgoalshow').textContent = t.goal;
+  var label = t.status === 'ended' ? (t.outcome || 'ended').toUpperCase() : t.status.replace('_', ' ').toUpperCase();
+  $('tellstatus').textContent = label; $('tellstatus').className = 'badge ' + (t.outcome === 'verified' ? 'VERIFIED' : t.status === 'ended' ? 'FAILED' : '');
+  var ol = $('tellfeed'); ol.textContent = '';
+  t.feed.slice(-30).forEach(function (f) {
+    var li = el('li', { class: f.kind }, f.kind === 'step' ? 'step ' + f.k + ': ' + f.text : f.text);
+    if (f.reason) li.appendChild(el('span', { class: 'why' }, f.reason));
+    ol.appendChild(li);
+  });
+  ol.scrollTop = ol.scrollHeight;
+  var p = t.pending, isConfirm = t.status === 'confirm';
+  $('tellpending').hidden = !p || isConfirm;
+  if (p && !isConfirm) {
+    $('tellpendingmsg').textContent = p.message;
+    $('tellapprove').hidden = $('telldecline').hidden = t.status !== 'awaiting_approval';
+    $('tellapprove').textContent = 'Approve "' + (p.target || '').slice(0, 40) + '"';
+    $('tellcontinue').hidden = t.status !== 'needs_user';
+  }
+  $('tellconfirm').hidden = !isConfirm;
+  if (isConfirm && tellConfirmFor !== p.nonce) {            // fill the editable proposal once per confirmation
+    tellConfirmFor = p.nonce;
+    var r = t.result || {}, pr = r.proposed || {};
+    $('tellanswer').textContent = 'It says: ' + (r.answer || 'done');
+    $('tellverifier').textContent = r.verifier ? (r.verifier.label ? 'Verifier: ' + r.verifier.label + ' ' + (r.verifier.reason || '') : 'Verifier: ' + (r.verifier.error || '')) : '';
+    $('tellname').value = t.goal.slice(0, 80);
+    $('tellcheckurl').value = pr.urlPattern || '';
+    $('tellchecktext').value = (pr.texts || []).join(', ');
+  }
+  var live = /^(running|paused|awaiting_approval|needs_user)$/.test(t.status);
+  $('tellpause').hidden = t.status !== 'running';
+  $('tellresume').hidden = t.status !== 'paused';
+  $('telltakeover').hidden = !live || !!t.takeover;
+  $('tellstop').hidden = !live && !isConfirm;
+  $('tellclose').hidden = t.status !== 'ended';
+  $('tellnotebar').hidden = !live;
+  $('tellreason').textContent = t.status === 'ended' ? t.reason || '' : '';
+}
+function tellDecideMsg(kind) {
+  var p = tell && tell.pending; if (!p) return;
+  var m = { type: kind, nonce: p.nonce };
+  var note = $('tellnote').value.trim(); if (note && kind !== 'tell_approve') { m.note = note; $('tellnote').value = ''; }
+  call(m).then(refresh);
+}
+$('tellgo').onclick = function () {
+  call({ type: 'tell_start', tabId: targetTab, goal: $('tellgoal').value.trim(), startUrl: $('tellurl').value.trim() })
+    .then(function () { $('tellgoal').value = ''; lastTellSig = ''; refresh(); });
+};
+$('tellpause').onclick = function () { call({ type: 'tell_pause' }).then(refresh); };
+$('tellresume').onclick = function () { call({ type: 'tell_resume' }).then(refresh); };
+$('telltakeover').onclick = function () { call({ type: 'tell_takeover' }).then(refresh); };
+$('tellstop').onclick = function () { call({ type: 'tell_stop' }).then(refresh); };
+$('tellclose').onclick = function () { call({ type: 'tell_clear' }).then(function () { lastTellSig = ''; refresh(); }); };
+$('tellapprove').onclick = function () { tellDecideMsg('tell_approve'); };
+$('telldecline').onclick = function () { tellDecideMsg('tell_decline'); };
+$('tellcontinue').onclick = function () { tellDecideMsg('tell_continue'); };
+$('tellnotego').onclick = function () {
+  var v = $('tellnote').value.trim(); if (!v) return;
+  if (tell && tell.status === 'needs_user') return tellDecideMsg('tell_continue');
+  call({ type: 'tell_note', text: v }).then(function () { $('tellnote').value = ''; refresh(); });
+};
+$('tellyes').onclick = function () {
+  var p = tell && tell.pending; if (!p) return;
+  call({ type: 'tell_confirm', nonce: p.nonce, yes: true, name: $('tellname').value.trim(),
+         expect: { urlPattern: $('tellcheckurl').value.trim(), texts: $('tellchecktext').value.split(',').map(function (x) { return x.trim(); }).filter(Boolean) } })
+    .then(function (rec) { notice('Saved "' + rec.name + '". Run it from Recordings any time.'); lastSig = ''; refresh(); });
+};
+$('tellno').onclick = function () { var p = tell && tell.pending; if (p) call({ type: 'tell_confirm', nonce: p.nonce, yes: false }).then(refresh); };
+$('exporttraining').onclick = function () {
+  if (!confirm('Save your Tell-it runs as a file on this computer? It contains the page text the agent saw on each step. Nothing is uploaded.')) return;
+  call({ type: 'tell_export_training' }).then(function (d) {
+    download('awos-tellit-training-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(d, null, 1));
+  });
+};
+
+async function refresh() {
+  state = await call({ type: 'get_state' });
+  var ts = await call({ type: 'tell_state' });
+  tell = ts.tell; tellCfg = ts.settings;
+  render(); renderTell();
+}
 
 $('rec').onclick = function () { call({ type: 'start_recording', tabId: targetTab }).then(refresh); };
 $('stop').onclick = function () {

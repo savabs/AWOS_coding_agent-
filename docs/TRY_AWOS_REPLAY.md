@@ -5,7 +5,7 @@ AWOS Replay is a Chrome extension: **show a web chore once, then replay it whene
 - It never pays, sends, deletes or submits without your click.
 - Nothing leaves your machine: the model runs on 127.0.0.1, and recordings stay in Chrome's local storage.
 
-> Status: MVP. It works on our test pages (28 automated tests). These are its first real sites, and the point of this
+> Status: MVP. It works on our test pages (automated tests on local pages). These are its first real sites, and the point of this
 > round is to find where it breaks. Use a **separate Chrome profile**, and start with low-risk chores.
 
 ## 1. Install (once)
@@ -20,10 +20,10 @@ AWOS Replay is a Chrome extension: **show a web chore once, then replay it whene
 1. Open the start page of the chore and log in yourself (AWOS never stores passwords).
 2. Click the AWOS icon, then **Record this tab**. Do the chore once, normally. Then click **Stop recording**.
 3. Under the recording, fill in two fields, then click **Save goal + checks**:
-   - **Goal**: what must be true at the end, with the details that matter (for example "October 2026 statement for account
-     ...1234 downloaded"). The local verifier reads it.
-   - **Expect text on final page**: a phrase that only appears when it worked (for example "Statement downloaded",
-     "Saved", or the month's name). Without a check, the run can only end UNVERIFIED.
+   - **Goal**: what must be true at the end, with the details that matter (for example "marketing e-mails are off and
+     the language is Deutsch"). The local verifier reads it.
+   - **Expect text on final page**: a phrase that only appears when it worked (for example "Settings saved", "Lead
+     added", or the order number). Without a check, the run can only end UNVERIFIED.
 
 ## 3. Replay
 - Click **Run** on the recording.
@@ -40,11 +40,31 @@ AWOS Replay is a Chrome extension: **show a web chore once, then replay it whene
 ## 4. Good first chores (recurring, low risk)
 | Chore | Why it is a good test |
 |---|---|
-| Download last month's statement from a bank or card portal | login wall (you type), menus, a date picker, a download |
-| Download this month's invoice from a SaaS billing page (Google Workspace, AWS, Notion, Zoom...) | the classic month-end chore |
-| Export a CSV report from a dashboard (Stripe, analytics, a CRM) | filters, then export |
-| Fill a weekly timesheet or expense form, stopping at Submit | form filling; the approval gate must pause at Submit |
-| Check an order or shipment status page | a read-only check with an expected text |
+| Change a setting in a profile / settings page (notifications, language) | checkboxes, a dropdown, a save with a status text |
+| Add a contact or lead to a CRM-style form | form filling; typed values become "Ask each run" params |
+| Look up a record in an internal admin table or portal | a search box (Enter), a private page that must stay local |
+| Check a train, flight or order status page | a read-only check with an expected text |
+| Fill a weekly timesheet or a job application, stopping at Submit | the approval gate must pause at Submit |
+| Export a CSV report from a dashboard | filters, then a download check |
+
+## 4b. Tell it (v0.5): describe the chore instead of recording it
+Type what you want in the popup's **Tell it** box and press **Start**; the agent does it in the tab while you watch.
+- **The brain is local by default**: an agent model on your Mac (llama-server, e.g. Qwen3.5-4B, or Qwen3.5-9B on a
+  16 GB+ Mac): `llama-server -m Qwen3.5-4B-Instruct-Q4_K_M.gguf --port 8080`. The 2B model from step 1 only repairs and
+  verifies; it cannot drive a page. Pages you open with Tell it (intranet, CRM, bank, e-mail) never leave the Mac.
+- **Claude is opt-in**: Options -> Tell it -> "Claude with your own API key" plus the consent box. When it is on, each
+  step's page text and button names go to Anthropic. Add sites to "Never use the cloud on these sites" and Tell it
+  stops before sending anything from them; a recipe can be locked the same way.
+- Each step shows its reason and action. **Pause**, **Stop**, **Take over** (do it by hand; Resume hands back), or type a
+  correction ("no, use the Settings tab"). Submit / pay / send / delete / unsubscribe-like clicks wait for **Approve**.
+  Passwords and codes: you type them in the page, then **Continue**.
+- When it says done, check the page, edit the proposed checks, and click **Yes, that's it**: it is saved as a normal
+  recording and replays like one.
+- Good first goals: "turn off marketing e-mails in my settings", "add Grace Hopper as a new lead", "what is the
+  status of order 4417 in the admin table", "fill this application up to, not including, Submit", "compare the price
+  of this product in two shops and tell me the cheaper one".
+- **Export training data** saves your Tell-it runs to a file (it contains the page text the agent saw; nothing is
+  uploaded). Details: `docs/specs/tell_it.md`.
 
 ## 5. Send the results back
 Click **Export run log** in the popup and send the JSON file.

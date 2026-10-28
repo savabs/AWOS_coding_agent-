@@ -22,7 +22,7 @@
 cannot be re-found by itself, and to double-check the final page.</p>
 
 <fieldset>
-  <legend>Brain</legend>
+  <legend>Brain for repair and verify</legend>
   <label class="choice"><input type="radio" name="brain" value="local" id="brain-local"> Local model (private, free)</label>
   <div class="hint">Runs on this Mac at the endpoint below. Nothing leaves your machine. <span id="localstatus"></span></div>
   <label class="choice"><input type="radio" name="brain" value="claude" id="brain-claude"> Claude (your own API key)</label>
@@ -34,6 +34,32 @@ cannot be re-found by itself, and to double-check the final page.</p>
     <div class="hint" id="keystate"></div>
     <label class="choice"><input type="checkbox" id="cloudConsent"> I agree that page data from my runs is sent to Anthropic</label>
   </div>
+</fieldset>
+
+<fieldset id="tellset">
+  <legend>Tell it (the agent that does a task from your words)</legend>
+  <label class="choice"><input type="radio" name="agentBrain" value="local" id="agent-local"> Local agent model on this Mac (default, private, free)</label>
+  <div class="hint">Every page the agent reads stays on this computer: intranet, CRM, HR portal, bank, e-mail.
+  Needs an <em>agent</em> model served by llama-server, e.g. Qwen3.5-4B (8 GB Macs) or Qwen3.5-9B (16 GB or more, stronger):
+  <code>llama-server -m Qwen3.5-4B-Instruct-Q4_K_M.gguf --port 8080</code>. The small 2B model AWOS installs for
+  repair / verify cannot drive a page by itself. <span id="agentstatus"></span></div>
+  <label for="agentEndpoint">Agent model endpoint (OpenAI-compatible, loopback only)</label>
+  <input type="text" id="agentEndpoint" placeholder="http://127.0.0.1:8080/v1">
+  <label for="agentModel">Agent model name</label>
+  <input type="text" id="agentModel" placeholder="qwen3.5-4b">
+  <label class="choice"><input type="radio" name="agentBrain" value="claude" id="agent-claude"> Claude with your own API key (opt-in)</label>
+  <div class="hint">Off unless you pick it and tick the consent box below. When on, on every step the page's text, its
+  button and field names, the values the agent types and your goal are sent to Anthropic. Passwords and codes never are
+  (you type those yourself).</div>
+  <label for="agentClaudeModel">Claude model for Tell it</label>
+  <select id="agentClaudeModel"><option value="claude-haiku-5-5">claude-haiku-5-5 (fast, cheap)</option>
+    <option value="claude-sonnet-5-5">claude-sonnet-5-5 (stronger, ~20x the price)</option></select>
+  <label for="noCloudSites">Never use the cloud on these sites (one per line, e.g. intranet.example.com)</label>
+  <textarea id="noCloudSites" rows="3" style="width:100%;box-sizing:border-box;font:inherit"></textarea>
+  <div class="hint">Wins over every setting above: on these sites Tell it stops before sending anything, and replay
+  repair / verify use the local model only. A single recipe can be locked too (Recordings, "Goal + checks").</div>
+  <label class="choice"><input type="checkbox" id="keepTraining"> Keep my Tell-it runs on this computer as training data
+  (exported only when I click "Export training data")</label>
 </fieldset>
 
 <label for="endpoint">Local model endpoint (OpenAI-compatible)</label>

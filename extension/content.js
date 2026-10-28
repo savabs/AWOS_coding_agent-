@@ -22,6 +22,8 @@
  *          after a user click in the extension UI) -- a second, local gate.
  *          strict:true (scheduled run / imported recipe) also gates submit / confirm / order / ...
  *   check  {texts} -> which expected texts are present on the page
+ *   agent_observe / agent_act {act, approved, expectName} / agent_secrets -> Tell it (lib/agent.js contract):
+ *          act on control n of the last observation, with the same danger / sensitive-field gates
  * Messages are plain JSON; element handles never leave the page.
  */
 (function () {
@@ -57,7 +59,7 @@
   /** danger text for an Enter in a field: the field, its form, and the form's default button. */
   function pressDanger(el, name, strict) {
     var b = defaultButton(el);
-    return S.dangerMatchStrict([S.dangerContext(el, name), b ? S.dangerContext(b, L.accName(b)) : ''].join(' | '), strict === true);
+    return S.dangerMatchStrict([S.dangerContext(el, name), b ? S.dangerContext(b, L.accName(b)) : ''].join(' | '), strict === 'tell' ? 'tell' : strict === true);
   }
 
   function onClick(e) {
@@ -246,6 +248,55 @@
     if (el.isConnected) el.dispatchEvent(new KeyboardEvent('keyup', o));
   }
 
+  // ---- Tell it: act on control n of the last observe() (the agent's numbering) -----------------------------
+  // The service worker validated the action against the observation already; this is the second, local gate:
+  // approval-gated clicks / Enters (AWOSSafety TELL_RE: pay, send, delete, submit, place order, confirm, unsubscribe ...) are refused
+  // unless approved:true, sensitive fields are never filled (the user types them), and the control must still
+  // carry the name the agent saw (expectName) so an approval binds to that exact control.
+  function agentAct(msg, reply) {
+    var a = msg.act || {}, el = L.observed(a.n);
+    if (a.verb === 'scroll') { window.scrollBy(0, (a.direction === 'up' ? -1 : 1) * Math.round(innerHeight * 0.8)); return reply({ ok: true }); }
+    if (!el || !el.isConnected) return reply({ ok: false, error: 'control ' + a.n + ' is gone (the page changed)' });
+    var name = L.accName(el);
+    if (msg.expectName != null && name !== msg.expectName) return reply({ ok: false, error: 'control ' + a.n + ' changed (the page changed)' });
+    var loc = L.describe(el);
+    el.scrollIntoView({ block: 'center', inline: 'nearest' });
+    if (a.verb === 'click' || (a.verb === 'select' && el.tagName !== 'SELECT')) {
+      var d = S.dangerMatchStrict(S.dangerContext(el, name), 'tell');
+      if (d && msg.approved !== true) return reply({ ok: false, needsApproval: true, danger: d, loc: loc });
+      reply({ ok: true, loc: loc, url: location.href, asClick: true, recDanger: S.dangerMatch(S.dangerContext(el, loc.name)) });
+      setTimeout(function () { el.focus && el.focus(); el.click(); }, 0);
+      return;
+    }
+    if (a.verb === 'fill' || a.verb === 'fill_enter') {
+      var sr = S.sensitiveField(el);
+      if (sr) return reply({ ok: false, secret: sr, loc: loc });
+      if (a.verb === 'fill_enter') {
+        var pd = pressDanger(el, name, 'tell');
+        if (pd && msg.approved !== true) return reply({ ok: false, needsApproval: true, danger: pd, loc: loc });
+      }
+      setValue(el, String(a.value == null ? '' : a.value));
+      if (a.verb === 'fill') return reply({ ok: true, loc: loc });
+      reply({ ok: true, loc: loc, url: location.href, recDanger: pressDanger(el, name, false) });
+      setTimeout(function () { pressEnter(el); }, 0);
+      return;
+    }
+    if (a.verb === 'select') {
+      var want = S.norm(a.option).toLowerCase();
+      var o = Array.prototype.slice.call(el.options).find(function (x) { return S.norm(x.text).toLowerCase() === want; });
+      if (!o) return reply({ ok: false, error: '"' + a.option + '" is not an option here' });
+      setValue(el, o.value);
+      return reply({ ok: true, loc: loc, value: o.value, optionText: S.norm(o.text) });
+    }
+    reply({ ok: false, error: 'unknown action' });
+  }
+  /** sensitive fields the user has typed into (values never leave the page: only the locator and the reason). */
+  function agentSecrets() {
+    return L.deepAll(L.KIND_SELECTOR.fill).filter(function (el) {
+      return S.sensitiveField(el) && String(el.value || '').length > 0;
+    }).map(function (el) { return { loc: L.describe(el), reason: S.sensitiveField(el) }; });
+  }
+
   function banner(text) {
     var b = document.getElementById('__awos_banner');
     if (!text) { if (b) b.remove(); return; }
@@ -272,6 +323,9 @@
       }
       case 'page_text': reply({ url: location.href, text: S.norm(document.body ? document.body.innerText : '').slice(0, 2000) }); return;
       case 'observe': reply(L.observe()); return;             // the final page for the local verifier
+      case 'agent_observe': reply(L.observe()); return;       // Tell it: the page, numbered as the agent sees it
+      case 'agent_act': agentAct(msg, reply); return;
+      case 'agent_secrets': reply({ fields: agentSecrets() }); return;
       case 'banner': banner(msg.text); reply({ ok: true }); return;
     }
   });

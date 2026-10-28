@@ -1,0 +1,13 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Orders admin: results</title></head>
+<body>
+<h1>Results</h1>
+<table><tr><th>Order</th><th>Customer</th><th>Status</th></tr><tr><td id="o"></td><td>Grace Hopper</td><td id="s"></td></tr></table>
+<p role="status" id="msg"></p>
+<script>
+  var q = new URLSearchParams(location.search).get('q') || '';
+  document.getElementById('o').textContent = q;
+  document.getElementById('s').textContent = q === '4417' ? 'Shipped' : 'Unknown';
+  document.getElementById('msg').textContent = '1 order found for ' + q;
+</script>
+</body></html>

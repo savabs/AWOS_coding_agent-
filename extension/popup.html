@@ -27,6 +27,46 @@
     <button id="imp-no">Discard</button>
   </section>
 
+  <section id="tellbar">
+    <h3>Tell it</h3>
+    <textarea id="tellgoal" rows="2" placeholder="Tell it what to do…"></textarea>
+    <div class="muted" id="tellexample"></div>
+    <div class="acts">
+      <input id="tellurl" placeholder="Start page (optional; default: this tab)">
+      <button id="tellgo" class="primary">Start</button>
+    </div>
+    <div class="muted" id="tellbrain"></div>
+  </section>
+
+  <section id="tellpanel" hidden>
+    <div class="row"><span id="tellgoalshow"></span><span id="tellstatus" class="badge"></span></div>
+    <ol id="tellfeed" class="steps"></ol>
+    <div id="tellpending" hidden>
+      <p id="tellpendingmsg"></p>
+      <button id="tellapprove" class="danger" hidden>Approve</button>
+      <button id="telldecline" hidden>No, don't</button>
+      <button id="tellcontinue" hidden>Continue</button>
+    </div>
+    <div id="tellconfirm" hidden>
+      <p id="tellanswer"></p>
+      <p id="tellverifier" class="muted"></p>
+      <label>Recipe name</label><input id="tellname">
+      <label>Check: ends at (origin + path, * allowed)</label><input id="tellcheckurl">
+      <label>Check: the final page shows (comma separated)</label><input id="tellchecktext">
+      <div class="acts"><button id="tellyes" class="primary">Yes, that's it: save as recipe</button><button id="tellno">No</button></div>
+    </div>
+    <div class="acts" id="tellctl">
+      <button id="tellpause">Pause</button><button id="tellresume" hidden>Resume</button>
+      <button id="telltakeover">Take over</button><button id="tellstop">Stop</button>
+      <button id="tellclose" hidden>Close</button>
+    </div>
+    <div class="acts" id="tellnotebar">
+      <input id="tellnote" placeholder="Correct it (e.g. use the Settings tab, not Profile)">
+      <button id="tellnotego">Send</button>
+    </div>
+    <p id="tellreason"></p>
+  </section>
+
   <section id="recbar">
     <button id="rec" class="primary">Record this tab</button>
     <button id="stop" hidden>Stop recording</button>
@@ -63,6 +103,10 @@
   <section>
     <button id="export">Export run log</button>
     <span class="muted">redacted: no typed values, no URL queries</span>
+  </section>
+  <section>
+    <button id="exporttraining">Export training data</button>
+    <span class="muted">your Tell-it runs, saved to a file on this computer; nothing is uploaded</span>
   </section>
   <p id="notice" class="ok"></p>
   <p id="error" class="error"></p>

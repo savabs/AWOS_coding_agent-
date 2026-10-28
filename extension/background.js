@@ -40,7 +40,7 @@
  * downgrade VERIFIED to CHECK ("look at this one"), and its opinion is logged on
  * every run.
  */
-importScripts('lib/safety.js', 'lib/model.js', 'lib/recipe.js');
+importScripts('lib/safety.js', 'lib/model.js', 'lib/recipe.js', 'lib/agent.js');
 var S = self.AWOSSafety, M = self.AWOSModel, R = self.AWOSRecipe;
 
 // ---- storage helpers --------------------------------------------------------
@@ -49,6 +49,19 @@ async function setLocal(key, val) { var o = {}; o[key] = val; await chrome.stora
 async function getSess(key) { var o = await chrome.storage.session.get(key); return o[key] || null; }
 async function setSess(key, val) { var o = {}; o[key] = val; if (val === null) await chrome.storage.session.remove(key); else await chrome.storage.session.set(o); }
 async function settings() { var s = Object.assign({}, M.DEFAULTS, await getLocal('settings', {})); delete s.claudeKey; return s; }
+/** brainSettings for a replay, with the "never use cloud" lock applied: a locked recipe or a locked site (its start
+ *  page) never goes to Claude; repair / verify use the local model instead. The lock always wins. */
+async function lockedBrain(run, rec) {
+  var cfg = await brainSettings();
+  if (cfg.brain !== 'claude') return cfg;
+  var site = R.siteOf(rec.startUrl || '');
+  var why = rec.noCloud ? 'this recipe' : (site && (cfg.noCloudSites || []).indexOf(site) >= 0 ? site : '');
+  if (why) {
+    cfg.brain = 'local'; delete cfg.claudeKey;
+    if (!run.cloudLockLogged) { run.cloudLockLogged = true; logRun(run, 'cloud is locked off for ' + why + ': repair / verify use the local model only'); }
+  }
+  return cfg;
+}
 /** settings plus the API key, only for the model call itself. */
 async function brainSettings() { var s = await settings(); if (s.brain === 'claude') s.claudeKey = await getLocal('claudeKey', ''); return s; }
 async function getRec(id) { return (await getLocal('recordings', {}))[id] || null; }
@@ -165,6 +178,8 @@ async function busyReason() {
   var cur = await getSess('run');
   if (cur && /^(running|awaiting_approval|needs_user)$/.test(cur.status)) return 'a replay is already in progress';
   if (await getSess('recState')) return 'stop the recording before running a replay';
+  var tl = await getSess('tell');
+  if (tl && /^(running|paused|awaiting_approval|needs_user|confirm)$/.test(tl.status)) return 'a Tell-it run is in progress';
   return '';
 }
 
@@ -203,7 +218,7 @@ async function driveInner(runId) {
   if (!run || run.id !== runId || run.status !== 'running') return;
   var rec = await getRec(run.recId);
   if (!rec) return fail(run, 'ERROR', 'the recording was deleted');
-  var cfg = await brainSettings();
+  var cfg = await lockedBrain(run, rec);
   var strict = run.scheduled || !!rec.imported;      // nobody watching / someone else's recipe: stricter gate vocabulary
   while (run.i < rec.steps.length) {
     var i = run.i;
@@ -424,7 +439,7 @@ async function finish(run, rec) {
   // second opinion from the local verifier (G7). It may only DOWNGRADE: a VERIFIED it disagrees with
   // becomes CHECK ("look at this one"); it never turns UNVERIFIED / FAILED into a pass. Its opinion is
   // always recorded (shadow mode for the other verdicts), so exported logs show what it would have caught.
-  var cfg = await brainSettings();
+  var cfg = await lockedBrain(run, rec);
   if (cfg.enabled && cfg.verify !== false) {
     var obs = await sendRetry(run.tabId, { type: 'observe' }).catch(function () { return null; });
     var P = run.params || {};
@@ -766,7 +781,13 @@ var HANDLERS = {
   save_settings: async function (msg) {
     var s = Object.assign({}, msg.settings || {}); delete s.claudeKey;
     if (s.brain !== 'claude') s.brain = 'local';
-    s.cloudConsent = s.brain === 'claude' && s.cloudConsent === true;     // consent only means something with the Claude brain
+    if (s.agentBrain !== 'claude') s.agentBrain = 'local';                 // Tell it: local unless the user opts in
+    s.cloudConsent = (s.brain === 'claude' || s.agentBrain === 'claude') && s.cloudConsent === true;   // consent only means something with a Claude brain
+    if (s.agentEndpoint != null && !M.isLoopback(s.agentEndpoint)) throw new Error('the agent endpoint must be loopback (127.0.0.1 / localhost)');
+    if (s.agentClaudeModel != null && ['claude-haiku-5-5', 'claude-sonnet-5-5'].indexOf(s.agentClaudeModel) < 0) s.agentClaudeModel = 'claude-haiku-5-5';
+    if (s.noCloudSites != null) s.noCloudSites = (Array.isArray(s.noCloudSites) ? s.noCloudSites : String(s.noCloudSites).split(/[\s,]+/))
+      .map(function (x) { x = String(x).trim().toLowerCase(); return /^https?:/.test(x) ? R.siteOf(x) : R.registrableDomain(x.replace(/\/.*$/, '')); })
+      .filter(Boolean).filter(function (x, i, a) { return a.indexOf(x) === i; }).slice(0, 200);
     await setLocal('settings', s); return settings();
   },
   save_claude_key: async function (msg) {
@@ -813,3 +834,5 @@ chrome.runtime.onMessage.addListener(function (msg, sender, reply) {
   }
   await armAll(true);                 // alarms normally persist; re-arm any that went missing
 })();
+
+importScripts('tellit.js');          // Tell it (v0.5): goal -> agent loop -> recipe; uses the helpers above

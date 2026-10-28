@@ -41,3 +41,13 @@ button.small { padding: 2px 8px; font-size: 12px; }
 #importpanel .meta { color: #59636e; font-size: 12px; margin: 2px 0; }
 .steps { max-height: 160px; overflow: auto; font-size: 12px; padding-left: 20px; margin: 4px 0; }
 .warnlist li { color: #953800; font-size: 12px; }
+#tellbar textarea { width: 100%; box-sizing: border-box; font: inherit; resize: vertical; }
+#tellpanel { border: 2px solid #8250df; border-radius: 6px; padding: 6px 8px; }
+#tellpanel input { width: 100%; box-sizing: border-box; font: inherit; }
+#tellpanel .acts input { width: auto; }
+#tellpanel label { display: block; font-size: 12px; margin-top: 4px; }
+#tellfeed li .why { color: #59636e; display: block; }
+#tellfeed li.bad, #tellfeed li.warn { color: #953800; }
+#tellfeed li.approve, #tellfeed li.wait { color: #a40e26; }
+#tellpending { border: 2px solid #cf222e; border-radius: 6px; padding: 6px 8px; margin: 6px 0; }
+#tellconfirm { border: 2px solid #1a7f37; border-radius: 6px; padding: 6px 8px; margin: 6px 0; }
