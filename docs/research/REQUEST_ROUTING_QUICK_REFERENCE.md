@@ -1,3 +1,9 @@
+---
+title: "Request Routing & Intent Understanding — Quick Reference"
+tags:
+  - doc/research
+---
+
 # Request Routing & Intent Understanding — Quick Reference
 
 ## TL;DR
@@ -179,3 +185,8 @@ def semantic_route(request, confidence_threshold=0.70):
 ---
 
 **Full research:** [request_routing_architectures.html](request_routing_architectures.html)
+
+## Related
+
+- _(add links to related documents here)_
+

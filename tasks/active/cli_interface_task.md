@@ -1,3 +1,10 @@
+---
+title: "CLI Interface Task"
+tags:
+  - doc/task
+  - status/active
+---
+
 # CLI Interface Task
 
 ## Status: COMPLETE — 2026-05-17
@@ -37,3 +44,8 @@ Build a standalone `awos` CLI command that exposes all agent capabilities:
 
 ## Time Estimate
 ~2 hours (actual)
+
+## Related
+
+- _(add links to related documents here)_
+

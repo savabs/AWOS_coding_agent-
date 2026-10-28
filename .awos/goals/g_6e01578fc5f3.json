@@ -1,0 +1,99 @@
+{
+  "root_id": "g_6e01578fc5f3",
+  "nodes": {
+    "g_6e01578fc5f3": {
+      "goal_id": "g_6e01578fc5f3",
+      "description": "Add a health_check() method to the Orchestrator class in scaffold/agent/orchestrator.py that returns a dict with the readiness state of each component: LinUCB (is_ready, total_updates), GP (is_fitted), PRM (trained or dormant), VectorMemory (available), CriticEngine (enabled), and PostMortemEngine (patterns stored count)",
+      "parent_ids": [],
+      "child_ids": [
+        "g_49facb9f65a7",
+        "g_631aa706990c",
+        "g_5adf357c1657"
+      ],
+      "tasks": [],
+      "status": "in_progress",
+      "created_at": "2026-05-24T09:41:39Z",
+      "updated_at": "2026-05-24T12:13:11Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_a4101add",
+        "orch_50769b75"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_49facb9f65a7": {
+      "goal_id": "g_49facb9f65a7",
+      "description": "Add a `health_check()` method to the `Orchestrator` class. This method will query the readiness state of its component instances (LinUCB, GP, PRM, VectorMemory, CriticEngine, PostMortemEngine) and return a dictionary containing these states. Assume the Orchestrator holds these components as attributes (e.g., `self.linucb_component`) and they expose the required status via properties or methods (e.g., `is_ready()`, `total_updates`, `is_fitted`). Handle cases where components might not be initialized.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "scaffold/agent/orchestrator.py",
+          "action": "Add a `health_check()` method to the `Orchestrator` class. This method will query the readiness state of its component instances (LinUCB, GP, PRM, VectorMemory, CriticEngine, PostMortemEngine) and return a dictionary containing these states. Assume the Orchestrator holds these components as attributes (e.g., `self.linucb_component`) and they expose the required status via properties or methods (e.g., `is_ready()`, `total_updates`, `is_fitted`). Handle cases where components might not be initialized.",
+          "complexity": "medium"
+        }
+      ],
+      "status": "failed",
+      "created_at": "2026-05-24T09:42:06Z",
+      "updated_at": "2026-05-24T12:13:21Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_a4101add",
+        "orch_a38f20fa",
+        "orch_50769b75"
+      ],
+      "failure_count": 3,
+      "critique_ids": []
+    },
+    "g_631aa706990c": {
+      "goal_id": "g_631aa706990c",
+      "description": "Add a new test case to verify the functionality of `Orchestrator.health_check()`. This test should instantiate an `Orchestrator` (potentially with mocked components to control their state) and assert that the `health_check()` method returns a dictionary with the expected structure and accurate readiness information for each component.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "file": "test_week1.py",
+          "action": "Add a new test case to verify the functionality of `Orchestrator.health_check()`. This test should instantiate an `Orchestrator` (potentially with mocked components to control their state) and assert that the `health_check()` method returns a dictionary with the expected structure and accurate readiness information for each component.",
+          "complexity": "medium"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-05-24T09:42:06Z",
+      "updated_at": "2026-05-24T12:13:38Z",
+      "completed_at": "2026-05-24T12:13:38Z",
+      "session_ids": [
+        "orch_a4101add",
+        "orch_a38f20fa",
+        "orch_50769b75"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_5adf357c1657": {
+      "goal_id": "g_5adf357c1657",
+      "description": "Complete the `health_check` method within the `Orchestrator` class by adding readiness checks for CriticEngine (enabled) and PostMortemEngine (patterns stored count) components. Ensure all component checks are aggregated into the final return dictionary.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 3,
+          "file": "scaffold/agent/orchestrator.py",
+          "action": "Complete the `health_check` method within the `Orchestrator` class by adding readiness checks for CriticEngine (enabled) and PostMortemEngine (patterns stored count) components. Ensure all component checks are aggregated into the final return dictionary.",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-05-24T12:13:11Z",
+      "updated_at": "2026-05-24T12:13:49Z",
+      "completed_at": "2026-05-24T12:13:49Z",
+      "session_ids": [
+        "orch_50769b75"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

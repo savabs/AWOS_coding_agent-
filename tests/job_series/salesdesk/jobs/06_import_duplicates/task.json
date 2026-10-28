@@ -1,0 +1,7 @@
+{
+  "id": "06_import_duplicates",
+  "goal": "Bug: `import` crashes with a long sqlite IntegrityError traceback when the CSV contains an order_id we already have (which happens every time someone re-imports yesterday's file), and nothing at all gets imported. It also happily imports rows for customers that were never registered. Such rows should be treated like the other bad rows import already skips: skip them, report them with their line number (`line N: duplicate order_id 'o1'` - also when the id appears twice in the same file, the later row is the duplicate - and `line N: unknown customer 'zz'`), and import all the good rows. The skipped lines should be listed in file order, and the existing orders must stay untouched.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

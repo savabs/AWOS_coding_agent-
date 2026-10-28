@@ -60,7 +60,9 @@ print("\n2. Budget")
 rc, out = run(["budget"])
 assert_test("budget_exit_0", rc == 0, f"exit={rc}")
 assert_test("budget_has_spent", "Spent:" in out, out[:200])
-assert_test("budget_has_requests", "Requests:" in out)
+# The budget report is token-first: call count is reported on the Tokens line
+# ("Tokens: N across M API calls"), not under a separate "Requests:" heading.
+assert_test("budget_has_calls", "API calls" in out, out[:200])
 
 # ── 3. Memory stats ────────────────────────────────────────────────────
 print("\n3. Memory stats")

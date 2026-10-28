@@ -1,0 +1,117 @@
+# Watch AWOS computer use LIVE on a free GitHub macOS runner (a disposable macOS VM).
+# The runner streams its own screen (screencapture -> MJPEG, view-only) from a tiny server
+# (scripts/live_screen_server.py) behind HTTP Basic auth (user "viewer", password =
+# LIVE_VIEW_PASSWORD repo secret), exposed through a temporary Cloudflare quick tunnel.
+# The link is published as a commit status (context "live-view"). Demos then run while you
+# watch, and the runner stays up HOLD_MIN extra minutes.
+# Launch: push to a branch named bench-cloud/mac-view-<anything>. Settings: ci/mac_live_view.env.
+name: mac-live-view
+
+on:
+  push:
+    branches: ["bench-cloud/mac-view-**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write   # publish the live-view link as a commit status (readable immediately)
+
+jobs:
+  live:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      CLOUDFLARED_VERSION: "2026.9.3"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require the viewing password
+        env:
+          PW: ${{ secrets.LIVE_VIEW_PASSWORD }}
+        run: |
+          if [ -z "$PW" ]; then
+            echo "::error::Set the repo secret LIVE_VIEW_PASSWORD first (gh secret set LIVE_VIEW_PASSWORD)"; exit 1
+          fi
+          if [ "${#PW}" -lt 8 ]; then echo "::error::LIVE_VIEW_PASSWORD must be at least 8 characters"; exit 1; fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Deps
+        run: |
+          pip install -q -r requirements.txt pyobjc-framework-ApplicationServices pyobjc-framework-Quartz \
+            pyobjc-framework-Cocoa pyobjc-framework-FSEvents keyring
+
+      - name: Live screen stream + tunnel
+        env:
+          LIVE_VIEW_PASSWORD: ${{ secrets.LIVE_VIEW_PASSWORD }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          nohup python scripts/live_screen_server.py --port 6080 --interval 1 > "$HOME/screen.log" 2>&1 &
+          for i in $(seq 1 30); do nc -z 127.0.0.1 6080 && break; sleep 1; done
+          nc -z 127.0.0.1 6080 || { cat "$HOME/screen.log"; echo "::error::screen server did not start"; exit 1; }
+          # self-test: page comes back with the password, 401 without
+          code=$(curl -s -o /dev/null -w '%{http_code}' -u "viewer:$LIVE_VIEW_PASSWORD" http://127.0.0.1:6080/)
+          noauth=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:6080/)
+          echo "self-test: with password=$code without=$noauth"
+          [ "$code" = 200 ] && [ "$noauth" = 401 ] || { echo "::error::auth self-test failed"; exit 1; }
+          curl -fsSL -o /tmp/cf.tgz \
+            "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-darwin-arm64.tgz"
+          tar -xzf /tmp/cf.tgz -C /tmp
+          nohup /tmp/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:6080 > "$HOME/cf.log" 2>&1 &
+          URL=""
+          for i in $(seq 1 60); do
+            URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$HOME/cf.log" | head -1 || true)
+            [ -n "$URL" ] && break; sleep 2
+          done
+          [ -n "$URL" ] || { cat "$HOME/cf.log"; echo "::error::tunnel did not come up"; exit 1; }
+          echo "LIVE VIEW: $URL  (user viewer)"
+          echo "## Live view: $URL (user viewer)" >> "$GITHUB_STEP_SUMMARY"
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" -f state=pending \
+            -f context="live-view" -f description="user: viewer, password: LIVE_VIEW_PASSWORD" -f target_url="$URL" >/dev/null \
+            && echo "published live-view status"
+
+      - name: Give the viewer time to connect
+        run: |
+          source ci/mac_live_view.env
+          open -a Clock 2>/dev/null || true   # something moving on screen while waiting
+          echo "waiting ${WAIT_BEFORE_S}s before the demos start"; sleep "$WAIT_BEFORE_S"
+
+      - name: Live demos (watch them in the viewer)
+        shell: bash
+        run: |
+          set +e
+          source ci/mac_live_view.env
+          mkdir -p out
+          C="$HOME/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari"
+          for D in com.apple.Safari "$C"; do
+            defaults write "$D" AutoFillPasswords -bool false
+            defaults write "$D" CanPromptForPushNotifications -bool false
+          done
+          for T in $DEMOS; do
+            osascript -e 'quit app "Safari"' 2>/dev/null; sleep 2
+            case "$T" in
+              dd_*) V="${T#dd_}"; ARGS="--target dd --variant $V" ;;
+              teach_t3) ARGS="--target teach_t3" ;;
+              *) echo "unknown demo $T"; continue ;;
+            esac
+            echo "=== demo $T ==="
+            PYTHONPATH=$PWD python -m scaffold.agent.desktop.live demo $ARGS --keep-window --out out 2>&1 | tee "out/demo_$T.log"
+            sleep "$PAUSE_BETWEEN_S"
+          done
+
+      - name: Hold the runner so you can keep looking
+        run: |
+          source ci/mac_live_view.env
+          echo "holding ${HOLD_MIN} min"; sleep $(( HOLD_MIN * 60 ))
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-live-view
+          path: out/
+          if-no-files-found: warn

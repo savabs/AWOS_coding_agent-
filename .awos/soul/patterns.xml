@@ -1,0 +1,2 @@
+<?xml version='1.0' encoding='utf-8'?>
+<patterns><style><naming>snake_case for functions, CamelCase for classes</naming><docstring>NumPy style for all functions</docstring><formatting>black (88 chars), ruff strict mode</formatting></style><conventions><error_handling>Explicit try/except, never bare except</error_handling><type_hints>Required for all public functions</type_hints><imports>Group: stdlib, third-party, local</imports></conventions></patterns>

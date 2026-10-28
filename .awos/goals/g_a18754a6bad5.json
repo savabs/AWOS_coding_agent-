@@ -1,0 +1,59 @@
+{
+  "root_id": "g_a18754a6bad5",
+  "nodes": {
+    "g_a18754a6bad5": {
+      "goal_id": "g_a18754a6bad5",
+      "description": "create docs/http_only_test.md about automated checks",
+      "parent_ids": [],
+      "child_ids": [
+        "g_b3321cbd86f1"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-06-15T12:52:05Z",
+      "updated_at": "2026-06-15T12:52:05Z",
+      "completed_at": "2026-06-15T12:52:05Z",
+      "session_ids": [
+        "orch_3101d5df"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_b3321cbd86f1": {
+      "goal_id": "g_b3321cbd86f1",
+      "description": "create docs/http_only_test.md about automated checks",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "task_type": "create_file",
+          "path": "docs/http_only_test.md",
+          "file": "docs/http_only_test.md",
+          "action": "create docs/http_only_test.md about automated checks",
+          "content_hint": "create docs/http_only_test.md about automated checks",
+          "complexity": "low",
+          "_placement_validation": {
+            "ok": true,
+            "path": "docs/http_only_test.md",
+            "artifact_kind": "general",
+            "expected_folder": null,
+            "issues": [],
+            "score": 1.0
+          },
+          "artifact_kind": "general",
+          "placement_ok": true
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-06-15T12:52:05Z",
+      "updated_at": "2026-06-15T12:52:05Z",
+      "completed_at": "2026-06-15T12:52:05Z",
+      "session_ids": [
+        "orch_3101d5df"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

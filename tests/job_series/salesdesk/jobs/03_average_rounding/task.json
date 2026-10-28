@@ -1,0 +1,7 @@
+{
+  "id": "03_average_rounding",
+  "goal": "Our accountant spotted that the Average line in the daily report is sometimes a cent too low: two orders of 0.10 and 0.15 show an average of 0.12, but 0.125 should come out as 0.13. We round half up everywhere else (amounts are already parsed that way), so averages must too. Please fix it by adding one helper, `divide_cents(cents, count)` in salesdesk/currency.py, that divides an amount in cents and rounds half up to a whole cent (0 when count is 0), and use it for the report's average. More reports with averages are coming, so they'll all use this helper.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

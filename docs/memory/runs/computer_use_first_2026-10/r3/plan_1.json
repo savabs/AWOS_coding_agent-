@@ -1,0 +1,318 @@
+{
+ "ops": [
+  {
+   "op": "mkdir",
+   "path": "receipts/2025-12"
+  },
+  {
+   "op": "mkdir",
+   "path": "receipts/2026-01"
+  },
+  {
+   "op": "mkdir",
+   "path": "receipts/2026-02"
+  },
+  {
+   "op": "mkdir",
+   "path": "receipts/2026-03"
+  },
+  {
+   "op": "move",
+   "src": "receipts/Receipt (3).pdf",
+   "dst": "receipts/2025-12/2025-12-30_adobe_105.42.pdf"
+  },
+  {
+   "op": "move",
+   "src": "receipts/IMG_2041.pdf",
+   "dst": "receipts/2026-01/2026-01-23_home-depot_104.22.pdf"
+  },
+  {
+   "op": "move",
+   "src": "receipts/IMG_2077.txt",
+   "dst": "receipts/2026-01/2026-01-29_adobe_93.51.txt"
+  },
+  {
+   "op": "move",
+   "src": "receipts/INV_0042.txt",
+   "dst": "receipts/2026-01/2026-01-13_shell_33.39.txt"
+  },
+  {
+   "op": "move",
+   "src": "receipts/Scan 14.txt",
+   "dst": "receipts/2026-01/2026-01-25_starbucks_31.87.txt"
+  },
+  {
+   "op": "move",
+   "src": "receipts/receipt(1).pdf",
+   "dst": "receipts/2026-01/2026-01-04_whole-foods_100.01.pdf"
+  },
+  {
+   "op": "move",
+   "src": "receipts/scan0001.txt",
+   "dst": "receipts/2026-01/2026-01-10_whole-foods_108.23.txt"
+  },
+  {
+   "op": "move",
+   "src": "receipts/statement.pdf",
+   "dst": "receipts/2026-01/2026-01-25_adobe_163.72.pdf"
+  },
+  {
+   "op": "move",
+   "src": "receipts/doc_scan_2.txt",
+   "dst": "receipts/2026-02/2026-02-07_amazon_151.78.txt"
+  },
+  {
+   "op": "move",
+   "src": "receipts/download.txt",
+   "dst": "receipts/2026-02/2026-02-14_amazon_204.64.txt"
+  },
+  {
+   "op": "move",
+   "src": "receipts/invoice-final-FINAL.pdf",
+   "dst": "receipts/2026-02/2026-02-09_uber_15.97.pdf"
+  },
+  {
+   "op": "move",
+   "src": "receipts/untitled.txt",
+   "dst": "receipts/2026-02/2026-02-24_home-depot_98.54.txt"
+  },
+  {
+   "op": "move",
+   "src": "receipts/IMG_3310.txt",
+   "dst": "receipts/2026-03/2026-03-03_uber_8.70.txt"
+  },
+  {
+   "op": "move",
+   "src": "receipts/photo copy.txt",
+   "dst": "receipts/2026-03/2026-03-16_staples_69.10.txt"
+  },
+  {
+   "op": "move",
+   "src": "receipts/receipt.txt",
+   "dst": "receipts/2026-03/2026-03-21_whole-foods_96.67.txt"
+  },
+  {
+   "op": "write_file",
+   "path": "receipts/summary.csv",
+   "content": "vendor,count,total\nadobe,3,362.65\namazon,2,356.42\nhome-depot,2,202.76\nshell,1,33.39\nstarbucks,1,31.87\nstaples,1,69.10\nuber,2,24.67\nwhole-foods,3,304.91\n"
+  }
+ ],
+ "dry_run": [
+  {
+   "index": 0,
+   "op": {
+    "op": "mkdir",
+    "path": "receipts/2025-12"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 1,
+   "op": {
+    "op": "mkdir",
+    "path": "receipts/2026-01"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 2,
+   "op": {
+    "op": "mkdir",
+    "path": "receipts/2026-02"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 3,
+   "op": {
+    "op": "mkdir",
+    "path": "receipts/2026-03"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 4,
+   "op": {
+    "op": "move",
+    "src": "receipts/Receipt (3).pdf",
+    "dst": "receipts/2025-12/2025-12-30_adobe_105.42.pdf"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 5,
+   "op": {
+    "op": "move",
+    "src": "receipts/IMG_2041.pdf",
+    "dst": "receipts/2026-01/2026-01-23_home-depot_104.22.pdf"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 6,
+   "op": {
+    "op": "move",
+    "src": "receipts/IMG_2077.txt",
+    "dst": "receipts/2026-01/2026-01-29_adobe_93.51.txt"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 7,
+   "op": {
+    "op": "move",
+    "src": "receipts/INV_0042.txt",
+    "dst": "receipts/2026-01/2026-01-13_shell_33.39.txt"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 8,
+   "op": {
+    "op": "move",
+    "src": "receipts/Scan 14.txt",
+    "dst": "receipts/2026-01/2026-01-25_starbucks_31.87.txt"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 9,
+   "op": {
+    "op": "move",
+    "src": "receipts/receipt(1).pdf",
+    "dst": "receipts/2026-01/2026-01-04_whole-foods_100.01.pdf"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 10,
+   "op": {
+    "op": "move",
+    "src": "receipts/scan0001.txt",
+    "dst": "receipts/2026-01/2026-01-10_whole-foods_108.23.txt"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 11,
+   "op": {
+    "op": "move",
+    "src": "receipts/statement.pdf",
+    "dst": "receipts/2026-01/2026-01-25_adobe_163.72.pdf"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 12,
+   "op": {
+    "op": "move",
+    "src": "receipts/doc_scan_2.txt",
+    "dst": "receipts/2026-02/2026-02-07_amazon_151.78.txt"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 13,
+   "op": {
+    "op": "move",
+    "src": "receipts/download.txt",
+    "dst": "receipts/2026-02/2026-02-14_amazon_204.64.txt"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 14,
+   "op": {
+    "op": "move",
+    "src": "receipts/invoice-final-FINAL.pdf",
+    "dst": "receipts/2026-02/2026-02-09_uber_15.97.pdf"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 15,
+   "op": {
+    "op": "move",
+    "src": "receipts/untitled.txt",
+    "dst": "receipts/2026-02/2026-02-24_home-depot_98.54.txt"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 16,
+   "op": {
+    "op": "move",
+    "src": "receipts/IMG_3310.txt",
+    "dst": "receipts/2026-03/2026-03-03_uber_8.70.txt"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 17,
+   "op": {
+    "op": "move",
+    "src": "receipts/photo copy.txt",
+    "dst": "receipts/2026-03/2026-03-16_staples_69.10.txt"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 18,
+   "op": {
+    "op": "move",
+    "src": "receipts/receipt.txt",
+    "dst": "receipts/2026-03/2026-03-21_whole-foods_96.67.txt"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  },
+  {
+   "index": 19,
+   "op": {
+    "op": "write_file",
+    "path": "receipts/summary.csv",
+    "content": "vendor,count,total\nadobe,3,362.65\namazon,2,356.42\nhome-depot,2,202.76\nshell,1,33.39\nstarbucks,1,31.87\nstaples,1,69.10\nub... (152 chars)"
+   },
+   "ok": true,
+   "message": "ok",
+   "blocked_by": ""
+  }
+ ]
+}

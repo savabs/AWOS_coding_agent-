@@ -1,0 +1,23 @@
+{
+  "id": "stage1_long_workload_v1",
+  "title": "Stage 1 Long Workload Mission",
+  "updated": "2026-06-21",
+  "env": {
+    "AWOS_USE_WORKTREE": "true",
+    "AWOS_RUNTIME_SESSION": "true",
+    "AWOS_CHEAP_ONLY": "true",
+    "AWOS_PREMIUM_BUDGET": "0",
+    "AWOS_MONTHLY_BUDGET": "20",
+    "AWOS_LEARNING_DISABLE": "true"
+  },
+  "plan_file": "stage1_long_workload.plan.json",
+  "goal": "Stage 1 long workload mission: eight docstring/comment edits in worktree sandbox (one file per task). Uses fixed plan — planner skipped.",
+  "success_criteria": [
+    "Session rs_* completed with 8+ tasks",
+    "Wall time > 10 minutes OR pause/resume exercised",
+    "Worktree isolation — main repo unchanged",
+    "SymbolIndex > 0 files",
+    "awos sessions show prints Sandbox path"
+  ],
+  "pause_hint": "Ctrl+C after task 4–6 completes — then: awos sessions list --status paused && awos sessions resume rs_<id>"
+}

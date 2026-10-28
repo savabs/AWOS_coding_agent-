@@ -1,0 +1,107 @@
+# Can a free GitHub-hosted macOS runner (itself a disposable VM) host AWOS live computer use?
+# Checks: VM flag, Accessibility / Input Monitoring / event posting for our Python, TCC grants,
+# then the scripted live dev_dashboard demos (variants a, b, c) and teach_t3 in real Safari.
+# Screenshots + results (incl. every interruption dismissed, see live/interrupts.py) uploaded.
+# Launch: push to a branch named bench-cloud/mac-<anything> (except mac-arena-* / mac-view-* / mac-model-* / mac-pack-*, see their workflows).
+name: mac-live-probe
+
+on:
+  push:
+    branches: ["bench-cloud/mac-**", "!bench-cloud/mac-view-**", "!bench-cloud/mac-arena-**", "!bench-cloud/mac-model-**", "!bench-cloud/mac-pack-**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Deps
+        run: |
+          pip install -q -r requirements.txt pyobjc-framework-ApplicationServices pyobjc-framework-Quartz \
+            pyobjc-framework-Cocoa pyobjc-framework-FSEvents keyring
+
+      - name: Machine facts
+        shell: bash
+        run: |
+          set +e
+          sw_vers; uname -m; sysctl -n hw.ncpu hw.memsize kern.hv_vmm_present
+          csrutil status
+          echo "--- TCC (system) Accessibility / ListenEvent / PostEvent / ScreenCapture clients"
+          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+            "select service, client, auth_value from access where service in ('kTCCServiceAccessibility','kTCCServiceListenEvent','kTCCServicePostEvent','kTCCServiceScreenCapture');" || true
+          echo "--- python path"; which python; python -c "import sys; print(sys.executable)"
+
+      - name: Permission check (our Python, as a child of the runner's bash)
+        shell: bash
+        run: |
+          set +e
+          PYTHONPATH=$PWD python -m scaffold.agent.desktop.capture check; echo "capture check exit=$?"
+          PYTHONPATH=$PWD python -m scaffold.agent.desktop.live probe --app Finder; echo "live probe exit=$?"
+
+      # The runner is itself a disposable VM (kern.hv_vmm_present=1); these settings only touch it.
+      # The demos' own vm_hygiene applies the same settings again (gated by in_guest_vm).
+      - name: Guest hygiene (suppress Safari save-password / notification prompts)
+        shell: bash
+        run: |
+          set +e
+          osascript -e 'quit app "Safari"' 2>/dev/null; sleep 1
+          C="$HOME/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari"
+          for D in com.apple.Safari "$C"; do
+            for K in AutoFillPasswords CanPromptForPushNotifications; do
+              defaults write "$D" "$K" -bool false; echo "write $D $K exit=$?"
+              echo "read $D $K = $(defaults read "$D" "$K" 2>&1)"
+            done
+          done
+
+      - name: Live scripted demos (dev_dashboard variants a, b, c; real Safari)
+        shell: bash
+        run: |
+          set +e
+          mkdir -p out
+          for V in a b c; do
+            osascript -e 'quit app "Safari"' 2>/dev/null; sleep 1
+            # screen recording of the whole demo (watch it from the run's artifacts)
+            screencapture -v -V 240 -x out/video_dd_$V.mov & REC=$!
+            sleep 2
+            PYTHONPATH=$PWD python -m scaffold.agent.desktop.live demo --target dd --variant $V --keep-window --out out \
+              2>&1 | tee out/demo_dd_$V.log
+            echo "demo dd $V exit=${PIPESTATUS[0]}"
+            sleep 2; kill -INT $REC 2>/dev/null; wait $REC 2>/dev/null
+            screencapture -x out/screen_after_dd_$V.png || echo "screencapture failed"
+          done
+
+      - name: Live scripted demo (teach_t3)
+        shell: bash
+        run: |
+          set +e
+          osascript -e 'quit app "Safari"' 2>/dev/null; sleep 1
+          screencapture -v -V 300 -x out/video_teach_t3.mov & REC=$!
+          sleep 2
+          PYTHONPATH=$PWD python -m scaffold.agent.desktop.live demo --target teach_t3 --keep-window --out out \
+            2>&1 | tee out/demo_teach_t3.log
+          echo "demo exit=${PIPESTATUS[0]}"
+          sleep 2; kill -INT $REC 2>/dev/null; wait $REC 2>/dev/null
+          screencapture -x out/screen_after_teach_t3.png || echo "screencapture failed"
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-live-probe-${{ matrix.os }}
+          path: out/
+          if-no-files-found: warn

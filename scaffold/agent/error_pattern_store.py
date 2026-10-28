@@ -19,6 +19,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
+
+def _redact_at_rest(obj):
+    """secret_scan.redact_obj: no key format or owner env secret is persisted."""
+    try:
+        from .secret_scan import redact_obj
+    except ImportError:
+        from secret_scan import redact_obj
+    return redact_obj(obj)
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_STORE_PATH = ".awos/error_patterns.jsonl"
@@ -64,11 +73,11 @@ class ErrorPatternStore:
         """Append a new ErrorPattern to the JSONL store. Never raises."""
         try:
             with open(self._path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(asdict(pattern)) + "\n")
+                f.write(json.dumps(_redact_at_rest(asdict(pattern))) + "\n")
                 f.flush()
         except Exception:
             logger.exception("Failed to save error pattern")
-            record = asdict(pattern)
+            record = _redact_at_rest(asdict(pattern))
             line = json.dumps(record, ensure_ascii=False) + "\n"
             with open(self._path, "a", encoding="utf-8") as fh:
                 fh.write(line)

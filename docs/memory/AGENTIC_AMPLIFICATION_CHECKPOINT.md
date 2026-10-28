@@ -1,3 +1,9 @@
+---
+title: "Agentic Amplification Checkpoint"
+tags:
+  - doc/memory
+---
+
 # Agentic Amplification Checkpoint
 
 **See full checkpoint:** [AGENTIC_AMPLIFICATION_CHECKPOINT.html](AGENTIC_AMPLIFICATION_CHECKPOINT.html)

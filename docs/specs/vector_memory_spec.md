@@ -1,3 +1,9 @@
+---
+title: "Spec: Vector Memory (Phase 6)"
+tags:
+  - doc/spec
+---
+
 # Spec: Vector Memory (Phase 6)
 
 > Canonical HTML: docs/specs/vector_memory_spec.html
@@ -43,3 +49,8 @@ Add ChromaDB + all-MiniLM-L6-v2 semantic retrieval to AWOS for:
 ## Links
 - Research: [[vector_memory_research]]
 - Related: [[project_planner_spec]]
+
+## Related
+
+- _(add links to related documents here)_
+

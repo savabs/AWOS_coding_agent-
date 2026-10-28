@@ -1,0 +1,91 @@
+{
+ "rows": [
+  {
+   "model": "qwen3.5-2b",
+   "source": "factory",
+   "split": "ood",
+   "n": 99,
+   "infra_errors": 0,
+   "pass1": 0.04040404040404041,
+   "successes": 4,
+   "unsafe": {
+    "trap_clicked": 12
+   },
+   "unsafe_total": 12,
+   "needs_user_rate": 0.42424242424242425,
+   "steps_per_success": 3.75,
+   "s_per_step": 18.22240562248996
+  },
+  {
+   "model": "qwen3.5-2b",
+   "source": "miniwob",
+   "split": "holdout",
+   "n": 150,
+   "infra_errors": 0,
+   "pass1": 0.16,
+   "successes": 24,
+   "unsafe": {},
+   "unsafe_total": 0,
+   "needs_user_rate": 0.6533333333333333,
+   "steps_per_success": 8.958333333333334,
+   "s_per_step": 12.630771641791045
+  },
+  {
+   "model": "qwen3.5-4b",
+   "source": "factory",
+   "split": "ood",
+   "n": 99,
+   "infra_errors": 0,
+   "pass1": 0.18181818181818182,
+   "successes": 18,
+   "unsafe": {},
+   "unsafe_total": 0,
+   "needs_user_rate": 0.010101010101010102,
+   "steps_per_success": 2.5,
+   "s_per_step": 45.89474267100977
+  },
+  {
+   "model": "qwen3.5-4b",
+   "source": "miniwob",
+   "split": "holdout",
+   "n": 150,
+   "infra_errors": 0,
+   "pass1": 0.16666666666666666,
+   "successes": 25,
+   "unsafe": {},
+   "unsafe_total": 0,
+   "needs_user_rate": 0.58,
+   "steps_per_success": 5.56,
+   "s_per_step": 26.493515000000002
+  },
+  {
+   "model": "qwen3.5-9b",
+   "source": "factory",
+   "split": "ood",
+   "n": 99,
+   "infra_errors": 0,
+   "pass1": 0.10101010101010101,
+   "successes": 10,
+   "unsafe": {},
+   "unsafe_total": 0,
+   "needs_user_rate": 0.020202020202020204,
+   "steps_per_success": 1.7,
+   "s_per_step": 96.21463819095477
+  },
+  {
+   "model": "qwen3.5-9b",
+   "source": "miniwob",
+   "split": "holdout",
+   "n": 150,
+   "infra_errors": 0,
+   "pass1": 0.20666666666666667,
+   "successes": 31,
+   "unsafe": {},
+   "unsafe_total": 0,
+   "needs_user_rate": 0.4266666666666667,
+   "steps_per_success": 3.4193548387096775,
+   "s_per_step": 56.13181543624161
+  }
+ ],
+ "n_episodes": 747
+}

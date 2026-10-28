@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>FAQ · AWOS docs</title>
+<meta name="description" content="Answers to common questions about AWOS: privacy, safety, which tickets work best, cost, local models and how it differs from a chat assistant.">
+<link rel="canonical" href="https://awos.tirramind.com/docs/faq/">
+<meta property="og:title" content="FAQ · AWOS docs">
+<meta property="og:description" content="Answers to common questions about AWOS: privacy, safety, which tickets work best, cost, local models and how it differs from a chat assistant.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://awos.tirramind.com/docs/faq/">
+<meta name="robots" content="index,follow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap">
+  <a class="brand" href="/" aria-label="AWOS Replay home">AWOS<span>.</span> <small>Replay</small></a>
+  <nav class="links" aria-label="Main">
+    <a class="wide" href="/#how">How it works</a>
+    <a href="/recipes/">Recipes</a>
+    <a class="wide" href="/#pricing">Pricing</a>
+    <a class="wide" href="/coding-agent/">Coding agent</a>
+    <a href="/docs/" aria-current="page">Docs</a>
+  </nav>
+  <a class="btn primary" href="/#waitlist">Join the waitlist</a>
+</div></header>
+<main id="main" class="wrap"><div class="docs-layout">
+<nav class="docs-side" aria-label="Docs">
+<h2>Docs</h2>
+<ul>
+<li><a href="/docs/">Overview</a></li>
+<li><a href="/docs/quickstart/">Quickstart</a></li>
+<li><a href="/docs/fix-github/">Fix a GitHub issue or PR</a></li>
+<li><a href="/docs/concepts/">Concepts</a></li>
+<li><a href="/docs/models-and-cost/">Models and cost</a></li>
+<li><a href="/docs/cli/">CLI reference</a></li>
+<li><a href="/docs/security/">Security and privacy</a></li>
+<li><a href="/docs/faq/" aria-current="page">FAQ</a></li>
+</ul>
+</nav>
+<article class="doc">
+<div class="eyebrow">Docs · FAQ</div>
+<h1>FAQ</h1>
+
+<details open>
+  <summary>Does my code leave my machine?</summary>
+  <p>Only the context sent to the model provider you choose. With a local model and <code>--privacy local_only</code>, nothing leaves. See <a href="/docs/security/">Security and privacy</a>.</p>
+</details>
+<details>
+  <summary>Can it break my repo?</summary>
+  <p>It never edits your checkout and never pushes. All work lands on a separate local branch you review, merge or delete.</p>
+</details>
+<details>
+  <summary>What kinds of tickets work best?</summary>
+  <p>Well-defined bugs, small features, test writing, refactors and migrations with a clear definition of done. Vague product decisions still need you.</p>
+</details>
+<details>
+  <summary>Which languages does it support?</summary>
+  <p>The worker's own test check runs <code>pytest</code>, and the measured results are on Python projects, so Python repositories with tests are where AWOS is proven today.</p>
+</details>
+<details>
+  <summary>How much does a ticket cost?</summary>
+  <p>On 73 real GitHub issues, Claude Haiku 5.5 averaged $0.0071 per issue. A local model costs $0 per ticket. Every job has a dollar cap you set. See <a href="/docs/models-and-cost/">Models and cost</a>.</p>
+</details>
+<details>
+  <summary>Can I use it without any cloud model?</summary>
+  <p>Yes. Run a local model server and set <code>AWOS_PROVIDER=local</code>. In our check, Qwen3.5 9B on a 16 GB MacBook solved 8 of 10 easy issues, slowly. It is best for routine fixes queued overnight.</p>
+</details>
+<details>
+  <summary>What happens if my API key stops working overnight?</summary>
+  <p>Jobs pause as blocked instead of failing, you get one notification, and they resume once the key works again. You can also run <code>awos unblock &lt;id&gt;</code>.</p>
+</details>
+<details>
+  <summary>How is this different from an interactive coding assistant?</summary>
+  <p>AWOS is built to run unattended through a queue, check its own work, and hand you finished branches, instead of pairing with you in a chat.</p>
+</details>
+<details>
+  <summary>How do I get it?</summary>
+  <p>AWOS is in early access and free while it is. <a href="/access/">Request access</a> and we will send the install command.</p>
+</details>
+<nav class="pager" aria-label="Docs pages"><a class="prev" href="/docs/security/"><small>Previous</small>Security and privacy</a></nav>
+</article>
+</div></main>
+<footer class="site"><div class="wrap">
+  <span>AWOS Replay. Show it once, it does it forever. Open source. Built in India.</span>
+  <nav aria-label="Footer">
+    <a href="/#how">How it works</a>
+    <a href="/recipes/">Recipes</a>
+    <a href="/replay/privacy/">Privacy policy</a>
+    <a href="/#waitlist">Waitlist</a>
+    <a href="/coding-agent/">Coding agent</a>
+    <a href="/docs/">Coding agent docs</a>
+    <a href="/access/">Team early access</a>
+  </nav>
+</div></footer>
+</body>
+</html>

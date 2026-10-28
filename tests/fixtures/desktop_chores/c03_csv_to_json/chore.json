@@ -1,0 +1,50 @@
+{
+  "id": "c03_csv_to_json",
+  "title": "Convert contacts CSV to JSON",
+  "instruction": "Convert contacts.csv into contacts.json: a list of objects with keys name, email, balance (balance as a number).",
+  "rung": "shell",
+  "start": {
+    "files": {
+      "contacts.csv": "name,email,balance\nAda Lovelace,ada@example.org,120.50\nAlan Turing,alan@example.org,99.99\nGrace Hopper,grace@example.org,250\n"
+    }
+  },
+  "probes": [
+    {
+      "id": "row_count",
+      "getter": {
+        "type": "json_value",
+        "path": "contacts.json"
+      },
+      "comparator": {
+        "op": "length",
+        "expected": 3
+      }
+    },
+    {
+      "id": "third_email",
+      "getter": {
+        "type": "json_value",
+        "path": "contacts.json",
+        "key": "2.email"
+      },
+      "comparator": {
+        "op": "equals",
+        "expected": "grace@example.org"
+      }
+    },
+    {
+      "id": "balance_numeric",
+      "getter": {
+        "type": "json_value",
+        "path": "contacts.json",
+        "key": "0.balance"
+      },
+      "comparator": {
+        "op": "approx",
+        "expected": 120.5,
+        "tolerance": 0.001
+      }
+    }
+  ],
+  "invariants": []
+}

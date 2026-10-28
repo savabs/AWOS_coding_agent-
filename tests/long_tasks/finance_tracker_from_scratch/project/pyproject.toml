@@ -1,0 +1,9 @@
+[project]
+name = "fintrack"
+version = "1.0.0"
+description = "Personal finance tracker: bank CSV import, categorization, reports, budgets"
+requires-python = ">=3.9"
+dependencies = []
+
+[tool.setuptools]
+packages = ["fintrack"]

@@ -1,0 +1,242 @@
+{
+ "fresh_astroid_2977": {
+  "line": "1 01_and_or_constraints          ok       start: 33 failed, 296 passed in 3.90s | reference: 329 passed in 2.61s",
+  "ok": true,
+  "problems": [],
+  "seconds": 307
+ },
+ "fresh_astroid_3130": {
+  "line": "1 01_cap_percent_formatting      ok       start: 11 failed, 485 passed, 7 skipped, 10 xfailed in 63.23s (0:01:03) | reference: 496 passed, 7 skipped, 10 xfailed in 57.72s",
+  "ok": true,
+  "problems": [],
+  "seconds": 422
+ },
+ "fresh_astroid_3193": {
+  "line": "1 01_stdlib_named_c_extension    ok       start: 4 failed, 110 passed, 4 skipped, 10 subtests passed in 24.41s | reference: 114 passed, 4 skipped, 10 subtests passed in 22.87s",
+  "ok": true,
+  "problems": [],
+  "seconds": 348
+ },
+ "fresh_astroid_3235": {
+  "line": "1 01_fstring_as_string_roundtrip ok       start: 1 failed, 212 passed, 7 skipped in 5.34s | reference: 213 passed, 7 skipped in 4.08s",
+  "ok": true,
+  "problems": [],
+  "seconds": 330
+ },
+ "fresh_astroid_3286": {
+  "line": "1 01_raw_building_parent_cycle   ok       start: 2 failed, 17 passed, 1 skipped in 123.08s (0:02:03) | reference: 19 passed, 1 skipped in 1.55s",
+  "ok": true,
+  "problems": [],
+  "seconds": 447
+ },
+ "fresh_astroid_3348": {
+  "line": "1 01_self_containing_live_containers ok       start: 2 failed, 230 passed, 8 skipped in 129.44s (0:02:09) | reference: 232 passed, 8 skipped in 4.69s",
+  "ok": true,
+  "problems": [],
+  "seconds": 491
+ },
+ "fresh_attrs_1592": {
+  "line": "1 01_on_setattr_generators       ok       start: 1 error in 0.47s | reference: 52 passed, 1 xfailed in 0.45s",
+  "ok": true,
+  "problems": [],
+  "seconds": 10
+ },
+ "fresh_boltons_441": {
+  "line": "1 01_us_timezone_fold            ok       start: 2 failed, 11 passed in 0.18s | reference: 13 passed in 0.10s",
+  "ok": true,
+  "problems": [],
+  "seconds": 15
+ },
+ "fresh_boltons_443": {
+  "line": "1 01_edge_case_sweep             ok       start: .............................................F | reference: 91 passed in 1.95s",
+  "ok": true,
+  "problems": [],
+  "seconds": 600
+ },
+ "fresh_boltons_513": {
+  "line": "1 01_spooled_write_and_text_seek ok       start: 13 failed, 87 passed in 0.89s | reference: 88 passed, 12 subtests passed in 0.36s",
+  "ok": true,
+  "problems": [],
+  "seconds": 19
+ },
+ "fresh_click_3777": {
+  "line": "1 01_pager_env_args              ok       start: 8 failed, 249 passed, 23 skipped in 3.92s | reference: 257 passed, 23 skipped in 3.97s",
+  "ok": true,
+  "problems": [],
+  "seconds": 44
+ },
+ "fresh_click_3818": {
+  "line": "1 01_keyboard_interrupt_race     ok       start: 5 failed, 3 passed in 1.41s | reference: 8 passed in 0.05s",
+  "ok": true,
+  "problems": [],
+  "seconds": 47
+ },
+ "fresh_markdown-it-py_428": {
+  "line": "1 01_unterminated_inline_html    ok       start: 6 failed, 10 passed in 1.41s | reference: 16 passed in 0.51s",
+  "ok": true,
+  "problems": [],
+  "seconds": 12
+ },
+ "fresh_markdown-it-py_433": {
+  "line": "1 01_commonmark_whitespace       ok       start: 12 failed, 3 passed in 0.30s | reference: 15 passed in 0.13s",
+  "ok": true,
+  "problems": [],
+  "seconds": 12
+ },
+ "fresh_markdown_1648": {
+  "line": "1 01_comment_in_raw_inline_html  ok       start: 2 failed, 131 passed in 0.50s | reference: 133 passed in 0.38s",
+  "ok": true,
+  "problems": [],
+  "seconds": 18
+ },
+ "fresh_more-itertools_1248": {
+  "line": "1 01_numeric_range_consistency   ok       start: 2 failed, 593 passed, 11189 subtests passed in 14.14s | reference: 595 passed, 11189 subtests passed in 13.12s",
+  "ok": true,
+  "problems": [],
+  "seconds": 150
+ },
+ "fresh_more-itertools_1261": {
+  "line": "1 01_combination_with_replacement_index ok       start: 14 failed, 602 passed, 11291 subtests passed in 20.28s | reference: 602 passed, 11305 subtests passed in 14.34s",
+  "ok": true,
+  "problems": [],
+  "seconds": 160
+ },
+ "fresh_networkx_8837": {
+  "line": "1 01_digraph_node_connectivity   ok       start: 10 failed, 55 passed in 11.51s | reference: 65 passed in 12.37s",
+  "ok": true,
+  "problems": [],
+  "seconds": 56
+ },
+ "fresh_networkx_8892": {
+  "line": "1 01_weak_graph_in_cached_views  ok       start: 1 failed, 314 passed in 2.49s | reference: 315 passed in 2.34s",
+  "ok": true,
+  "problems": [],
+  "seconds": 20
+ },
+ "fresh_pathspec_132": {
+  "line": "1 01_reinclude_under_excluded_dir ok       start: 4 failed, 22 passed, 126 skipped, 38 subtests passed in 0.31s | reference: 22 passed, 126 skipped, 42 subtests passed in 0.22s",
+  "ok": true,
+  "problems": [],
+  "seconds": 7
+ },
+ "fresh_pathspec_144": {
+  "line": "1 01_reincluded_ancestor_dir_rule ok       start: 2 failed, 29 passed, 204 skipped, 66 subtests passed in 0.38s | reference: 29 passed, 204 skipped, 68 subtests passed in 0.38s",
+  "ok": true,
+  "problems": [],
+  "seconds": 7
+ },
+ "fresh_pathspec_152": {
+  "line": "1 01_terminal_newline_filename   ok       start: 74 failed, 49 passed, 6 skipped, 83 subtests passed in 1.89s | reference: 65 passed, 6 skipped, 142 subtests passed in 0.24s",
+  "ok": true,
+  "problems": [],
+  "seconds": 9
+ },
+ "fresh_pathspec_157": {
+  "line": "1 01_bracket_backslash_escapes   ok       start: 32 failed, 130 passed, 328 subtests passed in 1.75s | reference: 130 passed, 360 subtests passed in 0.69s",
+  "ok": true,
+  "problems": [],
+  "seconds": 10
+ },
+ "fresh_pydash_273": {
+  "line": "1 01_extrema_empty_default       ok       start: ======================== 12 failed, 139 passed in 1.22s ======================== | reference: ============================= 151 passed in 0.39s ==============================",
+  "ok": true,
+  "problems": [],
+  "seconds": 18
+ },
+ "fresh_pyflakes_868": {
+  "line": "1 01_typing_special_forms        ok       start: 4 failed, 54 passed, 2 skipped in 0.33s | reference: 58 passed, 2 skipped in 0.24s",
+  "ok": true,
+  "problems": [],
+  "seconds": 5
+ },
+ "fresh_pyparsing_652": {
+  "line": "1 01_bounded_repetition_recursion ok       start: 36 failed, 1886 passed, 6 skipped, 1978 subtests passed in 427.58s (0:07:07) | reference: 1922 passed, 6 skipped, 1978 subtests passed in 83.02s (0:01:23)",
+  "ok": true,
+  "problems": [],
+  "seconds": 770
+ },
+ "fresh_pyparsing_653": {
+  "line": "1 01_match_previous_expr_nested  ok       start: 2 failed, 1932 passed, 6 skipped, 1978 subtests passed in 54.10s | reference: 1934 passed, 6 skipped, 1978 subtests passed in 83.37s (0:01:23)",
+  "ok": true,
+  "problems": [],
+  "seconds": 411
+ },
+ "fresh_sqlglot_8029": {
+  "line": "1 01_oracle_pivot_syntax         ok       start: 3 failed, 26 passed, 219 subtests passed in 1.24s | reference: 27 passed, 221 subtests passed in 0.91s",
+  "ok": true,
+  "problems": [],
+  "seconds": 156
+ },
+ "fresh_sqlglot_8042": {
+  "line": "1 01_lineage_chained_pivots      ok       start: 12 failed, 45 passed in 2.50s | reference: 49 passed, 8 subtests passed in 1.98s",
+  "ok": true,
+  "problems": [],
+  "seconds": 203
+ },
+ "fresh_sqlglot_8259": {
+  "line": "1 01_mod_precedence              ok       start: 1 failed, 69 passed, 104 subtests passed in 0.94s | reference: 70 passed, 104 subtests passed in 2.01s",
+  "ok": true,
+  "problems": [],
+  "seconds": 223
+ },
+ "fresh_sqlglot_8335": {
+  "line": "1 01_mysql_index_prefixes        ok       start: 1 failed, 52 passed, 481 subtests passed in 2.86s | reference: 53 passed, 491 subtests passed in 1.20s",
+  "ok": true,
+  "problems": [],
+  "seconds": 213
+ },
+ "fresh_sqlglot_8460": {
+  "line": "1 01_array_insert_position       ok       start: 5 failed, 24 passed, 469 subtests passed in 7.60s | reference: 24 passed, 474 subtests passed in 1.08s",
+  "ok": true,
+  "problems": [],
+  "seconds": 190
+ },
+ "fresh_sqlglot_8471": {
+  "line": "1 01_mysql_backslash_escapes     ok       start: 2 failed, 61 passed, 561 subtests passed in 1.81s | reference: 62 passed, 565 subtests passed in 1.47s",
+  "ok": true,
+  "problems": [],
+  "seconds": 184
+ },
+ "fresh_sqlglot_8493": {
+  "line": "1 01_tsql_bare_table_hints       ok       start: 5 failed, 61 passed, 725 subtests passed in 1.67s | reference: 63 passed, 850 subtests passed in 2.06s",
+  "ok": true,
+  "problems": [],
+  "seconds": 104
+ },
+ "fresh_sqlglot_8524": {
+  "line": "1 01_spark_slice_to_duckdb       ok       start: 31 failed, 49 passed, 661 subtests passed in 2.81s | reference: 49 passed, 701 subtests passed in 1.70s",
+  "ok": true,
+  "problems": [],
+  "seconds": 108
+ },
+ "fresh_sqlglot_8538": {
+  "line": "1 01_trino_literal_precision     ok       start: 1 failed, 16 passed, 25 subtests passed in 1.14s | reference: 17 passed, 38 subtests passed in 0.57s",
+  "ok": true,
+  "problems": [],
+  "seconds": 101
+ },
+ "fresh_sqlglot_8574": {
+  "line": "1 01_search_cycle_clauses        ok       start: 2 failed, 58 passed, 665 subtests passed in 6.67s | reference: 60 passed, 665 subtests passed in 1.17s",
+  "ok": true,
+  "problems": [],
+  "seconds": 105
+ },
+ "fresh_tinydb_634": {
+  "line": "1 01_caching_middleware_closed   ok       start: ========================= 1 failed, 8 passed in 0.25s ========================== | reference: ============================== 9 passed in 0.20s ===============================",
+  "ok": true,
+  "problems": [],
+  "seconds": 9
+ },
+ "fresh_tomlkit_610": {
+  "line": "1 01_integer_underscores         ok       start: 15 failed, 171 passed in 1.83s | reference: 186 passed in 0.93s",
+  "ok": true,
+  "problems": [],
+  "seconds": 14
+ },
+ "fresh_typeguard_571": {
+  "line": "1 01_typeddict_readonly          ok       start: 2 failed, 237 passed, 5 skipped, 3 xfailed in 1.12s | reference: 239 passed, 5 skipped, 3 xfailed in 1.01s",
+  "ok": true,
+  "problems": [],
+  "seconds": 14
+ }
+}

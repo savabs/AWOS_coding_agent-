@@ -1,0 +1,150 @@
+# Claude models (Anthropic API) through the same harness + MicroAgent as the local models:
+#   * ceiling test on the frozen exam (miniwob holdout, factory ood) -> compare with BASELINE.md
+#   * distillation data on the train splits (successful, safe episodes are SFT rows in the local text format)
+# Settings: ci/rl_cloud.env (JOBS lines: name model source split shards cap_usd). Every job has a hard
+# spend cap (AWOS_CLOUD_MAX_USD = line cap / shards, split across workers). Secret: ANTHROPIC_API_KEY.
+# Launch: push to a branch named bench-cloud/rl-cloud-<anything>.
+name: rl-cloud
+
+on:
+  push:
+    branches: ["bench-cloud/rl-cloud-**"]
+
+permissions:
+  contents: read
+  actions: read            # PRIOR_RUN: download the earlier run's artifacts to resume from
+
+jobs:
+  config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.cfg.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: cfg
+        name: Build the matrix from ci/rl_cloud.env
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ci/rl_cloud.env
+          python3 - "$JOBS" >> "$GITHUB_OUTPUT" <<'PY'
+          import json, sys
+          inc = []
+          for ln in sys.argv[1].strip().splitlines():
+              # optional 7th column: which shards to run (e.g. "1" or "1,2"); the cap is split across them
+              name, model, source, split, shards, cap, *only = ln.split()
+              run = [int(x) for x in only[0].split(",")] if only else list(range(1, int(shards) + 1))
+              for k in run:
+                  inc.append({"name": name, "model": model, "source": source, "split": split,
+                              "shard": k, "shards": int(shards), "cap": round(float(cap) / len(run), 3)})
+          print("matrix=" + json.dumps({"include": inc}))
+          PY
+
+  run:
+    needs: config
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix: ${{ fromJSON(needs.config.outputs.matrix) }}
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      AWOS_CLOUD_MODEL: ${{ matrix.model }}
+      AWOS_CLOUD_MAX_USD: ${{ matrix.cap }}
+      AWOS_MICRO_MAX_SECONDS: "3600"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Python deps + Playwright Chromium
+        run: |
+          pip install -r requirements.txt
+          pip install playwright anthropic
+          python -m playwright install --with-deps chromium
+
+      - name: MiniWoB++ html (pinned commit, cached)
+        id: miniwob
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/awos-rl/miniwob
+          key: miniwob-a7658beb68e1d3572329e06734c5822bd284ddc8
+      - name: Fetch MiniWoB++ (cache miss)
+        if: steps.miniwob.outputs.cache-hit != 'true'
+        run: bash scripts/rl/fetch_miniwob.sh
+
+      # PRIOR_RUN (ci/rl_cloud.env): start from that run's results for the same shard, so only episodes
+      # that did not complete (spend cap, account usage limit, rate limit) are run again - nothing twice.
+      - name: Seed from the prior run (resume)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ART: rl-cloud-${{ matrix.name }}-${{ matrix.source }}-${{ matrix.split }}-s${{ matrix.shard }}of${{ matrix.shards }}
+          NAME: ${{ matrix.name }}__${{ matrix.source }}__${{ matrix.split }}__shard${{ matrix.shard }}of${{ matrix.shards }}
+        run: |
+          set -euo pipefail
+          eval "$(grep -E '^PRIOR_RUN=' ci/rl_cloud.env || true)"
+          mkdir -p runs/rl
+          if [ -n "${PRIOR_RUN:-}" ] && gh run download "$PRIOR_RUN" --repo "$GITHUB_REPOSITORY" -n "$ART" -D runs/rl 2>/dev/null; then
+            F="runs/rl/$NAME/trajectories.jsonl"
+            python3 - "$F" <<'PY'
+          import json, sys
+          rows, n = [], 0
+          for ln in open(sys.argv[1]):
+              r = json.loads(ln)
+              h = next((e for e in r["trajectory"].get("events", []) if e.get("event") == "harness"), {})
+              err = str(h.get("model_error") or "")
+              if not r["trajectory"].get("error") and any(s in err for s in ("usage limits", "budget reached", "RateLimitError", "overloaded")):
+                  r["trajectory"]["error"] = "not run: " + err[:200]       # retried by the harness resume
+                  n += 1
+              rows.append(json.dumps(r))
+          open(sys.argv[1], "w").write("\n".join(rows) + "\n")
+          print(f"seeded {len(rows)} prior episodes; {n} marked to retry")
+          PY
+            wc -l < "$F" > "runs/rl/$NAME/.prior_lines"
+          else
+            echo "no prior results for $ART"
+          fi
+
+      - name: Run the shard (scaffold.rl.harness --model cloud)
+        shell: bash
+        env:
+          NAME: ${{ matrix.name }}__${{ matrix.source }}__${{ matrix.split }}__shard${{ matrix.shard }}of${{ matrix.shards }}
+        run: |
+          set -uo pipefail
+          [ -n "$ANTHROPIC_API_KEY" ] || { echo "::error::ANTHROPIC_API_KEY secret not set"; exit 1; }
+          eval "$(grep -E '^(WORKERS|AWOS_CLOUD_EFFORT)=' ci/rl_cloud.env)"
+          export AWOS_CLOUD_EFFORT
+          OUT="runs/rl/$NAME"; mkdir -p "$OUT"
+          PRIOR=$(cat "$OUT/.prior_lines" 2>/dev/null || echo 0)
+          PYTHONPATH=$PWD python -m scaffold.rl.harness run --source "${{ matrix.source }}" --split "${{ matrix.split }}" \
+            --model cloud --model-label "${{ matrix.model }}" --workers "$WORKERS" \
+            --shard "${{ matrix.shard }}/${{ matrix.shards }}" --out "$OUT/" 2>&1 | tee "$OUT/harness.log" | grep -E "tasks x|PASS|fail|error" | tail -40
+          RC=${PIPESTATUS[0]}
+          PYTHONPATH=$PWD python -m scaffold.rl.harness summarize "$OUT/" > "$OUT/summary.txt" 2>&1 || true
+          head -30 "$OUT/summary.txt" >> "$GITHUB_STEP_SUMMARY" || true
+          # spend of THIS run only (rows appended after the seeded prior rows; the cap is enforced in-process)
+          python3 - "$OUT/trajectories.jsonl" "$PRIOR" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import json, sys
+          usd = calls = 0
+          for ln in open(sys.argv[1]).readlines()[int(sys.argv[2]):]:
+              ev = [e for e in json.loads(ln)["trajectory"].get("events", []) if e.get("event") == "harness"]
+              u = (ev[0].get("usage") if ev else None) or {}
+              usd += float(u.get("usd") or 0); calls += int(u.get("calls") or 0)
+          print(f"\n**Spend:** ${usd:.2f} over {calls} model calls")
+          PY
+          exit "$RC"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rl-cloud-${{ matrix.name }}-${{ matrix.source }}-${{ matrix.split }}-s${{ matrix.shard }}of${{ matrix.shards }}
+          path: runs/rl/**
+          if-no-files-found: warn

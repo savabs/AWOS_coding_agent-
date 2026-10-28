@@ -1,0 +1,46 @@
+scaffold/rl/web_judge — a port of WebJudge, the automatic evaluator of the Online-Mind2Web benchmark.
+
+Upstream
+    https://github.com/OSU-NLP-Group/Online-Mind2Web
+    commit f0d805ee0e9e0b3ea70911e45e5264b72968f3dc (main, 2026-05-28), read 2026-10-25
+    files ported: src/methods/webjudge_online_mind2web.py (prompts, key points, key screenshots,
+                  outcome judgment), src/utils.py (encode_image, extract_predication, OpenaiEngine),
+                  src/run.py (result.json v1/v2 loading, screenshot order, success definition)
+    Copyright (c) 2025 OSU Natural Language Processing, MIT License (full text in ./LICENSE).
+
+    Paper: Tianci Xue, Weijian Qi, Tianneng Shi, Chan Hee Song, Boyu Gou, Dawn Song, Huan Sun, Yu Su.
+    "An Illusion of Progress? Assessing the Current State of Web Agents." COLM 2025. arXiv:2504.01382.
+    Online-Mind2Web is derived from Mind2Web (Deng et al., NeurIPS 2023); please cite both.
+
+The prompt strings in prompts.py are copied verbatim (checked by sha256 in tests/rl/test_web_judge.py).
+The parsing and scoring rules in judge.py follow the upstream code line by line. The Online-Mind2Web task
+data (CC BY 4.0) is not vendored here.
+
+WebJudge-7B (https://huggingface.co/osunlp/WebJudge-7B, Apache-2.0, fine-tuned from Qwen2.5-VL-7B-Instruct)
+is downloaded at run time by kaggle/web-judge/run.py. Its weights are not part of this repository.
+
+Deviations from upstream (also in docs/specs/web_judge.md):
+  1. o4-mini request parameters. Upstream OpenaiEngine.generate sends max_tokens=512, temperature=0. The
+     OpenAI API refuses both for o-series reasoning models. We send max_completion_tokens (default 8192,
+     which covers reasoning plus the visible answer) and no temperature. The default reasoning effort is
+     kept. The WebJudge-7B backend sends upstream's max_tokens=512, temperature=0 unchanged.
+  2. Errors. Upstream retries 3 times and then lets the exception kill the worker. We retry 3 times
+     (expo backoff) and then record the episode as judge_error, so the rest of the run continues.
+  3. Screenshot files. v1 order is upstream's (first integer in the file name). We list only image files
+     (.png/.jpg/.jpeg/.webp), so a stray .DS_Store or log no longer crashes. A v2 step whose screenshot
+     is null (allowed for TASK_COMPLETE) is skipped; upstream would crash on it.
+  4. JPEG encoding. Upstream converts only RGBA to RGB before saving as JPEG, so P/LA/CMYK images crash.
+     We convert every mode other than RGB/L. RGB and RGBA inputs give the same bytes as upstream.
+  5. Harness status. Episodes that result.json marks blocked or infra_error are counted as failures, as
+     upstream would count them (success = verdict over all task dirs), but by default they are not sent to
+     the judge (--judge-blocked sends them) and are reported separately.
+  6. Cost cap. --max-usd stops the run before a call that could exceed the cap. Unfinished episodes are
+     reported as not_judged; upstream has no cap.
+  7. WebJudge-7B on 2x T4 (kaggle/web-judge, 2026-10-26). Upstream serves the model with its preprocessor
+     defaults (max_pixels 12.8 MP), a 65536 context and up to 50 images; on 16 GB T4s vLLM's start-up profiling
+     ran out of memory. The Kaggle kernel uses max_pixels 1003520 (about 1 MP: our 1280x800 screenshots are
+     barely downscaled), max_model_len 40960, at most 30 images per request, and --enforce-eager.
+     A final-answer call with more than 30 key screenshots is rejected by vLLM and recorded as judge_error.
+  Everything else is unchanged: key-point parsing, the per-image 1-5 score regex, score_threshold=3,
+  MAX_IMAGE=50, the "image/png" data-URL label on the JPEG key screenshots, the prompt without images
+  when none pass the threshold, and success = "success" after "Status:" in the final answer.

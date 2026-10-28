@@ -1,0 +1,7 @@
+{
+  "id": "09_cli_error_tracebacks",
+  "goal": "A few mistakes still end in a Python traceback instead of salesdesk's normal error line: a malformed --now value (e.g. `--now yesterday`), importing a file that doesn't exist (or is a folder), and a --db path that can't be used as our database (a folder, a path in a folder that doesn't exist, or some file that isn't a salesdesk database). Every one of these should be reported exactly like the tool's other errors, in one line that mentions the value or path that was wrong. Nothing else about the commands should change.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

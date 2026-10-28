@@ -1,0 +1,48 @@
+{
+  "root_id": "g_688b4187585c",
+  "nodes": {
+    "g_688b4187585c": {
+      "goal_id": "g_688b4187585c",
+      "description": "Add a one-line docstring to the _extract_context method in worker.py",
+      "parent_ids": [],
+      "child_ids": [
+        "g_a3480c809760"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-05-27T08:21:31Z",
+      "updated_at": "2026-05-27T08:22:50Z",
+      "completed_at": "2026-05-27T08:22:50Z",
+      "session_ids": [
+        "orch_a3760caf",
+        "orch_e15051dd"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_a3480c809760": {
+      "goal_id": "g_a3480c809760",
+      "description": "Add a one-line docstring to the `_extract_context` method, explaining its purpose (e.g., 'Extracts relevant context from the given code string.')",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "worker.py",
+          "action": "Add a one-line docstring to the `_extract_context` method, explaining its purpose (e.g., 'Extracts relevant context from the given code string.')",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-05-27T08:21:39Z",
+      "updated_at": "2026-05-27T08:22:50Z",
+      "completed_at": "2026-05-27T08:22:50Z",
+      "session_ids": [
+        "orch_a3760caf",
+        "orch_e15051dd"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

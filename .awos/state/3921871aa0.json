@@ -1,0 +1,22 @@
+{
+  "goal": "g3",
+  "goal_hash": "3921871aa0",
+  "started_at": "2026-06-18T14:13:37",
+  "last_updated": "2026-06-18T14:18:46",
+  "completed_task_ids": [],
+  "failed_task_ids": [
+    1,
+    "1_1",
+    "1_2",
+    "1_1_1",
+    "1_1_2",
+    "1_2_1",
+    "1_2_2"
+  ],
+  "session_ids": [
+    "orch_41145e74",
+    "orch_e128dae6",
+    "orch_8fe52dbb"
+  ],
+  "status": "failed"
+}

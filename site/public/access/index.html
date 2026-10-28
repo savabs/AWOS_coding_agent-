@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Request early access · AWOS</title>
+<meta name="description" content="Tell us which coding tickets you would hand off first. AWOS onboards a few teams at a time during early access.">
+<link rel="canonical" href="https://awos.tirramind.com/access/">
+<meta property="og:title" content="Request early access · AWOS">
+<meta property="og:description" content="Tell us which coding tickets you would hand off first. AWOS onboards a few teams at a time during early access.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://awos.tirramind.com/access/">
+<meta name="robots" content="index,follow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap">
+  <a class="brand" href="/" aria-label="AWOS Replay home">AWOS<span>.</span> <small>Replay</small></a>
+  <nav class="links" aria-label="Main">
+    <a class="wide" href="/#how">How it works</a>
+    <a href="/recipes/">Recipes</a>
+    <a class="wide" href="/#pricing">Pricing</a>
+    <a class="wide" href="/coding-agent/">Coding agent</a>
+    <a href="/docs/">Docs</a>
+  </nav>
+  <a class="btn primary" href="/#waitlist">Join the waitlist</a>
+</div></header>
+<main id="main" class="wrap">
+<div class="access">
+  <div class="eyebrow">Early access</div>
+  <h1>Tell us what you would hand off first</h1>
+  <p class="sub">We onboard a few teams at a time. Tell us about your backlog and we will get back to you. Early-access members get the install command and a direct line to the builder.</p>
+  <form id="access-form" novalidate data-endpoint="/api/request-access">
+    <div class="row">
+      <label for="f-name">Name<input id="f-name" name="name" autocomplete="name" required></label>
+      <label for="f-email">Work email<input id="f-email" name="email" type="email" autocomplete="email" required></label>
+    </div>
+    <div class="row">
+      <label for="f-role">Role<select id="f-role" name="role"><option>Solo developer</option><option>Engineer on a team</option><option>Engineering lead</option><option>Founder</option><option>Open-source maintainer</option><option>Agency or freelancer</option></select></label>
+      <label for="f-team">Team size<select id="f-team" name="team"><option>Just me</option><option>2–10</option><option>11–50</option><option>51+</option></select></label>
+    </div>
+    <label for="f-tickets">What tickets would you hand off first?<textarea id="f-tickets" name="tickets" placeholder="e.g. flaky tests in our API, dependency bumps, small UI bugs from the support queue"></textarea></label>
+    <label for="f-tools">Which coding tools do you use today?<input id="f-tools" name="tools" placeholder="e.g. Claude Code, Cursor, Copilot"></label>
+    <div class="cta"><button class="btn primary" type="submit">Request access</button></div>
+    <p class="status" id="f-status" role="status" aria-live="polite"></p>
+    <p class="formnote">We only use this to contact you about early access.</p>
+  </form>
+  <p class="note">Want to read first? Start with the <a href="/docs/quickstart/">quickstart</a> or the <a href="/docs/security/">security model</a>.</p>
+</div>
+</main>
+<script src="/assets/access.js" defer></script>
+<footer class="site"><div class="wrap">
+  <span>AWOS Replay. Show it once, it does it forever. Open source. Built in India.</span>
+  <nav aria-label="Footer">
+    <a href="/#how">How it works</a>
+    <a href="/recipes/">Recipes</a>
+    <a href="/replay/privacy/">Privacy policy</a>
+    <a href="/#waitlist">Waitlist</a>
+    <a href="/coding-agent/">Coding agent</a>
+    <a href="/docs/">Coding agent docs</a>
+    <a href="/access/">Team early access</a>
+  </nav>
+</div></footer>
+</body>
+</html>

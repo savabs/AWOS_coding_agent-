@@ -1,0 +1,85 @@
+# The Chrome extension (AWOS Replay) end to end with the REAL repair model, on a free ubuntu runner:
+# llama-server (CPU) serves the GGUF on 127.0.0.1:8080, headless Chromium loads the unpacked extension,
+# tests/extension/test_real_model.py replays recordings over renamed / deleted / gated page variants.
+# Launch: push to bench-cloud/ext-real-model-<anything>. MODEL: a label from ci/rl_eval.env MODEL_SPECS.
+name: ext-real-model
+
+on:
+  push:
+    branches: ["bench-cloud/ext-real-model-**"]
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      MODEL: g7-rv2b
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python deps + Playwright Chromium
+        run: |
+          pip install -q -r requirements.txt pytest==8.4.2 pytest-timeout playwright
+          python -m playwright install --with-deps chromium
+      - name: Model spec from ci/rl_eval.env
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$MODEL" >> "$GITHUB_ENV" <<'PY'
+          import re, sys
+          env = open("ci/rl_eval.env").read()
+          for ln in re.search(r'MODEL_SPECS="\n(.*?)"', env, re.S).group(1).splitlines():
+              p = ln.split()
+              if p and p[0] == sys.argv[1]:
+                  print(f"GGUF_REPO={p[1]}\nGGUF_FILE={p[2]}\nGGUF_REV={p[3]}\nGGUF_SHA={p[5]}")
+                  break
+          else:
+              sys.exit(f"unknown model {sys.argv[1]}")
+          PY
+      - name: Download the GGUF (sha256-checked)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/models
+          case "$GGUF_REPO" in
+            gh-release:*)
+              gh release download "$GGUF_REV" --repo "${GGUF_REPO#gh-release:}" --dir ~/models --clobber \
+                --pattern "$(basename "${GGUF_FILE%-00001-of-*}" .gguf)*.gguf" ;;
+            *) curl -fL --retry 5 -o ~/models/"$GGUF_FILE" "https://huggingface.co/$GGUF_REPO/resolve/$GGUF_REV/$GGUF_FILE" ;;
+          esac
+          echo "$GGUF_SHA  $HOME/models/$GGUF_FILE" | sha256sum -c -
+      - name: llama-server (CPU, loopback)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          source ci/rl_eval.env
+          mkdir -p ~/llama && cd ~/llama
+          gh release download "$LLAMA_TAG" --repo ggml-org/llama.cpp --pattern "llama-$LLAMA_TAG-bin-ubuntu-x64.tar.gz" --clobber
+          tar -xzf "llama-$LLAMA_TAG-bin-ubuntu-x64.tar.gz"
+          BIN=$(find ~/llama -name llama-server -type f | head -1); chmod +x "$BIN"
+          LD_LIBRARY_PATH="$(dirname "$BIN"):${LD_LIBRARY_PATH:-}" nohup "$BIN" -m ~/models/$GGUF_FILE --alias local \
+            --host 127.0.0.1 --port 8080 -ngl 0 -t "$(nproc)" -c 4096 -np 1 --jinja --reasoning off --cache-prompt --cache-ram 0 -cms 256 --temp 0 \
+            > ~/llama-server.log 2>&1 &
+          for i in $(seq 1 120); do curl -s -m 2 http://127.0.0.1:8080/health | grep -q ok && break; sleep 5; done
+          curl -s http://127.0.0.1:8080/health
+      - name: Extension end to end with the real model
+        env:
+          AWOS_REAL_MODEL_URL: http://127.0.0.1:8080/v1
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=.:tests python -m pytest tests/extension/test_real_model.py -q -s -p no:cacheprovider 2>&1 | tee e2e.txt; rc=$?
+          { echo "### extension + $MODEL"; echo '```'; tail -40 e2e.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit $rc
+      - name: Server log
+        if: always()
+        run: tail -40 ~/llama-server.log || true

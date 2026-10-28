@@ -1,0 +1,57 @@
+<!--meta
+title: Shared recipe · AWOS Replay
+description: A shared AWOS Replay recipe. The recipe lives in the link after the #, which is never sent to a server; read every step here before adding it.
+section: recipes
+script: /assets/recipe-page.js
+module: yes
+-->
+<div class="access recipe">
+  <div class="eyebrow">Shared recipe · AWOS Replay</div>
+  <h1 id="r-title">Reading the recipe…</h1>
+  <p id="r-loading" class="sub">Unpacking the recipe from the link. Nothing is sent anywhere.</p>
+  <noscript><p class="sub">This page needs JavaScript to read the recipe in the link. It runs only in your browser; nothing is uploaded.</p></noscript>
+
+  <div id="r-error" class="callout bad" hidden>
+    <ul id="r-errors"></ul>
+    <p>Ask the sender for a fresh link, or <a href="/recipes/">browse the example recipes</a>.</p>
+  </div>
+
+  <div id="r-view" hidden>
+    <p id="r-desc" class="lede"></p>
+    <dl class="r-meta">
+      <div><dt>Starts on</dt><dd><b id="r-site"></b><span id="r-url" class="mono"></span></dd></div>
+      <div><dt>Length</dt><dd id="r-count"></dd></div>
+      <div><dt>Made with</dt><dd id="r-made"></dd></div>
+    </dl>
+    <div class="cta"><button class="btn primary" id="r-add" type="button">Add to AWOS Replay</button><button class="btn ghost" id="r-copy" type="button">Copy link</button></div>
+    <p class="status" id="r-status" role="status" aria-live="polite"></p>
+
+    <div id="r-install" class="callout" hidden>
+      <p><b>Install AWOS Replay first.</b> It is free, runs on your Mac and is open source. Run this in Terminal, then reload this page:</p>
+      <pre class="install" aria-label="Install command"><code>{{replay_install}}</code></pre>
+      <p><a href="/#how">How AWOS Replay works</a></p>
+    </div>
+
+    <h2>What you fill in</h2>
+    <p id="r-noparams" class="sub">Nothing. This recipe runs the same way every time.</p>
+    <div id="r-params-wrap" class="table-wrap">
+      <table>
+        <thead><tr><th scope="col">Asks for</th><th scope="col">Name</th><th scope="col">Example</th></tr></thead>
+        <tbody id="r-params"></tbody>
+      </table>
+    </div>
+
+    <h2>Steps</h2>
+    <ol id="r-steps" class="r-steps"></ol>
+    <p id="r-danger" class="note" hidden>The sender marked some steps risky. Whatever a recipe says, AWOS Replay applies its own rules on your machine and waits for your OK before steps that pay, delete or send.</p>
+
+    <h2>How it checks it worked</h2>
+    <ul id="r-checks" class="r-checks"></ul>
+
+    <div class="callout">
+      <p><b>Review before you add it.</b> A recipe is a list of steps someone else recorded. It runs in your browser with your logins, so only add recipes for sites you use and steps you understand. AWOS Replay asks you to confirm before saving it.</p>
+    </div>
+  </div>
+
+  <p class="note">The recipe is stored in this link after the <code>#</code>. Browsers do not send that part to any server, so this page reads it without uploading it. <a href="/recipes/">More recipes</a></p>
+</div>

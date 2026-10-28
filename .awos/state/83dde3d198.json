@@ -1,0 +1,33 @@
+{
+  "goal": "CI Rescue Sprint: fix auth.py, billing.py, inventory.py, shipping.py, and promo.py so all 35 pytest tests pass. Do not edit tests/, conftest.py, or golden/. Keep 7 regression tests green.",
+  "goal_hash": "83dde3d198",
+  "started_at": "2026-06-25T19:36:57",
+  "last_updated": "2026-06-26T10:05:17",
+  "completed_task_ids": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18
+  ],
+  "failed_task_ids": [],
+  "session_ids": [
+    "orch_a489395c",
+    "orch_1c89764f",
+    "orch_8471919f"
+  ],
+  "status": "complete"
+}

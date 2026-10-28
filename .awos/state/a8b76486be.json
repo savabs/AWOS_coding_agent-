@@ -1,0 +1,14 @@
+{
+  "goal": "In scaffold/agent/worktree.py add a one-line docstring to register_worktree explaining it reattaches a persisted worktree path for session resume",
+  "goal_hash": "a8b76486be",
+  "started_at": "2026-06-18T09:47:16",
+  "last_updated": "2026-06-18T09:47:25",
+  "completed_task_ids": [
+    1
+  ],
+  "failed_task_ids": [],
+  "session_ids": [
+    "orch_e4bb6849"
+  ],
+  "status": "complete"
+}

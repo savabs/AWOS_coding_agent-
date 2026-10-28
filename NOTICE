@@ -1,0 +1,62 @@
+AWOS
+Copyright (c) the AWOS authors.
+
+This product includes code derived from the third-party projects below.
+Per-file detail (upstream path, commit, what was ported, what was changed)
+is in docs/third_party/wp1.md ... wp8.md. Design-only references (no code
+copied) are listed there too and are not repeated here.
+
+------------------------------------------------------------------------
+OpenAdapt / openadapt-flow (MIT)
+Copyright (c) 2025-2026 OpenAdapt.AI (MLDSAI Inc.)
+Used in:
+  scaffold/agent/desktop/capture/   (adapted; see capture/NOTICE)
+  scaffold/agent/desktop/effects/   (readback_values.py vendored; see effects/LICENSE-OpenAdapt)
+  scaffold/agent/desktop/grounding.py (ladder/truncation design ported)
+  testbeds/teach_once/induction.py, skill_runner.py (algorithms ported)
+
+------------------------------------------------------------------------
+Playwright (Apache License 2.0)
+Copyright (c) Microsoft Corporation
+Portions of selectorGenerator.ts ported to Python in
+  scaffold/agent/desktop/grounding.py
+Licensed under the Apache License, Version 2.0 (the "License"); you may not
+use these files except in compliance with the License. You may obtain a copy
+at http://www.apache.org/licenses/LICENSE-2.0. Unless required by applicable
+law or agreed to in writing, software distributed under the License is
+distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the specific language
+governing permissions and limitations under the License.
+
+------------------------------------------------------------------------
+Zero (Mail-0/Zero), commit 64c5480 (MIT)
+Copyright (c) 2025 Zero Email
+Used in:
+  scaffold/agent/desktop/mail_text.py      (HTML-to-text, XML serialiser, tracking-pixel rules)
+  scaffold/agent/desktop/triage_cascade.py (automated-sender regexes, dont-reply list)
+Only MIT-licensed files were used; none of Zero's header-restricted files.
+
+------------------------------------------------------------------------
+MIT License text (applies to the OpenAdapt and Zero portions above)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+------------------------------------------------------------------------
+Optional runtime dependencies (not vendored): keyring (MIT, Jason R. Coombs
+et al.), PyObjC (MIT). Installed by the user only if needed.

@@ -1,0 +1,34 @@
+{
+  "_comment": "Chrome Web Store 'Privacy practices' justifications. build_extension_zip.sh fails if extension/manifest.json asks for a permission, host or content-script match that has no entry here, so a new permission always gets a written reason before it can ship.",
+  "permissions": {
+    "storage": "Saves the user's recorded chores (the steps they clicked and typed), the last 20 replay results and their settings in chrome.storage on this computer. Nothing is synced or uploaded.",
+    "tabs": "Replay drives the tab the user chose: it reads that tab's URL and load status to know when a page has finished loading, navigates it to the recorded start page, and messages the content script in it.",
+    "alarms": "Runs a saved chore on the schedule the user set (for example every Monday at 9:00). No alarm exists unless the user creates a schedule.",
+    "downloads": "Some chores end by downloading a file the user asked for (an invoice or statement PDF). Replay starts that download and checks it finished, so the result can be verified.",
+    "notifications": "Tells the user when a scheduled replay finished, failed, or is waiting for their approval before a risky step (for example a payment or delete button).",
+    "scripting": "Injects the recorder/replayer script into a tab the user explicitly starts a recording or replay in, when the tab was open before the extension was installed.",
+    "activeTab": "Lets the user start recording on the current tab from the toolbar button without granting access to other tabs.",
+    "contextMenus": "Adds 'Record a chore here' / 'Replay' to the right-click menu.",
+    "sidePanel": "Shows the recording and the replay progress (each step, its check, and any approval request) in Chrome's side panel.",
+    "offscreen": "Runs the local verification step in an offscreen document so the service worker can be suspended between steps.",
+    "webNavigation": "Detects when a replayed click navigates to a new page so the next step waits for that page instead of the old one.",
+    "unlimitedStorage": "Long recordings with page snapshots for verification can exceed the default 10 MB local storage quota; all of it stays on the user's computer."
+  },
+  "host_permissions": {
+    "http://127.0.0.1/*": "Talks to the AWOS model server that runs on the user's own Mac (llama.cpp on 127.0.0.1:8080). This is the default model; requests never leave the computer.",
+    "http://localhost/*": "Same as 127.0.0.1: the user's own local model server, if they set it up under the name localhost.",
+    "http://[::1]/*": "Same as 127.0.0.1, for the IPv6 loopback address.",
+    "https://api.anthropic.com/*": "Optional: only if the user pastes their own Anthropic API key in Options and switches the model to Claude. Off by default; the key and requests go straight from the browser to Anthropic, never to AWOS.",
+    "http://*/*": "Chores can be on any website the user chooses (their bank, their SaaS tools, an internal portal). The recorder/replayer only acts in a tab where the user started a recording or a replay.",
+    "https://*/*": "Same as http://*/*: any website the user chooses to record a chore on.",
+    "<all_urls>": "Same as http/https: any website the user chooses to record a chore on."
+  },
+  "content_script_matches": {
+    "http://*/*": "The recorder (captures the user's own clicks and typing while they record) and replayer (repeats them) must be present on whatever site the chore is on. It does nothing until the user starts a recording or replay in that tab.",
+    "https://*/*": "Same as http://*/*.",
+    "<all_urls>": "Same as http://*/*.",
+    "https://awos.tirramind.com/r/*": "Recipe import bridge: on the AWOS recipe page (/r/) only, it answers the page's 'is AWOS Replay installed' hello and passes a shared recipe the user clicked 'Add' on to the extension, which shows every step and imports it only after the user confirms. It reads nothing else on the page.",
+    "https://awos-site.pages.dev/r/*": "Recipe import bridge: on the AWOS recipe page (/r/) only, it answers the page's 'is AWOS Replay installed' hello and passes a shared recipe the user clicked 'Add' on to the extension, which shows every step and imports it only after the user confirms. It reads nothing else on the page. (the same site's Cloudflare Pages address)",
+    "http://localhost:8000/r/*": "Recipe import bridge: on the AWOS recipe page (/r/) only, it answers the page's 'is AWOS Replay installed' hello and passes a shared recipe the user clicked 'Add' on to the extension, which shows every step and imports it only after the user confirms. It reads nothing else on the page. (local development copy of the site only; no data is sent anywhere)"
+  }
+}

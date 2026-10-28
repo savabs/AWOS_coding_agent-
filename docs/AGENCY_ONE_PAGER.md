@@ -1,3 +1,9 @@
+---
+title: "AWOS — Agency Offer (One Page)"
+tags:
+  - doc/wiki
+---
+
 # AWOS — Agency Offer (One Page)
 
 > Send this after a discovery call or as a DM follow-up.

@@ -1,3 +1,9 @@
+---
+title: "ML Meta-Controller for AWOS Self-Improvement"
+tags:
+  - doc/research
+---
+
 # ML Meta-Controller for AWOS Self-Improvement
 
 ## Problem Statement
@@ -97,3 +103,8 @@ RewardStore at .awos/reward_store.jsonl (append-only, human-readable).
 Until LinUCB has seen ≥ 20 outcomes, defer to existing EscalationEngine heuristics.
 This prevents the cold-start problem from degrading performance.
 After 20 outcomes: LinUCB takes over, heuristics used only as tiebreaker.
+
+## Related
+
+- _(add links to related documents here)_
+

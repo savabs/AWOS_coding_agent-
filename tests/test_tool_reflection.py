@@ -212,11 +212,11 @@ class TestEscalationSoftHint:
         from scaffold.agent.ml_router import LinUCBRouter
 
         tracker = ToolPerformanceTracker(persist_dir=tmp_path)
-        # Sonnet has 100% success on "architecture" tasks
+        # Pro (the stronger ladder rung; Sonnet was removed) has 100% success
         for _ in range(5):
-            tracker.record(tool="Worker", model="Claude Sonnet 4.6",
+            tracker.record(tool="Worker", model="DeepSeek V4 Pro",
                            task_type="architecture", success=True)
-        # DeepSeek has 0% success on "architecture" tasks
+        # DeepSeek Flash has 0% success on "architecture" tasks
         for _ in range(5):
             tracker.record(tool="Worker", model="DeepSeek V4 Flash",
                            task_type="architecture", success=False)
@@ -230,7 +230,7 @@ class TestEscalationSoftHint:
         decision = engine.decide(task, failure_count=0, budget_remaining=20.0)
 
         assert "Performance hint" in decision.reason
-        assert decision.spec.level == EscalationLevel.SONNET
+        assert decision.spec.level == EscalationLevel.OPENCODE
 
     def test_warm_linucb_ignores_soft_hint(self, tmp_path):
         """When LinUCB is ready, the soft hint is bypassed."""
@@ -295,20 +295,23 @@ class TestEscalationSoftHint:
         for _ in range(2):
             tracker.record(tool="Worker", model="DeepSeek V4 Flash",
                            task_type="new_feature", success=True)
-        # Sonnet succeeding on "new_feature" tasks
+        # Pro (the stronger rung) succeeding on "new_feature" tasks
         for _ in range(9):
-            tracker.record(tool="Worker", model="Claude Sonnet 4.6",
+            tracker.record(tool="Worker", model="DeepSeek V4 Pro",
                            task_type="new_feature", success=True)
         for _ in range(1):
-            tracker.record(tool="Worker", model="Claude Sonnet 4.6",
+            tracker.record(tool="Worker", model="DeepSeek V4 Pro",
                            task_type="new_feature", success=False)
 
         ml_router = LinUCBRouter(min_samples=20)
         engine = self._engine(tracker=tracker, ml_router=ml_router)
-        task = {"action": "add new feature to auth", "file": "auth.py", "complexity": "high"}
+        # Low complexity, so the heuristic alone would stay on Flash: only the
+        # veto can move it to Pro.
+        task = {"action": "add new feature to auth", "file": "auth.py", "complexity": "low"}
         decision = engine.decide(task, failure_count=0, budget_remaining=20.0)
 
-        assert "Performance veto" in decision.reason or decision.spec.level.value >= EscalationLevel.SONNET.value
+        assert "Performance veto" in decision.reason
+        assert decision.spec.level == EscalationLevel.OPENCODE
 
 
 # ── Existing veto tests (updated for semantic task types) ─────────────────────

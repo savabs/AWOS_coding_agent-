@@ -1,3 +1,9 @@
+---
+title: "Daily workflow — Copilot-style, token-owned"
+tags:
+  - doc/wiki
+---
+
 # Daily workflow — Copilot-style, token-owned
 
 This repo is your **self-hosted coding copilot**: same loop as “chat + apply changes in the repo,” except **you** choose the model tier, context budget, and pricing path.

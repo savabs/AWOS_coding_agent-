@@ -1,0 +1,10 @@
+{
+  "corpus_id": "code_evolution_commit_1",
+  "description": "Tiered discounts — 12 baseline green, 3 tier tests red",
+  "goal_assertions": {
+    "must_still_pass": "python3 -m pytest tests/ -q --tb=no",
+    "forbidden_paths": ["tests/", "conftest.py", "golden/"],
+    "expected_pass_count": 15,
+    "baseline_must_remain_green": 12
+  }
+}

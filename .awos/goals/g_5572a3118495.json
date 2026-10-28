@@ -1,0 +1,72 @@
+{
+  "root_id": "g_5572a3118495",
+  "nodes": {
+    "g_5572a3118495": {
+      "goal_id": "g_5572a3118495",
+      "description": "Add a short docstring to the StabilityGate.should_check method explaining that it runs every N completed sessions",
+      "parent_ids": [],
+      "child_ids": [
+        "g_ad20e617a4b3",
+        "g_bdc1baa32133"
+      ],
+      "tasks": [],
+      "status": "in_progress",
+      "created_at": "2026-05-26T19:53:52Z",
+      "updated_at": "2026-05-26T19:55:20Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_35292487",
+        "orch_c0cb4bae"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_ad20e617a4b3": {
+      "goal_id": "g_ad20e617a4b3",
+      "description": "Add a short docstring to the `StabilityGate.should_check` method explaining that it runs every N completed sessions. The docstring content should be similar to: \"Checks whether the stability gate should be activated. This method runs every N completed sessions to evaluate stability.\"",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "awos/core/stability_gate.py",
+          "action": "Add a short docstring to the `StabilityGate.should_check` method explaining that it runs every N completed sessions. The docstring content should be similar to: \"Checks whether the stability gate should be activated. This method runs every N completed sessions to evaluate stability.\"",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-05-26T19:55:20Z",
+      "updated_at": "2026-05-26T19:56:13Z",
+      "completed_at": "2026-05-26T19:56:13Z",
+      "session_ids": [
+        "orch_c0cb4bae",
+        "orch_a59978ec"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_bdc1baa32133": {
+      "goal_id": "g_bdc1baa32133",
+      "description": "Run code formatter (e.g., Black or Ruff) on the modified file `awos/core/stability_gate.py` to ensure adherence to style guidelines after adding the docstring.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 2,
+          "file": "awos/core/stability_gate.py",
+          "action": "Run code formatter (e.g., Black or Ruff) on the modified file `awos/core/stability_gate.py` to ensure adherence to style guidelines after adding the docstring.",
+          "complexity": "low"
+        }
+      ],
+      "status": "pending",
+      "created_at": "2026-05-26T19:55:20Z",
+      "updated_at": "2026-05-26T19:55:20Z",
+      "completed_at": null,
+      "session_ids": [
+        "orch_c0cb4bae"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

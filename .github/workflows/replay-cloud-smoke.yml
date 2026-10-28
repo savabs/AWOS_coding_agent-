@@ -1,0 +1,119 @@
+# AWOS Replay (the Chrome extension in extension/) on REAL public websites, on a free ubuntu runner.
+# tests/extension/cloud_smoke: 6 read-only chores (Wikipedia, MDN, Python docs, Hacker News, a GitHub release
+# asset download, OpenStreetMap) are recorded once as a person would do them, then replayed in a fresh tab,
+# plus a "drift" replay whose stored target was edited to force the local model's repair path.
+# Model: the G7 2B GGUF from this repo's release (sha256-checked), served by llama.cpp (CPU) on 127.0.0.1:8080.
+# No secrets, no paid APIs, nothing typed but public search terms; the run logs are uploaded as an artifact.
+#
+# Launch: push to bench-cloud/rl-replay-<anything> (bench-cloud/rl-** is excluded from the paid ladder workflow,
+# see .github/workflows/ladder.yml), or Actions -> replay-cloud-smoke -> Run workflow.
+# NOTE: `schedule` (and the Run workflow button) only work once this file is on the default branch (main);
+# until it is merged, only the push trigger fires.
+name: replay-cloud-smoke
+
+on:
+  push:
+    branches: ["bench-cloud/rl-replay-**"]
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * *"          # daily 06:17 UTC (fires from the default branch only)
+
+permissions:
+  contents: read
+
+concurrency:
+  group: replay-cloud-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GGUF_FILE: qwen3.5-2b-g7-rv-Q4_K_M.gguf          # same file + sha256 as scripts/awos_model.sh (g7)
+      GGUF_TAG: rl-qwen3.5-2b-g7-rv
+      GGUF_SHA: a63e356f91aa5e1f741fc5132301f88140445e50f4b3a45658f921813c957f4f
+      OUT: runs/replay-smoke
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: pytest + Playwright Chromium
+        run: |
+          pip install -q pytest==8.4.2 pytest-timeout playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Cache the GGUF
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/models/${{ env.GGUF_FILE }}
+          key: gguf-${{ env.GGUF_FILE }}-${{ env.GGUF_SHA }}
+
+      - name: Download the G7 GGUF (sha256-checked)
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/models
+          gh release download "$GGUF_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$GGUF_FILE" --dir ~/models --clobber
+          echo "$GGUF_SHA  $HOME/models/$GGUF_FILE" | sha256sum -c -
+
+      - name: llama-server (official CPU build, loopback only)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "$GGUF_SHA  $HOME/models/$GGUF_FILE" | sha256sum -c -
+          source ci/rl_eval.env                        # LLAMA_TAG, the same llama.cpp build as the other CI jobs
+          mkdir -p ~/llama && cd ~/llama
+          gh release download "$LLAMA_TAG" --repo ggml-org/llama.cpp --pattern "llama-$LLAMA_TAG-bin-ubuntu-x64.tar.gz" --clobber
+          tar -xzf "llama-$LLAMA_TAG-bin-ubuntu-x64.tar.gz"
+          BIN=$(find ~/llama -name llama-server -type f | head -1); chmod +x "$BIN"
+          LD_LIBRARY_PATH="$(dirname "$BIN"):${LD_LIBRARY_PATH:-}" nohup "$BIN" -m ~/models/$GGUF_FILE --alias local \
+            --host 127.0.0.1 --port 8080 -ngl 0 -t "$(nproc)" -c 4096 -np 1 --jinja --reasoning off --cache-prompt \
+            --cache-ram 0 -cms 256 --temp 0 > ~/llama-server.log 2>&1 &
+          for i in $(seq 1 120); do curl -s -m 2 http://127.0.0.1:8080/health | grep -q ok && break; sleep 5; done
+          curl -s http://127.0.0.1:8080/health
+
+      - name: Record + replay on real sites
+        env:
+          AWOS_REPLAY_SMOKE: "1"
+          AWOS_REAL_MODEL_URL: http://127.0.0.1:8080/v1
+          AWOS_REPLAY_SMOKE_OUT: ${{ env.OUT }}
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p "$OUT"
+          PYTHONPATH=.:tests/extension python -m pytest tests/extension/cloud_smoke -v -s -p no:cacheprovider \
+            2>&1 | tee "$OUT/pytest.log"; rc=$?
+          {
+            echo "## AWOS Replay on real sites (G7 2B, llama.cpp CPU)"
+            echo
+            cat "$OUT/summary.md" 2>/dev/null || echo "(no summary written)"
+            echo
+            echo "_locator = re-found by attribute scoring (score, margin to the runner-up); MODEL = scoring was not"
+            echo "confident and the local repair model picked from the shortlist. Verifier = the G7 second opinion,"
+            echo "which can only downgrade VERIFIED to CHECK._"
+            echo
+            echo '<details><summary>pytest tail</summary>'; echo; echo '```'; tail -25 "$OUT/pytest.log"; echo '```'; echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $rc
+
+      - name: llama-server log
+        if: always()
+        run: cp ~/llama-server.log "$OUT/" 2>/dev/null; tail -30 ~/llama-server.log || true
+
+      - name: Upload run logs (public sites only, no secrets)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: replay-cloud-smoke-${{ github.run_id }}
+          path: ${{ env.OUT }}/**
+          if-no-files-found: warn

@@ -1,0 +1,48 @@
+{
+  "root_id": "g_295ec392abe4",
+  "nodes": {
+    "g_295ec392abe4": {
+      "goal_id": "g_295ec392abe4",
+      "description": "Add a docstring to the _cheap_call method in scaffold/agent/orchestrator.py explaining it retries up to 3 times with exponential backoff",
+      "parent_ids": [],
+      "child_ids": [
+        "g_2506b492acb2"
+      ],
+      "tasks": [],
+      "status": "completed",
+      "created_at": "2026-05-24T11:11:10Z",
+      "updated_at": "2026-06-16T08:19:15Z",
+      "completed_at": "2026-06-16T08:19:15Z",
+      "session_ids": [
+        "orch_4e56d946",
+        "orch_0ad76d7b"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    },
+    "g_2506b492acb2": {
+      "goal_id": "g_2506b492acb2",
+      "description": "Add a docstring to the `_cheap_call` method explaining it retries up to 3 times with exponential backoff for transient failures.",
+      "parent_ids": [],
+      "child_ids": [],
+      "tasks": [
+        {
+          "task_id": 1,
+          "file": "scaffold/agent/orchestrator.py",
+          "action": "Add a docstring to the `_cheap_call` method explaining it retries up to 3 times with exponential backoff for transient failures.",
+          "complexity": "low"
+        }
+      ],
+      "status": "completed",
+      "created_at": "2026-05-24T11:11:15Z",
+      "updated_at": "2026-06-16T08:19:15Z",
+      "completed_at": "2026-06-16T08:19:15Z",
+      "session_ids": [
+        "orch_4e56d946",
+        "orch_0ad76d7b"
+      ],
+      "failure_count": 0,
+      "critique_ids": []
+    }
+  }
+}

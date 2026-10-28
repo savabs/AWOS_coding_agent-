@@ -1,3 +1,9 @@
+---
+title: "Hermes Agent Comprehensive Research Report"
+tags:
+  - doc/research
+---
+
 # Hermes Agent Comprehensive Research Report
 
 **Research Date:** 2026-05-16  
@@ -1493,3 +1499,8 @@ DEEPSEEK_API_KEY        # DeepSeek API key
 **End of Research Report**
 
 *This comprehensive research was compiled on 2026-05-16 by analyzing official documentation, community sources, GitHub repositories, and third-party analyses. All information is current as of the research date.*
+
+## Related
+
+- _(add links to related documents here)_
+

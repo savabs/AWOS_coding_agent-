@@ -1,0 +1,7 @@
+{
+  "id": "05_partial_archive_bug",
+  "goal": "Bug: when writing an archive fails halfway (we hit 'No space left on device' on the NAS), backupd crashes with a traceback and leaves a half-written backup-....zip in the backup folder. Worse, `status` and our monitoring then count that broken file as the latest good backup. A backup file must only ever appear in the backup folder once it is complete, even while a run is still in progress. If writing fails, remove whatever was partly written, leave the existing backups alone, don't update the last-run time, and report it like backupd's other errors: one line that includes the underlying reason, exit status 1. Both zip and tar (compress off) archives are affected.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

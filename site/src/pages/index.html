@@ -1,0 +1,132 @@
+<!--meta
+title: AWOS Replay · Show it once, it does it forever
+description: AWOS Replay is a Chrome extension that records a web chore once, replays it on demand, and checks it really worked. A small model runs on your own Mac, so nothing leaves it. Free and open source.
+script: /assets/replay-waitlist.js
+-->
+  <div class="hero">
+    <div>
+      <div class="eyebrow">AWOS Replay · Chrome extension · free and open source</div>
+      <h1>Show it once. <em>It does it forever.</em></h1>
+      <p class="lede">Record a boring web chore once: download the invoice, export the report, fill the timesheet. AWOS Replay does it again whenever you ask, then checks that it really worked. A small model runs on your own Mac, so your pages and passwords never leave it.</p>
+      <div class="cta"><a class="btn primary" href="#install">Install free</a><a class="btn ghost" href="/recipes/">Browse recipes</a></div>
+      <p class="formnote">Chrome on a Mac. No account. <a href="#waitlist">Join the waitlist</a> for Pro and Windows.</p>
+    </div>
+    <figure class="demo">
+      <video id="demo-video" controls preload="none" playsinline poster="/assets/replay/demo-poster.svg" aria-describedby="demo-cap">
+        <source src="/assets/replay/demo.mp4" type="video/mp4">
+        <p>Your browser cannot play this video. It shows a chore being recorded once, replayed, and verified.</p>
+      </video>
+      <figcaption id="demo-cap">75 seconds: record an invoice download once, replay it next month, see it verified.</figcaption>
+    </figure>
+  </div>
+
+  <section id="how" aria-labelledby="how-h">
+    <div class="eyebrow">How it works · 30 seconds</div>
+    <h2 id="how-h">Record, replay, verified</h2>
+    <p class="sub">No scripting and no flowchart builder. You do the chore once in your normal browser, with your normal logins.</p>
+    <div class="steps three">
+      <div><span class="n">1 · record</span><h3>Do it once</h3><p>Press record and do the chore. AWOS Replay notes each click, field and choice. Passwords and card numbers are replaced with blanks; they are never saved.</p></div>
+      <div><span class="n">2 · replay</span><h3>It does it again</h3><p>Run it from the toolbar whenever you need it. If the site moved a button, the local model finds it again. If it is not sure, it stops and asks you.</p></div>
+      <div><span class="n">3 · verified</span><h3>It checks the result</h3><p>Every run ends with a check: the page shows the text you expect and the address is right. You see <b>VERIFIED</b> or <b>CHECK</b>, never a silent "done".</p></div>
+    </div>
+    <p class="note">Steps that pay, delete or send something stop and wait for your OK, every time.</p>
+  </section>
+
+  <section id="recipes" aria-labelledby="recipes-h">
+    <div class="eyebrow">Recipes</div>
+    <h2 id="recipes-h">Share a chore as a link</h2>
+    <p class="sub">A recipe is a recorded chore without your data in it. Send it as a link; the other person reads every step in plain language before adding it. The recipe lives in the part of the link after the <code>#</code>, which browsers never send to a server.</p>
+    <!--RECIPE_CARDS:3-->
+    <p><a href="/recipes/">See all example recipes</a></p>
+  </section>
+
+  <section id="privacy" aria-labelledby="privacy-h">
+    <div class="eyebrow">Free, private, open source</div>
+    <h2 id="privacy-h">Your browser, your Mac, your data</h2>
+    <div class="two">
+      <ul class="facts">
+        <li><b>The brain runs on your Mac</b><span>A small open model runs locally. Pages you replay on are read on your machine, not by a cloud service.</span></li>
+        <li><b>Uses the logins you already have</b><span>It runs in your own Chrome, so there are no passwords to hand over and no bots logging in from a data centre.</span></li>
+        <li><b>Secrets stay out of recipes</b><span>Password and card fields are recorded as blanks. Values you mark "ask me" are typed by you on each run.</span></li>
+      </ul>
+      <ul class="facts">
+        <li><b>Open source</b><span>Read the extension, the model prompts and the safety rules: <a href="https://github.com/savabs/AWOS_coding_agent-">source on GitHub</a>.</span></li>
+        <li><b>No trackers</b><span>No cookies or analytics on this site, none in the extension. Read the <a href="/replay/privacy/">privacy policy</a>.</span></li>
+        <li><b>Optional Claude brain (Pro)</b><span>For hard pages, add your own Anthropic key. Off unless you turn it on; by default every model call stays on your Mac.</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="pricing" aria-labelledby="pricing-h">
+    <div class="eyebrow">Pricing</div>
+    <h2 id="pricing-h">Free on your Mac. Pro when you want it hands-off.</h2>
+    <div class="two">
+      <div class="price"><div class="tag">Free</div>
+        <ul>
+          <li>Record and replay on demand</li>
+          <li>Local model on your Mac: no account, no per-run cost</li>
+          <li>Verified runs, with a run log you can export</li>
+          <li>Share and import recipes</li>
+        </ul>
+        <a class="btn ghost" href="#install">Install free</a>
+      </div>
+      <div class="price"><div class="tag">Pro <small>$12/mo</small></div>
+        <ul>
+          <li>Schedules: run a chore every Monday at 9, or on the 1st of the month</li>
+          <li>Unlimited saved recipes</li>
+          <li>Claude cloud brain for hard pages (bring your own key)</li>
+          <li>Direct line to the builder</li>
+        </ul>
+        <div class="cta"><button class="btn primary" type="button" disabled>Checkout opening soon</button><a class="btn ghost" href="#waitlist">Get notified</a></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="install" aria-labelledby="install-h">
+    <div class="eyebrow">Install</div>
+    <h2 id="install-h">One command on your Mac</h2>
+    <p class="sub">It sets up the small local model and the Chrome extension. Run it in Terminal.</p>
+    <pre class="install" aria-label="Install command"><code>{{replay_install}}</code></pre>
+    <p class="formnote">Needs macOS and Chrome. It downloads a small open model (2 billion parameters, about 1.5 GB) once. The model itself never needs the internet after that.</p>
+  </section>
+
+  <section id="waitlist" aria-labelledby="waitlist-h">
+    <div class="eyebrow">Waitlist</div>
+    <h2 id="waitlist-h">What chore would you hand off?</h2>
+    <p class="sub">One question. We build recipes and fixes for the chores people name most. Email is optional; leave it to hear when Pro and scheduling open.</p>
+    <form id="replay-form" class="waitlist" novalidate data-endpoint="/api/request-access">
+      <div class="row">
+        <label for="r-chore">The chore<select id="r-chore" name="chore" required>
+          <option value="">Choose one</option>
+          <option value="bills_invoices">Downloading bills and invoices</option>
+          <option value="reports_exports">Exporting reports and CSVs</option>
+          <option value="timesheets_forms">Timesheets and repeat forms</option>
+          <option value="order_status">Checking orders, shipments, tickets</option>
+          <option value="alerts_watch">Watching listings, prices, jobs</option>
+          <option value="data_entry">Copying data between sites</option>
+          <option value="other">Something else</option>
+        </select></label>
+        <label for="r-pro">Would you pay $12/mo for schedules?<select id="r-pro" name="pro">
+          <option value="">Rather not say</option>
+          <option value="yes">Yes</option>
+          <option value="maybe">Maybe</option>
+          <option value="no">No, free is enough</option>
+        </select></label>
+      </div>
+      <label for="r-note">Describe it in a sentence (optional)<textarea id="r-note" name="note" maxlength="500" placeholder="e.g. every month I log into 6 supplier portals and download the invoices for my accountant"></textarea></label>
+      <label for="r-email">Email (optional)<input id="r-email" name="email" type="email" maxlength="254" autocomplete="email"></label>
+      <label class="hp" for="r-website" aria-hidden="true">Website<input id="r-website" name="website" tabindex="-1" autocomplete="off"></label>
+      <div class="cta"><button class="btn primary" type="submit">Join the waitlist</button></div>
+      <p class="status" id="r-status" role="status" aria-live="polite"></p>
+      <p class="formnote">No trackers and no cookies. We store your answers, your country code and your email if you give one. Only the builder reads them.</p>
+    </form>
+  </section>
+
+  <section id="faq" aria-labelledby="faq-h">
+    <div class="eyebrow">Questions</div>
+    <h2 id="faq-h">Fair questions</h2>
+    <details><summary>How is this different from a macro recorder?</summary><p>Recorders replay exact positions and break when a site changes. AWOS Replay remembers each target by many clues (its label, text, nearby words) and, when the page changed, asks a small local model to pick the right one. When it cannot be sure, it stops instead of clicking the wrong thing. And each run ends with a check, so you know it worked.</p></details>
+    <details><summary>How is it different from an AI browser agent?</summary><p>An agent works the task out from scratch every time, which is slow, costly and different on each run. Replay follows what you showed it and only uses the model where the page changed. It is predictable, and on a local model it costs nothing per run.</p></details>
+    <details><summary>Is a shared recipe safe to add?</summary><p>A recipe is only a list of steps. The recipe page shows every step in plain language before you add it, the extension asks you to confirm, and risky steps (pay, delete, send) still stop for your OK when it runs. Recipes never contain the sender's passwords or data.</p></details>
+    <details><summary>Where is the old AWOS coding agent?</summary><p>It is still here: <a href="/coding-agent/">AWOS coding agent</a> and its <a href="/docs/">docs</a>. Replay uses the same local-first engine.</p></details>
+  </section>

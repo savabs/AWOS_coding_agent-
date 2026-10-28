@@ -1,0 +1,7 @@
+{
+  "id": "10_keep_last",
+  "goal": "The office server was switched off for three weeks over the holidays. The first backup after that pruned every older archive because they were all past retention_days, so we were left with a single backup. Add a setting `keep_last` (in [backup], APP_KEEP_LAST like every other setting; default 0 = off): pruning must always keep the newest N backups, however old they are. Retention otherwise works as today, and only real backup archives count. It must not be negative, and bad values are configuration errors like any other bad setting. List it in show-config and in the README's settings table.",
+  "max_turns": 40,
+  "max_cost_usd": 0.3,
+  "timeout_min": 15
+}

@@ -1,3 +1,9 @@
+---
+title: "DAGExecutor Spec"
+tags:
+  - doc/spec
+---
+
 # DAGExecutor Spec
 
 ## Interface
@@ -46,3 +52,8 @@ Wraps `_execute_single_task`:
 - `use_parallel=False` is the default — zero behaviour change for existing callers
 - Max 4 concurrent workers to avoid API rate limits
 - Works with `TaskDecomposer` retry loop (decomposed tasks also get parallelised)
+
+## Related
+
+- _(add links to related documents here)_
+
