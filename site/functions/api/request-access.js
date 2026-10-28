@@ -5,10 +5,14 @@
 //   - local-first waitlist:      {form:"waitlist", role, why, note?, email?, src?} -> wl:...
 //     role and why must come from fixed lists; the record gets a segment tag
 //     (see segmentFor) so discovery can count sign-ups per candidate customer.
+//   - AWOS Replay waitlist:      {form:"replay", chore, pro?, note?, email?, src?} -> rp:...
+//     chore ("what chore would you hand off?") is the segment; pro is yes/maybe/no/"".
 // GET ?token=ADMIN_TOKEN (owner only, constant-time compare; wrong token -> 404):
-//   (default)                 {count, requests, waitlist_count}
+//   (default)                 {count, requests, waitlist_count, replay_count}
 //   &view=waitlist            {count, by_segment, by_role, by_why, by_country, by_src, entries}
 //   &view=waitlist&format=csv the waitlist entries as CSV
+//   &view=replay              {count, by_chore, by_pro, by_country, by_src, entries}
+//   &view=replay&format=csv   the Replay waitlist entries as CSV
 // No cookies, no IP stored (IP is used only for an hourly rate-limit key).
 import { json, adminAuthorized, readBodyCapped } from "../../lib/common.js";
 
@@ -24,7 +28,11 @@ export const ROLES = ["solo_dev", "team_dev", "founder", "researcher", "other"];
 export const WHY = ["privacy", "cost", "offline", "speed", "curiosity", "other"];
 // Where the visitor came from: ?src= on the landing URL (first-party, no cookies).
 // Anything else is stored as "".
-export const SOURCES = ["hn", "localllama", "devindia", "x", "interview", "other"];
+export const SOURCES = ["hn", "localllama", "devindia", "x", "interview", "ph", "reddit", "recipe", "other"];
+// AWOS Replay waitlist: the chore people would hand off (the segment) and Pro intent.
+export const CHORES = ["bills_invoices", "reports_exports", "timesheets_forms", "order_status", "alerts_watch",
+  "data_entry", "other"];
+export const PRO_ANSWERS = ["yes", "maybe", "no", ""];
 export const SEGMENTS = ["privacy_team", "privacy_individual", "cost_sensitive", "local_builder", "unclassified"];
 
 // Candidate customers from docs/STRATEGY.md, derived only from the two answers.
@@ -79,23 +87,40 @@ export function cleanWaitlist(data) {
   return { rec: { form: "waitlist", segment: segmentFor(role, why), role, why, note, email, src } };
 }
 
+// The stored Replay waitlist record, or {error} for a 400.
+export function cleanReplay(data) {
+  for (const f of ["chore", "pro", "note", "email", "website", "src"]) {
+    if (data[f] != null && typeof data[f] !== "string") return { error: `${f} must be text.` };
+  }
+  const chore = data.chore || "";
+  if (!CHORES.includes(chore)) return { error: "Pick the chore you would hand off." };
+  const pro = data.pro || "";
+  if (!PRO_ANSWERS.includes(pro)) return { error: "Pick yes, maybe or no for Pro." };
+  const note = text(data.note || "");
+  if (note.length > MAX_NOTE) return { error: `Keep the description under ${MAX_NOTE} characters.` };
+  const email = text(data.email || "").toLowerCase();
+  if (email && (email.length > MAX_EMAIL || !EMAIL.test(email))) return { error: "That email does not look valid." };
+  const src = SOURCES.includes(data.src) ? data.src : "";
+  return { rec: { form: "replay", segment: chore, chore, pro, note, email, src } };
+}
+
 function randomId() {
   const b = new Uint8Array(8);
   crypto.getRandomValues(b);
   return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 }
 
-async function postWaitlist(request, env, data) {
+async function postWaitlist(request, env, data, cleaner = cleanWaitlist, prefix = "wl:") {
   // Honeypot: a hidden field real visitors never fill. Look successful, store nothing.
   if (typeof data.website === "string" && data.website.trim()) return json({ ok: true });
-  const out = cleanWaitlist(data);
+  const out = cleaner(data);
   if (out.error) return json({ error: out.error }, 400);
   const kv = env.ACCESS_REQUESTS;
   if (await rateLimited(kv, request)) return json({ error: "Too many requests. Try again in an hour." }, 429);
   const ts = new Date().toISOString();
   const rec = { ...out.rec, ts, country: (request.headers.get("cf-ipcountry") || "").slice(0, 2) };
   // With an email, a resubmit updates the same record; without, each is its own.
-  const key = rec.email ? "wl:e:" + rec.email : `wl:a:${ts}:${randomId()}`;
+  const key = rec.email ? prefix + "e:" + rec.email : `${prefix}a:${ts}:${randomId()}`;
   await kv.put(key, JSON.stringify(rec));
   return json({ ok: true, segment: rec.segment });
 }
@@ -110,6 +135,10 @@ export async function onRequestPost({ request, env }) {
   if (data.form === "waitlist") {
     if (new TextEncoder().encode(raw).length > MAX_WAITLIST_BODY) return json({ error: "Request too large." }, 413);
     return postWaitlist(request, env, data);
+  }
+  if (data.form === "replay") {
+    if (new TextEncoder().encode(raw).length > MAX_WAITLIST_BODY) return json({ error: "Request too large." }, 413);
+    return postWaitlist(request, env, data, cleanReplay, "rp:");
   }
 
   const rec = {
@@ -166,14 +195,52 @@ function csvCell(v) {
   return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
-export function waitlistCsv(rows) {
-  return [CSV_COLS.join(","), ...rows.map((r) => CSV_COLS.map((c) => csvCell(r[c])).join(","))].join("\n") + "\n";
+export function waitlistCsv(rows, cols = CSV_COLS) {
+  return [cols.join(","), ...rows.map((r) => cols.map((c) => csvCell(r[c])).join(","))].join("\n") + "\n";
+}
+
+const REPLAY_CSV_COLS = ["ts", "chore", "pro", "src", "country", "email", "note"];
+
+export function replayCsv(rows) {
+  return waitlistCsv(rows, REPLAY_CSV_COLS);
+}
+
+function csvResponse(body, filename) {
+  return new Response(body, {
+    headers: {
+      "content-type": "text/csv; charset=utf-8",
+      "content-disposition": `attachment; filename="${filename}"`,
+      "cache-control": "no-store",
+    },
+  });
+}
+
+async function countPrefix(kv, prefix) {
+  let n = 0, cursor;
+  do {
+    const page = await kv.list({ prefix, cursor });
+    n += page.keys.length;
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  return n;
 }
 
 export async function onRequestGet({ request, env }) {
   if (!adminAuthorized(request, env) || !env.ACCESS_REQUESTS) return json({ error: "Not found." }, 404);
   const params = new URL(request.url).searchParams;
   const kv = env.ACCESS_REQUESTS;
+  if (params.get("view") === "replay") {
+    const rows = await listPrefix(kv, "rp:");
+    if (params.get("format") === "csv") return csvResponse(replayCsv(rows), "awos-replay-waitlist.csv");
+    return json({
+      count: rows.length,
+      by_chore: countBy(rows, "chore", CHORES),
+      by_pro: countBy(rows, "pro", ["yes", "maybe", "no"]),
+      by_country: countBy(rows, "country"),
+      by_src: countBy(rows, "src"),
+      entries: rows,
+    });
+  }
   if (params.get("view") === "waitlist") {
     const rows = await listPrefix(kv, "wl:");
     if (params.get("format") === "csv") {
@@ -196,11 +263,6 @@ export async function onRequestGet({ request, env }) {
     });
   }
   const out = await listPrefix(kv, "req:");
-  let waitlist = 0, cursor;
-  do {
-    const page = await kv.list({ prefix: "wl:", cursor });
-    waitlist += page.keys.length;
-    cursor = page.list_complete ? undefined : page.cursor;
-  } while (cursor);
-  return json({ count: out.length, requests: out, waitlist_count: waitlist });
+  return json({ count: out.length, requests: out, waitlist_count: await countPrefix(kv, "wl:"),
+    replay_count: await countPrefix(kv, "rp:") });
 }

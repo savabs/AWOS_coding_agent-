@@ -1,0 +1,12 @@
+# Cloudflare Pages response headers (copied to public/_headers by build.py).
+# /r/ renders untrusted shared recipes: lock it down. No inline script, no
+# network access from the page, and no referrer (the #fragment is never sent
+# anyway, but the recipe page should not leak which page it was either).
+/r/*
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'
+  Referrer-Policy: no-referrer
+  X-Frame-Options: DENY
+
+# Applies to every path, /r/ included (Pages merges matching rules).
+/*
+  X-Content-Type-Options: nosniff
