@@ -18,7 +18,7 @@ function load() {
     $(s.agentBrain === 'claude' ? 'agent-claude' : 'agent-local').checked = true;
     $('agentEndpoint').value = s.agentEndpoint || 'http://127.0.0.1:8081/v1';
     $('agentModel').value = s.agentModel || 'qwen3.5-4b';
-    $('searchPage').value = s.searchPage || 'https://duckduckgo.com/';
+    $('searchPage').value = s.searchPage || 'https://duckduckgo.com/?q={goal}';
     $('agentClaudeModel').value = s.agentClaudeModel || 'claude-haiku-5-5';
     $('noCloudSites').value = (s.noCloudSites || []).join('\n');
     $('keepTraining').checked = s.keepTraining !== false;
@@ -55,7 +55,7 @@ $('save').onclick = async function () {
                    findTimeoutMs: Math.max(500, parseInt($('findTimeoutMs').value, 10) || 4000),
                    brain: b, cloudConsent: (b === 'claude' || ab === 'claude') && $('cloudConsent').checked,
                    agentBrain: ab, agentEndpoint: aep, agentModel: $('agentModel').value.trim() || 'qwen3.5-4b',
-                   searchPage: /^https:\/\//.test($('searchPage').value.trim()) ? $('searchPage').value.trim() : 'https://duckduckgo.com/',
+                   searchPage: /^https:\/\//.test($('searchPage').value.trim()) ? $('searchPage').value.trim() : 'https://duckduckgo.com/?q={goal}',
                    agentClaudeModel: $('agentClaudeModel').value, keepTraining: $('keepTraining').checked,
                    noCloudSites: $('noCloudSites').value.split(/[\s,]+/).filter(Boolean) };
   await chrome.runtime.sendMessage({ type: 'save_settings', settings: settings });

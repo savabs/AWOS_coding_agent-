@@ -33,6 +33,24 @@ CHORES = [
 RESULTS = []
 
 
+@pytest.mark.skipif(os.environ.get("AWOS_REAL_AGENT_LIVE") != "1", reason="AWOS_REAL_AGENT_LIVE=1 for the live-site check")
+def test_real_agent_live_search(x):
+    """The owner's run: on duckduckgo.com the same fill_enter repeated 22 times (the page ignored synthetic Enter)."""
+    x.server.model_answer = "NOT_FOUND"
+    x.set_settings(agentEndpoint=URL, agentModel=MODEL)
+    page = x.ctx.new_page()
+    page.goto("https://duckduckgo.com/")
+    t0 = time.time()
+    x.call("tell_start", tabId=x.tab_id(page), goal="Search the web for the price of Dior Homme Intense")
+    t = _wait_tell(x, END, timeout=300)
+    row = {"chore": "live_ddg_search", "searched": "q=" in page.url, "status": t["status"],
+           "steps": len(t.get("steps") or []), "seconds": round(time.time() - t0, 1),
+           "feed": [f.get("text") for f in t.get("feed") or [] if f.get("kind") in ("step", "bad")][-8:]}
+    print("\nREAL-AGENT", json.dumps(row))
+    x.call("tell_stop")
+    assert row["searched"], row
+
+
 @pytest.mark.parametrize("name,path,goal,ok", CHORES, ids=[c[0] for c in CHORES])
 def test_real_agent_chore(x, name, path, goal, ok):
     x.server.model_answer = "NOT_FOUND"                 # repair calls stay on the fake server; the agent uses URL

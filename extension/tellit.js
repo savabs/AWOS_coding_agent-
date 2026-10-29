@@ -23,7 +23,7 @@ var AG = self.AWOSAgent;
 var TELL_MAX_TRAJ = 20;
 var TELL_DEFAULTS = { agentBrain: 'local', agentEndpoint: 'http://127.0.0.1:8081/v1', agentModel: 'qwen3.5-4b',
                       agentClaudeModel: 'claude-haiku-5-5', noCloudSites: [], keepTraining: true,
-                      searchPage: 'https://duckduckgo.com/' };
+                      searchPage: 'https://duckduckgo.com/?q={goal}' };
 /** a site the goal names ("... on wikipedia.org", "https://..."), as an https URL; not e-mail addresses. */
 function siteInGoal(goal) {
   var m = /(?:^|[\s("'])((?:https?:\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,24})(\/[^\s"')]*)?/i.exec(String(goal || ''));
@@ -43,6 +43,8 @@ async function tellSettings() {
   var s = Object.assign({}, TELL_DEFAULTS, await settings());
   if (CLAUDE_AGENT_MODELS.indexOf(s.agentClaudeModel) < 0) s.agentClaudeModel = TELL_DEFAULTS.agentClaudeModel;
   if (s.agentBrain !== 'claude') s.agentBrain = 'local';
+  // 0.5.0 Options saved the bare search home page; it now starts on the results for the goal
+  if (/^https:\/\/duckduckgo\.com\/?$/i.test(String(s.searchPage || ''))) s.searchPage = TELL_DEFAULTS.searchPage;
   return s;
 }
 /** the cloud may not see this page: its site is locked by the user, or the recipe is. */
@@ -156,8 +158,13 @@ async function tellStart(msg) {
     var named = siteInGoal(goal);
     if (named) { start = named; startNote = 'I opened ' + named + ' because the goal names it.'; }
     else {
-      start = cfg.searchPage || TELL_DEFAULTS.searchPage;
-      startNote = 'No site was open: you are on a search page. Search for the site you need, or use goto("https://...") if you know its address.';
+      // the search RESULTS for the goal ({goal} in the setting): typing into a search engine's box is fragile (DuckDuckGo
+      // ignores synthetic Enter; a real run repeated it 22 times) and costs a step
+      var sp = cfg.searchPage || TELL_DEFAULTS.searchPage;
+      start = sp.indexOf('{goal}') >= 0 ? sp.replace('{goal}', encodeURIComponent(goal.slice(0, 200))) : sp;
+      startNote = sp.indexOf('{goal}') >= 0
+        ? 'No site was open: you are on web search results for the goal. Open the result that fits, or use goto("https://...") if you know the address.'
+        : 'No site was open: you are on a search page. Search for the site you need, or use goto("https://...") if you know its address.';
     }
   }
   if (cfg.agentBrain === 'claude') {

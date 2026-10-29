@@ -267,6 +267,20 @@ def test_no_start_page_needed(x):
     assert t["status"] == "confirm" and t["startUrl"] == x.server.base + "/admin.html", t["feed"]
     assert "No site was open: you are on a search page" in brain.requests[0]["messages"][1]["content"]
     x.call("tell_stop")
+    # with {goal} in the start page it opens the search RESULTS for the goal (no fragile search-box typing)
+    page.close()                                                  # two about:blank tabs would confuse tab_id()
+    brain = _setup(x, ['done "Results are open"'], searchPage=x.server.base + "/search_results.html?q={goal}")
+    page = x.ctx.new_page()
+    page.goto("about:blank")
+    x.call("tell_start", tabId=x.tab_id(page), goal="price of Dior Homme Intense")
+    t = _wait_tell(x, ("confirm", "ended", "needs_user", "awaiting_approval"))
+    assert t["startUrl"] == x.server.base + "/search_results.html?q=price%20of%20Dior%20Homme%20Intense", t["startUrl"]
+    assert "Results for price of Dior Homme Intense" in page.inner_text("#r")
+    assert "web search results for the goal" in brain.requests[0]["messages"][1]["content"]
+    x.call("tell_stop")
+    # the bare DuckDuckGo home page saved by 0.5.0 Options is upgraded to the results template
+    x.set_settings(searchPage="https://duckduckgo.com/")
+    assert x.sw.evaluate("() => tellSettings().then(s => s.searchPage)") == "https://duckduckgo.com/?q={goal}"
     # a site named in the goal is opened directly; e-mail addresses and IPs are not sites
     f = "(g) => siteInGoal(g)"
     assert x.sw.evaluate(f, "find when the Eiffel Tower was finished on wikipedia.org please") == "https://wikipedia.org/"
