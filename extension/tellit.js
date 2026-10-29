@@ -345,14 +345,16 @@ async function tellExecute(t, cfg, act, ctx, approved) {
   // loop guard: the same click on the same page a 3rd time in a row (a 4B model toggling one checkbox for all 25
   // steps on a real run) pauses and asks instead of using up the step budget. micro_agent.py never counts clicks as
   // duplicates (toggles are legitimate), so two in a row still pass.
-  var rk = act.verb === 'click' && v.control ? tabUrl + '|' + (v.control.name || '') : '';
+  // any action, not only clicks: a real run repeated the same fill_enter 22 times on a page that ignored it
+  var rk = v.control && /^(click|fill|fill_enter|select)$/.test(act.verb)
+    ? [tabUrl, act.verb, v.control.name || '', act.value == null ? '' : act.value, act.option || ''].join('|') : '';
   t.repeat = rk && t.repeatKey === rk ? (t.repeat || 1) + 1 : 1;
   t.repeatKey = rk;
   if (rk && t.repeat >= 3) {
     t.repeat = 0; t.repeatKey = '';
-    tellReject(t, ctx, 'the same click on the same page a third time in a row; it is not moving the goal forward');
-    return tellPause(t, 'needs_user', { kind: 'loop', message: 'The agent keeps clicking "' + (v.control.name || 'the same control')
-      + '" on this page without getting closer to the goal. Type a correction below and press Continue, or Stop.' });
+    tellReject(t, ctx, 'the same action on the same page a third time in a row; it is not moving the goal forward');
+    return tellPause(t, 'needs_user', { kind: 'loop', message: 'The agent keeps repeating ' + ctx.show + ' on "' + (v.control.name || 'the same control')
+      + '" without getting closer to the goal. Type a correction below and press Continue, or Stop.' });
   }
   // safety gate, before anything is sent to the page
   var gateName = '', danger = null;

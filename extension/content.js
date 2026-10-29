@@ -240,12 +240,22 @@
     var o = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true };
     var go = el.dispatchEvent(new KeyboardEvent('keydown', o));
     go = el.dispatchEvent(new KeyboardEvent('keypress', o)) && go;
-    if (go && el.isConnected && el.form) {
+    var submit = function () {
       var b = defaultButton(el);
       if (b && !b.disabled) b.click();
       else if (el.form.requestSubmit) el.form.requestSubmit(); else el.form.submit();
-    }
+    };
+    if (go && el.isConnected && el.form) submit();
     if (el.isConnected) el.dispatchEvent(new KeyboardEvent('keyup', o));
+    // A page handler cancelled the synthetic Enter but then did nothing with it (sites that only act on a trusted
+    // key press, e.g. DuckDuckGo's search box: a real run typed the same query 22 times). If ~1.2 s later the
+    // address is the same and the field is still in its form, submit the form the way the browser would.
+    if (!go && el.form) {
+      var before = location.href;
+      setTimeout(function () {
+        if (location.href === before && el.isConnected && el.form) submit();
+      }, 1200);
+    }
   }
 
   // ---- Tell it: act on control n of the last observe() (the agent's numbering) -----------------------------

@@ -275,6 +275,27 @@ def test_no_start_page_needed(x):
     assert x.sw.evaluate(f, "check 10.0.0.1 status") == "" and x.sw.evaluate(f, "compare two shops") == ""
 
 
+def test_enter_ignored_by_page_still_searches(x):
+    # DuckDuckGo-like box: page code cancels the synthetic Enter and does nothing (a real run repeated the same
+    # fill_enter 22 times); the form is then submitted the way the browser would
+    _setup(x, ['fill_enter "Search the web" "dior homme intense price"', 'done "Searched"'])
+    page, _ = _start(x, "/search_like.html", "Search the web for the price of Dior Homme Intense")
+    t = _wait_tell(x, ("confirm", "ended", "needs_user", "awaiting_approval"))
+    assert t["status"] == "confirm", t["feed"]
+    assert page.url.split("?")[0].endswith("/search_results.html") and "dior homme intense price" in page.inner_text("#r")
+    x.call("tell_stop")
+
+
+def test_same_fill_enter_three_times_pauses(x):
+    # the loop guard covers every action, not only clicks: the third identical fill_enter is refused and it asks
+    brain = _setup(x, ['fill_enter "Search the web" "same query"'] * 6)
+    _start(x, "/dead_search.html", "Search the web for the same query")
+    t = _wait_tell(x, ("needs_user", "confirm", "ended", "awaiting_approval"), timeout=90)
+    assert t["status"] == "needs_user" and t["pending"]["kind"] == "loop", t["feed"]
+    assert 'fill_enter(1, "same query")' in t["pending"]["message"] and len(brain.requests) == 3
+    x.call("tell_stop")
+
+
 def test_same_click_three_times_pauses_instead_of_looping(x):
     # the real Qwen3.5-4B toggled "Marketing e-mails" for all 25 steps on this chore; two in a row is a toggle,
     # a third is a loop: it is rejected (not clicked) and the run asks the user
