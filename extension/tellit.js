@@ -22,7 +22,16 @@
 var AG = self.AWOSAgent;
 var TELL_MAX_TRAJ = 20;
 var TELL_DEFAULTS = { agentBrain: 'local', agentEndpoint: 'http://127.0.0.1:8081/v1', agentModel: 'qwen3.5-4b',
-                      agentClaudeModel: 'claude-haiku-5-5', noCloudSites: [], keepTraining: true };
+                      agentClaudeModel: 'claude-haiku-5-5', noCloudSites: [], keepTraining: true,
+                      searchPage: 'https://duckduckgo.com/' };
+/** a site the goal names ("... on wikipedia.org", "https://..."), as an https URL; not e-mail addresses. */
+function siteInGoal(goal) {
+  var m = /(?:^|[\s("'])((?:https?:\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,24})(\/[^\s"')]*)?/i.exec(String(goal || ''));
+  if (!m) return '';
+  var host = m[1].replace(/^https?:\/\//i, '');
+  if (/^\d+(\.\d+)+$/.test(host) || !/[a-z]/i.test(host.split('.').pop())) return '';
+  return 'https://' + host + (m[2] || '/');
+}
 var CLAUDE_AGENT_MODELS = ['claude-haiku-5-5', 'claude-sonnet-5-5'];
 function localAgentHint(ep) {
   return 'No local agent model is answering at ' + ep + '. Set one up on this Mac (private: page data never leaves it) '
@@ -137,9 +146,20 @@ async function tellStart(msg) {
   var goal = String(msg.goal || '').trim().slice(0, 500);
   if (!goal) throw new Error('type what it should do');
   var tab = await chrome.tabs.get(msg.tabId);
-  var start = String(msg.startUrl || '').trim() || tab.url || '';
-  if (!/^https?:\/\//.test(start)) throw new Error('Tell it works on http(s) pages: open the site first, or give a start page');
   var cfg = await tellSettings();
+  // start: the typed start page, else this tab if it is a web page, else a site named in the goal, else the search
+  // page (the agent searches or goto()s from there, like a person opening a new tab). No start page is required.
+  var start = String(msg.startUrl || '').trim(), startNote = '';
+  if (start && !/^https?:\/\//i.test(start)) start = 'https://' + start;
+  if (!start && /^https?:\/\//i.test(tab.url || '')) start = tab.url;
+  if (!start) {
+    var named = siteInGoal(goal);
+    if (named) { start = named; startNote = 'I opened ' + named + ' because the goal names it.'; }
+    else {
+      start = cfg.searchPage || TELL_DEFAULTS.searchPage;
+      startNote = 'No site was open: you are on a search page. Search for the site you need, or use goto("https://...") if you know its address.';
+    }
+  }
   if (cfg.agentBrain === 'claude') {
     cfg.claudeKey = await getLocal('claudeKey', '');
     var why = M.claudeBlocked(cfg);
@@ -155,7 +175,7 @@ async function tellStart(msg) {
             brain: cfg.agentBrain, model: cfg.agentBrain === 'claude' ? 'anthropic:' + cfg.agentClaudeModel : 'local:' + cfg.agentModel,
             maxSteps: Math.max(1, Math.min(AG.MAX_STEPS, caps.steps || AG.MAX_STEPS)),
             maxSeconds: Math.max(1, Math.min(AG.MAX_SECONDS, caps.seconds || AG.MAX_SECONDS)),
-            step: 0, activeMs: 0, segStart: Date.now(), window: 0, visited: [], history: [], invalid: 0, note: '',
+            step: 0, activeMs: 0, segStart: Date.now(), window: 0, visited: [], history: [], invalid: 0, note: startNote,
             steps: [{ action: 'goto', url: start }], feed: [], pending: null, pendingHist: null, guardSkip: {}, flagSeen: {},
             traj: { task_id: '', model: '', steps: [], outcome: '', reason: '', events: [], flags: [], seconds: 0, error: '' } };
   t.traj.task_id = t.id; t.traj.model = t.model;

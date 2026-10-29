@@ -48,6 +48,8 @@ cannot be re-found by itself, and to double-check the final page.</p>
   <input type="text" id="agentEndpoint" placeholder="http://127.0.0.1:8081/v1">
   <label for="agentModel">Agent model name</label>
   <input type="text" id="agentModel" placeholder="qwen3.5-4b">
+  <label for="searchPage">Start page when no site is open (Tell it searches from here)</label>
+  <input type="text" id="searchPage" placeholder="https://duckduckgo.com/">
   <label class="choice"><input type="radio" name="agentBrain" value="claude" id="agent-claude"> Claude with your own API key (opt-in)</label>
   <div class="hint">Off unless you pick it and tick the consent box below. When on, on every step the page's text, its
   button and field names, the values the agent types and your goal are sent to Anthropic. Passwords and codes never are

@@ -256,6 +256,25 @@ def test_invalid_replies_repair_then_ask_and_correction_reaches_prompt(x):
     _check_trajectory(ep)
 
 
+def test_no_start_page_needed(x):
+    # a new tab (no web page) and no start page typed: it starts on the search page and tells the agent so
+    brain = _setup(x, ['fill_enter "Order number" "4417"', 'done "Order 4417 (Grace Hopper): Shipped"'],
+                   searchPage=x.server.base + "/admin.html")
+    page = x.ctx.new_page()
+    page.goto("about:blank")
+    x.call("tell_start", tabId=x.tab_id(page), goal="Look up order 4417 in the orders admin and tell me its status")
+    t = _wait_tell(x, ("confirm", "ended", "needs_user", "awaiting_approval"))
+    assert t["status"] == "confirm" and t["startUrl"] == x.server.base + "/admin.html", t["feed"]
+    assert "No site was open: you are on a search page" in brain.requests[0]["messages"][1]["content"]
+    x.call("tell_stop")
+    # a site named in the goal is opened directly; e-mail addresses and IPs are not sites
+    f = "(g) => siteInGoal(g)"
+    assert x.sw.evaluate(f, "find when the Eiffel Tower was finished on wikipedia.org please") == "https://wikipedia.org/"
+    assert x.sw.evaluate(f, "open https://news.ycombinator.com/newest and read the top title") == "https://news.ycombinator.com/newest"
+    assert x.sw.evaluate(f, "e-mail ada@example.com the report") == ""
+    assert x.sw.evaluate(f, "check 10.0.0.1 status") == "" and x.sw.evaluate(f, "compare two shops") == ""
+
+
 def test_same_click_three_times_pauses_instead_of_looping(x):
     # the real Qwen3.5-4B toggled "Marketing e-mails" for all 25 steps on this chore; two in a row is a toggle,
     # a third is a loop: it is rejected (not clicked) and the run asks the user

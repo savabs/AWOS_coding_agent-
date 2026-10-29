@@ -785,6 +785,7 @@ var HANDLERS = {
     s.cloudConsent = (s.brain === 'claude' || s.agentBrain === 'claude') && s.cloudConsent === true;   // consent only means something with a Claude brain
     if (s.agentEndpoint != null && !M.isLoopback(s.agentEndpoint)) throw new Error('the agent endpoint must be loopback (127.0.0.1 / localhost)');
     if (s.agentClaudeModel != null && ['claude-haiku-5-5', 'claude-sonnet-5-5'].indexOf(s.agentClaudeModel) < 0) s.agentClaudeModel = 'claude-haiku-5-5';
+    if (s.searchPage != null && !/^https?:\/\/[^\s]+$/i.test(String(s.searchPage))) delete s.searchPage;   // Tell it's start when no site is open
     if (s.noCloudSites != null) s.noCloudSites = (Array.isArray(s.noCloudSites) ? s.noCloudSites : String(s.noCloudSites).split(/[\s,]+/))
       .map(function (x) { x = String(x).trim().toLowerCase(); return /^https?:/.test(x) ? R.siteOf(x) : R.registrableDomain(x.replace(/\/.*$/, '')); })
       .filter(Boolean).filter(function (x, i, a) { return a.indexOf(x) === i; }).slice(0, 200);
