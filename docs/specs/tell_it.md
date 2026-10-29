@@ -100,7 +100,9 @@ Deviations (deliberate):
 
 - Default: a local agent model on llama-server (OpenAI-compatible, loopback only), e.g. Qwen3.5-4B Q4_K_M
   (8 GB Macs) or Qwen3.5-9B (16 GB or more). Request: `system` + `user`, `temperature 0`, `max_tokens 200`,
-  the per-step `grammar`, thinking off. Nothing leaves the computer.
+  the per-step `grammar`, thinking off. Nothing leaves the computer. Default endpoint
+  `http://127.0.0.1:8081/v1`, model `qwen3.5-4b`: the agent server that `scripts/install_replay.sh --agent 4b|9b`
+  runs as launchd agent `ai.awos.replay-agent`. The 2B repair / verify model stays on 8080.
 - Start check: if the endpoint does not answer, or `/models` lists only the 2B repair / verify model (G6/G7), the
   start is refused with how to start an agent model. The cloud is never suggested.
 - Claude (opt-in): Options -> Tell it -> "Claude with your own API key" + the consent box + a key. Model

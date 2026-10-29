@@ -16,7 +16,7 @@ function load() {
     $(s.brain === 'claude' ? 'brain-claude' : 'brain-local').checked = true;
     $('cloudConsent').checked = !!s.cloudConsent;
     $(s.agentBrain === 'claude' ? 'agent-claude' : 'agent-local').checked = true;
-    $('agentEndpoint').value = s.agentEndpoint || 'http://127.0.0.1:8080/v1';
+    $('agentEndpoint').value = s.agentEndpoint || 'http://127.0.0.1:8081/v1';
     $('agentModel').value = s.agentModel || 'qwen3.5-4b';
     $('agentClaudeModel').value = s.agentClaudeModel || 'claude-haiku-5-5';
     $('noCloudSites').value = (s.noCloudSites || []).join('\n');
@@ -43,7 +43,7 @@ $('save').onclick = async function () {
   if (!AWOSModel.isLoopback(ep)) return say('Endpoint must be loopback (127.0.0.1 / localhost).', true);
   var b = brain(), ab = agentBrain(), key = $('claudeKey').value.trim();
   if ((b === 'claude' || ab === 'claude') && !$('cloudConsent').checked) return say('Tick the consent box to use Claude, or choose the local model.', true);
-  var aep = $('agentEndpoint').value.trim() || 'http://127.0.0.1:8080/v1';
+  var aep = $('agentEndpoint').value.trim() || 'http://127.0.0.1:8081/v1';
   if (!AWOSModel.isLoopback(aep)) return say('The agent endpoint must be loopback (127.0.0.1 / localhost).', true);
   if (key) {
     var r = await chrome.runtime.sendMessage({ type: 'save_claude_key', key: key });

@@ -9,12 +9,24 @@ AWOS Replay is a Chrome extension: **show a web chore once, then replay it whene
 > round is to find where it breaks. Use a **separate Chrome profile**, and start with low-risk chores.
 
 ## 1. Install (once)
-1. `brew install llama.cpp`. You also need `gh` (logged in) to download the model.
-2. Start the model: `bash scripts/awos_model.sh` (first run downloads 1.3 GB). Leave it running. Check it with
-   `bash scripts/awos_model.sh --check`.
+1. Install the local models: `bash scripts/install_replay.sh --agent 4b`. On a Mac with 16 GB or more you can use
+   `--agent 9b` instead (stronger, 5.7 GB). It installs llama.cpp with Homebrew if it is missing, downloads the models
+   (sha256-checked), and starts two low-priority background servers on this Mac only:
+   - `127.0.0.1:8080`: the 2B repair / verify model for Replay (1.3 GB).
+   - `127.0.0.1:8081`: the Tell-it agent model (Qwen3.5-4B, 2.7 GB, or the 9B).
+
+   Each server unloads its model after 5 idle minutes. **Tell it needs `--agent`.** The 2B cannot drive a page by
+   itself. `--agent none` removes only the agent server. `AWOS_DRY_RUN=1` shows every step without doing it.
+   Details: `docs/launch/replay_install.md`.
+2. Check it with `bash scripts/install_replay.sh --status` or `bash scripts/awos_model.sh --check`. The second also
+   checks that 8081 serves an agent model and not the 2B.
+   (Without the installer: `brew install llama.cpp` and `bash scripts/awos_model.sh` in a terminal, which serves the
+   2B only.)
 3. Chrome: open `chrome://extensions`, turn on Developer mode, click **Load unpacked**, and pick the `extension/` folder of
    this repo.
-4. Pin "AWOS Replay". In its **Options**, the endpoint should be `http://127.0.0.1:8080/v1`.
+4. Pin "AWOS Replay". In its **Options**, the endpoint should be `http://127.0.0.1:8080/v1`, and the Tell-it agent
+   endpoint `http://127.0.0.1:8081/v1` with model `qwen3.5-4b` (`qwen3.5-9b` if you installed the 9B). Those are the
+   defaults.
 
 ## 2. Record a chore (once per chore)
 1. Open the start page of the chore and log in yourself (AWOS never stores passwords).
@@ -49,9 +61,9 @@ AWOS Replay is a Chrome extension: **show a web chore once, then replay it whene
 
 ## 4b. Tell it (v0.5): describe the chore instead of recording it
 Type what you want in the popup's **Tell it** box and press **Start**; the agent does it in the tab while you watch.
-- **The brain is local by default**: an agent model on your Mac (llama-server, e.g. Qwen3.5-4B, or Qwen3.5-9B on a
-  16 GB+ Mac): `llama-server -m Qwen3.5-4B-Instruct-Q4_K_M.gguf --port 8080`. The 2B model from step 1 only repairs and
-  verifies; it cannot drive a page. Pages you open with Tell it (intranet, CRM, bank, e-mail) never leave the Mac.
+- **The brain is local by default**: an agent model on your Mac, Qwen3.5-4B (or Qwen3.5-9B on a 16 GB+ Mac) on
+  `127.0.0.1:8081`, set up by the installer: `bash scripts/install_replay.sh --agent 4b` (or `--agent 9b`). The 2B model
+  on 8080 only repairs and verifies; it cannot drive a page. Pages you open with Tell it (intranet, CRM, bank, e-mail) never leave the Mac.
 - **Claude is opt-in**: Options -> Tell it -> "Claude with your own API key" plus the consent box. When it is on, each
   step's page text and button names go to Anthropic. Add sites to "Never use the cloud on these sites" and Tell it
   stops before sending anything from them; a recipe can be locked the same way.

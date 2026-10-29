@@ -40,11 +40,12 @@ cannot be re-found by itself, and to double-check the final page.</p>
   <legend>Tell it (the agent that does a task from your words)</legend>
   <label class="choice"><input type="radio" name="agentBrain" value="local" id="agent-local"> Local agent model on this Mac (default, private, free)</label>
   <div class="hint">Every page the agent reads stays on this computer: intranet, CRM, HR portal, bank, e-mail.
-  Needs an <em>agent</em> model served by llama-server, e.g. Qwen3.5-4B (8 GB Macs) or Qwen3.5-9B (16 GB or more, stronger):
-  <code>llama-server -m Qwen3.5-4B-Instruct-Q4_K_M.gguf --port 8080</code>. The small 2B model AWOS installs for
-  repair / verify cannot drive a page by itself. <span id="agentstatus"></span></div>
+  Needs an <em>agent</em> model, Qwen3.5-4B (8 GB Macs) or Qwen3.5-9B (16 GB or more, stronger), on
+  127.0.0.1:8081, set up by the installer: <code>--agent 4b</code> or <code>--agent 9b</code>
+  (<code>install_replay.sh --agent 4b</code>). The small 2B model on 8080 only repairs / verifies; it cannot drive a
+  page by itself. <span id="agentstatus"></span></div>
   <label for="agentEndpoint">Agent model endpoint (OpenAI-compatible, loopback only)</label>
-  <input type="text" id="agentEndpoint" placeholder="http://127.0.0.1:8080/v1">
+  <input type="text" id="agentEndpoint" placeholder="http://127.0.0.1:8081/v1">
   <label for="agentModel">Agent model name</label>
   <input type="text" id="agentModel" placeholder="qwen3.5-4b">
   <label class="choice"><input type="radio" name="agentBrain" value="claude" id="agent-claude"> Claude with your own API key (opt-in)</label>

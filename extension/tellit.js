@@ -21,13 +21,13 @@
  */
 var AG = self.AWOSAgent;
 var TELL_MAX_TRAJ = 20;
-var TELL_DEFAULTS = { agentBrain: 'local', agentEndpoint: 'http://127.0.0.1:8080/v1', agentModel: 'qwen3.5-4b',
+var TELL_DEFAULTS = { agentBrain: 'local', agentEndpoint: 'http://127.0.0.1:8081/v1', agentModel: 'qwen3.5-4b',
                       agentClaudeModel: 'claude-haiku-5-5', noCloudSites: [], keepTraining: true };
 var CLAUDE_AGENT_MODELS = ['claude-haiku-5-5', 'claude-sonnet-5-5'];
 function localAgentHint(ep) {
-  return 'No local agent model is answering at ' + ep + '. Start one on this Mac (private: page data never leaves it), e.g. '
-    + 'llama-server -m Qwen3.5-4B-Instruct-Q4_K_M.gguf --port 8080 (or the 9B model on a Mac with 16 GB or more), '
-    + 'then try again. The small 2B model AWOS installs for repair / verify cannot drive a page by itself.';
+  return 'No local agent model is answering at ' + ep + '. Set one up on this Mac (private: page data never leaves it) '
+    + 'with the AWOS installer: install_replay.sh --agent 4b (Qwen3.5-4B on llama-server, 127.0.0.1:8081), or --agent 9b '
+    + 'on a Mac with 16 GB or more, then try again. The small 2B model on 8080 only repairs / verifies; it cannot drive a page.';
 }
 
 async function tellSettings() {
@@ -120,8 +120,8 @@ async function checkLocalAgent(cfg) {
     var ids = ((j && j.data) || []).map(function (m) { return String(m.id || ''); });
     if (ids.length && ids.every(function (id) { return /(^|[^0-9.])2b\b|g6|g7|verif|repair/i.test(id); }))
       return 'The local server only runs the small repair / verify model (' + ids.join(', ') + '), which cannot drive a page. '
-        + 'Start an agent model next to it, e.g. llama-server -m Qwen3.5-4B-Instruct-Q4_K_M.gguf --port 8080 (9B on 16 GB+ Macs), '
-        + 'and set its address in Options.';
+        + 'Set up the agent model with the AWOS installer: install_replay.sh --agent 4b (or --agent 9b on 16 GB+ Macs); '
+        + 'it serves on http://127.0.0.1:8081/v1, the default agent endpoint in Options.';
     return '';
   } catch (e) { return localAgentHint(cfg.agentEndpoint); }
   finally { clearTimeout(timer); }

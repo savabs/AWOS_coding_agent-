@@ -359,10 +359,14 @@ def test_local_agent_missing_explains_without_pushing_cloud(x):
     tab = x.tab_id(page)
     err = _err(x, "tell_start", tabId=tab, goal="Open my settings")
     assert "llama-server" in err and "Qwen3.5-4B" in err and "Claude" not in err and "cloud" not in err.lower()
+    assert "install_replay.sh --agent 4b" in err and "--agent 9b" in err             # the installer sets it up
     x.server.overrides["/v1/models"] = "models_2b.json"
     _setup(x, [])
     err = _err(x, "tell_start", tabId=tab, goal="Open my settings")
-    assert "repair / verify model" in err and "Claude" not in err
+    assert "repair / verify model" in err and "Claude" not in err and "--agent 4b" in err and "8081" in err
+    # the default agent endpoint is the installer's agent server (8081), not the 2B repair server (8080)
+    assert x.sw.evaluate("TELL_DEFAULTS")["agentEndpoint"] == "http://127.0.0.1:8081/v1"
+    assert x.sw.evaluate("TELL_DEFAULTS")["agentModel"] == "qwen3.5-4b"
     assert x.call("tell_state")["tell"] is None
     assert x.call("tell_state")["settings"]["agentBrain"] == "local"                       # local is the default
 
