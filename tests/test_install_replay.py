@@ -45,7 +45,12 @@ STUBS = {
     # one state file per launchd label: bootstrap <domain> <plist>, bootout/print <domain>/<label>
     "launchctl": (
         'echo "launchctl $*" >> "$STUB_LOG"\n'
-        'case "$1" in bootstrap) touch "$STUB_STATE/$(basename "$3" .plist)" ;; bootout) rm -f "$STUB_STATE/${2##*/}" ;;'
+        'case "$1" in bootstrap) [ -n "${STUB_SLOW_BOOTOUT:-}" ] && [ -f "$STUB_STATE/$(basename "$3" .plist)" ]'
+        ' && { echo "Bootstrap failed: 5: Input/output error" >&2; exit 5; };'
+        ' touch "$STUB_STATE/$(basename "$3" .plist)" ;;'
+        # real launchctl unloads asynchronously: with STUB_SLOW_BOOTOUT the label lingers ~1 s after bootout returns
+        ' bootout) if [ -n "${STUB_SLOW_BOOTOUT:-}" ]; then (sleep 1; rm -f "$STUB_STATE/${2##*/}") >/dev/null 2>&1 &'
+        ' else rm -f "$STUB_STATE/${2##*/}"; fi ;;'
         ' print) [ -f "$STUB_STATE/${2##*/}" ] || exit 113; printf "\\tpid = 4242\\n" ;; esac'
     ),
     # :8080 answers while ai.awos.replay-model is loaded, :8081 while ai.awos.replay-agent is (it lists
@@ -135,6 +140,15 @@ def test_dry_run_prints_plan_and_changes_nothing(env):
     assert "http://127.0.0.1:8081/v1 (qwen3.5-4b)" in out
     code = [l for l in SCRIPT.read_text().splitlines() if not l.lstrip().startswith("#")]
     assert not [l for l in code if re.search(r"\bsudo\b", l.split("#")[0]) and "say" not in l]
+
+
+def test_rerun_waits_for_async_bootout(env):
+    # macOS: bootout returns before the old service is gone, and an immediate bootstrap fails with
+    # "Bootstrap failed: 5: Input/output error" (the owner hit this re-running with --agent 4b)
+    run(env)
+    r = run(env, "--agent", "4b", extra={"STUB_SLOW_BOOTOUT": "1"})
+    assert "Bootstrap failed" not in r.stdout + r.stderr
+    assert "model server: UP" in r.stdout and "Tell-it agent server: UP" in r.stdout
 
 
 def test_install_then_uninstall_is_exact_roundtrip(env):

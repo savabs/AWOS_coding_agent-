@@ -277,6 +277,20 @@ EOF
 EOF
 }
 
+# launchctl bootout returns before the old service has finished unloading; a bootstrap right after it fails with
+# "Bootstrap failed: 5: Input/output error" (seen on a re-run that switched the agent model). Wait until the label is
+# gone (<= 15 s), then bootstrap, retrying a few times.
+bootstrap_when_gone() {   # bootstrap_when_gone <label> <plist>
+  local label="$1" plist="$2" _
+  for _ in $(seq 1 30); do loaded "$label" || break; sleep 0.5; done
+  for _ in 1 2 3 4 5; do
+    launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null && return 0
+    loaded "$label" && return 0
+    sleep 1
+  done
+  launchctl bootstrap "gui/$(id -u)" "$plist" || die "could not load $label (launchctl bootstrap failed); try: launchctl bootout gui/$(id -u)/$label, then run this again"
+}
+
 install_launchd() {   # install_launchd <kind> <label> <plist> <log> <port> <args-function> <what> <port-env>
   local kind="$1" label="$2" plist="$3" log="$4" port="$5" args="$6" what="$7" portenv="$8" text
   mkdir_rec "$AGENTS_DIR"
@@ -296,8 +310,8 @@ install_launchd() {   # install_launchd <kind> <label> <plist> <log> <port> <arg
   record "$kind $plist"
   record "$kind $log"
   run launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true   # reload if it was already there
-  run launchctl bootstrap "gui/$(id -u)" "$plist"
-  [ "$DRY" = 1 ] && return
+  [ "$DRY" = 1 ] || bootstrap_when_gone "$label" "$plist"
+  [ "$DRY" = 1 ] && { run launchctl bootstrap "gui/$(id -u)" "$plist"; return; }
   say "starting the $what server..."
   local _; for _ in $(seq 1 60); do healthy "$port" && break; sleep 1; done
   if healthy "$port"; then say "$what server: UP on http://127.0.0.1:$port"
