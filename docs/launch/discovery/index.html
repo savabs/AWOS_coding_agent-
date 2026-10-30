@@ -191,16 +191,8 @@ Would you have 15 minutes this week to walk me through how you do it today? No p
 </section>
 
 <section aria-labelledby="subs-h">
-  <h2 id="subs-h">Subreddits whose rules allow it</h2>
-  <p class="sub">Checked against each subreddit's rules on 30 Oct 2026 (from archived copies, since Reddit blocks automated access: still glance at the sidebar before posting). Subreddits that ban "pain point", "market research" or "I'm building" posts were removed: r/smallbusiness, r/realtors, r/propertymanagement, r/ecommerce, r/shopify, r/EtsySellers, r/freelance, r/bookkeeping, r/privacy.</p>
-  <div class="panel post">
-    <header><h3>Message to the moderators (for "ask the mods first")</h3><span class="where">Reddit: Message the mods, in the subreddit's sidebar</span><button class="ghost copy" data-for="p-modmail">Copy</button></header>
-<pre id="p-modmail">hi mods, quick question before i post anything
-
-i'm building a tool around repetitive browser tasks and want to ask your members what chores they still do by hand (no links, no product pitch, i'd say upfront that i'm building something). is a question post like that ok here, or is there a thread you'd prefer i use?
-
-happy to skip it if it's not a fit. thanks!</pre>
-  </div>
+  <h2 id="subs-h">Reddit: what to write where</h2>
+  <p class="sub">Only subreddits whose rules allow it (checked 30 Oct 2026 from archived copies, since Reddit blocks automated access: glance at the sidebar before posting). Removed because they ban "pain point", "market research" or "I'm building" posts: r/smallbusiness, r/realtors, r/propertymanagement, r/ecommerce, r/shopify, r/EtsySellers, r/freelance, r/bookkeeping, r/privacy. One post a day at most; a few helpful comments a day to build karma; answer every reply the same day.</p>
   <div id="subposts" style="display:grid;gap:14px"></div>
 </section>
 
@@ -325,6 +317,96 @@ happy to skip it if it's not a fit. thanks!</pre>
     });
     host.appendChild(box);
   });
+
+
+  // ---- Reddit-only messages by situation -----------------------------------------------------------------
+  // promo-thread comments (short, comment-sized): subreddit -> [thread, text]
+  var THREADCOMMENTS = {
+    "r/msp": ["the pinned Weekly Promo thread",
+      "builder here (full disclosure). not promoting anything yet, just trying to learn: what's the portal task you still click through by hand every week? vendor/distributor/licensing stuff, whatever it is. how long does it take, and what's stopped it being automated? mfa, no api, site changes?"],
+    "r/webscraping": ["the monthly Self-Promotion thread",
+      "i'm building something for logged-in browser chores (not public scraping) and want to learn before i build more. for anyone who's automated tasks behind a login: what finally killed it? session expiry, 2fa, cloudflare, dom changes, downloads opening in new tabs? would love to hear what the task was"],
+    "r/selfhosted": ["the weekly New Project Megathread",
+      "early project, i'm the builder: an ai that does repetitive web chores in your own browser with the model running locally (llama.cpp, small qwen model). before i go further, what would you actually trust something like this with on your logged-in accounts? and what would it need to show you first?"],
+    "r/AmazonSeller": ["the Community Promotion Post",
+      "researching tools for repetitive seller central / supplier portal work (i'm building something, full disclosure). which task do you repeat by hand every week, and how long does it take? has anything actually fixed it for you?"]
+  };
+  // what each ask-first subreddit is about, for its modmail
+  var MODTOPIC = {
+    "r/automation": "web chores that still can't be automated because there's no api",
+    "r/nocode": "tasks where no-code tools hit a wall (logins, 2fa, sites with no api)",
+    "r/n8n": "workflow steps that need a real browser (logins, 2fa, no api)",
+    "r/zapier": "tasks people wanted to zap but couldn't because there's no integration",
+    "r/RPA": "where browser bots break most (selectors, mfa, new tabs) and how people find out",
+    "r/VirtualAssistant": "the repetitive client tasks VAs do in web apps and portals",
+    "r/sales": "the crm and portal busywork reps repeat every day",
+    "r/RevOps": "recurring tasks that still need someone to log in and click",
+    "r/Entrepreneur": "the boring web admin founders still do themselves",
+    "r/MedicalBilling": "repetitive payer portal tasks (eligibility, claim status, remits)",
+    "r/FreightBrokers": "retyping between load boards and carrier portals",
+    "r/recruiting": "repetitive clicking between job boards and the ats",
+    "r/FulfillmentByAmazon": "repetitive seller central and supplier portal work",
+    "r/Insurance": "re-entering client info across carrier portals (for agents)"
+  };
+  function modmailFor(sub) {
+    return "hi mods, quick question before i post anything in " + sub + "\n\n"
+      + "i'm building a tool and want to ask members about " + (MODTOPIC[sub] || "the repetitive web tasks they do by hand")
+      + ". it'd be a plain question post: no links, no product pitch, and i'd say upfront that i'm building something.\n\n"
+      + "is that ok here, or is there a thread you'd prefer i use? totally fine if it's not a fit. thanks!";
+  }
+  var REPLIES = [
+    ["Someone describes a chore", "been there. how often do you end up doing it, and is it the time that bugs you or having to remember it?"],
+    ["Someone's script or tool broke", "what broke it in the end, the login/2fa or the site changing? and did it at least tell you it failed or just die quietly?"],
+    ["Someone asks how to automate X", "curious what you've tried so far. is it behind a login with 2fa? that's usually where every approach i've seen falls over"],
+    ["Someone asks what you're building (answer once, honestly)", "i'm building something that does these chores in your own browser and tells you clearly if it failed. still early, mostly trying to learn what breaks for people"],
+    ["Someone says they pay a VA or person for it", "out of curiosity, roughly what does that cost you a month? and does the VA ever get it wrong or miss a week?"]
+  ];
+  var FOLLOWUPS = [
+    ["They answered your first question", "that's really helpful, thanks. if something did this for you, what would it need to do for you to actually trust it? do it quietly, or show you what it did after?"],
+    ["They described a big chore (many portals, hours a month)", "how long does the whole thing take you in a month, roughly? and what happens if it's late or gets missed?"],
+    ["They seem keen", "would you be up for a quick 10 min chat sometime this week? i'd just want you to walk me through how you do it today, no pitch"],
+    ["Wrapping up a thread", "thanks a lot, this helps more than you'd think. i'll share what i learn from everyone if you're curious"]
+  ];
+  function card(host, title, chipText, note, parts, idp) {
+    var box = document.createElement("div"); box.className = "panel post";
+    var hd = document.createElement("header");
+    var h = document.createElement("h3"); h.textContent = title; hd.appendChild(h);
+    if (chipText) { var c = document.createElement("span"); c.className = "chip"; c.textContent = chipText; hd.appendChild(c); }
+    box.appendChild(hd);
+    if (note) { var n = document.createElement("p"); n.className = "sub"; n.textContent = note; box.appendChild(n); }
+    parts.forEach(function (part, j) {
+      var row = document.createElement("div"); row.style.cssText = "display:grid;gap:6px";
+      var lab = document.createElement("div"); lab.style.cssText = "display:flex;justify-content:space-between;align-items:center;gap:8px";
+      var l = document.createElement("span"); l.className = "where"; l.textContent = part[0]; lab.appendChild(l);
+      var b = document.createElement("button"); b.className = "ghost copy"; b.dataset.for = idp + "-" + j; b.textContent = "Copy"; lab.appendChild(b);
+      var pre = document.createElement("pre"); pre.id = idp + "-" + j; pre.textContent = part[1];
+      row.appendChild(lab); row.appendChild(pre); box.appendChild(row);
+    });
+    host.appendChild(box);
+  }
+  function heading(host, text, sub) {
+    var h = document.createElement("h3"); h.style.cssText = "font-family:var(--font-display);font-size:1.15rem;margin-top:8px"; h.textContent = text; host.appendChild(h);
+    if (sub) { var p = document.createElement("p"); p.className = "sub"; p.textContent = sub; host.appendChild(p); }
+  }
+  var rh = document.getElementById("subposts");
+  rh.textContent = "";
+  var byKind = { ok: [], thread: [], ask: [] };
+  SUBPOSTS.forEach(function (p) { byKind[p[0]].push(p); });
+  heading(rh, "1. Post now", "Rules allow a question post. Comment on a few posts there first: it needs a little karma.");
+  byKind.ok.forEach(function (p, i) { card(rh, p[3], "Post", "", [["Title", p[4]], ["Text", p[5]]], "ok" + i); });
+  heading(rh, "2. Comment inside their promo thread", "Never as your own post. Find the pinned thread and comment there.");
+  byKind.thread.forEach(function (p, i) {
+    var tc = THREADCOMMENTS[p[3]];
+    card(rh, p[3], "Promo thread", tc ? "Comment in " + tc[0] + "." : "", [["Comment", tc ? tc[1] : p[5]]], "th" + i);
+  });
+  heading(rh, "3. Ask the mods first, then post if they say yes", "Sidebar > Message the mods. Send the first text; use the post only after a yes.");
+  byKind.ask.forEach(function (p, i) {
+    card(rh, p[3], "Ask first", "", [["Message to the mods", modmailFor(p[3])], ["Post title (after a yes)", p[4]], ["Post text (after a yes)", p[5]]], "ask" + i);
+  });
+  heading(rh, "4. Replies in existing threads", "Search the subreddit for people already complaining (no API, 2FA, every week manually, vendor portal), sort by New. Reply only where it fits; never drop a link.");
+  REPLIES.forEach(function (r, i) { card(rh, r[0], "", "", [["Reply", r[1]]], "rep" + i); });
+  heading(rh, "5. Follow-ups in your own threads", "");
+  FOLLOWUPS.forEach(function (r, i) { card(rh, r[0], "", "", [["Reply", r[1]]], "fu" + i); });
 
   // copy buttons
   document.querySelectorAll("button.copy").forEach(function (b) {
