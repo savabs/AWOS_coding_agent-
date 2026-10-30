@@ -190,6 +190,12 @@ Would you have 15 minutes this week to walk me through how you do it today? No p
   </div>
 </section>
 
+<section aria-labelledby="subs-h">
+  <h2 id="subs-h">One post per subreddit</h2>
+  <p class="sub">Questions only, no links. Read each subreddit's rules first; if it bans vendor posts, reply to an existing complaint thread instead. One subreddit a day. Start with r/msp, r/VirtualAssistant and r/webscraping.</p>
+  <div id="subposts" style="display:grid;gap:14px"></div>
+</section>
+
 <section aria-labelledby="script-h">
   <h2 id="script-h">The 15-minute conversation</h2>
   <p class="sub">Ask about what they did, not what they would do. People are polite about ideas and honest about their last Tuesday. Don't describe the product until the last two minutes.</p>
@@ -244,6 +250,77 @@ Would you have 15 minutes this week to walk me through how you do it today? No p
 </main>
 <script>
 (function () {
+  // one tailored ask-post per subreddit: [group, subreddit, title, body]
+  var SUBPOSTS = [
+    ["Portal-heavy jobs", "r/msp", "What portal busywork do you still click through by hand every week?",
+     "Between vendor portals, distributor sites, licensing dashboards and client tools, I keep hearing MSPs spend real time clicking through the same screens every week.\n\nWhat's the most repetitive one for you? How often, how long does it take, and why isn't it automated (no API, MFA, the site keeps changing)?\n\nTrying to understand the problem before building anything."],
+    ["Portal-heavy jobs", "r/MedicalBilling", "Which payer portal task eats the most of your week?",
+     "Eligibility checks, claim status, pulling remits, re-entering the same patient details across portals...\n\nWhich one do you repeat the most, and roughly how long does it take? Has anything ever helped, or is it all by hand because of MFA and each payer's portal being different?"],
+    ["Portal-heavy jobs", "r/FreightBrokers", "What do you copy between load boards and carrier portals by hand?",
+     "Curious how much of the day goes to retyping the same load, carrier or tracking info between sites.\n\nWhat's the most repetitive part for you, and have you tried any tool to cut it down? What broke?"],
+    ["Portal-heavy jobs", "r/propertymanagement", "What's the most repetitive portal task in your week?",
+     "Rent and payment portals, listing sites, vendor and owner portals...\n\nWhich task do you do the same way every week or month, how long does it take, and what have you tried to get rid of it?"],
+    ["Portal-heavy jobs", "r/Insurance", "Agents: how much time goes to re-entering client info in carrier portals?",
+     "Quoting the same client in several carrier portals sounds like a lot of copy-paste.\n\nHow long does it take you per client, how often, and does any tool actually help with it today?"],
+    ["Portal-heavy jobs", "r/VirtualAssistant", "VAs: which client tasks are pure repetitive clicking in web apps?",
+     "You probably see more of this than anyone. Which tasks do clients hand you that are the same clicks every week, in web apps or portals with no export or API?\n\nWhich ones are the most tedious, and which are the hardest to do reliably (logins, 2FA codes, sites changing)?"],
+    ["Already automate", "r/automation", "What web chore do you still do by hand because there's no API?",
+     "Zapier and Make cover anything with an API. What's the one chore stuck in a portal or web app you have to log into and click through?\n\nHow often do you do it, and what killed your attempts to automate it: logins, 2FA, the site changing, captchas?"],
+    ["Already automate", "r/nocode", "Where did your no-code automation hit a wall?",
+     "Curious about the tasks where no-code tools just stop working: no API, a login with 2FA, a site that keeps changing, a PDF that opens in a new tab.\n\nWhat was the task, and what did you end up doing instead?"],
+    ["Already automate", "r/zapier", "What's the task you wanted to Zap but couldn't (no API)?",
+     "Looking for the stuff that lives in a web portal with no Zapier integration.\n\nWhat is it, how often do you do it, and how do you handle it today?"],
+    ["Already automate", "r/n8n", "Which workflows broke because the step needed a real browser?",
+     "Logins, 2FA, sites with no API, clicking through a portal. Which steps forced you back to doing it by hand, or into a fragile Puppeteer/Playwright node?\n\nWhat broke, and how often?"],
+    ["Already automate", "r/RPA", "Where do your bots break most on web apps?",
+     "For those running UiPath, Power Automate or similar on browser tasks: what breaks most often? Selector changes, MFA, pop-ups, new tabs, timing?\n\nAnd how do you find out it broke, before or after someone notices?"],
+    ["Already automate", "r/webscraping", "What finally killed your logged-in automation?",
+     "For scripts that log into a site and do something (not just scrape public pages): was it session expiry, 2FA, Cloudflare, DOM changes, or downloads opening in new tabs?\n\nWhat was the task, and did you give up or find a workaround?"],
+    ["Specific jobs", "r/realtors", "How much of your week goes to clicking through listing portals?",
+     "Refreshing or updating listings, copying leads into your CRM, re-entering the same property details on several sites...\n\nWhich of these do you repeat the most, how long does it take, and do you use anything for it today?"],
+    ["Specific jobs", "r/recruiting", "What's the most repetitive clicking in your recruiting week?",
+     "Moving candidates between job boards and your ATS, posting the same role in several places, copying notes...\n\nWhich task eats the most time, and what have you tried to cut it down?"],
+    ["Specific jobs", "r/sales", "What CRM or portal busywork do you do every single day?",
+     "Logging activity, copying lead info between tools, pulling the same report every Monday...\n\nWhat's yours, how long does it take, and does anyone on your team have a fix for it?"],
+    ["Specific jobs", "r/RevOps", "Which recurring task still needs someone to log in and click?",
+     "Exports with no API, admin settings in several tools, reports pulled from dashboards by hand...\n\nWhat's the most annoying one, how often does it run, and who ends up doing it?"],
+    ["Specific jobs", "r/ecommerce", "What do you still update by hand across your sales channels?",
+     "Stock, prices, order statuses, tracking numbers across marketplaces and your own store.\n\nWhich task is the most repetitive, how long does it take each week, and what tools have you tried?"],
+    ["Specific jobs", "r/shopify", "What admin task do you repeat in other sites every week?",
+     "Not the stuff Shopify apps already handle; the tasks where you still log into a supplier, marketplace or shipping site and click through.\n\nWhat is it and how long does it take you?"],
+    ["Specific jobs", "r/AmazonSeller", "Which Seller Central task do you repeat the most by hand?",
+     "Reports, inventory, pricing, case follow-ups...\n\nWhich one eats the most time each week, and has any tool actually fixed it for you?"],
+    ["Specific jobs", "r/FulfillmentByAmazon", "What part of running FBA is still pure manual clicking?",
+     "Curious which tasks you repeat every week in Seller Central or supplier portals, and why they aren't automated yet."],
+    ["Specific jobs", "r/EtsySellers", "What do you do by hand every week that feels like it should be automatic?",
+     "Updating listings, copying orders to shipping sites, checking stock with suppliers...\n\nWhich task is the most tedious for you, and how long does it take?"],
+    ["Specific jobs", "r/smallbusiness", "What's the one admin chore you'd hand off tomorrow?",
+     "The one where you log into some website and do the same clicks every week or month.\n\nWhat is it, how long does it take, and why haven't you handed it off yet?"],
+    ["Specific jobs", "r/Entrepreneur", "Which repetitive web task are you still doing yourself?",
+     "Founders end up doing a lot of portal and dashboard busywork.\n\nWhat's yours, how often, and what stopped you from automating or delegating it?"],
+    ["Specific jobs", "r/freelance", "What client admin do you repeat every month?",
+     "Client portals, invoicing sites, timesheets, platform dashboards...\n\nWhich task is the same clicks every time, and how long does it take you?"],
+    ["Specific jobs", "r/bookkeeping", "Which portal task takes the most time each month?",
+     "Logging into bank, vendor and client portals to pull statements, documents or data.\n\nWhich one is the worst, how many portals is it, and what breaks when you try to speed it up (2FA, downloads)?"],
+    ["Local / privacy", "r/LocalLLaMA", "Has anyone used a local model as a browser agent for real chores?",
+     "I've been testing small local models (4B/9B on llama.cpp) driving a browser on a 16 GB Mac. Simple pages work in a few steps; real sites still trip them up.\n\nHas anyone made this work day to day? Which chores would you trust it with, and does running locally change that for you?"],
+    ["Local / privacy", "r/selfhosted", "Would you self-host an AI that does web chores in your browser?",
+     "Thinking about agents that log into your accounts and do repetitive tasks, with the model running on your own machine.\n\nWould you trust it with logged-in accounts? What would it need to show you first?"],
+    ["Local / privacy", "r/privacy", "Would you let an AI use your logged-in accounts if nothing left your computer?",
+     "Agents that click through websites for you usually send every page to a cloud AI.\n\nIf the AI ran entirely on your own computer instead, would that change whether you'd use one? What would still worry you?"]
+  ];
+  var host = document.getElementById("subposts"), lastGroup = "";
+  SUBPOSTS.forEach(function (p, i) {
+    if (p[0] !== lastGroup) { var g = document.createElement("h3"); g.textContent = p[0]; host.appendChild(g); lastGroup = p[0]; }
+    var box = document.createElement("div"); box.className = "panel post";
+    var hd = document.createElement("header");
+    var h = document.createElement("h3"); h.textContent = p[1]; hd.appendChild(h);
+    var b = document.createElement("button"); b.className = "ghost copy"; b.dataset.for = "sp-" + i; b.textContent = "Copy"; hd.appendChild(b);
+    box.appendChild(hd);
+    var pre = document.createElement("pre"); pre.id = "sp-" + i; pre.textContent = p[2] + "\n\n" + p[3]; box.appendChild(pre);
+    host.appendChild(box);
+  });
+
   // copy buttons
   document.querySelectorAll("button.copy").forEach(function (b) {
     b.addEventListener("click", function () {
