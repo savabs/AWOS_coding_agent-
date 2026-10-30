@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Talk to Users Kit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+:root {
+  /* plan: a field notebook for customer discovery. Ink-blue accent, paper neutrals, one column of
+     sections you work down; the tracker is the one boxed, operated element. */
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --ink: #17202b;
+  --muted: #5b6676;
+  --line: #dde2e9;
+  --accent: #1f4fbf;
+  --accent-soft: #e6edfb;
+  --good: #1d7a46;
+  --warn: #9a5b00;
+  --font-display: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --font-body: "IBM Plex Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11151b; --surface: #181e26; --ink: #e7ebf1; --muted: #9aa6b6; --line: #2a3340;
+    --accent: #8fb0ff; --accent-soft: #1d2a45; --good: #6fd19a; --warn: #f0b85c; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11151b; --surface: #181e26; --ink: #e7ebf1; --muted: #9aa6b6; --line: #2a3340;
+  --accent: #8fb0ff; --accent-soft: #1d2a45; --good: #6fd19a; --warn: #f0b85c; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 400 16px/1.55 var(--font-body); }
+main { max-width: 860px; margin: 0 auto; padding: 32px 16px 64px; display: grid; gap: 40px; }
+h1, h2, h3 { font-family: var(--font-display); line-height: 1.2; text-wrap: balance; margin: 0; }
+h1 { font-size: 2rem; }
+h2 { font-size: 1.45rem; }
+h3 { font-size: 1.05rem; font-family: var(--font-body); font-weight: 600; }
+p { margin: 0; max-width: 65ch; }
+.sub { color: var(--muted); }
+section { display: grid; gap: 14px; }
+.kicker { font: 500 .78rem/1 var(--font-body); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+ol, ul { margin: 0; padding-left: 1.2em; display: grid; gap: 6px; max-width: 70ch; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 12px; }
+.rule { border-left: 3px solid var(--accent); padding: 8px 12px; background: var(--accent-soft); border-radius: 0 8px 8px 0; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: .92rem; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+th { font-weight: 600; color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; }
+tr:last-child td { border-bottom: 0; }
+.rank { font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 600; }
+.post { display: grid; gap: 8px; }
+.post header { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; justify-content: space-between; }
+.where { color: var(--muted); font-size: .88rem; }
+pre { margin: 0; white-space: pre-wrap; font: 400 .9rem/1.5 var(--font-mono); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; }
+button, .btn { font: 500 .9rem var(--font-body); border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: var(--surface); padding: 8px 14px; cursor: pointer; }
+button.ghost { background: transparent; color: var(--accent); }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 2px; }
+.tile b { font: 600 1.6rem/1.1 var(--font-display); font-variant-numeric: tabular-nums; }
+.tile span { color: var(--muted); font-size: .85rem; }
+form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+label { display: grid; gap: 4px; font-size: .85rem; color: var(--muted); }
+input, select, textarea { font: 400 .95rem var(--font-body); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 100%; }
+textarea { min-height: 70px; resize: vertical; }
+.full { grid-column: 1 / -1; }
+.log { display: grid; gap: 10px; }
+.entry { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 4px; }
+.entry.pays { border-left-color: var(--good); }
+.entry.maybe { border-left-color: var(--warn); }
+.entry .meta { color: var(--muted); font-size: .82rem; display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: .78rem; background: var(--accent-soft); color: var(--accent); }
+.status { font-size: .88rem; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<main>
+
+<header style="display:grid;gap:10px">
+  <div class="kicker">Customer discovery · AWOS computer use</div>
+  <h1>Talk to 10 people before we build anything else</h1>
+  <p class="sub">Questions to ask, where to ask them, what to post, and a tracker for every answer. Goal: find out who has a repetitive browser chore bad enough to pay for, and whether they would trust an AI on their own computer to do it.</p>
+</header>
+
+<section aria-labelledby="learn-h">
+  <h2 id="learn-h">What we need to learn</h2>
+  <ol>
+    <li><b>Who</b> repeats the same web chore every week, and which chore. Real examples, not "that sounds useful".</li>
+    <li><b>What they do today:</b> by hand, a VA, a tool like Bardeen, Zapier or Automa, a script. What they pay for it.</li>
+    <li><b>Trust:</b> would they let an AI click around their logged-in accounts? Does "runs privately on your Mac, nothing leaves it" matter to them, or is cloud fine?</li>
+  </ol>
+  <div class="rule"><p><b>Decision rule after 10 conversations:</b> if 3 or more people describe the same kind of chore, do it at least weekly, and already spend money or a person's time on it, build for exactly them. If nobody does, we stop computer use or change the target. One "cool idea" is not a signal; a past purchase is.</p></div>
+</section>
+
+<section aria-labelledby="where-h">
+  <h2 id="where-h">Where to ask, in this order</h2>
+  <p class="sub">Ask posts, not launches: no links, no product pitch. Say you are building in this space when someone asks. Read each place's rules before posting; skip any that bans this.</p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>#</th><th>Where</th><th>Who you reach</th><th>Rules to respect</th></tr></thead>
+    <tbody>
+      <tr><td class="rank">1</td><td>People you know (LinkedIn, WhatsApp, ex-colleagues)</td><td>Your tech and finance contacts: ops, sales, founders</td><td>Personal message, one each. Easiest 5 conversations.</td></tr>
+      <tr><td class="rank">2</td><td>Hacker News: Ask HN</td><td>Developers and founders who automate things</td><td>Ask HN only, no link. Don't repost within days; never ask for upvotes.</td></tr>
+      <tr><td class="rank">3</td><td>r/automation, r/nocode</td><td>People already paying for Zapier/Make who hit sites with no API</td><td>Some only allow promo in weekly threads. A pure question post is usually fine.</td></tr>
+      <tr><td class="rank">4</td><td>r/LocalLLaMA</td><td>People who run models on their own machines (the privacy angle)</td><td>Must have technical substance. Ask about their experience with local agents.</td></tr>
+      <tr><td class="rank">5</td><td>Job-specific subs: r/realtors, r/recruiting, r/sales, r/ecommerce, r/FulfillmentByAmazon</td><td>The jobs that already pay for browser automation</td><td>Strict on vendors. Ask about their workflow; disclose you're building if asked. Check each sidebar.</td></tr>
+      <tr><td class="rank">6</td><td>Indie Hackers, r/SideProject</td><td>Solo founders with admin chores</td><td>Genuine discussion posts only.</td></tr>
+      <tr><td class="rank">7</td><td>X / LinkedIn public post</td><td>Your wider network</td><td>Personal tone, a real question, no tagging strangers.</td></tr>
+      <tr><td class="rank">8</td><td>Replies to people who publicly complain about a chore</td><td>The warmest leads: they already said they have the pain</td><td>One reply or DM each, one follow-up at most. Never mass DMs.</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section aria-labelledby="posts-h">
+  <h2 id="posts-h">Posts to copy</h2>
+  <p class="sub">Edit each one into your own words before posting. Post one place per day, and answer every reply.</p>
+
+  <div class="panel post">
+    <header><h3>Ask HN</h3><span class="where">news.ycombinator.com/submit, title + text, no URL</span><button class="ghost copy" data-for="p-hn">Copy</button></header>
+<pre id="p-hn">Ask HN: What browser chores do you still do by hand every week?
+
+I'm trying to understand which repetitive web tasks people still click through manually: things in web apps with no API, admin consoles, portals, marketplaces, internal tools.
+
+If you have one:
+- what is the chore, and how often do you do it?
+- why isn't it automated (no API, logins, the site changes, not worth a script)?
+- have you tried a tool (Zapier, Bardeen, a Playwright script, a VA)? What broke?
+- would you let an AI agent do it in your logged-in browser? Would it matter if the model ran locally and nothing left your machine?
+
+I'm building in this space and want to learn what's real before building more.</pre>
+  </div>
+
+  <div class="panel post">
+    <header><h3>r/automation or r/nocode</h3><span class="where">text post</span><button class="ghost copy" data-for="p-auto">Copy</button></header>
+<pre id="p-auto">What web chore do you still do by hand because there's no API?
+
+Zapier/Make cover anything with an API. I keep hearing about the rest: portals, marketplace dashboards, internal admin pages, sites you have to log into and click through.
+
+What's yours, how often do you do it, and what have you tried? I'm especially curious where record-and-replay tools or scripts broke (site changed, login, captcha...).
+
+(I'm building something here and want to learn before I build more. Not selling anything in this thread.)</pre>
+  </div>
+
+  <div class="panel post">
+    <header><h3>r/LocalLLaMA</h3><span class="where">text post, Discussion flair</span><button class="ghost copy" data-for="p-local">Copy</button></header>
+<pre id="p-local">Would you let a local model drive your browser for real chores?
+
+I've been testing small local models (Qwen3.5 4B/9B on llama.cpp, grammar-constrained actions) as browser agents on a 16 GB Mac. On simple pages the 4B does lookups and form fills in a few steps; on real sites it still loops and gets confused, and the 9B is too heavy next to Chrome on 16 GB.
+
+Questions for people here:
+- has anyone used a local computer-use agent for something real, day to day? What worked?
+- which chores would you hand to it if it were reliable?
+- does "runs locally" actually change whether you'd trust it with logged-in accounts, or is cloud fine for you?</pre>
+  </div>
+
+  <div class="panel post">
+    <header><h3>Job-specific subs (realtors, recruiting, sales, ecommerce)</h3><span class="where">adapt the chore line per sub</span><button class="ghost copy" data-for="p-job">Copy</button></header>
+<pre id="p-job">How much of your week goes to repetitive clicking in web portals?
+
+For example [refreshing listings on the portals / copying candidates between job boards and your ATS / updating stock and prices across marketplaces / pulling reports out of dashboards].
+
+How do you handle it today: by hand, an assistant, a tool? If a tool, which one, and what does it cost you? What's the most annoying part?
+
+Asking because I'm researching tools for this and want to hear how people actually work.</pre>
+  </div>
+
+  <div class="panel post">
+    <header><h3>LinkedIn / X</h3><span class="where">your own profile</span><button class="ghost copy" data-for="p-li">Copy</button></header>
+<pre id="p-li">Question for people who live in web apps all day:
+
+What's the one repetitive browser chore you'd hand off tomorrow if you could trust something to do it right?
+
+I'm building an AI that does web chores on your own computer (privately, nothing sent to the cloud) and I'm talking to people before building more. Reply or DM me; I'd love 15 minutes with anyone who has a chore like this.</pre>
+  </div>
+
+  <div class="panel post">
+    <header><h3>DM to someone who complained about a chore</h3><span class="where">one message, at most one follow-up</span><button class="ghost copy" data-for="p-dm">Copy</button></header>
+<pre id="p-dm">Hi [name], I saw your post about [the chore]. I'm working on something that does browser chores like that on your own computer, and I'm trying to understand the problem before building more.
+
+Would you have 15 minutes this week to walk me through how you do it today? No pitch, I just want to learn. Happy to share what I find.</pre>
+  </div>
+</section>
+
+<section aria-labelledby="script-h">
+  <h2 id="script-h">The 15-minute conversation</h2>
+  <p class="sub">Ask about what they did, not what they would do. People are polite about ideas and honest about their last Tuesday. Don't describe the product until the last two minutes.</p>
+  <div class="panel">
+    <ol>
+      <li>Walk me through the last time you did [the chore]. When was it, and what exactly did you click?</li>
+      <li>How often does it come up? How long does it take each time?</li>
+      <li>What happens if it doesn't get done, or is done late or wrong?</li>
+      <li>Have you tried to get rid of it? (A tool, a script, an assistant, asking for an API.) What happened?</li>
+      <li>What do you pay for that today, in money or someone's hours?</li>
+      <li>Who else on your team or in your job has the same chore?</li>
+      <li>Would you let software click through your logged-in accounts to do it? What would it need to show you before you'd trust it?</li>
+      <li>Does it matter to you whether it runs on your computer or in the cloud? Why?</li>
+      <li><i>Last two minutes only:</i> describe the idea in one sentence and ask "would you try it on that chore next week?" A yes with a date is a signal; "sounds cool" is not.</li>
+    </ol>
+  </div>
+</section>
+
+<section aria-labelledby="track-h">
+  <h2 id="track-h">Tracker</h2>
+  <p class="sub">Log every conversation and every useful reply. Only you can see these entries.</p>
+  <div class="tiles" aria-live="polite">
+    <div class="tile"><b id="t-total">0</b><span>conversations logged</span></div>
+    <div class="tile"><b id="t-weekly">0</b><span>do the chore weekly or more</span></div>
+    <div class="tile"><b id="t-pays">0</b><span>already pay money or hours</span></div>
+    <div class="tile"><b id="t-try">0</b><span>agreed to try it on a date</span></div>
+  </div>
+  <div class="panel">
+    <form id="f">
+      <label for="f-who">Who (name or handle)<input id="f-who" required maxlength="120"></label>
+      <label for="f-where">Where<select id="f-where">
+        <option>Personal network</option><option>Hacker News</option><option>r/automation / r/nocode</option>
+        <option>r/LocalLLaMA</option><option>Job-specific subreddit</option><option>Indie Hackers / SideProject</option>
+        <option>X / LinkedIn</option><option>DM after a public complaint</option><option>Other</option></select></label>
+      <label for="f-role">Their job<input id="f-role" maxlength="120" placeholder="e.g. recruiter, Amazon seller, ops lead"></label>
+      <label for="f-chore" class="full">The chore, in their words<textarea id="f-chore" required maxlength="1000"></textarea></label>
+      <label for="f-freq">How often<select id="f-freq"><option>Daily</option><option>Weekly</option><option>Monthly</option><option>Rarely</option></select></label>
+      <label for="f-today">How they do it today<input id="f-today" maxlength="200" placeholder="by hand, VA, Bardeen, script..."></label>
+      <label for="f-pays">Pays for it today<select id="f-pays"><option value="yes">Yes (money or someone's hours)</option><option value="no">No</option></select></label>
+      <label for="f-local">Local vs cloud<select id="f-local"><option>Local matters</option><option>Cloud is fine</option><option>Didn't say</option></select></label>
+      <label for="f-try">Will try it on a date<select id="f-try"><option value="no">No</option><option value="yes">Yes</option></select></label>
+      <label for="f-notes" class="full">Notes and quotes<textarea id="f-notes" maxlength="2000"></textarea></label>
+      <div class="full" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button type="submit" id="f-save">Save entry</button>
+        <span class="status" id="f-status">Connecting to your tracker…</span>
+      </div>
+    </form>
+  </div>
+  <div class="log" id="log"><p class="sub" id="log-empty">No entries yet. Your first conversation goes here.</p></div>
+</section>
+
+</main>
+<script>
+(function () {
+  // copy buttons
+  document.querySelectorAll("button.copy").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var t = document.getElementById(b.dataset.for).textContent;
+      var done = function (ok) { var old = "Copy"; b.textContent = ok ? "Copied" : "Select and copy"; setTimeout(function () { b.textContent = old; }, 1600); };
+      try { navigator.clipboard.writeText(t).then(function () { done(true); }, function () { done(false); }); }
+      catch (e) { done(false); }
+    });
+  });
+
+  var status = document.getElementById("f-status");
+  var logEl = document.getElementById("log");
+  var db = null, user = null, coll = null;
+
+  function render(rows) {
+    rows.sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
+    document.getElementById("t-total").textContent = rows.length;
+    document.getElementById("t-weekly").textContent = rows.filter(function (r) { return r.freq === "Daily" || r.freq === "Weekly"; }).length;
+    document.getElementById("t-pays").textContent = rows.filter(function (r) { return r.pays === "yes"; }).length;
+    document.getElementById("t-try").textContent = rows.filter(function (r) { return r.tryIt === "yes"; }).length;
+    logEl.textContent = "";
+    if (!rows.length) {
+      var p = document.createElement("p"); p.className = "sub"; p.textContent = "No entries yet. Your first conversation goes here."; logEl.appendChild(p); return;
+    }
+    rows.forEach(function (r) {
+      var d = document.createElement("article");
+      d.className = "entry" + (r.pays === "yes" ? " pays" : r.tryIt === "yes" ? " maybe" : "");
+      var h = document.createElement("h3"); h.textContent = r.who + (r.role ? " · " + r.role : ""); d.appendChild(h);
+      var c = document.createElement("p"); c.textContent = r.chore; d.appendChild(c);
+      var m = document.createElement("div"); m.className = "meta";
+      [r.where, r.freq, "today: " + (r.today || "?"), r.pays === "yes" ? "pays today" : "doesn't pay", r.local, r.tryIt === "yes" ? "will try" : ""]
+        .filter(Boolean).forEach(function (s) { var sp = document.createElement("span"); sp.textContent = s; m.appendChild(sp); });
+      d.appendChild(m);
+      if (r.notes) { var n = document.createElement("p"); n.className = "sub"; n.textContent = r.notes; d.appendChild(n); }
+      if (r.at) { var t = document.createElement("span"); t.className = "chip"; t.textContent = new Date(r.at).toLocaleDateString(); d.appendChild(t); }
+      logEl.appendChild(d);
+    });
+  }
+
+  document.getElementById("f").addEventListener("submit", function (e) {
+    e.preventDefault();
+    if (!coll) { status.textContent = "The tracker isn't connected (open this page signed in to claude.ai). Nothing was saved."; return; }
+    var v = function (id) { return document.getElementById(id).value.trim(); };
+    var row = { who: v("f-who"), where: v("f-where"), role: v("f-role"), chore: v("f-chore"), freq: v("f-freq"),
+                today: v("f-today"), pays: v("f-pays"), local: v("f-local"), tryIt: v("f-try"), notes: v("f-notes"), at: Date.now() };
+    if (!row.who || !row.chore) { status.textContent = "Add who it was and the chore."; return; }
+    var btn = document.getElementById("f-save"); btn.disabled = true; status.textContent = "Saving…";
+    var id = "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    coll.doc(id).set(row).then(function () {
+      status.textContent = "Saved."; document.getElementById("f").reset();
+    }, function (err) { status.textContent = "Not saved: " + ((err && err.message) || err); }).then(function () { btn.disabled = false; });
+  });
+
+  if (window.claude && window.claude.use) {
+    Promise.all([window.claude.use("db"), window.claude.use("user")]).then(function (r) {
+      db = r[0]; user = r[1];
+      if (!db) { status.textContent = "The tracker needs you signed in to claude.ai; the rest of the page works."; return; }
+      coll = db.collection("convos");
+      coll.onSnapshot(function (snap) {
+        var rows = []; snap.forEach(function (d) { rows.push(d.data()); }); render(rows);
+        status.textContent = "Tracker connected.";
+      }, function (err) { status.textContent = "Tracker unavailable: " + ((err && err.message) || err); });
+    }, function () { status.textContent = "The tracker isn't available here; the rest of the page works."; });
+  } else {
+    status.textContent = "Open this page on claude.ai to use the tracker; the rest of the page works.";
+  }
+})();
+</script>
+</body>
+</html>
