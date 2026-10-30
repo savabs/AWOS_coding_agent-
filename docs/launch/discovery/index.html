@@ -191,8 +191,8 @@ Would you have 15 minutes this week to walk me through how you do it today? No p
 </section>
 
 <section aria-labelledby="subs-h">
-  <h2 id="subs-h">One post per subreddit</h2>
-  <p class="sub">Questions only, no links. Read each subreddit's rules first; if it bans vendor posts, reply to an existing complaint thread instead. One subreddit a day. Start with r/msp, r/VirtualAssistant and r/webscraping.</p>
+  <h2 id="subs-h">One post per subreddit, one a day</h2>
+  <p class="sub">Written the way people actually talk on Reddit. Post them yourself, one subreddit a day in this order (four weeks). Before each one: read the subreddit's rules, change a few words so it sounds like you, and spend five minutes commenting on other posts there first. If a subreddit bans this kind of post, reply to an existing thread about the problem instead. Answer every comment the same day.</p>
   <div id="subposts" style="display:grid;gap:14px"></div>
 </section>
 
@@ -251,73 +251,80 @@ Would you have 15 minutes this week to walk me through how you do it today? No p
 <script>
 (function () {
   // one tailored ask-post per subreddit: [group, subreddit, title, body]
+  // one ask-post per subreddit, in a normal person's voice: [day, group, subreddit, title, body]
   var SUBPOSTS = [
-    ["Portal-heavy jobs", "r/msp", "What portal busywork do you still click through by hand every week?",
-     "Between vendor portals, distributor sites, licensing dashboards and client tools, I keep hearing MSPs spend real time clicking through the same screens every week.\n\nWhat's the most repetitive one for you? How often, how long does it take, and why isn't it automated (no API, MFA, the site keeps changing)?\n\nTrying to understand the problem before building anything."],
-    ["Portal-heavy jobs", "r/MedicalBilling", "Which payer portal task eats the most of your week?",
-     "Eligibility checks, claim status, pulling remits, re-entering the same patient details across portals...\n\nWhich one do you repeat the most, and roughly how long does it take? Has anything ever helped, or is it all by hand because of MFA and each payer's portal being different?"],
-    ["Portal-heavy jobs", "r/FreightBrokers", "What do you copy between load boards and carrier portals by hand?",
-     "Curious how much of the day goes to retyping the same load, carrier or tracking info between sites.\n\nWhat's the most repetitive part for you, and have you tried any tool to cut it down? What broke?"],
-    ["Portal-heavy jobs", "r/propertymanagement", "What's the most repetitive portal task in your week?",
-     "Rent and payment portals, listing sites, vendor and owner portals...\n\nWhich task do you do the same way every week or month, how long does it take, and what have you tried to get rid of it?"],
-    ["Portal-heavy jobs", "r/Insurance", "Agents: how much time goes to re-entering client info in carrier portals?",
-     "Quoting the same client in several carrier portals sounds like a lot of copy-paste.\n\nHow long does it take you per client, how often, and does any tool actually help with it today?"],
-    ["Portal-heavy jobs", "r/VirtualAssistant", "VAs: which client tasks are pure repetitive clicking in web apps?",
-     "You probably see more of this than anyone. Which tasks do clients hand you that are the same clicks every week, in web apps or portals with no export or API?\n\nWhich ones are the most tedious, and which are the hardest to do reliably (logins, 2FA codes, sites changing)?"],
-    ["Already automate", "r/automation", "What web chore do you still do by hand because there's no API?",
-     "Zapier and Make cover anything with an API. What's the one chore stuck in a portal or web app you have to log into and click through?\n\nHow often do you do it, and what killed your attempts to automate it: logins, 2FA, the site changing, captchas?"],
-    ["Already automate", "r/nocode", "Where did your no-code automation hit a wall?",
-     "Curious about the tasks where no-code tools just stop working: no API, a login with 2FA, a site that keeps changing, a PDF that opens in a new tab.\n\nWhat was the task, and what did you end up doing instead?"],
-    ["Already automate", "r/zapier", "What's the task you wanted to Zap but couldn't (no API)?",
-     "Looking for the stuff that lives in a web portal with no Zapier integration.\n\nWhat is it, how often do you do it, and how do you handle it today?"],
-    ["Already automate", "r/n8n", "Which workflows broke because the step needed a real browser?",
-     "Logins, 2FA, sites with no API, clicking through a portal. Which steps forced you back to doing it by hand, or into a fragile Puppeteer/Playwright node?\n\nWhat broke, and how often?"],
-    ["Already automate", "r/RPA", "Where do your bots break most on web apps?",
-     "For those running UiPath, Power Automate or similar on browser tasks: what breaks most often? Selector changes, MFA, pop-ups, new tabs, timing?\n\nAnd how do you find out it broke, before or after someone notices?"],
-    ["Already automate", "r/webscraping", "What finally killed your logged-in automation?",
-     "For scripts that log into a site and do something (not just scrape public pages): was it session expiry, 2FA, Cloudflare, DOM changes, or downloads opening in new tabs?\n\nWhat was the task, and did you give up or find a workaround?"],
-    ["Specific jobs", "r/realtors", "How much of your week goes to clicking through listing portals?",
-     "Refreshing or updating listings, copying leads into your CRM, re-entering the same property details on several sites...\n\nWhich of these do you repeat the most, how long does it take, and do you use anything for it today?"],
-    ["Specific jobs", "r/recruiting", "What's the most repetitive clicking in your recruiting week?",
-     "Moving candidates between job boards and your ATS, posting the same role in several places, copying notes...\n\nWhich task eats the most time, and what have you tried to cut it down?"],
-    ["Specific jobs", "r/sales", "What CRM or portal busywork do you do every single day?",
-     "Logging activity, copying lead info between tools, pulling the same report every Monday...\n\nWhat's yours, how long does it take, and does anyone on your team have a fix for it?"],
-    ["Specific jobs", "r/RevOps", "Which recurring task still needs someone to log in and click?",
-     "Exports with no API, admin settings in several tools, reports pulled from dashboards by hand...\n\nWhat's the most annoying one, how often does it run, and who ends up doing it?"],
-    ["Specific jobs", "r/ecommerce", "What do you still update by hand across your sales channels?",
-     "Stock, prices, order statuses, tracking numbers across marketplaces and your own store.\n\nWhich task is the most repetitive, how long does it take each week, and what tools have you tried?"],
-    ["Specific jobs", "r/shopify", "What admin task do you repeat in other sites every week?",
-     "Not the stuff Shopify apps already handle; the tasks where you still log into a supplier, marketplace or shipping site and click through.\n\nWhat is it and how long does it take you?"],
-    ["Specific jobs", "r/AmazonSeller", "Which Seller Central task do you repeat the most by hand?",
-     "Reports, inventory, pricing, case follow-ups...\n\nWhich one eats the most time each week, and has any tool actually fixed it for you?"],
-    ["Specific jobs", "r/FulfillmentByAmazon", "What part of running FBA is still pure manual clicking?",
-     "Curious which tasks you repeat every week in Seller Central or supplier portals, and why they aren't automated yet."],
-    ["Specific jobs", "r/EtsySellers", "What do you do by hand every week that feels like it should be automatic?",
-     "Updating listings, copying orders to shipping sites, checking stock with suppliers...\n\nWhich task is the most tedious for you, and how long does it take?"],
-    ["Specific jobs", "r/smallbusiness", "What's the one admin chore you'd hand off tomorrow?",
-     "The one where you log into some website and do the same clicks every week or month.\n\nWhat is it, how long does it take, and why haven't you handed it off yet?"],
-    ["Specific jobs", "r/Entrepreneur", "Which repetitive web task are you still doing yourself?",
-     "Founders end up doing a lot of portal and dashboard busywork.\n\nWhat's yours, how often, and what stopped you from automating or delegating it?"],
-    ["Specific jobs", "r/freelance", "What client admin do you repeat every month?",
-     "Client portals, invoicing sites, timesheets, platform dashboards...\n\nWhich task is the same clicks every time, and how long does it take you?"],
-    ["Specific jobs", "r/bookkeeping", "Which portal task takes the most time each month?",
-     "Logging into bank, vendor and client portals to pull statements, documents or data.\n\nWhich one is the worst, how many portals is it, and what breaks when you try to speed it up (2FA, downloads)?"],
-    ["Local / privacy", "r/LocalLLaMA", "Has anyone used a local model as a browser agent for real chores?",
-     "I've been testing small local models (4B/9B on llama.cpp) driving a browser on a 16 GB Mac. Simple pages work in a few steps; real sites still trip them up.\n\nHas anyone made this work day to day? Which chores would you trust it with, and does running locally change that for you?"],
-    ["Local / privacy", "r/selfhosted", "Would you self-host an AI that does web chores in your browser?",
-     "Thinking about agents that log into your accounts and do repetitive tasks, with the model running on your own machine.\n\nWould you trust it with logged-in accounts? What would it need to show you first?"],
-    ["Local / privacy", "r/privacy", "Would you let an AI use your logged-in accounts if nothing left your computer?",
-     "Agents that click through websites for you usually send every page to a cloud AI.\n\nIf the AI ran entirely on your own computer instead, would that change whether you'd use one? What would still worry you?"]
+    [1, "Portal-heavy jobs", "r/msp", "what portal stuff do you still click through by hand every week?",
+     "genuinely curious. between vendor portals, distributor sites, licensing dashboards etc it feels like there's a ton of the same clicking every week\n\nwhat's the one that annoys you most? how long does it take and why isn't it automated yet (no api, mfa, site keeps changing?)\n\nfull disclosure i'm trying to build something around this, so i'm asking before i build the wrong thing lol"],
+    [2, "Portal-heavy jobs", "r/VirtualAssistant", "VAs, what's the most mind-numbing client task you do?",
+     "the stuff that's literally the same clicks every week in some web app or portal. no export, no api, just log in and click\n\nwhich one do you dread the most? and which ones are hardest to do without mistakes (2fa codes, sites changing, stuff opening in new tabs)?\n\nasking because i'm looking into tools for this and want to hear from people who actually do it"],
+    [3, "Already automate", "r/webscraping", "what finally killed your logged-in automation?",
+     "not talking public scraping, i mean scripts that log in somewhere and do a task for you\n\nthe stories i keep hearing are session tokens expiring, 2fa, cloudflare, the dom changing, pdfs opening in a new tab the script never catches\n\nwhat was yours? did you give up or find a workaround?"],
+    [4, "Already automate", "r/automation", "what web chore are you still doing by hand because there's no api?",
+     "zapier/make cover anything with an api. i'm curious about the rest, the stuff stuck in some portal you have to log into and click through\n\nwhat is it, how often, and what killed your attempts to automate it?"],
+    [5, "Portal-heavy jobs", "r/MedicalBilling", "which payer portal task eats most of your week?",
+     "eligibility checks, claim status, pulling remits, typing the same patient info into 5 different portals...\n\nwhich one do you repeat the most? is any of it automated for you or is it all by hand because every payer portal is different + mfa?"],
+    [6, "Already automate", "r/RPA", "where do your bots break the most on web apps?",
+     "for people running uipath / power automate etc on browser stuff, what breaks most? selectors changing, mfa, popups, new tabs, timing?\n\nand how do you usually find out it broke? before or after someone notices"],
+    [7, "Specific jobs", "r/smallbusiness", "what's the admin chore you'd hand off tomorrow if you could?",
+     "the one where you log into some website and do the exact same clicks every week or month\n\nwhat is it, how long does it take you, and why haven't you handed it off yet?"],
+    [8, "Portal-heavy jobs", "r/FreightBrokers", "how much retyping between load boards and carrier portals do you do?",
+     "trying to understand how much of the day goes to copying the same load/carrier/tracking info between sites\n\nwhat's the most repetitive part? ever tried a tool for it? what broke?"],
+    [9, "Already automate", "r/nocode", "where did your no-code setup hit a wall?",
+     "curious about the tasks where no-code just stops working. no api, login with 2fa, site keeps changing, file downloads...\n\nwhat was the task and what did you end up doing instead?"],
+    [10, "Specific jobs", "r/realtors", "how much of your week is clicking around listing portals?",
+     "refreshing listings, copying leads into your crm, entering the same property details on a bunch of sites...\n\nwhich of these eats the most time for you? using anything for it right now?"],
+    [11, "Portal-heavy jobs", "r/propertymanagement", "most repetitive portal task in your week?",
+     "rent/payment portals, listing sites, vendor and owner portals etc\n\nwhich one is the same thing every week or month, how long does it take, and have you found anything that helps?"],
+    [12, "Specific jobs", "r/recruiting", "what's the most repetitive clicking in your week?",
+     "moving candidates between job boards and your ats, posting the same role in 5 places, copying notes around...\n\nwhich one eats the most time? tried anything to cut it down?"],
+    [13, "Specific jobs", "r/ecommerce", "what do you still update by hand across your channels?",
+     "stock, prices, order status, tracking numbers across marketplaces and your own store\n\nwhich one is the most annoying, how long a week, and what tools have you tried?"],
+    [14, "Local / privacy", "r/LocalLLaMA", "anyone actually using a local model as a browser agent for real stuff?",
+     "been messing with small local models (4b/9b on llama.cpp) driving a browser on a 16gb mac. simple pages are fine, real sites still trip them up a lot\n\nhas anyone got this working day to day? what chores would you trust it with, and does it being local actually change that for you?"],
+    [15, "Portal-heavy jobs", "r/Insurance", "agents, how much time goes to retyping client info into carrier portals?",
+     "quoting the same client across a bunch of carrier portals sounds like a lot of copy paste\n\nhow long per client roughly? anything that actually helps with it?"],
+    [16, "Already automate", "r/zapier", "what did you want to zap but couldn't because there's no integration?",
+     "looking for the stuff living in some web portal with no zapier app\n\nwhat is it, how often, how do you handle it now?"],
+    [17, "Already automate", "r/n8n", "which workflows broke because a step needed a real browser?",
+     "logins, 2fa, sites with no api, clicking through a portal... which steps sent you back to doing it by hand or into a fragile puppeteer node?"],
+    [18, "Specific jobs", "r/sales", "what crm / portal busywork do you do every single day?",
+     "logging activity, copying lead info between tools, pulling the same report every monday...\n\nwhat's yours, how long does it take, does anyone on your team have a fix?"],
+    [19, "Specific jobs", "r/RevOps", "which recurring task still needs a human to log in and click?",
+     "exports with no api, admin settings across tools, dashboard reports pulled by hand...\n\nwhat's the most annoying one and who ends up doing it?"],
+    [20, "Specific jobs", "r/AmazonSeller", "which seller central task do you repeat the most by hand?",
+     "reports, inventory, pricing, case follow-ups...\n\nwhich one eats the most time each week? has any tool actually fixed it for you?"],
+    [21, "Specific jobs", "r/FulfillmentByAmazon", "what part of running fba is still pure manual clicking?",
+     "curious which tasks you repeat every week in seller central or supplier portals and why they're not automated yet"],
+    [22, "Specific jobs", "r/shopify", "what do you still do by hand on other sites every week?",
+     "not the stuff apps already handle, more the tasks where you log into a supplier / marketplace / shipping site and click through\n\nwhat is it and how long does it take?"],
+    [23, "Specific jobs", "r/EtsySellers", "what do you do by hand every week that should just be automatic?",
+     "updating listings, copying orders to shipping sites, checking stock with suppliers...\n\nwhich one is the most tedious for you?"],
+    [24, "Specific jobs", "r/Entrepreneur", "which boring web task are you still doing yourself?",
+     "founders end up doing so much portal/dashboard busywork\n\nwhat's yours, how often, and what's stopped you from automating or delegating it?"],
+    [25, "Specific jobs", "r/freelance", "what client admin do you repeat every month?",
+     "client portals, invoicing sites, timesheets, platform dashboards...\n\nwhich one is the exact same clicks every time and how long does it take?"],
+    [26, "Specific jobs", "r/bookkeeping", "which portal task takes the most time each month?",
+     "logging into bank/vendor/client portals to pull statements or docs\n\nwhich one's the worst, how many portals is it, and what breaks when you try to speed it up? (2fa, downloads...)"],
+    [27, "Local / privacy", "r/selfhosted", "would you self-host an ai that does web chores in your browser?",
+     "thinking about agents that log into your accounts and do the repetitive stuff, with the model running on your own machine\n\nwould you trust it with logged-in accounts? what would it need to show you first?"],
+    [28, "Local / privacy", "r/privacy", "would you let an ai use your logged-in accounts if nothing left your computer?",
+     "most agents that click through sites for you send every page to some cloud ai\n\nif it ran entirely on your own computer would that change whether you'd use one? what would still worry you?"]
   ];
-  var host = document.getElementById("subposts"), lastGroup = "";
+  var host = document.getElementById("subposts");
   SUBPOSTS.forEach(function (p, i) {
-    if (p[0] !== lastGroup) { var g = document.createElement("h3"); g.textContent = p[0]; host.appendChild(g); lastGroup = p[0]; }
     var box = document.createElement("div"); box.className = "panel post";
     var hd = document.createElement("header");
-    var h = document.createElement("h3"); h.textContent = p[1]; hd.appendChild(h);
-    var b = document.createElement("button"); b.className = "ghost copy"; b.dataset.for = "sp-" + i; b.textContent = "Copy"; hd.appendChild(b);
-    box.appendChild(hd);
-    var pre = document.createElement("pre"); pre.id = "sp-" + i; pre.textContent = p[2] + "\n\n" + p[3]; box.appendChild(pre);
+    var h = document.createElement("h3"); h.textContent = "Day " + p[0] + " \u00b7 " + p[2];
+    var tag = document.createElement("span"); tag.className = "where"; tag.textContent = p[1];
+    hd.appendChild(h); hd.appendChild(tag); box.appendChild(hd);
+    [["Title", p[3], "st-"], ["Text", p[4], "sb-"]].forEach(function (part) {
+      var row = document.createElement("div"); row.style.cssText = "display:grid;gap:6px";
+      var lab = document.createElement("div"); lab.style.cssText = "display:flex;justify-content:space-between;align-items:center;gap:8px";
+      var l = document.createElement("span"); l.className = "where"; l.textContent = part[0]; lab.appendChild(l);
+      var b = document.createElement("button"); b.className = "ghost copy"; b.dataset.for = part[2] + i; b.textContent = "Copy"; lab.appendChild(b);
+      var pre = document.createElement("pre"); pre.id = part[2] + i; pre.textContent = part[1];
+      row.appendChild(lab); row.appendChild(pre); box.appendChild(row);
+    });
     host.appendChild(box);
   });
 
