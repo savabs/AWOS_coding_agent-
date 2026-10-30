@@ -23,7 +23,7 @@
 #
 # Env: AWOS_DRY_RUN=1 (print every action, change nothing), AWOS_MODEL_PORT (8080), AWOS_AGENT_PORT (8081),
 # AWOS_REPLAY_MODEL (g7|g6|base2b, default g7), AWOS_REPLAY_AGENT (4b|9b|none, same as --agent),
-# AWOS_SLEEP_IDLE (seconds, 300; -1 = never unload), AWOS_NONINTERACTIVE=1 (answer "no" to every question),
+# AWOS_SLEEP_IDLE (seconds, 300; -1 = never unload), AWOS_AGENT_SLEEP_IDLE (agent model, 1800), AWOS_NONINTERACTIVE=1 (answer "no" to every question),
 # AWOS_MODEL_URL + AWOS_MODEL_SHA256 / AWOS_AGENT_URL + AWOS_AGENT_SHA256 (mirror / tests).
 set -euo pipefail
 
@@ -41,6 +41,8 @@ APLIST="$AGENTS_DIR/$ALABEL.plist"
 PORT="${AWOS_MODEL_PORT:-8080}"
 APORT="${AWOS_AGENT_PORT:-8081}"
 SLEEP_IDLE="${AWOS_SLEEP_IDLE:-300}"
+# the Tell-it agent model stays loaded longer: a cold reload made the first step after a pause take minutes
+AGENT_SLEEP_IDLE="${AWOS_AGENT_SLEEP_IDLE:-1800}"
 DRY="${AWOS_DRY_RUN:-0}"
 case "$DRY" in 0|"") DRY=0 ;; *) DRY=1 ;; esac
 AGENT_ARG="${AWOS_REPLAY_AGENT:-}"
@@ -228,10 +230,11 @@ download() {   # download <kind: file|agentfile> <path> <url> <sha256> <size-byt
 
 xml_escape() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
 
-sleep_args() {   # llama.cpp >= b6900ish: unload the model after N idle seconds, reload on the next request
-  [ "$SLEEP_IDLE" != "-1" ] || return 0
+sleep_args() {   # sleep_args [seconds]: llama.cpp >= b6900ish unloads the model after N idle seconds, reloads on the next request
+  local n="${1:-$SLEEP_IDLE}"
+  [ "$n" != "-1" ] || return 0
   if [ "$DRY" = 1 ] && [ ! -x "$LLAMA" ] || "$LLAMA" --help 2>&1 | grep -q -- --sleep-idle-seconds; then
-    printf '%s\n' --sleep-idle-seconds "$SLEEP_IDLE"
+    printf '%s\n' --sleep-idle-seconds "$n"
   else
     warn "this llama.cpp has no --sleep-idle-seconds (brew upgrade llama.cpp); the models stay loaded"
   fi
@@ -246,7 +249,7 @@ server_args() {   # one per line; the EngineBench flags from scripts/awos_model.
 agent_args() {   # Tell it: 12k context for page text + history, one slot, grammar-constrained (works on llama-server)
   printf '%s\n' "$LLAMA" -m "$AMODEL" --alias "$AALIAS" --host 127.0.0.1 --port "$APORT" \
     --jinja --reasoning off -c 12288 -np 1 --temp 0 --cache-ram 0 -cms 256
-  sleep_args
+  sleep_args "$AGENT_SLEEP_IDLE"
 }
 
 plist_text() {   # plist_text <label> <log> <args-function>

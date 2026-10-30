@@ -272,7 +272,7 @@ def test_dry_run_agent_choice(env, agent):
     args = re.findall(r"<string>(.*?)</string>", plist.split("<key>ProgramArguments</key>", 1)[1].split("</array>", 1)[0])
     assert args[1:3] == ["-m", f"{env['home']}/.awos/models/{A4B if agent == '4b' else A9B}"]
     assert " ".join(args[3:]) == (f"--alias qwen3.5-{agent} --host 127.0.0.1 --port 8081 --jinja --reasoning off "
-                                  "-c 12288 -np 1 --temp 0 --cache-ram 0 -cms 256 --sleep-idle-seconds 300")
+                                  "-c 12288 -np 1 --temp 0 --cache-ram 0 -cms 256 --sleep-idle-seconds 1800")   # agent: 30 min
     for flag in (f"<string>{ALABEL}</string>", "<string>Background</string>", "<key>LowPriorityIO</key><true/>",
                  "<key>LowPriorityBackgroundIO</key><true/>", "<key>Nice</key><integer>10</integer>"):
         assert flag in plist, flag

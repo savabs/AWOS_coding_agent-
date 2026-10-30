@@ -310,6 +310,24 @@ def test_same_fill_enter_three_times_pauses(x):
     x.call("tell_stop")
 
 
+def test_popup_warms_the_local_agent_model_only(x):
+    # opening the popup sends one 1-token request to the LOCAL agent endpoint (a cold model load made the first step
+    # after a pause take minutes); at most once a minute; never to the cloud
+    _setup(x, ["done \"ok\""])
+    x.sw.evaluate("() => { tellWarmAt = 0; }")
+    n = len(x.server.model_calls)
+    assert x.call("tell_warm") == {"warm": True}
+    _wait = time.time() + 5
+    while time.time() < _wait and len(x.server.model_calls) == n:
+        time.sleep(0.1)
+    warm = x.server.model_calls[n:]
+    assert len(warm) == 1 and warm[0]["max_tokens"] == 1 and warm[0]["model"] == "fake-agent"
+    assert x.call("tell_warm") == {"warm": "recent"}                        # throttled
+    x.sw.evaluate("() => { tellWarmAt = 0; }")
+    x.set_settings(agentBrain="claude", cloudConsent=True)
+    assert x.call("tell_warm") == {"warm": False}                           # cloud brain: nothing is sent anywhere
+
+
 def test_same_click_three_times_pauses_instead_of_looping(x):
     # the real Qwen3.5-4B toggled "Marketing e-mails" for all 25 steps on this chore; two in a row is a toggle,
     # a third is a loop: it is rejected (not clicked) and the run asks the user

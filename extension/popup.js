@@ -434,6 +434,8 @@ async function brainCheck() {
 }
 
 (async function () {
+  // start loading the local agent model now: it unloads when idle, and a cold load takes seconds to minutes
+  call({ type: 'tell_warm' }).catch(function () {});
   targetTab = await resolveTab();
   await refresh();
   brainCheck();

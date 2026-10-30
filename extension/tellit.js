@@ -196,6 +196,7 @@ async function tellStart(msg) {
 }
 
 var tellDriving = null;
+var tellWarmAt = 0;
 async function tellDrive(id) {
   if (tellDriving === id) return;
   tellDriving = id;
@@ -606,6 +607,19 @@ async function exportTraining() {
   Object.assign(HANDLERS, {
     tell_start: async function (msg) { return tellStart(msg); },
     tell_state: async function () { return { tell: await getSess('tell'), settings: await tellSettings() }; },
+    // popup opened: wake the local agent model in the background (one 1-token request) so the first Tell-it step
+    // does not pay the cold load. Local loopback endpoint only; never the cloud. At most once a minute.
+    tell_warm: async function () {
+      var cfg = await tellSettings();
+      if (cfg.agentBrain !== 'local' || !M.isLoopback(cfg.agentEndpoint)) return { warm: false };
+      if (Date.now() - (tellWarmAt || 0) < 60000) return { warm: 'recent' };
+      tellWarmAt = Date.now();
+      fetch(String(cfg.agentEndpoint).replace(/\/$/, '') + '/chat/completions', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: cfg.agentModel, messages: [{ role: 'user', content: 'ok' }], max_tokens: 1 })
+      }).catch(function () {});
+      return { warm: true };
+    },
     tell_pause: async function () {
       var t = await getSess('tell'); if (!t || t.status !== 'running') throw new Error('not running');
       t.pauseRequested = true; await saveTell(t); return { ok: true };
