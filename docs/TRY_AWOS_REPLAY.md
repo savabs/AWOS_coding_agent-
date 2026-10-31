@@ -99,6 +99,21 @@ For the documents you fetch from several supplier / vendor / partner / payout po
   dismissal is in the run log.
 - **PDFs that open in a new tab** are downloaded with your browser (your login applies), the tab is closed, and the
   file counts for the download check. A file from another site asks you first.
+- **Fewer logins mid-run (0.6.1).** Most interruptions are expired logins, so AWOS now finds them before the run:
+  - **Keep-alive** (on by default, per collection under **Logins**): every 3 days AWOS opens each portal's start page
+    in a background tab, only looks whether you are still logged in, and closes it. It never clicks or types there.
+    If a portal logged you out you get one notification ("Supplier X logged you out; log in any time before the
+    month-end run") and the checklist shows **Login needed**. **Check logins now** does it on demand.
+  - **Pre-flight**: 24 hours before a scheduled collection run (change it, or 0 = off, under **Logins**), and at the
+    start of every run, the same check. One notification lists the portals that need you; **Open the ones that need
+    me** opens just those login pages. The run starts with the portals that are ready and picks up the others as soon
+    as you have logged in, so all your logins happen in one short sitting.
+  - **Remember me**: on a login page AWOS ticks "Remember me" / "Keep me signed in" / "Trust this device" (only a
+    checkbox labelled like that, nothing else) before you log in. Options can turn it off.
+  - **Chrome's saved passwords (experimental)**: if Chrome has filled in both your username and your password by
+    itself, AWOS clicks Sign in once for you. It never reads, types or stores the password; it only checks that Chrome
+    marked both fields as autofilled. Chrome often holds a saved password back until you click in the page yourself;
+    then this simply does not happen and the run waits for you. Options: "Use Chrome's saved passwords to sign in".
 - Details: `docs/specs/portal_run.md`.
 
 ## 5. Send the results back

@@ -332,6 +332,8 @@
       case 'ping': reply({ ok: true, url: location.href, recording: recording, contentType: document.contentType || '' }); return;
       case 'page_kind': reply(P.pageKind()); return;
       case 'unblock': reply(P.unblock()); return;
+      case 'remember_me': reply(P.rememberMe()); return;                      // v0.6.1, login handoffs only
+      case 'autofill_signin': reply(P.autofillSignin(!!msg.testHook)); return; // v0.6.1, never reads a field value
       case 'rec_state': recording = !!msg.on; lastFillKey = null; reply({ ok: true }); return;
       case 'locate': locate(msg.step, msg.timeoutMs).then(reply); return true;
       case 'act': act(msg.step, msg.index, msg.approved, msg.strict, reply); return;

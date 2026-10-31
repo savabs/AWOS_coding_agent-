@@ -80,6 +80,18 @@ cannot be re-found by itself, and to double-check the final page.</p>
 <label for="collectionWaitMin">Collections: wait for you on a login / code / check (minutes) before moving to the next portal</label>
 <input type="number" id="collectionWaitMin" min="1" max="240" step="1">
 
+<fieldset id="loginset">
+  <legend>Logins on portal runs</legend>
+  <label class="choice"><input type="checkbox" id="rememberMe"> Tick "Remember me" / "Keep me signed in" / "Trust this device" on login pages</label>
+  <div class="hint">When a run stops at a login page, AWOS ticks that one checkbox (only a checkbox whose label says exactly
+  that, never anything else) before you log in, so the portal logs you out less often. It is written in the run log.</div>
+  <label class="choice"><input type="checkbox" id="autofillSignin"> Use Chrome's saved passwords to sign in (experimental)</label>
+  <div class="hint">When Chrome has filled in both the username and the password of a login form by itself, AWOS clicks
+  that form's sign-in button once, as if you had logged in. AWOS never reads, types, stores or sends the password: it only
+  checks that Chrome marked both fields as autofilled. Chrome often keeps an autofilled password back from the page until
+  you click or type in it yourself; then this does nothing and the run waits for you as usual.</div>
+</fieldset>
+
 <p><button id="save">Save</button><span id="status"></span></p>
 <script src="lib/model.js"></script>
 <script src="options.js"></script>

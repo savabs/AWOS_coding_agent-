@@ -44,6 +44,18 @@
  *    after another in their own tabs; results per period YYYY-MM (Got / Missing / Needs you / Failed), a re-run
  *    skips the portals already Got, a summary notification at the end, optional monthly schedule (chrome.alarms).
  *
+ * v0.6.1 fewer handoffs (docs/specs/portal_run.md section 5), no new permissions:
+ *  - keep-alive: per collection (on by default, every keepAliveDays = 3), each portal's start page is opened in a
+ *    background tab, one at a time, classified logged in / login page, and closed; nothing is clicked or typed. A
+ *    logout is notified once, early, and shows as "Login needed". Skipped while anything else runs.
+ *  - pre-flight: the same check preflightHours (24) before a scheduled collection run and at the start of every
+ *    collection run: ONE notification naming the logged-out portals, "Open the ones that need me" opens just those;
+ *    the run does the ready portals first and picks the others up as soon as their login is seen.
+ *  - on a login page: tick an unchecked "remember me / keep me signed in / trust this device" checkbox (Option
+ *    rememberMe), and when Chrome autofilled both the username and the password (the :autofill state, the value is
+ *    never read), click the sign-in button once (Option autofillSignin, experimental); else the normal handoff.
+ *  portalStatus (chrome.storage.local), loginTabs / probeTab (chrome.storage.session).
+ *
  * Replay of one step: wait for the tab to load -> content 'locate' (attribute
  * scoring) -> if not confident, ask the local model to pick from the shortlist
  * or say NOT_FOUND -> approval gate for dangerous clicks -> content 'act'.
@@ -338,9 +350,11 @@ async function driveInner(runId) {
     }
     await waitForLoad(run.tabId); await ensureContent(run.tabId);
     // handoff (v0.6): after a Continue, first get back to this step's page; then is a human needed here?
-    var again = !!run.resume;
+    var again = !!run.resume && !run.resume.auto;
     if (run.resume) await resumeAfterHandoff(run, rec, step, i);
     var hk = await handoffNeeded(run, step, i);
+    // v0.6.1: on a login page, tick "remember me", and sign in once if Chrome autofilled both fields; else hand off
+    if (hk && hk.kind === 'login' && await assistLogin(run, i)) continue;
     if (hk) return pause(run, 'needs_user', handoffPending(hk, i, again));
     if (step.action === 'fill' && (step.ask || S.isPlaceholder(step.value))) {
       if (run.userDone[i]) { logRun(run, 'user typed ' + (step.sensitive ? step.value : 'the value') + ' themselves'); run.done[i] = true; run.i++; await saveRun(run); continue; }
@@ -465,6 +479,43 @@ function handoffPending(pk, i, again) {
   return { handoff: pk.kind, url: R.stripUrl(pk.url),
     message: (again ? 'Still waiting: ' : '') + 'Step ' + (i + 1) + ': the site ' + what + ' ' + HANDOFF_ASK[pk.kind]
       + ' in this tab, then click Continue. AWOS picks up at step ' + (i + 1) + ' without redoing earlier steps or downloads.' };
+}
+/** login helpers on a page the user is about to log in on (v0.6.1). Ticks a "remember me" style checkbox (Option
+ *  rememberMe, default on) and, when Chrome has autofilled both the username and the password (Option autofillSignin,
+ *  default on), clicks the form's sign-in button once. The password is never read, typed, stored or logged: the page
+ *  script only checks the fields' :autofill state. -> {ticked, clicked, why} */
+async function assistTab(tabId, cfg, tries) {
+  var out = { ticked: '', clicked: '', why: '' };
+  if (cfg.rememberMe !== false && !tries.remember) {
+    tries.remember = true;
+    var rm = await sendTab(tabId, { type: 'remember_me' }).catch(function () { return null; });
+    if (rm && rm.ticked) out.ticked = rm.ticked;
+  }
+  if (cfg.autofillSignin !== false && !tries.autofill) {
+    tries.autofill = true;
+    var hook = !!(await getSess('testAutofillHook'));           // tests only: set from the worker, pages cannot reach it
+    var af = await sendTab(tabId, { type: 'autofill_signin', testHook: hook }).catch(function () { return null; });
+    out.clicked = (af && af.clicked) || ''; out.why = af ? af.why : 'the page did not answer';
+  }
+  return out;
+}
+/** a login handoff before step i: true when Chrome's autofill signed in (the loop then re-observes the page, as after
+ *  the user's Continue), false when the run must pause for the user. Each helper runs once per step. */
+async function assistLogin(run, i) {
+  var cfg = await settings();
+  run.loginTries = run.loginTries || {};
+  var tries = run.loginTries[i] = run.loginTries[i] || {};
+  if (tries.remember && tries.autofill) return false;
+  var urlBefore = ((await chrome.tabs.get(run.tabId).catch(function () { return {}; })).url) || '';
+  var r = await assistTab(run.tabId, cfg, tries);
+  if (r.ticked) logRun(run, 'step ' + (i + 1) + ': ticked "' + r.ticked + '" on the login page, so the portal keeps you signed in longer (Options can turn this off)');
+  if (cfg.autofillSignin !== false && !r.clicked && r.why) logRun(run, 'step ' + (i + 1) + ': not signing in with Chrome\'s saved password: ' + r.why);
+  if (!r.clicked) { await saveRun(run); return false; }
+  logRun(run, 'step ' + (i + 1) + ': ' + r.why + '; clicked "' + r.clicked + '" once (AWOS never read, typed or stored the password)');
+  run.resume = { step: i, kind: 'login', auto: true };
+  await saveRun(run);
+  try { await settleNavigation(run.tabId, urlBefore, 5000); } catch (e) { /* the loop's own checks follow */ }
+  return true;
 }
 /** after the user's Continue: if the tab is not on step i's recorded page (a re-login lands on a dashboard), go back
  *  to it. Steps before i are done (run.done) and are not repeated. */
@@ -797,14 +848,25 @@ async function afterRun(run) {
 
 // ---- notifications --------------------------------------------------------------------------------------
 var NOTICES = [];            // the last few notices (tests and the popup read them; nothing else)
-function notify(id, title, message) {
-  NOTICES.unshift({ id: id, title: title, message: message, at: Date.now() }); NOTICES.length = Math.min(NOTICES.length, 20);
+function notify(id, title, message, buttons) {
+  NOTICES.unshift({ id: id, title: title, message: message, at: Date.now(), buttons: (buttons || []).map(function (b) { return b.title; }) });
+  NOTICES.length = Math.min(NOTICES.length, 20);
   try {
-    chrome.notifications.create(id, { type: 'basic', iconUrl: 'icons/icon128.png', title: title, message: String(message).slice(0, 300),
-                                      priority: 2, requireInteraction: /needs you/.test(title) }).catch(function () {});
+    var opt = { type: 'basic', iconUrl: 'icons/icon128.png', title: title, message: String(message).slice(0, 300),
+                priority: 2, requireInteraction: /needs you/.test(title) };
+    if (buttons && buttons.length) opt.buttons = buttons.slice(0, 2);
+    chrome.notifications.create(id, opt).catch(function () {});
   } catch (e) { /* notifications unavailable */ }
 }
+/** a login notice (keep-alive / pre-flight): its button, or a click on it, opens just the portals that need a login. */
+function loginNoticeColl(id) { var m = /^awos-(?:keep|pre)-(.+)$/.exec(id || ''); return m ? m[1] : ''; }
+chrome.notifications.onButtonClicked.addListener(function (id) {
+  var cid = loginNoticeColl(id);
+  if (cid) openLogins(cid).catch(function (e) { console.warn('open logins', e); });
+});
 chrome.notifications.onClicked.addListener(async function (id) {
+  var cid = loginNoticeColl(id);
+  if (cid) return openLogins(cid).catch(function (e) { console.warn('open logins', e); });
   var run = await getSess('run');
   if (run && id === 'awos-run-' + run.id && run.tabId != null) {
     var t = await chrome.tabs.update(run.tabId, { active: true }).catch(function () { return null; });
@@ -847,9 +909,11 @@ async function armAll(onlyMissing) {
   }
   var cols = await getLocal('collections', {});
   for (var cid in cols) {
+    if (!(onlyMissing && await chrome.alarms.get(KEEP_ALARM + cid))) await armKeepAlive(cols[cid]);
     if (!cols[cid].schedule) continue;
-    if (onlyMissing && await chrome.alarms.get(COLL_ALARM + cid)) continue;
-    await armColl(cols[cid]);
+    var ca = onlyMissing && await chrome.alarms.get(COLL_ALARM + cid);
+    if (!ca) { await armColl(cols[cid]); continue; }
+    if (!(await chrome.alarms.get(PRE_ALARM + cid))) await armPreflight(cols[cid], ca.scheduledTime);
   }
 }
 /** a scheduled run: its own background tab, last-used param values, every human step pauses + notifies. */
@@ -874,6 +938,9 @@ chrome.alarms.onAlarm.addListener(function (a) {
   if (a.name.indexOf(ALARM) === 0) fireSchedule(a.name.slice(ALARM.length)).catch(function (e) { console.warn('schedule', e); });
   else if (a.name.indexOf(COLL_ALARM) === 0) fireColl(a.name.slice(COLL_ALARM.length)).catch(function (e) { console.warn('collection schedule', e); });
   else if (a.name.indexOf(COLL_WAIT) === 0) collSkip(a.name.slice(COLL_WAIT.length), 'nobody answered in time').catch(function () {});
+  else if (a.name.indexOf(KEEP_ALARM) === 0) keepAliveSweep(a.name.slice(KEEP_ALARM.length)).catch(function (e) { console.warn('keep-alive', e); });
+  else if (a.name.indexOf(PRE_ALARM) === 0) firePreflight(a.name.slice(PRE_ALARM.length)).catch(function (e) { console.warn('pre-flight', e); });
+  else if (a.name.indexOf(LOGIN_POLL) === 0) collNext().catch(function () {});          // backup wake-up while waiting for logins
 });
 chrome.runtime.onStartup.addListener(function () { armAll(true); });
 chrome.runtime.onInstalled.addListener(function () { armAll(true); });
@@ -915,21 +982,82 @@ async function collStart(collId, opts) {
   var res = await periodResults(collId, period);
   var queue = col.recIds.filter(function (id) { return !(res[id] && res[id].status === 'got'); });
   var c = { id: uid('coll'), collId: collId, name: col.name, period: period, queue: queue, idx: 0, status: 'running',
-            scheduled: !!opts.scheduled, startedAt: Date.now(), alreadyGot: col.recIds.length - queue.length, current: null };
+            scheduled: !!opts.scheduled, startedAt: Date.now(), alreadyGot: col.recIds.length - queue.length, current: null,
+            phase: 'preflight', deferred: {}, needLogin: [] };
   await setSess('coll', c);
-  await collNext();
-  return getSess('coll');
+  collBegin(c.id).catch(function (e) { console.warn('collection', e); });
+  return c;
 }
 
-/** start the next portal in the queue (its own background tab), or finish. */
-async function collNext() {
+/** pre-flight at the start of a collection run (v0.6.1): check which portals are logged out (a background tab per
+ *  portal, nothing clicked or typed), send ONE notification naming them with "Open the ones that need me", then run the
+ *  ready portals first; the logged-out ones wait at the end of the queue and are picked up as soon as their login is
+ *  seen (collNext). */
+async function collBegin(cId) {
   var c = await getSess('coll');
-  if (!c || c.status !== 'running') return;
+  if (!c || c.id !== cId || c.status !== 'running' || c.phase !== 'preflight') return;
+  var col = await getColl(c.collId), cfg = await settings();
+  if (col && col.preflightAtStart !== false && c.queue.length) {
+    var pf = await withProbeLock(function () { return checkPortals(c.queue, { source: 'run start', spacingMs: cfg.preflightSpacingMs }); });
+    var need = pf.results.filter(function (r) { return r.status === 'login'; }).map(function (r) { return r.recId; });
+    c = await getSess('coll');
+    if (!c || c.id !== cId || c.status !== 'running') return;
+    if (need.length) {
+      c.queue = c.queue.filter(function (id) { return need.indexOf(id) < 0; }).concat(need);
+      need.forEach(function (id) { c.deferred[id] = true; });
+      c.needLogin = need;
+      for (var k = 0; k < need.length; k++) {
+        await setCollResult(c.collId, c.period, need[k], { status: 'needs_you', loginNeeded: true, waiting: true, recName: (await getRec(need[k]) || {}).name,
+          reason: 'Login needed: AWOS picks this portal up as soon as you are logged in' });
+      }
+      var names = await recNames(need), ready = c.queue.length - need.length;
+      notify('awos-pre-' + c.collId, 'AWOS Replay: ' + c.name + ': log in to ' + need.length + ' portal' + (need.length === 1 ? '' : 's'),
+             (ready ? ready + ' portal' + (ready === 1 ? ' is' : 's are') + ' ready and running now. ' : '') + 'Log in to ' + names
+             + ' and AWOS picks ' + (need.length === 1 ? 'it' : 'them') + ' up as soon as you are in.', [{ title: 'Open the ones that need me' }]);
+    }
+  }
+  c.phase = 'run'; await setSess('coll', c);
+  await collNext();
+}
+
+var collChain = Promise.resolve();
+/** start the next portal in the queue, or wait for a login, or finish. Serialised: timers, tab events and run ends
+ *  may all ask at once. */
+function collNext() { var p = collChain.then(collNextInner); collChain = p.catch(function () {}); return p; }
+async function collNextInner() {
+  var c = await getSess('coll');
+  if (!c || c.status !== 'running' || c.phase === 'preflight' || c.current) return;
   while (c.idx < c.queue.length) {
     var recId = c.queue[c.idx], rec = await getRec(recId);
     if (!rec) { await setCollResult(c.collId, c.period, recId, { status: 'failed', reason: 'the recipe was deleted' }); c.idx++; continue; }
     var res = (await periodResults(c.collId, c.period))[recId];
     if (res && res.status === 'got') { c.idx++; continue; }
+    if (c.deferred && c.deferred[recId]) {             // only logged-out portals are left: wait for a login
+      var pick = await firstLoggedIn(c);
+      if (pick < 0) {
+        var cfg = await settings(), waitMs = Math.max(0.05, +cfg.collectionWaitMin || 10) * 60000;
+        c.loginDeadline = c.loginDeadline || Date.now() + waitMs;
+        if (Date.now() < c.loginDeadline) {
+          c.waitingLogin = true; await setSess('coll', c);
+          var poll = Math.max(200, +cfg.loginPollMs || 5000);
+          setTimeout(function () { collNext().catch(function () {}); }, poll);
+          chrome.alarms.create(LOGIN_POLL + c.collId, { when: Date.now() + Math.max(30000, poll) }).catch(function () {});
+          return;
+        }
+        for (var k = c.idx; k < c.queue.length; k++) {
+          if (!c.deferred[c.queue[k]]) continue;
+          await setCollResult(c.collId, c.period, c.queue[k], { status: 'needs_you', loginNeeded: true, recName: ((await getRec(c.queue[k])) || {}).name,
+            reason: 'Login needed: still logged out after ' + Math.round(waitMs / 60000) + ' min. Log in, then Run collection again (portals already got are skipped)' });
+        }
+        c.waitingLogin = false; c.idx = c.queue.length; await setSess('coll', c);
+        break;
+      }
+      var tmp = c.queue[c.idx]; c.queue[c.idx] = c.queue[pick]; c.queue[pick] = tmp;
+      recId = c.queue[c.idx]; rec = await getRec(recId);
+      delete c.deferred[recId]; c.waitingLogin = false;
+      (c.pickedUp = c.pickedUp || []).push(recId);
+      chrome.alarms.clear(LOGIN_POLL + c.collId).catch(function () {});
+    }
     var tab = await chrome.tabs.create({ url: 'about:blank', active: false });
     c.current = { recId: recId, tabId: tab.id }; await setSess('coll', c);
     try {
@@ -943,11 +1071,38 @@ async function collNext() {
   }
   await collFinish(c);
 }
+/** the queue index (from c.idx) of the first deferred portal whose login is now seen, or -1. A login tab the user
+ *  opened from "Open the ones that need me" is asked first (no new tab); otherwise the portal's start page is checked
+ *  in a background tab, at most every loginProbeMs (default 60 s) per portal. */
+async function firstLoggedIn(c) {
+  var cfg = await settings(), tabs = (await getSess('loginTabs')) || {}, every = Math.max(500, +cfg.loginProbeMs || 60000);
+  c.lastProbe = c.lastProbe || {};
+  for (var k = c.idx; k < c.queue.length; k++) {
+    var id = c.queue[k];
+    if (!c.deferred[id]) continue;
+    var rec = await getRec(id);
+    if (!rec) continue;
+    if (tabs[id] != null) {
+      var pk = await sendTab(tabs[id], { type: 'page_kind' }).catch(function () { return null; });
+      if (pk && pk.url && R.siteOf(pk.url) === R.siteOf(rec.startUrl)) {
+        if (!pk.kind) { await setPortalStatus(id, { status: 'ok', why: 'logged in (seen in the tab you opened)', url: R.stripUrl(pk.url) }, 'login tab'); return k; }
+        continue;                                      // still on its login page: the user is not done yet
+      }
+    }
+    if (Date.now() - (c.lastProbe[id] || 0) < every) continue;
+    c.lastProbe[id] = Date.now(); await setSess('coll', c);
+    var r = await withProbeLock(function () { return probePortal(rec); });
+    await setPortalStatus(id, r, 'waiting for login');
+    if (r.status === 'ok') return k;
+  }
+  return -1;
+}
 
 async function collFinish(c) {
   var cols = await getLocal('collections', {}), col = cols[c.collId];
   var sum = col ? collSummary(col, await periodResults(c.collId, c.period)) : { text: 'collection deleted', counts: {} };
-  c.status = 'done'; c.current = null; c.endedAt = Date.now(); c.summary = sum.text; c.counts = sum.counts;
+  c.status = 'done'; c.current = null; c.endedAt = Date.now(); c.summary = sum.text; c.counts = sum.counts; c.waitingLogin = false;
+  chrome.alarms.clear(LOGIN_POLL + c.collId).catch(function () {});
   await setSess('coll', c);
   if (col) { col.last = { period: c.period, summary: sum.text, at: Date.now() }; await setLocal('collections', cols); }
   notify('awos-coll-' + c.collId, 'AWOS Replay: ' + c.name + ' (' + c.period + ')', sum.text + (c.alreadyGot ? ' (' + c.alreadyGot + ' already got earlier)' : ''));
@@ -1004,9 +1159,9 @@ async function collSkip(runId, why) {
 
 async function armColl(col) {
   await chrome.alarms.clear(COLL_ALARM + col.id);
-  if (!col.schedule) return null;
-  var when = nextFire(col.schedule, Date.now());
+  var when = col.schedule ? nextFire(col.schedule, Date.now()) : null;
   if (when) await chrome.alarms.create(COLL_ALARM + col.id, { when: when });
+  await armPreflight(col, when);
   return when;
 }
 async function fireColl(collId) {
@@ -1029,10 +1184,208 @@ async function saveColl(msg) {
   }
   if (msg.monthOffset != null) col.monthOffset = +msg.monthOffset === -1 ? -1 : 0;
   if (msg.schedule !== undefined) col.schedule = cleanSchedule(msg.schedule);
+  // logins (v0.6.1): keep-alive every N days (on by default), pre-flight N hours before a scheduled run (24, 0 = off)
+  if (msg.keepAlive !== undefined) col.keepAlive = msg.keepAlive !== false;
+  if (msg.keepAliveDays != null) { var kd = parseInt(msg.keepAliveDays, 10); if (!(kd >= 1 && kd <= 30)) throw new Error('keep-alive: every 1-30 days'); col.keepAliveDays = kd; }
+  if (msg.preflightHours != null) { var ph = parseInt(msg.preflightHours, 10); if (!(ph >= 0 && ph <= 168)) throw new Error('pre-flight: 0-168 hours before the run'); col.preflightHours = ph; }
+  if (msg.preflightAtStart !== undefined) col.preflightAtStart = msg.preflightAtStart !== false;
   cols[col.id] = col; await setLocal('collections', cols);
   var next = await armColl(col);
-  return Object.assign({}, col, { next: next });
+  var keepNext = await armKeepAlive(col);
+  return Object.assign({}, col, { next: next, keepNext: keepNext });
 }
+
+// ---- logins: keep-alive, pre-flight, "Open the ones that need me" (v0.6.1) ----------------------------------
+// Most handoffs in a monthly run are expired logins. A keep-alive visits each portal's recorded start page every few
+// days in a background tab, one portal at a time, and only looks: logged in, or a login page (lib/portal.js
+// pageKind). Nothing on the page is clicked or typed (stricter than the pop-up rules allow), the tab is closed. A
+// portal that logged the user out is reported early, once, and shows as "Login needed" in the checklist. The same
+// check runs `preflightHours` before a scheduled collection run and at the start of every collection run.
+// portalStatus (chrome.storage.local) {recId: {status: ok|login|captcha|error|self_login, kind, why, url, at, source, notified}}
+var KEEP_ALARM = 'awos-keep:', PRE_ALARM = 'awos-pre:', LOGIN_POLL = 'awos-coll-login:';
+var probeChain = Promise.resolve();
+/** one portal check at a time (keep-alive, pre-flight and a waiting collection share it). */
+function withProbeLock(fn) { var p = probeChain.then(fn, fn); probeChain = p.catch(function () {}); return p; }
+/** the recording signs in by itself (it has a password step): its start page is a login page by design. */
+function selfLogin(rec) { return (rec.steps || []).some(function (s) { return s.action === 'fill' && /password/i.test(String(s.sensitive || '')); }); }
+async function recNames(ids) {
+  var recs = await getLocal('recordings', {}), n = ids.map(function (id) { return (recs[id] && recs[id].name) || 'a portal'; });
+  return n.length <= 1 ? n.join('') : n.slice(0, -1).join(', ') + ' and ' + n[n.length - 1];
+}
+/** open the portal's start page in a background tab, classify it, close the tab. Looks only: no click, no typing. */
+async function probePortal(rec) {
+  var start = rec.startUrl || '';
+  if (!/^https?:/.test(start)) return { status: 'error', why: 'no web start page' };
+  if (selfLogin(rec)) return { status: 'self_login', why: 'this recipe signs in by itself (you type the password during the run)' };
+  if (S.urlDanger(start)) return { status: 'error', why: 'its start page matches "' + S.urlDanger(start) + '"; not opened unattended' };
+  var tab = null;
+  try {
+    tab = await chrome.tabs.create({ url: start, active: false });
+    await setSess('probeTab', tab.id);
+    await sleep(150); await waitForLoad(tab.id, 20000);
+    await ensureContent(tab.id, null, 8000);
+    await waitQuiet(tab.id, 1500);
+    var pk = await sendTab(tab.id, { type: 'page_kind' });
+    var landed = ((await chrome.tabs.get(tab.id).catch(function () { return {}; })).url) || pk.url || '';
+    var st = !pk.kind ? 'ok' : (pk.kind === 'login' || pk.kind === 'otp') ? 'login' : pk.kind;
+    return { status: st, kind: pk.kind || '', why: pk.why || (st === 'ok' ? 'logged in' : ''), url: R.stripUrl(landed) };
+  } catch (e) {
+    return { status: 'error', why: String(e && e.message || e) };
+  } finally {
+    if (tab) await chrome.tabs.remove(tab.id).catch(function () {});
+    await setSess('probeTab', null);
+  }
+}
+/** record a portal's login status; -> the new entry with `wasNotified` (a logout already reported). */
+async function setPortalStatus(recId, r, source) {
+  var all = await getLocal('portalStatus', {}), prev = all[recId] || {};
+  var cur = { status: r.status, kind: r.kind || '', why: r.why || '', url: r.url || '', at: Date.now(), source: source || '' };
+  cur.notified = cur.status === 'login' && prev.status === 'login' && !!prev.notified;    // a new logout is reported again
+  all[recId] = cur; await setLocal('portalStatus', all);
+  return cur;
+}
+async function markNotified(ids) {
+  var all = await getLocal('portalStatus', {});
+  ids.forEach(function (id) { if (all[id]) all[id].notified = true; });
+  await setLocal('portalStatus', all);
+}
+/** check portals one after another (spacingMs apart, default 8 s: polite to the sites). abortIfBusy: stop before the
+ *  next portal when a replay / collection / recording / Tell it run started (keep-alive never gets in the way). */
+async function checkPortals(recIds, opts) {
+  var cfg = await settings(), out = { results: [], aborted: '' };
+  var gap = opts.spacingMs != null ? +opts.spacingMs : (cfg.keepAliveSpacingMs != null ? +cfg.keepAliveSpacingMs : 8000);
+  var ids = recIds.filter(function (id, k, a) { return a.indexOf(id) === k; });
+  for (var k = 0; k < ids.length; k++) {
+    if (opts.abortIfBusy) { var busy = await busyReason(); if (busy) { out.aborted = busy; break; } }
+    var rec = await getRec(ids[k]);
+    if (!rec) continue;
+    if (k > 0 && gap > 0) await sleep(gap);
+    var r = await probePortal(rec);
+    var cur = await setPortalStatus(ids[k], r, opts.source);
+    out.results.push(Object.assign({ recId: ids[k], name: rec.name }, cur));
+  }
+  return out;
+}
+async function armKeepAlive(col) {
+  if (!col) return null;
+  await chrome.alarms.clear(KEEP_ALARM + col.id);
+  if (col.keepAlive === false || !(col.recIds || []).length) return null;
+  var every = (col.keepAliveDays || 3) * 86400000;
+  var when = Math.max(Date.now() + 60000, (col.lastKeepAlive || Date.now()) + every);
+  await chrome.alarms.create(KEEP_ALARM + col.id, { when: when });
+  return when;
+}
+/** the keep-alive sweep of one collection (the alarm, or the popup's "Check logins now"). Notifies once per logout. */
+async function keepAliveSweep(collId, opts) {
+  opts = opts || {};
+  var col = await getColl(collId);
+  if (!col) return null;
+  if (!opts.manual && col.keepAlive === false) return null;
+  var busy = await busyReason();
+  if (busy) {
+    if (opts.manual) throw new Error(busy);
+    await chrome.alarms.create(KEEP_ALARM + collId, { when: Date.now() + 30 * 60000 });     // the user is mid-run: later
+    return { skipped: busy };
+  }
+  var out = await withProbeLock(function () { return checkPortals(col.recIds, { source: opts.manual ? 'check now' : 'keep-alive', abortIfBusy: true }); });
+  var cols = await getLocal('collections', {});
+  if (cols[collId]) { cols[collId].lastKeepAlive = Date.now(); await setLocal('collections', cols); }
+  if (out.aborted) await chrome.alarms.create(KEEP_ALARM + collId, { when: Date.now() + 30 * 60000 });
+  else await armKeepAlive(cols[collId]);
+  var fresh = out.results.filter(function (r) { return r.status === 'login' && !r.notified; }).map(function (r) { return r.recId; });
+  if (fresh.length) {
+    var names = await recNames(fresh);
+    notify('awos-keep-' + collId, 'AWOS Replay: login needed for ' + col.name,
+           names + ' logged you out; log in any time before the month-end run.', [{ title: 'Open the ones that need me' }]);
+    await markNotified(fresh);
+  }
+  return { results: out.results, aborted: out.aborted, notified: fresh };
+}
+/** the advance check before a scheduled run: `preflightHours` (default 24, 0 = off) before it. */
+async function armPreflight(col, runAt) {
+  await chrome.alarms.clear(PRE_ALARM + col.id);
+  var h = col.preflightHours == null ? 24 : +col.preflightHours;
+  if (!runAt || !col.schedule || !(h > 0)) return null;
+  var when = runAt - h * 3600000;
+  if (when < Date.now() + 60000) return null;            // too close: the run's own start check does it
+  await chrome.alarms.create(PRE_ALARM + col.id, { when: when });
+  return when;
+}
+/** the portals of the collection's next scheduled period that still need a login: ONE notification naming them. */
+async function firePreflight(collId) {
+  var col = await getColl(collId);
+  if (!col) return null;
+  var runAlarm = await chrome.alarms.get(COLL_ALARM + collId), runAt = runAlarm ? runAlarm.scheduledTime : Date.now();
+  var busy = await busyReason();
+  if (busy) {                                           // mid-run: try again in 30 min if the run is still far enough away
+    if (runAt - Date.now() > 3600000) await chrome.alarms.create(PRE_ALARM + collId, { when: Date.now() + 30 * 60000 });
+    return { skipped: busy };
+  }
+  var period = periodOf(runAt, col.monthOffset || 0), res = await periodResults(collId, period);
+  var ids = col.recIds.filter(function (id) { return !(res[id] && res[id].status === 'got'); });
+  var out = await withProbeLock(function () { return checkPortals(ids, { source: 'pre-flight', abortIfBusy: true }); });
+  var need = out.results.filter(function (r) { return r.status === 'login'; }).map(function (r) { return r.recId; });
+  var cols = await getLocal('collections', {});
+  if (cols[collId]) { cols[collId].lastPreflight = { at: Date.now(), need: need, period: period }; await setLocal('collections', cols); }
+  if (need.length) {
+    notify('awos-pre-' + collId, 'AWOS Replay: ' + col.name + ' runs ' + new Date(runAt).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }),
+           'Log in to ' + (await recNames(need)) + ' any time before then, all in one go; the other portals are ready.', [{ title: 'Open the ones that need me' }]);
+    await markNotified(need);
+  }
+  return { results: out.results, need: need, aborted: out.aborted };
+}
+/** "Open the ones that need me": a tab per portal of the collection whose login is needed (not already got this
+ *  period), the first one in front. On each, "remember me" is ticked and Chrome's autofill may sign in (Options);
+ *  the user does the rest. A waiting collection run notices the login in these tabs and picks the portal up. */
+async function openLogins(collId) {
+  var col = await getColl(collId);
+  if (!col) throw new Error('no such collection');
+  var c = await getSess('coll'), period = c && c.collId === collId ? c.period : periodOf(Date.now(), col.monthOffset || 0);
+  var res = await periodResults(collId, period), ps = await getLocal('portalStatus', {}), tabs = (await getSess('loginTabs')) || {};
+  var ids = col.recIds.filter(function (id) { return ps[id] && ps[id].status === 'login' && !(res[id] && res[id].status === 'got'); });
+  var opened = [];
+  for (var k = 0; k < ids.length; k++) {
+    var rec = await getRec(ids[k]);
+    if (!rec || !/^https?:/.test(rec.startUrl || '') || S.urlDanger(rec.startUrl)) continue;
+    var old = tabs[ids[k]] != null ? await chrome.tabs.get(tabs[ids[k]]).catch(function () { return null; }) : null;
+    var tab = old || await chrome.tabs.create({ url: rec.startUrl, active: opened.length === 0 });
+    if (old && opened.length === 0) await chrome.tabs.update(old.id, { active: true }).catch(function () {});
+    tabs[ids[k]] = tab.id; opened.push({ recId: ids[k], tabId: tab.id });
+  }
+  await setSess('loginTabs', tabs);
+  if (opened.length) {
+    var t0 = await chrome.tabs.get(opened[0].tabId).catch(function () { return null; });
+    if (t0) chrome.windows.update(t0.windowId, { focused: true }).catch(function () {});
+  }
+  helpLoginTabs(opened).catch(function (e) { console.warn('login tabs', e); });
+  return { opened: opened.length, recIds: opened.map(function (o) { return o.recId; }) };
+}
+/** on each opened login tab: "remember me", and Chrome's autofill sign-in (once per tab); noted on portalStatus. */
+async function helpLoginTabs(opened) {
+  var cfg = await settings();
+  for (var k = 0; k < opened.length; k++) {
+    try {
+      await sleep(150); await waitForLoad(opened[k].tabId, 20000); await ensureContent(opened[k].tabId, null, 8000);
+      var pk = await sendTab(opened[k].tabId, { type: 'page_kind' });
+      if (pk.kind !== 'login') continue;
+      var r = await assistTab(opened[k].tabId, cfg, {});
+      var all = await getLocal('portalStatus', {});
+      if (all[opened[k].recId]) {
+        all[opened[k].recId].assist = { ticked: r.ticked, clicked: r.clicked, why: r.why, at: Date.now() };
+        await setLocal('portalStatus', all);
+      }
+    } catch (e) { /* the user may already be typing there; nothing else to do */ }
+  }
+}
+// a login tab the user opened finished loading: a collection waiting for logins looks right away
+chrome.tabs.onUpdated.addListener(function (tabId, info) {
+  if (info.status !== 'complete') return;
+  Promise.all([getSess('coll'), getSess('loginTabs')]).then(function (both) {
+    var c = both[0], tabs = both[1] || {};
+    if (!c || c.status !== 'running' || !c.waitingLogin) return;
+    if (Object.keys(tabs).some(function (id) { return tabs[id] === tabId; })) setTimeout(function () { collNext().catch(function () {}); }, 300);
+  }).catch(function () {});
+});
 
 async function archive(run) {
   run.pending = null; run.endedAt = Date.now();
@@ -1199,7 +1552,8 @@ var HANDLERS = {
     return { recState: await getSess('recState'), run: await getSess('run'), recordings: await getLocal('recordings', {}),
              runs: await getLocal('runs', []), settings: await settings(), claudeKeySet: !!(await getLocal('claudeKey', '')),
              pendingImport: await getSess('pendingImport'), version: chrome.runtime.getManifest().version,
-             collections: await getLocal('collections', {}), collResults: await getLocal('collResults', {}), coll: await getSess('coll') };
+             collections: await getLocal('collections', {}), collResults: await getLocal('collResults', {}), coll: await getSess('coll'),
+             portalStatus: await getLocal('portalStatus', {}) };
   },
   start_recording: async function (msg) { return startRecording(msg.tabId, msg.name); },
   stop_recording: async function () { return stopRecording(); },
@@ -1293,8 +1647,12 @@ var HANDLERS = {
   coll_delete: async function (msg) {
     var cols = await getLocal('collections', {}); delete cols[msg.id]; await setLocal('collections', cols);
     var res = await getLocal('collResults', {}); delete res[msg.id]; await setLocal('collResults', res);
-    await chrome.alarms.clear(COLL_ALARM + msg.id); return { ok: true };
+    await chrome.alarms.clear(COLL_ALARM + msg.id); await chrome.alarms.clear(KEEP_ALARM + msg.id); await chrome.alarms.clear(PRE_ALARM + msg.id);
+    return { ok: true };
   },
+  // logins (v0.6.1)
+  coll_check_logins: async function (msg) { return keepAliveSweep(msg.id, { manual: true }); },     // "Check logins now"
+  coll_open_logins: async function (msg) { return openLogins(msg.id); },                           // "Open the ones that need me"
   coll_run: async function (msg) { return collStart(msg.id, { period: msg.period }); },
   coll_skip: async function (msg) { return collSkip(msg.runId, 'skipped by the user'); },
   coll_stop: async function () {               // stop the collection after the current portal (it is not interrupted)
@@ -1326,11 +1684,14 @@ async function restoreAfterRestart() {
   if (run && run.status === 'running' && driving !== run.id) {
     await fail(run, 'INTERRUPTED', 'the extension restarted during step ' + (run.i + 1) + '; check the page, then run again');
   }
+  var pt = await getSess('probeTab');         // a login check the restart cut short: its background tab goes
+  if (pt != null) { await chrome.tabs.remove(pt).catch(function () {}); await setSess('probeTab', null); }
   var co = await getSess('coll');             // a collection whose current portal ended while the worker was gone
   if (co && co.status === 'running' && co.current) {
     var cur = await getSess('run');
     if (!cur || cur.recId !== co.current.recId || /^(done|failed)$/.test(cur.status)) { co.idx++; co.current = null; await setSess('coll', co); await collNext(); }
-  }
+  } else if (co && co.status === 'running' && co.phase === 'preflight') await collBegin(co.id);
+  else if (co && co.status === 'running' && co.waitingLogin) await collNext();     // still waiting for a login
   await armAll(true);                 // alarms normally persist; re-arm any that went missing
   return { run: await getSess('run'), coll: await getSess('coll') };
 }

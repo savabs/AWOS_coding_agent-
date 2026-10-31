@@ -1,6 +1,6 @@
 /* AWOS Replay options: brain for repair / verify (local model or Claude with the user's own key), Tell it's agent
  * brain (local agent model by default; Claude only on opt-in), the never-use-cloud site list, training-data keeping,
- * local endpoint / name / on-off, find timeout. The API key goes to chrome.storage.local via save_claude_key and is never shown again. */
+ * local endpoint / name / on-off, find timeout, login helpers on portal runs (remember me, Chrome autofill sign-in). The API key goes to chrome.storage.local via save_claude_key and is never shown again. */
 'use strict';
 var $ = function (id) { return document.getElementById(id); };
 function say(text, bad) { $('status').className = bad ? 'error' : ''; $('status').textContent = text; }
@@ -22,6 +22,7 @@ function load() {
     $('agentClaudeModel').value = s.agentClaudeModel || 'claude-haiku-5-5';
     $('noCloudSites').value = (s.noCloudSites || []).join('\n');
     $('keepTraining').checked = s.keepTraining !== false;
+    $('rememberMe').checked = s.rememberMe !== false; $('autofillSignin').checked = s.autofillSignin !== false;
     $('keystate').textContent = st.claudeKeySet ? 'A key is saved. Leave the box empty to keep it.' : 'No key saved yet.';
     showBrain();
   });
@@ -58,6 +59,7 @@ $('save').onclick = async function () {
                    agentBrain: ab, agentEndpoint: aep, agentModel: $('agentModel').value.trim() || 'qwen3.5-4b',
                    searchPage: /^https:\/\//.test($('searchPage').value.trim()) ? $('searchPage').value.trim() : 'https://duckduckgo.com/?q={goal}',
                    agentClaudeModel: $('agentClaudeModel').value, keepTraining: $('keepTraining').checked,
+                   rememberMe: $('rememberMe').checked, autofillSignin: $('autofillSignin').checked,
                    noCloudSites: $('noCloudSites').value.split(/[\s,]+/).filter(Boolean) };
   await chrome.runtime.sendMessage({ type: 'save_settings', settings: settings });
   say('Saved.');

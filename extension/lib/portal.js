@@ -15,6 +15,16 @@
  *      reject / decline / necessary-only / close. Never "accept", "agree", "allow all", never anything in the
  *      danger vocabulary (pay, send, delete, submit, confirm, ...). A blocker with no allowed control is reported
  *      as `blocked` so the run pauses for the user instead.
+ *  rememberMe() -> {ticked: label | '', seen: n}   (v0.6.1)
+ *      on a login handoff: ticks ONE unchecked, visible checkbox whose whole label is "remember me" / "keep me signed
+ *      in" / "stay signed in" / "trust this device" / "don't ask again on this device" (REMEMBER_RE). Nothing else.
+ *  autofillSignin(testHook) -> {clicked: button name | '', why}   (v0.6.1, experimental)
+ *      when Chrome has autofilled BOTH the username and the password field of a visible sign-in form (the :autofill /
+ *      :-webkit-autofill pseudo-class, and not :placeholder-shown), clicks that form's sign-in button once. It never
+ *      reads a field's value (only those pseudo-classes and the field's type), and returns nothing about the fields
+ *      except why it did or did not click. `testHook` (passed only by the worker, from chrome.storage.session, which
+ *      pages cannot reach) also counts a data-awos-test-autofill attribute as autofilled: Playwright cannot make
+ *      Chrome autofill a saved password, so the tests mark the fields that way.
  * Plain script: defines globalThis.AWOSPortal (needs AWOSSafety and AWOSLocator loaded first).
  */
 (function (root) {
@@ -170,8 +180,62 @@
     return res;
   }
 
+  // ---- login helpers (v0.6.1): "remember me", Chrome-autofilled sign-in -------------------------------------
+  var DEV = '( (on|for) (this|my) (device|computer|browser))?';
+  var REMEMBER_RE = new RegExp('^(remember me' + DEV + '|remember (this|my) (device|computer|browser)'
+    + '|keep me (signed|logged) in' + DEV + '|stay (signed|logged) in' + DEV
+    + '|trust this (device|computer|browser)|(do not|don\'t|dont) ask (me )?again' + DEV
+    + '|(do not|don\'t|dont) ask (me )?for (a )?code again' + DEV + ')( for \\d+ days)?$', 'i');
+  var SIGNIN_RE = /^(sign ?in|log ?in|login|log on|logon|sign on|sign in securely|log in securely|secure sign ?in|continue|next|submit)$/i;
+  function cleanLabel(s) { return norm(s).toLowerCase().replace(/’/g, "'").replace(/[.!?:]+$/, '').trim(); }
+  function checkboxName(el) {
+    var n = L.accName(el) || '';
+    if (!n) { var lab = L.closestDeep(el, 'label'); if (lab) n = lab.innerText || lab.textContent || ''; }
+    return cleanLabel(n);
+  }
+  function isChecked(el) { return el.matches('input') ? !!el.checked : el.getAttribute('aria-checked') === 'true'; }
+  /** a checkbox the user can see: itself, or (custom-styled, the input hidden) its label. */
+  function boxVisible(el) {
+    if (vis(el)) return true;
+    return Array.prototype.slice.call(el.labels || []).some(vis);
+  }
+  function rememberMe() {
+    var boxes = L.deepAll('input[type=checkbox], [role=checkbox]').filter(function (el) { return !el.disabled && boxVisible(el); });
+    var hit = boxes.find(function (el) { return !isChecked(el) && REMEMBER_RE.test(checkboxName(el)); });
+    if (!hit) return { ticked: '', seen: boxes.length };
+    try { hit.click(); } catch (e) { return { ticked: '', seen: boxes.length }; }
+    return { ticked: checkboxName(hit), seen: boxes.length, checked: isChecked(hit) };
+  }
+  function pseudo(el, sel) { try { return el.matches(sel); } catch (e) { return false; } }
+  /** Chrome autofilled this field, judged by pseudo-classes only (its value is never read). */
+  function autofilled(el, testHook) {
+    var af = pseudo(el, ':autofill') || pseudo(el, ':-webkit-autofill') || (!!testHook && el.hasAttribute('data-awos-test-autofill'));
+    return af && !pseudo(el, ':placeholder-shown');
+  }
+  var USER_SEL = 'input[type=email], input[type=text], input[type=tel], input:not([type])';
+  var BTN_SEL = 'button, input[type=submit], [role=button]';
+  function autofillSignin(testHook) {
+    var pws = L.deepAll('input[type=password]').filter(vis);
+    if (pws.length !== 1) return { clicked: '', why: pws.length ? 'more than one password field (not a plain sign-in form)' : 'no visible password field' };
+    var pw = pws[0], form = pw.form || L.closestDeep(pw, 'form');
+    var users = L.deepAll(USER_SEL, form || undefined).filter(function (el) {
+      return vis(el) && !!(el.compareDocumentPosition(pw) & Node.DOCUMENT_POSITION_FOLLOWING);       // before the password field
+    });
+    var user = users[users.length - 1];
+    if (!user) return { clicked: '', why: 'no username field before the password field (a two-step sign-in is not handled)' };
+    var uA = autofilled(user, testHook), pA = autofilled(pw, testHook);
+    if (!uA || !pA) return { clicked: '', why: 'Chrome has not autofilled ' + (!uA && !pA ? 'the username and the password' : !uA ? 'the username' : 'the password') };
+    var btn = L.deepAll(BTN_SEL, form || undefined).filter(function (b) { return vis(b) && !b.disabled; })
+      .find(function (b) { return SIGNIN_RE.test(cleanLabel(L.accName(b) || b.value || '')); });
+    if (!btn) return { clicked: '', why: 'no sign-in button in the form' };
+    var name = norm(L.accName(btn) || btn.value || 'Sign in');
+    try { if (btn.focus) btn.focus(); btn.click(); } catch (e) { return { clicked: '', why: 'the click failed' }; }
+    return { clicked: name, why: 'Chrome had autofilled the username and the password' };
+  }
+
   root.AWOSPortal = {
-    DISMISS_RE: DISMISS_RE, CONSENT_RE: CONSENT_RE, NEVER_RE: NEVER_RE,
+    DISMISS_RE: DISMISS_RE, CONSENT_RE: CONSENT_RE, NEVER_RE: NEVER_RE, REMEMBER_RE: REMEMBER_RE, SIGNIN_RE: SIGNIN_RE,
     pageKind: pageKind, coveredBy: coveredBy, blockers: blockers, unblock: unblock, allowed: allowed,
+    rememberMe: rememberMe, autofillSignin: autofillSignin, autofilled: autofilled, rememberLabel: checkboxName,
   };
 })(typeof globalThis !== 'undefined' ? globalThis : self);

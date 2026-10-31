@@ -4,7 +4,8 @@ A local HTTP server (127.0.0.1, random port) serves tests/extension/pages and a
 fake OpenAI-compatible model at /v1/chat/completions (no real model, no network).
 `server.overrides` swaps the file behind a path, so the same recorded URL can
 serve a renamed / deleted variant at replay time; `server.redirects` answers a path with a 302 (a portal whose
-session expired sends you to its login page) and `server.hits` lists every GET path (files downloaded once?). Chromium runs headless with
+session expired sends you to its login page), `server.auth` does the same only until a login page set the
+`portal_session=ok` cookie (v0.6.1 keep-alive / pre-flight), and `server.hits` lists every GET path (files downloaded once?). Chromium runs headless with
 the unpacked extension loaded (Playwright's "chromium" channel = new headless,
 which supports extensions). Skips when Playwright or a Chromium build is missing.
 Run with the 3.12 venv:  ~/.awos/rl-venv/bin/python -m pytest tests/extension -q
@@ -38,6 +39,8 @@ class _Handler(SimpleHTTPRequestHandler):
         path = self.path.split("?")[0]
         self.server.hits.append(path)
         loc = self.server.redirects.get(path)
+        if not loc and path in self.server.auth and "portal_session=ok" not in (self.headers.get("Cookie") or ""):
+            loc = self.server.auth[path]          # a portal that needs a login: 302 until the login page set the cookie
         if loc:
             self.send_response(302)
             self.send_header("Location", loc)
@@ -75,7 +78,7 @@ class _Handler(SimpleHTTPRequestHandler):
 def server():
     srv = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     srv.overrides, srv.model_calls, srv.model_answer = {}, [], "NOT_FOUND"
-    srv.redirects, srv.hits = {}, []
+    srv.redirects, srv.hits, srv.auth = {}, [], {}
     srv.verify_calls, srv.verify_answer = [], "VERIFIED: fake"
     srv.base = f"http://127.0.0.1:{srv.server_address[1]}"
     t = threading.Thread(target=srv.serve_forever, daemon=True)
@@ -90,6 +93,7 @@ def _reset_server(request):
         srv = request.getfixturevalue("server")
         srv.overrides.clear()
         srv.redirects.clear()
+        srv.auth.clear()
         srv.hits.clear()
         srv.model_calls.clear()
         srv.model_answer = "NOT_FOUND"

@@ -278,7 +278,13 @@ function periodOf(t, offset) {
   var d = new Date(t); d.setDate(1); d.setMonth(d.getMonth() + (offset || 0));
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
 }
-function collStatusText(r) {
+/** v0.6.1: a portal the last login check found logged out shows "Login needed" until it is got this period. */
+function loginNeeded(r, p) { return !(r && r.status === 'got') && ((p && p.status === 'login') || !!(r && r.loginNeeded)); }
+function collStatusText(r, p) {
+  if (loginNeeded(r, p)) {
+    var when = p && p.at ? ' (checked ' + new Date(p.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + ')' : '';
+    return 'Login needed' + (r && r.waiting ? ' (waiting for you)' : '') + (r && r.loginNeeded && !r.waiting && r.reason ? ': ' + r.reason.replace(/^Login needed: /, '') : when);
+  }
   if (!r) return 'Not run yet';
   if (r.status === 'got') return r.file ? 'Got (' + r.file + ')' : 'Got';
   if (r.status === 'missing') return 'Missing' + (r.reason ? ': ' + r.reason : '');
@@ -303,6 +309,25 @@ function collSchedBox(col) {
   };
   [on, date, time, save].forEach(function (x) { box.appendChild(x); });
   box.appendChild(el('div', { class: 'muted' }, 'A scheduled collection opens one background tab per portal; a login, code or check notifies you.'));
+  return box;
+}
+function collKeepBox(col) {
+  var box = el('div', { class: 'sched keep' });
+  var lab = el('label', { class: 'meta' }), on = el('input', { type: 'checkbox', class: 'kaon' }); on.checked = col.keepAlive !== false;
+  lab.appendChild(on); lab.appendChild(document.createTextNode(' Keep logins alive: visit each portal every '));
+  var days = el('input', { class: 'kadays', type: 'number', min: '1', max: '30', value: String(col.keepAliveDays || 3) });
+  lab.appendChild(days); lab.appendChild(document.createTextNode(' days (a background tab; nothing is clicked or typed)'));
+  var lab2 = el('label', { class: 'meta' }, 'Check logins ');
+  var hours = el('input', { class: 'kahours', type: 'number', min: '0', max: '168', value: String(col.preflightHours == null ? 24 : col.preflightHours) });
+  lab2.appendChild(hours); lab2.appendChild(document.createTextNode(' hours before a scheduled run (0 = off; every run also checks at its start)'));
+  var save = el('button', { class: 'kasave small' }, 'Save');
+  save.onclick = function () {
+    call({ type: 'coll_save', id: col.id, keepAlive: on.checked, keepAliveDays: parseInt(days.value, 10) || 3,
+           preflightHours: Math.max(0, parseInt(hours.value, 10) || 0) }).then(function (r) {
+      notice(r.keepNext ? 'Next login check: ' + new Date(r.keepNext).toLocaleString() : 'Keep-alive off.'); lastCollSig = ''; refresh();
+    });
+  };
+  [lab, lab2, save].forEach(function (x) { box.appendChild(x); });
   return box;
 }
 function renderCollections() {
@@ -330,7 +355,7 @@ function renderCollections() {
   if (list.contains(ae) && /^(INPUT|SELECT)$/.test(ae.tagName)) return;
   var busy = (run && /^(running|awaiting_approval|needs_user)$/.test(run.status)) || (c && c.status === 'running') || !!state.recState;
   var waiting = run && run.collection && /^(needs_user|awaiting_approval)$/.test(run.status) ? run : null;
-  var sig = JSON.stringify([cols, results, c, !!busy, waiting && waiting.id, Object.keys(recs)]);
+  var sig = JSON.stringify([cols, results, c, !!busy, waiting && waiting.id, Object.keys(recs), state.portalStatus]);
   if (sig === lastCollSig) return;
   lastCollSig = sig;
   list.textContent = '';
@@ -343,7 +368,8 @@ function renderCollections() {
     col.recIds.forEach(function (id) {
       var r = res[id], row = el('div', { class: 'portal', 'data-rec': id });
       row.appendChild(el('span', null, recs[id] ? recs[id].name : (r && r.recName) || '(deleted recipe)'));
-      row.appendChild(el('span', { class: 'st ' + (r ? r.status : 'notrun') }, collStatusText(r)));
+      var p = (state.portalStatus || {})[id];
+      row.appendChild(el('span', { class: 'st ' + (loginNeeded(r, p) ? 'needs_you login' : r ? r.status : 'notrun') }, collStatusText(r, p)));
       li.appendChild(row);
     });
     if (col.last && !(c && c.collId === col.id && c.status === 'running')) li.appendChild(el('div', { class: 'meta' }, 'Last: ' + col.last.summary));
@@ -356,6 +382,22 @@ function renderCollections() {
       skip.onclick = function () { call({ type: 'coll_skip', runId: waiting.id }).then(function () { lastCollSig = ''; refresh(); }); };
       acts.appendChild(skip);
     }
+    var ps = state.portalStatus || {};
+    var nNeed = col.recIds.filter(function (id) { return loginNeeded(res[id], ps[id]) && ps[id] && ps[id].status === 'login'; }).length;
+    if (nNeed) {
+      var open = el('button', { class: 'collopen primary' }, 'Open the ones that need me (' + nNeed + ')');
+      open.onclick = function () { call({ type: 'coll_open_logins', id: col.id }).then(function (r) { notice('Opened ' + r.opened + ' login tab(s). Log in there; AWOS notices.'); }); };
+      acts.appendChild(open);
+    }
+    var chk = el('button', { class: 'collcheck' }, 'Check logins now'); chk.disabled = !!busy;
+    chk.onclick = function () {
+      notice('Checking each portal in a background tab (nothing is clicked or typed)...');
+      call({ type: 'coll_check_logins', id: col.id }).then(function (r) {
+        var bad = (r.results || []).filter(function (x) { return x.status === 'login'; }).length;
+        notice(bad ? bad + ' portal(s) need a login.' : 'All portals are logged in.'); lastCollSig = ''; refresh();
+      });
+    };
+    acts.appendChild(chk);
     var del = el('button', { class: 'colldel' }, 'Delete');
     del.onclick = function () { if (confirm('Delete the collection "' + col.name + '"? The recipes stay.')) call({ type: 'coll_delete', id: col.id }).then(refresh); };
     acts.appendChild(del);
@@ -363,6 +405,9 @@ function renderCollections() {
     var sch = details(col.id + ':csched', 'Schedule' + (col.schedule ? ' (monthly, day ' + col.schedule.date + ' ' + col.schedule.time + ')' : ''));
     sch.appendChild(collSchedBox(col));
     li.appendChild(sch);
+    var ka = details(col.id + ':ckeep', 'Logins' + (col.keepAlive === false ? ' (keep-alive off)' : ' (keep-alive every ' + (col.keepAliveDays || 3) + ' days)'));
+    ka.appendChild(collKeepBox(col));
+    li.appendChild(ka);
     list.appendChild(li);
   });
 }

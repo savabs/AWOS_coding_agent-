@@ -1,8 +1,10 @@
 # Portal runs (AWOS Replay 0.6)
 
-Status: built (extension 0.6.0). Code: `extension/background.js` (driver, collections), `extension/lib/portal.js`
-(page classification, pop-up dismissal), `extension/content.js` (messages), `extension/popup.js` (checklist).
-Tests: `tests/extension/test_portal_run.py` (fixture portals in `tests/extension/pages/portal/`).
+Status: built (extension 0.6.1). Code: `extension/background.js` (driver, collections, logins), `extension/lib/portal.js`
+(page classification, pop-up dismissal, remember me, autofill sign-in), `extension/content.js` (messages),
+`extension/popup.js` (checklist), `extension/options.html` (login Options).
+Tests: `tests/extension/test_portal_run.py`, `tests/extension/test_fewer_handoffs.py` (0.6.1); fixture portals in
+`tests/extension/pages/portal/`.
 
 ## Why
 
@@ -121,9 +123,84 @@ Stop ends the run. A new tab that is not a file is left open and logged.
 The recorder marks a click that opened a tab (`opensTab: true`) and the file it showed or downloaded
 (`download: {name}`); recipes export these as `opens_tab` / `downloads` booleans without the file name.
 
+## 5. Fewer handoffs: logins (0.6.1)
+
+Most handoffs left in a monthly run are expired logins. 0.6.1 finds them early and puts them in one short sitting.
+
+**Login check (`probePortal`).** Opens the recipe's recorded start URL in a background tab, waits for it to load and go
+quiet, classifies it with `AWOSPortal.pageKind` and closes the tab. `login` / `otp` -> **Login needed**; nothing ->
+logged in (`ok`); `captcha` and `error` are recorded but are not "Login needed". It clicks nothing and types nothing
+(not even the pop-up dismissals the rules would allow). Not opened: a start URL matching the danger vocabulary, or a
+recipe that signs in by itself (it has a password step: `self_login`). The result goes to `portalStatus[recId]`
+(`chrome.storage.local`: status, why, landed URL without query, time, source). One check at a time (a shared lock),
+`keepAliveSpacingMs` (default 8 s) between portals.
+
+**Keep-alive.** Per collection, on by default (`keepAlive`, `keepAliveDays` = 3; popup: Collections -> Logins). An
+alarm `awos-keep:<id>` checks every portal of the collection every N days. Skipped, and retried in 30 min, while a
+replay, collection, recording or Tell-it run is in progress; a sweep stops before its next portal if one starts. A
+portal newly found logged out is notified once (one notification per sweep: "Supplier X logged you out; log in any
+time before the month-end run", button **Open the ones that need me**); it is notified again only after it was seen
+logged in in between. The checklist shows "Login needed (checked <time>)" until the portal is got for the period.
+**Check logins now** runs the same sweep by hand.
+
+**Pre-flight before a scheduled run.** `preflightHours` (default 24, 0 = off) before a monthly scheduled run, an alarm
+`awos-pre:<id>` checks the portals not yet got for that period and sends ONE notification naming those that need a
+login ("Log in to A and B any time before then"), with **Open the ones that need me**. Busy: retried in 30 min while
+the run is more than an hour away.
+
+**Pre-flight at the start of every collection run.** `coll_run` returns at once; the run first checks every portal
+in its queue (`preflightSpacingMs`, default 1 s apart). The logged-out ones move to the end of the queue, show "Login
+needed (waiting for you)", and ONE notification names them ("1 portal is ready and running now. Log in to A and AWOS
+picks it up as soon as you are in."). The ready portals run first, without interruption. When only logged-out
+portals are left, the run waits for a login, polling every `loginPollMs` (5 s; a `chrome.alarms` backup wakes the
+worker): a login tab the user opened from **Open the ones that need me** is asked for its page kind (a page on the
+portal's site that is not a login page counts as logged in; its load also triggers a look right away), otherwise the
+start page is checked in a background tab at most every `loginProbeMs` (60 s). The first portal whose login is seen
+runs next (`coll.pickedUp`). Nobody logging in within `collectionWaitMin` (10 min, the existing collection wait,
+counted from when the run starts waiting) leaves those portals as **Needs you** ("Login needed: still logged out
+after 10 min"); a re-run skips the ones got. A portal whose start page is fine but that logs out later still hands
+off as in section 1. A worker restart during the pre-flight redoes it; during the wait it resumes the wait.
+
+**Open the ones that need me** (`coll_open_logins`: the notification's button or a click on it, or the popup button):
+one tab per portal of the collection whose last check said Login needed and that is not got this period, the first
+in front, nothing else. On each, the two helpers below run once.
+
+**Remember me** (Option `rememberMe`, default on). On a login handoff (section 1) and on the tabs opened above, before
+the user logs in, `AWOSPortal.rememberMe` ticks ONE visible, unchecked checkbox whose whole label (case-insensitive,
+trailing punctuation dropped) is: remember me / keep me signed (logged) in / stay signed (logged) in, optionally "on
+this device"; remember this device / trust this device / don't ask (for a code) again (on this device); optionally
+"for N days". Anything else (newsletter, terms, "remember me and send me offers", cookie choices) is never touched; a
+ticked box is never unticked. Logged: `ticked "keep me signed in" on the login page ...`.
+
+**Chrome-autofilled logins** (experimental; Option `autofillSignin`, "Use Chrome's saved passwords to sign in", default
+on). On a login handoff, if the page has exactly one visible password field, a username field (email / text / tel)
+before it in the same form, and BOTH match `:autofill` / `:-webkit-autofill` and not `:placeholder-shown`,
+`AWOSPortal.autofillSignin` clicks that form's sign-in button (named sign in / log in / log on / continue / next /
+submit) once per step, logs it, and the run continues as after the user's Continue (back to the step's page; still a
+login page -> the normal handoff, no second click). Anything else -> the normal handoff, with the reason logged
+("Chrome has not autofilled the username").
+- AWOS never reads, logs, stores, types or sends the password, nor the username: the page script looks only at the
+  fields' type and pseudo-classes, and returns only whether it clicked and why. The tests assert the fixture's
+  password string appears nowhere in the run log, run state, storage or notifications.
+- **Chrome may not let this fire.** Chrome often shows a saved password only as a preview, or keeps the value back
+  from the page until a real user gesture (a click or key press in the page); a script's click is not one. Then the
+  fields are not `:autofill`, or the form submits without the password and the login page comes back; either way the
+  run hands off as before. Two-step logins (username page, then password page) and logins inside iframes are not
+  handled. Whether it fires on a given portal has to be found out on real sites; it is not proven.
+- Testing: Playwright cannot make Chrome autofill a saved password. The decision logic is tested with
+  `pages/portal/login_autofill.html`, which fills its own fields and marks them `data-awos-test-autofill`. The
+  extension honours that attribute only when the worker passes `testHook`, which it reads from
+  `chrome.storage.session.testAutofillHook` (set by the test through the worker; web pages and content scripts cannot
+  read or write session storage). In normal use it is never set.
+
+Settings (Options; `chrome.storage.local.settings`): `rememberMe`, `autofillSignin`, plus the tuning knobs
+`keepAliveSpacingMs`, `preflightSpacingMs`, `loginPollMs`, `loginProbeMs` (no UI). Collection fields: `keepAlive`,
+`keepAliveDays`, `preflightHours`, `preflightAtStart` (default true), `lastKeepAlive`, `lastPreflight`.
+
 ## Permissions
 
-None added. `downloads` (0.4) now also starts downloads (`chrome.downloads.download`) for files that opened in a new
+None added in 0.6 or 0.6.1. The keep-alive and pre-flight use `tabs` (background tabs on the recipe's own start
+page), `alarms`, and `notifications` (now with a button), all already requested. `downloads` (0.4) now also starts downloads (`chrome.downloads.download`) for files that opened in a new
 tab; its store justification already says "Replay starts that download and checks it finished".
 
 ## Known gaps
@@ -134,3 +211,9 @@ tab; its store justification already says "Replay starts that download and check
   than the recorded one hands off unnecessarily; an invisible bot check is not seen (it needs nothing from the user).
 - A portal left as "Needs you" restarts from its first step on the next collection run (the dedupe is per run).
 - Pop-ups inside cross-origin iframes are not seen (main frame only, as before).
+- Keep-alive only helps where visiting a page extends the session. Sites with a hard session lifetime (log in again
+  every 24 h whatever you do) still log the user out; the keep-alive then only reports it early. A background tab
+  briefly appears in the tab strip during each check.
+- Login detection is the same heuristic as the handoff: the username-only first page of a two-step login does not
+  look like a login page, so a waiting run may start such a portal too early (it then hands off as usual).
+- The autofill sign-in is unproven on real sites (section 5); "remember me" only helps where the portal honours it.
