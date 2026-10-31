@@ -1,5 +1,6 @@
 /* AWOS Replay popup: record/stop, recordings list (run with params, checks, params, schedule, share, delete),
- * live run panel with the approval / needs-user prompt and the verdict, and the import confirmation.
+ * live run panel with the approval / needs-user prompt and the verdict, the import confirmation, and (v0.6)
+ * collections: the monthly checklist (Got / Missing / Needs you / Failed per portal, run, skip, schedule).
  * The target tab is the active tab, or ?tab=<id> when the popup is opened as a
  * page (handy for testing and for pinning it in its own window).
  * Approve and Import are only ever sent from click handlers on those buttons.
@@ -268,8 +269,110 @@ function render() {
   var rs = state.recState, mine = rs && rs.tabId === targetTab;
   $('rec').hidden = !!rs; $('stop').hidden = !rs;
   $('recinfo').textContent = rs ? (mine ? 'Recording: ' : 'Recording another tab: ') + (rs.rec.steps.length - 1) + ' actions' : '';
-  renderImport(); renderRecordings(); renderRun();
+  renderImport(); renderRecordings(); renderRun(); renderCollections();
 }
+
+// ---- Collections: the monthly checklist (v0.6) -------------------------------------------------------------
+var lastCollSig = '', lastPickSig = '';
+function periodOf(t, offset) {
+  var d = new Date(t); d.setDate(1); d.setMonth(d.getMonth() + (offset || 0));
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+function collStatusText(r) {
+  if (!r) return 'Not run yet';
+  if (r.status === 'got') return r.file ? 'Got (' + r.file + ')' : 'Got';
+  if (r.status === 'missing') return 'Missing' + (r.reason ? ': ' + r.reason : '');
+  if (r.status === 'needs_you') return 'Needs you' + (r.waiting ? ' (waiting)' : '') + (r.reason ? ': ' + r.reason : '');
+  return 'Failed' + (r.reason ? ' (' + r.reason + ')' : '');
+}
+function collSchedBox(col) {
+  var box = el('div', { class: 'sched' });
+  var on = el('select', { class: 'cskind' });
+  [['', 'No schedule'], ['monthly', 'Monthly on day']].forEach(function (o) { on.appendChild(el('option', { value: o[0] }, o[1])); });
+  var date = el('input', { class: 'csdate', type: 'number', min: '1', max: '28', value: String((col.schedule && col.schedule.date) || 1) });
+  var time = el('input', { class: 'cstime', type: 'time', value: (col.schedule && col.schedule.time) || '09:00' });
+  on.value = col.schedule ? 'monthly' : '';
+  function vis() { date.hidden = time.hidden = !on.value; }
+  on.onchange = vis; vis();
+  var save = el('button', { class: 'cssave small' }, 'Save schedule');
+  save.onclick = function () {
+    var sc = on.value ? { kind: 'monthly', date: parseInt(date.value, 10), time: time.value } : null;
+    call({ type: 'coll_save', id: col.id, schedule: sc }).then(function (res) {
+      notice(res.next ? 'Next collection run: ' + new Date(res.next).toLocaleString() : 'Schedule off.'); lastCollSig = ''; refresh();
+    });
+  };
+  [on, date, time, save].forEach(function (x) { box.appendChild(x); });
+  box.appendChild(el('div', { class: 'muted' }, 'A scheduled collection opens one background tab per portal; a login, code or check notifies you.'));
+  return box;
+}
+function renderCollections() {
+  var cols = Object.values(state.collections || {}).sort(function (a, b) { return a.createdAt - b.createdAt; });
+  var recs = state.recordings || {}, results = state.collResults || {}, c = state.coll, run = state.run;
+  $('collempty').hidden = cols.length > 0;
+  // the "New collection" picker: one checkbox per recording
+  var pickSig = JSON.stringify(Object.keys(recs).map(function (k) { return [k, recs[k].name]; }));
+  if (pickSig !== lastPickSig) {
+    lastPickSig = pickSig;
+    var pick = $('collpick'), was = {};
+    pick.querySelectorAll('input').forEach(function (i) { was[i.value] = i.checked; });
+    pick.textContent = '';
+    Object.values(recs).sort(function (a, b) { return a.createdAt - b.createdAt; }).forEach(function (r) {
+      var l = el('label'), i = el('input', { type: 'checkbox', value: r.id, class: 'collrec' });
+      i.checked = !!was[r.id];
+      l.appendChild(i); l.appendChild(document.createTextNode(' ' + r.name + (r.expectDownload && r.expectDownload.nameRegex ? '' : ' (no expected download yet)')));
+      pick.appendChild(l);
+    });
+    if (!Object.keys(recs).length) pick.textContent = 'Record each portal first (one recipe per portal).';
+  }
+  $('collrun').textContent = c ? (c.status === 'running' ? 'Running "' + c.name + '" for ' + c.period + ' (' + Math.min(c.idx + 1, c.queue.length) + ' of ' + c.queue.length + ')'
+                                                        : 'Last run of "' + c.name + '" (' + c.period + '): ' + (c.summary || '')) : '';
+  var list = $('collections'), ae = document.activeElement;
+  if (list.contains(ae) && /^(INPUT|SELECT)$/.test(ae.tagName)) return;
+  var busy = (run && /^(running|awaiting_approval|needs_user)$/.test(run.status)) || (c && c.status === 'running') || !!state.recState;
+  var waiting = run && run.collection && /^(needs_user|awaiting_approval)$/.test(run.status) ? run : null;
+  var sig = JSON.stringify([cols, results, c, !!busy, waiting && waiting.id, Object.keys(recs)]);
+  if (sig === lastCollSig) return;
+  lastCollSig = sig;
+  list.textContent = '';
+  cols.forEach(function (col) {
+    var period = c && c.collId === col.id ? c.period : (col.last ? col.last.period : periodOf(Date.now(), col.monthOffset || 0));
+    var res = (results[col.id] || {})[period] || {};
+    var li = el('li', { class: 'coll', 'data-coll': col.id });
+    var head = el('div', { class: 'row' }); head.appendChild(el('strong', null, col.name)); head.appendChild(el('span', { class: 'badge' }, period));
+    li.appendChild(head);
+    col.recIds.forEach(function (id) {
+      var r = res[id], row = el('div', { class: 'portal', 'data-rec': id });
+      row.appendChild(el('span', null, recs[id] ? recs[id].name : (r && r.recName) || '(deleted recipe)'));
+      row.appendChild(el('span', { class: 'st ' + (r ? r.status : 'notrun') }, collStatusText(r)));
+      li.appendChild(row);
+    });
+    if (col.last && !(c && c.collId === col.id && c.status === 'running')) li.appendChild(el('div', { class: 'meta' }, 'Last: ' + col.last.summary));
+    var acts = el('div', { class: 'acts' });
+    var go = el('button', { class: 'collgo primary' }, 'Run collection'); go.disabled = !!busy;
+    go.onclick = function () { call({ type: 'coll_run', id: col.id }).then(function () { lastCollSig = ''; refresh(); }); };
+    acts.appendChild(go);
+    if (waiting && waiting.collection.id === col.id) {
+      var skip = el('button', { class: 'collskip' }, 'Skip this portal (leave it for me)');
+      skip.onclick = function () { call({ type: 'coll_skip', runId: waiting.id }).then(function () { lastCollSig = ''; refresh(); }); };
+      acts.appendChild(skip);
+    }
+    var del = el('button', { class: 'colldel' }, 'Delete');
+    del.onclick = function () { if (confirm('Delete the collection "' + col.name + '"? The recipes stay.')) call({ type: 'coll_delete', id: col.id }).then(refresh); };
+    acts.appendChild(del);
+    li.appendChild(acts);
+    var sch = details(col.id + ':csched', 'Schedule' + (col.schedule ? ' (monthly, day ' + col.schedule.date + ' ' + col.schedule.time + ')' : ''));
+    sch.appendChild(collSchedBox(col));
+    li.appendChild(sch);
+    list.appendChild(li);
+  });
+}
+$('collcreate').onclick = function () {
+  var ids = []; document.querySelectorAll('#collpick .collrec').forEach(function (i) { if (i.checked) ids.push(i.value); });
+  call({ type: 'coll_save', name: $('collname').value.trim(), recIds: ids, monthOffset: $('collprev').checked ? -1 : 0 }).then(function (col) {
+    notice('Created "' + col.name + '" with ' + col.recIds.length + ' portal(s).'); $('collname').value = ''; $('collnew').open = false;
+    lastCollSig = ''; lastPickSig = ''; refresh();
+  });
+};
 
 // ---- Tell it ---------------------------------------------------------------------------------------------
 var EXAMPLES = [

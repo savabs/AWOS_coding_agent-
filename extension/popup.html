@@ -92,6 +92,18 @@
     <p id="empty" class="muted">None yet. Press Record, do the task once, press Stop.</p>
     <ul id="recordings"></ul>
   </section>
+  <section id="collsec">
+    <h3>Collections: monthly checklist</h3>
+    <p id="collempty" class="muted">Group recipes into a checklist, e.g. "Month-end supplier docs": one portal per recipe, each with its expected download (use {{month}} / {{year}} in the name pattern).</p>
+    <p id="collrun" class="meta"></p>
+    <ul id="collections"></ul>
+    <details id="collnew"><summary>New collection</summary>
+      <input id="collname" placeholder="Name (e.g. Month-end supplier docs)">
+      <div id="collpick" class="meta"></div>
+      <label class="meta"><input type="checkbox" id="collprev"> Collect last month's documents (the period is the previous month)</label>
+      <button id="collcreate" class="primary">Create collection</button>
+    </details>
+  </section>
   <section>
     <h3>Import a recipe</h3>
     <div class="acts">

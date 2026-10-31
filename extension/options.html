@@ -77,6 +77,8 @@ cannot be re-found by itself, and to double-check the final page.</p>
 
 <label for="findTimeoutMs">Wait for each control (ms)</label>
 <input type="number" id="findTimeoutMs" min="500" max="30000" step="500">
+<label for="collectionWaitMin">Collections: wait for you on a login / code / check (minutes) before moving to the next portal</label>
+<input type="number" id="collectionWaitMin" min="1" max="240" step="1">
 
 <p><button id="save">Save</button><span id="status"></span></p>
 <script src="lib/model.js"></script>

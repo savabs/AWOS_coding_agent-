@@ -71,7 +71,7 @@ Every step has `action` (one of `goto`, `click`, `fill`, `select`, `press`). Non
 | action | fields |
 |---|---|
 | `goto` | `url` (http/https, no query, no fragment) |
-| `click` | `loc`, optional `url`, optional `navigates` (bool) |
+| `click` | `loc`, optional `url`, optional `navigates` (bool), optional `opens_tab` (bool: the click opens a new tab, e.g. a PDF viewer; v0.6), optional `downloads` (bool: the click downloads a file; the file name is never shared; v0.6) |
 | `fill` | `loc`, optional `url`, and **exactly one of** `value: "{{param}}"` or `ask: true`; optional `sensitive` (string reason, e.g. `"password"`, `"one-time-code"`) only with `ask` |
 | `select` | `loc`, optional `url`, `value` (string, may be `"{{param}}"`), optional `optionText` (string) |
 | `press` | `loc` (the field), optional `url`, `key` (only `"Enter"`), optional `navigates` (bool): Enter in a form / search field, replayed as Enter on that field (same approval gate as clicking the form's submit button) |
@@ -96,7 +96,7 @@ Step URLs (`goto.url`, `step.url`) and `loc.href` never carry query strings or f
 | `goal` | string | 0-300 chars; what must be true at the end (the local verifier reads it) |
 | `expect_text` | array of string | 0-10 items, 1-200 chars each; all must appear on the final page |
 | `expect_url` | string or null | origin + path, `*` wildcard allowed, no `?` or `#` |
-| `expect_download` | object or null | `{"name_regex": "<JS regex source, 1-200 chars>"}`: a download whose file name matches finished during the run |
+| `expect_download` | object or null | `{"name_regex": "<JS regex source, 1-200 chars>"}`: a download whose file name matches finished during the run. May use the built-ins `{{year}}`, `{{month}}` (two digits) and `{{month_name}}` (v0.6, see `portal_run.md`); they need no `params` entry |
 
 ## 2. Limits
 

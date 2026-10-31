@@ -51,3 +51,12 @@ button.small { padding: 2px 8px; font-size: 12px; }
 #tellfeed li.approve, #tellfeed li.wait { color: #a40e26; }
 #tellpending { border: 2px solid #cf222e; border-radius: 6px; padding: 6px 8px; margin: 6px 0; }
 #tellconfirm { border: 2px solid #1a7f37; border-radius: 6px; padding: 6px 8px; margin: 6px 0; }
+#collections li.coll { border: 1px solid #d0d7de; border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; }
+#collections .portal { display: flex; justify-content: space-between; gap: 6px; font-size: 12px; padding: 2px 0; border-top: 1px solid #eaeef2; }
+#collections .portal .st { text-align: right; }
+#collections .st.got { color: #116329; }
+#collections .st.missing, #collections .st.failed { color: #a40e26; }
+#collections .st.needs_you { color: #953800; font-weight: 600; }
+#collections .acts { margin-top: 4px; display: flex; gap: 6px; flex-wrap: wrap; }
+#collsec input:not([type=checkbox]) { width: 100%; box-sizing: border-box; font: inherit; margin-top: 4px; }
+#collpick label { display: block; }

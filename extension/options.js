@@ -12,7 +12,7 @@ function load() {
   Promise.all([chrome.runtime.sendMessage({ type: 'get_state' }), chrome.runtime.sendMessage({ type: 'tell_state' })]).then(function (both) {
     var st = both[0], s = Object.assign({}, both[1].settings, st.settings);
     $('endpoint').value = s.endpoint; $('model').value = s.model;
-    $('enabled').checked = !!s.enabled; $('findTimeoutMs').value = s.findTimeoutMs;
+    $('enabled').checked = !!s.enabled; $('findTimeoutMs').value = s.findTimeoutMs; $('collectionWaitMin').value = s.collectionWaitMin || 10;
     $(s.brain === 'claude' ? 'brain-claude' : 'brain-local').checked = true;
     $('cloudConsent').checked = !!s.cloudConsent;
     $(s.agentBrain === 'claude' ? 'agent-claude' : 'agent-local').checked = true;
@@ -53,6 +53,7 @@ $('save').onclick = async function () {
   }
   var settings = { endpoint: ep, model: $('model').value.trim() || 'local', enabled: $('enabled').checked,
                    findTimeoutMs: Math.max(500, parseInt($('findTimeoutMs').value, 10) || 4000),
+                   collectionWaitMin: Math.min(240, Math.max(1, parseInt($('collectionWaitMin').value, 10) || 10)),
                    brain: b, cloudConsent: (b === 'claude' || ab === 'claude') && $('cloudConsent').checked,
                    agentBrain: ab, agentEndpoint: aep, agentModel: $('agentModel').value.trim() || 'qwen3.5-4b',
                    searchPage: /^https:\/\//.test($('searchPage').value.trim()) ? $('searchPage').value.trim() : 'https://duckduckgo.com/?q={goal}',

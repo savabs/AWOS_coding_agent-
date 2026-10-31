@@ -130,6 +130,8 @@
       if (s.url != null) { var su = cleanUrlField(s.url, w + '.url', errors); if (su) out.url = su; }
       if (s.action === 'click') {
         if (s.navigates != null) out.navigates = !!s.navigates;
+        if (s.opens_tab != null) out.opens_tab = !!s.opens_tab;      // v0.6: the click opens a new tab (a file viewer)
+        if (s.downloads != null) out.downloads = !!s.downloads;      // v0.6: the click downloads a file (no file name is shared)
       } else if (s.action === 'press') {                         // Enter in a field (submits its form / search box)
         if (s.key != null && s.key !== 'Enter') errors.push(w + '.key must be "Enter"');
         out.key = 'Enter';
@@ -225,7 +227,7 @@
       if (s.action === 'goto') return { action: 'goto', url: stripUrl(s.url) };
       var out = { action: s.action, loc: scrubLoc(s.loc || {}, s.action === 'fill') };
       var u = stripUrl(s.url); if (u) out.url = u;
-      if (s.action === 'click') { if (s.navigates) out.navigates = true; }
+      if (s.action === 'click') { if (s.navigates) out.navigates = true; if (s.opensTab) out.opens_tab = true; if (s.download) out.downloads = true; }
       else if (s.action === 'press') { out.key = 'Enter'; if (s.navigates) out.navigates = true; }
       else if (s.action === 'fill') {
         var secret = s.sensitive || S.isPlaceholder(s.value);
@@ -272,6 +274,11 @@
       if (s.action === 'click' || s.action === 'press') {     // never trust a shipped danger flag: recompute from the description (the live gate runs too)
         var l = s.loc || {};
         out.danger = S.dangerMatch([l.name, l.text, l.label, l.title, l.id, l.nameAttr, l.formId].join(' | '));
+      }
+      if (s.action === 'click') {
+        delete out.opens_tab; delete out.downloads;
+        if (s.opens_tab) out.opensTab = true;
+        if (s.downloads) out.download = { name: '' };
       }
       if (s.action === 'fill' || s.action === 'select') {
         var m = TOKEN_RE.exec(str(s.value));

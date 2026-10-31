@@ -78,6 +78,29 @@ Type what you want in the popup's **Tell it** box and press **Start**; the agent
 - **Export training data** saves your Tell-it runs to a file (it contains the page text the agent saw; nothing is
   uploaded). Details: `docs/specs/tell_it.md`.
 
+## 4c. Monthly portal downloads (v0.6): statements, invoices, payout CSVs
+For the documents you fetch from several supplier / vendor / partner / payout portals every month.
+1. **Record each portal once** (log in first, then press Record): open the statements or payouts page, click the
+   download. In **Goal + checks**, set "Expect a download named like" with the month in it, for example
+   `statement-{{year}}-{{month}}\.pdf$` or `payouts_{{month_name}}_{{year}}\.csv$`.
+2. **Make a collection**: in the popup's **Collections** section, **New collection**, name it ("Month-end supplier
+   docs"), tick the portals, and tick "last month" if you collect the previous month's documents.
+3. **Run collection**. Each portal runs in its own background tab, one after another. The checklist shows per portal
+   **Got** (file name), **Missing** (the portal ran but this month's file was not there), **Needs you** or **Failed**
+   (with the reason), and a notification sums it up: "4 of 6 got, 1 missing, 1 needs you". Run it again later in the
+   month: portals already **Got** are skipped. Optionally set a monthly schedule (day + time).
+- **Login expired, a code, a bot check?** The run pauses and notifies you: log in / enter the code / solve the check in
+  that tab, then click **Continue**. It goes back to the page it was on and carries on from the next step; files it
+  already downloaded are not downloaded again. AWOS never solves a bot check and never types your password.
+  In a collection, **Skip this portal** (or not answering for 10 minutes; change it in Options) leaves that tab open
+  for you and moves on.
+- **"What's new" pop-ups and cookie banners** are closed with close / not now / skip / got it, cookie banners only with
+  reject / necessary only. AWOS never clicks accept / agree; a pop-up that only offers those pauses for you. Each
+  dismissal is in the run log.
+- **PDFs that open in a new tab** are downloaded with your browser (your login applies), the tab is closed, and the
+  file counts for the download check. A file from another site asks you first.
+- Details: `docs/specs/portal_run.md`.
+
 ## 5. Send the results back
 Click **Export run log** in the popup and send the JSON file.
 - It contains, per run: the verdict, how each step was found, and every model call (the candidate button names it saw and
@@ -86,7 +109,8 @@ Click **Export run log** in the popup and send the JSON file.
 - Button and link names are included (they can contain things like an account name), so skim it before sending.
 
 ## Known limits (MVP)
-- Main frame only: no iframes, shadow DOM, drag and drop, file uploads or multi-tab chores.
-- "Verified" checks the final URL and the texts you set. It does not yet check that a downloaded file arrived.
+- Main frame only: no iframes, drag and drop, file uploads or multi-tab chores (a file that opens in a new tab is the
+  one exception: it is downloaded).
+- "Verified" checks the final URL, the texts you set and, if you set one, that a matching download arrived.
 - The model is a 2B trained on synthetic apps. Real sites are new to it, and finding where it struggles is the point of
   this round.

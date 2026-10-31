@@ -22,6 +22,10 @@
  *          after a user click in the extension UI) -- a second, local gate.
  *          strict:true (scheduled run / imported recipe) also gates submit / confirm / order / ...
  *   check  {texts} -> which expected texts are present on the page
+ *   page_kind -> AWOSPortal.pageKind(): is this a login / one-time-code / bot-check page (the worker decides whether
+ *          the recording expected it; nothing on the page is touched)
+ *   unblock -> AWOSPortal.unblock(): dismiss a pop-up / consent banner in the way (close / not now / reject only)
+ *   locate also reports `covered` when the found target sits under an overlay or dialog
  *   agent_observe / agent_act {act, approved, expectName} / agent_secrets -> Tell it (lib/agent.js contract):
  *          act on control n of the last observation, with the same danger / sensitive-field gates
  * Messages are plain JSON; element handles never leave the page.
@@ -30,7 +34,7 @@
   'use strict';
   if (window.__awosReplayLoaded) return;
   window.__awosReplayLoaded = true;
-  var S = window.AWOSSafety, L = window.AWOSLocator;
+  var S = window.AWOSSafety, L = window.AWOSLocator, P = window.AWOSPortal;
   var recording = false, lastFillKey = null, keySeq = 0, sentValue = {};
   var lastEnter = null;         // {form, t}: the Enter that submitted a form (its implicit default-button click is not a step)
 
@@ -172,6 +176,10 @@
     if (res.index >= 0 && !(res.index in res.dangers)) {
       var bel = L.element(res.index), bd = dangerOf(step.action, bel, bel ? L.accName(bel) : '');
       if (bd) res.dangers[res.index] = bd;
+    }
+    if (res.index >= 0 && P) {                       // found, but drawn under a pop-up (a "what's new" modal after login)
+      var cov = P.coveredBy(L.element(res.index));
+      if (cov) res.covered = { text: S.norm(cov.innerText || cov.textContent).slice(0, 120) };
     }
     return res;
   }
@@ -321,7 +329,9 @@
 
   chrome.runtime.onMessage.addListener(function (msg, _sender, reply) {
     switch (msg && msg.type) {
-      case 'ping': reply({ ok: true, url: location.href, recording: recording }); return;
+      case 'ping': reply({ ok: true, url: location.href, recording: recording, contentType: document.contentType || '' }); return;
+      case 'page_kind': reply(P.pageKind()); return;
+      case 'unblock': reply(P.unblock()); return;
       case 'rec_state': recording = !!msg.on; lastFillKey = null; reply({ ok: true }); return;
       case 'locate': locate(msg.step, msg.timeoutMs).then(reply); return true;
       case 'act': act(msg.step, msg.index, msg.approved, msg.strict, reply); return;
