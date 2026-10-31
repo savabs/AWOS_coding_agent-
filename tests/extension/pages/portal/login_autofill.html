@@ -1,0 +1,23 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Supplier portal - Sign in</title></head><body>
+<h1>Sign in</h1>
+<p>Your session has expired. Please sign in again.</p>
+<!-- v0.6.1 test fixture: Playwright cannot make Chrome autofill a saved password, so this page plays Chrome: it fills
+     the fields itself and marks them data-awos-test-autofill, which the extension only honours when the worker set
+     its test hook (chrome.storage.session, out of a page's reach). ?mark=pw marks the password only. -->
+<form id="login" onsubmit="event.preventDefault(); if (!document.getElementById('pw').value) return; window.__signin = (window.__signin || 0) + 1;
+      document.cookie='portal_session=ok; path=/'; location.href='/portal/dashboard.html';">
+<label>Email <input id="email" name="email" type="email" autocomplete="username"></label>
+<label>Password <input id="pw" name="password" type="password" autocomplete="current-password"></label>
+<label><input id="news" type="checkbox"> Email me product news</label>
+<label><input id="keep" type="checkbox"> Remember me on this device</label>
+<button id="forgot" type="button" onclick="window.__forgot = 1">Forgot password?</button>
+<button id="signin" type="submit">Sign in</button>
+</form>
+<script>
+  var mark = new URLSearchParams(location.search).get('mark') || 'both';
+  document.getElementById('email').value = 'ap@supplier.example';
+  document.getElementById('pw').value = 'SECRET-PW-4417';
+  if (mark === 'both') document.getElementById('email').setAttribute('data-awos-test-autofill', '');
+  document.getElementById('pw').setAttribute('data-awos-test-autofill', '');
+</script>
+</body></html>

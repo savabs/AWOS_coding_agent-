@@ -2,10 +2,10 @@
   "_comment": "Chrome Web Store 'Privacy practices' justifications. build_extension_zip.sh fails if extension/manifest.json asks for a permission, host or content-script match that has no entry here, so a new permission always gets a written reason before it can ship.",
   "permissions": {
     "storage": "Saves the user's recorded chores (the steps they clicked and typed), the last 20 replay results and their settings in chrome.storage on this computer. Nothing is synced or uploaded.",
-    "tabs": "Replay drives the tab the user chose: it reads that tab's URL and load status to know when a page has finished loading, navigates it to the recorded start page, and messages the content script in it.",
+    "tabs": "Replay drives the tab the user chose: it reads that tab's URL and load status to know when a page has finished loading, navigates it to the recorded start page, and messages the content script in it. For a monthly collection the user created, it also opens each portal's recorded start page in a background tab every few days to see whether the user is still logged in, then closes it (nothing is clicked or typed there).",
     "alarms": "Runs a saved chore on the schedule the user set (for example every Monday at 9:00). No alarm exists unless the user creates a schedule.",
     "downloads": "Some chores end by downloading a file the user asked for (an invoice or statement PDF). Replay starts that download and checks it finished, so the result can be verified.",
-    "notifications": "Tells the user when a scheduled replay finished, failed, or is waiting for their approval before a risky step (for example a payment or delete button).",
+    "notifications": "Tells the user when a scheduled replay finished, failed, or is waiting for their approval before a risky step (for example a payment or delete button), or that a portal in their monthly collection logged them out and needs them to log in before the run.",
     "scripting": "Injects the recorder/replayer script into a tab the user explicitly starts a recording or replay in, when the tab was open before the extension was installed.",
     "activeTab": "Lets the user start recording on the current tab from the toolbar button without granting access to other tabs.",
     "contextMenus": "Adds 'Record a chore here' / 'Replay' to the right-click menu.",

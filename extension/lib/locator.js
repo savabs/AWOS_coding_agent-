@@ -326,9 +326,16 @@
     }).filter(Boolean);
     var dlg = q('dialog[open], [role=dialog], [role=alertdialog]')[0];
     var lines = String(document.body ? document.body.innerText : '').split('\n').map(norm).filter(Boolean);
-    var controls = allControls().map(function (el) {
+    var formEls = deepAll('form'), els = allControls();
+    lastObserved = els;
+    var controls = els.map(function (el) {
       var role = roleOf(el), d = { role: role === 'radio' ? 'radiogroup' : role, name: accName(el), context: contextOf(el),
                                    inDialog: !!closestDeep(el, 'dialog, [role=dialog], [role=alertdialog]') };
+      // Tell-it fields (not used by the verifier outline): enclosing form index, autocomplete, sensitive-field reason
+      var fm = el.form || closestDeep(el, 'form'), fi = fm ? formEls.indexOf(fm) : -1;
+      if (fi >= 0) d.form = fi;
+      var ac = low(el.getAttribute('autocomplete')); if (ac) d.ac = ac;
+      if (/^(input|textarea)$/i.test(el.tagName) && root.AWOSSafety) { var sr = root.AWOSSafety.sensitiveField(el); if (sr) d.sensitive = sr; }
       if (el.tagName === 'SELECT') {
         d.role = 'combobox';
         d.options = Array.prototype.slice.call(el.options).map(function (o) { return norm(o.text); }).slice(0, 12);
@@ -347,12 +354,17 @@
     var nav = performance.getEntriesByType && performance.getEntriesByType('navigation')[0];
     return { url: location.href, status: (nav && nav.responseStatus) || 0, title: norm(document.title), alerts: alerts, statuses: statuses, regions: regions,
              dialog: dlg ? (contextOf(dlg.firstElementChild || dlg) || norm(dlg.getAttribute('aria-label')) || textOf(dlg, 120)) : '',
-             text: lines.join('\n'), controls: controls };
+             text: lines.join('\n'), controls: controls,
+             headings: q('h1, h2, h3, h4, h5, h6').map(function (e) { return textOf(e, 200); }).filter(Boolean),
+             forms: formEls.map(function (f) { return { label: norm(f.getAttribute('aria-label') || '') }; }) };
   }
+  var lastObserved = [];
+  /** the element behind control number n (1-based) of the last observe(). */
+  function observed(n) { return lastObserved[n - 1] || null; }
 
   root.AWOSLocator = {
     ACCEPT: ACCEPT, MARGIN: MARGIN, FLOOR: FLOOR, WEIGHTS: WEIGHTS, KIND_SELECTOR: KIND_SELECTOR,
-    describe: describe, score: score, find: find, element: element, brief: brief, observe: observe,
+    describe: describe, score: score, find: find, element: element, brief: brief, observe: observe, observed: observed,
     accName: accName, roleOf: roleOf, strSim: strSim, kindOf: kindOf,
     deepAll: deepAll, closestDeep: closestDeep, deepText: deepText, sameControl: sameControl,
   };

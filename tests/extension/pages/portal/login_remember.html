@@ -1,0 +1,12 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Supplier portal - Sign in</title></head><body>
+<h1>Sign in</h1>
+<p>Your session has expired. Please sign in again.</p>
+<form id="login" onsubmit="event.preventDefault(); document.cookie='portal_session=ok; path=/'; location.href='/portal/dashboard.html';">
+<label>Email <input id="email" name="email" type="email"></label>
+<label>Password <input id="pw" name="password" type="password"></label>
+<label><input id="news" type="checkbox"> Email me product news and offers</label>
+<label><input id="terms" type="checkbox"> I accept the updated terms</label>
+<label><input id="keep" type="checkbox" name="remember"> Keep me signed in</label>
+<button id="signin" type="submit">Sign in</button>
+</form>
+</body></html>
