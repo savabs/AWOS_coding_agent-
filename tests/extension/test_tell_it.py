@@ -471,6 +471,7 @@ def test_popup_live_view_approve_and_save(x):
     tab = x.tab_id(page)
     popup = x.popup(tab)
     assert popup.get_attribute("#tellgoal", "placeholder") == "Tell it what to do…"
+    popup.wait_for_function("document.getElementById('tellbrain').textContent.length > 0")   # the first refresh has landed
     assert "never leaves" in popup.inner_text("#tellbrain")
     popup.fill("#tellgoal", "Fill the application with my first name and send it")
     popup.click("#tellgo")

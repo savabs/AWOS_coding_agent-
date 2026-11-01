@@ -121,7 +121,8 @@ def test_preflight_lists_logged_out_portals_once_runs_ready_first_and_picks_up_a
 
     opened = x.call("coll_open_logins", id=col["id"])
     assert opened["recIds"] == [pay["id"]], opened                              # just the one that needs the user
-    login = _wait(lambda: next((p for p in x.ctx.pages if p.url.endswith("/portal/login.html")), None), what="the login tab")
+    # x.state() is a Playwright call: it lets the sync API process events, so ctx.pages sees the new tab and its URL
+    login = _wait(lambda: (x.state(), next((p for p in x.ctx.pages if p.url.endswith("/portal/login.html")), None))[1], what="the login tab")
     login.wait_for_selector("#pw")
     assert login.input_value("#pw") == ""                                       # AWOS never types a password
     login.fill("#email", "ap@payouts.example")

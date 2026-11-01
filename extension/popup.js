@@ -1,6 +1,8 @@
 /* AWOS Replay popup: record/stop, recordings list (run with params, checks, params, schedule, share, delete),
  * live run panel with the approval / needs-user prompt and the verdict, the import confirmation, and (v0.6)
  * collections: the monthly checklist (Got / Missing / Needs you / Failed per portal, run, skip, schedule).
+ * v0.7: per recipe the period templating ("September 2026 -> {{month_name}} {{year}}", undo per field, which month a
+ * run uses), what changed (rec.history), and after a VERIFIED run with model-decided steps the update offer.
  * The target tab is the active tab, or ?tab=<id> when the popup is opened as a
  * page (handy for testing and for pinning it in its own window).
  * Approve and Import are only ever sent from click handlers on those buttons.
@@ -81,6 +83,55 @@ function fieldRow(r, s, k) {
   };
   row.appendChild(make);
   return row;
+}
+
+// ---- v0.7: period templating per recipe ------------------------------------------------------------------
+var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+function periodLabel(p) { var m = /^(\d{4})-(\d{2})$/.exec(p || ''); return m ? MONTHS[+m[2] - 1] + ' ' + m[1] : (p || '?'); }
+function tplField(path) {
+  var m = /^steps\.(\d+)\.(.+)$/.exec(path);
+  var names = { 'loc.name': 'target', 'loc.text': 'target text', 'loc.href': 'link', 'loc.label': 'label', 'loc.title': 'title', 'loc.id': 'id',
+                'loc.placeholder': 'placeholder', 'loc.neighbor': 'nearby text', 'loc.block': 'row text', 'loc.context': 'section', url: 'page',
+                value: 'typed value', optionText: 'option', 'download.name': 'download name' };
+  if (m) return 'step ' + (+m[1] + 1) + ' ' + (names[m[2]] || m[2]);
+  if (/^expect\.texts\./.test(path)) return 'expected text';
+  return { goal: 'goal', 'expect.urlPattern': 'final page', 'expectDownload.nameRegex': 'download pattern' }[path] || path;
+}
+function periodBox(r) {
+  var tpl = r.tpl || {}, keys = Object.keys(tpl), on = keys.filter(function (k) { return tpl[k].on !== false; }).length;
+  var d = details(r.id + ':period', 'Period: recorded for ' + periodLabel(r.period) + (keys.length ? ', ' + on + ' of ' + keys.length + ' fields follow the month' : ', nothing to template'));
+  d.classList.add('periodbox');
+  var row = el('div', { class: 'meta' }, 'Each run uses ');
+  var mode = el('select', { class: 'pmode' });
+  [['previous', 'the previous month'], ['this', 'this month']].forEach(function (o) { mode.appendChild(el('option', { value: o[0] }, o[1])); });
+  mode.value = r.periodMode === 'this' ? 'this' : 'previous';
+  mode.onchange = function () { call({ type: 'set_period', id: r.id, mode: mode.value }).then(function () { lastSig = ''; refresh(); }); };
+  row.appendChild(mode);
+  row.appendChild(document.createTextNode(' (a collection uses its own month).'));
+  d.appendChild(row);
+  if (keys.length) {                         // run once for a chosen month (a missed month, a re-run)
+    var r2 = el('div', { class: 'meta' }), mon = el('input', { class: 'prun', type: 'month', value: periodOf(Date.now(), r.periodMode === 'this' ? 0 : -1) });
+    var go = el('button', { class: 'prungo small' }, 'Run for this month');
+    go.disabled = !!(state.run && /^(running|awaiting_approval|needs_user)$/.test(state.run.status)) || !!state.recState;
+    go.onclick = function () { call({ type: 'run', recId: r.id, tabId: targetTab, period: mon.value }).then(function () { lastSig = ''; refresh(); }); };
+    [mon, go].forEach(function (x) { r2.appendChild(x); });
+    d.appendChild(r2);
+  }
+  keys.forEach(function (k) {
+    var e = tpl[k], tr = el('div', { class: 'tplrow' + (e.on === false ? ' off' : ''), 'data-path': k });
+    tr.appendChild(el('span', { class: 'tplfield' }, tplField(k) + ':'));
+    tr.appendChild(el('span', { class: 'tplmap' }, '"' + e.example + '" \u2192 "' + e.template + '"'));
+    var b = el('button', { class: 'tplundo small' }, e.on === false ? 'Redo' : 'Undo');
+    b.title = e.on === false ? 'Follow the month again' : 'Keep this field exactly as recorded';
+    b.onclick = function () { call({ type: 'set_template', id: r.id, path: k, on: e.on === false }).then(function () { lastSig = ''; refresh(); }); };
+    tr.appendChild(b);
+    d.appendChild(tr);
+  });
+  (r.history || []).slice(-5).reverse().forEach(function (h) {
+    d.appendChild(el('div', { class: 'meta histrow' }, new Date(h.at).toLocaleDateString() + ' (' + periodLabel(h.period) + ') step ' + (h.step + 1) + ': '
+      + (h.accepted ? h.from + ' \u2192 ' + h.to : 'offered a new step, kept ' + h.from)));
+  });
+  return d;
 }
 
 function scheduleBox(r) {
@@ -172,7 +223,7 @@ function renderRecordings() {
     li.appendChild(row);
 
     var chk = details(r.id + ':checks', 'Goal + checks');
-    var goal = el('input', { class: 'goal', placeholder: 'Goal: what must be true at the end (e.g. marketing e-mails are off)', value: r.goal || '' });
+    var goal = el('input', { class: 'goal', placeholder: r.goalProposed ? 'Goal (proposed): ' + r.goalProposed : 'Goal: what must be true at the end (e.g. marketing e-mails are off)', value: r.goal || '' });
     var texts = el('input', { class: 'texts', placeholder: 'Expect text on final page (comma separated)', value: (r.expect.texts || []).join(', ') });
     var url = el('input', { class: 'url', placeholder: 'Final URL (origin+path, * allowed; blank = no check)', value: r.expect.urlPattern || '' });
     var dl = el('input', { class: 'dl', placeholder: 'Expect a download named like (regex, e.g. report.*\\.csv)', value: (r.expectDownload && r.expectDownload.nameRegex) || '' });
@@ -194,6 +245,7 @@ function renderRecordings() {
       typed.forEach(function (p) { fields.appendChild(fieldRow(r, p[0], p[1])); });
       li.appendChild(fields);
     }
+    li.appendChild(periodBox(r));
     var sch = details(r.id + ':sched', 'Schedule' + (r.schedule ? ' (on)' : ''));
     sch.appendChild(scheduleBox(r));
     li.appendChild(sch);
@@ -226,6 +278,13 @@ function renderRun() {
     }
   } else { $('needparams').textContent = ''; lastNeedSig = ''; }
   $('reason').textContent = run.result && run.result.reason ? (run.result.code ? run.result.code + ': ' : '') + run.result.reason : '';
+  var uo = run.updateOffer;                 // v0.7: the portal changed and the model found the way: keep it?
+  $('updateoffer').hidden = !(uo && !uo.done);
+  if (uo && !uo.done) {
+    $('updatemsg').textContent = 'The portal changed. ' + uo.steps.map(function (o) {
+      return 'Step ' + (o.step + 1) + ': the recipe clicked ' + o.from + '; this run the model chose the ' + (o.to.role || 'control') + ' "' + o.to.name + '"';
+    }).join('. ') + '. The run was VERIFIED. Use the new step from now on?';
+  }
   var ch = $('checks'); ch.textContent = '';
   ((run.result && run.result.checks) || []).forEach(function (c) {
     ch.appendChild(el('li', { class: c.ok ? 'ok' : 'bad' }, c.kind + ': ' + c.expected + (c.kind === 'download' && c.actual ? ' (' + c.actual + ')' : '')));
@@ -288,6 +347,7 @@ function collStatusText(r, p) {
   if (!r) return 'Not run yet';
   if (r.status === 'got') return r.file ? 'Got (' + r.file + ')' : 'Got';
   if (r.status === 'missing') return 'Missing' + (r.reason ? ': ' + r.reason : '');
+  if (r.status === 'wrong_period') return 'Wrong period' + (r.file ? ' (' + r.file + ')' : '') + (r.reason ? ': ' + r.reason : '');
   if (r.status === 'needs_you') return 'Needs you' + (r.waiting ? ' (waiting)' : '') + (r.reason ? ': ' + r.reason : '');
   return 'Failed' + (r.reason ? ' (' + r.reason + ')' : '');
 }
@@ -543,6 +603,14 @@ function decide(kind) {
   call(msg).then(refresh);
 }
 $('approve').onclick = function () { decide('approve'); };
+function updateDecision(yes) {
+  var run = state.run; if (!run || !run.updateOffer) return;
+  call({ type: 'guided_update', runId: run.id, nonce: run.updateOffer.nonce, accept: yes }).then(function () {
+    notice(yes ? 'Saved: the recipe uses the new step from now on.' : 'Kept the recorded step.'); lastSig = ''; refresh();
+  });
+}
+$('updateyes').onclick = function () { updateDecision(true); };
+$('updateno').onclick = function () { updateDecision(false); };
 $('continue').onclick = function () { decide('continue'); };
 $('reject').onclick = function () { decide('reject'); };
 $('export').onclick = function () {

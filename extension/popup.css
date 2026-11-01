@@ -15,7 +15,8 @@ ul { list-style: none; padding: 0; margin: 0; }
 .badge.VERIFIED { background: #dafbe1; color: #116329; }
 .badge.UNVERIFIED { background: #fff8c5; color: #7d4e00; }
 .badge.FAILED { background: #ffebe9; color: #a40e26; }
-.badge.CHECK { background: #fff1e5; color: #953800; }   /* checks passed, the local verifier disagrees: look */
+.badge.CHECK { background: #fff1e5; color: #953800; }
+.badge.MISSING, .badge.WRONG_PERIOD { background: #ffebe9; color: #a40e26; }   /* v0.7 goal-guided verdicts */   /* checks passed, the local verifier disagrees: look */
 #pending { border: 2px solid #cf222e; border-radius: 6px; padding: 6px 8px; margin: 6px 0; }
 #checks li.ok::before { content: "ok  "; color: #116329; }
 #checks li.bad::before { content: "no  "; color: #a40e26; }
@@ -55,8 +56,14 @@ button.small { padding: 2px 8px; font-size: 12px; }
 #collections .portal { display: flex; justify-content: space-between; gap: 6px; font-size: 12px; padding: 2px 0; border-top: 1px solid #eaeef2; }
 #collections .portal .st { text-align: right; }
 #collections .st.got { color: #116329; }
-#collections .st.missing, #collections .st.failed { color: #a40e26; }
+#collections .st.missing, #collections .st.failed, #collections .st.wrong_period { color: #a40e26; }
 #collections .st.needs_you { color: #953800; font-weight: 600; }
 #collections .acts { margin-top: 4px; display: flex; gap: 6px; flex-wrap: wrap; }
 #collsec input:not([type=checkbox]) { width: 100%; box-sizing: border-box; font: inherit; margin-top: 4px; }
 #collpick label { display: block; }
+
+/* v0.7 period templating */
+.tplrow { font-size: 12px; margin: 3px 0; }
+.tplrow .tplfield { color: #57606a; margin-right: 4px; }
+.tplrow.off .tplmap { text-decoration: line-through; color: #8c959f; }
+#updateoffer { background: #ddf4ff; border-radius: 6px; padding: 6px 8px; margin: 6px 0; }

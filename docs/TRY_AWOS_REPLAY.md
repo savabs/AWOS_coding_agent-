@@ -116,6 +116,26 @@ For the documents you fetch from several supplier / vendor / partner / payout po
     then this simply does not happen and the run waits for you. Options: "Use Chrome's saved passwords to sign in".
 - Details: `docs/specs/portal_run.md`.
 
+## 4d. Next month's document, not last month's (v0.7)
+A recipe recorded in October that clicked "Invoice September 2026" no longer clicks September again in November.
+- **The month follows the run.** When you stop recording, AWOS finds the month in what you clicked, typed, expected
+  and downloaded ("September 2026", "Sep-2026", "2026-09", "09/2026", "Q3 2026", a file named `payout_2026_09.csv`)
+  and turns it into a placeholder. The recipe's **Period** section shows each one, for example
+  `"Invoice September 2026" -> "Invoice {{month_name}} {{year}}"`, with **Undo** if a field must stay exactly as
+  recorded. Order numbers, prices, phone numbers and dates with a day are left alone.
+- **Which month a run uses**: the previous month by default; switch a recipe to "this month" in its **Period**
+  section, or use **Run for this month** with any month. A collection uses its own month.
+- **When the portal changed** (a redesign, a renamed row), AWOS asks the agent model (the same local model as Tell it;
+  Claude only if you opted in, never for a recipe you locked) to pick the control for this month's goal, for example
+  "Download the October 2026 supplier invoice". It never falls back to the recorded, old row. If this month's
+  document is not posted yet, the run ends as **Missing** with the model's reason and nothing is downloaded. Pay /
+  delete / submit choices still wait for your Approve. At most 5 such decisions per run, each in the run log.
+- **It learns.** If the model had to decide and the run was VERIFIED, the popup asks "The portal changed: use the new
+  step from now on?". Say yes and next month's run is fast again; the recipe keeps a short history of what changed.
+- **Wrong period**: if the file that arrived is for another month (the portal still serves September's invoice), the
+  run and the checklist say **Wrong period**, not Got.
+- Details: `docs/specs/goal_guided.md`.
+
 ## 5. Send the results back
 Click **Export run log** in the popup and send the JSON file.
 - It contains, per run: the verdict, how each step was found, and every model call (the candidate button names it saw and

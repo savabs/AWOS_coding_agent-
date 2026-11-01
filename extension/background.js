@@ -56,6 +56,23 @@
  *    never read), click the sign-in button once (Option autofillSignin, experimental); else the normal handoff.
  *  portalStatus (chrome.storage.local), loginTabs / probeTab (chrome.storage.session).
  *
+ * v0.7 goal-guided runs (docs/specs/goal_guided.md), no new permissions:
+ *  - period templating (lib/period.js): at save / import, period expressions in step targets, typed values, URLs,
+ *    expected texts and download names that name the recording's month become placeholders (rec.tpl, per field,
+ *    undoable in the popup). Each run has a period (the collection's, a `period` given to the run, else the recipe's
+ *    default: previous month, or this month) and replays the recipe with it substituted (AWOSPeriod.view).
+ *  - goal-guided step decision: a templated or `variable` step (a control in a repeated list / table row) that does
+ *    not match confidently, or matches a control naming another period, is decided by the Tell-it agent brain (same
+ *    endpoint, micro-agent contract, consent and cloud-lock rules as tellit.js): ONE action on the current page from
+ *    the goal (period substituted), "last time at this step you clicked ...", the steps done and the observation;
+ *    validated, gated and executed like a Tell-it action. needs_user / done = the recipe ends MISSING with the model's
+ *    reason (never the recorded, old target). At most GUIDED_CAP (5) model decisions per run, each logged.
+ *  - result vs goal: the downloaded file must match the period-substituted expectation; a file for another period is
+ *    WRONG_PERIOD (verdict + collection checklist), not Got.
+ *  - skills memory: a VERIFIED run with model-decided steps offers "the portal changed: use the new step from now on?"
+ *    (run.updateOffer -> guided_update); accepting stores the model's control as the step (templated again) and a
+ *    per-recipe history entry (rec.history).
+ *
  * Replay of one step: wait for the tab to load -> content 'locate' (attribute
  * scoring) -> if not confident, ask the local model to pick from the shortlist
  * or say NOT_FOUND -> approval gate for dangerous clicks -> content 'act'.
@@ -74,8 +91,14 @@
  * downgrade VERIFIED to CHECK ("look at this one"), and its opinion is logged on
  * every run.
  */
-importScripts('lib/safety.js', 'lib/model.js', 'lib/recipe.js', 'lib/agent.js');
-var S = self.AWOSSafety, M = self.AWOSModel, R = self.AWOSRecipe;
+importScripts('lib/safety.js', 'lib/model.js', 'lib/period.js', 'lib/recipe.js', 'lib/agent.js');
+var S = self.AWOSSafety, M = self.AWOSModel, R = self.AWOSRecipe, PD = self.AWOSPeriod;
+// "now" for periods only (the default run period, a recording's month). Tests pin it through chrome.storage.session
+// (testNow), which web pages cannot reach; everything else uses the real clock.
+var TEST_NOW = 0;
+chrome.storage.session.get('testNow').then(function (o) { TEST_NOW = +o.testNow || 0; }).catch(function () {});
+chrome.storage.onChanged.addListener(function (ch, area) { if (area === 'session' && ch.testNow) TEST_NOW = +ch.testNow.newValue || 0; });
+function nowMs() { return TEST_NOW || Date.now(); }
 
 // ---- storage helpers --------------------------------------------------------
 async function getLocal(key, dflt) { var o = await chrome.storage.local.get(key); return o[key] === undefined ? dflt : o[key]; }
@@ -164,6 +187,7 @@ async function stopRecording() {
   var rec = st.rec;
   if (tab && tab.url) { var u = new URL(tab.url); rec.expect.urlPattern = u.origin + u.pathname; }
   if (!actionCount(rec)) rec.warning = NO_ACTIONS;
+  applyPeriod(rec, false);
   var all = await getLocal('recordings', {}); all[rec.id] = rec; await setLocal('recordings', all);
   await setSess('recState', null);
   if (tab) await sendTab(st.tabId, { type: 'rec_state', on: false }).catch(function () {});
@@ -281,11 +305,17 @@ async function startRun(recId, tabId, opts) {
   var run = { id: uid('run'), recId: recId, recName: rec.name, tabId: tabId, i: 0, status: 'running', startedAt: Date.now(),
               pending: null, approval: null, userDone: {}, log: [], resolved: [], result: null,
               params: Object.assign({}, rec.lastParams || {}, params), scheduled: !!opts.scheduled, imported: !!rec.imported,
-              done: {}, unblocked: {}, period: (opts.collection && opts.collection.period) || periodOf(Date.now(), 0),
-              collection: opts.collection || null };
+              done: {}, unblocked: {}, period: (opts.collection && opts.collection.period) || (PD.valid(opts.period) ? opts.period : '') || defaultPeriod(rec),
+              collection: opts.collection || null, recPeriod: rec.period || '', guided: [], history: [] };
+  // the newest download before this run: a wrong-period file must be one THIS run downloaded (v0.7)
+  run.dlMark = ((await chrome.downloads.search({ orderBy: ['-startTime'], limit: 1 }).catch(function () { return []; }))[0] || {}).id || 0;
   logRun(run, 'start "' + rec.name + '" (' + rec.steps.length + ' steps)' + (run.scheduled ? ' [scheduled]' : '') + (run.imported ? ' [imported recipe]' : '')
               + (run.collection ? ' [collection, ' + run.period + ']' : ''));
   if (!actionCount(rec)) logRun(run, 'note: this recording has no clicks or typing, only page addresses; nothing will be done on the page');
+  var nt = Object.keys(rec.tpl || {}).filter(function (k) { return rec.tpl[k].on !== false; }).length;
+  if (nt) logRun(run, 'period ' + PD.label(run.period) + ': ' + nt + ' templated field' + (nt === 1 ? '' : 's') + ' (recorded for ' + PD.label(rec.period)
+                      + ') replayed with ' + PD.label(run.period) + (run.collection ? ' (the collection\'s period)' : opts.period ? ' (chosen for this run)'
+                      : ' (' + (rec.periodMode === 'this' ? 'this' : 'previous') + ' month)'));
   await saveRun(run);
   drive(run.id);
   return run;
@@ -305,8 +335,9 @@ async function drive(runId) {
 async function driveInner(runId) {
   var run = await getSess('run');
   if (!run || run.id !== runId || run.status !== 'running') return;
-  var rec = await getRec(run.recId);
-  if (!rec) return fail(run, 'ERROR', 'the recording was deleted');
+  var base = await getRec(run.recId);
+  if (!base) return fail(run, 'ERROR', 'the recording was deleted');
+  var rec = PD.view(base, run.period);          // v0.7: the recipe with this run's period substituted
   var cfg = await lockedBrain(run, rec);
   var strict = run.scheduled || !!rec.imported;      // nobody watching / someone else's recipe: stricter gate vocabulary
   run.done = run.done || {}; run.unblocked = run.unblocked || {};
@@ -346,6 +377,7 @@ async function driveInner(runId) {
         logRun(run, 'the site redirected to ' + R.stripUrl(landed));
       }
       run.resume = null;                // a goto puts the run where it should be by itself
+      (run.history = run.history || []).push('opened ' + R.stripUrl(step.url));
       run.done[i] = true; run.i++; run.approval = null; await saveRun(run); continue;
     }
     await waitForLoad(run.tabId); await ensureContent(run.tabId);
@@ -392,10 +424,26 @@ async function driveInner(runId) {
           + '. Deal with it yourself in this tab, then press Continue.' });
       }
     }
-    var index = -1, how = '';
-    if (loc.status === 'found') {
+    var index = -1, how = '', ge = null, gWhy = '';
+    var gEl = guidedEligible(base, i), gp = run.guidedPending && run.guidedPending.step === i ? run.guidedPending : null;
+    if (gp) gWhy = 'resume';                                      // approved model decision: no new model call
+    else if (loc.status === 'found') {
       index = loc.index; how = 'score ' + loc.score + ' (margin ' + loc.margin + ')' + (loc.dupes ? ' [' + (loc.dupes + 1) + ' identical copies, picked by position]' : '');
+      if (gEl.templated) {             // found, but does it name THIS run's period (not the recorded one)?
+        var fd = (loc.shortlist.find(function (c) { return c.index === loc.index; }) || {}).desc || {};
+        var cc = PD.consistent(base.tpl, i, fd, run.period);
+        if (!cc.ok) gWhy = 'the best match "' + (fd.name || fd.text || '') + '" does not name ' + PD.label(run.period) + ' (' + cc.why.join('; ') + ')';
+      }
     }
+    else if (gEl.any) gWhy = 'no confident match for "' + (step.loc.name || step.loc.text || step.loc.css || '') + '" (' + loc.status + ', best ' + loc.score + ')';
+    if (gWhy) {
+      var gd = gp || await guidedDecide(run, base, rec, step, i, gWhy);
+      if (!gd) return;                                           // ended (missing / failed) inside
+      ge = await guidedExecute(run, step, i, gd);
+      if (!ge) return;                                           // paused for approval or failed inside
+      index = ge.index; how = ge.how;
+    }
+    else if (loc.status === 'found') { /* confident, period-consistent */ }
     else if (!loc.shortlist.length) {
       return fail(run, 'NOT_FOUND', 'step ' + (i + 1) + ': nothing on the page resembles "' + (step.loc.name || step.loc.css) + '"');
     } else {
@@ -409,7 +457,10 @@ async function driveInner(runId) {
       if (ans.notFound) return fail(run, 'NOT_FOUND', 'step ' + (i + 1) + ': local model says the control "' + (step.loc.name || '') + '" is gone');
       index = loc.shortlist[ans.choice].index; how = 'model pick #' + (ans.choice + 1) + ' (score ' + loc.shortlist[ans.choice].score + ')';
     }
-    var cand = (loc.shortlist.find(function (c) { return c.index === index; }) || {}).desc || {};
+    var cand, urlBefore, tabsBefore;
+    if (ge) { cand = ge.cand; urlBefore = ge.urlBefore; tabsBefore = ge.tabsBefore; }
+    else {
+    cand = (loc.shortlist.find(function (c) { return c.index === index; }) || {}).desc || {};
     // the same expression names the target when pausing and when checking the approval,
     // so an approved target whose live name is empty (icon-only button) does not re-pause forever.
     var target = cand.name || step.loc.name || step.loc.label || step.loc.css || '';
@@ -422,15 +473,18 @@ async function driveInner(runId) {
           message: 'Step ' + (i + 1) + ' will ' + verb + ' "' + target + '" (matches "' + danger + '"). Approve to continue.' });
       }
     }
-    var urlBefore = ((await chrome.tabs.get(run.tabId).catch(function () { return {}; })).url) || '';
-    var tabsBefore = step.action === 'click' ? (await chrome.tabs.query({}).catch(function () { return []; })).map(function (t) { return t.id; }) : null;
+    urlBefore = ((await chrome.tabs.get(run.tabId).catch(function () { return {}; })).url) || '';
+    tabsBefore = step.action === 'click' ? (await chrome.tabs.query({}).catch(function () { return []; })).map(function (t) { return t.id; }) : null;
     var r = await sendTab(run.tabId, { type: 'act', step: step, index: index, approved: ok, strict: strict });
     if (!r || !r.ok) {
       if (r && r.needsApproval) return pause(run, 'awaiting_approval', { danger: r.danger, target: target,
         message: 'Step ' + (i + 1) + ' will ' + verb + ' "' + target + '" (matches "' + r.danger + '"). Approve to continue.' });
       return fail(run, 'ERROR', 'step ' + (i + 1) + ': ' + (r ? r.error : 'no reply'));
     }
+    }
     run.resolved.push({ step: i, how: how, name: cand.name || '' });
+    (run.history = run.history || []).push((step.action === 'press' ? 'pressed Enter in' : step.action === 'fill' ? 'typed into' : step.action === 'select' ? 'chose in' : 'clicked')
+                                            + ' "' + (cand.name || step.loc.name || '') + '"');
     // the verifier's action list, in the agent's own syntax (verifier_data.action_list)
     var q = function (v) { return JSON.stringify(String(v == null ? '' : v)); };
     var an = step.action === 'fill' ? 'fill(' + (index + 1) + ', ' + (step.sensitive || step.ask || S.isPlaceholder(step.value) ? '{secret}' : q(step.value)) + ')'
@@ -446,6 +500,7 @@ async function driveInner(runId) {
         logRun(run, nav.changed ? 'page changed to ' + R.stripUrl(nav.url) + ' (' + nav.ms + ' ms)' : 'recorded as navigating, but the address did not change within 3 s');
       } else { await sleep(400); await waitForLoad(run.tabId); }
     }
+    if (ge && !step.navigates) await waitQuiet(run.tabId, 1000);     // a model-chosen control may navigate though the recorded one did not
     if (tabsBefore) {                 // new-tab files (v0.6): did this click open a tab on a PDF / CSV / ...?
       var nt = await newTabFrom(run.tabId, tabsBefore, step.opensTab ? 5000 : 0);
       if (nt != null) {
@@ -673,11 +728,11 @@ function periodOf(t, offset) {
   var d = new Date(t); d.setDate(1); d.setMonth(d.getMonth() + (offset || 0));
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
 }
-/** built-in values for a period: {{year}} 2026, {{month}} 10, {{month_name}} October (v0.6, collections). */
-function builtins(period) {
-  var m = /^(\d{4})-(\d{2})$/.exec(String(period || '')) || /^(\d{4})-(\d{2})$/.exec(periodOf(Date.now(), 0));
-  return { year: m[1], month: m[2], month_name: MONTHS[+m[2] - 1] };
-}
+/** built-in values for a period: {{year}} 2026, {{month}} 10, {{month_name}} October, {{month_short}} Oct,
+ *  {{quarter}} 4, ... (v0.6 collections; v0.7 lib/period.js). */
+function builtins(period) { return PD.builtins(PD.valid(period) ? period : periodOf(nowMs(), 0)); }
+/** a run's period when nobody chose one: the recipe's mode, previous month by default (v0.7). */
+function defaultPeriod(rec) { return periodOf(nowMs(), rec && rec.periodMode === 'this' ? 0 : -1); }
 /** the run's param values over the built-ins (a recipe's own {{month}} param wins). */
 function runParams(run) { return Object.assign(builtins(run.period), run.params || {}); }
 function cleanParams(rec, given) {
@@ -768,9 +823,23 @@ async function finish(run, rec) {
     await sleep(1500); await waitQuiet(run.tabId, 2000);
     pc = await pageChecks(run, rec); checks = pc.checks;
   }
-  if (rec.expectDownload && rec.expectDownload.nameRegex) checks.push(await checkDownload(run, R.substitute(rec.expectDownload.nameRegex, runParams(run))));
+  var base = await getRec(run.recId), dx = downloadExpectation(base || rec, run, run.period);
+  if (dx.exact) {
+    var dc = await checkDownload(run, dx.exact);
+    if (!dc.ok && dx.generic) {            // v0.7: a file for another period (the recorded one, an older one) is not Got
+      var wrong = await findDownload(run, dx.generic);
+      if (wrong) { dc.wrongPeriod = true; dc.actual = wrong; }
+    }
+    checks.push(dc);
+  }
   var verdict = !checks.length ? 'UNVERIFIED' : checks.every(function (x) { return x.ok; }) ? 'VERIFIED' : 'FAILED';
   var reason = verdict === 'UNVERIFIED' ? 'no expectations recorded' : '';
+  var wp = checks.find(function (x) { return x.wrongPeriod; });
+  if (wp) {
+    var h0 = PD.periodsIn(wp.actual)[0], wper = h0 ? (h0.period ? PD.label(h0.period) : h0.text) : 'another period';
+    verdict = 'WRONG_PERIOD';
+    reason = 'downloaded ' + wp.actual + ', which is for ' + wper + ', not ' + PD.label(run.period) + ' (expected a file matching ' + wp.expected + ')';
+  }
   var noActions = !actionCount(rec);
   if (noActions && verdict === 'VERIFIED') {               // only reopened a URL: the checks passing is not a chore done
     verdict = 'UNVERIFIED';
@@ -799,9 +868,10 @@ async function finish(run, rec) {
       reason = 'checks passed, but the local verifier says ' + op.label + ': ' + op.reason;
     }
   }
-  run.status = verdict === 'FAILED' ? 'failed' : 'done';
-  run.result = { verdict: verdict, code: verdict === 'FAILED' ? 'CHECK_FAILED' : noActions ? 'NO_ACTIONS' : '', checks: checks, reason: reason,
-                 noActions: noActions };
+  run.status = verdict === 'FAILED' || verdict === 'WRONG_PERIOD' ? 'failed' : 'done';
+  run.result = { verdict: verdict, code: verdict === 'FAILED' ? 'CHECK_FAILED' : verdict === 'WRONG_PERIOD' ? 'WRONG_PERIOD' : noActions ? 'NO_ACTIONS' : '',
+                 checks: checks, reason: reason, noActions: noActions };
+  offerUpdate(run, base, verdict);
   logRun(run, verdict + ' (' + checks.filter(function (x) { return x.ok; }).length + '/' + checks.length + ' checks)');
   await archive(run);
   await sendTab(run.tabId, { type: 'banner', text: '' }).catch(function () {});
@@ -825,7 +895,8 @@ async function checkDownload(run, nameRegex, waitMs, graceMs) {
     var mine = items.filter(function (d) { return downloadNames(d).some(function (n) { return re.test(n); }); });
     var done = mine.find(function (d) { return d.state === 'complete'; });
     if (done) return { kind: 'download', expected: nameRegex, ok: true, actual: downloadNames(done).find(function (n) { return re.test(n); }) };
-    var going = mine.some(function (d) { return d.state === 'in_progress'; });
+    // any download of this run still in progress may be the one (its temporary name matches nothing yet)
+    var going = items.some(function (d) { return d.state === 'in_progress'; });
     seen = items.map(function (d) { return downloadNames(d).join(' / ') || '(unnamed)'; }).slice(0, 5).join(', ');
     if ((!going && Date.now() >= grace) || Date.now() >= end) {
       return { kind: 'download', expected: nameRegex, ok: false, actual: going ? 'still downloading' : (seen ? 'other downloads: ' + seen : 'no download') };
@@ -950,7 +1021,7 @@ chrome.runtime.onInstalled.addListener(function () { armAll(true); });
 // each in its own background tab, and records per period (YYYY-MM) what happened: got (file name), missing (the
 // portal ran but no matching file), needs_you (a login / code / check / approval nobody answered in time, or the
 // user pressed Skip) or failed (reason). A re-run in the same period skips the portals already got.
-var COLL_ALARM = 'awos-coll-sched:', COLL_WAIT = 'awos-coll-wait:', COLL_STATUS = { got: 1, missing: 1, needs_you: 1, failed: 1 };
+var COLL_ALARM = 'awos-coll-sched:', COLL_WAIT = 'awos-coll-wait:', COLL_STATUS = { got: 1, missing: 1, wrong_period: 1, needs_you: 1, failed: 1 };
 async function getColl(id) { return (await getLocal('collections', {}))[id] || null; }
 async function periodResults(collId, period) { return ((await getLocal('collResults', {}))[collId] || {})[period] || {}; }
 async function setCollResult(collId, period, recId, val) {
@@ -960,10 +1031,11 @@ async function setCollResult(collId, period, recId, val) {
   await setLocal('collResults', all);
 }
 function collSummary(col, res) {
-  var n = { got: 0, missing: 0, needs_you: 0, failed: 0, notrun: 0 };
+  var n = { got: 0, missing: 0, wrong_period: 0, needs_you: 0, failed: 0, notrun: 0 };
   col.recIds.forEach(function (id) { var r = res[id]; n[r && COLL_STATUS[r.status] ? r.status : 'notrun']++; });
   var bits = [n.got + ' of ' + col.recIds.length + ' got'];
   if (n.missing) bits.push(n.missing + ' missing');
+  if (n.wrong_period) bits.push(n.wrong_period + ' wrong period');
   if (n.needs_you) bits.push(n.needs_you + (n.needs_you === 1 ? ' needs you' : ' need you'));
   if (n.failed) bits.push(n.failed + ' failed');
   if (n.notrun) bits.push(n.notrun + ' not run');
@@ -977,7 +1049,7 @@ async function collStart(collId, opts) {
   if (!col.recIds.length) throw new Error('this collection has no portals yet');
   var busy = await busyReason();
   if (busy) throw new Error(busy);
-  var period = opts.period || periodOf(Date.now(), col.monthOffset || 0);
+  var period = opts.period || periodOf(nowMs(), col.monthOffset || 0);
   if (!/^\d{4}-\d{2}$/.test(period)) throw new Error('period must be YYYY-MM');
   var res = await periodResults(collId, period);
   var queue = col.recIds.filter(function (id) { return !(res[id] && res[id].status === 'got'); });
@@ -1113,6 +1185,8 @@ function collStatusOf(run, rec) {
   var res = run.result || {}, checks = res.checks || [];
   var dl = checks.find(function (x) { return x.kind === 'download'; });
   if (run.leftForUser) return { status: 'needs_you', reason: run.leftForUser };
+  if (dl && dl.wrongPeriod) return { status: 'wrong_period', file: dl.actual || '', reason: res.reason || '' };
+  if (res.code === 'MISSING') return { status: 'missing', reason: res.reason || '' };
   if (dl && dl.ok) return { status: 'got', file: dl.actual || '' };
   if (!dl && /^(VERIFIED|CHECK|UNVERIFIED)$/.test(res.verdict || '')) {
     var last = (run.fileTabs || []).slice(-1)[0];
@@ -1340,7 +1414,7 @@ async function firePreflight(collId) {
 async function openLogins(collId) {
   var col = await getColl(collId);
   if (!col) throw new Error('no such collection');
-  var c = await getSess('coll'), period = c && c.collId === collId ? c.period : periodOf(Date.now(), col.monthOffset || 0);
+  var c = await getSess('coll'), period = c && c.collId === collId ? c.period : periodOf(nowMs(), col.monthOffset || 0);
   var res = await periodResults(collId, period), ps = await getLocal('portalStatus', {}), tabs = (await getSess('loginTabs')) || {};
   var ids = col.recIds.filter(function (id) { return ps[id] && ps[id].status === 'login' && !(res[id] && res[id].status === 'got'); });
   var opened = [];
@@ -1451,6 +1525,7 @@ async function exportLog() {
       expect: { url: !!(r.expect && r.expect.urlPattern), texts: ((r.expect && r.expect.texts) || []).length,
                 download: !!(r.expectDownload && r.expectDownload.nameRegex) },
       params: (r.params || []).length, imported: !!r.imported, schedule: r.schedule ? r.schedule.kind : '',
+      period: r.period || '', periodMode: r.periodMode || '', templated: Object.keys(r.tpl || {}).length, changes: (r.history || []).length,
       steps: r.steps.map(function (s) {
         if (s.action === 'goto') return { action: 'goto', url: redactUrl(s.url) };
         var l = s.loc || {};
@@ -1464,7 +1539,8 @@ async function exportLog() {
       scheduled: !!r.scheduled, imported: !!r.imported,
       verdict: r.result && r.result.verdict, code: r.result && r.result.code, reason: redactText(r.result && r.result.reason),
       checks: ((r.result && r.result.checks) || []).map(function (c) { return { kind: c.kind, ok: c.ok }; }),
-      resolved: r.resolved, modelCalls: r.modelCalls || [],
+      resolved: r.resolved, modelCalls: r.modelCalls || [], period: r.period || '',
+      guided: (r.guided || []).map(function (g) { return { step: g.step, action: g.action, control: g.control, reason: redactText(g.reason), why: redactText(g.why) }; }),
       verifier: r.verifier ? { label: r.verifier.label || '', reason: redactText(r.verifier.reason || ''),
                                error: r.verifier.error || '', ms: r.verifier.ms || 0 } : null,
       log: r.log.map(function (l) { return { t: l.t, step: l.step, text: redactText(l.text) }; }) };
@@ -1522,6 +1598,7 @@ async function confirmImport(n) {
   var v = R.validate(p.recipe);                    // validate again: storage.session is ours, but cheap insurance
   if (!v.ok) throw new Error(v.errors.join('; '));
   var rec = R.toRecording(v.recipe, uid('rec'));
+  applyPeriod(rec, !!v.recipe.period);          // v0.7: literal period expressions in a shared recipe become templates too
   await putRec(rec);
   await setSess('pendingImport', null);
   chrome.action.setBadgeText({ text: '' }).catch(function () {});
@@ -1569,8 +1646,31 @@ var HANDLERS = {
       if (rx) { try { new RegExp(rx); new RegExp(R.substitute(rx, builtins())); } catch (e) { throw new Error('download name pattern is not a valid regex'); } }
       rec.expectDownload = rx ? { nameRegex: rx.slice(0, 200) } : null;
     }
+    applyPeriod(rec, true);                   // v0.7: new goal / checks are templated against the recorded period
     await setLocal('recordings', all); return rec;
   },
+  /** v0.7: undo / redo the templating of one field ("September 2026 -> {{month_name}} {{year}}"). */
+  set_template: async function (msg) {
+    var rec = await getRec(msg.id);
+    if (!rec) throw new Error('no such recording');
+    var e = (rec.tpl || {})[msg.path];
+    if (!e) throw new Error('that field is not templated');
+    e.on = msg.on !== false;
+    await putRec(rec); return rec;
+  },
+  /** v0.7: which month a run uses by default (previous / this), and which month the recording was made for. */
+  set_period: async function (msg) {
+    var rec = await getRec(msg.id);
+    if (!rec) throw new Error('no such recording');
+    if (msg.mode != null) { if (msg.mode !== 'this' && msg.mode !== 'previous') throw new Error('period mode: this or previous month'); rec.periodMode = msg.mode; }
+    if (msg.recorded != null && msg.recorded !== rec.period) {
+      if (!PD.valid(msg.recorded)) throw new Error('recorded period must be YYYY-MM');
+      rec.period = msg.recorded; rec.periodInferred = false;
+    }
+    applyPeriod(rec, true);
+    await putRec(rec); return rec;
+  },
+  guided_update: async function (msg) { return guidedUpdate(msg); },
   /** turn a typed field (fill / select step) into a param, or back (param: null). Secret fields never become params. */
   set_param: async function (msg) {
     var rec = await getRec(msg.id);
@@ -1604,7 +1704,7 @@ var HANDLERS = {
     var all = await getLocal('recordings', {}); delete all[msg.id]; await setLocal('recordings', all);
     await chrome.alarms.clear(ALARM + msg.id); return { ok: true };
   },
-  run: async function (msg) { return startRun(msg.recId, msg.tabId, { params: msg.params }); },
+  run: async function (msg) { return startRun(msg.recId, msg.tabId, { params: msg.params, period: msg.period }); },
   approve: async function (msg) { await decide('approve', msg.runId, msg.nonce); return { ok: true }; },
   continue: async function (msg) { await decide('continue', msg.runId, msg.nonce, msg.params); return { ok: true }; },
   reject: async function (msg) { await decide('reject', msg.runId, msg.nonce); return { ok: true }; },
@@ -1698,3 +1798,4 @@ async function restoreAfterRestart() {
 restoreAfterRestart();
 
 importScripts('tellit.js');          // Tell it (v0.5): goal -> agent loop -> recipe; uses the helpers above
+importScripts('guided.js');          // goal-guided runs (v0.7): period templating + model-decided steps; uses both

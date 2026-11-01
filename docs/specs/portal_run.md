@@ -1,5 +1,10 @@
 # Portal runs (AWOS Replay 0.6)
 
+> 0.7 (`goal_guided.md`): a portal's recipe now follows the month by itself (period templating: "Invoice September
+> 2026" in the recording becomes "Invoice {{month_name}} {{year}}"), steps that changed are decided by the agent
+> brain from the goal, and the checklist gained **Wrong period**; a portal whose document is not posted yet ends as
+> **Missing** with the model's reason, without downloading anything.
+
 Status: built (extension 0.6.1). Code: `extension/background.js` (driver, collections, logins), `extension/lib/portal.js`
 (page classification, pop-up dismissal, remember me, autofill sign-in), `extension/content.js` (messages),
 `extension/popup.js` (checklist), `extension/options.html` (login Options).
@@ -67,7 +72,10 @@ driving is failed as INTERRUPTED, as before: its last click may have half-run). 
 A collection (`collections` in `chrome.storage.local`) groups recipes, one portal each, each with its expected
 download. The download pattern may use `{{year}}`, `{{month}}` (two digits) and `{{month_name}}`, the period's
 values (a recipe's own param of the same name wins); e.g. `statement-{{year}}-{{month}}\.pdf$`. `monthOffset: -1`
-collects last month's documents.
+collects last month's documents. Since 0.7 the pattern is written for you when the recorded file name names the month
+(`invoice-2026-09.pdf` -> `invoice-{{year}}-{{month}}.pdf`), all period placeholders are available, and the recipe's
+steps follow the collection's period too (`goal_guided.md`). A recipe run on its own uses its own default month
+(previous month unless set to this month).
 
 **Run collection** (`coll_run`): the period is `YYYY-MM` (this month, or last month with the offset). Portals already
 **Got** in that period are skipped; the others run one after another, each in its own background tab, through the
@@ -79,7 +87,8 @@ Per portal and period (`collResults[collId][period][recId]`):
 | status | when |
 |---|---|
 | `got` (file) | the download check passed (file name shown); or no download is expected and the run verified |
-| `missing` | the portal ran to the end but no file matched the pattern, or the download link itself is gone (NOT_FOUND on a download step) |
+| `missing` | the portal ran to the end but no file matched the pattern, or the download link itself is gone (NOT_FOUND on a download step), or (0.7) the agent brain said this period's document is not there (verdict MISSING, its reason shown; nothing was downloaded) |
+| `wrong_period` (file) | (0.7) the run downloaded a file whose name matches the pattern for another period, e.g. September's invoice in the October run (verdict WRONG_PERIOD); never counted as got |
 | `needs_you` | the portal paused (login, code, check, approval, pop-up). While it waits it shows "Needs you (waiting)"; **Skip this portal** in the popup, or nobody answering within `settings.collectionWaitMin` (default 10 min, a `chrome.alarms` alarm), leaves its tab open for the user and moves on |
 | `failed` (reason) | anything else (the reason is the run's code and message) |
 
@@ -199,11 +208,13 @@ Settings (Options; `chrome.storage.local.settings`): `rememberMe`, `autofillSign
 
 ## Permissions
 
-None added in 0.6 or 0.6.1. The keep-alive and pre-flight use `tabs` (background tabs on the recipe's own start
+None added in 0.6, 0.6.1 or 0.7. The keep-alive and pre-flight use `tabs` (background tabs on the recipe's own start
 page), `alarms`, and `notifications` (now with a button), all already requested. `downloads` (0.4) now also starts downloads (`chrome.downloads.download`) for files that opened in a new
 tab; its store justification already says "Replay starts that download and checks it finished".
 
 ## Known gaps
+
+(0.7 limits of templating and step decisions: `goal_guided.md`, Known limits.)
 
 - A login page that appears after the last step (before the final checks) is not handed off; the checks fail.
 - A file shown by a viewer that runs no page script and whose URL and title do not name a file is not recognised.

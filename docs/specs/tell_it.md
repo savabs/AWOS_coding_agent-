@@ -72,6 +72,9 @@ Deviations (deliberate):
 - A model `fill` on a password / code field is not a REJECTED step (Python): the run pauses and the user types it;
   the history line is `k. fill(...) -> SKIPPED: the owner types passwords and codes themselves; ...`.
 - Page guards pause instead of ending (`NEEDS_USER` in Python); Continue skips that guard for that page.
+- (0.7) A goal-guided replay step (`goal_guided.md`) uses the same brain and prompt with one extra `hint` line after
+  the `Step k of N.` line ("This is a saved recipe replayed for October 2026 ... Last time at this step you clicked
+  ..."); Tell-it prompts never carry it.
 - `needs_user("why")` pauses (the user can act or type a correction, then Continue) instead of ending.
 - The invalid-reply cap counts invalid replies *in a row* (Python counts them per subtask).
 - JS radio buttons are single controls (role `radiogroup`, no options); `click(n)` works on them. Clickable = any

@@ -28,6 +28,7 @@
  *   locate also reports `covered` when the found target sits under an overlay or dialog
  *   agent_observe / agent_act {act, approved, expectName} / agent_secrets -> Tell it (lib/agent.js contract):
  *          act on control n of the last observation, with the same danger / sensitive-field gates
+ * v0.7: a recorded click inside a repeated list / table row is marked `variable` (goal-guided replay).
  * Messages are plain JSON; element handles never leave the page.
  */
 (function () {
@@ -73,8 +74,24 @@
     if (lastEnter && el.form && el.form === lastEnter.form && Date.now() - lastEnter.t < 600) return;   // Enter's implicit submit click
     var loc = L.describe(el);
     lastFillKey = null;
-    send({ type: 'rec_step', step: { action: 'click', loc: loc, url: location.href, scrollY: Math.round(scrollY),
-           danger: S.dangerMatch(S.dangerContext(el, loc.name)) } });
+    var step = { action: 'click', loc: loc, url: location.href, scrollY: Math.round(scrollY),
+                 danger: S.dangerMatch(S.dangerContext(el, loc.name)) };
+    if (repeatedRow(el)) step.variable = true;          // v0.7: a row of a list / table (which row it is can change)
+    send({ type: 'rec_step', step: step });
+  }
+
+  /** v0.7: the control sits in a repeated list / table row: a tr / li / row-like ancestor (<= 6 levels up) whose parent
+   *  has at least 3 children of the same kind (an invoice list, a statements table). Which row is meant can change
+   *  from run to run, so replay decides it by meaning when it does not match confidently. */
+  function repeatedRow(el) {
+    var n = el;
+    for (var k = 0; k < 6 && n && n.parentElement; k++, n = n.parentElement) {
+      var tag = n.tagName, role = n.getAttribute && n.getAttribute('role');
+      if (!/^(TR|LI|ARTICLE)$/.test(tag) && !/^(row|listitem|article)$/.test(role || '')) continue;
+      var same = Array.prototype.filter.call(n.parentElement.children, function (c) { return c.tagName === tag && (c.getAttribute('role') || '') === (role || ''); });
+      if (same.length >= 3) return true;
+    }
+    return false;
   }
 
   /** Enter in a single-line field inside a form or a search box: the submit IS this keypress. */

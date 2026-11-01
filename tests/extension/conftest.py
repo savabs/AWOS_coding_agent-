@@ -5,7 +5,8 @@ fake OpenAI-compatible model at /v1/chat/completions (no real model, no network)
 `server.overrides` swaps the file behind a path, so the same recorded URL can
 serve a renamed / deleted variant at replay time; `server.redirects` answers a path with a 302 (a portal whose
 session expired sends you to its login page), `server.auth` does the same only until a login page set the
-`portal_session=ok` cookie (v0.6.1 keep-alive / pre-flight), and `server.hits` lists every GET path (files downloaded once?). Chromium runs headless with
+`portal_session=ok` cookie (v0.6.1 keep-alive / pre-flight), and `server.hits` lists every GET path (files downloaded once?); `server.state` is served as /__state.json (what a fixture
+page shows) and /files/gen/<name> is a generated document. Chromium runs headless with
 the unpacked extension loaded (Playwright's "chromium" channel = new headless,
 which supports extensions). Skips when Playwright or a Chromium build is missing.
 Run with the 3.12 venv:  ~/.awos/rl-venv/bin/python -m pytest tests/extension -q
@@ -22,6 +23,9 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 EXT = ROOT / "extension"
 PAGES = pathlib.Path(__file__).resolve().parent / "pages"
+# the extension's period clock (default run period = previous month, a recording's month) is pinned to mid-November
+# 2026 so "previous month" is 2026-10 whatever day the suite runs; the fixture files are October 2026 documents
+TEST_NOW_MS = int(time.mktime((2026, 11, 15, 12, 0, 0, 0, 0, -1)) * 1000)
 
 
 class _Handler(SimpleHTTPRequestHandler):
@@ -38,6 +42,12 @@ class _Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?")[0]
         self.server.hits.append(path)
+        if path == "/__state.json":               # page scripts read what the test set (v0.7 invoices portal)
+            return self._send(json.dumps(self.server.state).encode(), "application/json")
+        if path.startswith("/files/gen/"):        # a generated document (any name: invoice-2026-10.pdf, payout-2026-11.csv)
+            name = path[len("/files/gen/"):]
+            ctype = "text/csv" if name.endswith(".csv") else "application/pdf"
+            return self._send(b"%PDF-1.4 fake document " + name.encode() + b"\n", ctype)
         loc = self.server.redirects.get(path)
         if not loc and path in self.server.auth and "portal_session=ok" not in (self.headers.get("Cookie") or ""):
             loc = self.server.auth[path]          # a portal that needs a login: 302 until the login page set the cookie
@@ -51,6 +61,13 @@ class _Handler(SimpleHTTPRequestHandler):
         if alt:
             self.path = "/" + alt + self.path[len(path):]
         return super().do_GET()
+
+    def _send(self, body, ctype):
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_POST(self):
         n = int(self.headers.get("Content-Length") or 0)
@@ -79,6 +96,7 @@ def server():
     srv = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     srv.overrides, srv.model_calls, srv.model_answer = {}, [], "NOT_FOUND"
     srv.redirects, srv.hits, srv.auth = {}, [], {}
+    srv.state = {}
     srv.verify_calls, srv.verify_answer = [], "VERIFIED: fake"
     srv.base = f"http://127.0.0.1:{srv.server_address[1]}"
     t = threading.Thread(target=srv.serve_forever, daemon=True)
@@ -95,6 +113,7 @@ def _reset_server(request):
         srv.redirects.clear()
         srv.auth.clear()
         srv.hits.clear()
+        srv.state.clear()
         srv.model_calls.clear()
         srv.model_answer = "NOT_FOUND"
         srv.verify_calls.clear()
@@ -143,7 +162,9 @@ class Ext:
         return self.call("get_state")
 
     def set_settings(self, **kw):
-        s = {"endpoint": self.server.base + "/v1", "model": "fake", "enabled": True, "findTimeoutMs": 1500}
+        # the agent brain (Tell it, goal-guided steps) is the fake server too: never a real model on this machine
+        s = {"endpoint": self.server.base + "/v1", "model": "fake", "enabled": True, "findTimeoutMs": 1500,
+             "agentEndpoint": self.server.base + "/v1", "agentModel": "fake-agent"}
         s.update(kw)
         return self.call("save_settings", settings=s)
 
@@ -178,7 +199,8 @@ def x(ext, server):
     ctx, sw, ext_id = ext
     sw = live_worker(ctx, sw)
     sw.evaluate("chrome.storage.local.clear().then(() => chrome.storage.session.clear()).then(() => chrome.alarms.clearAll())"
-                ".then(() => { if (self.__realFetch) self.fetch = self.__realFetch; NOTICES.length = 0; })")
+                ".then(() => chrome.storage.session.set({testNow: %d}))"
+                ".then(() => { if (self.__realFetch) self.fetch = self.__realFetch; NOTICES.length = 0; })" % TEST_NOW_MS)
     d = Ext(ctx, sw, ext_id, server)
     d.set_settings()
     yield d

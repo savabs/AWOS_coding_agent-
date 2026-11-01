@@ -1,0 +1,63 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Supplier portal - Invoices</title>
+<style>table{border-collapse:collapse}td,th{padding:4px 10px}ul.cards{list-style:none;padding:0}ul.cards li{margin:6px 0}</style>
+</head><body>
+<h1>Invoices</h1>
+<p>Your supplier invoices, newest first.</p>
+<div id="list"></div>
+<p><a href="/help.html">Help</a></p>
+<script>
+// What this portal shows comes from ?period=YYYY-MM, else from the test server (/__state.json):
+//   latest  'YYYY-MM' the newest month posted (3 months are listed, newest first)
+//   layout  'table' (rows "Invoice October 2026" with a PDF link) | 'cards' (buttons "Oct-2026 Invoice", a redesign)
+//   stale   only the newest row, and its link downloads the previous month's file (a portal bug)
+//   drafts  cards only: each card also has a "Delete <Mon-YYYY> draft" button (sets window.__deleted)
+var MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+var st = {};
+try { var x = new XMLHttpRequest(); x.open('GET', '/__state.json', false); x.send(); st = JSON.parse(x.responseText || '{}'); } catch (e) {}
+var q = new URLSearchParams(location.search).get('period');
+var latest = q || st.latest || '2026-10', layout = st.layout || 'table';
+function back(p, n) { var y = +p.slice(0, 4), m = +p.slice(5, 7) - 1 - n; while (m < 0) { m += 12; y--; } return { y: y, m: m }; }
+function pad(n) { return (n < 10 ? '0' : '') + n; }
+var rows = [0, 1, 2].map(function (n) { var d = back(latest, n); return { y: d.y, m: d.m, key: d.y + '-' + pad(d.m + 1) }; });
+if (st.stale) rows = rows.slice(0, 1);
+var box = document.getElementById('list');
+function fetchFile(name) {          // a button that downloads (the cards layout has no links)
+  var a = document.createElement('a'); a.href = '/files/gen/' + name; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+}
+if (layout === 'cards') {
+  var ul = document.createElement('ul'); ul.className = 'cards';
+  rows.forEach(function (r) {
+    var li = document.createElement('li'), b = document.createElement('button');
+    b.className = 'dl'; b.textContent = MONTHS[r.m].slice(0, 3) + '-' + r.y + ' Invoice';
+    b.onclick = function () { fetchFile('invoice-' + r.key + '.pdf'); };
+    li.appendChild(b);
+    if (st.drafts) {
+      var del = document.createElement('button'); del.className = 'del'; del.textContent = 'Delete ' + MONTHS[r.m].slice(0, 3) + '-' + r.y + ' draft';
+      del.onclick = function () { window.__deleted = (window.__deleted || 0) + 1; li.remove(); };
+      li.appendChild(document.createTextNode(' ')); li.appendChild(del);
+    }
+    ul.appendChild(li);
+  });
+  box.appendChild(ul);
+} else {
+  var t = document.createElement('table'), amounts = ['1,240.00', '980.50', '1,105.25'];
+  t.innerHTML = '<tr><th>Document</th><th>Amount</th></tr>';
+  rows.forEach(function (r, k) {
+    var tr = document.createElement('tr'), td = document.createElement('td'), a = document.createElement('a');
+    a.textContent = 'Invoice ' + MONTHS[r.m] + ' ' + r.y;
+    if (st.stale && k === 0) {        // the portal's script fetches last month's document behind this month's name
+      var prev = back(latest, 1), old = prev.y + '-' + pad(prev.m + 1);
+      a.href = '#latest';
+      a.onclick = function (e) { e.preventDefault(); fetchFile('invoice-' + old + '.pdf'); };
+    } else {
+      a.href = '/files/gen/invoice-' + r.key + '.pdf';
+      a.setAttribute('download', '');
+    }
+    td.appendChild(a); tr.appendChild(td);
+    var am = document.createElement('td'); am.textContent = 'EUR ' + amounts[k]; tr.appendChild(am);
+    t.tBodies[0].appendChild(tr);
+  });
+  box.appendChild(t);
+}
+</script>
+</body></html>

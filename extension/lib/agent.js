@@ -312,6 +312,7 @@
   function buildPrompt(p) {
     var out = ['Goal: ' + p.goal, 'Step ' + p.step + ' of ' + (p.maxSteps || MAX_STEPS) + '.'];
     if (p.note) out.push('Note from the owner: ' + p.note);
+    if (p.hint) out.push(p.hint);                     // v0.7 goal-guided replay: what this step did last time (not in micro_agent.py)
     var visited = p.visited || [];
     if (visited.length > 1) out.push('Pages so far: ' + visited.slice(-6).map(function (t) { return '"' + maskSecrets(t).slice(0, 50) + '"'; }).join(' -> '));
     out.push(pagePurpose(p.obs));
