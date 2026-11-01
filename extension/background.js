@@ -73,6 +73,13 @@
  *    (run.updateOffer -> guided_update); accepting stores the model's control as the step (templated again) and a
  *    per-recipe history entry (rec.history).
  *
+ * v0.8 phone link + fewer pings + failure evidence (docs/specs/phone_link.md): phone.js sends handoffs to the user's
+ * paired phone over the end-to-end encrypted relay (codes typed + submitted, approvals, status); keep-alive logouts are
+ * batched into the pre-flight notice (settings.immediateNotices restores per-logout notices); rec.durations flags
+ * "slower than usual" runs; a failing / needs-you step stores a local-only screenshot (storage.local shots, last 20).
+ * New host permission <all_urls> (no new install warning: the content script already runs on every http(s) site):
+ * captureVisibleTab needs it, and the relay / ntfy.sh send no CORS headers.
+ *
  * Replay of one step: wait for the tab to load -> content 'locate' (attribute
  * scoring) -> if not confident, ask the local model to pick from the shortlist
  * or say NOT_FOUND -> approval gate for dangerous clicks -> content 'act'.
@@ -91,7 +98,7 @@
  * downgrade VERIFIED to CHECK ("look at this one"), and its opinion is logged on
  * every run.
  */
-importScripts('lib/safety.js', 'lib/model.js', 'lib/period.js', 'lib/recipe.js', 'lib/agent.js');
+importScripts('lib/safety.js', 'lib/model.js', 'lib/period.js', 'lib/recipe.js', 'lib/agent.js', 'lib/phone.js');
 var S = self.AWOSSafety, M = self.AWOSModel, R = self.AWOSRecipe, PD = self.AWOSPeriod;
 // "now" for periods only (the default run period, a recording's month). Tests pin it through chrome.storage.session
 // (testNow), which web pages cannot reach; everything else uses the real clock.
@@ -765,11 +772,14 @@ function approved(run, i, target) { return !!(run.approval && run.approval.step 
 
 async function pause(run, status, pending) {
   run.status = status; run.pending = Object.assign({ nonce: nonce(), step: run.i }, pending);
+  run.pausedAt = Date.now();                     // v0.8: time waiting for a human does not count as run time
   logRun(run, 'paused: ' + pending.message);
+  if (status === 'needs_user') await captureFailure(run, 'NEEDS_YOU');
   await saveRun(run);
   await sendTab(run.tabId, { type: 'banner', text: pending.message + ' (open the AWOS popup)' }).catch(function () {});
   if (run.scheduled || pending.handoff || run.collection) notify('awos-run-' + run.id, 'AWOS Replay needs you: ' + run.recName, pending.message + ' Open the AWOS popup.');
   if (run.collection) await collOnPause(run);
+  await phoneOnPause(run).catch(function (e) { console.warn('phone', e); });
 }
 
 async function fail(run, code, reason) {
@@ -910,6 +920,8 @@ async function afterRun(run) {
   var rec = await getRec(run.recId);
   var v = run.result ? run.result.verdict : 'FAILED';
   if (rec) { rec.lastRun = { verdict: v, at: Date.now(), scheduled: !!run.scheduled, reason: run.result && run.result.reason || '' }; await putRec(rec); }
+  await phoneCheckResolved().catch(function () {});
+  await phoneRunStatus(run).catch(function (e) { console.warn('phone status', e); });
   if (run.collection) return collAfterRun(run, rec);
   if (!run.scheduled) return;
   notify('awos-run-' + run.id, 'AWOS Replay: ' + run.recName + ' ' + v,
@@ -1086,6 +1098,8 @@ async function collBegin(cId) {
       notify('awos-pre-' + c.collId, 'AWOS Replay: ' + c.name + ': log in to ' + need.length + ' portal' + (need.length === 1 ? '' : 's'),
              (ready ? ready + ' portal' + (ready === 1 ? ' is' : 's are') + ' ready and running now. ' : '') + 'Log in to ' + names
              + ' and AWOS picks ' + (need.length === 1 ? 'it' : 'them') + ' up as soon as you are in.', [{ title: 'Open the ones that need me' }]);
+      await markNotified(need);
+      await phoneLoginNotice(c.name, await recNameList(need), need.length).catch(function () {});
     }
   }
   c.phase = 'run'; await setSess('coll', c);
@@ -1178,6 +1192,7 @@ async function collFinish(c) {
   await setSess('coll', c);
   if (col) { col.last = { period: c.period, summary: sum.text, at: Date.now() }; await setLocal('collections', cols); }
   notify('awos-coll-' + c.collId, 'AWOS Replay: ' + c.name + ' (' + c.period + ')', sum.text + (c.alreadyGot ? ' (' + c.alreadyGot + ' already got earlier)' : ''));
+  await phoneCollStatus(c, col).catch(function (e) { console.warn('phone status', e); });
 }
 
 /** what one portal's run means for the checklist. */
@@ -1282,6 +1297,7 @@ var probeChain = Promise.resolve();
 function withProbeLock(fn) { var p = probeChain.then(fn, fn); probeChain = p.catch(function () {}); return p; }
 /** the recording signs in by itself (it has a password step): its start page is a login page by design. */
 function selfLogin(rec) { return (rec.steps || []).some(function (s) { return s.action === 'fill' && /password/i.test(String(s.sensitive || '')); }); }
+async function recNameList(ids) { var recs = await getLocal('recordings', {}); return ids.map(function (id) { return (recs[id] && recs[id].name) || 'a portal'; }); }
 async function recNames(ids) {
   var recs = await getLocal('recordings', {}), n = ids.map(function (id) { return (recs[id] && recs[id].name) || 'a portal'; });
   return n.length <= 1 ? n.join('') : n.slice(0, -1).join(', ') + ' and ' + n[n.length - 1];
@@ -1367,6 +1383,9 @@ async function keepAliveSweep(collId, opts) {
   if (out.aborted) await chrome.alarms.create(KEEP_ALARM + collId, { when: Date.now() + 30 * 60000 });
   else await armKeepAlive(cols[collId]);
   var fresh = out.results.filter(function (r) { return r.status === 'login' && !r.notified; }).map(function (r) { return r.recId; });
+  // v0.8 batching (default): a logout found by keep-alive is shown in the checklist and summarised ONCE at the
+  // pre-flight / run-start moment, not notified now. Options "Notify each logout right away" restores this notice.
+  if (fresh.length && (await settings()).immediateNotices !== true) return { results: out.results, aborted: out.aborted, notified: [], batched: fresh };
   if (fresh.length) {
     var names = await recNames(fresh);
     notify('awos-keep-' + collId, 'AWOS Replay: login needed for ' + col.name,
@@ -1403,8 +1422,10 @@ async function firePreflight(collId) {
   if (cols[collId]) { cols[collId].lastPreflight = { at: Date.now(), need: need, period: period }; await setLocal('collections', cols); }
   if (need.length) {
     notify('awos-pre-' + collId, 'AWOS Replay: ' + col.name + ' runs ' + new Date(runAt).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }),
-           'Log in to ' + (await recNames(need)) + ' any time before then, all in one go; the other portals are ready.', [{ title: 'Open the ones that need me' }]);
+           need.length + ' portal' + (need.length === 1 ? ' needs' : 's need') + ' a login. Log in to ' + (await recNames(need))
+           + ' any time before then, all in one go; the other portals are ready.', [{ title: 'Open the ones that need me' }]);
     await markNotified(need);
+    await phoneLoginNotice(col.name, await recNameList(need), need.length).catch(function () {});
   }
   return { results: out.results, need: need, aborted: out.aborted };
 }
@@ -1461,8 +1482,52 @@ chrome.tabs.onUpdated.addListener(function (tabId, info) {
   }).catch(function () {});
 });
 
+// ---- failure evidence (v0.8): slow runs, a screenshot when a step fails ------------------------------------------
+var SHOTS_MAX = 20, SHOTS_BYTES = 5 * 1024 * 1024;
+function fmtMs(ms) { return ms >= 60000 ? Math.round(ms / 6000) / 10 + ' min' : Math.round(ms / 100) / 10 + ' s'; }
+function median(a) { var b = a.slice().sort(function (x, y) { return x - y; }), m = b.length >> 1; return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2; }
+/** the end of a run: a screenshot for a failure, and its duration against the recipe's last 10 (slow-run alert). */
+async function runEvidence(run) {
+  var v = run.result && run.result.verdict;
+  if (/^(FAILED|MISSING|WRONG_PERIOD)$/.test(v || '')) await captureFailure(run, run.result.code === 'NEEDS_YOU' ? 'NEEDS_YOU' : v);
+  if (!/^(VERIFIED|CHECK|UNVERIFIED)$/.test(v || '')) return;           // a run that stopped early says nothing about speed
+  var rec = await getRec(run.recId);
+  if (!rec) return;
+  var ms = Math.max(0, (run.endedAt || Date.now()) - run.startedAt - (run.pausedMs || 0)), prev = rec.durations || [];
+  if (prev.length >= 3) {
+    var cfg = await settings(), med = median(prev), extra = cfg.slowRunExtraMs == null ? 180000 : +cfg.slowRunExtraMs;
+    var limit = Math.max(2 * med, med + extra);
+    if (ms > limit) {
+      run.result.slow = { ms: ms, median: med, text: 'slower than usual: ' + fmtMs(ms) + ' (usually ' + fmtMs(med) + '); the portal may be getting slower or changing' };
+      run.result.reason = [run.result.reason, run.result.slow.text].filter(Boolean).join('; ');
+      logRun(run, run.result.slow.text);
+    }
+  }
+  rec.durations = prev.concat([ms]).slice(-10);
+  await putRec(rec);
+}
+/** a picture of the run tab when a step fails / needs the user, kept ONLY in chrome.storage.local (last 20): never sent
+ *  to the phone, the relay or a model. Only possible when the run tab is the visible tab of its window; a background
+ *  tab (scheduled / collection runs) gets the note "tab not visible" instead. */
+async function captureFailure(run, why) {
+  if (run.shot && run.shot.step === run.i && run.shot.why === why) return;
+  var entry = { id: uid('shot'), runId: run.id, recName: run.recName, step: run.i, at: Date.now(), why: why }, note = '';
+  try {
+    var tab = await chrome.tabs.get(run.tabId), win = await chrome.windows.get(tab.windowId);
+    if (!tab.active || win.state === 'minimized') note = 'tab not visible';
+    else entry.dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 60 });
+  } catch (e) { note = 'screenshot not possible (' + String(e && e.message || e).slice(0, 160) + ')'; }
+  run.shot = { step: run.i, why: why, id: entry.dataUrl ? entry.id : '', note: note };
+  if (!entry.dataUrl) { logRun(run, 'no screenshot of step ' + (run.i + 1) + ': ' + note); return; }
+  var shots = [entry].concat(await getLocal('shots', [])).slice(0, SHOTS_MAX), total = 0;
+  shots = shots.filter(function (x) { total += (x.dataUrl || '').length; return total <= SHOTS_BYTES || x === entry; });
+  await setLocal('shots', shots);
+  logRun(run, 'screenshot of step ' + (run.i + 1) + ' (' + why + ') saved on this computer only (popup: Screenshot); it is never sent to your phone or anywhere else');
+}
+
 async function archive(run) {
   run.pending = null; run.endedAt = Date.now();
+  await runEvidence(run).catch(function (e) { console.warn('evidence', e); });
   await saveRun(run);
   var runs = await getLocal('runs', []); runs.unshift(run); await setLocal('runs', runs.slice(0, 20));
 }
@@ -1506,7 +1571,9 @@ async function decide(kind, runId, n, params) {
     return fail(run, 'REJECTED', 'user stopped the run at step ' + (run.i + 1));
   }
   run.status = 'running'; run.pending = null;
+  if (run.pausedAt) { run.pausedMs = (run.pausedMs || 0) + (Date.now() - run.pausedAt); run.pausedAt = 0; }
   await saveRun(run);
+  phoneCheckResolved().catch(function () {});
   await chrome.alarms.clear(COLL_WAIT + run.id).catch(function () {});
   await sendTab(run.tabId, { type: 'banner', text: '' }).catch(function () {});
   drive(run.id);
@@ -1630,7 +1697,8 @@ var HANDLERS = {
              runs: await getLocal('runs', []), settings: await settings(), claudeKeySet: !!(await getLocal('claudeKey', '')),
              pendingImport: await getSess('pendingImport'), version: chrome.runtime.getManifest().version,
              collections: await getLocal('collections', {}), collResults: await getLocal('collResults', {}), coll: await getSess('coll'),
-             portalStatus: await getLocal('portalStatus', {}) };
+             portalStatus: await getLocal('portalStatus', {}),
+             phone: await phoneSummary(), shots: (await getLocal('shots', [])).map(function (x) { return { id: x.id, runId: x.runId, recName: x.recName, at: x.at, why: x.why }; }) };
   },
   start_recording: async function (msg) { return startRecording(msg.tabId, msg.name); },
   stop_recording: async function () { return stopRecording(); },
@@ -1760,6 +1828,7 @@ var HANDLERS = {
     if (!c || c.status !== 'running') throw new Error('no collection is running');
     c.queue = c.queue.slice(0, c.idx + 1); await setSess('coll', c); return c;
   },
+  get_shot: async function (msg) { return (await getLocal('shots', [])).find(function (x) { return x.id === msg.id; }) || { error: 'that screenshot is gone (only the last 20 are kept)' }; },
   coll_clear: async function () { var c = await getSess('coll'); if (c && c.status !== 'running') await setSess('coll', null); return { ok: true }; },
 };
 // the only messages a content script may send; import_offer checks the sender is the recipe page itself
@@ -1799,3 +1868,4 @@ restoreAfterRestart();
 
 importScripts('tellit.js');          // Tell it (v0.5): goal -> agent loop -> recipe; uses the helpers above
 importScripts('guided.js');          // goal-guided runs (v0.7): period templating + model-decided steps; uses both
+importScripts('phone.js');           // phone link (v0.8): handoffs to the user's phone over the encrypted relay

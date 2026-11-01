@@ -2,6 +2,9 @@
 
 A local HTTP server (127.0.0.1, random port) serves tests/extension/pages and a
 fake OpenAI-compatible model at /v1/chat/completions (no real model, no network).
+A fake phone relay (v0.8, docs/specs/phone_link.md) answers /api/relay/<channel>/... in memory with the same JSON as the
+real one (`server.relay`: registered token hashes, to-phone / to-mac envelopes, forwarded SMS; `server.relay_status`
+= 503 makes every relay call answer "not configured"), and /ntfy/<topic> records pushes in `server.ntfy`.
 `server.overrides` swaps the file behind a path, so the same recorded URL can
 serve a renamed / deleted variant at replay time; `server.redirects` answers a path with a 302 (a portal whose
 session expired sends you to its login page), `server.auth` does the same only until a login page set the
@@ -41,6 +44,8 @@ class _Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0]
+        if path.startswith("/api/relay/"):
+            return self._relay("GET")
         self.server.hits.append(path)
         if path == "/__state.json":               # page scripts read what the test set (v0.7 invoices portal)
             return self._send(json.dumps(self.server.state).encode(), "application/json")
@@ -69,9 +74,64 @@ class _Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    # ---- fake phone relay (in memory, same JSON as the real one) ----
+    def _json(self, code, obj):
+        out = json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+    def _relay(self, method, body=None):
+        srv, rl = self.server, self.server.relay
+        parts = self.path.split("?")[0].split("/")[3:]          # <channel>/<what>[/<id>]
+        q = dict(kv.split("=", 1) for kv in (self.path.split("?", 1)[1].split("&") if "?" in self.path else []) if "=" in kv)
+        rl["calls"].append((method, "/".join(parts[1:]), body))
+        if srv.relay_status != 200:
+            return self._json(srv.relay_status, {"error": "relay not configured"})
+        if len(parts) < 2:
+            return self._json(404, {"error": "no"})
+        ch, what = parts[0], parts[1]
+        boxes = rl["boxes"].setdefault(ch, {"to-phone": [], "to-mac": [], "sms": []})
+        if what == "register" and method == "POST":           # first registration wins; another hash -> 409
+            if rl["registered"].get(ch, body.get("tokenHash")) != body.get("tokenHash"):
+                return self._json(409, {"error": "channel registered to another token"})
+            rl["registered"][ch] = body.get("tokenHash")
+            return self._json(200, {"ok": True})
+        if what not in boxes:
+            return self._json(404, {"error": "no"})
+        if method == "POST" and len(parts) == 2:
+            if any(m.get("id") == body.get("id") for m in boxes[what]):
+                return self._json(200, {"duplicate": True})
+            msg = dict(body, at=max([int(time.time() * 1000)] + [m["at"] + 1 for m in boxes[what]]))   # monotonic per list
+            boxes[what].append(msg)
+            return self._json(201, {"ok": True, "at": msg["at"]})
+        if method == "GET" and len(parts) == 2:
+            since = 0 if rl.get("ignore_since") else int(q.get("since") or 0)   # ignore_since: the client must filter
+            return self._json(200, {"messages": [m for m in boxes[what] if m["at"] > since]})
+        if method == "DELETE" and len(parts) == 3:
+            before = len(boxes[what])
+            boxes[what][:] = [m for m in boxes[what] if m.get("id") != parts[2]]
+            rl["deleted"].append((what, parts[2]))
+            return self._json(200, {"ok": True, "deleted": before - len(boxes[what])})
+        return self._json(405, {"error": "method"})
+
+    def do_DELETE(self):
+        if self.path.startswith("/api/relay/"):
+            return self._relay("DELETE")
+        self.send_error(404)
+
     def do_POST(self):
         n = int(self.headers.get("Content-Length") or 0)
-        body = json.loads(self.rfile.read(n) or b"{}")
+        raw = self.rfile.read(n) or b""
+        if self.path.startswith("/ntfy/"):
+            self.server.ntfy.append({"topic": self.path[len("/ntfy/"):], "body": raw.decode("utf-8", "replace"),
+                                     "headers": {k.lower(): v for k, v in self.headers.items()}})
+            return self._json(200, {"id": "x"})
+        if self.path.startswith("/api/relay/"):
+            return self._relay("POST", json.loads(raw or b"{}"))
+        body = json.loads(raw or b"{}")
         if self.path.rstrip("/") != "/v1/chat/completions":
             self.send_error(404)
             return
@@ -91,6 +151,15 @@ class _Handler(SimpleHTTPRequestHandler):
         self.wfile.write(out)
 
 
+def _fresh_relay():
+    return {"registered": {}, "boxes": {}, "calls": [], "deleted": []}
+
+
+def relay_box(srv, channel, what):
+    """the fake relay's list for one channel and direction ("to-phone", "to-mac", "sms"); tests append / read it."""
+    return srv.relay["boxes"].setdefault(channel, {"to-phone": [], "to-mac": [], "sms": []})[what]
+
+
 @pytest.fixture(scope="session")
 def server():
     srv = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
@@ -98,6 +167,7 @@ def server():
     srv.redirects, srv.hits, srv.auth = {}, [], {}
     srv.state = {}
     srv.verify_calls, srv.verify_answer = [], "VERIFIED: fake"
+    srv.relay, srv.relay_status, srv.ntfy = _fresh_relay(), 200, []
     srv.base = f"http://127.0.0.1:{srv.server_address[1]}"
     t = threading.Thread(target=srv.serve_forever, daemon=True)
     t.start()
@@ -118,6 +188,8 @@ def _reset_server(request):
         srv.model_answer = "NOT_FOUND"
         srv.verify_calls.clear()
         srv.verify_answer = "VERIFIED: fake"
+        srv.relay, srv.relay_status = _fresh_relay(), 200
+        srv.ntfy.clear()
     yield
 
 

@@ -92,8 +92,38 @@ cannot be re-found by itself, and to double-check the final page.</p>
   you click or type in it yourself; then this does nothing and the run waits for you as usual.</div>
 </fieldset>
 
+<fieldset id="noticeset">
+  <legend>Notifications</legend>
+  <label class="choice"><input type="checkbox" id="immediateNotices"> Notify each logout right away</label>
+  <div class="hint">Off (default): when the every-few-days login check finds a portal logged you out, it only shows in the
+  checklist, and you get ONE notice at the pre-flight / run-day moment ("2 portals need a login"). On: a notice each time.</div>
+</fieldset>
+
 <p><button id="save">Save</button><span id="status"></span></p>
+
+<fieldset id="phoneset">
+  <legend>Phone</legend>
+  <div class="hint">Answer a run from your phone: type a one-time code (or forward the SMS), approve or stop a risky click,
+  and see each run's result. Bot checks and logins still need you at this Mac. Everything goes end-to-end encrypted
+  through the AWOS relay (it cannot read it); the key is only in this browser and in the link below. The push
+  notification (ntfy.sh) only ever says "AWOS needs you": never a code, a portal name or page text. Screenshots never
+  leave this computer.</div>
+  <div id="phoneoff">
+    <label for="phoneBase">Relay address</label>
+    <input type="text" id="phoneBase" placeholder="https://awos.tirramind.com">
+    <p><button id="phonepair">Pair a phone</button></p>
+  </div>
+  <div id="phoneon" hidden>
+    <p>Scan this with your phone's camera, or open the link on your phone:</p>
+    <div id="phoneqr"></div>
+    <input type="text" id="phonelink" readonly>
+    <p><button id="phonecopy">Copy pair link</button> <button id="phoneunpair">Unpair</button></p>
+    <div class="hint" id="phonereg"></div>
+  </div>
+  <div class="hint" id="phonestatus"></div>
+</fieldset>
 <script src="lib/model.js"></script>
+<script src="lib/qr.js"></script>
 <script src="options.js"></script>
 </body>
 </html>

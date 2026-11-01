@@ -22,6 +22,7 @@ function load() {
     $('agentClaudeModel').value = s.agentClaudeModel || 'claude-haiku-5-5';
     $('noCloudSites').value = (s.noCloudSites || []).join('\n');
     $('keepTraining').checked = s.keepTraining !== false;
+    $('immediateNotices').checked = s.immediateNotices === true;
     $('rememberMe').checked = s.rememberMe !== false; $('autofillSignin').checked = s.autofillSignin !== false;
     $('keystate').textContent = st.claudeKeySet ? 'A key is saved. Leave the box empty to keep it.' : 'No key saved yet.';
     showBrain();
@@ -59,6 +60,7 @@ $('save').onclick = async function () {
                    agentBrain: ab, agentEndpoint: aep, agentModel: $('agentModel').value.trim() || 'qwen3.5-4b',
                    searchPage: /^https:\/\//.test($('searchPage').value.trim()) ? $('searchPage').value.trim() : 'https://duckduckgo.com/?q={goal}',
                    agentClaudeModel: $('agentClaudeModel').value, keepTraining: $('keepTraining').checked,
+                   immediateNotices: $('immediateNotices').checked,
                    rememberMe: $('rememberMe').checked, autofillSignin: $('autofillSignin').checked,
                    noCloudSites: $('noCloudSites').value.split(/[\s,]+/).filter(Boolean) };
   await chrome.runtime.sendMessage({ type: 'save_settings', settings: settings });
@@ -66,3 +68,34 @@ $('save').onclick = async function () {
   load();
 };
 load();
+
+// ---- Phone (v0.8, docs/specs/phone_link.md) ----
+function showPhone(ph) {
+  $('phoneon').hidden = !ph.paired; $('phoneoff').hidden = !!ph.paired;
+  $('phoneBase').value = ph.base || 'https://awos.tirramind.com';
+  $('phonestatus').className = 'hint'; $('phonestatus').textContent = '';
+  if (!ph.paired) return;
+  $('phonelink').value = ph.link;
+  try { $('phoneqr').innerHTML = AWOSQR.toSvg(ph.link, { ecc: 'M', scale: 4 }); }
+  catch (e) { $('phoneqr').textContent = 'Could not draw the QR code: ' + e.message; }
+  var reg = ph.register || {};
+  $('phonereg').className = reg.ok ? 'hint ok' : 'hint error';
+  $('phonereg').textContent = reg.ok ? 'Registered with the relay.' : reg.status === 409 ? 'This channel is already registered to another pairing (409): click Unpair, then Pair a phone again (a new channel).' : reg.status === 503 ? 'The relay is not configured yet (503). Runs work as before; the phone gets nothing until it is.'
+    : 'Could not register with the relay' + (reg.error ? ' (' + reg.error + ')' : '') + '. Runs work as before.';
+}
+function loadPhone() { chrome.runtime.sendMessage({ type: 'phone_state' }).then(showPhone); }
+$('phonepair').onclick = async function () {
+  var base = $('phoneBase').value.trim().replace(/\/+$/, '') || 'https://awos.tirramind.com';
+  if (!/^https?:\/\/[^\s/]+/.test(base)) { $('phonestatus').className = 'hint error'; $('phonestatus').textContent = 'The relay address must be http(s)://host'; return; }
+  // the relay sends no CORS headers: the worker reaches it (and ntfy.sh) through the <all_urls> host permission
+  var r = await chrome.runtime.sendMessage({ type: 'phone_pair', base: base });
+  if (r && r.error) { $('phonestatus').className = 'hint error'; $('phonestatus').textContent = r.error; return; }
+  showPhone(r);
+};
+$('phonecopy').onclick = function () {
+  navigator.clipboard.writeText($('phonelink').value).then(function () { $('phonestatus').textContent = 'Copied. Open it on your phone only.'; });
+};
+$('phoneunpair').onclick = function () {
+  chrome.runtime.sendMessage({ type: 'phone_unpair' }).then(function () { $('phoneqr').textContent = ''; $('phonelink').value = ''; loadPhone(); });
+};
+loadPhone();

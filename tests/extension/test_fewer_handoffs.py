@@ -50,7 +50,7 @@ def test_keep_alive_marks_logged_in_and_logged_out_portals_and_notifies_once(x):
     x.ctx.clear_cookies()
     sup = _supplier(x)
     _, _, pay = _record_payouts(x, "Payout report")
-    _fast(x)
+    _fast(x, immediateNotices=True)       # v0.8 batches keep-alive logouts by default (test_phone_link); this is the 0.6.1 option
     col = x.call("coll_save", name="Month-end", recIds=[sup["id"], pay["id"]])
     alarm = x.sw.evaluate("(id) => chrome.alarms.get('awos-keep:' + id)", col["id"])
     days = (alarm["scheduledTime"] / 1000 - time.time()) / 86400
