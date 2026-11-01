@@ -7,6 +7,18 @@
   Referrer-Policy: no-referrer
   X-Frame-Options: DENY
 
+# /phone/ holds the pair key (localStorage) and shows relay messages: same
+# lock-down, but it may talk to its own origin (the /api/relay/ calls) and load
+# its manifest. The pair secrets sit in the #fragment, which is never sent.
+/phone/*
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'
+  Referrer-Policy: no-referrer
+  X-Frame-Options: DENY
+  Cache-Control: no-cache
+
+/assets/phone/manifest.webmanifest
+  Content-Type: application/manifest+json
+
 # Applies to every path, /r/ included (Pages merges matching rules).
 /*
   X-Content-Type-Options: nosniff

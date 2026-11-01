@@ -13,7 +13,10 @@ Fails (exit 1) when:
     valid v1 AWOS Replay recipe under 64 KB, or /recipes/ lacks its 6 examples;
   - the recipe page scripts use innerHTML/outerHTML/insertAdjacentHTML/
     document.write (recipes are untrusted input);
-  - a required page or file is missing (/, /r/, /recipes/, /coding-agent/, _headers...).
+  - the phone page (/phone/) is not wired up: its scripts use unsafe DOM sinks,
+    its manifest is not valid JSON or names a missing icon, the page does not
+    link the manifest, or _headers lacks its CSP (connect-src 'self' only);
+  - a required page or file is missing (/, /r/, /recipes/, /coding-agent/, /phone/, _headers...).
 Pending launch items are reported but pass, so the site can be built and
 previewed before launch; `--release` (run before deploying) fails on them:
   - the INSTALL_COMMAND placeholder (fill site/src/replay_install.txt);
@@ -41,8 +44,13 @@ OPTIONAL_END = {"p", "li", "option", "tr", "td", "th", "thead", "tbody"}
 PENDING_ASSETS = {"/assets/replay/demo.mp4": "the demo video (see docs/launch/replay/demo_scripts.md)"}
 REQUIRED = ("sitemap.xml", "robots.txt", "404.html", "_headers", "assets/style.css", "index.html",
             "r/index.html", "recipes/index.html", "coding-agent/index.html", "assets/recipe-core.js",
-            "assets/recipe-page.js", "assets/replay/demo-poster.svg", "replay/privacy/index.html")
-RECIPE_SCRIPTS = ("assets/recipe-core.js", "assets/recipe-page.js")
+            "assets/recipe-page.js", "assets/replay/demo-poster.svg", "replay/privacy/index.html",
+            "phone/index.html", "assets/phone.js", "assets/phone-core.js", "assets/phone/manifest.webmanifest",
+            "assets/phone/icon-180.png", "assets/phone/icon-192.png", "assets/phone/icon-512.png")
+# Scripts that put untrusted text (shared recipes, relay messages) into the page.
+RECIPE_SCRIPTS = ("assets/recipe-core.js", "assets/recipe-page.js", "assets/phone.js", "assets/phone-core.js")
+PHONE_MANIFEST = "assets/phone/manifest.webmanifest"
+PHONE_CSP_MUST = ("default-src 'none'", "script-src 'self'", "connect-src 'self'", "frame-ancestors 'none'")
 UNSAFE_DOM = re.compile(r"\b(innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval)\b|new Function")
 RECIPE_MAX = 64 * 1024
 EXAMPLE_RECIPES = 6
@@ -141,6 +149,42 @@ def page_url(f: Path) -> str:
     return "/" + rel
 
 
+def phone_problems(parsed: dict[Path, "Page"]) -> list[str]:
+    """The /phone/ page: manifest, icons, its CSP in _headers, manifest link."""
+    out: list[str] = []
+    mf = PUBLIC / PHONE_MANIFEST
+    if mf.is_file():
+        try:
+            m = json.loads(mf.read_text(encoding="utf-8"))
+        except ValueError as e:
+            return [f"{PHONE_MANIFEST}: not JSON ({e})"]
+        if m.get("start_url") != "/phone/" or m.get("scope") != "/phone/" or m.get("display") != "standalone":
+            out.append(f"{PHONE_MANIFEST}: start_url/scope must be /phone/ and display standalone")
+        sizes = set()
+        for icon in m.get("icons", []):
+            src = str(icon.get("src", ""))
+            sizes.add(icon.get("sizes"))
+            if not target_file(src).is_file():
+                out.append(f"{PHONE_MANIFEST}: icon {src} missing")
+        if not {"192x192", "512x512"} <= sizes:
+            out.append(f"{PHONE_MANIFEST}: needs 192x192 and 512x512 icons")
+    page = parsed.get(PUBLIC / "phone" / "index.html")
+    if page is not None and "/" + PHONE_MANIFEST not in page.links:
+        out.append("phone/index.html: does not link the manifest")
+    headers = PUBLIC / "_headers"
+    if headers.is_file():
+        text = headers.read_text(encoding="utf-8")
+        block = re.search(r"^/phone/\*\n((?:[ \t]+.*\n?)+)", text, re.M)
+        csp = re.search(r"Content-Security-Policy:(.*)", block.group(1)) if block else None
+        if not csp:
+            out.append("_headers: no Content-Security-Policy for /phone/*")
+        else:
+            missing = [d for d in PHONE_CSP_MUST if d not in csp.group(1)]
+            if missing or "unsafe-" in csp.group(1):
+                out.append(f"_headers: /phone/* CSP must have {missing} and no unsafe-*")
+    return out
+
+
 def main() -> int:
     if not PUBLIC.exists():
         print("site/public missing: run python3 site/build.py first")
@@ -221,6 +265,8 @@ def main() -> int:
             m = UNSAFE_DOM.search(code)
             if m:
                 problems.append(f"{js}: uses {m.group(0)} (recipes are untrusted; use textContent)")
+
+    problems.extend(phone_problems(parsed))
 
     for token, fix in (("EFFECTIVE_DATE", "the effective date"), ("CONTACT_EMAIL", "a contact address")):
         n = sum(f.read_text(encoding="utf-8").count(token) for f in pages)

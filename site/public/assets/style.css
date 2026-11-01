@@ -205,3 +205,47 @@ footer.site a{color:var(--muted)}
 .callout.bad ul{margin:0 0 8px;padding-left:20px;color:var(--fail)}
 #faq details{max-width:80ch}
 @media (max-width:860px){.steps.three{grid-template-columns:1fr}.r-meta{grid-template-columns:1fr}}
+
+/* /phone/: the AWOS phone link (mobile first, installable). */
+.phone{max-width:560px;margin:0 auto;padding-block:12px 48px}
+.ph-top{display:flex;justify-content:space-between;align-items:center;gap:12px;padding-block:6px}
+.ph-live{font:12px var(--mono);color:var(--muted)}
+.phone h1{font-size:clamp(28px,8vw,40px);margin:10px 0 14px}
+.phone .ph-sec{padding-block:0;border-top:0}
+.phone .lede{font-size:17px;margin-bottom:14px}
+.phone .sub{margin-bottom:14px}
+.ph-steps{padding-left:22px;display:grid;gap:8px;margin:0 0 16px}
+.ph-paste{display:grid;gap:8px;margin-bottom:8px}
+.ph-paste label,.ph-code label{font-weight:600;font-size:14px}
+.phone input{font:16px var(--body);padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);width:100%;min-height:48px}
+.phone .btn{min-height:48px;justify-content:center}
+.phone .btn.small{min-height:32px;padding:4px 10px;font-size:13px}
+.phone .btn:disabled{opacity:.55;cursor:default}
+.ph-needs{display:grid;gap:14px;margin-bottom:14px}
+.ph-card{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--cost);border-radius:10px;padding:16px;display:grid;gap:10px}
+.ph-card>*,.phone input{min-width:0}
+.phone form{background:none;border:0;border-radius:0;padding:0}
+.ph-card.ph-captcha,.ph-card.ph-login{border-left-color:var(--muted)}
+.ph-card.ph-dim{opacity:.6}
+.ph-card p{margin:0}
+.ph-card-head{display:flex;justify-content:space-between;gap:8px}
+.ph-portal{font:700 22px/1.2 var(--display);margin:0;overflow-wrap:anywhere}
+.ph-text{overflow-wrap:anywhere;white-space:pre-wrap}
+.ph-code{display:grid;grid-template-columns:1fr;gap:8px}
+.ph-code input{font:600 24px var(--mono);letter-spacing:.2em;text-align:center}
+.ph-card .cta .btn{flex:1}
+.linkish{background:none;border:0;color:var(--accent);font:14px var(--body);text-decoration:underline;cursor:pointer;padding:4px 0;justify-self:start}
+.ph-at{font:12px var(--mono);color:var(--muted)}
+.ph-empty{background:var(--surface);border:1px dashed var(--line);border-radius:10px;padding:16px;color:var(--muted);margin:0 0 14px}
+.ph-status{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px}
+.ph-summary{font:600 18px var(--display);margin:4px 0 8px}
+.ph-items{list-style:none;padding:0;margin:0 0 6px;display:grid;gap:8px}
+.ph-items li{overflow-wrap:anywhere}
+.ph-detail{display:block;color:var(--muted);font-size:14px}
+.pill.fail{color:var(--fail)}
+.ph-guide{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin-bottom:12px}
+.ph-guide summary{font-weight:600;cursor:pointer;min-height:32px}
+.ph-guide p{margin:10px 0}
+.ph-h{font:600 18px var(--display);margin:18px 0 8px}
+.ph-copyable{font:13px var(--mono);background:var(--code);border-radius:4px;padding:2px 6px;overflow-wrap:anywhere;user-select:all;-webkit-user-select:all}
+.ph-forget{margin-top:24px}

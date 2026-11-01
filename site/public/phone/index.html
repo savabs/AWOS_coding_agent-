@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>AWOS on your phone</title>
+<meta name="description" content="Answer AWOS Replay from your phone: type a 2FA code, approve a step, see how this month&#x27;s portal chores went. Messages are end-to-end encrypted between your Mac and this page.">
+<link rel="canonical" href="https://awos.tirramind.com/phone/">
+<meta property="og:title" content="AWOS on your phone">
+<meta property="og:description" content="Answer AWOS Replay from your phone: type a 2FA code, approve a step, see how this month&#x27;s portal chores went. Messages are end-to-end encrypted between your Mac and this page.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://awos.tirramind.com/phone/">
+<meta name="robots" content="index,follow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="manifest" href="/assets/phone/manifest.webmanifest">
+<meta name="theme-color" content="#1f6b52">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="AWOS">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="apple-touch-icon" href="/assets/phone/icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/assets/phone/icon-192.png">
+</head>
+<body>
+<main id="main" class="wrap">
+<div class="phone">
+  <div class="ph-top">
+    <span class="brand">AWOS<span>.</span> <small>phone</small></span>
+    <span id="ph-live" class="ph-live" role="status" aria-live="polite"></span>
+  </div>
+  <h1 id="ph-title">AWOS on your phone</h1>
+  <noscript><p class="sub">This page needs JavaScript. It runs only on your phone; the key in the pair link never leaves it.</p></noscript>
+
+  <!-- Not paired -->
+  <section id="ph-unpaired" class="ph-sec" hidden>
+    <p class="lede">Not paired with a Mac yet.</p>
+    <ol class="ph-steps">
+      <li>On your Mac, open AWOS Replay and choose <b>Pair a phone</b>.</li>
+      <li>Scan the QR code with this phone's camera, or open the pair link on this phone.</li>
+      <li>This page then remembers the Mac. Add it to your home screen (Safari: Share → Add to Home Screen; Chrome: ⋮ → Add to Home screen / Install app).</li>
+    </ol>
+    <p class="sub">Opened from the home screen and still not paired? The home-screen app keeps its own storage on iPhone. Copy the pair link from your Mac and paste it here:</p>
+    <form id="ph-paste" class="ph-paste" autocomplete="off">
+      <label for="ph-link">Pair link</label>
+      <input id="ph-link" name="link" type="url" inputmode="url" placeholder="https://awos.tirramind.com/phone/#c=…" autocapitalize="off" spellcheck="false">
+      <button class="btn primary" type="submit">Pair</button>
+    </form>
+    <p id="ph-pair-err" class="status err" role="alert"></p>
+  </section>
+
+  <!-- Paired -->
+  <section id="ph-paired" class="ph-sec" hidden>
+    <div id="ph-needs" class="ph-needs" aria-live="polite"></div>
+    <p id="ph-empty" class="ph-empty">Nothing needs you right now. Keep this page open during a run, or turn on alerts below.</p>
+
+    <div class="ph-status" id="ph-status-box" hidden>
+      <div class="eyebrow">Latest run</div>
+      <p id="ph-summary" class="ph-summary"></p>
+      <ul id="ph-items" class="ph-items"></ul>
+      <p id="ph-status-at" class="ph-at"></p>
+    </div>
+
+    <details class="ph-guide" id="alerts">
+      <summary>Get alerts on this phone (ntfy)</summary>
+      <p>When a run needs you, your Mac sends a short alert through <a href="https://ntfy.sh/">ntfy</a>. The alert only says "AWOS needs you: open the AWOS phone page". No codes, no portal names.</p>
+      <p>Your topic: <code id="ph-topic" class="ph-copyable"></code> <button class="btn ghost small" type="button" data-copy="ph-topic">Copy</button></p>
+      <p><b>iPhone:</b> install <i>ntfy</i> from the App Store → open it → <b>+</b> → paste the topic → leave the server as <code>ntfy.sh</code> → <b>Subscribe</b>. Allow notifications when asked.</p>
+      <p><b>Android:</b> install <i>ntfy</i> from Google Play or F-Droid → <b>+</b> → paste the topic → <b>Subscribe</b>. Allow notifications when asked.</p>
+      <p class="sub">Tapping an alert opens this page. Anyone who knows the topic can read or send alerts on it, which is why it carries nothing private.</p>
+    </details>
+
+    <details class="ph-guide" id="sms">
+      <summary>Forward SMS codes automatically</summary>
+      <p class="callout bad">Forwarded texts are the one part that is <b>not</b> end-to-end encrypted: an iPhone Shortcut cannot encrypt. The text goes over HTTPS to the AWOS relay, is cut to 500 characters, kept at most 10 minutes and deleted as soon as your Mac reads it. Forward only texts with codes.</p>
+      <p>Address: <code id="ph-sms-url" class="ph-copyable"></code> <button class="btn ghost small" type="button" data-copy="ph-sms-url">Copy</button></p>
+      <p>Header <code>X-AWOS-Token</code>: <code id="ph-sms-token" class="ph-copyable"></code> <button class="btn ghost small" type="button" data-copy="ph-sms-token">Copy</button></p>
+
+      <h2 class="ph-h">iPhone (Shortcuts)</h2>
+      <ol class="ph-steps">
+        <li>Open <b>Shortcuts</b> → <b>Automation</b> → <b>+</b> (New Automation) → <b>Message</b>.</li>
+        <li><b>Message Contains</b>: <code>code</code>. Choose <b>Run Immediately</b> (turn off <i>Notify When Run</i> if you like) → <b>Next</b>.</li>
+        <li><b>New Blank Automation</b> → <b>Add Action</b> → search <b>Get Contents of URL</b>.</li>
+        <li>Tap the URL and paste the address above.</li>
+        <li>Tap <b>›</b>: <b>Method</b> = POST. <b>Headers</b> → Add new header: key <code>X-AWOS-Token</code>, value = the token above.</li>
+        <li><b>Request Body</b> = JSON → Add new field → Text: key <code>text</code>, value = tap and choose the <b>Shortcut Input</b> variable, then tap it and pick <b>Content</b> (the message text). → <b>Done</b>.</li>
+        <li>Repeat steps 1 to 6 with <code>OTP</code> and <code>verification</code> (one word per automation: Shortcuts matches one phrase each).</li>
+      </ol>
+
+      <h2 class="ph-h">Android (MacroDroid)</h2>
+      <ol class="ph-steps">
+        <li>Install <b>MacroDroid</b> from Google Play → <b>Add Macro</b>.</li>
+        <li><b>Trigger</b> + → <b>Phone/SMS</b> → <b>SMS Received</b> → Any contact → <b>Text contains</b>: <code>code</code> (add more triggers for <code>OTP</code>, <code>verification</code>). Allow the SMS permission.</li>
+        <li><b>Action</b> + → <b>Connectivity</b> → <b>HTTP Request</b>. Method <b>POST</b>, URL = the address above.</li>
+        <li><b>Headers</b> tab: add <code>X-AWOS-Token</code> = the token above.</li>
+        <li><b>Body</b>: content type <code>text/plain</code>, body = the <code>[sms_message]</code> magic text (tap the ⋯ / magic text button → SMS message text).</li>
+        <li>Name it "AWOS codes" → save (✓). Keep MacroDroid allowed to run in the background (Settings → Battery → no restrictions).</li>
+      </ol>
+
+      <h2 class="ph-h">Android (Tasker, alternative)</h2>
+      <ol class="ph-steps">
+        <li><b>Profiles</b> + → <b>Event</b> → <b>Phone</b> → <b>Received Text</b> → Type SMS; Content <code>*code*/*OTP*/*verification*</code>.</li>
+        <li>New task → + → <b>Net</b> → <b>HTTP Request</b>: Method POST, URL = the address above, Headers <code>X-AWOS-Token:</code> + the token, Body <code>%SMSRB</code>, Mime Type <code>text/plain</code>.</li>
+        <li>Back out to save; make sure the profile is on.</li>
+      </ol>
+      <p class="sub">Test it: text yourself "test code 1234". Within a few seconds your Mac's AWOS Replay shows it under Phone.</p>
+    </details>
+
+    <details class="ph-guide" id="about">
+      <summary>How this works</summary>
+      <p>Your Mac and this page share a secret key from the pair link. The part after <code>#</code> is never sent to any server. Messages between them go through the AWOS relay already encrypted (AES-GCM), are kept at most 10 minutes and are deleted once handled. Captchas and logins cannot be done from here yet: those cards tell you which portal to finish at your Mac.</p>
+    </details>
+
+    <div class="cta ph-forget"><button class="btn ghost" type="button" id="ph-forget">Forget this Mac</button></div>
+  </section>
+  <p id="ph-msg" class="status" role="status" aria-live="polite"></p>
+</div>
+</main>
+<script type="module" src="/assets/phone.js"></script>
+</body>
+</html>

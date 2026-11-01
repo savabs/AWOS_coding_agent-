@@ -5,11 +5,12 @@ The site for **AWOS Replay** ("show it once, it does it forever": a Chrome exten
 Plain HTML and CSS, no framework, no external JS.
 
 - `src/partials/` holds the shared head, header and footer.
-- `src/pages/` has one file per page. Each starts with a `<!--meta ... -->` block (title, description, layout, section, optional script, optional `module: yes`). `pages/docs/*.html` use the docs layout, which adds the sidebar and previous/next links.
+- `src/pages/` has one file per page. Each starts with a `<!--meta ... -->` block (title, description, layout, section, optional script, optional `module: yes`, optional `manifest:` for an installable page). `pages/docs/*.html` use the docs layout, which adds the sidebar and previous/next links; `layout: app` (used by `/phone/`) drops the site header and footer.
   - `index.html`: AWOS Replay landing (how it works, demo video slot, free/Pro, install, waitlist).
   - `recipes.html` (`/recipes/`): gallery of the 6 example recipes in `src/recipes/examples.json` (fictional `example.com` sites).
   - `r.html` (`/r/`): the shared-recipe page. See "Recipe links" below.
   - `coding-agent.html` (`/coding-agent/`): the previous home page, unchanged apart from its title.
+  - `phone.html` (`/phone/`): the AWOS phone link. Answer a run's 2FA code or approval from a phone; installable (manifest + icons in `assets/phone/`), `phone.js` + `phone-core.js`, own CSP in `_headers`. Talks to `functions/api/relay/` (KV `RELAY`, optional). Protocol, SMS forwarding guides and owner steps: `docs/launch/phone_link.md`.
   - `replay/privacy.html` (`/replay/privacy/`): the extension's privacy policy (the Chrome Web Store listing links here). `EFFECTIVE_DATE` and `CONTACT_EMAIL` are placeholders.
 - `src/assets/` has `style.css` (the design tokens, light and dark themes), the form scripts (`access.js`, `waitlist.js`, `replay-waitlist.js`, `pro.js`) and the recipe code (`recipe-core.js`, `recipe-page.js`). It is copied to `public/assets/`.
 - `src/replay_install.txt`: the AWOS Replay install command shown on `/` and `/r/`. It installs from `main`, so it works only after `scripts/install_replay.sh` is merged there.
@@ -17,7 +18,7 @@ Plain HTML and CSS, no framework, no external JS.
 - `build.py` assembles everything into `public/**` and writes `sitemap.xml` and `robots.txt`. It fills `{{replay_install}}` and `<!--RECIPE_CARDS-->` and encodes each example recipe into its `/r/#...` link. Set `SITE_URL` for canonical and sitemap URLs (default `https://awos.tirramind.com`). Recipe share links are `https://awos.tirramind.com/r/#<payload>`; the `/r/` page only uses `location.origin`, so it works the same on `awos-site.pages.dev` and `localhost:8000`.
 - `check_site.py` checks the built site: every internal link and `#anchor` resolves, every `/r/#...` link decodes to a valid v1 recipe under 64 KB, `/recipes/` has 6 of them, no off-site `<script src>`, the recipe scripts never use `innerHTML`, tags nest correctly, each page has a title, a meta description and one `<h1>`. Launch items still missing (the `INSTALL_COMMAND` placeholder, the demo video, the privacy policy date and contact) are listed as PENDING; `check_site.py --release` fails on them.
 - `functions/api/request-access.js` is a Cloudflare Pages Function. It stores form submissions in a KV namespace and lists them for the owner.
-- `tests/`: `npm test` (`node --test`, Node >= 20, no dependencies): the Pages Functions and the recipe decode/validate/describe logic.
+- `tests/`: `npm test` (`node --test`, Node >= 20, no dependencies): the Pages Functions, the phone relay and phone-link crypto, and the recipe decode/validate/describe logic.
 
 Build, check, test and preview locally:
 
@@ -101,6 +102,8 @@ Coding-agent waitlist records (`wl:e:<email>` or `wl:a:<ts>:<rand>`): `{form, se
 `role` is one of solo_dev, team_dev, founder, researcher, other; `why` one of privacy, cost, offline, speed,
 curiosity, other; `segment` is derived from both (privacy_team, privacy_individual, cost_sensitive, local_builder,
 unclassified). Discovery plan: `docs/launch/discovery/`.
+
+Phone relay (optional KV `RELAY`): `npx wrangler kv namespace create RELAY`, bind it as `RELAY` (dashboard or `wrangler.toml`), deploy. Without it `/api/relay/*` answers 503. See `docs/launch/phone_link.md`.
 
 `USAGE` and `LICENSES` KV bindings are optional; see `docs/launch/paddle_setup.md` section 3.
 
