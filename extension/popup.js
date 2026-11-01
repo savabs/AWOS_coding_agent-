@@ -285,12 +285,29 @@ function renderRun() {
       return 'Step ' + (o.step + 1) + ': the recipe clicked ' + o.from + '; this run the model chose the ' + (o.to.role || 'control') + ' "' + o.to.name + '"';
     }).join('. ') + '. The run was VERIFIED. Use the new step from now on?';
   }
+  var sh = run.shot || {};                  // v0.8: a screenshot of the failing step, stored locally only
+  $('shotlink').hidden = !sh.id;
+  if (sh.id) $('shotlink').href = 'shot.html?id=' + encodeURIComponent(sh.id);
+  $('shotnote').textContent = !sh.id && sh.note ? 'No screenshot: ' + sh.note : '';
   var ch = $('checks'); ch.textContent = '';
   ((run.result && run.result.checks) || []).forEach(function (c) {
     ch.appendChild(el('li', { class: c.ok ? 'ok' : 'bad' }, c.kind + ': ' + c.expected + (c.kind === 'download' && c.actual ? ' (' + c.actual + ')' : '')));
   });
   var log = $('log'); log.textContent = '';
   run.log.slice(-40).forEach(function (l) { log.appendChild(el('li', null, l.text)); });
+}
+
+/** v0.8: the phone link's state in one line (paired? relay reachable? waiting on the phone?). */
+function renderPhone() {
+  var ph = state.phone || {}, line = $('phoneline');
+  line.hidden = !ph.paired;
+  if (!ph.paired) return;
+  var rl = ph.relay || ph.register || {}, bits = ['Phone paired'];
+  if (rl.status === 503) bits.push('the relay is not configured (503): handoffs stay here on the Mac');
+  else if (rl.error) bits.push('relay problem: ' + rl.error + ' (handoffs stay here on the Mac)');
+  if (ph.need) bits.push('waiting for your phone (' + ph.need.kind + (ph.need.seen ? ', seen' : '') + ')');
+  line.textContent = bits.join('; ');
+  line.className = 'meta' + (rl.error ? ' warn' : '');
 }
 
 function describeStep(s) {
@@ -328,7 +345,7 @@ function render() {
   var rs = state.recState, mine = rs && rs.tabId === targetTab;
   $('rec').hidden = !!rs; $('stop').hidden = !rs;
   $('recinfo').textContent = rs ? (mine ? 'Recording: ' : 'Recording another tab: ') + (rs.rec.steps.length - 1) + ' actions' : '';
-  renderImport(); renderRecordings(); renderRun(); renderCollections();
+  renderImport(); renderRecordings(); renderRun(); renderCollections(); renderPhone();
 }
 
 // ---- Collections: the monthly checklist (v0.6) -------------------------------------------------------------

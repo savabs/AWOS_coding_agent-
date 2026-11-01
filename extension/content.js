@@ -332,6 +332,21 @@
     }).map(function (el) { return { loc: L.describe(el), reason: S.sensitiveField(el) }; });
   }
 
+  /** v0.8 phone link: the one-time code the user sent from their phone (or an SMS they forwarded) goes into the
+   *  page's one-time-code field, then Enter / the form's default button, as a person would. Only on a page that has
+   *  such a field; the value is never kept or sent anywhere. Messages come only from the extension's own worker. */
+  function phoneCode(code, reply) {
+    code = String(code || '');
+    if (!/^[A-Za-z0-9]{4,8}$/.test(code)) return reply({ ok: false, error: 'not a code' });
+    var el = P && P.otpField();
+    if (!el) return reply({ ok: false, error: 'no one-time-code field on this page' });
+    el.scrollIntoView({ block: 'center', inline: 'nearest' });
+    setValue(el, code);
+    code = '';
+    reply({ ok: true, field: L.accName(el) || 'code field', url: location.href });   // reply first: submitting may unload the page
+    setTimeout(function () { pressEnter(el); }, 0);
+  }
+
   function banner(text) {
     var b = document.getElementById('__awos_banner');
     if (!text) { if (b) b.remove(); return; }
@@ -366,6 +381,7 @@
       case 'agent_act': agentAct(msg, reply); return;
       case 'agent_secrets': reply({ fields: agentSecrets() }); return;
       case 'banner': banner(msg.text); reply({ ok: true }); return;
+      case 'phone_code': phoneCode(msg.code, reply); return;   // v0.8: the user's own code, sent from their phone
     }
   });
 

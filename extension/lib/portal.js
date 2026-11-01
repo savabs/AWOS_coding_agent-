@@ -7,6 +7,7 @@
  *      "verify you are human" style text. Never solved, clicked or bypassed: the user does it.
  *      otp:     a visible one-time-code field (autocomplete=one-time-code, "verification code", "2FA", ...)
  *      login:   a visible password field, or a "your session expired / log in again" text
+ *  otpField()  -> the visible one-time-code field (the same rule as pageKind's otp), or null (v0.8 phone link)
  *  coveredBy(el) -> the overlay / dialog element drawn over el's centre, or null
  *  blockers()   -> visible modals, overlays and cookie / consent banners on the page now
  *  unblock()    -> {dismissed: [{name, kind, text}], blocked: {kind, text, controls[]} | null}
@@ -78,8 +79,7 @@
       return out;
     }
     var fields = L.deepAll('input').filter(vis);
-    var otp = null, otpWhy = '';
-    fields.some(function (el) { var r = S.sensitiveField(el); if (r && OTP_REASON.test(r)) { otp = el; otpWhy = r; return true; } return false; });
+    var otp = otpField(fields), otpWhy = otp ? S.sensitiveField(otp) : '';
     if (otp) { out.kind = 'otp'; out.why = 'a one-time code field ("' + (L.accName(otp) || otpWhy) + '")'; return out; }
     if (fields.some(function (el) { return (el.getAttribute('type') || '').toLowerCase() === 'password'; })) {
       out.kind = 'login'; out.why = 'a password field'; return out;
@@ -87,6 +87,11 @@
     var ex = EXPIRED_TEXT.exec(text);
     if (ex) { out.kind = 'login'; out.why = '"' + ex[0] + '"'; }
     return out;
+  }
+
+  /** the visible one-time-code field on the page, or null (v0.8: a code from the user's phone is typed into it). */
+  function otpField(fields) {
+    return (fields || L.deepAll('input').filter(vis)).find(function (el) { var r = S.sensitiveField(el); return !!r && OTP_REASON.test(r); }) || null;
   }
 
   /** the topmost element at viewport point (x, y), through OPEN shadow roots. */
@@ -234,6 +239,7 @@
   }
 
   root.AWOSPortal = {
+    otpField: otpField,
     DISMISS_RE: DISMISS_RE, CONSENT_RE: CONSENT_RE, NEVER_RE: NEVER_RE, REMEMBER_RE: REMEMBER_RE, SIGNIN_RE: SIGNIN_RE,
     pageKind: pageKind, coveredBy: coveredBy, blockers: blockers, unblock: unblock, allowed: allowed,
     rememberMe: rememberMe, autofillSignin: autofillSignin, autofilled: autofilled, rememberLabel: checkboxName,

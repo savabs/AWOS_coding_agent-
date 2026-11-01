@@ -136,6 +136,32 @@ A recipe recorded in October that clicked "Invoice September 2026" no longer cli
   run and the checklist say **Wrong period**, not Got.
 - Details: `docs/specs/goal_guided.md`.
 
+## 4e. Answer from your phone, fewer pings, failure evidence (v0.8)
+- **Pair a phone** (Options -> **Phone**): scan the QR code with your phone's camera, or **Copy pair link** and open
+  it on the phone (an iPhone home-screen app needs the pasted link). From then on, when a run stops for you:
+  - **a one-time code**: type it on the phone page, or forward the code SMS to it (the page explains how). AWOS types
+    it into the portal's code field and submits it, as you would, and the run goes on. Only an SMS that arrived after
+    the run asked for the code is used.
+  - **an approval** (pay / delete / send ...): Approve or Stop on the phone, exactly like the popup buttons.
+  - **a bot check or a login**: the phone shows it; you still do it at the Mac.
+  - At the end of every run / collection the phone page shows the result per portal.
+  The relay (awos.tirramind.com) only carries encrypted messages it cannot read; the key is in your browser and in the
+  pair link only. Your phone rings through ntfy.sh with one fixed text, "AWOS needs you: open the AWOS phone page":
+  never a code, a portal name or page text. If the relay is down or not set up, everything works on the Mac as before
+  (the popup says so). **Unpair** wipes the pairing.
+- **Fewer pings (on by default)**: logouts found by the every-few-days login check no longer notify one by one; they
+  show in the checklist and you get ONE notice at the pre-flight / run-day moment ("2 portals need a login").
+  Options -> Notifications -> "Notify each logout right away" brings the old behaviour back.
+- **Slower than usual**: each recipe remembers its last 10 run times (time waiting for you does not count). A run that
+  takes more than twice the usual time, and at least 3 minutes more, is marked "slower than usual" in its verdict and on
+  the phone: often the first sign that a portal is changing.
+- **Screenshot on failure**: when a step fails or needs you, AWOS keeps a picture of the run tab (popup: **Screenshot
+  of the failure**; the last 20 are kept). Only possible when the run tab is the visible tab of its window: scheduled
+  and collection runs work in background tabs, so their log says "tab not visible". Screenshots stay on this computer;
+  they are never sent to the phone, the relay or a model. A screenshot is a picture of the page as it was, so anything
+  on screen (an account number, a balance) is in it.
+- Details: `docs/specs/phone_link.md`.
+
 ## 5. Send the results back
 Click **Export run log** in the popup and send the JSON file.
 - It contains, per run: the verdict, how each step was found, and every model call (the candidate button names it saw and
