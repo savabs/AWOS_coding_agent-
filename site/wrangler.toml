@@ -31,9 +31,9 @@ id = "7ed8feebbe6147499b5b705d0d25d19f"
 # KV namespace, variable name RELAY) or uncomment this block with the real id.
 # Protocol and limits: docs/launch/phone_link.md
 #
-# [[kv_namespaces]]
-# binding = "RELAY"        # phone relay: functions/api/relay/[[path]].js
-# id = "<id from: npx wrangler kv namespace create RELAY>"
+[[kv_namespaces]]
+binding = "RELAY"        # phone relay: functions/api/relay/[[path]].js (created 2026-11-02)
+id = "03986d22c71248fb9ef691af87b814ad"
 
 [vars]
 # sandbox -> sandbox-api.paddle.com + Paddle.Environment "sandbox"; live -> api.paddle.com.
