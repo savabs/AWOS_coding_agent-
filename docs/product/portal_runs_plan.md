@@ -1,6 +1,6 @@
 # Portal runs: product plan (2026-11-02)
 
-From 14 logged discovery conversations (Reddit: r/nocode, r/RPA, r/zapier, and replies; tracker = claude.ai artifact "Talk to Users
+From 13 logged discovery conversations (Reddit: r/nocode, r/RPA, r/zapier, and replies; tracker = claude.ai artifact "Talk to Users
 Kit", collection `convos`).
 
 **Product.** For people who log into many supplier / partner portals every month to collect invoices, statements or
