@@ -13,7 +13,7 @@ missing, and never fails silently.
 | Pause on login / code / captcha, resume without redoing work (3) | built (0.6) |
 | 2FA from the phone; SMS-only MFA blocks even RPA teams (5) | built (0.8); not yet tested for real |
 | Unexpected pop-ups, incl. "accept new terms" (5) | built (0.9): agent brain reads unknown pop-ups; terms / consent / payment always stop |
-| Never trust a green run: the result really landed (5); per step too: expect X (e.g. "success"), and if something else appeared, read it, class it error / warning, act on it; capped retries and scrolls so a run never loops | files: built (0.9) size + content checks, "Not a document"; end of run: final URL + expected texts, retried once; caps: one retry after a pop-up, 5 model-chosen steps. Gap: no check after each step, and no reading of the error / warning that appeared instead |
+| Never trust a green run: the result really landed (5); per step too: expect X (e.g. "success"), and if something else appeared, read it, class it error / warning, act on it; capped retries and scrolls so a run never loops, caps set per portal while testing it or read from the page ("page 1 of 5") | files: built (0.9) size + content checks, "Not a document"; end of run: final URL + expected texts, retried once; caps: one retry after a pop-up, 5 model-chosen steps. Gap: no check after each step, and no reading of the error / warning that appeared instead |
 | Flag what is missing (2) | built (collection checklist) |
 | New-tab PDFs, incl. tabs opening behind the main window (3) | built (0.6) |
 | One sitting, no nagging every few days (1, strongly) | built (0.8) |
