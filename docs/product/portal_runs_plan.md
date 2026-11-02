@@ -1,6 +1,6 @@
 # Portal runs: product plan (2026-11-02)
 
-From 9 logged discovery conversations (Reddit: r/nocode, r/RPA, and replies; tracker = claude.ai artifact "Talk to Users
+From 12 logged discovery conversations (Reddit: r/nocode, r/RPA, r/zapier, and replies; tracker = claude.ai artifact "Talk to Users
 Kit", collection `convos`).
 
 **Product.** For people who log into many supplier / partner portals every month to collect invoices, statements or
@@ -22,6 +22,7 @@ missing, and never fails silently.
 | Wait for a state (spinner gone, button enabled), not delays (3) | built (0.9): wait until usable before each action |
 | E-mail as the cheap door (codes and documents) (2) | gap |
 | Keyboard / Enter fallback (1) | gap (small) |
+| Pull values into a sheet / CSV, not just download files (daily ops stats; event details) (2) | not in this plan yet: runs are built around documents |
 | What happens to the files after (rename, folder, accountant) | unknown: answers pending |
 | Will they pay; why not Dext / Hubdoc | unknown: answers pending |
 
