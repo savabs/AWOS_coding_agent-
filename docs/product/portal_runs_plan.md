@@ -1,6 +1,6 @@
 # Portal runs: product plan (2026-11-02)
 
-From 13 logged discovery conversations (Reddit: r/nocode, r/RPA, r/zapier, and replies; tracker = claude.ai artifact "Talk to Users
+From 14 logged discovery conversations (Reddit: r/nocode, r/RPA, r/zapier, and replies; tracker = claude.ai artifact "Talk to Users
 Kit", collection `convos`).
 
 **Product.** For people who log into many supplier / partner portals every month to collect invoices, statements or
@@ -17,13 +17,14 @@ missing, and never fails silently.
 | Flag what is missing (2) | built (collection checklist) |
 | New-tab PDFs, incl. tabs opening behind the main window (3) | built (0.6) |
 | One sitting, no nagging every few days (1, strongly) | built (0.8) |
-| Never miss a cycle (portal keeps only 3 months) (1) | built (0.9): catch-up of missed months in collections |
-| Fast inside short sessions (5-min idle logout) (2) | mostly; unmeasured on a real portal |
+| Never miss a cycle (portal keeps only 3 months; bit one user twice a year after time away, support took 4-5 days while accounting chased) (1, strong) | built (0.9): catch-up of missed months in collections |
+| Fast inside short sessions (5-min idle logout; a timeout kills the code too, so login + new code + wait, up to 3 loops) (2) | mostly; unmeasured on a real portal |
 | Wait for a state (spinner gone, button enabled), not delays (3) | built (0.9): wait until usable before each action |
 | E-mail as the cheap door (codes, documents, "your invoice is ready" links that land on a login) (3) | gap |
 | Keyboard / Enter fallback, as a backup blended with clicks (arrow keys to scroll, visual match to find the item) (1, RPA dev) | gap (small) |
 | What happens to the files after (rename, folder, accountant) | unknown: answers pending |
-| Will they pay; why not Dext / Hubdoc | unknown: answers pending |
+| Will they pay; why not Dext / Hubdoc (1, strong: paid, dropped after 2 months) | one answer: it covered ~4 of 12 vendors (big utilities), not the small / 2FA / timeout ones, "paying for the easy part"; price not asked yet |
+| Logins stay on the user's computer (an incumbent storing logins on its servers made the finance person nervous) (1, strong) | by design: runs in the user's own browser |
 
 ## Priorities
 - **P0** (before a real tester) **- done in 0.9** (tests: `tests/extension/test_portal_p0.py`; untested on a real portal): real file checks (bytes, PDF/CSV by content, not a saved login/error page); AI-read
