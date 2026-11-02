@@ -21,7 +21,7 @@ missing, and never fails silently.
 | Fast inside short sessions (5-min idle logout) (2) | mostly; unmeasured on a real portal |
 | Wait for a state (spinner gone, button enabled), not delays (3) | built (0.9): wait until usable before each action |
 | E-mail as the cheap door (codes, documents, "your invoice is ready" links that land on a login) (3) | gap |
-| Keyboard / Enter fallback (1) | gap (small) |
+| Keyboard / Enter fallback, as a backup blended with clicks (arrow keys to scroll, visual match to find the item) (1, RPA dev) | gap (small) |
 | What happens to the files after (rename, folder, accountant) | unknown: answers pending |
 | Will they pay; why not Dext / Hubdoc | unknown: answers pending |
 
