@@ -22,7 +22,6 @@ missing, and never fails silently.
 | Wait for a state (spinner gone, button enabled), not delays (3) | built (0.9): wait until usable before each action |
 | E-mail as the cheap door (codes and documents) (2) | gap |
 | Keyboard / Enter fallback (1) | gap (small) |
-| Pull values into a sheet / CSV, not just download files (daily ops stats; event details) (2) | not in this plan yet: runs are built around documents |
 | What happens to the files after (rename, folder, accountant) | unknown: answers pending |
 | Will they pay; why not Dext / Hubdoc | unknown: answers pending |
 
