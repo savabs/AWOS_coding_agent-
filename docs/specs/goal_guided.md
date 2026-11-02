@@ -144,6 +144,26 @@ model chose the button "Oct-2026 Invoice". The run was VERIFIED. Use the new ste
 Either way `rec.history` (last 20) records when, which period, which step, from what to what, and the model's reason;
 the popup lists the last five under the recipe's **Period** section.
 
+## 5. Catch up on missed months (0.9)
+
+Some portals keep only the last few months: a missed cycle is lost. For a recipe in a collection, after a run got the
+current period's file (verdict VERIFIED / CHECK, download check passed, content checked as in `portal_run.md` 7), AWOS
+looks on the same listing page for earlier periods within the collection's lookback (`catchUpMonths`, default 3,
+0-12; `catchUp: false` turns it off; popup: collection -> **Missed months**) that are not **Got** in the collection's
+history, oldest first:
+- the period-templated download step (the last download step with templated fields) is re-run with that period
+  substituted (`AWOSPeriod.view`); the step's URL too, when it is templated (`?period=2026-08`);
+- the target must be found without a model: of the locator's shortlist (row position, neighbours and css ignored,
+  since they point at the recorded month's row), exactly ONE control must name that period and no other
+  (`AWOSPeriod.consistent`); none = "not listed on this page", two = not unambiguous; no model call, no approval: a
+  control matching the danger vocabulary is skipped;
+- the file must arrive (a new download matching that period's name pattern, <= 20 s) and pass the file checks; it is
+  recorded under its own period as **Got (caught up)** (`collResults[col][period][rec] = {status: 'got', caughtUp:
+  true, file, content, fromPeriod, runId}`), or **Not a document**;
+- a period already Got is never downloaded again (logged "already got").
+The run log lists each period; the collection summary and notification add "caught up August 2026"; the phone status
+detail names the caught-up months. A recipe whose download opens a new tab is not caught up yet (logged).
+
 ## Recipe format
 
 See `recipe_v1.md`: built-in period placeholders need no params entry and may appear in loc strings, step URLs,
@@ -182,3 +202,5 @@ already makes; downloads are checked with `downloads`.
   a redesign that adds a new page between steps still fails, with the reason in the log.
 - The fixtures exercise a scripted (fake) agent brain; the quality of real local models on real portals is not
   measured here.
+- Catch-up (0.9) only sees earlier periods listed on the page the current one was downloaded from (no paging, no
+  "older" link, no period picker); a list that names months only in a neighbouring cell ("PDF" links) is not caught up.

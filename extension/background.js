@@ -98,8 +98,8 @@
  * downgrade VERIFIED to CHECK ("look at this one"), and its opinion is logged on
  * every run.
  */
-importScripts('lib/safety.js', 'lib/model.js', 'lib/period.js', 'lib/recipe.js', 'lib/agent.js', 'lib/phone.js');
-var S = self.AWOSSafety, M = self.AWOSModel, R = self.AWOSRecipe, PD = self.AWOSPeriod;
+importScripts('lib/safety.js', 'lib/model.js', 'lib/period.js', 'lib/recipe.js', 'lib/agent.js', 'lib/phone.js', 'lib/filecheck.js', 'lib/portal.js');
+var S = self.AWOSSafety, M = self.AWOSModel, R = self.AWOSRecipe, PD = self.AWOSPeriod, FC = self.AWOSFile, PP = self.AWOSPortal;
 // "now" for periods only (the default run period, a recording's month). Tests pin it through chrome.storage.session
 // (testNow), which web pages cannot reach; everything else uses the real clock.
 var TEST_NOW = 0;
@@ -411,8 +411,8 @@ async function driveInner(runId) {
     if (loc.scrolled) logRun(run, 'scrolled ' + loc.scrolled.steps + ' step(s) looking for a lazy-loaded target (' + loc.scrolled.ms + ' ms, '
                                  + (loc.status === 'found' ? 'found' : 'not found') + ')');
     // pop-ups (v0.6): a target that is not found, or is drawn under an overlay, gets one unblock pass + one retry
-    if ((loc.covered || loc.status !== 'found') && !run.unblocked[i]) {
-      run.unblocked[i] = true;
+    if ((loc.covered || loc.status !== 'found' || run.forceUnblock === i) && !run.unblocked[i]) {
+      run.unblocked[i] = true; run.forceUnblock = null;
       var ub = await sendRetry(run.tabId, { type: 'unblock' }, 2).catch(function () { return null; });
       if (ub && ub.dismissed && ub.dismissed.length) {
         ub.dismissed.forEach(function (d) {
@@ -425,10 +425,21 @@ async function driveInner(runId) {
         logRun(run, 'step ' + (i + 1) + ': retried after the dismissal: ' + (loc.status === 'found' && !loc.covered ? 'found' : loc.status + (loc.covered ? ', still covered' : '')));
       }
       if (ub && ub.blocked && (loc.covered || loc.status !== 'found')) {
-        var b = ub.blocked, what = b.kind === 'consent' ? 'cookie / consent banner' : 'pop-up';
-        return pause(run, 'needs_user', { popup: b.kind, message: 'Step ' + (i + 1) + ': a ' + what + ' ("' + b.text.slice(0, 80) + '") is in the way. AWOS only clicks close / not now'
-          + (b.kind === 'consent' ? ' / reject' : '') + ' on these' + (b.controls.length ? ', and this one only offers: ' + b.controls.join(', ') : '')
-          + '. Deal with it yourself in this tab, then press Continue.' });
+        // v0.9: a pop-up the known rules cannot close is read by the agent brain (popupRead, guided.js)
+        var pr = await popupRead(run, base, ub.blocked, i);
+        if (pr.closed) {
+          await sleep(300); await waitQuiet(run.tabId, 1500);
+          loc = await sendRetry(run.tabId, { type: 'locate', step: step, timeoutMs: cfg.findTimeoutMs });
+          logRun(run, 'step ' + (i + 1) + ': retried after closing the pop-up: ' + (loc.status === 'found' && !loc.covered ? 'found' : loc.status + (loc.covered ? ', still covered' : '')));
+        } else {
+          var b = ub.blocked, what = b.kind === 'consent' ? 'cookie / consent banner' : 'pop-up';
+          var dec = pr.verdict === 'NEEDS_DECISION', ttl = String(b.title || b.text).slice(0, 80);
+          return pause(run, 'needs_user', { popup: b.kind, decision: { verdict: pr.verdict || 'UNKNOWN', title: ttl, reason: pr.reason || '' },
+            message: 'Step ' + (i + 1) + ': ' + (dec ? 'a pop-up needs your decision: "' + ttl + '"' : 'a ' + what + ' ("' + ttl + '") is in the way')
+              + '. AWOS never accepts, agrees or decides for you; it only clicks close / not now' + (b.kind === 'consent' ? ' / reject' : '') + ' on these'
+              + (b.controls.length ? ', and this one only offers: ' + b.controls.join(', ') : '')
+              + '. Deal with it yourself in this tab, then press Continue (or Stop).' });
+        }
       }
     }
     var index = -1, how = '', ge = null, gWhy = '';
@@ -482,10 +493,21 @@ async function driveInner(runId) {
     }
     urlBefore = ((await chrome.tabs.get(run.tabId).catch(function () { return {}; })).url) || '';
     tabsBefore = step.action === 'click' ? (await chrome.tabs.query({}).catch(function () { return []; })).map(function (t) { return t.id; }) : null;
-    var r = await sendTab(run.tabId, { type: 'act', step: step, index: index, approved: ok, strict: strict });
+    var r = await sendTab(run.tabId, { type: 'act', step: step, index: index, approved: ok, strict: strict, usableMs: usableMs(cfg) });
+    if (r && r.waited) noteWait(run, i, target, r.waited);
     if (!r || !r.ok) {
       if (r && r.needsApproval) return pause(run, 'awaiting_approval', { danger: r.danger, target: target,
         message: 'Step ' + (i + 1) + ' will ' + verb + ' "' + target + '" (matches "' + r.danger + '"). Approve to continue.' });
+      if (r && r.unusable) {             // v0.9: never became usable: one pop-up pass + retry, then the user
+        run.unusable = run.unusable || {};
+        if (!run.unusable[i]) {
+          run.unusable[i] = true; delete run.unblocked[i]; run.forceUnblock = i;
+          logRun(run, 'step ' + (i + 1) + ': "' + target + '" was still ' + r.unusable + ' after ' + fmtMs(r.waited.ms) + '; checking for a pop-up and trying again');
+          await saveRun(run); continue;
+        }
+        return pause(run, 'needs_user', { unusable: r.unusable, message: 'Step ' + (i + 1) + ': "' + target + '" stays ' + r.unusable + ' (waited ' + fmtMs(r.waited.ms)
+          + ' twice). Make it usable in this tab (or wait for the page), then press Continue; AWOS tries the step again.' });
+      }
       return fail(run, 'ERROR', 'step ' + (i + 1) + ': ' + (r ? r.error : 'no reply'));
     }
     }
@@ -728,6 +750,14 @@ async function waitQuiet(tabId, maxMs) {
   catch (e) { return { quiet: false, error: String(e && e.message || e) }; }
 }
 
+/** v0.9 wait-until-usable cap (settings.usableWaitMs, default 8 s, the settle cap style). */
+function usableMs(cfg) { var v = cfg && cfg.usableWaitMs; return v == null ? 8000 : Math.max(0, Math.min(15000, +v || 0)); }
+/** a wait before acting goes to the log and run.timings. */
+function noteWait(run, i, target, w) {
+  (run.timings = run.timings || []).push({ step: i, what: 'wait_usable', ms: w.ms, why: w.why, ok: w.ok !== false });
+  logRun(run, 'step ' + (i + 1) + ': waited ' + fmtMs(w.ms) + ' for "' + target + '" to be usable (' + w.why + ')' + (w.ok === false ? '; still not usable' : ''));
+}
+
 // ---- params / domain lock ------------------------------------------------------------------------------
 var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 /** 'YYYY-MM' of the month `offset` months from the date `t` (local time). */
@@ -777,7 +807,7 @@ async function pause(run, status, pending) {
   if (status === 'needs_user') await captureFailure(run, 'NEEDS_YOU');
   await saveRun(run);
   await sendTab(run.tabId, { type: 'banner', text: pending.message + ' (open the AWOS popup)' }).catch(function () {});
-  if (run.scheduled || pending.handoff || run.collection) notify('awos-run-' + run.id, 'AWOS Replay needs you: ' + run.recName, pending.message + ' Open the AWOS popup.');
+  if (run.scheduled || pending.handoff || pending.decision || run.collection) notify('awos-run-' + run.id, 'AWOS Replay needs you: ' + run.recName, pending.message + ' Open the AWOS popup.');
   if (run.collection) await collOnPause(run);
   await phoneOnPause(run).catch(function (e) { console.warn('phone', e); });
 }
@@ -836,7 +866,7 @@ async function finish(run, rec) {
   var base = await getRec(run.recId), dx = downloadExpectation(base || rec, run, run.period);
   if (dx.exact) {
     var dc = await checkDownload(run, dx.exact);
-    if (!dc.ok && dx.generic) {            // v0.7: a file for another period (the recorded one, an older one) is not Got
+    if (!dc.ok && !dc.notDocument && dx.generic) {            // v0.7: a file for another period (the recorded one, an older one) is not Got
       var wrong = await findDownload(run, dx.generic);
       if (wrong) { dc.wrongPeriod = true; dc.actual = wrong; }
     }
@@ -849,6 +879,11 @@ async function finish(run, rec) {
     var h0 = PD.periodsIn(wp.actual)[0], wper = h0 ? (h0.period ? PD.label(h0.period) : h0.text) : 'another period';
     verdict = 'WRONG_PERIOD';
     reason = 'downloaded ' + wp.actual + ', which is for ' + wper + ', not ' + PD.label(run.period) + ' (expected a file matching ' + wp.expected + ')';
+  }
+  var nd = checks.find(function (x) { return x.notDocument; });
+  if (nd) {                                                // v0.9: an empty file / a saved web page is never Got
+    verdict = 'FAILED';
+    reason = 'Not a document: ' + nd.content.why;
   }
   var noActions = !actionCount(rec);
   if (noActions && verdict === 'VERIFIED') {               // only reopened a URL: the checks passing is not a chore done
@@ -878,9 +913,14 @@ async function finish(run, rec) {
       reason = 'checks passed, but the local verifier says ' + op.label + ': ' + op.reason;
     }
   }
+  var unc = checks.find(function (x) { return x.kind === 'download' && x.ok && x.content && x.content.state === 'unchecked'; });
+  if (unc && /^(VERIFIED|CHECK|UNVERIFIED)$/.test(verdict)) reason = [reason, 'download ' + unc.content.why].filter(Boolean).join('; ');
   run.status = verdict === 'FAILED' || verdict === 'WRONG_PERIOD' ? 'failed' : 'done';
-  run.result = { verdict: verdict, code: verdict === 'FAILED' ? 'CHECK_FAILED' : verdict === 'WRONG_PERIOD' ? 'WRONG_PERIOD' : noActions ? 'NO_ACTIONS' : '',
+  run.result = { verdict: verdict, code: nd ? 'NOT_A_DOCUMENT' : verdict === 'FAILED' ? 'CHECK_FAILED' : verdict === 'WRONG_PERIOD' ? 'WRONG_PERIOD' : noActions ? 'NO_ACTIONS' : '',
                  checks: checks, reason: reason, noActions: noActions };
+  if (run.collection && /^(VERIFIED|CHECK)$/.test(verdict) && checks.some(function (x) { return x.kind === 'download' && x.ok; })) {
+    await catchUp(run, base || rec).catch(function (e) { logRun(run, 'catch-up stopped: ' + String(e && e.message || e)); });   // v0.9 (guided.js)
+  }
   offerUpdate(run, base, verdict);
   logRun(run, verdict + ' (' + checks.filter(function (x) { return x.ok; }).length + '/' + checks.length + ' checks)');
   await archive(run);
@@ -903,8 +943,16 @@ async function checkDownload(run, nameRegex, waitMs, graceMs) {
   for (;;) {
     var items = await chrome.downloads.search({ startedAfter: new Date(run.startedAt - 1000).toISOString() }).catch(function () { return []; });
     var mine = items.filter(function (d) { return downloadNames(d).some(function (n) { return re.test(n); }); });
+    mine.sort(function (a, b) { return (b.id || 0) - (a.id || 0); });            // the newest first
     var done = mine.find(function (d) { return d.state === 'complete'; });
-    if (done) return { kind: 'download', expected: nameRegex, ok: true, actual: downloadNames(done).find(function (n) { return re.test(n); }) };
+    if (done) {
+      var out = { kind: 'download', expected: nameRegex, ok: true, actual: downloadNames(done).find(function (n) { return re.test(n); }) };
+      var fc = await fileCheck(run, done, out.actual);                          // v0.9: never trust a green run
+      out.content = { state: fc.state, why: fc.why, size: fc.size, mime: fc.mime };
+      if (fc.state === 'bad') { out.ok = false; out.notDocument = true; }
+      logRun(run, 'file check of ' + out.actual + ': ' + (fc.state === 'bad' ? 'NOT a document: ' : '') + fc.why + (fc.size >= 0 ? ' (' + fc.size + ' bytes)' : ''));
+      return out;
+    }
     // any download of this run still in progress may be the one (its temporary name matches nothing yet)
     var going = items.some(function (d) { return d.state === 'in_progress'; });
     seen = items.map(function (d) { return downloadNames(d).join(' / ') || '(unnamed)'; }).slice(0, 5).join(', ');
@@ -913,6 +961,29 @@ async function checkDownload(run, nameRegex, waitMs, graceMs) {
     }
     await sleep(500);
   }
+}
+
+// ---- file checks (v0.9, lib/filecheck.js): size, then the first bytes, read again on the portal's own origin ------
+/** -> AWOSFile.classify result for a completed chrome.downloads item. The first 1 KB is re-read by the run tab's
+ *  content script (same origin only, Range request, the portal's cookies); a data: URL is decoded here. */
+async function fileCheck(run, d, name) {
+  name = name || fileName(d);
+  var size = Math.max(d.fileSize == null ? -1 : +d.fileSize, d.bytesReceived == null ? -1 : +d.bytesReceived);
+  var o = { name: name, size: size, mime: d.mime || '' };
+  if (size !== 0) {
+    var url = d.finalUrl || d.url || '';
+    if (/^data:/i.test(url)) {
+      try {
+        var m = /^data:([^;,]*)(;base64)?,(.*)$/i.exec(url), raw = m[2] ? atob(m[3].slice(0, 1400)) : decodeURIComponent(m[3]).slice(0, 1024);
+        o.head = raw.slice(0, 1024); o.peekType = m[1];
+      } catch (e) { o.peekWhy = 'could not decode the data address'; }
+    } else {
+      var pk = await sendTab(run.tabId, { type: 'peek', url: url }).catch(function (e) { return { ok: false, why: 'the portal page did not answer (' + String(e && e.message || e).slice(0, 60) + ')' }; });
+      if (pk && pk.ok && pk.head != null) { o.head = pk.head; o.peekType = pk.type || ''; }
+      else o.peekWhy = (pk && pk.why) || 'could not read it again';
+    }
+  }
+  return FC.classify(o);
 }
 
 // ---- after a run: last verdict on the recipe, scheduled-run notice --------------------------------------
@@ -1033,7 +1104,7 @@ chrome.runtime.onInstalled.addListener(function () { armAll(true); });
 // each in its own background tab, and records per period (YYYY-MM) what happened: got (file name), missing (the
 // portal ran but no matching file), needs_you (a login / code / check / approval nobody answered in time, or the
 // user pressed Skip) or failed (reason). A re-run in the same period skips the portals already got.
-var COLL_ALARM = 'awos-coll-sched:', COLL_WAIT = 'awos-coll-wait:', COLL_STATUS = { got: 1, missing: 1, wrong_period: 1, needs_you: 1, failed: 1 };
+var COLL_ALARM = 'awos-coll-sched:', COLL_WAIT = 'awos-coll-wait:', COLL_STATUS = { got: 1, missing: 1, wrong_period: 1, not_document: 1, needs_you: 1, failed: 1 };
 async function getColl(id) { return (await getLocal('collections', {}))[id] || null; }
 async function periodResults(collId, period) { return ((await getLocal('collResults', {}))[collId] || {})[period] || {}; }
 async function setCollResult(collId, period, recId, val) {
@@ -1043,11 +1114,12 @@ async function setCollResult(collId, period, recId, val) {
   await setLocal('collResults', all);
 }
 function collSummary(col, res) {
-  var n = { got: 0, missing: 0, wrong_period: 0, needs_you: 0, failed: 0, notrun: 0 };
+  var n = { got: 0, missing: 0, wrong_period: 0, not_document: 0, needs_you: 0, failed: 0, notrun: 0 };
   col.recIds.forEach(function (id) { var r = res[id]; n[r && COLL_STATUS[r.status] ? r.status : 'notrun']++; });
   var bits = [n.got + ' of ' + col.recIds.length + ' got'];
   if (n.missing) bits.push(n.missing + ' missing');
   if (n.wrong_period) bits.push(n.wrong_period + ' wrong period');
+  if (n.not_document) bits.push(n.not_document + ' not a document');
   if (n.needs_you) bits.push(n.needs_you + (n.needs_you === 1 ? ' needs you' : ' need you'));
   if (n.failed) bits.push(n.failed + ' failed');
   if (n.notrun) bits.push(n.notrun + ' not run');
@@ -1191,7 +1263,10 @@ async function collFinish(c) {
   chrome.alarms.clear(LOGIN_POLL + c.collId).catch(function () {});
   await setSess('coll', c);
   if (col) { col.last = { period: c.period, summary: sum.text, at: Date.now() }; await setLocal('collections', cols); }
-  notify('awos-coll-' + c.collId, 'AWOS Replay: ' + c.name + ' (' + c.period + ')', sum.text + (c.alreadyGot ? ' (' + c.alreadyGot + ' already got earlier)' : ''));
+  var cu = c.caughtUp || [];
+  if (cu.length) { c.summary += '; caught up ' + cu.map(function (x) { return PD.label(x.period); }).join(', '); await setSess('coll', c); }
+  notify('awos-coll-' + c.collId, 'AWOS Replay: ' + c.name + ' (' + c.period + ')', sum.text + (c.alreadyGot ? ' (' + c.alreadyGot + ' already got earlier)' : '')
+         + (cu.length ? '. Caught up: ' + cu.map(function (x) { return PD.label(x.period) + ' (' + x.recName + ')'; }).join(', ') : ''));
   await phoneCollStatus(c, col).catch(function (e) { console.warn('phone status', e); });
 }
 
@@ -1200,9 +1275,13 @@ function collStatusOf(run, rec) {
   var res = run.result || {}, checks = res.checks || [];
   var dl = checks.find(function (x) { return x.kind === 'download'; });
   if (run.leftForUser) return { status: 'needs_you', reason: run.leftForUser };
+  if (dl && dl.notDocument) return { status: 'not_document', file: dl.actual || '', reason: (dl.content && dl.content.why) || res.reason || '' };
   if (dl && dl.wrongPeriod) return { status: 'wrong_period', file: dl.actual || '', reason: res.reason || '' };
   if (res.code === 'MISSING') return { status: 'missing', reason: res.reason || '' };
-  if (dl && dl.ok) return { status: 'got', file: dl.actual || '' };
+  if (dl && dl.ok) {
+    var cs = (dl.content && dl.content.state) || '';
+    return { status: 'got', file: dl.actual || '', content: cs, contentNote: cs === 'unchecked' ? dl.content.why : '' };
+  }
   if (!dl && /^(VERIFIED|CHECK|UNVERIFIED)$/.test(res.verdict || '')) {
     var last = (run.fileTabs || []).slice(-1)[0];
     return { status: 'got', file: last ? last.name : '', note: rec && !rec.expectDownload ? 'no expected download set for this portal' : '' };
@@ -1278,6 +1357,9 @@ async function saveColl(msg) {
   if (msg.keepAliveDays != null) { var kd = parseInt(msg.keepAliveDays, 10); if (!(kd >= 1 && kd <= 30)) throw new Error('keep-alive: every 1-30 days'); col.keepAliveDays = kd; }
   if (msg.preflightHours != null) { var ph = parseInt(msg.preflightHours, 10); if (!(ph >= 0 && ph <= 168)) throw new Error('pre-flight: 0-168 hours before the run'); col.preflightHours = ph; }
   if (msg.preflightAtStart !== undefined) col.preflightAtStart = msg.preflightAtStart !== false;
+  // v0.9 catch-up of missed months: on by default, lookback 3 months (0-12)
+  if (msg.catchUp !== undefined) col.catchUp = msg.catchUp !== false;
+  if (msg.catchUpMonths != null) { var cm = parseInt(msg.catchUpMonths, 10); if (!(cm >= 0 && cm <= 12)) throw new Error('catch-up: 0-12 months back'); col.catchUpMonths = cm; }
   cols[col.id] = col; await setLocal('collections', cols);
   var next = await armColl(col);
   var keepNext = await armKeepAlive(col);
@@ -1565,6 +1647,10 @@ async function decide(kind, runId, n, params) {
     } else if (run.pending.popup) {           // the user closed the pop-up: one more unblock pass if it is back
       if (run.unblocked) delete run.unblocked[run.pending.step];
       logRun(run, 'user dealt with the pop-up');
+    } else if (run.pending.unusable) {        // v0.9: the control stayed disabled / covered / busy: try the step again
+      if (run.unusable) delete run.unusable[run.pending.step];
+      if (run.unblocked) delete run.unblocked[run.pending.step];
+      logRun(run, 'user says the control is usable now; trying the step again');
     } else run.userDone[run.pending.step] = true;
   } else {                                    // reject / abort
     run.pending = null;

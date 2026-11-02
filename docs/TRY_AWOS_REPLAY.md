@@ -162,6 +162,24 @@ A recipe recorded in October that clicked "Invoice September 2026" no longer cli
   on screen (an account number, a balance) is in it.
 - Details: `docs/specs/phone_link.md`.
 
+## 4f. Never a silent green run (v0.9)
+- **Real file checks**: a downloaded file counts as Got only if it is more than 0 bytes and its content matches its
+  name (a PDF starts with `%PDF-`, a CSV is text with a delimiter in its first line, an XLSX / ZIP starts with `PK`). A
+  login or error page saved as `invoice.pdf` shows as **Not a document** with the reason, in the run, the checklist and
+  on the phone. When AWOS cannot re-read the file (it is on another site), it says **content not checked** instead of
+  pretending.
+- **Pop-ups nobody wrote a rule for**: when a pop-up blocks a step and is not a plain "Not now / Close" one, the agent
+  model reads it (your local model by default; Claude only if you chose it). A harmless one (a survey, a tour) is closed
+  with its own close button. Anything about terms, consent, payment, data sharing, your account, deletions or
+  subscriptions stops and asks you, on the Mac and on your paired phone: "a pop-up needs your decision". AWOS never
+  accepts or agrees for you, whatever the model says.
+- **Missed months**: in a collection, after this month's file, AWOS also fetches up to 3 earlier months still listed on
+  the same page that you have not got yet (each checked like the main file), shown as **Got (caught up)**. Change the
+  number or switch it off per collection (**Missed months**).
+- **Waits for the page**: before each click or typing AWOS waits (up to 8 s) until the button is visible, enabled, not
+  under a loading spinner; slow portals no longer fail on a greyed-out button.
+- Details: `docs/specs/portal_run.md` sections 6-8, `docs/specs/goal_guided.md` section 5.
+
 ## 5. Send the results back
 Click **Export run log** in the popup and send the JSON file.
 - It contains, per run: the verdict, how each step was found, and every model call (the candidate button names it saw and

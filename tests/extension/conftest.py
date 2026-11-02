@@ -46,13 +46,32 @@ class _Handler(SimpleHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path.startswith("/api/relay/"):
             return self._relay("GET")
-        self.server.hits.append(path)
+        if self.headers.get("Range"):              # v0.9 file check re-reading the first 1 KB: not a download
+            self.server.peeks.append(path)
+        else:
+            self.server.hits.append(path)
         if path == "/__state.json":               # page scripts read what the test set (v0.7 invoices portal)
             return self._send(json.dumps(self.server.state).encode(), "application/json")
         if path.startswith("/files/gen/"):        # a generated document (any name: invoice-2026-10.pdf, payout-2026-11.csv)
             name = path[len("/files/gen/"):]
-            ctype = "text/csv" if name.endswith(".csv") else "application/pdf"
-            return self._send(b"%PDF-1.4 fake document " + name.encode() + b"\n", ctype)
+            if name.endswith(".csv"):
+                return self._send(b"date,description,amount\n2026-10-31," + name.encode() + b",100.00\n", "text/csv")
+            return self._send(b"%PDF-1.4 fake document " + name.encode() + b"\n", "application/pdf")
+        if path.startswith("/files/doc/"):        # v0.9 file checks: what the document link serves is server.state["doc"]
+            name, mode = path[len("/files/doc/"):], self.server.state.get("doc", "good")
+            html = b"<!doctype html><html><head><title>Sign in</title></head><body>Your session expired. Please sign in.</body></html>"
+            good_ctype = "text/csv" if name.endswith(".csv") else "application/pdf"
+            if mode == "html":                    # the login / error page, served as what it is (text/html)
+                return self._send(html, "text/html; charset=utf-8")
+            if mode == "html_as_doc":             # the same page mislabelled as the document type: only its bytes tell
+                return self._send(html, good_ctype)
+            if mode == "empty":
+                return self._send(b"", good_ctype)
+            if mode == "notcsv":                  # one word per line: no delimiter
+                return self._send(b"report\nnothing here\n", "text/csv")
+            if name.endswith(".csv"):
+                return self._send(b"date;description;amount\n2026-10-31;fees;12.00\n", "text/csv")
+            return self._send(b"%PDF-1.4\n%fake but real header " + name.encode() + b"\n%%EOF\n", "application/pdf")
         loc = self.server.redirects.get(path)
         if not loc and path in self.server.auth and "portal_session=ok" not in (self.headers.get("Cookie") or ""):
             loc = self.server.auth[path]          # a portal that needs a login: 302 until the login page set the cookie
@@ -164,7 +183,7 @@ def relay_box(srv, channel, what):
 def server():
     srv = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     srv.overrides, srv.model_calls, srv.model_answer = {}, [], "NOT_FOUND"
-    srv.redirects, srv.hits, srv.auth = {}, [], {}
+    srv.redirects, srv.hits, srv.auth, srv.peeks = {}, [], {}, []
     srv.state = {}
     srv.verify_calls, srv.verify_answer = [], "VERIFIED: fake"
     srv.relay, srv.relay_status, srv.ntfy = _fresh_relay(), 200, []
@@ -183,6 +202,7 @@ def _reset_server(request):
         srv.redirects.clear()
         srv.auth.clear()
         srv.hits.clear()
+        srv.peeks.clear()
         srv.state.clear()
         srv.model_calls.clear()
         srv.model_answer = "NOT_FOUND"

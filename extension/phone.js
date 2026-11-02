@@ -94,13 +94,17 @@ async function phoneSummary() {
 async function phoneOnPause(run) {
   var p = await phoneCfg(), pd = run.pending || {};
   if (!p) return;
-  var kind = run.status === 'awaiting_approval' ? 'approve' : PHONE_NEED_KIND[pd.handoff] || '';
+  // v0.9: a pop-up that needs the user's decision goes as an approve-style need: yes = "I dealt with it, try again",
+  // no = stop the run. AWOS never clicks the pop-up either way.
+  var kind = run.status === 'awaiting_approval' || pd.decision ? 'approve' : PHONE_NEED_KIND[pd.handoff] || '';
   if (!kind) return;
   var old = await getSess('phoneNeed');
   if (old && old.runId === run.id && old.nonce === pd.nonce) return;
   if (old) await phoneResolve(old);
   var need = { req: PH.b64u(crypto.getRandomValues(new Uint8Array(12))), runId: run.id, nonce: pd.nonce, kind: kind, at: Date.now() };
-  var env = await PH.seal(p.key, 'to-phone', { type: 'need', req: need.req, kind: kind, portal: run.recName || '', message: pd.message || '', at: need.at });
+  var msg = pd.decision ? 'A pop-up needs your decision: "' + pd.decision.title + '". AWOS never accepts or agrees for you: deal with it at the Mac. '
+    + 'Approve = I dealt with it, try the step again; Decline = stop this run.' : pd.message || '';
+  var env = await PH.seal(p.key, 'to-phone', { type: 'need', req: need.req, kind: kind, portal: run.recName || '', message: msg, at: need.at });
   var r = await relayFetch(p, 'POST', '/to-phone', env);
   if (!r.ok) {
     logRun(run, 'phone: could not send this to your phone (' + r.error + '); answer it here on the Mac as usual');
@@ -234,6 +238,11 @@ async function phoneUseCode(need, code, from) {
 
 async function phoneApprove(need, yes) {
   var run = await needRun(need);
+  if (run && run.status === 'needs_user' && run.pending.decision) {          // v0.9: a pop-up decision
+    logRun(run, 'phone: you ' + (yes ? 'said the pop-up is dealt with; trying the step again (AWOS did not click it)' : 'stopped the run from your phone'));
+    await saveRun(run);
+    return decide(yes ? 'continue' : 'reject', run.id, run.pending.nonce);
+  }
   if (!run || run.status !== 'awaiting_approval') return;
   logRun(run, 'phone: you ' + (yes ? 'approved' : 'declined') + ' this on your phone');
   await saveRun(run);
@@ -261,8 +270,10 @@ async function phoneCollStatus(c, col) {
   var items = ((col && col.recIds) || []).map(function (id) {
     var r = res[id] || {}, run = r.runId ? runs.find(function (x) { return x.id === r.runId; }) : null;
     var slow = run && run.result && run.result.slow;
-    return { portal: (recs[id] && recs[id].name) || r.recName || 'a portal', state: r.status || 'not run',
-             detail: [r.file || r.reason || '', slow ? slow.text : ''].filter(Boolean).join('; ') };
+    var caught = (c.caughtUp || []).filter(function (x) { return x.recId === id; }).map(function (x) { return PD.label(x.period); });
+    return { portal: (recs[id] && recs[id].name) || r.recName || 'a portal', state: r.status === 'not_document' ? 'not a document' : r.status || 'not run',
+             detail: [r.status === 'not_document' ? r.reason : r.file || r.reason || '', r.contentNote || '', slow ? slow.text : '',
+                      caught.length ? 'caught up ' + caught.join(', ') : ''].filter(Boolean).join('; ') };
   });
   var bad = items.some(function (it) { return it.state !== 'got'; });
   await phoneStatus(c.name + ' (' + c.period + '): ' + (c.summary || ''), items, bad);

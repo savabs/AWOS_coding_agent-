@@ -56,7 +56,7 @@ button.small { padding: 2px 8px; font-size: 12px; }
 #collections .portal { display: flex; justify-content: space-between; gap: 6px; font-size: 12px; padding: 2px 0; border-top: 1px solid #eaeef2; }
 #collections .portal .st { text-align: right; }
 #collections .st.got { color: #116329; }
-#collections .st.missing, #collections .st.failed, #collections .st.wrong_period { color: #a40e26; }
+#collections .st.missing, #collections .st.failed, #collections .st.wrong_period, #collections .st.not_document { color: #a40e26; }
 #collections .st.needs_you { color: #953800; font-weight: 600; }
 #collections .acts { margin-top: 4px; display: flex; gap: 6px; flex-wrap: wrap; }
 #collsec input:not([type=checkbox]) { width: 100%; box-sizing: border-box; font: inherit; margin-top: 4px; }

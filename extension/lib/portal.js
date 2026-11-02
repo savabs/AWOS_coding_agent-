@@ -16,6 +16,10 @@
  *      reject / decline / necessary-only / close. Never "accept", "agree", "allow all", never anything in the
  *      danger vocabulary (pay, send, delete, submit, confirm, ...). A blocker with no allowed control is reported
  *      as `blocked` so the run pauses for the user instead.
+ *      `blocked` also carries title, body (<= 800 chars) and ctl [{n, name, hint}] for the agent brain (v0.9)
+ *  closeBlocked(n, name) -> {ok, name, why}   (v0.9) closes a pop-up the agent brain read as HARMLESS with the
+ *      control it named, only when that control's name is a close / dismiss word and no deny rule matches
+ *  decisionWord(info) -> the word that makes a pop-up a decision for the user (terms, consent, payment, ...) or ''
  *  rememberMe() -> {ticked: label | '', seen: n}   (v0.6.1)
  *      on a login handoff: ticks ONE unchecked, visible checkbox whose whole label is "remember me" / "keep me signed
  *      in" / "stay signed in" / "trust this device" / "don't ask again on this device" (REMEMBER_RE). Nothing else.
@@ -122,12 +126,19 @@
     return ov && !containsDeep(ov, el) ? ov : null;
   }
 
+  /** a loading overlay (spinner / progress bar / aria-busy, no controls) is not a pop-up: replay waits it out (v0.9). */
+  var BUSY_SEL = '[role=progressbar], [aria-busy=true], [class*=spinner i], [class*=loading i], [class*=loader i]';
+  function busyOverlay(e) {
+    var busy = false;
+    try { busy = e.matches(BUSY_SEL) || !!e.querySelector(BUSY_SEL); } catch (x) { return false; }
+    return busy && !L.deepAll(L.KIND_SELECTOR.click, e).length && textOf(e, 200).length < 80;
+  }
   function isConsent(el) { return CONSENT_HINT.test(hay(el) + ' ' + textOf(el, 400)); }
   /** visible pop-ups in the way: open dialogs / modals, overlays over the viewport, cookie / consent banners. */
   function blockers() {
     var out = [];
     function add(e) {
-      if (!e || !vis(e)) return;
+      if (!e || !vis(e) || busyOverlay(e)) return;
       for (var k = 0; k < out.length; k++) { if (containsDeep(out[k], e)) return; if (containsDeep(e, out[k])) { out[k] = e; return; } }
       out.push(e);
     }
@@ -177,12 +188,64 @@
         pick.sort(function (a, b2) { return (/^(close|x|×|✕)$/i.test(nameOf(a)) ? 1 : 0) - (/^(close|x|×|✕)$/i.test(nameOf(b2)) ? 1 : 0); });
       }
       var text = textOf(b, 160);
-      if (!pick.length) { res.blocked = { kind: kind, text: text, controls: ctl.map(nameOf).filter(Boolean).slice(0, 8) }; return; }
+      if (!pick.length) {
+        res.blocked = { kind: kind, text: text, controls: ctl.map(nameOf).filter(Boolean).slice(0, 8),
+                        title: titleOf(b), body: textOf(b, 800), ctl: ctl.slice(0, 12).map(function (c, k) { return { n: k + 1, name: nameOf(c), hint: nameOf(c) ? '' : hintOf(c) }; }) };
+        return;
+      }
       var c = pick[0], name = nameOf(c);
       try { c.focus && c.focus(); c.click(); } catch (e) { res.blocked = { kind: kind, text: text, controls: [name] }; return; }
       res.dismissed.push({ name: name, kind: kind, text: text });
     });
     return res;
+  }
+
+  // ---- unknown pop-ups read by the agent brain (v0.9, docs/specs/portal_run.md 8) ------------------------------
+  // The worker asks the brain only when unblock() found a blocker with no allowed control. The brain may name ONE
+  // control to close a HARMLESS pop-up; it is clicked only if its name is a close / dismiss word (HARMLESS_RE) and
+  // nothing in the deny rules (NEVER_RE, the strict danger vocabulary, the danger context) matches: those win.
+  var HARMLESS_RE = /\b(close|dismiss|not now|not right now|later|skip|got it|no,? thanks|no thank you|continue to (the )?(site|website|portal|dashboard|app|page))\b|^(x|×|✕|✖|ok|okay)$/i;
+  // a pop-up about any of these needs the user's decision, whatever the model says ("accept new terms" always)
+  var DECISION_RE = /\b(terms|conditions|t&cs?|agreement|agree|accept|consent|privacy (policy|notice)|data (sharing|processing|protection)|share (your )?data|gdpr|pay|payment|payments|billing|(credit|debit|payment) card|card (details|number)|subscribe|subscription|(change|upgrade|choose|select) (your |a )?plan|upgrade|free trial|renew|renewal|delete|deletion|close (your )?account|deactivate|cancel (your )?(account|subscription|plan)|account (change|changes|settings|update)|verify (your )?(identity|account|e-?mail|phone)|password|permissions?|authori[sz]e|legal|e-?sign|signature)\b/i;
+  function titleOf(b) {
+    var lab = b.getAttribute('aria-label') || '';
+    var by = b.getAttribute('aria-labelledby');
+    if (!lab && by) lab = by.split(/\s+/).map(function (id) { var n = document.getElementById(id); return n ? n.textContent : ''; }).join(' ');
+    if (!lab) { var h = L.deepAll('h1, h2, h3, h4, [role=heading]', b)[0]; if (h) lab = h.textContent; }
+    if (!lab) { var d = L.deepAll(MODAL_SEL, b)[0]; if (d) lab = d.getAttribute('aria-label') || ''; }
+    return norm(lab).slice(0, 120) || textOf(b, 60);
+  }
+  function hintOf(c) { return norm(hay(c)).slice(0, 60); }
+  /** a control the brain named may close the pop-up: a close / dismiss word, and no deny rule matches. */
+  function harmlessAllowed(c, kind) {
+    var name = nameOf(c);
+    if (name && (NEVER_RE.test(name) || S.dangerMatchStrict(name, true))) return false;
+    if (S.dangerMatch(S.dangerContext(c, name).replace(/\b(cookies?|consent)\b/gi, ''))) return false;
+    if (kind === 'consent' && name && !CONSENT_RE.test(name.toLowerCase()) && !HARMLESS_RE.test(name)) return false;
+    if (!name) return /\b(close|dismiss)\b/i.test(hay(c)) && !NEVER_RE.test(hay(c));        // an icon-only close button
+    return HARMLESS_RE.test(name);
+  }
+  /** the decision rule over what the user would read: title, text and the controls' names. -> matched word or ''. */
+  function decisionWord(info) {
+    var t = [info.title || '', info.body || info.text || '', (info.controls || []).join(' | ')].join(' | ');
+    var m = DECISION_RE.exec(t); return m ? m[0].toLowerCase() : '';
+  }
+  /** click control n (as numbered in unblock()'s `blocked.ctl`) of the blocker that offers no allowed control, only
+   *  when it still carries the name the brain saw and harmlessAllowed() agrees. -> {ok, name, why} */
+  function closeBlocked(n, expectName) {
+    var bs = blockers();
+    for (var k = 0; k < bs.length; k++) {
+      var b = bs[k], kind = isConsent(b) ? 'consent' : 'popup', ctl = controlsIn(b);
+      if (ctl.some(function (c) { return allowed(c, kind); })) continue;      // unblock() handles that one itself
+      var c = ctl[(n | 0) - 1];
+      if (!c) return { ok: false, why: 'the pop-up has no control ' + n };
+      var name = nameOf(c);
+      if (name !== (expectName || '')) return { ok: false, why: 'control ' + n + ' changed (now "' + name + '")' };
+      if (!harmlessAllowed(c, kind)) return { ok: false, why: '"' + (name || hintOf(c) || 'that control') + '" is not a close / dismiss control AWOS may click' };
+      try { c.focus && c.focus(); c.click(); } catch (e) { return { ok: false, why: 'the click failed' }; }
+      return { ok: true, name: name || hintOf(c) || 'close', text: textOf(b, 160) };
+    }
+    return { ok: false, why: 'the pop-up is gone' };
   }
 
   // ---- login helpers (v0.6.1): "remember me", Chrome-autofilled sign-in -------------------------------------
@@ -242,6 +305,8 @@
     otpField: otpField,
     DISMISS_RE: DISMISS_RE, CONSENT_RE: CONSENT_RE, NEVER_RE: NEVER_RE, REMEMBER_RE: REMEMBER_RE, SIGNIN_RE: SIGNIN_RE,
     pageKind: pageKind, coveredBy: coveredBy, blockers: blockers, unblock: unblock, allowed: allowed,
+    HARMLESS_RE: HARMLESS_RE, DECISION_RE: DECISION_RE, harmlessAllowed: harmlessAllowed, decisionWord: decisionWord, closeBlocked: closeBlocked,
+    topAt: topAt, overlayOf: overlayOf, containsDeep: containsDeep, vis: vis,
     rememberMe: rememberMe, autofillSignin: autofillSignin, autofilled: autofilled, rememberLabel: checkboxName,
   };
 })(typeof globalThis !== 'undefined' ? globalThis : self);

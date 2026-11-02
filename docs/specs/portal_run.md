@@ -5,6 +5,10 @@
 > brain from the goal, and the checklist gained **Wrong period**; a portal whose document is not posted yet ends as
 > **Missing** with the model's reason, without downloading anything.
 
+> 0.9 (P0 of `docs/product/portal_runs_plan.md`): wait until the target is usable (section 6), real file checks
+> (section 7, **Not a document**), unknown pop-ups read by the agent brain (section 8), catch-up of missed months
+> (`goal_guided.md` section 5). Tests: `tests/extension/test_portal_p0.py`.
+
 Status: built (extension 0.6.1). Code: `extension/background.js` (driver, collections, logins), `extension/lib/portal.js`
 (page classification, pop-up dismissal, remember me, autofill sign-in), `extension/content.js` (messages),
 `extension/popup.js` (checklist), `extension/options.html` (login Options).
@@ -206,9 +210,77 @@ Settings (Options; `chrome.storage.local.settings`): `rememberMe`, `autofillSign
 `keepAliveSpacingMs`, `preflightSpacingMs`, `loginPollMs`, `loginProbeMs` (no UI). Collection fields: `keepAlive`,
 `keepAliveDays`, `preflightHours`, `preflightAtStart` (default true), `lastKeepAlive`, `lastPreflight`.
 
+## 6. Wait until usable (0.9)
+
+Before a replayed click / Enter / typing / choice, the content script waits (polling 100 ms, at most
+`settings.usableWaitMs`, default 8 s, the settle-cap style) until the target is usable:
+- visible (clicks and Enter only: a box with a size, not `display:none` / `visibility:hidden`),
+- enabled (not `disabled`, not `aria-disabled="true"`, not in a disabled fieldset; a field to type into not read-only),
+- no `aria-busy="true"` on it or around it,
+- not covered: the top element at its centre (`elementFromPoint`, through open shadow roots) is the target, inside it,
+  or not an overlay / spinner; and no visible spinner (`role=progressbar`, `aria-busy`, `spinner` / `loading` /
+  `loader` classes) overlaps it.
+The wait goes to `run.timings` (`{step, what: 'wait_usable', ms, why}`) and the log ("waited 2.1 s for "Download" to
+be usable (disabled)"). A target that never becomes usable falls through to the existing path: one pop-up pass
+(section 3) and a retry, then a pause for the user ("stays disabled ... make it usable, then Continue"; Continue retries
+the step). A full-page loading overlay (spinner / progress bar, no controls, little text) is not treated as a pop-up:
+it is waited out.
+Deviation from a strict "elementFromPoint must hit it": a cover that is neither an overlay (fixed / sticky / dialog)
+nor a spinner (a "stretched link" card) does not count, because the synthetic click reaches the target anyway and
+counting it would stall working recipes.
+
+## 7. Real file checks: never trust a green run (0.9)
+
+A download counts as **Got** only when the completed file (`chrome.downloads`) passes `lib/filecheck.js`:
+- more than 0 bytes (`fileSize` / `bytesReceived`): an empty file is **Not a document**;
+- not a web page under a document's name: Chrome's mime for the download is `text/html`, or its first bytes start like
+  HTML (`<!doctype html`, `<html`, ...) -> **Not a document**, "probably a login or error page saved under the file's
+  name";
+- content matches the name: `.pdf` has `%PDF-` in its first 1 KB; `.csv` / `.tsv` is text (no NUL bytes) with a
+  delimiter (`,` `;` tab `|`) in its first line; `.xlsx` / `.xlsm` / `.docx` / `.ods` / `.zip` start with `PK`. Other
+  kinds: only the size and the "not a web page" checks.
+The first bytes are read by the run tab's content script with `fetch(url, {credentials: 'include'})` and
+`Range: bytes=0-1023`, **only when the file's URL is on the portal page's own origin** (or a `blob:` of it; a `data:`
+URL is decoded in the worker). When that is not possible (another origin, the portal refuses a second read, or it
+answers the re-read with a web page while the download itself was a document type), the result is **content not
+checked** with the reason: still Got, and the verdict / checklist say so instead of pretending. No new permission.
+Where it shows: the run's download check (`content: {state: ok | bad | unchecked, why, size, mime}`), the verdict
+(`FAILED`, code `NOT_A_DOCUMENT`, reason "Not a document: ..."), the collection checklist (**Not a document (file):
+why**, or "Got (file) - content not checked (...)"), the summary ("1 not a document") and the phone status.
+Limits: the re-read is a second GET of the document (a one-time download link then gives "content not checked");
+a PDF that is a valid header plus garbage passes; an HTML page saved as `.txt` / `.json` is only caught by its mime /
+first bytes.
+
+## 8. Unknown pop-ups read by the agent brain (0.9)
+
+When a pop-up blocks a step and none of the known rules (section 3) can close it, the agent brain reads it: the same
+endpoint, consent and cloud-lock rules as goal-guided steps (`goal_guided.md` 2: local loopback model by default,
+Claude only with consent + key, never for a cloud-locked recipe / site). ONE call per pop-up, at most 2 per run
+(`POPUP_CAP`); Options key `popupAI: false` turns it off (no UI yet). The prompt carries the pop-up's title, text
+(<= 800 chars, secrets masked) and numbered controls inside `<popup untrusted="true">`; the reply is one line:
+- `HARMLESS n # reason`: control n closes it. It is clicked only if its name is a close / dismiss word
+  (`AWOSPortal.HARMLESS_RE`: close, x, dismiss, not now, later, skip, got it, no thanks, continue to site, ok) and none
+  of the deny rules match (`NEVER_RE` accept / agree / subscribe / pay ..., the strict danger vocabulary, the danger
+  context): those win. Otherwise the run pauses.
+- `NEEDS_DECISION # reason` (terms, consent, agreeing, payments, data sharing, account changes, deletions,
+  subscriptions) or `UNKNOWN`: never clicked; the run pauses (`needs_user`, `pending.popup` + `pending.decision`
+  `{verdict, title, reason}`), the Mac gets a notification and the popup shows "a pop-up needs your decision: <title>",
+  and a paired phone gets an approve-style need ("Approve = I dealt with it at the Mac, try the step again; Decline =
+  stop the run"). AWOS never clicks the pop-up on either answer.
+- A pop-up whose title / text / controls name terms, conditions, agree / accept, consent, privacy policy, data sharing,
+  payment / billing / card, subscription / plan / upgrade / trial / renewal, deletion, closing / cancelling the
+  account, verifying identity, password, permissions, signature (`AWOSPortal.DECISION_RE`) is NEEDS_DECISION whatever
+  the model says ("accept new terms" always stops); the override is logged.
+Every classification is logged ("the local agent model read the pop-up "Quick survey": HARMLESS (control 2): ...") and
+kept in `run.popups` `{step, title, rule, model, modelReason, verdict, reason, control, brain}`; the call is in
+`run.modelCalls` (`kind: 'popup'`).
+Limits: the decision words are English; a harmless pop-up that mentions "plan" or "card" pauses (the safe side); a
+pop-up whose close control has no name and no "close" / "dismiss" in its id / class / label cannot be closed by AWOS.
+
 ## Permissions
 
-None added in 0.6, 0.6.1 or 0.7. The keep-alive and pre-flight use `tabs` (background tabs on the recipe's own start
+None added in 0.6, 0.6.1, 0.7 or 0.9 (0.9 re-reads file heads with the content script's own fetch on the portal's
+origin). The keep-alive and pre-flight use `tabs` (background tabs on the recipe's own start
 page), `alarms`, and `notifications` (now with a button), all already requested. `downloads` (0.4) now also starts downloads (`chrome.downloads.download`) for files that opened in a new
 tab; its store justification already says "Replay starts that download and checks it finished".
 

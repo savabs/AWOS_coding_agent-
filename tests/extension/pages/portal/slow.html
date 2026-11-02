@@ -1,0 +1,27 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Payout portal - Slow payouts</title>
+<style>#spin{position:fixed;inset:0;background:rgba(255,255,255,.7);z-index:20;display:flex;align-items:center;justify-content:center}
+.spinner{width:40px;height:40px;border:4px solid #ccc;border-top-color:#333;border-radius:50%}</style></head><body>
+<h1>Payouts</h1>
+<!-- v0.9 wait-until-usable: what this page does comes from the test server (/__state.json):
+       disabledMs  the download button is disabled for that long after load (a page still fetching data)
+       spinnerMs   a full-page loading spinner covers everything for that long -->
+<table><tr><td>October 2026</td><td><button id="dl" type="button">Download October payouts</button></td></tr></table>
+<p><a href="/help.html">Help</a></p>
+<script>
+var st = {};
+try { var x = new XMLHttpRequest(); x.open('GET', '/__state.json', false); x.send(); st = JSON.parse(x.responseText || '{}'); } catch (e) {}
+var b = document.getElementById('dl');
+window.__clicks = 0; window.__clickedAt = 0; window.__loadedAt = Date.now();
+b.onclick = function () {
+  if (b.disabled) return;
+  window.__clicks++; window.__clickedAt = Date.now();
+  var a = document.createElement('a'); a.href = '/files/payout-2026-10.csv'; a.download = 'payout-2026-10.csv'; document.body.appendChild(a); a.click(); a.remove();
+};
+if (st.disabledMs) { b.disabled = true; setTimeout(function () { b.disabled = false; }, st.disabledMs); }
+if (st.spinnerMs) {
+  var s = document.createElement('div'); s.id = 'spin'; s.setAttribute('role', 'progressbar'); s.setAttribute('aria-label', 'Loading');
+  s.innerHTML = '<div class="spinner"></div>'; document.body.appendChild(s);
+  setTimeout(function () { s.remove(); }, st.spinnerMs);
+}
+</script>
+</body></html>

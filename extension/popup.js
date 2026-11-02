@@ -291,7 +291,8 @@ function renderRun() {
   $('shotnote').textContent = !sh.id && sh.note ? 'No screenshot: ' + sh.note : '';
   var ch = $('checks'); ch.textContent = '';
   ((run.result && run.result.checks) || []).forEach(function (c) {
-    ch.appendChild(el('li', { class: c.ok ? 'ok' : 'bad' }, c.kind + ': ' + c.expected + (c.kind === 'download' && c.actual ? ' (' + c.actual + ')' : '')));
+    ch.appendChild(el('li', { class: c.ok ? 'ok' : 'bad' }, c.kind + ': ' + c.expected + (c.kind === 'download' && c.actual ? ' (' + c.actual + ')' : '')
+      + (c.content ? (c.notDocument ? ' - NOT a document: ' : ' - ') + c.content.why : '')));
   });
   var log = $('log'); log.textContent = '';
   run.log.slice(-40).forEach(function (l) { log.appendChild(el('li', null, l.text)); });
@@ -362,7 +363,11 @@ function collStatusText(r, p) {
     return 'Login needed' + (r && r.waiting ? ' (waiting for you)' : '') + (r && r.loginNeeded && !r.waiting && r.reason ? ': ' + r.reason.replace(/^Login needed: /, '') : when);
   }
   if (!r) return 'Not run yet';
-  if (r.status === 'got') return r.file ? 'Got (' + r.file + ')' : 'Got';
+  if (r.status === 'got') {
+    return (r.caughtUp ? 'Got (caught up' + (r.file ? ': ' + r.file : '') + ')' : r.file ? 'Got (' + r.file + ')' : 'Got')
+      + (r.contentNote ? ' - ' + r.contentNote : '');
+  }
+  if (r.status === 'not_document') return 'Not a document' + (r.file ? ' (' + r.file + ')' : '') + (r.reason ? ': ' + r.reason : '');
   if (r.status === 'missing') return 'Missing' + (r.reason ? ': ' + r.reason : '');
   if (r.status === 'wrong_period') return 'Wrong period' + (r.file ? ' (' + r.file + ')' : '') + (r.reason ? ': ' + r.reason : '');
   if (r.status === 'needs_you') return 'Needs you' + (r.waiting ? ' (waiting)' : '') + (r.reason ? ': ' + r.reason : '');
@@ -405,6 +410,22 @@ function collKeepBox(col) {
     });
   };
   [lab, lab2, save].forEach(function (x) { box.appendChild(x); });
+  return box;
+}
+/** v0.9: catch up on missed months (per collection: on/off, how many months back). */
+function collCatchBox(col) {
+  var box = el('div', { class: 'sched catch' });
+  var lab = el('label', { class: 'meta' }), on = el('input', { type: 'checkbox', class: 'cuon' }); on.checked = col.catchUp !== false;
+  lab.appendChild(on); lab.appendChild(document.createTextNode(' After getting this month, also fetch up to '));
+  var n = el('input', { class: 'cumonths', type: 'number', min: '0', max: '12', value: String(col.catchUpMonths == null ? 3 : col.catchUpMonths) });
+  lab.appendChild(n); lab.appendChild(document.createTextNode(' earlier months still listed on the page and not got yet (each is checked like the main file)'));
+  var save = el('button', { class: 'cusave small' }, 'Save');
+  save.onclick = function () {
+    call({ type: 'coll_save', id: col.id, catchUp: on.checked, catchUpMonths: Math.max(0, Math.min(12, parseInt(n.value, 10) || 0)) }).then(function () {
+      notice(on.checked ? 'Catch-up on.' : 'Catch-up off.'); lastCollSig = ''; refresh();
+    });
+  };
+  [lab, save].forEach(function (x) { box.appendChild(x); });
   return box;
 }
 function renderCollections() {
@@ -485,6 +506,9 @@ function renderCollections() {
     var ka = details(col.id + ':ckeep', 'Logins' + (col.keepAlive === false ? ' (keep-alive off)' : ' (keep-alive every ' + (col.keepAliveDays || 3) + ' days)'));
     ka.appendChild(collKeepBox(col));
     li.appendChild(ka);
+    var cu = details(col.id + ':ccatch', 'Missed months' + (col.catchUp === false ? ' (catch-up off)' : ' (catch up ' + (col.catchUpMonths == null ? 3 : col.catchUpMonths) + ' back)'));
+    cu.appendChild(collCatchBox(col));
+    li.appendChild(cu);
     list.appendChild(li);
   });
 }

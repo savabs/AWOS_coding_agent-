@@ -26,6 +26,10 @@
  *          the recording expected it; nothing on the page is touched)
  *   unblock -> AWOSPortal.unblock(): dismiss a pop-up / consent banner in the way (close / not now / reject only)
  *   locate also reports `covered` when the found target sits under an overlay or dialog
+ *   v0.9: act first waits (<= usableMs, 8 s) until the target is usable: visible, enabled, not under an overlay or a
+ *          loading spinner, no aria-busy; the reply carries `waited` {ms, why}, or `unusable` when it never became so
+ *   peek {url} -> the first 1 KB of a downloaded file, re-read on this page's origin only (file content check)
+ *   popup_close {n, name} -> AWOSPortal.closeBlocked: close a pop-up the agent brain read as harmless
  *   agent_observe / agent_act {act, approved, expectName} / agent_secrets -> Tell it (lib/agent.js contract):
  *          act on control n of the last observation, with the same danger / sensitive-field gates
  * v0.7: a recorded click inside a repeated list / table row is marked `variable` (goal-guided replay).
@@ -228,14 +232,67 @@
     el.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
-  function act(step, index, approved, strict, reply) {
+  // ---- wait until usable (v0.9): visible, enabled, not covered, no busy spinner over it ------------------------
+  var SPINNER_SEL = '[role=progressbar], [aria-busy=true], .spinner, .loading, .loader, [class*=spinner i], [class*=loading i], [class*=loader i]';
+  function boxOf(el) { return el.getBoundingClientRect(); }
+  function overlaps(a, b) { return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom; }
+  function spinnerLike(n) {
+    for (var k = 0, e = n; e && e.nodeType === 1 && k < 4; k++, e = e.parentElement) {
+      try { if (e.matches(SPINNER_SEL)) return e; } catch (x) { return null; }
+    }
+    return null;
+  }
+  /** why el cannot be used right now ('' = usable). Clicks / Enter need it visible; every action needs it enabled,
+   *  not under an overlay or a spinner (the top element at its centre is el, inside it, or not overlay-like), and no
+   *  busy marker (aria-busy) on it or around it. A cover that is not an overlay / spinner (a stretched link) does not
+   *  count: el.click() reaches the target anyway. */
+  function unusableWhy(el, action) {
+    if (!el || !el.isConnected) return 'gone';
+    var r = boxOf(el), cs = getComputedStyle(el), clicky = action === 'click' || action === 'press';
+    if (clicky && (r.width <= 0 || r.height <= 0 || cs.visibility === 'hidden' || cs.display === 'none')) return 'not visible';
+    if (el.disabled === true || el.getAttribute('aria-disabled') === 'true' || (el.matches && el.matches(':disabled'))) return 'disabled';
+    if (action === 'fill' && el.readOnly === true) return 'read-only';
+    var busy = L.closestDeep(el, '[aria-busy=true]');
+    if (busy) return 'busy (aria-busy)';
+    if (r.width > 0 && r.height > 0 && P) {
+      var cx = Math.min(innerWidth - 1, Math.max(0, r.left + r.width / 2)), cy = Math.min(innerHeight - 1, Math.max(0, r.top + r.height / 2));
+      var t = P.topAt(cx, cy);
+      if (t && t !== el && !P.containsDeep(el, t) && !P.containsDeep(t, el)) {
+        if (spinnerLike(t)) return 'a loading spinner is over it';
+        var ov = P.overlayOf(t);
+        if (ov && !P.containsDeep(ov, el)) return 'covered by an overlay';
+      }
+      var spins = L.deepAll(SPINNER_SEL).filter(function (sp) {
+        if (sp === el || P.containsDeep(sp, el) || P.containsDeep(el, sp) || !P.vis(sp)) return false;
+        return overlaps(boxOf(sp), r);
+      });
+      if (spins.length) return 'a loading spinner is over it';
+    }
+    return '';
+  }
+  /** polls (100 ms) until el is usable or maxMs (default 8 s) -> {ok, ms, why: what it waited for, last} */
+  async function waitUsable(el, action, maxMs) {
+    var t0 = Date.now(), end = t0 + (maxMs == null ? 8000 : maxMs), first = '', why;
+    for (;;) {
+      why = unusableWhy(el, action);
+      if (!why) return { ok: true, ms: Date.now() - t0, why: first };
+      if (!first) first = why;
+      if (why === 'gone' || Date.now() >= end) return { ok: false, ms: Date.now() - t0, why: first, last: why };
+      await sleep(100);
+    }
+  }
+
+  async function act(step, index, approved, strict, reply, usableMs) {
     var el = L.element(index);
     if (!el || !el.isConnected) return reply({ ok: false, error: 'element gone' });
     el.scrollIntoView({ block: 'center', inline: 'nearest' });
+    var w = await waitUsable(el, step.action, usableMs);
+    if (!w.ok) return reply({ ok: false, unusable: w.last || w.why, waited: w, error: 'the control is ' + (w.last || w.why) + ' after ' + Math.round(w.ms / 100) / 10 + ' s' });
+    var waited = w.why ? w : null;
     if (step.action === 'fill') {
       if (S.isPlaceholder(step.value)) return reply({ ok: false, error: 'placeholder value; the user must type it' });
       setValue(el, step.value);
-      return reply({ ok: true });
+      return reply({ ok: true, waited: waited });
     }
     if (step.action === 'select') {
       var opts = Array.prototype.slice.call(el.options);
@@ -243,19 +300,48 @@
            || opts.find(function (x) { return S.norm(x.text) === step.optionText; });
       if (!o) return reply({ ok: false, error: 'option not found: ' + (step.optionText || step.value) });
       setValue(el, o.value);
-      return reply({ ok: true });
+      return reply({ ok: true, waited: waited });
     }
     if (step.action === 'press') {
       var pd = pressDanger(el, L.accName(el), strict) || step.danger;
       if (pd && approved !== true) return reply({ ok: false, needsApproval: true, danger: pd });
-      reply({ ok: true, url: location.href });
+      reply({ ok: true, url: location.href, waited: waited });
       setTimeout(function () { pressEnter(el); }, 0);
       return;
     }
     var danger = S.dangerMatchStrict(S.dangerContext(el, L.accName(el)), strict === true) || step.danger;
     if (danger && approved !== true) return reply({ ok: false, needsApproval: true, danger: danger });
-    reply({ ok: true, url: location.href });   // reply before clicking: the click may unload this page
+    reply({ ok: true, url: location.href, waited: waited });   // reply before clicking: the click may unload this page
     setTimeout(function () { el.focus && el.focus(); el.click(); }, 0);
+  }
+
+  /** v0.9 file check: the first <= 1024 bytes of a downloaded file, read again on THIS page's origin only (the
+   *  portal's cookies apply, as for the download). Another origin is not read: the worker says "content not checked".
+   *  -> {ok, status, type, head (latin1), why} */
+  async function peek(url) {
+    var u; try { u = new URL(url, location.href); } catch (e) { return { ok: false, why: 'not a web address' }; }
+    if (!/^(https?|blob):$/.test(u.protocol) || u.origin !== location.origin) return { ok: false, why: 'the file is on another origin than the portal page' };
+    var ctl = new AbortController(), timer = setTimeout(function () { ctl.abort(); }, 8000);
+    try {
+      var resp = await fetch(u.href, { credentials: 'include', cache: 'no-store', headers: u.protocol === 'blob:' ? {} : { Range: 'bytes=0-1023' }, signal: ctl.signal });
+      var out = { ok: resp.ok, status: resp.status, type: resp.headers.get('content-type') || '', redirected: !!resp.redirected };
+      if (!resp.ok) { out.why = 'reading it again answered HTTP ' + resp.status; return out; }
+      var bytes = new Uint8Array(0);
+      if (resp.body && resp.body.getReader) {
+        var rd = resp.body.getReader();
+        while (bytes.length < 1024) {
+          var c = await rd.read();
+          if (c.done) break;
+          var nb = new Uint8Array(bytes.length + c.value.length); nb.set(bytes); nb.set(c.value, bytes.length); bytes = nb;
+        }
+        try { rd.cancel(); } catch (e) {}
+      } else bytes = new Uint8Array(await resp.arrayBuffer());
+      bytes = bytes.slice(0, 1024);
+      var head = ''; for (var k = 0; k < bytes.length; k++) head += String.fromCharCode(bytes[k]);
+      out.head = head;
+      return out;
+    } catch (e) { return { ok: false, why: 'could not read it again (' + String(e && e.message || e).slice(0, 80) + ')' }; }
+    finally { clearTimeout(timer); }
   }
 
   /** Enter on a field as a person would: key events for page handlers (search boxes, comboboxes), then, unless a
@@ -368,7 +454,12 @@
       case 'autofill_signin': reply(P.autofillSignin(!!msg.testHook)); return; // v0.6.1, never reads a field value
       case 'rec_state': recording = !!msg.on; lastFillKey = null; reply({ ok: true }); return;
       case 'locate': locate(msg.step, msg.timeoutMs).then(reply); return true;
-      case 'act': act(msg.step, msg.index, msg.approved, msg.strict, reply); return;
+      case 'act':                                                             // async since 0.9 (wait until usable): always replies
+        act(msg.step, msg.index, msg.approved, msg.strict, reply, msg.usableMs)
+          .catch(function (e) { try { reply({ ok: false, error: 'page script error: ' + String(e && e.message || e) }); } catch (x) {} });
+        return true;
+      case 'peek': peek(msg.url).then(reply); return true;                    // v0.9: the first bytes of a downloaded file
+      case 'popup_close': reply(P.closeBlocked(msg.n, msg.name)); return;     // v0.9: a pop-up the agent brain read as harmless
       case 'quiet': quiet(msg.idleMs, msg.timeoutMs).then(reply); return true;
       case 'check': {
         var body = S.norm(L.deepText());
