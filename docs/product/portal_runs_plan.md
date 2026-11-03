@@ -41,11 +41,17 @@ missing, and never fails silently.
 - **Not code**: switch on the relay; test end to end on one real portal; get the Reddit test-case user running it;
   ask about Dext/Hubdoc and price.
 
-## Competitors seen in discovery
+## Competitors (discovery + desk research 2026-11-04)
 | Who | What it is | Where it falls short for our user |
 |---|---|---|
 | Dext / Hubdoc-type fetchers | fetch invoices from supported suppliers | one user: covered ~4 of 12 vendors (big utilities), not the 2FA / timeout ones; logins stored on their servers made finance nervous; dropped after 2 months |
+| **Tailride** (closest) | invoice collection from portals, runs ON THE USER'S COMPUTER (desktop app Mac/Win/Linux, or browser extension), "passwords stay there"; fills authenticator-app codes; free for 10 invoices/mo, $19/mo for 75 (tailride.so compare page, checked 2026-11-04) | local + logins-stay-local is NOT unique to us. Says nothing about SMS / e-mail codes; invoices only |
+| GetMyInvoices | cloud fetching, "10,000+ portals" (vendor claim); desktop app only for authenticator 2FA; EUR 19-179/mo by portals, 499 business | SMS / e-mail codes not automated; logins in their cloud; reviews: connections often break and need manual work, slow setup and support |
+| Skyvern / Browser Use | general cloud browser agents for developers; authenticator codes automatic, SMS pushed in by API or paid number; $29-149/mo or per step | developer tools, logins in their cloud or a password vault |
+| Hubdoc / AutoEntry | Hubdoc retired portal fetching (API links only); AutoEntry reportedly stopped | their users are left doing it by hand (Xero ideas forum, Sage forum) |
 | Skydive | cloud browser agents, each with its own cloud computer; scheduled, drops files in a folder, flags page changes; ~$20-49/mo, free tier (third-party sources disagree) | runs in their cloud, so logins and documents leave the user's machine; 2FA handling unconfirmed |
+
+**What can still set us apart** (given Tailride): text-message / e-mail codes via the human's phone; recovering after redesigns; a missing-document checklist; chores beyond invoices (statements per account, daily portal figures, courier and partner portals). People do pay: single-purpose fetchers cost EUR 19-179/mo.
 
 ## Parking lot (expansion ideas, not now)
 - **Start runs from Siri Shortcuts** (Mac): expose each saved run as a Shortcuts action, so Siri, schedules and people's
