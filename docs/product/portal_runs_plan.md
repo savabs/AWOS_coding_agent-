@@ -1,6 +1,6 @@
 # Portal runs: product plan (2026-11-02)
 
-From 15 logged discovery conversations (Reddit: r/nocode, r/RPA, r/zapier, and replies; tracker = claude.ai artifact "Talk to Users
+From 16 logged discovery conversations (Reddit: r/nocode, r/RPA, r/zapier, and replies; tracker = claude.ai artifact "Talk to Users
 Kit", collection `convos`).
 
 **Product.** For people who log into many supplier / partner portals every month to collect invoices, statements or
@@ -11,7 +11,7 @@ missing, and never fails silently.
 | Need (how many raised it) | Status |
 |---|---|
 | Pause on login / code / captcha, resume without redoing work (3) | built (0.6) |
-| 2FA from the phone; SMS-only MFA blocks even RPA teams (5) | built (0.8); not yet tested for real |
+| 2FA from the phone; SMS-only MFA blocks even RPA teams (6) | built (0.8); not yet tested for real |
 | Unexpected pop-ups, incl. "accept new terms" (5) | built (0.9): agent brain reads unknown pop-ups; terms / consent / payment always stop |
 | Never trust a green run: the result really landed (5); per step too: expect X (e.g. "success"), and if something else appeared, read it, class it error / warning, act on it; capped retries and scrolls so a run never loops, caps set per portal while testing it or read from the page ("page 1 of 5") | files: built (0.9) size + content checks, "Not a document"; end of run: final URL + expected texts, retried once; caps: one retry after a pop-up, 5 model-chosen steps. Gap: no check after each step, and no reading of the error / warning that appeared instead |
 | Flag what is missing (2) | built (collection checklist) |
@@ -24,7 +24,7 @@ missing, and never fails silently.
 | E-mail as the cheap door (codes, documents, "your invoice is ready" links that land on a login; many vendor / payroll sites hide a scheduled e-mailed report in settings, so look there first when setting up a portal) (4) | gap |
 | Move content from a portal into another app, not just download it (daily portal stats into an ops sheet; call recordings + AI summaries into a Mac CRM) (2) | gap: run values are typed in at start, nothing carries a value from one site to another; the CRM here (Daylite) is a Mac desktop app, outside a browser extension |
 | Keyboard / Enter fallback, as a backup blended with clicks (arrow keys to scroll, visual match to find the item) (1, RPA dev) | gap (small) |
-| What happens to the files after (rename, folder, accountant) | unknown: answers pending |
+| What happens to the files after (rename, folder, accountant) (1: rename + drop in the accounting folder) | gap: downloads keep the site's file name, no folder choice (P1 "finish the job") |
 | Will they pay; why not Dext / Hubdoc (1, strong: paid, dropped after 2 months) | one answer: it covered ~4 of 12 vendors (big utilities), not the small / 2FA / timeout ones, "paying for the easy part"; price not asked yet |
 | Logins stay on the user's computer (an incumbent storing logins on its servers made the finance person nervous) (1, strong) | by design: runs in the user's own browser |
 
