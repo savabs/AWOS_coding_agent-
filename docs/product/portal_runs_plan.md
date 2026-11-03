@@ -1,6 +1,6 @@
 # Portal runs: product plan (2026-11-02)
 
-From 16 logged discovery conversations (Reddit: r/nocode, r/RPA, r/zapier, and replies; tracker = claude.ai artifact "Talk to Users
+From 20 logged discovery conversations (Reddit: r/nocode, r/RPA, r/zapier, and replies; tracker = claude.ai artifact "Talk to Users
 Kit", collection `convos`).
 
 **Product.** For people who log into many supplier / partner portals every month to collect invoices, statements or
@@ -11,7 +11,7 @@ missing, and never fails silently.
 | Need (how many raised it) | Status |
 |---|---|
 | Pause on login / code / captcha, resume without redoing work (3) | built (0.6) |
-| 2FA from the phone; SMS-only MFA blocks even RPA teams (6) | built (0.8); not yet tested for real |
+| 2FA from the phone; SMS-only MFA blocks even RPA teams; sometimes asked again right at the export button, not only at login (7) | built (0.8); not yet tested for real |
 | Unexpected pop-ups, incl. "accept new terms" (5) | built (0.9): agent brain reads unknown pop-ups; terms / consent / payment always stop |
 | Never trust a green run: the result really landed (5); per step too: expect X (e.g. "success"), and if something else appeared, read it, class it error / warning, act on it; capped retries and scrolls so a run never loops, caps set per portal while testing it or read from the page ("page 1 of 5") | files: built (0.9) size + content checks, "Not a document"; end of run: final URL + expected texts, retried once; caps: one retry after a pop-up, 5 model-chosen steps. Gap: no check after each step, and no reading of the error / warning that appeared instead |
 | Flag what is missing (2) | built (collection checklist) |
