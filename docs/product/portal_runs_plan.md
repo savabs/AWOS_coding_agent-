@@ -37,3 +37,9 @@ missing, and never fails silently.
 - **P2**: keyboard fallback; network-level downloads; locked-screen runs.
 - **Not code**: switch on the relay; test end to end on one real portal; get the Reddit test-case user running it;
   ask about Dext/Hubdoc and price.
+
+## Parking lot (expansion ideas, not now)
+- **Start runs from Siri Shortcuts** (Mac): expose each saved run as a Shortcuts action, so Siri, schedules and people's
+  own automations can start it. Source: a home-automation user who already bridges a legacy device with Shortcuts + IFTTT.
+- **Device dashboards with no integration**: a brand with a web dashboard but no API turns device admin into a portal
+  chore (slow jobs: usage reports, schedules; not instant on/off). Same source.
