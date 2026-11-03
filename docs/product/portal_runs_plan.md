@@ -38,6 +38,12 @@ missing, and never fails silently.
 - **Not code**: switch on the relay; test end to end on one real portal; get the Reddit test-case user running it;
   ask about Dext/Hubdoc and price.
 
+## Competitors seen in discovery
+| Who | What it is | Where it falls short for our user |
+|---|---|---|
+| Dext / Hubdoc-type fetchers | fetch invoices from supported suppliers | one user: covered ~4 of 12 vendors (big utilities), not the 2FA / timeout ones; logins stored on their servers made finance nervous; dropped after 2 months |
+| Skydive | cloud browser agents, each with its own cloud computer; scheduled, drops files in a folder, flags page changes; ~$20-49/mo, free tier (third-party sources disagree) | runs in their cloud, so logins and documents leave the user's machine; 2FA handling unconfirmed |
+
 ## Parking lot (expansion ideas, not now)
 - **Start runs from Siri Shortcuts** (Mac): expose each saved run as a Shortcuts action, so Siri, schedules and people's
   own automations can start it. Source: a home-automation user who already bridges a legacy device with Shortcuts + IFTTT.
