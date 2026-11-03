@@ -15,6 +15,7 @@ missing, and never fails silently.
 | Unexpected pop-ups, incl. "accept new terms" (5) | built (0.9): agent brain reads unknown pop-ups; terms / consent / payment always stop |
 | Never trust a green run: the result really landed (5); per step too: expect X (e.g. "success"), and if something else appeared, read it, class it error / warning, act on it; capped retries and scrolls so a run never loops, caps set per portal while testing it or read from the page ("page 1 of 5") | files: built (0.9) size + content checks, "Not a document"; end of run: final URL + expected texts, retried once; caps: one retry after a pop-up, 5 model-chosen steps. Gap: no check after each step, and no reading of the error / warning that appeared instead |
 | Flag what is missing (2) | built (collection checklist) |
+| One portal's problem never stops the rest: mark it and go on with the next; whoever decides answers within minutes (2, RPA devs) | built: "Skip this portal (leave it for me)" + a wait alarm that leaves a waiting portal and starts the next |
 | New-tab PDFs, incl. tabs opening behind the main window (3) | built (0.6) |
 | One sitting, no nagging every few days (1, strongly) | built (0.8) |
 | Never miss a cycle (portal keeps only 3 months; bit one user twice a year after time away, support took 4-5 days while accounting chased) (1, strong) | built (0.9): catch-up of missed months in collections |
