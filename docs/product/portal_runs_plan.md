@@ -1,6 +1,6 @@
 # Portal runs: product plan (2026-11-02)
 
-From 13 logged discovery conversations (Reddit: r/nocode, r/RPA, r/zapier, and replies; tracker = claude.ai artifact "Talk to Users
+From 14 logged discovery conversations (Reddit: r/nocode, r/RPA, r/zapier, and replies; tracker = claude.ai artifact "Talk to Users
 Kit", collection `convos`).
 
 **Product.** For people who log into many supplier / partner portals every month to collect invoices, statements or
@@ -21,6 +21,7 @@ missing, and never fails silently.
 | Fast inside short sessions (5-min idle logout; a timeout kills the code too, so login + new code + wait, up to 3 loops) (2) | mostly; unmeasured on a real portal |
 | Wait for a state (spinner gone, button enabled), not delays (3) | built (0.9): wait until usable before each action |
 | E-mail as the cheap door (codes, documents, "your invoice is ready" links that land on a login) (3) | gap |
+| Move content from a portal into another app, not just download it (daily portal stats into an ops sheet; call recordings + AI summaries into a Mac CRM) (2) | gap: run values are typed in at start, nothing carries a value from one site to another; the CRM here (Daylite) is a Mac desktop app, outside a browser extension |
 | Keyboard / Enter fallback, as a backup blended with clicks (arrow keys to scroll, visual match to find the item) (1, RPA dev) | gap (small) |
 | What happens to the files after (rename, folder, accountant) | unknown: answers pending |
 | Will they pay; why not Dext / Hubdoc (1, strong: paid, dropped after 2 months) | one answer: it covered ~4 of 12 vendors (big utilities), not the small / 2FA / timeout ones, "paying for the easy part"; price not asked yet |
