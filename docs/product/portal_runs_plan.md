@@ -43,3 +43,6 @@ missing, and never fails silently.
   own automations can start it. Source: a home-automation user who already bridges a legacy device with Shortcuts + IFTTT.
 - **Device dashboards with no integration**: a brand with a web dashboard but no API turns device admin into a portal
   chore (slow jobs: usage reports, schedules; not instant on/off). Same source.
+- **Competitor pricing behind calculators / multi-step forms**: fill a form to read the numbers; rare and different on
+  every site, so "a custom script for each one doesn't pay off". Only works for us if setting up a new site is near
+  zero effort (supports P1 recipe setup from one sentence). Source: r/nocode reply.
