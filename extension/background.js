@@ -151,18 +151,34 @@ function samePage(a, b) {
   try { var x = new URL(a), y = new URL(b); return x.origin === y.origin && x.pathname.replace(/\/+$/, '') === y.pathname.replace(/\/+$/, ''); }
   catch (e) { return false; }
 }
-/** ping the content script until it answers (optionally on a given URL). */
+/** ping the content script until it answers (optionally on a given URL). v0.9.3: a loaded page that has no live copy
+ *  (it was open before the extension was reloaded / updated) gets one injected, once. */
 async function ensureContent(tabId, wantUrl, timeoutMs) {
-  var end = Date.now() + (timeoutMs || 8000), last = '';
+  var start = Date.now(), end = start + (timeoutMs || 8000), last = '', injected = false;
   while (Date.now() < end) {
     try {
       var r = await sendTab(tabId, { type: 'ping' });
       if (r && r.ok && (!wantUrl || sameUrl(r.url, wantUrl))) return r;
       last = r ? 'on ' + r.url : 'no reply';
-    } catch (e) { last = String(e.message || e); }
+      if (!r && !injected && Date.now() - start > 600) injected = await injectContent(tabId);   // only a dead copy is there
+    } catch (e) {
+      last = String(e.message || e);
+      if (!injected && Date.now() - start > 600 && /receiving end/i.test(last)) injected = await injectContent(tabId);
+    }
     await sleep(150);
   }
   throw new Error('page script not ready (' + last + ')');
+}
+var CONTENT_FILES = ['lib/safety.js', 'lib/locator.js', 'lib/portal.js', 'content.js'];
+/** put the page script into an already-loaded http(s) tab (true once tried, so callers inject at most once). */
+async function injectContent(tabId) {
+  var tab = await chrome.tabs.get(tabId).catch(function () { return null; });
+  if (!tab || tab.status !== 'complete' || !/^https?:/.test(tab.url || '')) return false;
+  await sleep(250);                                  // a page that just loaded gets its own copy: never add a second one
+  var r = await sendTab(tabId, { type: 'ping' }).catch(function () { return null; });
+  if (r && r.ok) return true;
+  await chrome.scripting.executeScript({ target: { tabId: tabId }, files: CONTENT_FILES }).catch(function (e) { console.warn('inject', e); });
+  return true;
 }
 function stripHash(u) { return String(u || '').split('#')[0]; }
 function sameUrl(a, b) { return stripHash(a) === stripHash(b); }
@@ -184,13 +200,17 @@ async function startRecording(tabId, name) {
               startUrl: tab.url, steps: [{ action: 'goto', url: tab.url }], expect: { urlPattern: '', texts: [] } };
   // v0.9.1: recording that starts inside an open window (the app's Settings dialog over its home page): warn, and keep
   // the window's name / tab on the start step so replay knows the recipe needs it open (goal-guided navigation)
+  // v0.9.3: the tab may have been open since before the extension was reloaded: make sure a live recorder is in it,
+  // or every click is lost and the recording ends with 0 actions
+  try { await ensureContent(tabId, null, 4000); }
+  catch (e) { throw new Error('AWOS cannot reach this page (' + (e.message || e) + '). Reload the page, then start recording again.'); }
   var cx = await sendTab(tabId, { type: 'rec_context' }).catch(function () { return null; });
   if (cx && cx.dialog) {
     rec.steps[0].dialog = cx.dialog;
     rec.startWarning = START_IN_DIALOG;
   }
   await setSess('recState', { tabId: tabId, rec: rec, lastClickAt: 0 });
-  await sendTab(tabId, { type: 'rec_state', on: true }).catch(function () {});
+  await sendTab(tabId, { type: 'rec_state', on: true });
   return rec;
 }
 var START_IN_DIALOG = 'A window is already open. For a reliable recipe, close it and start recording from the normal page, then open it while recording.';
@@ -1291,7 +1311,14 @@ chrome.alarms.onAlarm.addListener(function (a) {
   else if (a.name.indexOf(LOGIN_POLL) === 0) collNext().catch(function () {});          // backup wake-up while waiting for logins
 });
 chrome.runtime.onStartup.addListener(function () { armAll(true); });
-chrome.runtime.onInstalled.addListener(function () { armAll(true); });
+chrome.runtime.onInstalled.addListener(function (d) {
+  armAll(true);
+  if (d && d.reason === 'chrome_update') return;
+  // v0.9.3: tabs open before an install / reload / update have no live page script: give each one a fresh copy
+  chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] }).then(function (tabs) {
+    tabs.forEach(function (t) { if (!t.discarded) injectContent(t.id); });
+  }).catch(function () {});
+});
 
 // ---- collections: a monthly checklist of portals (v0.6) -------------------------------------------------
 // A collection groups recipes (one portal each, with its expected download). Running it runs them one after another,

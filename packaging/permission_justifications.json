@@ -6,7 +6,7 @@
     "alarms": "Runs a saved chore on the schedule the user set (for example every Monday at 9:00). No alarm exists unless the user creates a schedule.",
     "downloads": "Some chores end by downloading a file the user asked for (an invoice or statement PDF). Replay starts that download and checks it finished, so the result can be verified.",
     "notifications": "Tells the user when a scheduled replay finished, failed, or is waiting for their approval before a risky step (for example a payment or delete button), or that a portal in their monthly collection logged them out and needs them to log in before the run.",
-    "scripting": "Injects the recorder/replayer script into a tab the user explicitly starts a recording or replay in, when the tab was open before the extension was installed.",
+    "scripting": "Puts AWOS Replay's page script back into tabs that were already open when the extension was installed, reloaded or updated (Chrome only adds it to pages loaded afterwards), so recording and replay work there without the user reloading the page. Only AWOS Replay's own bundled files are injected; no remote code.",
     "activeTab": "Lets the user start recording on the current tab from the toolbar button without granting access to other tabs.",
     "contextMenus": "Adds 'Record a chore here' / 'Replay' to the right-click menu.",
     "sidePanel": "Shows the recording and the replay progress (each step, its check, and any approval request) in Chrome's side panel.",

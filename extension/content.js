@@ -42,8 +42,10 @@
  */
 (function () {
   'use strict';
-  if (window.__awosReplayLoaded) return;
-  window.__awosReplayLoaded = true;
+  // v0.9.3: after the extension is reloaded / updated, a tab opened before keeps a dead copy of this script; the worker
+  // injects a fresh one and the newest copy takes over (an older copy's recorder handlers go quiet)
+  var GEN = window.__awosReplayGen = (window.__awosReplayGen || 0) + 1;
+  function stale() { return window.__awosReplayGen !== GEN; }
   var S = window.AWOSSafety, L = window.AWOSLocator, P = window.AWOSPortal;
   var recording = false, lastFillKey = null, keySeq = 0, sentValue = {};
   var lastEnter = null;         // {form, t}: the Enter that submitted a form (its implicit default-button click is not a step)
@@ -77,7 +79,7 @@
   }
 
   function onClick(e) {
-    if (!recording || !e.isTrusted) return;
+    if (!recording || !e.isTrusted || stale()) return;
     var t = realTarget(e), el = t && L.closestDeep(t, L.KIND_SELECTOR.click);
     if (!el || el.matches(L.KIND_SELECTOR.fill) || el.tagName === 'SELECT') return;
     if (lastEnter && el.form && el.form === lastEnter.form && Date.now() - lastEnter.t < 600) return;   // Enter's implicit submit click
@@ -136,7 +138,7 @@
 
   /** Enter in a single-line field inside a form or a search box: the submit IS this keypress. */
   function onKeyDown(e) {
-    if (!recording || !e.isTrusted || e.key !== 'Enter' || e.isComposing || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
+    if (!recording || !e.isTrusted || stale() || e.key !== 'Enter' || e.isComposing || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
     var el = realTarget(e);
     if (!el || !el.matches || !el.matches(L.KIND_SELECTOR.fill) || el.tagName === 'TEXTAREA' || el.isContentEditable) return;
     var inSearch = el.form || L.closestDeep(el, '[role=search], [role=combobox], [role=searchbox]')
@@ -149,7 +151,7 @@
   }
 
   function onInput(e) {
-    if (!recording) return;
+    if (!recording || stale()) return;
     var el = realTarget(e);
     if (!el || !el.matches) return;
     if (el.tagName === 'SELECT') {          // isTrusted not required: some UIs set selects by script
@@ -172,6 +174,7 @@
   // v0.9.1: a file the page builds itself (fetch -> Blob -> a temporary <a download>, often clicked by script) is saved
   // under the name the page gives it; the worker learns that name here (the browser may not report it, or late)
   document.addEventListener('click', function (e) {
+    if (stale()) return;
     var t = realTarget(e), a = t && L.closestDeep(t, 'a[download]');
     if (a && /^(blob|data):/i.test(a.href || '') && a.getAttribute('download')) send({ type: 'dl_hint', href: String(a.href).slice(0, 300), name: String(a.getAttribute('download')).slice(0, 200) });
   }, true);
@@ -516,6 +519,7 @@
   }
 
   chrome.runtime.onMessage.addListener(function (msg, _sender, reply) {
+    if (stale()) return;                            // v0.9.3: a newer copy answers
     switch (msg && msg.type) {
       case 'ping': reply({ ok: true, url: location.href, recording: recording, contentType: document.contentType || '' }); return;
       case 'page_kind': reply(P.pageKind()); return;
