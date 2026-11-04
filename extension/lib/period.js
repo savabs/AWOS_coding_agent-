@@ -156,6 +156,20 @@
     return { template: head + out, changed: changed, hits: hits };
   }
   function periodsIn(text, kind) { return detect(text, null, kind).hits; }
+  /** v0.9.1: the periods a list ROW names, full dates with a day included ("Nov 1, 2026", "1 November 2026",
+   *  "2026-11-01"): the day is free, the month + year is the period. Only for row texts (a variable step picks its
+   *  row by period); ordinary templating still leaves dates with a day alone. -> ['YYYY-MM', ...] */
+  var DAY_MDY = new RegExp('(?<![A-Za-z])' + MON + '\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+' + YEAR + '(?!\\d)', 'gi');
+  var DAY_DMY = new RegExp('(?<![\\d])(\\d{1,2})(?:st|nd|rd|th)?\\.?\\s+' + MON + '\\.?,?\\s+' + YEAR + '(?!\\d)', 'gi');
+  var DAY_ISO = /(?<![\d.])((?:19|20)\d{2})-(0[1-9]|1[0-2])-([0-2]\d|3[01])(?!\d)/g;
+  function rowPeriods(text) {
+    var t = str(text).replace(DAY_MDY, function (a, m, d, y) { return ' ' + m + ' ' + y + ' '; })
+      .replace(DAY_DMY, function (a, d, m, y) { return ' ' + m + ' ' + y + ' '; })
+      .replace(DAY_ISO, function (a, y, m) { return ' ' + y + '-' + m + ' '; });
+    var out = [];
+    periodsIn(t).forEach(function (h) { if (h.period && out.indexOf(h.period) < 0) out.push(h.period); });
+    return out;
+  }
 
   // ---- recordings ----------------------------------------------------------------------------------------------
   var LOC_KEYS = ['name', 'text', 'label', 'title', 'href', 'placeholder', 'neighbor', 'block', 'context', 'id'];
@@ -271,7 +285,7 @@
   root.AWOSPeriod = {
     MONTHS: MONTHS, SHORT: SHORT, BUILTIN: BUILTIN, BUILTIN_SET: BUILTIN_SET,
     periodOf: periodOf, shift: shift, valid: valid, label: label, builtins: builtins, substitute: substitute, hasTokens: hasTokens,
-    detect: detect, periodsIn: periodsIn, names: names, fields: fields, scan: scan, view: view, templatedView: templatedView,
+    detect: detect, periodsIn: periodsIn, rowPeriods: rowPeriods, names: names, fields: fields, scan: scan, view: view, templatedView: templatedView,
     fromTokens: fromTokens, infer: infer, consistent: consistent, stepTemplated: stepTemplated, getPath: getPath, setPath: setPath,
   };
 })(typeof globalThis !== 'undefined' ? globalThis : self);

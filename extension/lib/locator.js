@@ -169,6 +169,20 @@
     return parts.join(' > ');
   }
 
+  /** v0.9.1: the text of the repeated list / table row el sits in (an invoice row: date, amount, number), or ''.
+   *  Same rule as the recorder's `variable`: a tr / li / article / row-like ancestor (<= 6 up) with >= 3 siblings of its kind. */
+  function rowText(el) {
+    var n = el;
+    for (var k = 0; k < 6 && n && n.parentElement; k++, n = n.parentElement) {
+      var tag = n.tagName, role = n.getAttribute && n.getAttribute('role');
+      if (!/^(TR|LI|ARTICLE)$/.test(tag) && !/^(row|listitem|article)$/.test(role || '')) continue;
+      var same = 0, kids = n.parentElement.children;
+      for (var j = 0; j < kids.length; j++) if (kids[j].tagName === tag && (kids[j].getAttribute('role') || '') === (role || '')) same++;
+      if (same >= 3) return norm(n.innerText || n.textContent).slice(0, 160);
+    }
+    return '';
+  }
+
   function describe(el, page) {
     var r = el.getBoundingClientRect();
     var form = el.form || closestDeep(el, 'form');
@@ -195,6 +209,7 @@
       title: norm(el.getAttribute('title')),
       formId: form ? (form.id || form.getAttribute('name') || '') : '',
       pos: { x: Math.round(r.left + scrollX), y: Math.round(r.top + scrollY), w: Math.round(r.width), h: Math.round(r.height) },
+      row: rowText(el),
     };
   }
 
@@ -299,14 +314,20 @@
     });
     var status = !best || best.score < FLOOR ? 'not_found'
       : (best.score >= ACCEPT && margin >= MARGIN && best.anchor) ? 'found' : 'ambiguous';
+    // v0.9.1: every control with the recorded name that sits in a list row (identical "Download PDF" links, one per
+    // invoice), in document order with its row text: the worker picks the row by its period / text, never by position
+    var want = low(rec.name), twins = [];
+    if (want) scored.forEach(function (c) { if (low(c.desc.name) === want && c.desc.row) twins.push({ index: c.index, row: c.desc.row }); });
+    twins.sort(function (a, b) { return a.index - b.index; });
     return { status: status, index: best ? best.index : -1, score: best ? r3(best.score) : 0,
-             anchor: !!(best && best.anchor), margin: r3(margin), dupes: dupes, shortlist: shortlist };
+             anchor: !!(best && best.anchor), margin: r3(margin), dupes: dupes, shortlist: shortlist,
+             twins: twins.length >= 2 ? twins.slice(0, 40) : [] };
   }
 
   function brief(d) {
     return { tag: d.tag, type: d.type, role: d.role, name: d.name, text: d.text.slice(0, 60), id: d.id,
              nameAttr: d.nameAttr, label: d.label, placeholder: d.placeholder, neighbor: d.neighbor, href: d.href,
-             context: d.context || '', block: d.block || '', siblings: d.siblings || [] };
+             context: d.context || '', block: d.block || '', siblings: d.siblings || [], row: d.row || '' };
   }
 
   function element(index) { return lastScan[index] || null; }
@@ -331,6 +352,7 @@
     var controls = els.map(function (el) {
       var role = roleOf(el), d = { role: role === 'radio' ? 'radiogroup' : role, name: accName(el), context: contextOf(el),
                                    inDialog: !!closestDeep(el, 'dialog, [role=dialog], [role=alertdialog]') };
+      var rw = rowText(el); if (rw) d.row = rw;                   // v0.9.1: the list row it sits in (guided row choice)
       // Tell-it fields (not used by the verifier outline): enclosing form index, autocomplete, sensitive-field reason
       var fm = el.form || closestDeep(el, 'form'), fi = fm ? formEls.indexOf(fm) : -1;
       if (fi >= 0) d.form = fi;

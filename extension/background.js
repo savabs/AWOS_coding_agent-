@@ -66,7 +66,7 @@
  *    endpoint, micro-agent contract, consent and cloud-lock rules as tellit.js): ONE action on the current page from
  *    the goal (period substituted), "last time at this step you clicked ...", the steps done and the observation;
  *    validated, gated and executed like a Tell-it action. needs_user / done = the recipe ends MISSING with the model's
- *    reason (never the recorded, old target). At most GUIDED_CAP (5) model decisions per run, each logged.
+ *    reason (never the recorded, old target). At most GUIDED_CAP (8 since 0.9.1) model decisions per run, each logged; v0.9.1: up to GUIDED_NAV (4) moves toward one step's control (guided.js guidedOutcome).
  *  - result vs goal: the downloaded file must match the period-substituted expectation; a file for another period is
  *    WRONG_PERIOD (verdict + collection checklist), not Got.
  *  - skills memory: a VERIFIED run with model-decided steps offers "the portal changed: use the new step from now on?"
@@ -182,18 +182,46 @@ async function startRecording(tabId, name) {
   if (!/^https?:/.test(tab.url || '')) throw new Error('can only record http(s) pages');
   var rec = { id: uid('rec'), name: name || ('Recording ' + new Date().toLocaleString()), createdAt: Date.now(),
               startUrl: tab.url, steps: [{ action: 'goto', url: tab.url }], expect: { urlPattern: '', texts: [] } };
+  // v0.9.1: recording that starts inside an open window (the app's Settings dialog over its home page): warn, and keep
+  // the window's name / tab on the start step so replay knows the recipe needs it open (goal-guided navigation)
+  var cx = await sendTab(tabId, { type: 'rec_context' }).catch(function () { return null; });
+  if (cx && cx.dialog) {
+    rec.steps[0].dialog = cx.dialog;
+    rec.startWarning = START_IN_DIALOG;
+  }
   await setSess('recState', { tabId: tabId, rec: rec, lastClickAt: 0 });
   await sendTab(tabId, { type: 'rec_state', on: true }).catch(function () {});
   return rec;
 }
+var START_IN_DIALOG = 'A window is already open. For a reliable recipe, close it and start recording from the normal page, then open it while recording.';
 
 async function stopRecording() {
   var st = await getSess('recState');
   if (!st) throw new Error('not recording');
   var tab = await chrome.tabs.get(st.tabId).catch(function () { return null; });
+  await recQueue;                                   // pending step / download notes land first
+  st = await getSess('recState') || st;
   var rec = st.rec;
+  // v0.9.1: a download whose final name was not known yet when it started (blob: built in the page, a hosted URL)
+  for (var did in (st.dlSteps || {})) {
+    var ds = rec.steps[st.dlSteps[did]], it = (await chrome.downloads.search({ id: +did }).catch(function () { return []; }))[0];
+    var fn = it ? fileName(it) : '';
+    if (ds && ds.download && !ds.download.name && /\.[a-z0-9]{1,5}$/i.test(fn)) ds.download.name = fn;
+  }
   if (tab && tab.url) { var u = new URL(tab.url); rec.expect.urlPattern = u.origin + u.pathname; }
   if (!actionCount(rec)) rec.warning = NO_ACTIONS;
+  else if (rec.startWarning) rec.warning = 'The recording started with the "' + (rec.steps[0].dialog.name || 'a') + '" window already open: replay will have to find its way into it. '
+    + 'For a reliable recipe, record again starting from the normal page and open the window while recording.';
+  var dlLike = downloadGoal(rec);
+  if (actionCount(rec) && dlLike && !(rec.steps || []).some(function (x) { return x.download; })) {
+    rec.noFileWarning = 'No file was downloaded while recording (' + dlLike + '). If the invoice opened in a new tab, click its Download button '
+      + 'there while recording (AWOS follows a page a recorded click opens); otherwise set the expected download under Goal + checks, '
+      + 'or replays cannot be verified.';
+    rec.warning = [rec.warning, rec.noFileWarning].filter(Boolean).join(' ');
+  }
+  if (st.followed) rec.followNote = 'The click on "' + st.followed.name + '" opened a page in a new tab; the recording continued there.';
+  var dl = proposeDownload(rec);
+  if (dl) rec.expectDownloadProposed = dl;
   applyPeriod(rec, false);
   var all = await getLocal('recordings', {}); all[rec.id] = rec; await setLocal('recordings', all);
   await setSess('recState', null);
@@ -217,7 +245,7 @@ function onRecStep(tabId, msg) {
       var step = msg.step; if (step.action === 'fill') step.mergeKey = msg.mergeKey;
       steps.push(step);
     }
-    if (msg.step.action === 'click' || msg.step.action === 'press') st.lastClickAt = Date.now();
+    if (msg.step.action === 'click' || msg.step.action === 'press') { st.lastClickAt = Date.now(); st.lastClickIdx = steps.length - 1; }
     await setSess('recState', st);
   }).catch(function (e) { console.warn('rec_step', e); });
   return recQueue;
@@ -227,13 +255,14 @@ chrome.tabs.onUpdated.addListener(function (tabId, info) {
   if (!info.url) return;
   recQueue = recQueue.then(async function () {
     var st = await getSess('recState');
-    if (st && st.newTabs && st.newTabs[tabId] != null) {           // a tab a recorded click opened: is it a file?
+    if (st && st.newTabs && st.newTabs[tabId] != null && st.tabId !== tabId) {   // a tab a recorded click opened: is it a file?
       var ns = st.rec.steps[st.newTabs[tabId]];
       if (ns && fileUrl(info.url) && !(ns.download && ns.download.name)) { ns.download = { name: urlName(info.url) }; await setSess('recState', st); }
       return;
     }
     if (!st || st.tabId !== tabId) return;
     var steps = st.rec.steps, last = steps[steps.length - 1];
+    if (last && last.followTab) return;                 // v0.9.1: the followed tab's own load / redirects, not a step
     if (last && last.action === 'goto' && sameUrl(last.url, info.url)) return;
     if (Date.now() - (st.lastClickAt || 0) < 3000 && last && (last.action === 'click' || last.action === 'press')) { last.navigates = true; }
     else steps.push({ action: 'goto', url: info.url });    // typed / bookmark navigation
@@ -244,10 +273,14 @@ chrome.tabs.onUpdated.addListener(function (tabId, info) {
 // ---- recording: downloads and new tabs a recorded click caused (v0.6) ------------------------------------
 var FILE_EXT = /\.(pdf|csv|tsv|xlsx?|xlsm|ods|docx?|odt|zip|txt|xml|json|ofx|qfx|qif|sta|mt940|png|jpe?g)$/i;
 function fileUrl(u) { try { var x = new URL(u); return /^https?:$/.test(x.protocol) && FILE_EXT.test(x.pathname); } catch (e) { return false; } }
-/** the click step that just ran in the recorded tab (<= 5 s ago), or -1. */
+/** the click step that just ran in the recorded tab (<= 8 s ago: a page that builds the file in script, fetch ->
+ *  blob -> <a download>, can take a while), or -1. v0.9.1: the latest recorded click, even when an address change
+ *  (a goto) or a typed value was recorded after it. */
+var REC_DL_WINDOW = 8000;
 function lastClickIndex(st) {
-  var k = st.rec.steps.length - 1, last = st.rec.steps[k];
-  return last && last.action === 'click' && Date.now() - (st.lastClickAt || 0) < 5000 ? k : -1;
+  if (Date.now() - (st.lastClickAt || 0) >= REC_DL_WINDOW) return -1;
+  var k = st.lastClickIdx != null ? st.lastClickIdx : st.rec.steps.length - 1, s = st.rec.steps[k];
+  return s && s.action === 'click' ? k : -1;
 }
 chrome.downloads.onCreated.addListener(function (d) {
   setTimeout(function () {                 // the click's rec_step message may still be on its way
@@ -255,11 +288,36 @@ chrome.downloads.onCreated.addListener(function (d) {
       var st = await getSess('recState');
       if (!st) return;
       var k = lastClickIndex(st);
-      if (k < 0 || st.rec.steps[k].download) return;
-      st.rec.steps[k].download = { name: fileName(d) || '' };
+      if (k < 0 && st.newTabs) {             // v0.9.1: a download the opened tab started by itself (an invoice host)
+        var kk = Object.keys(st.newTabs).map(function (t) { return st.newTabs[t]; }).pop();
+        if (kk != null && Date.now() - (st.lastClickAt || 0) < 15000) k = kk;
+      }
+      if (k < 0 || (st.rec.steps[k].download && st.rec.steps[k].download.name)) return;
+      // a blob: / data: download (built in the page) has no name yet: the final file name arrives with onChanged
+      var nm = fileName(d) || '';
+      if (/^(blob|data):/i.test(d.finalUrl || d.url || '') && !baseName(d.filename)) nm = DL_HINTS[d.url] || '';
+      st.rec.steps[k].download = { name: /\.[a-z0-9]{1,5}$/i.test(nm) ? nm : '' };
+      if (/^(blob|data):/i.test(d.url || '')) st.rec.steps[k].download.generated = true;
+      (st.dlSteps = st.dlSteps || {})[d.id] = k;
+      var now = (await chrome.downloads.search({ id: d.id }).catch(function () { return []; }))[0];   // its name may be settled already
+      if (now && baseName(now.filename) && /\.[a-z0-9]{1,5}$/i.test(baseName(now.filename))) st.rec.steps[k].download.name = baseName(now.filename);
       await setSess('recState', st);
     }).catch(function (e) { console.warn('rec download', e); });
   }, 300);
+});
+// v0.9.1: a download's final name is often known only later (a hosted invoice URL with no file name, a
+// Content-Disposition header): when the browser settles the file name, the recorded step gets it
+chrome.downloads.onChanged.addListener(function (delta) {
+  if (!delta.filename && !(delta.state && delta.state.current === 'complete')) return;
+  recQueue = recQueue.then(async function () {
+    var st = await getSess('recState');
+    if (!st || !st.dlSteps || st.dlSteps[delta.id] == null) return;
+    var d = (await chrome.downloads.search({ id: delta.id }).catch(function () { return []; }))[0];
+    var step = st.rec.steps[st.dlSteps[delta.id]], n = d ? fileName(d) : '';
+    if (!step || !n || !/\.[a-z0-9]{1,5}$/i.test(n) || (step.download && step.download.name === n)) return;
+    step.download = { name: n };
+    await setSess('recState', st);
+  }).catch(function (e) { console.warn('rec download name', e); });
 });
 chrome.tabs.onCreated.addListener(function (tab) {
   if (tab.openerTabId == null) return;
@@ -275,9 +333,46 @@ chrome.tabs.onCreated.addListener(function (tab) {
       if (fileUrl(u) && !step.download) step.download = { name: urlName(u) };
       (st.newTabs = st.newTabs || {})[tab.id] = k;
       await setSess('recState', st);
+      if (!step.download) followIfPage(tab.id, k);        // v0.9.1: a web page (a hosted invoice), not a file?
     }).catch(function (e) { console.warn('rec new tab', e); });
   }, 300);
 });
+/** v0.9.1: a recorded click opened a WEB PAGE in a new tab (a payment provider's hosted invoice with its own Download
+ *  button): that tab is the obvious continuation, so the recording moves there (the click is marked followTab; replay
+ *  switches to the tab it opens). A file (PDF viewer, no page script) is not followed: it stays a new-tab file. */
+async function followIfPage(tabId, k) {
+  var ok = null;
+  try { await waitForLoad(tabId, 15000); ok = await ensureContent(tabId, null, 5000); } catch (e) { ok = null; }
+  var t = await chrome.tabs.get(tabId).catch(function () { return null; });
+  recQueue = recQueue.then(async function () {
+    var st = await getSess('recState');
+    if (!st || !t || st.newTabs == null || st.newTabs[tabId] !== k || st.tabId === tabId) return;
+    var step = st.rec.steps[k];
+    if (!step || (step.download && step.download.name)) return;
+    if (!ok || /pdf|octet|csv|excel|spreadsheet/i.test(ok.contentType || '') || !/^https?:/.test(t.url || '')) {
+      if (FILE_EXT.test(t.title || '') || fileUrl(t.url || '')) { step.download = { name: urlName(t.url) || t.title }; await setSess('recState', st); }
+      return;
+    }
+    var from = st.tabId;
+    step.followTab = true;
+    st.followed = { from: from, tabId: tabId, step: k, name: (step.loc && (step.loc.name || step.loc.text)) || 'the link', url: R.stripUrl(t.url) };
+    st.tabId = tabId; st.lastClickAt = 0;
+    await setSess('recState', st);
+    await sendTab(from, { type: 'rec_state', on: false }).catch(function () {});
+    await sendTab(tabId, { type: 'rec_state', on: true }).catch(function () {});
+    await sendTab(from, { type: 'banner', text: 'that opened a new tab; recording continues THERE (in the new tab).' }).catch(function () {});
+    await sendTab(tabId, { type: 'banner', text: 'recording continues in this tab (it was opened by the recorded click). Click what you need here, then Stop in the AWOS popup.' }).catch(function () {});
+  }).catch(function (e) { console.warn('rec follow', e); });
+}
+/** v0.9.1: the download check a recording suggests: its last recorded download's name, digits generalised. */
+function proposeDownload(rec) {
+  var n = '';
+  (rec.steps || []).forEach(function (s) { if (s.download && s.download.name && /\.[a-z0-9]{1,5}$/i.test(s.download.name)) n = s.download.name; });
+  if (!n) return '';
+  var m = /^(.*?)(\.[a-z0-9]{1,5})$/i.exec(n);
+  var stem = m[1].replace(/ \(\d+\)$/, '').split(/(\d+)/).map(function (x, k) { return k % 2 ? '\\d+' : x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }).join('');
+  return '^' + stem + '(?: \\(\\d+\\))?' + m[2].replace('.', '\\.') + '$';
+}
 
 // ---- replay -----------------------------------------------------------------
 function logRun(run, text) { run.log.push({ t: Date.now(), step: run.i, text: text }); }
@@ -407,13 +502,21 @@ async function driveInner(runId) {
         run.done[i] = true; run.i++; run.approval = null; await saveRun(run); continue;
       }
     }
+    var dBefore = step.action === 'click' || step.action === 'press' ? await openTitles(run) : [];   // v0.9.1: windows already open
     var loc = await sendRetry(run.tabId, { type: 'locate', step: step, timeoutMs: cfg.findTimeoutMs });
     if (loc.scrolled) logRun(run, 'scrolled ' + loc.scrolled.steps + ' step(s) looking for a lazy-loaded target (' + loc.scrolled.ms + ' ms, '
                                  + (loc.status === 'found' ? 'found' : 'not found') + ')');
     // pop-ups (v0.6): a target that is not found, or is drawn under an overlay, gets one unblock pass + one retry
     if ((loc.covered || loc.status !== 'found' || run.forceUnblock === i) && !run.unblocked[i]) {
       run.unblocked[i] = true; run.forceUnblock = null;
-      var ub = await sendRetry(run.tabId, { type: 'unblock' }, 2).catch(function () { return null; });
+      // v0.9.1: the app's own windows are never closed: the one this step was recorded in, one holding its control,
+      // one an earlier step of this run opened, or one with the app's tabs / menus (lib/portal.js appDialogWhy)
+      var keep = { name: step.loc.name || step.loc.text || '', role: step.loc.role || '', dialog: step.dialog || (rec.steps[0] || {}).dialog || null, own: run.ownDialogs || [], covered: !!loc.covered };
+      var ub = await sendRetry(run.tabId, { type: 'unblock', keep: keep }, 2).catch(function () { return null; });
+      if (ub && ub.blocked) ub.blocked.keep = keep;
+      (ub && ub.kept || []).forEach(function (k) {
+        logRun(run, 'step ' + (i + 1) + ': kept the "' + k.title + '" window open (' + k.why + '); it is part of the app, not a pop-up');
+      });
       if (ub && ub.dismissed && ub.dismissed.length) {
         ub.dismissed.forEach(function (d) {
           logRun(run, 'step ' + (i + 1) + ': dismissed a ' + (d.kind === 'consent' ? 'cookie / consent banner' : 'pop-up') + ' ("' + d.text.slice(0, 60) + '") with "' + d.name + '"');
@@ -444,10 +547,18 @@ async function driveInner(runId) {
     }
     var index = -1, how = '', ge = null, gWhy = '';
     var gEl = guidedEligible(base, i), gp = run.guidedPending && run.guidedPending.step === i ? run.guidedPending : null;
+    var pr0 = !gp && !loc.covered ? pickRow(run, base, i, loc) : null;     // v0.9.1: identical controls, one per list row
+    if (pr0 && pr0.index != null) {
+      var twin = (loc.shortlist.find(function (c) { return c.index === pr0.index; }) || {}).desc;
+      loc.status = 'found'; loc.index = pr0.index; loc.rowPick = pr0.how;
+      if (!twin) loc.shortlist.push({ index: pr0.index, score: loc.score, desc: { name: step.loc.name || '', role: step.loc.role || '' } });
+      logRun(run, 'step ' + (i + 1) + ': picked ' + pr0.how);
+    }
     if (gp) gWhy = 'resume';                                      // approved model decision: no new model call
+    else if (pr0 && pr0.none) gWhy = 'which row: ' + pr0.none;
     else if (loc.status === 'found') {
-      index = loc.index; how = 'score ' + loc.score + ' (margin ' + loc.margin + ')' + (loc.dupes ? ' [' + (loc.dupes + 1) + ' identical copies, picked by position]' : '');
-      if (gEl.templated) {             // found, but does it name THIS run's period (not the recorded one)?
+      index = loc.index; how = loc.rowPick ? 'row: ' + loc.rowPick : 'score ' + loc.score + ' (margin ' + loc.margin + ')' + (loc.dupes ? ' [' + (loc.dupes + 1) + ' identical copies, picked by position]' : '');
+      if (gEl.templated && !loc.rowPick) {   // found, but does it name THIS run's period (not the recorded one)? (a picked row did)
         var fd = (loc.shortlist.find(function (c) { return c.index === loc.index; }) || {}).desc || {};
         var cc = PD.consistent(base.tpl, i, fd, run.period);
         if (!cc.ok) gWhy = 'the best match "' + (fd.name || fd.text || '') + '" does not name ' + PD.label(run.period) + ' (' + cc.why.join('; ') + ')';
@@ -459,6 +570,26 @@ async function driveInner(runId) {
       if (!gd) return;                                           // ended (missing / failed) inside
       ge = await guidedExecute(run, step, i, gd);
       if (!ge) return;                                           // paused for approval or failed inside
+      // v0.9.1: was that the step, or a move toward its control (open the menu / window / tab it was in)?
+      if (await guidedOutcome(run, base, step, i, gd, ge) === 'nav') {
+        run.guidedNav = run.guidedNav || {};
+        var nn = run.guidedNav[i] = (run.guidedNav[i] || 0) + 1;
+        var lastG = (run.guided || [])[run.guided.length - 1];
+        if (lastG) lastG.nav = true;
+        (run.history = run.history || []).push('clicked "' + (ge.cand.name || '') + '" (a move toward this step\'s control)');
+        (run.actions = run.actions || []).push({ action: 'click(' + (ge.index + 1) + ')', control: (ge.cand.role || '') + ' ' + JSON.stringify(ge.cand.name || '') });
+        await sleep(300); await waitQuiet(run.tabId, 1500);
+        await noteDialogs(run, dBefore);
+        if (nn >= GUIDED_NAV) {
+          var stillLoc = await sendRetry(run.tabId, { type: 'locate', step: step, timeoutMs: cfg.findTimeoutMs });
+          if (stillLoc.status !== 'found') {
+            return fail(run, 'NOT_FOUND', 'step ' + (i + 1) + ': the model made ' + nn + ' moves toward "' + (step.loc.name || step.loc.text || '') + '" without reaching it (the cap per step).' + expectNote(base, run));
+          }
+        }
+        logRun(run, 'step ' + (i + 1) + ': that was a move toward the step (' + nn + ' of ' + GUIDED_NAV + '); looking for "' + (step.loc.name || step.loc.text || '') + '" again');
+        await saveRun(run);
+        continue;
+      }
       index = ge.index; how = ge.how;
     }
     else if (loc.status === 'found') { /* confident, period-consistent */ }
@@ -530,6 +661,7 @@ async function driveInner(runId) {
       } else { await sleep(400); await waitForLoad(run.tabId); }
     }
     if (ge && !step.navigates) await waitQuiet(run.tabId, 1000);     // a model-chosen control may navigate though the recorded one did not
+    if (step.action === 'click' || step.action === 'press') await noteDialogs(run, dBefore);
     if (tabsBefore) {                 // new-tab files (v0.6): did this click open a tab on a PDF / CSV / ...?
       var nt = await newTabFrom(run.tabId, tabsBefore, step.opensTab ? 5000 : 0);
       if (nt != null) {
@@ -540,6 +672,17 @@ async function driveInner(runId) {
     }
   }
   await finish(run, rec);
+}
+
+/** v0.9.1: windows (dialogs) open after a step of this run: the run opened them, so no pop-up pass closes them. */
+async function openTitles(run) {
+  var od = await sendTab(run.tabId, { type: 'open_dialogs' }).catch(function () { return null; });
+  return (od && od.titles) || [];
+}
+/** only windows that were NOT open before the step (`before`) count as opened by it (a pop-up already there does not). */
+async function noteDialogs(run, before) {
+  var own = run.ownDialogs = run.ownDialogs || [];
+  (await openTitles(run)).forEach(function (t) { if ((before || []).indexOf(t) < 0 && own.indexOf(t) < 0 && own.length < 10) own.push(t); });
 }
 
 // ---- handoff: a human is needed (login again, one-time code, bot check) (v0.6) ----------------------------
@@ -690,7 +833,16 @@ async function handleNewTab(run, tabId, i) {
     await sleep(150);
   }
   if (!/^https?:/.test(url)) { logRun(run, 'step ' + (i + 1) + ' opened a new tab with no web address; left it open'); return null; }
-  if (!(await fileKind(tabId, url, t))) { logRun(run, 'step ' + (i + 1) + ' opened a new tab (' + R.stripUrl(url) + '), not a file; left it open'); return null; }
+  if (!(await fileKind(tabId, url, t))) {
+    var rs = ((await getRec(run.recId)) || { steps: [] }).steps[i] || {};
+    if (rs.followTab) {               // v0.9.1: recorded as the continuation (a hosted invoice page): the run goes on there
+      run.openerTabId = run.openerTabId || run.tabId; run.tabId = tabId;
+      try { await ensureContent(tabId); } catch (e) { /* the next step waits for it */ }
+      logRun(run, 'step ' + (i + 1) + ' opened ' + R.stripUrl(url) + ' in a new tab; the recipe continues in that tab, as recorded');
+      return null;
+    }
+    logRun(run, 'step ' + (i + 1) + ' opened a new tab (' + R.stripUrl(url) + '), not a file; left it open'); return null;
+  }
   var from = ((await chrome.tabs.get(run.tabId).catch(function () { return {}; })).url) || '';
   if (!autoDownloadOk(url, from)) {
     var host = ''; try { host = new URL(url).host; } catch (e) {}
@@ -885,6 +1037,16 @@ async function finish(run, rec) {
     verdict = 'FAILED';
     reason = 'Not a document: ' + nd.content.why;
   }
+  // v0.9.1: a download chore with no download check must not look done when no file arrived
+  var dlGoal = downloadGoal(base || rec);
+  if (dlGoal && !dx.exact && /^(VERIFIED|CHECK)$/.test(verdict)) {
+    var mine = (await chrome.downloads.search({ startedAfter: new Date(run.startedAt - 1000).toISOString() }).catch(function () { return []; }))
+      .filter(function (d) { return d.id > (run.dlMark || 0) && d.state === 'complete'; });
+    if (!mine.length) {
+      verdict = 'UNVERIFIED'; run.noFile = true;
+      reason = 'this is a download chore (' + dlGoal + '), but no file was downloaded in this run and no download check is set';
+    }
+  }
   var noActions = !actionCount(rec);
   if (noActions && verdict === 'VERIFIED') {               // only reopened a URL: the checks passing is not a chore done
     verdict = 'UNVERIFIED';
@@ -913,6 +1075,7 @@ async function finish(run, rec) {
       reason = 'checks passed, but the local verifier says ' + op.label + ': ' + op.reason;
     }
   }
+  if (run.noFile && verdict !== 'UNVERIFIED' && verdict !== 'FAILED') { verdict = 'UNVERIFIED'; }
   var unc = checks.find(function (x) { return x.kind === 'download' && x.ok && x.content && x.content.state === 'unchecked'; });
   if (unc && /^(VERIFIED|CHECK|UNVERIFIED)$/.test(verdict)) reason = [reason, 'download ' + unc.content.why].filter(Boolean).join('; ');
   run.status = verdict === 'FAILED' || verdict === 'WRONG_PERIOD' ? 'failed' : 'done';
@@ -928,11 +1091,29 @@ async function finish(run, rec) {
   await afterRun(run);
 }
 
+/** v0.9.1: why this recipe is a download chore ('' = it is not): its goal says download, or its last action clicks a
+ *  download-like control ("Download PDF", "Export CSV"). */
+function downloadGoal(rec) {
+  var g = String((rec && (rec.goal || rec.goalProposed)) || '');
+  if (/\bdownload/i.test(g)) return 'the goal says "download"';
+  var acts = ((rec && rec.steps) || []).filter(function (x) { return x.action !== 'goto'; }), last = acts[acts.length - 1];
+  var n = last && last.action === 'click' && last.loc ? String(last.loc.name || last.loc.text || '') : '';
+  return /\b(download|pdf|csv|xlsx?|export)\b/i.test(n) ? 'the last step clicks "' + n.trim().slice(0, 40) + '"' : '';
+}
+
 // ---- download verification ------------------------------------------------------------------------------
 function baseName(p) { return String(p || '').split(/[\\/]/).pop(); }
 function urlName(u) { try { return decodeURIComponent(new URL(u).pathname.split('/').pop()); } catch (e) { return ''; } }
 /** the names a download can be matched by: the saved file name, else the URL's last path segment. */
-function downloadNames(d) { return [baseName(d.filename), urlName(d.finalUrl || d.url), urlName(d.url)].filter(Boolean); }
+function downloadNames(d) { return [DL_HINTS[d.url] || '', baseName(d.filename), urlName(d.finalUrl || d.url), urlName(d.url)].filter(Boolean); }
+/** v0.9.1: blob: / data: address -> the file name the page gave its <a download> (content.js dl_hint), last 50 */
+var DL_HINTS = {}, DL_HINT_KEYS = [];
+function dlHint(msg) {
+  var href = String(msg.href || ''), name = baseName(String(msg.name || '')).slice(0, 200);
+  if (!/^(blob|data):/i.test(href) || !name) return;
+  if (!(href in DL_HINTS)) { DL_HINT_KEYS.push(href); if (DL_HINT_KEYS.length > 50) delete DL_HINTS[DL_HINT_KEYS.shift()]; }
+  DL_HINTS[href] = name;
+}
 /** the name to show for a download: the first candidate that looks like a file name (a temp name has no extension). */
 function fileName(d) { var ns = downloadNames(d); return ns.find(function (n) { return /\.[a-z0-9]{1,5}$/i.test(n); }) || ns[0] || ''; }
 /** a download whose file name matches `nameRegex` finished since the run started. Waits `graceMs` for one to
@@ -972,7 +1153,8 @@ async function fileCheck(run, d, name) {
   var o = { name: name, size: size, mime: d.mime || '' };
   if (size !== 0) {
     var url = d.finalUrl || d.url || '';
-    if (/^data:/i.test(url)) {
+    if (/^blob:/i.test(url)) o.peekWhy = 'generated in the page';     // v0.9.1: a blob cannot be read again; size + type only
+    else if (/^data:/i.test(url)) {
       try {
         var m = /^data:([^;,]*)(;base64)?,(.*)$/i.exec(url), raw = m[2] ? atob(m[3].slice(0, 1400)) : decodeURIComponent(m[3]).slice(0, 1024);
         o.head = raw.slice(0, 1024); o.peekType = m[1];
@@ -1778,6 +1960,7 @@ var HANDLERS = {
     return { recording: !!(st && sender.tab && st.tabId === sender.tab.id) };
   },
   rec_step: async function (msg, sender) { if (sender.tab) await onRecStep(sender.tab.id, msg); return { ok: true }; },
+  dl_hint: async function (msg, sender) { if (sender.tab) dlHint(msg); return { ok: true }; },
   get_state: async function () {
     return { recState: await getSess('recState'), run: await getSess('run'), recordings: await getLocal('recordings', {}),
              runs: await getLocal('runs', []), settings: await settings(), claudeKeySet: !!(await getLocal('claudeKey', '')),
@@ -1800,6 +1983,7 @@ var HANDLERS = {
       if (rx) { try { new RegExp(rx); new RegExp(R.substitute(rx, builtins())); } catch (e) { throw new Error('download name pattern is not a valid regex'); } }
       rec.expectDownload = rx ? { nameRegex: rx.slice(0, 200) } : null;
     }
+    if (msg.newestRow !== undefined) rec.newestRow = !!msg.newestRow;    // v0.9.1: "always the newest row" (latest invoice chores)
     applyPeriod(rec, true);                   // v0.7: new goal / checks are templated against the recorded period
     await setLocal('recordings', all); return rec;
   },
@@ -1918,7 +2102,7 @@ var HANDLERS = {
   coll_clear: async function () { var c = await getSess('coll'); if (c && c.status !== 'running') await setSess('coll', null); return { ok: true }; },
 };
 // the only messages a content script may send; import_offer checks the sender is the recipe page itself
-var PAGE_ONLY = { hello: 1, rec_step: 1, import_offer: 1 };
+var PAGE_ONLY = { hello: 1, rec_step: 1, import_offer: 1, dl_hint: 1 };
 
 chrome.runtime.onMessage.addListener(function (msg, sender, reply) {
   var h = msg && HANDLERS[msg.type];

@@ -116,7 +116,7 @@ field is never typed into.
 and saved a key; a recipe or site locked off the cloud always gets the local model ("the step decision uses the local
 agent model (cloud is locked off for this recipe)"). Missing consent never escalates: the local model decides.
 
-**Cap and log**: at most 5 model decisions per run (`GUIDED_CAP`); each is logged with why it was needed and the
+**Cap and log**: at most 8 model decisions per run (`GUIDED_CAP`; 5 before 0.9.1); each is logged with why it was needed and the
 model's reason, kept in `run.guided` (step, action, control role + name, the control's locator, reason) and
 `run.modelCalls` (`kind: 'guided'`), and exported (redacted) by **Export run log**.
 
@@ -164,6 +164,27 @@ history, oldest first:
 The run log lists each period; the collection summary and notification add "caught up August 2026"; the phone status
 detail names the caught-up months. A recipe whose download opens a new tab is not caught up yet (logged).
 
+## 6. Finding the way back to a step's control (0.9.1)
+
+Eligible steps now also include steps recorded inside an app window (`step.dialog`) and every step of a recording that
+started with a window open. When such a step's control is missing (the Settings window is closed, another tab of it
+is shown), the guided decision becomes a short loop on the same step:
+observe -> ONE action -> validate + Tell-it gate (+ the content script's own) -> execute -> log -> look for the
+recorded (period-substituted) target again. The model's action counts as the step itself when it was not a click, was
+an approved gated click, names the recorded target (same / contained / >= 60 % shared words), names the run's period
+on a templated step, or (download steps) a download / new tab followed it within 2 s; otherwise it was a **move**
+("that was a move toward the step (2 of 4)"), kept in `run.guided` with `nav: true`, `run.history` and the verifier's
+action list. After a move the recorded target is located again; once it matches confidently the recorded step runs
+normally (no further model call). At most `GUIDED_NAV` = 4 moves per step (then NOT_FOUND "the model made 4 moves
+toward ..."), within the run's `GUIDED_CAP` = 8; needs_user / done still end MISSING. Moves are never offered as the
+step's new target by the skills memory.
+The hint adds the route: 'Last time at this step you clicked the link "Download PDF" (you were in the "Settings"
+window, on its "Billing" tab).', "The recording started with the "Settings" window already open on its "Billing"
+tab.", "The recorded route before this step: clicked ...; then clicked ...", "If that control is not on this page ...
+give ONE action that leads toward it (open the menu, window or tab it was in); you will be asked again after it (n of
+4 such moves used for this step)", and for identical row controls the numbered rows with their texts.
+Limit: the moves are not added to the recipe (the next run needs the model again); record from the normal page.
+
 ## Recipe format
 
 See `recipe_v1.md`: built-in period placeholders need no params entry and may appear in loc strings, step URLs,
@@ -198,8 +219,8 @@ already makes; downloads are checked with `downloads`.
   confident.
 - WRONG_PERIOD needs the period in the downloaded file's name (or URL); a portal that names every file `document.pdf`
   cannot be checked this way.
-- The model decides one step at a time and only actions on the current page (no goto / scroll / multi-step detours);
-  a redesign that adds a new page between steps still fails, with the reason in the log.
+- The model decides one step at a time and only actions on the current page (no goto / scroll); since 0.9.1 it may
+  make up to 4 clicks toward a step's control (section 6), but those detours are not saved into the recipe.
 - The fixtures exercise a scripted (fake) agent brain; the quality of real local models on real portals is not
   measured here.
 - Catch-up (0.9) only sees earlier periods listed on the page the current one was downloaded from (no paging, no

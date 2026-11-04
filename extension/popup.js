@@ -227,16 +227,22 @@ function renderRecordings() {
     var texts = el('input', { class: 'texts', placeholder: 'Expect text on final page (comma separated)', value: (r.expect.texts || []).join(', ') });
     var url = el('input', { class: 'url', placeholder: 'Final URL (origin+path, * allowed; blank = no check)', value: r.expect.urlPattern || '' });
     var dl = el('input', { class: 'dl', placeholder: 'Expect a download named like (regex, e.g. report.*\\.csv)', value: (r.expectDownload && r.expectDownload.nameRegex) || '' });
+    if (!r.expectDownload && r.expectDownloadProposed) {      // v0.9.1: proposed from the file the recording downloaded
+      dl.value = r.expectDownloadProposed; dl.classList.add('proposed'); dl.title = 'Proposed from the recorded download; Save to keep it';
+    }
+    var nrl = el('label', { class: 'newestrow' }), nr = el('input', { type: 'checkbox', class: 'newest' });
+    nr.checked = !!r.newestRow;
+    nrl.appendChild(nr); nrl.appendChild(document.createTextNode(' Always the newest row (e.g. "download the latest invoice")'));
     var save = el('button', { class: 'save' }, 'Save goal + checks');
     save.onclick = function () {
-      call({ type: 'save_recording', id: r.id, goal: goal.value.trim(), expectDownload: { nameRegex: dl.value.trim() },
+      call({ type: 'save_recording', id: r.id, goal: goal.value.trim(), expectDownload: { nameRegex: dl.value.trim() }, newestRow: nr.checked,
              expect: { urlPattern: url.value.trim(), texts: texts.value.split(',').map(function (s) { return s.trim(); }).filter(Boolean) } }).then(refresh);
     };
     var lockl = el('label', { class: 'cloudlock' }), lock = el('input', { type: 'checkbox', class: 'nocloud' });
     lock.checked = !!r.noCloud;
     lock.onchange = function () { call({ type: 'set_recipe_cloud_lock', id: r.id, on: lock.checked }).then(refresh); };
     lockl.appendChild(lock); lockl.appendChild(document.createTextNode(' Never use cloud for this recipe (repair / verify stay on this computer)'));
-    [goal, texts, url, dl, save, lockl].forEach(function (x) { chk.appendChild(x); });
+    [goal, texts, url, dl, nrl, save, lockl].forEach(function (x) { chk.appendChild(x); });
     li.appendChild(chk);
 
     var typed = r.steps.map(function (s, k) { return [s, k]; }).filter(function (p) { return p[0].action === 'fill' || p[0].action === 'select'; });
@@ -345,7 +351,8 @@ function renderImport() {
 function render() {
   var rs = state.recState, mine = rs && rs.tabId === targetTab;
   $('rec').hidden = !!rs; $('stop').hidden = !rs;
-  $('recinfo').textContent = rs ? (mine ? 'Recording: ' : 'Recording another tab: ') + (rs.rec.steps.length - 1) + ' actions' : '';
+  $('recinfo').textContent = rs ? (mine ? 'Recording: ' : 'Recording another tab: ') + (rs.rec.steps.length - 1) + ' actions'
+    + (rs.followed ? '. The invoice opened in a new tab; recording continues there (' + rs.followed.url + ').' : '') : '';
   renderImport(); renderRecordings(); renderRun(); renderCollections(); renderPhone();
 }
 
@@ -630,9 +637,15 @@ async function refresh() {
   render(); renderTell();
 }
 
-$('rec').onclick = function () { call({ type: 'start_recording', tabId: targetTab }).then(refresh); };
+$('rec').onclick = function () {
+  call({ type: 'start_recording', tabId: targetTab }).then(function (rec) { if (rec && rec.startWarning) notice(rec.startWarning); return refresh(); });
+};
 $('stop').onclick = function () {
-  call({ type: 'stop_recording' }).then(function (rec) { if (rec && rec.warning) notice(rec.warning); return refresh(); });
+  call({ type: 'stop_recording' }).then(function (rec) {
+    var t = rec ? [rec.warning, rec.followNote].filter(Boolean).join(' ') : '';
+    if (t) notice(t);
+    return refresh();
+  });
 };
 function decide(kind) {
   var run = state.run; if (!run || !run.pending) return;

@@ -18,7 +18,8 @@
  * Privacy: the same brains and rules as Tell it. Local (loopback) by default; Claude only with the user's consent and
  * key, and never for a recipe / site the user locked off the cloud (then the local model decides).
  */
-var GUIDED_CAP = 5;
+var GUIDED_CAP = 8;        // v0.9.1: was 5; a step may now need a few moves to reach its control (GUIDED_NAV)
+var GUIDED_NAV = 4;        // v0.9.1: at most this many model-decided moves toward ONE step's control
 
 // ---- save / import --------------------------------------------------------------------------------------------
 function applyPeriod(rec, keep) {
@@ -49,8 +50,84 @@ function proposeGoal(rec) {
 // ---- deciding a step by meaning ----------------------------------------------------------------------------------
 function guidedEligible(rec, i) {
   var s = rec.steps[i] || {}, templated = PD.stepTemplated(rec.tpl, i), variable = !!s.variable;
-  return { templated: templated, variable: variable, any: s.action !== 'goto' && (templated || variable) };
+  // v0.9.1: a control recorded inside an app window (Settings dialog), or a recording that started with one open:
+  // when it is not there, the window may simply be closed, so the model may find its way back into it
+  var inWindow = !!(s.dialog && s.dialog.name) || !!((rec.steps[0] || {}).dialog);
+  return { templated: templated, variable: variable, inWindow: inWindow, any: s.action !== 'goto' && (templated || variable || inWindow) };
 }
+
+// ---- v0.9.1: identical controls in list rows ("Download PDF" on every invoice row) ---------------------------------
+/** which row a variable step means this run, from the rows' texts (never by position alone):
+ *   - the recipe says "always the newest row" (rec.newestRow): the first row in page order
+ *   - the recorded row names a period (full dates with a day count: "Nov 1, 2026"): the row naming the same period
+ *     shifted to this run (recorded for the recording's month -> this run's month); exactly one such row
+ *   - else the row whose text is the recorded row's text
+ *  -> {index, how} | {none: why} (no row for the period: the model decides, it may say MISSING) | null (not this case) */
+function pickRow(run, base, i, loc) {
+  var s = base.steps[i] || {}, tw = (loc && loc.twins) || [];
+  if (!s.variable || tw.length < 2) return null;
+  if (base.newestRow) return { index: tw[0].index, how: 'the newest (first) of ' + tw.length + ' rows, as the recipe says' };
+  var recRow = (s.loc && s.loc.row) || '', rp = PD.rowPeriods(recRow);
+  if (rp.length === 1 && PD.valid(base.period || '')) {
+    var off = monthsBetween(base.period, rp[0]), want = PD.shift(run.period, off);
+    var hit = tw.filter(function (t) { var ps = PD.rowPeriods(t.row); return ps.length === 1 && ps[0] === want; });
+    if (hit.length === 1) return { index: hit[0].index, how: 'the row for ' + PD.label(want) + ' ("' + hit[0].row.slice(0, 60) + '") of ' + tw.length + ' identical "' + (s.loc.name || '') + '"' };
+    if (hit.length > 1) {
+      var ex = hit.filter(function (t) { return normRow(t.row) === normRow(PD.substitute(recRow, run.period)) || normRow(t.row) === normRow(recRow); });
+      if (ex.length === 1) return { index: ex[0].index, how: 'the row "' + ex[0].row.slice(0, 60) + '" (same text as recorded)' };
+      return { none: hit.length + ' rows name ' + PD.label(want) };
+    }
+    return { none: 'no row names ' + PD.label(want) };
+  }
+  var same = tw.filter(function (t) { return normRow(t.row) === normRow(recRow); });
+  if (same.length === 1) return { index: same[0].index, how: 'the row "' + same[0].row.slice(0, 60) + '" (same text as recorded)' };
+  return { none: 'no single row matches the recorded row "' + recRow.slice(0, 60) + '"' };
+}
+function normRow(t) { return String(t || '').replace(/\s+/g, ' ').trim().toLowerCase(); }
+function monthsBetween(a, b) {      // b - a in months ('YYYY-MM')
+  var pa = a.split('-'), pb = b.split('-');
+  return (+pb[0] - +pa[0]) * 12 + (+pb[1] - +pa[1]);
+}
+
+/** the hint lines about where the step's control was: its window / tab, and the recorded route to it. */
+function routeHint(base, i) {
+  var s = base.steps[i] || {}, out = [], st0 = (base.steps[0] || {}).dialog;
+  var where = s.dialog && s.dialog.name ? ' (you were in the "' + s.dialog.name + '" window' + (s.dialog.tab ? ', on its "' + s.dialog.tab + '" tab' : '') + ')' : '';
+  var route = base.steps.slice(0, i).filter(function (x) { return x.action !== 'goto'; }).slice(-5).map(function (x) {
+    return stepVerbPast(x) + ' ' + describeLoc(x) + (x.dialog && x.dialog.name ? ' (in the "' + x.dialog.name + '" window)' : '');
+  });
+  if (st0 && st0.name) out.push('The recording started with the "' + st0.name + '" window already open' + (st0.tab ? ' on its "' + st0.tab + '" tab' : '') + '.');
+  if (route.length) out.push('The recorded route before this step: ' + route.join('; then ') + '.');
+  return { where: where, lines: out };
+}
+/** did the model's action do the step itself, or was it a move toward it (open a menu / window / tab)? */
+function sameName(a, b) {
+  a = normRow(a).replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim(); b = normRow(b).replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!a || !b) return false;
+  if (a === b || a.indexOf(b) >= 0 || b.indexOf(a) >= 0) return true;
+  var A = a.split(' '), B = b.split(' '), inter = A.filter(function (t) { return B.indexOf(t) >= 0; }).length;
+  return inter / (A.length + B.length - inter) >= 0.6;
+}
+async function guidedOutcome(run, base, step, i, gd, ge) {
+  if (gd.act.verb !== 'click' || gd.approvedClick) return 'step';            // typing / choosing, or a gated click: the step
+  var c = ge.cand || {}, rs = base.steps[i] || {};
+  if (sameName(c.name, step.loc.name || step.loc.text || '') || sameName(c.name, (rs.loc && (rs.loc.name || rs.loc.text)) || '')) return 'step';
+  if (PD.stepTemplated(base.tpl, i)) {
+    var cc = PD.consistent(base.tpl, i, { name: c.name, text: c.name }, run.period);
+    if (cc.checked && cc.ok && cc.good > 0) return 'step';
+  }
+  if (downloadStep(step) || step.opensTab) {        // the step downloads: a file / a new tab after the click = it was the step
+    var end = Date.now() + 2000;
+    while (Date.now() < end) {
+      var d = (await chrome.downloads.search({ orderBy: ['-startTime'], limit: 1 }).catch(function () { return []; }))[0];
+      if (d && d.id > (ge.dlMark || 0)) return 'step';
+      if (ge.tabsBefore && await newTabFrom(run.tabId, ge.tabsBefore, 0) != null) return 'step';
+      await sleep(250);
+    }
+  }
+  return 'nav';
+}
+
 function describeLoc(s) {
   var l = (s && s.loc) || {}, role = l.role || l.tag || 'control';
   var word = { link: 'link', button: 'button', textbox: 'field', combobox: 'dropdown', checkbox: 'checkbox', password: 'field' }[role] || role;
@@ -100,12 +177,24 @@ async function guidedDecide(run, base, rec, step, i, why) {
   var raw = await sendRetry(run.tabId, { type: 'agent_observe' });
   if (brain === 'claude' && cloudLockedFor(cfg, raw.url, base)) { brain = 'local'; delete cfg.claudeKey; logRun(run, 'step ' + n1 + ': this page is cloud-locked; the local agent model decides'); }
   var obs = AG.maskObs(raw), hits = AG.detectInjection(obs);
+  var rh = routeHint(base, i), nav = ((run.guidedNav || {})[i]) || 0, rowsHint = '';
+  var tname = String((step.loc && step.loc.name) || '').toLowerCase().trim();
+  var twins = tname ? (obs.controls || []).map(function (c, k) { return [c, k + 1]; }).filter(function (p) { return String(p[0].name || '').toLowerCase().trim() === tname && p[0].row; }) : [];
+  if (twins.length >= 2) {
+    rowsHint = '\nThe page has ' + twins.length + ' controls named "' + step.loc.name + '", one per row; pick the row by its text (date, amount, number) for the goal, never just the first: '
+      + twins.slice(0, 10).map(function (p) { return p[1] + ' = row "' + AG.maskSecrets(String(p[0].row)).slice(0, 80) + '"'; }).join('; ') + '.'
+      + (base.steps[i].loc && base.steps[i].loc.row ? ' Last time the row was "' + AG.maskSecrets(base.steps[i].loc.row).slice(0, 80) + '".' : '');
+  }
   var goal = rec.goal || PD.substitute(base.goalProposed || ('Repeat the saved chore "' + base.name + '"'), run.period);
   goal = R.substitute(goal, runParams(run));
   var hint = 'This is a saved recipe replayed for ' + PD.label(run.period) + (base.period ? ' (it was recorded for ' + PD.label(base.period) + ')' : '')
     + ': give ONE action for this step only, the recipe does the rest. If the page does not have what the goal needs for '
     + PD.label(run.period) + ' (for example it is not posted yet), reply needs_user("why"). Never pick something for another period.\n'
-    + 'Last time at this step you ' + stepVerbPast(base.steps[i]) + ' ' + describeLoc(base.steps[i]) + '.';
+    + 'Last time at this step you ' + stepVerbPast(base.steps[i]) + ' ' + describeLoc(base.steps[i]) + rh.where + '.'
+    + (rh.lines.length ? '\n' + rh.lines.join('\n') : '')
+    + '\nIf that control is not on this page (for example it was inside a window, menu or tab that is closed now), give ONE action that '
+    + 'leads toward it (open the menu, window or tab it was in); you will be asked again after it' + (nav ? ' (' + nav + ' of ' + GUIDED_NAV + ' such moves used for this step)' : '') + '.'
+    + rowsHint;
   var history = (run.history || []).slice(-6).map(function (h, k, a) { return (k + 1 + Math.max(0, (run.history || []).length - a.length)) + '. ' + h + ' -> ok'; });
   var prompt = AG.buildPrompt({ goal: goal, step: run.guidedCalls + 1, maxSteps: GUIDED_CAP, visited: [], history: history, obs: obs, window: 0,
                                 injected: hits.length > 0, hint: hint });
@@ -172,6 +261,8 @@ async function guidedExecute(run, step, i, gd) {
   }
   var urlBefore = ((await chrome.tabs.get(run.tabId).catch(function () { return {}; })).url) || '';
   var tabsBefore = (await chrome.tabs.query({}).catch(function () { return []; })).map(function (t) { return t.id; });
+  var dlMark = ((await chrome.downloads.search({ orderBy: ['-startTime'], limit: 1 }).catch(function () { return []; }))[0] || {}).id || 0;
+  gd.approvedClick = !!(danger && ok);
   var r = await sendTab(run.tabId, { type: 'agent_act', act: act, approved: ok, expectName: gd.expectName })
     .catch(function (e) { return { ok: false, error: 'the page did not answer (' + (e.message || e) + ')' }; });
   if (!r || !r.ok) {
@@ -191,7 +282,7 @@ async function guidedExecute(run, step, i, gd) {
                     verb: act.verb, period: run.period, recDanger: r.recDanger || null, approved: ok });
   logRun(run, 'step ' + n1 + ': decided by the model: ' + gd.show + ' = ' + (c.role || 'control') + ' "' + (c.name || '') + '"'
               + (gd.reason ? ' (' + gd.reason + ')' : '') + (ok ? ' [approved by you]' : ''));
-  return { cand: { name: c.name || '', role: c.role || '' }, how: 'model decision (goal-guided)', index: act.n ? act.n - 1 : -1,
+  return { cand: { name: c.name || '', role: c.role || '' }, how: 'model decision (goal-guided)', index: act.n ? act.n - 1 : -1, dlMark: dlMark,
            urlBefore: urlBefore, tabsBefore: step.action === 'click' || act.verb === 'click' ? tabsBefore : null };
 }
 
@@ -240,7 +331,7 @@ async function findDownload(run, rx) {
 // ---- skills memory: keep what the model found when it worked ---------------------------------------------------------
 function offerUpdate(run, base, verdict) {
   if (verdict !== 'VERIFIED' || !base || !(run.guided || []).length) return;
-  var steps = run.guided.filter(function (g) { return g.loc && base.steps[g.step] && sameKind(base.steps[g.step].action, g.verb); })
+  var steps = run.guided.filter(function (g) { return g.loc && !g.nav && base.steps[g.step] && sameKind(base.steps[g.step].action, g.verb); })
     .map(function (g) { return { step: g.step, from: describeLoc(base.steps[g.step]), to: g.control, reason: g.reason || '' }; });
   if (!steps.length) return;
   run.updateOffer = { nonce: nonce(), steps: steps, period: run.period };
@@ -255,7 +346,7 @@ async function guidedUpdate(msg) {
   if (!rec) throw new Error('the recipe was deleted');
   var changed = [];
   run.updateOffer.steps.forEach(function (o) {
-    var g = (run.guided || []).find(function (x) { return x.step === o.step && x.loc; }), s = rec.steps[o.step];
+    var g = (run.guided || []).find(function (x) { return x.step === o.step && x.loc && !x.nav; }), s = rec.steps[o.step];
     if (!g || !s) return;
     var entry = { at: Date.now(), runId: run.id, period: run.period, step: o.step, from: describeLoc(s), reason: g.reason || '', accepted: !!msg.accept };
     if (msg.accept) {
@@ -358,7 +449,7 @@ async function popupRead(run, base, b, i) {
     var c = model.n ? (b.ctl || [])[model.n - 1] : null;
     if (!c) { out.verdict = 'UNKNOWN'; out.reason = 'the model said harmless but named no control of the pop-up'; }
     else {
-      var r = await sendTab(run.tabId, { type: 'popup_close', n: c.n, name: c.name }).catch(function (e) { return { ok: false, why: String(e && e.message || e) }; });
+      var r = await sendTab(run.tabId, { type: 'popup_close', n: c.n, name: c.name, keep: b.keep || null }).catch(function (e) { return { ok: false, why: String(e && e.message || e) }; });
       if (r && r.ok) {
         out.closed = true; entry.control = r.name;
         logRun(run, 'step ' + n1 + ': closed the pop-up "' + title + '" with "' + r.name + '" (model: harmless' + (model.reason ? ', ' + model.reason : '') + ')');

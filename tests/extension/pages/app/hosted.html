@@ -1,0 +1,11 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Invoice - Payments host</title></head><body>
+<!-- a payment provider's hosted invoice page (served on the OTHER origin of the test server): its own Download button -->
+<h1>Invoice</h1>
+<p id="what"></p>
+<p><a id="dl" download>Download invoice</a> <a href="/help.html">Help</a></p>
+<script>
+var p = new URLSearchParams(location.search).get('p') || '2026-10';
+document.getElementById('what').textContent = 'Invoice INV-' + p + '-0042 · Amount paid $200.00';
+document.getElementById('dl').href = '/files/doc/invoice-' + p + '.pdf';
+</script>
+</body></html>

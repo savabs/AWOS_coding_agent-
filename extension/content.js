@@ -33,6 +33,11 @@
  *   agent_observe / agent_act {act, approved, expectName} / agent_secrets -> Tell it (lib/agent.js contract):
  *          act on control n of the last observation, with the same danger / sensitive-field gates
  * v0.7: a recorded click inside a repeated list / table row is marked `variable` (goal-guided replay).
+ * v0.9.1: every recorded step carries `dialog` {name, tab} when its control sat in a dialog (the app's Settings window),
+ *   and `innerScroll` (the scrollTop of the inner scroll box it sat in); the lazy-target scroll search scrolls inner
+ *   scroll boxes (the open dialog's first) step by step before the window, and puts them back when nothing turns up.
+ *   unblock / popup_close take `keep` (the step's target) so the app's own windows are never closed;
+ *   rec_context -> the modal window open when recording starts.
  * Messages are plain JSON; element handles never leave the page.
  */
 (function () {
@@ -81,7 +86,38 @@
     var step = { action: 'click', loc: loc, url: location.href, scrollY: Math.round(scrollY),
                  danger: S.dangerMatch(S.dangerContext(el, loc.name)) };
     if (repeatedRow(el)) step.variable = true;          // v0.7: a row of a list / table (which row it is can change)
+    recContext(step, el);
     send({ type: 'rec_step', step: step });
+  }
+
+  /** v0.9.1: where the control was: the app window (dialog) it sat in and its tab, and the scroll position of the
+   *  inner scroll box it sat in (a Settings dialog's list scrolls inside the dialog, not the window). */
+  function recContext(step, el) {
+    var d = P && P.dialogOf(el);
+    if (d) step.dialog = d;
+    var box = scrollBoxOf(el);
+    if (box) step.innerScroll = Math.round(box.scrollTop);
+    return step;
+  }
+  function scrollable(e) {
+    if (!e || e.nodeType !== 1 || e === document.body || e === document.documentElement) return false;
+    if (e.scrollHeight <= e.clientHeight + 4) return false;
+    var oy = getComputedStyle(e).overflowY;
+    return oy === 'auto' || oy === 'scroll' || oy === 'overlay';
+  }
+  /** the nearest scrollable ancestor of el (through open shadow roots), or null. */
+  function scrollBoxOf(el) {
+    for (var n = el && (el.parentElement || (el.parentNode && el.parentNode.host)); n; n = n.parentElement || (n.parentNode && n.parentNode.host)) {
+      if (scrollable(n)) return n;
+    }
+    return null;
+  }
+  /** visible inner scroll boxes now, the ones inside an open dialog first, then the largest. */
+  function scrollBoxes() {
+    var all = L.deepAll('*').filter(function (e) { return scrollable(e) && (!P || P.vis(e)); });
+    all = all.filter(function (e) { return !all.some(function (o) { return o !== e && P && P.containsDeep(e, o) && o.clientHeight >= e.clientHeight * 0.8; }); });
+    var inDlg = function (e) { return !!(P && L.closestDeep(e, P.MODAL_SEL)); };
+    return all.sort(function (a, b) { return (inDlg(b) - inDlg(a)) || (b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight); }).slice(0, 2);
   }
 
   /** v0.7: the control sits in a repeated list / table row: a tr / li / row-like ancestor (<= 6 levels up) whose parent
@@ -108,8 +144,8 @@
     if (!inSearch) return;
     var loc = L.describe(el);
     lastFillKey = null; lastEnter = { form: el.form || null, t: Date.now() };
-    send({ type: 'rec_step', step: { action: 'press', key: 'Enter', loc: loc, url: location.href, scrollY: Math.round(scrollY),
-           danger: pressDanger(el, loc.name, false) } });
+    send({ type: 'rec_step', step: recContext({ action: 'press', key: 'Enter', loc: loc, url: location.href, scrollY: Math.round(scrollY),
+           danger: pressDanger(el, loc.name, false) }, el) });
   }
 
   function onInput(e) {
@@ -120,19 +156,25 @@
       if (e.type !== 'change') return;
       var opt = el.options[el.selectedIndex];
       lastFillKey = null;
-      send({ type: 'rec_step', step: { action: 'select', loc: L.describe(el), url: location.href,
-             value: el.value, optionText: opt ? S.norm(opt.text) : '' } });
+      send({ type: 'rec_step', step: recContext({ action: 'select', loc: L.describe(el), url: location.href,
+             value: el.value, optionText: opt ? S.norm(opt.text) : '' }, el) });
       return;
     }
     if (!e.isTrusted || (!el.matches(L.KIND_SELECTOR.fill) && !el.isContentEditable)) return;
     var key = keyOf(el), fv = fieldValue(el);
     if (sentValue[key] === fv.value) return;     // the blur-time 'change' repeats what 'input' already sent
     send({ type: 'rec_step', merge: key === lastFillKey, mergeKey: key,
-           step: { action: 'fill', loc: L.describe(el), url: location.href, value: fv.value, sensitive: fv.sensitive } });
+           step: recContext({ action: 'fill', loc: L.describe(el), url: location.href, value: fv.value, sensitive: fv.sensitive }, el) });
     lastFillKey = key; sentValue[key] = fv.value;
   }
 
   document.addEventListener('click', onClick, true);
+  // v0.9.1: a file the page builds itself (fetch -> Blob -> a temporary <a download>, often clicked by script) is saved
+  // under the name the page gives it; the worker learns that name here (the browser may not report it, or late)
+  document.addEventListener('click', function (e) {
+    var t = realTarget(e), a = t && L.closestDeep(t, 'a[download]');
+    if (a && /^(blob|data):/i.test(a.href || '') && a.getAttribute('download')) send({ type: 'dl_hint', href: String(a.href).slice(0, 300), name: String(a.getAttribute('download')).slice(0, 200) });
+  }, true);
   document.addEventListener('input', onInput, true);
   document.addEventListener('change', onInput, true);
   document.addEventListener('keydown', onKeyDown, true);
@@ -144,17 +186,45 @@
   var SCROLL_STEPS = 8, SCROLL_MS = 6000, SCROLL_WAIT = 450;
   /** nothing anchored on the page yet: scroll down in viewport steps (first to the recorded spot), re-scanning
    *  after each, so content that loads when scrolled into view (lazy lists, include-fragments) can appear.
-   *  Bounded by SCROLL_STEPS viewports and SCROLL_MS. Scroll position is restored when nothing turns up. */
+   *  Bounded by SCROLL_STEPS viewports and SCROLL_MS. Scroll position is restored when nothing turns up.
+   *  v0.9.1: inner scroll boxes first (<= 2, the open dialog's first; the recorded innerScroll, then box-height steps),
+   *  each put back when nothing turns up, then the window as before. */
   async function scrollSearch(step, res) {
+    var t0 = Date.now(), tried = 0, r;
+    // v0.9.1: first the inner scroll boxes (a dialog's list scrolls inside the dialog), then the window
+    var boxes = scrollBoxes();
+    for (var b = 0; b < boxes.length && Date.now() - t0 < SCROLL_MS; b++) {
+      var box = boxes[b], top0 = box.scrollTop, bh = Math.max(120, Math.round(box.clientHeight * 0.9)), tops = [];
+      if (step.innerScroll > 0) tops.push(step.innerScroll);
+      for (var j = 1; j <= SCROLL_STEPS; j++) tops.push(top0 + j * bh);
+      var stuckB = 0;
+      for (var m = 0; m < tops.length && Date.now() - t0 < SCROLL_MS; m++) {
+        var prev = box.scrollTop;
+        box.scrollTop = tops[m]; tried++;
+        await sleep(SCROLL_WAIT);
+        r = L.find(step.loc, step.action);
+        if (r.status === 'found' || (r.status === 'ambiguous' && r.anchor)) { r.scrolled = { steps: tried, y: Math.round(scrollY), box: Math.round(box.scrollTop), ms: Date.now() - t0 }; return r; }
+        if (m > 0 && Math.abs(box.scrollTop - prev) < 2) { if (++stuckB >= 2) break; } else stuckB = 0;
+      }
+      await sleep(300);
+      r = L.find(step.loc, step.action);
+      if (r.status === 'found' || (r.status === 'ambiguous' && r.anchor)) { r.scrolled = { steps: tried, y: Math.round(scrollY), box: Math.round(box.scrollTop), ms: Date.now() - t0 }; return r; }
+      box.scrollTop = top0;                                            // nothing there: put the box back
+    }
     var se = document.scrollingElement || document.documentElement;
-    if (!se || se.scrollHeight <= innerHeight + 4) return res;          // nothing to scroll: lazy content cannot be below
-    var x0 = scrollX, y0 = scrollY, t0 = Date.now(), H = Math.max(200, Math.round(innerHeight * 0.9));
+    if (!se || se.scrollHeight <= innerHeight + 4) {                  // nothing to scroll: lazy content cannot be below
+      if (!tried) return res;
+      res = L.find(step.loc, step.action);
+      res.scrolled = { steps: tried, y: -1, ms: Date.now() - t0 };
+      return res;
+    }
+    var x0 = scrollX, y0 = scrollY, H = Math.max(200, Math.round(innerHeight * 0.9)), t1 = Date.now();
     var ys = [], p = step.loc && step.loc.pos;
     var recY = step.scrollY > 0 ? step.scrollY : (p && p.y > innerHeight / 2 ? p.y - innerHeight / 2 : 0);
     if (recY > 0) ys.push(recY);
     for (var k = 1; k <= SCROLL_STEPS; k++) ys.push(y0 + k * H);
-    var stuck = 0, tried = 0, r;
-    for (var i = 0; i < ys.length && Date.now() - t0 < SCROLL_MS; i++) {
+    var stuck = 0;
+    for (var i = 0; i < ys.length && Date.now() - t1 < SCROLL_MS; i++) {
       var before = scrollY;
       window.scrollTo(x0, ys[i]); tried++;
       await sleep(SCROLL_WAIT);
@@ -162,7 +232,7 @@
       if (r.status === 'found') { r.scrolled = { steps: tried, y: Math.round(scrollY), ms: Date.now() - t0 }; return r; }
       if (i > 0 && Math.abs(scrollY - before) < 2) { if (++stuck >= 2) break; } else stuck = 0;   // at the bottom
     }
-    var tail = Math.min(t0 + SCROLL_MS, Date.now() + 1500);           // the last fragment may still be loading
+    var tail = Math.min(t1 + SCROLL_MS, Date.now() + 1500);           // the last fragment may still be loading
     while (Date.now() < tail) {
       await sleep(300);
       r = L.find(step.loc, step.action);
@@ -449,7 +519,9 @@
     switch (msg && msg.type) {
       case 'ping': reply({ ok: true, url: location.href, recording: recording, contentType: document.contentType || '' }); return;
       case 'page_kind': reply(P.pageKind()); return;
-      case 'unblock': reply(P.unblock()); return;
+      case 'unblock': reply(P.unblock(msg.keep)); return;           // v0.9.1: keep = the step's target / recorded window
+      case 'open_dialogs': reply({ titles: P.openDialogs() }); return;     // v0.9.1: windows a replayed step opened
+      case 'rec_context': reply({ dialog: P.openDialog(), url: location.href }); return;   // v0.9.1: recording starts here
       case 'remember_me': reply(P.rememberMe()); return;                      // v0.6.1, login handoffs only
       case 'autofill_signin': reply(P.autofillSignin(!!msg.testHook)); return; // v0.6.1, never reads a field value
       case 'rec_state': recording = !!msg.on; lastFillKey = null; reply({ ok: true }); return;
@@ -459,7 +531,7 @@
           .catch(function (e) { try { reply({ ok: false, error: 'page script error: ' + String(e && e.message || e) }); } catch (x) {} });
         return true;
       case 'peek': peek(msg.url).then(reply); return true;                    // v0.9: the first bytes of a downloaded file
-      case 'popup_close': reply(P.closeBlocked(msg.n, msg.name)); return;     // v0.9: a pop-up the agent brain read as harmless
+      case 'popup_close': reply(P.closeBlocked(msg.n, msg.name, msg.keep)); return;     // v0.9: a pop-up the agent brain read as harmless
       case 'quiet': quiet(msg.idleMs, msg.timeoutMs).then(reply); return true;
       case 'check': {
         var body = S.norm(L.deepText());

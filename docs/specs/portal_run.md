@@ -277,9 +277,60 @@ kept in `run.popups` `{step, title, rule, model, modelReason, verdict, reason, c
 Limits: the decision words are English; a harmless pop-up that mentions "plan" or "card" pauses (the safe side); a
 pop-up whose close control has no name and no "close" / "dismiss" in its id / class / label cannot be closed by AWOS.
 
+## 9. Apps with their own windows; downloads made by the page (0.9.1)
+
+The first real-portal runs (an AI-chat app's billing invoices: profile menu -> Settings dialog -> Billing tab ->
+"Download PDF" on each invoice row) failed in five ways; each has a fixture test (`tests/extension/test_realportal.py`,
+fixture app `tests/extension/pages/app/home.html` + `hosted.html`).
+
+1. **The app's own windows are never dismissed** (`AWOSPortal.appDialogWhy`). The unblock pass and the pop-up reader
+   skip a blocker that is (in this order) the window the step was recorded in (`step.dialog.name`, or the start step's
+   window), a window holding a control with the step's target name, a window an earlier step of THIS run opened
+   (`run.ownDialogs`: windows open after a click that were not open before it), or (unless the step's control was
+   found UNDER it, `keep.covered`) a window with the app's own tabs / menus / navigation or a Settings / Account /
+   Billing / Preferences / Profile title. Cookie / consent banners never qualify by tabs or title. Skipped windows are
+   logged ("kept the "Settings" window open (...); it is part of the app, not a pop-up") and reported in `unblock().kept`.
+   A Settings window the app reopened over the page a step needs is closed like a pop-up (its control was covered).
+2. **Identical controls in list rows.** The locator returns `twins`: every control with the recorded name inside a
+   repeated row, with the row's text (`loc.row`, recorded too). For a `variable` step with >= 2 twins the worker picks
+   the row (`pickRow`, guided.js): "always the newest row" (`rec.newestRow`, a checkbox) = the first row in page order;
+   else the row naming the recorded row's period shifted to the run's period (`AWOSPeriod.rowPeriods`: full dates with
+   a day, "Nov 1, 2026" / "1 November 2026" / "2026-11-01", give their month + year; the day is free), exactly one;
+   else the row with the recorded row's exact text. Never by position alone. No single row -> the goal-guided model
+   decides, and its prompt lists the rows ("21 = row "Nov 1, 2026 · $200.00 · Paid ...""). A picked row skips the
+   per-field period-consistency check (its row named the period).
+3. **Recording that starts inside a window.** `start_recording` asks the page (`rec_context`) for an open modal
+   window; if there is one the popup warns "A window is already open. For a reliable recipe, close it and start
+   recording from the normal page, then open it while recording.", the start step keeps `dialog: {name, tab}`, and
+   stopping repeats the warning. Every recorded step keeps `dialog` when its control sat in a window. Such steps are
+   goal-guided-eligible: when the control is missing, the model walks back in (goal_guided.md section 6).
+4. **Downloads.** (a) Any `chrome.downloads` item created <= 8 s after a recorded click (the latest click, even if an
+   address change was recorded after it) belongs to that click, including `blob:` / `data:` files built in the page;
+   the final file name is taken when the browser settles it (`downloads.onChanged`, and again at Stop), and the name a
+   page gives its temporary `<a download>` is learnt from the page (`dl_hint`, used by recording and by the replay's
+   name check). A blob cannot be read again: its file check is size + type only, "content not checked (generated in
+   the page)", never a failure. (b) A recorded click that opens a WEB PAGE in a new tab (a payment provider's hosted
+   invoice) is followed: the recording moves to that tab (`followTab` on the click, banners on both tabs, the popup
+   says "recording continues there"), and replay switches `run.tabId` to the tab the click opens. A file in a new tab
+   is not followed (it stays a new-tab file; another origin asks for Approve and then counts for the check).
+   (c) Stop proposes a download check from the recorded file name, numbers generalised (`expectDownloadProposed`,
+   prefilled in Goal + checks). (d) A download chore (goal says "download", or the last click is "Download PDF" /
+   "Export CSV" / ...) whose recording saved no file warns at Stop; its replay, with no download check and no file
+   downloaded, ends UNVERIFIED ("this is a download chore ..., but no file was downloaded in this run"), never VERIFIED /
+   CHECK.
+5. **Lists that scroll inside a window.** The lazy-target scroll search first scrolls up to 2 inner scroll boxes
+   (`overflow-y: auto | scroll`, content taller than the box; the open dialog's first), from the recorded
+   `step.innerScroll` then in box-height steps, re-scanning after each, stopping on a confident or anchored match, and
+   puts each box back when nothing turns up; then the window as before (its own time budget).
+
+Limits: windows are recognised by role (`dialog`, `alertdialog`, `aria-modal`) only: an app window drawn as a plain
+`div` is a "fixed overlay" and follows the old rules. Recording follows ONE new tab and stays there (going back to the
+first tab is not recorded). Shared recipes do not carry `dialog`, `followTab`, `innerScroll` or the row text yet
+(local recordings only). Row periods need month names or ISO dates; "11/01/2026" (day vs month) is not read.
+
 ## Permissions
 
-None added in 0.6, 0.6.1, 0.7 or 0.9 (0.9 re-reads file heads with the content script's own fetch on the portal's
+None added in 0.6, 0.6.1, 0.7, 0.9 or 0.9.1 (0.9 re-reads file heads with the content script's own fetch on the portal's
 origin). The keep-alive and pre-flight use `tabs` (background tabs on the recipe's own start
 page), `alarms`, and `notifications` (now with a button), all already requested. `downloads` (0.4) now also starts downloads (`chrome.downloads.download`) for files that opened in a new
 tab; its store justification already says "Replay starts that download and checks it finished".

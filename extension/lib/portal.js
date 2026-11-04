@@ -17,6 +17,9 @@
  *      danger vocabulary (pay, send, delete, submit, confirm, ...). A blocker with no allowed control is reported
  *      as `blocked` so the run pauses for the user instead.
  *      `blocked` also carries title, body (<= 800 chars) and ctl [{n, name, hint}] for the agent brain (v0.9)
+ *  v0.9.1: unblock(keep) / closeBlocked(n, name, keep) never touch the app's own windows (appDialogWhy): a dialog the
+ *      step was recorded in, one holding the step's control, or one with tabs / menus / a Settings-like title; such
+ *      dialogs are reported in `kept` and treated as part of the page. dialogOf(el) / openDialog() describe them.
  *  closeBlocked(n, name) -> {ok, name, why}   (v0.9) closes a pop-up the agent brain read as HARMLESS with the
  *      control it named, only when that control's name is a close / dismiss word and no deny rule matches
  *  decisionWord(info) -> the word that makes a pop-up a decision for the user (terms, consent, payment, ...) or ''
@@ -178,8 +181,62 @@
     return kind === 'consent' ? CONSENT_RE.test(low) : DISMISS_RE.test(low);
   }
 
-  function unblock() {
-    var res = { dismissed: [], blocked: null }, bs = blockers();
+  // ---- the app's own windows (v0.9.1, docs/specs/portal_run.md 9) ---------------------------------------------
+  // A Settings / Account / Billing window of the app itself (a modal dialog with tabs or menus, or one the step's
+  // target lives in) is part of the page, not a pop-up: it is never dismissed or offered to the pop-up reader.
+  var APPNAV_SEL = '[role=tablist], [role=tab], [role=menu], [role=menubar], [role=navigation], nav, [role=tree]';
+  var APP_TITLE = /^(settings|preferences|account|account settings|your account|my account|profile|billing|billing settings|options|workspace settings|organi[sz]ation settings|team settings|admin settings)\b/i;
+  function selectedTab(b) {
+    var t = L.deepAll('[role=tab][aria-selected=true]', b).filter(vis)[0];
+    return t ? nameOf(t) : '';
+  }
+  function looseSame(a, b) {
+    a = norm(a).toLowerCase(); b = norm(b).toLowerCase();
+    return !!a && !!b && (a === b || (a.length >= 4 && b.indexOf(a) === 0) || (b.length >= 4 && a.indexOf(b) === 0));
+  }
+  /** why blocker b is the app's own window the step needs ('' = an ordinary pop-up).
+   *  keep: {name, role, dialog: {name, tab}} of the step being replayed (all optional). */
+  function appDialogWhy(b, keep) {
+    keep = keep || {};
+    var title = titleOf(b);
+    if (keep.dialog && keep.dialog.name && looseSame(title, keep.dialog.name)) return 'the step was recorded in this window';
+    if ((keep.own || []).some(function (t) { return looseSame(title, t); })) return 'an earlier step of this run opened it';
+    var want = norm(keep.name || '').toLowerCase();
+    if (want && L.deepAll(L.KIND_SELECTOR.click + ', ' + L.KIND_SELECTOR.fill, b).some(function (c) { return nameOf(c).toLowerCase() === want; })) {
+      return 'it has the step\'s control "' + norm(keep.name) + '"';
+    }
+    // the step's control was found UNDER this window (the app reopened its Settings over the page the step needs):
+    // then only the rules above keep it; a Settings-like window in the way is closed like any pop-up
+    if (isConsent(b) || keep.covered) return '';
+    if (L.deepAll(APPNAV_SEL, b).some(vis)) return 'it has the app\'s own tabs / menus';
+    if (APP_TITLE.test(title)) return 'it is the app\'s "' + title.slice(0, 40) + '" window';
+    return '';
+  }
+  /** the dialog / modal el sits in -> {name, tab} (recorded with a step), or null. */
+  function dialogOf(el) {
+    var d = el && L.closestDeep(el, MODAL_SEL);
+    return d ? { name: titleOf(d).slice(0, 120), tab: selectedTab(d).slice(0, 80) } : null;
+  }
+  /** a visible modal window open now (not a cookie banner) -> {name, tab, nav}, or null (recording start, v0.9.1). */
+  function openDialog() {
+    var ds = L.deepAll(MODAL_SEL).filter(function (d) { return vis(d) && !busyOverlay(d) && !isConsent(d); });
+    var d = ds[ds.length - 1];
+    if (!d) return null;
+    return { name: titleOf(d).slice(0, 120), tab: selectedTab(d).slice(0, 80), nav: !!appDialogWhy(d, {}) };
+  }
+
+  /** titles of the visible modal windows now (the worker remembers the ones its own steps opened). */
+  function openDialogs() {
+    return L.deepAll(MODAL_SEL).filter(function (d) { return vis(d) && !busyOverlay(d) && !isConsent(d); })
+      .map(function (d) { return titleOf(d).slice(0, 120); }).filter(Boolean);
+  }
+
+  function unblock(keep) {
+    var res = { dismissed: [], blocked: null, kept: [] }, bs = blockers().filter(function (b) {
+      var why = appDialogWhy(b, keep);
+      if (why) res.kept.push({ title: titleOf(b).slice(0, 80), why: why });
+      return !why;
+    });
     bs.forEach(function (b) {
       if (res.blocked) return;
       var kind = isConsent(b) ? 'consent' : 'popup', ctl = controlsIn(b);
@@ -232,8 +289,8 @@
   }
   /** click control n (as numbered in unblock()'s `blocked.ctl`) of the blocker that offers no allowed control, only
    *  when it still carries the name the brain saw and harmlessAllowed() agrees. -> {ok, name, why} */
-  function closeBlocked(n, expectName) {
-    var bs = blockers();
+  function closeBlocked(n, expectName, keep) {
+    var bs = blockers().filter(function (b) { return !appDialogWhy(b, keep); });
     for (var k = 0; k < bs.length; k++) {
       var b = bs[k], kind = isConsent(b) ? 'consent' : 'popup', ctl = controlsIn(b);
       if (ctl.some(function (c) { return allowed(c, kind); })) continue;      // unblock() handles that one itself
@@ -307,6 +364,7 @@
     pageKind: pageKind, coveredBy: coveredBy, blockers: blockers, unblock: unblock, allowed: allowed,
     HARMLESS_RE: HARMLESS_RE, DECISION_RE: DECISION_RE, harmlessAllowed: harmlessAllowed, decisionWord: decisionWord, closeBlocked: closeBlocked,
     topAt: topAt, overlayOf: overlayOf, containsDeep: containsDeep, vis: vis,
+    appDialogWhy: appDialogWhy, dialogOf: dialogOf, openDialog: openDialog, openDialogs: openDialogs, MODAL_SEL: MODAL_SEL,
     rememberMe: rememberMe, autofillSignin: autofillSignin, autofilled: autofilled, rememberLabel: checkboxName,
   };
 })(typeof globalThis !== 'undefined' ? globalThis : self);

@@ -30,7 +30,12 @@ AWOS Replay is a Chrome extension: **show a web chore once, then replay it whene
 
 ## 2. Record a chore (once per chore)
 1. Open the start page of the chore and log in yourself (AWOS never stores passwords).
-2. Click the AWOS icon, then **Record this tab**. Do the chore once, normally. Then click **Stop recording**.
+2. **Start recording from the normal page**: close any window, menu or pop-up the app has open (a Settings dialog,
+   a profile menu) first. Click the AWOS icon, then **Record this tab**. Do the chore once, normally, opening the
+   Settings window, its Billing tab and so on WHILE recording, so the recipe knows the way in. Then click
+   **Stop recording**. (If a window is already open when you press Record, the popup says so: "A window is already
+   open. For a reliable recipe, close it and start recording from the normal page, then open it while recording.")
+   If a click opens the invoice in a new tab, AWOS follows that tab: click its Download button there, then Stop.
 3. Under the recording, fill in two fields, then click **Save goal + checks**:
    - **Goal**: what must be true at the end, with the details that matter (for example "marketing e-mails are off and
      the language is Deutsch"). The local verifier reads it.
@@ -179,6 +184,21 @@ A recipe recorded in October that clicked "Invoice September 2026" no longer cli
 - **Waits for the page**: before each click or typing AWOS waits (up to 8 s) until the button is visible, enabled, not
   under a loading spinner; slow portals no longer fail on a greyed-out button.
 - Details: `docs/specs/portal_run.md` sections 6-8, `docs/specs/goal_guided.md` section 5.
+
+## 4g. Apps with Settings windows (v0.9.1): billing invoices in a dialog
+- **The app's own windows stay open.** A Settings / Account / Billing window (a dialog with tabs or menus, one the step
+  was recorded in, or one the run itself opened) is part of the page and is never closed as a "pop-up". A real
+  "What's new" pop-up still is.
+- **Identical "Download PDF" on every invoice row**: AWOS picks the row by its date ("Nov 1, 2026" counts as November
+  2026), for the run's month, never just the top row. Tick **Always the newest row** under Goal + checks for chores
+  like "download the latest invoice".
+- **If the window is closed at replay** (or the recipe was recorded with it already open), the agent model walks back
+  in: up to 4 moves per step (profile menu, Settings, Billing), each checked and logged, then the recorded click runs.
+- **Lists that scroll inside the window** are scrolled there (not just the page) until the invoice shows up.
+- **Downloads made by the page itself** (a file built in the page, a hosted invoice page in a new tab) are recorded and
+  counted. A recording whose last click looks like a download but saved no file warns you when you stop, and its replay
+  ends UNVERIFIED ("no file was downloaded"), never green.
+- Details: `docs/specs/portal_run.md` section 9, `docs/specs/goal_guided.md` section 6.
 
 ## 5. Send the results back
 Click **Export run log** in the popup and send the JSON file.
