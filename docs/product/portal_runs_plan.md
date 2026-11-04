@@ -1,6 +1,6 @@
 # Portal runs: product plan (2026-11-02)
 
-From 23 logged discovery conversations (Reddit: r/nocode, r/RPA, r/zapier, and replies; tracker = claude.ai artifact "Talk to Users
+From 24 logged discovery conversations (Reddit: r/nocode, r/RPA, r/zapier, and replies; tracker = claude.ai artifact "Talk to Users
 Kit", collection `convos`).
 
 **Product.** For people who log into many supplier / partner portals every month to collect invoices, statements or
@@ -15,6 +15,7 @@ missing, and never fails silently.
 | Unexpected pop-ups, incl. "accept new terms"; on cloud apps mostly the vendor's new-feature and cookie notices, with accept / decline / OK / cancel buttons (6) | built (0.9): agent brain reads unknown pop-ups; terms / consent / payment always stop |
 | Never trust a green run: the result really landed (5); per step too: expect X (e.g. "success"), and if something else appeared, read it, class it error / warning, act on it; capped retries and scrolls so a run never loops, caps set per portal while testing it or read from the page ("page 1 of 5") | files: built (0.9) size + content checks, "Not a document"; end of run: final URL + expected texts, retried once; caps: one retry after a pop-up, 5 model-chosen steps. Gap: no check after each step, and no reading of the error / warning that appeared instead |
 | Flag what is missing (2) | built (collection checklist) |
+| Before retrying a step that changes something (submit, upload), check whether it already happened: "a Submit timeout doesn't prove nothing was submitted" (1, strong, tool maker) | downloads: built (a completed file isn't fetched again); submits / uploads: not checked yet |
 | Survive redesigns: the download button moves, ids change or get shuffled (5: mileage log, daily ops sheet, r/RPA, a legacy-site RPA dev, monthly statements) | built: multi-attribute locator re-finds a moved control but its name / label must still match |
 | Remember the chore: people keep a calendar reminder for it (3) | built: schedules (0.4), collections on a schedule (0.6) |
 | Fill this month's date range; the picker resets every visit (2) | partial: month / year placeholders fill typed dates; no last-day-of-month; click-only calendars untested |
