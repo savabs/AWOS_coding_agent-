@@ -234,6 +234,22 @@ def test_pdf_built_in_page_blob_is_recorded_and_counted(x):
     assert "generated in the page" in d["content"]["why"], d
 
 
+def test_self_closing_download_tab_without_a_pattern_counts_the_file(x):
+    # the owner's claude.ai run: "Download PDF" opened a tab that downloaded the invoice and closed itself; no name
+    # pattern was saved, so the run ended CHECK. The file this run downloaded now counts as its download check.
+    def acts(page):
+        _open_billing(page)
+        page.click("ul.inv li:first-child >> text=Download PDF")
+        time.sleep(1.5)
+    page, tab, rec, _ = _record(x, acts, state={"dl": "tabattach"})
+    assert not rec.get("expectDownload"), rec.get("expectDownload")        # nothing saved in Goal + checks
+    run = _run(x, page, tab, rec, state={"dl": "tabattach"})
+    assert run["result"]["verdict"] == "VERIFIED", _logs(run)
+    d = _dl(run)
+    assert d["ok"] and d.get("implicit"), d                   # (headless Chromium saves downloads under random names)
+    assert any("counted the download" in t for t in _logs(run)), _logs(run)
+
+
 def test_download_click_that_downloads_nothing_warns_and_is_not_green(x):
     def acts(page):
         _open_billing(page)

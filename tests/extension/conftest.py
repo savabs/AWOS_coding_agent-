@@ -72,6 +72,16 @@ class _Handler(SimpleHTTPRequestHandler):
             if name.endswith(".csv"):
                 return self._send(b"date;description;amount\n2026-10-31;fees;12.00\n", "text/csv")
             return self._send(b"%PDF-1.4\n%fake but real header " + name.encode() + b"\n%%EOF\n", "application/pdf")
+        if path.startswith("/files/attach/"):     # v0.9.2: an attachment response with no file name in the URL (a
+            key = path[len("/files/attach/"):]     # "Download PDF" that opens a tab, which downloads and closes itself)
+            body = b"%PDF-1.4\n%attachment " + key.encode() + b"\n%%EOF\n"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Disposition", 'attachment; filename="Invoice-' + key + '.pdf"')
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         loc = self.server.redirects.get(path)
         if not loc and path in self.server.auth and "portal_session=ok" not in (self.headers.get("Cookie") or ""):
             loc = self.server.auth[path]          # a portal that needs a login: 302 until the login page set the cookie

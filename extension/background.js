@@ -1039,12 +1039,24 @@ async function finish(run, rec) {
   }
   // v0.9.1: a download chore with no download check must not look done when no file arrived
   var dlGoal = downloadGoal(base || rec);
-  if (dlGoal && !dx.exact && /^(VERIFIED|CHECK)$/.test(verdict)) {
+  var dlStep = (rec.steps || []).some(function (s) { return s.download || s.opensTab; });
+  if ((dlGoal || dlStep) && !dx.exact && /^(VERIFIED|CHECK)$/.test(verdict)) {
     var mine = (await chrome.downloads.search({ startedAfter: new Date(run.startedAt - 1000).toISOString() }).catch(function () { return []; }))
       .filter(function (d) { return d.id > (run.dlMark || 0) && d.state === 'complete'; });
     if (!mine.length) {
       verdict = 'UNVERIFIED'; run.noFile = true;
-      reason = 'this is a download chore (' + dlGoal + '), but no file was downloaded in this run and no download check is set';
+      reason = 'this is a download chore (' + (dlGoal || 'its click downloads a file') + '), but no file was downloaded in this run and no download check is set';
+    } else {
+      // v0.9.2: no file-name pattern was set (e.g. a button that starts the download from a tab that closes itself),
+      // but this run did download a file: count the newest one as the download check (real bytes, not a web page)
+      var got = mine[mine.length - 1], gname = baseName(got.filename) || fileName(got) || '(file)';
+      var real = (got.fileSize || got.totalBytes || got.bytesReceived || 0) > 0 && !/html/i.test(got.mime || '');
+      checks.push({ kind: 'download', implicit: true, expected: 'the file this run downloaded (no name pattern set)', actual: gname, ok: real,
+                    notDocument: !real, content: real ? { state: 'unchecked', why: 'no name pattern set; size and type checked' }
+                                                       : { state: 'bad', why: 'the downloaded file is empty or a web page' } });
+      logRun(run, 'counted the download ' + gname + ' as this run\'s file (no name pattern is set; tip: save the suggested download pattern in Goal + checks)');
+      if (real && verdict === 'CHECK') verdict = 'VERIFIED';
+      if (!real) { verdict = 'FAILED'; reason = 'Not a document: the downloaded file is empty or a web page'; }
     }
   }
   var noActions = !actionCount(rec);
@@ -1866,7 +1878,10 @@ async function exportLog() {
         var l = s.loc || {};
         return { action: s.action, role: l.role, name: l.name, context: l.context || '', danger: s.danger || '',
                  sensitive: s.sensitive || '', valueLen: s.value != null && !s.param ? String(s.value).length : null,
-                 param: !!s.param, ask: !!s.ask, navigates: !!s.navigates };
+                 param: !!s.param, ask: !!s.ask, navigates: !!s.navigates,
+                 // v0.9.2: what the recorder linked to the step (flags only; no file names or row text)
+                 download: !!s.download, downloadNamed: !!(s.download && s.download.name), generated: !!(s.download && s.download.generated),
+                 opensTab: !!s.opensTab, followTab: !!s.followTab, inDialog: !!s.dialog, rowText: !!(l.row), variable: !!s.variable };
       }) };
   });
   var runOut = runs.map(function (r) {

@@ -81,6 +81,7 @@ function invoiceList() {
     }
     else if (mode === 'hosted') { a.href = other + '/app/hosted.html?p=' + r.key; a.target = '_blank'; }
     else if (mode === 'hostedpdf') { a.href = other + '/files/doc/invoice-' + r.key + '.pdf'; a.target = '_blank'; }
+    else if (mode === 'tabattach') { a.href = '/files/attach/' + r.key; a.target = '_blank'; }   // v0.9.2: like claude.ai: a tab that downloads and closes itself
     else if (mode === 'none') { a.href = '#billing'; a.onclick = function (e) { e.preventDefault(); }; }   // a click that downloads nothing
     else { a.href = '/files/doc/invoice-' + r.key + '.pdf'; a.setAttribute('download', ''); }
     li.appendChild(a); ul.appendChild(li);
