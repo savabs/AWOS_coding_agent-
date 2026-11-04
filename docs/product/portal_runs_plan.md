@@ -1,6 +1,6 @@
 # Portal runs: product plan (2026-11-02)
 
-From 25 logged discovery conversations (Reddit: r/nocode, r/RPA, r/zapier, and replies; tracker = claude.ai artifact "Talk to Users
+From 26 logged discovery conversations (Reddit: r/nocode, r/RPA, r/zapier, and replies; tracker = claude.ai artifact "Talk to Users
 Kit", collection `convos`).
 
 **Product.** For people who log into many supplier / partner portals every month to collect invoices, statements or
@@ -25,6 +25,7 @@ missing, and never fails silently.
 | Never miss a cycle (portal keeps only 3 months; bit one user twice a year after time away, support took 4-5 days while accounting chased) (1, strong) | built (0.9): catch-up of missed months in collections |
 | Fast inside short sessions (5-min idle logout; a timeout kills the code too, so login + new code + wait, up to 3 loops) (2) | mostly; unmeasured on a real portal |
 | Wait for a state (spinner gone, button enabled), not delays (3) | built (0.9): wait until usable before each action |
+| Look for a machine-readable door before clicking: e-mailed / scheduled report, the JSON request behind the page, embedded structured data (ld+json), feeds and calendar files (4 practitioners) | gap: Replay reads none of these today; e-mail is the row below |
 | E-mail as the cheap door (codes, documents, "your invoice is ready" links that land on a login; many vendor / payroll sites hide a scheduled e-mailed report in settings, so look there first when setting up a portal) (4) | gap |
 | Move content from a portal into another app, not just download it (daily portal stats into an ops sheet; call recordings + AI summaries into a Mac CRM; the same report exported and pasted into a sheet again and again) (3) | gap: run values are typed in at start, nothing carries a value from one site to another; the CRM here (Daylite) is a Mac desktop app, outside a browser extension |
 | Keyboard / Enter fallback, as a backup blended with clicks (arrow keys to scroll, visual match to find the item) (1, RPA dev) | gap (small) |
