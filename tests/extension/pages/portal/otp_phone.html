@@ -1,0 +1,20 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Supplier portal - Verify</title></head><body>
+<h1>Two-step verification</h1>
+<p>We sent a code to your phone. Enter it to continue.</p>
+<form id="f">
+<label>Verification code <input id="code" name="code" autocomplete="one-time-code" inputmode="numeric"></label>
+<button type="submit">Verify</button>
+</form>
+<p id="err"></p>
+<script>
+  // the portal accepts only 482915: then the session cookie is set and it goes on to the documents page
+  window.__tries = 0;
+  document.getElementById('f').onsubmit = function (e) {
+    e.preventDefault(); window.__tries++;
+    if (document.getElementById('code').value === '482915') {
+      document.cookie = 'portal_session=ok; path=/';
+      location.href = '/portal/supplier.html';
+    } else document.getElementById('err').textContent = 'Wrong code';
+  };
+</script>
+</body></html>

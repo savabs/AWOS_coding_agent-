@@ -1,15 +1,15 @@
 {
   "manifest_version": 3,
   "name": "AWOS Replay",
-  "version": "0.4.0",
+  "version": "0.11.0",
   "description": "Show it once, it does it forever: record a web chore, replay it on demand or on a schedule, verify it, share it.",
   "background": { "service_worker": "background.js" },
-  "permissions": ["storage", "tabs", "alarms", "downloads", "notifications"],
-  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "permissions": ["storage", "tabs", "alarms", "downloads", "notifications", "scripting"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*", "<all_urls>"],
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*"],
-      "js": ["lib/safety.js", "lib/locator.js", "content.js"],
+      "js": ["lib/safety.js", "lib/locator.js", "lib/pageview.js", "lib/portal.js", "content.js"],
       "run_at": "document_idle"
     },
     {

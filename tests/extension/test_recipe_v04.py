@@ -12,12 +12,14 @@
 Run:  PYTHONPATH=. ~/.awos/rl-venv/bin/python -m pytest tests/extension -q
 """
 import json
+import pathlib
 import time
 
 import pytest
 
 from test_extension_replay import _record_checkout, _record_form
 
+_VERSION = json.loads((pathlib.Path(__file__).resolve().parents[2] / "extension" / "manifest.json").read_text())["version"]
 pytestmark = pytest.mark.timeout(150)
 SITE = "https://awos.tirramind.com"
 KEY = "sk-ant-test-0123456789abcdef"
@@ -136,8 +138,8 @@ def test_page_import_needs_confirmation_then_answers_page(x):
     rec, tab = _record_checkout(x, page)
     recipe = x.call("export_recipe", id=rec["id"])["recipe"]
     site = _site(x)
-    assert _wait(lambda: _msgs(site, "awos-replay-present"))[0]["version"] == "0.4.0"
-    assert site.evaluate("document.documentElement.dataset.awosReplay") == "0.4.0"
+    assert _wait(lambda: _msgs(site, "awos-replay-present"))[0]["version"] == _VERSION
+    assert site.evaluate("document.documentElement.dataset.awosReplay") == _VERSION
 
     site.evaluate("(r) => window.postMessage({type: 'awos-import-recipe', recipe: r}, location.origin)", recipe)
     pend = _wait(lambda: x.state()["pendingImport"])

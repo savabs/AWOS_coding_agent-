@@ -1,0 +1,122 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Chat app - New chat</title>
+<style>
+body{font:14px system-ui,sans-serif;margin:0}
+header{display:flex;justify-content:space-between;padding:8px 16px;border-bottom:1px solid #ddd}
+main{padding:16px} aside{float:left;width:160px;padding:16px}
+#menu{position:absolute;right:16px;top:44px;background:#fff;border:1px solid #ccc;padding:4px;display:none}
+#menu.open{display:block} #menu [role=menuitem]{display:block;padding:4px 10px;cursor:pointer}
+#ov{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none}
+#ov.open{display:block}
+#dlg{position:fixed;left:10%;top:8%;width:80%;height:80%;background:#fff;padding:12px;box-sizing:border-box}
+#box{height:320px;overflow-y:auto;border:1px solid #eee;margin-top:8px;padding:8px}
+.tall{height:900px;background:linear-gradient(#fafafa,#eee)}
+ul.inv{list-style:none;padding:0} ul.inv li{padding:6px 0;border-bottom:1px solid #eee}
+#promo{position:fixed;left:30%;top:30%;width:40%;background:#fff;border:2px solid #333;padding:16px}
+</style></head><body>
+<!-- A small SPA that behaves like an AI-chat app's settings (docs/specs/portal_run.md 9): the profile menu opens a
+     Settings modal dialog (role=dialog, aria-modal) with tabs Account / Billing / Usage / Appearance; Billing lists
+     invoices, each row with an identical "Download PDF" link. The dialog's open / closed and tab state is in-page JS;
+     the URL never changes. Options from the test server (/__state.json):
+       open   'account' | 'billing'  the Settings dialog is open when the page loads, on that tab
+       promo  true                  a "What's new" pop-up over the page (a real pop-up: closed with "Got it")
+       latest 'YYYY-MM'             the newest invoice (4 monthly rows, newest first; default 2026-10)
+       dl     'local' (default: same-origin file, downloads) | 'hosted' (opens a hosted invoice PAGE on another
+              origin in a new tab, with its own Download button) | 'hostedpdf' (opens the PDF itself, other origin, new tab)
+              | 'none' (the link downloads nothing) | 'blob' ("Download PDF" BUTTONS: page script builds a PDF Blob ~0.7 s later, saved via a temporary <a download>)
+       lazy   true                  Billing: plan details first; the invoice list renders only once the dialog's inner
+                                    scroll box is scrolled to its end (the window itself does not scroll)
+       chats  N                     v0.10: the sidebar lists N past chats under "Recents" (claude.ai's chat history noise) -->
+<header><strong>Chat app</strong>
+  <button id="prof" aria-haspopup="menu">S Saurabh · Max</button></header>
+<div id="menu" role="menu" aria-label="Profile">
+  <div role="menuitem" tabindex="0" id="m-settings">Settings</div>
+  <div role="menuitem" tabindex="0">Get help</div>
+  <div role="menuitem" tabindex="0">Log out</div>
+</div>
+<aside><button>Chats and tasks</button><br><a href="#customize" id="cust">Customize</a></aside>
+<main><h1>New chat</h1><textarea aria-label="Message" rows="3" cols="40"></textarea></main>
+<div id="ov"><div id="dlg" role="dialog" aria-modal="true" aria-labelledby="st">
+  <button id="x" aria-label="Close" style="float:right">×</button>
+  <h2 id="st">Settings</h2>
+  <div role="tablist" id="tabs">
+    <button role="tab" data-t="account">Account</button>
+    <button role="tab" data-t="billing">Billing</button>
+    <button role="tab" data-t="usage">Usage</button>
+    <button role="tab" data-t="appearance">Appearance</button>
+  </div>
+  <div id="box"></div>
+</div></div>
+<div id="promo" role="dialog" aria-modal="true" aria-labelledby="pt" hidden>
+  <h3 id="pt">What's new</h3><p>Projects now support files.</p><button id="gotit">Got it</button></div>
+<script>
+var st = {};
+try { var xr = new XMLHttpRequest(); xr.open('GET', '/__state.json', false); xr.send(); st = JSON.parse(xr.responseText || '{}'); } catch (e) {}
+var SH = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+var other = location.protocol + '//' + (location.hostname === 'localhost' ? '127.0.0.1' : 'localhost') + ':' + location.port;
+function pad(n) { return (n < 10 ? '0' : '') + n; }
+function back(p, n) { var y = +p.slice(0, 4), m = +p.slice(5, 7) - 1 - n; while (m < 0) { m += 12; y--; } return { y: y, m: m, key: y + '-' + pad(m + 1) }; }
+var latest = st.latest || '2026-10';
+var rows = [0, 1, 2, 3].map(function (n) { return back(latest, n); });
+var menu = document.getElementById('menu'), ov = document.getElementById('ov'), box = document.getElementById('box');
+document.getElementById('prof').onclick = function () { menu.classList.toggle('open'); };
+document.getElementById('m-settings').onclick = function () { menu.classList.remove('open'); openSettings('account'); };
+document.getElementById('x').onclick = function () { ov.classList.remove('open'); };
+document.getElementById('gotit').onclick = function () { document.getElementById('promo').hidden = true; };
+Array.prototype.forEach.call(document.querySelectorAll('[role=tab]'), function (b) { b.onclick = function () { show(b.dataset.t); }; });
+function openSettings(t) { ov.classList.add('open'); show(t); }
+function invoiceList() {
+  var ul = document.createElement('ul'); ul.className = 'inv';
+  rows.forEach(function (r, k) {
+    var li = document.createElement('li'), mode = st.dl || 'local', a = document.createElement(mode === 'blob' ? 'button' : 'a');
+    li.appendChild(document.createTextNode(SH[r.m] + ' 1, ' + r.y + ' · $' + (k === 0 ? '200.00' : '100.00') + ' · Paid · INV-' + r.key + '-00' + (42 - k) + ' '));
+    a.textContent = 'Download PDF';
+    if (mode === 'blob') {        // the page "fetches" the PDF, builds a Blob and saves it through a temporary <a download>
+      a.onclick = function () {
+        setTimeout(function () {
+          var b = new Blob(['%PDF-1.4\n%generated in the page invoice-' + r.key + '\n%%EOF\n'], { type: 'application/pdf' });
+          var u = URL.createObjectURL(b), t = document.createElement('a');
+          t.href = u; t.download = 'invoice-' + r.key + '.pdf'; document.body.appendChild(t); t.click(); t.remove();
+          setTimeout(function () { URL.revokeObjectURL(u); }, 1500);
+        }, 700);
+      };
+    }
+    else if (mode === 'hosted') { a.href = other + '/app/hosted.html?p=' + r.key; a.target = '_blank'; }
+    else if (mode === 'hostedpdf') { a.href = other + '/files/doc/invoice-' + r.key + '.pdf'; a.target = '_blank'; }
+    else if (mode === 'tabattach') { a.href = '/files/attach/' + r.key; a.target = '_blank'; }   // v0.9.2: like claude.ai: a tab that downloads and closes itself
+    else if (mode === 'none') { a.href = '#billing'; a.onclick = function (e) { e.preventDefault(); }; }   // a click that downloads nothing
+    else { a.href = '/files/doc/invoice-' + r.key + '.pdf'; a.setAttribute('download', ''); }
+    li.appendChild(a); ul.appendChild(li);
+  });
+  return ul;
+}
+function show(t) {
+  Array.prototype.forEach.call(document.querySelectorAll('[role=tab]'), function (b) { b.setAttribute('aria-selected', b.dataset.t === t ? 'true' : 'false'); });
+  box.innerHTML = ''; box.scrollTop = 0; box.onscroll = null;
+  if (t === 'account') box.innerHTML = '<p>Your Chat app account</p><label>Full name <input value="Saurabh"></label>';
+  else if (t === 'usage') box.innerHTML = '<p>Usage this month: 42 messages</p>';
+  else if (t === 'appearance') box.innerHTML = '<p>Theme: system</p>';
+  else {
+    box.innerHTML = '<h3>Plan</h3><p>Max plan, billed monthly.</p>';
+    if (!st.lazy) { box.appendChild(invoiceList()); return; }
+    var tall = document.createElement('div'); tall.className = 'tall'; tall.textContent = 'Payment method and plan details'; box.appendChild(tall);
+    var h = document.createElement('h3'); h.textContent = 'Invoices'; box.appendChild(h);
+    box.onscroll = function () {                    // the list loads when its place scrolls into the dialog's view
+      if (box.scrollTop + box.clientHeight >= box.scrollHeight - 60 && !box.querySelector('ul.inv')) {
+        setTimeout(function () { if (!box.querySelector('ul.inv')) box.appendChild(invoiceList()); }, 150);
+      }
+    };
+  }
+}
+if (st.chats) {
+  var aside = document.querySelector('aside'), hh = document.createElement('h3'), ul = document.createElement('ul');
+  hh.textContent = 'Recents'; ul.className = 'recents';
+  for (var c = 1; c <= st.chats; c++) {
+    var li = document.createElement('li'), a = document.createElement('a');
+    a.href = '#chat-' + c; a.textContent = 'Chat about topic ' + c; li.appendChild(a); ul.appendChild(li);
+  }
+  aside.appendChild(hh); aside.appendChild(ul);
+}
+if (st.open) openSettings(st.open);
+if (st.promo) document.getElementById('promo').hidden = false;
+</script>
+</body></html>

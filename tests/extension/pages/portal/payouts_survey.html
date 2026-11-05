@@ -1,0 +1,13 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Payout portal - Payouts</title>
+<style>#ov{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:10}
+#dlg{background:#fff;padding:24px;width:360px}</style></head><body>
+<h1>Payouts</h1>
+<table><tr><td>October 2026</td><td><a id="oct" href="/files/payout-2026-10.csv" download>Download October payouts</a></td></tr></table>
+<p><a href="/help.html">Help</a></p>
+<!-- v0.9: a pop-up no known dismiss rule closes ("Close survey" is not in the close vocabulary): the agent brain reads it -->
+<div id="ov"><div id="dlg" role="dialog" aria-modal="true" aria-labelledby="t">
+<h2 id="t">Quick survey</h2><p>How was your month-end? It takes one minute.</p>
+<button id="start" onclick="window.__started = 1">Start survey</button>
+<button id="close" onclick="document.getElementById('ov').remove(); window.__closed = 1">Close survey</button>
+</div></div>
+</body></html>

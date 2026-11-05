@@ -10,7 +10,7 @@ Files: `scripts/install_replay.sh`, `packaging/build_extension_zip.sh`,
 
 ---
 
-## 1. Install the local model (Mac, Apple Silicon)
+## 1. Install the local models (Mac, Apple Silicon)
 
 The command for the website:
 
@@ -18,56 +18,109 @@ The command for the website:
 curl -fsSL https://raw.githubusercontent.com/savabs/AWOS_coding_agent-/main/scripts/install_replay.sh | bash
 ```
 
-(This works once the branch `claude/replay-install` is merged to `main`. Before that, put
-`refs/heads/claude/replay-install` in place of `main` to test it.)
+(This works once the branch with the installer is merged to `main`. Before that, put
+`refs/heads/<branch>` in place of `main` to test it.)
+
+It sets up two local models, each behind its own llama-server on loopback:
+
+| Server | launchd label | Address | Model | Used for |
+|---|---|---|---|---|
+| repair / verify | `ai.awos.replay-model` | `127.0.0.1:8080`, alias `local` | G7, Qwen3.5 2B Q4_K_M, 1.3 GB | Replay: finding a moved control, the verifier |
+| Tell-it agent | `ai.awos.replay-agent` | `127.0.0.1:8081`, alias `qwen3.5-4b` / `qwen3.5-9b` | Qwen3.5-4B Q4_K_M, 2.7 GB (or 9B, 5.7 GB) | Tell it: doing a chore from your words |
+
+The 2B cannot drive a page by itself, so **Tell it needs the agent server**.
 
 | Command | What it does |
 |---|---|
-| `... \| bash` | Installs, or repairs an existing install. Safe to run again. |
-| `... \| bash -s -- --status` | Shows whether the agent is installed and loaded, whether the server is up, the model, its memory use, and what install added |
-| `... \| bash -s -- --uninstall` | Removes exactly what install added. Add `--keep-model` to keep the 1.3 GB GGUF |
-| `AWOS_DRY_RUN=1 bash install_replay.sh` | Prints every action and changes nothing |
+| `... \| bash` | Installs, or repairs an existing install. Safe to run again. Picks the agent model from RAM (below) |
+| `... \| bash -s -- --agent 4b` | Agent model Qwen3.5-4B (the default on 8 GB+ Macs) |
+| `... \| bash -s -- --agent 9b` | Agent model Qwen3.5-9B: stronger, for 16 GB+ Macs. Replaces a 4B this script downloaded |
+| `... \| bash -s -- --agent none` | Removes only the agent server and its model; the 2B repair/verify server stays |
+| `... \| bash -s -- --status` | Both servers: launchd agent installed and loaded, resident MB, up or down, the model files, whether 8081 really serves an agent model (not the 2B), and what install added |
+| `... \| bash -s -- --uninstall` | Removes exactly what install added, both servers. Add `--keep-model` to keep the GGUFs |
+| `AWOS_DRY_RUN=1 bash install_replay.sh --agent 9b` | Prints every action and changes nothing |
+
+**Which agent model.** With no `--agent`, the installer keeps the agent model it installed earlier. On a
+first install it picks **4b** when the Mac has 8 GB of RAM or more, and **none** below that. On a 16 GB+ Mac it
+also prints that `--agent 9b` is stronger, but it never picks the 9B by itself (5.7 GB download and about
+5.7 GB of RAM while loaded). It always prints the choice and how to change it:
+
+```
+Tell-it agent model: 4b (Qwen3.5-4B, 2.7 GB download; default for 16 GB RAM)
+  Your Mac has 16 GB: --agent 9b is stronger (5.7 GB download, ~5.7 GB while loaded).
+  Change it any time: install_replay.sh --agent 4b | --agent 9b | --agent none
+```
+
+`--agent 9b` on a Mac with less than 16 GB installs it anyway, with a warning.
+
+**Pinned agent files.** These are the exact Hugging Face files CI evaluates (`ci/rl_eval.env` `MODEL_SPECS`).
+A test keeps the installer and that file equal. The sha256 is the LFS oid from the HF API for that revision.
+
+| `--agent` | Repo | File | Revision | Bytes | sha256 |
+|---|---|---|---|---|---|
+| `4b` | `unsloth/Qwen3.5-4B-GGUF` | `Qwen3.5-4B-Q4_K_M.gguf` | `e87f176479d0855a907a41277aca2f8ee7a09523` | 2,740,937,888 | `00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4` |
+| `9b` | `unsloth/Qwen3.5-9B-GGUF` | `Qwen3.5-9B-Q4_K_M.gguf` | `3885219b6810b007914f3a7950a8d1b469d598a5` | 5,680,522,464 | `03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8` |
 
 **What install does, and nothing else:**
 
-1. Checks that the Mac runs macOS on Apple Silicon (it refuses Intel Macs and Rosetta shells) and has about 2 GB free disk.
+1. Checks that the Mac runs macOS on Apple Silicon (it refuses Intel Macs and Rosetta shells). Then it checks
+   free disk **before anything is downloaded or installed**. It needs room for every model not yet on disk,
+   plus 1 GB of headroom: 2B + 4B is about 4 GB, then 1 GB more; 2B + 9B is about 7 GB, then 1 GB more. A
+   half-downloaded `.part` counts as already there. If the models don't fit, it stops and suggests
+   `--agent 4b` or `--agent none`.
 2. If `llama-server` is missing, runs `brew install llama.cpp`. If Homebrew is missing too, it **asks first**
    (`Install Homebrew now? [y/N]`, read from the terminal). With no terminal it answers no, prints the brew.sh
    link and stops. The script never uses `sudo` itself. Homebrew's own installer may ask for the Mac password.
 3. Downloads the repair/verify model (G7, Qwen3.5 2B Q4_K_M, 1.3 GB) from the public GitHub release
    `rl-qwen3.5-2b-g7-rv` into `~/.awos/models`. It uses the same file and sha256 as `scripts/awos_model.sh`
-   (a test keeps the two in sync). The download goes to `<file>.part` with curl retries and resume, and is
-   renamed only when the sha256 matches, so a cut-off download never looks finished.
-4. Writes the launchd **user** agent `~/Library/LaunchAgents/ai.awos.replay-model.plist` and loads it with
-   `launchctl bootstrap gui/<uid>`. The agent starts at login and restarts if the server crashes
-   (ThrottleInterval 30 s). It runs:
-   `llama-server -m <model> --alias local --host 127.0.0.1 --port 8080 -c 4096 -np 1 --jinja --reasoning off
-   --cache-prompt --cache-ram 0 -cms 256 --temp 0 --sleep-idle-seconds 300`.
-   These are the EngineBench flags from `awos_model.sh` plus the idle sleep. The server listens on
-   **127.0.0.1 only**.
+   (a test keeps the two in sync). Then it downloads the agent model from the pinned Hugging Face revision.
+   Both downloads go to `<file>.part` with curl retries and resume (3 tries), and are renamed only when the
+   sha256 matches, so a cut-off or wrong download never looks finished.
+4. Writes two launchd **user** agents and loads each with `launchctl bootstrap gui/<uid>`. They start at
+   login and restart if the server crashes (ThrottleInterval 30 s). Both have the same resource guard (below)
+   and listen on **127.0.0.1 only**.
+   - `~/Library/LaunchAgents/ai.awos.replay-model.plist` runs
+     `llama-server -m <2B> --alias local --host 127.0.0.1 --port 8080 -c 4096 -np 1 --jinja --reasoning off
+     --cache-prompt --cache-ram 0 -cms 256 --temp 0 --sleep-idle-seconds 300`.
+     These are the EngineBench flags from `awos_model.sh` plus the idle sleep.
+   - `~/Library/LaunchAgents/ai.awos.replay-agent.plist` runs
+     `llama-server -m <4B|9B> --alias qwen3.5-4b|qwen3.5-9b --host 127.0.0.1 --port 8081 --jinja --reasoning off
+     -c 12288 -np 1 --temp 0 --cache-ram 0 -cms 256 --sleep-idle-seconds 300`.
+     12k context holds the page text plus the step history Tell it sends. Tell it constrains every answer
+     with a GBNF `grammar`, which llama-server's `/v1/chat/completions` supports.
 5. Records what it added in `~/.awos/replay/installed`, one line per item: directories it created, files it
-   wrote or downloaded, `brew llama.cpp` if it installed that, and Homebrew if it installed that.
-   `--uninstall` reads this record. Anything that was already there before install (an existing model,
-   llama.cpp, `~/.awos`) is not recorded, so uninstall leaves it alone. Directories are removed only if they
-   are empty. Homebrew is never removed automatically, even when this script installed it, because other
-   apps may depend on it by then; uninstall prints the official link to remove it.
+   wrote or downloaded, `brew llama.cpp` if it installed that, and Homebrew if it installed that. The agent
+   server's plist, log and model are recorded as `agentfile` lines, and `agent 4b|9b` records the choice.
+   `--uninstall` reads this record. `--agent none` and a 4b↔9b switch remove only the `agentfile` items
+   (a switch keeps the plist and log, which it rewrites). Anything that was already there before install
+   (an existing model, llama.cpp, `~/.awos`) is not recorded, so uninstall leaves it alone. Directories are
+   removed only if they are empty. Homebrew is never removed automatically, even when this script installed it,
+   because other apps may depend on it by then; uninstall prints the official link to remove it.
 
 The script never touches browser profiles, other apps, or anything outside `$HOME` apart from
 `brew install llama.cpp`. The whole script is wrapped in `main "$@"` on its last line, so a cut-off
 `curl | bash` download never runs half a script. Child processes never read the piped script from stdin.
 
-Environment variables: `AWOS_MODEL_PORT` (default 8080; if you change it, set the same endpoint in the
-extension Options), `AWOS_REPLAY_MODEL` (`g7`, `g6` or `base2b`), `AWOS_SLEEP_IDLE` (seconds, default 300;
-`-1` keeps the model loaded), and `AWOS_NONINTERACTIVE=1`.
+Environment variables:
+- `AWOS_MODEL_PORT` (default 8080) and `AWOS_AGENT_PORT` (default 8081). If you change one, set the same
+  endpoint in the extension Options.
+- `AWOS_REPLAY_MODEL` (`g7`, `g6` or `base2b`).
+- `AWOS_REPLAY_AGENT` (`4b`, `9b` or `none`, same as `--agent`).
+- `AWOS_SLEEP_IDLE` (seconds, default 300; `-1` keeps the models loaded).
+- `AWOS_NONINTERACTIVE=1`.
 
-If `scripts/awos_model.sh` is already serving on 8080 in a terminal, install stops and says so instead of
-starting a second server.
+If something else already serves 8080 or 8081 (for example `scripts/awos_model.sh` or a hand-started
+llama-server in a terminal), install stops and says so instead of starting a second server.
+`bash scripts/awos_model.sh --check` also checks the agent server. It fails if 8081 serves the 2B (alias
+`local`, or a 2b / g6 / g7 name). If 8081 is down, it only prints a note, because Replay works without it.
 
 **After install** (the script prints these steps):
 1. Install the extension from the Chrome Web Store. For a dev build: `chrome://extensions` → Developer mode →
    Load unpacked → `extension/`.
 2. Extension Options → endpoint `http://127.0.0.1:8080/v1` (this is the default) → Save.
 3. Record a chore once (popup → Record), then Replay it.
+4. Tell it: Options → agent endpoint `http://127.0.0.1:8081/v1`, model `qwen3.5-4b` (the defaults; with
+   `--agent 9b`, set the model name to `qwen3.5-9b`).
 
 ### Resource guard: measured on an M-series MacBook Air (16 GB), llama.cpp b11146, G7 model
 
@@ -99,9 +152,35 @@ under memory pressure without swapping. The anonymous footprint (KV cache, Metal
   priority and 3.39 to 3.65 s under `taskpolicy -b` + `nice 10`, because Metal does the work. So Background
   costs Replay nothing and protects foreground apps.
 
-To re-measure: `bash install_replay.sh --status` shows the server's resident MB.
+To re-measure: `bash install_replay.sh --status` shows each server's resident MB.
 
-**Log:** `~/.awos/replay/model-server.log`. On each install it is reset if it has grown past 20 MB.
+### The agent server's memory: estimated from file sizes, not measured
+
+These numbers were **not measured** with the real 4B or 9B on a Mac. They are reasoned from the GGUF sizes and
+the 2B measurements above. The plist has the same guard as the 2B: Background, nice 10, low-priority IO,
+`--cache-ram 0 -cms 256`, and `--sleep-idle-seconds 300`.
+
+| Agent model | GGUF | Loaded (memory-mapped weights + context) | Asleep (after 5 idle min) |
+|---|---|---|---|
+| 4B (`--agent 4b`) | 2.74 GB | ≈ 2.7 GB mapped, plus the 12k-token context cache and Metal buffers | ≈ 60 MB |
+| 9B (`--agent 9b`) | 5.68 GB | ≈ 5.7 GB mapped, plus the context cache | ≈ 60 MB |
+
+- **Why these estimates:** the 2B's 1.27 GB GGUF showed up as about 0.8 GB resident while loaded. Most of
+  that was the file-backed mapping, which macOS can drop under memory pressure without swapping. Asleep, the
+  2B was 58 MB, and llama-server's own footprint does not depend on the model. So the 4B's weights take about
+  2.7 GB while loaded, and about 60 MB remain once it sleeps.
+- **The context cache:** `-c 12288` is three times the 2B's 4096 and is allocated on load. Qwen3.5 mixes
+  linear-attention layers with a few full-attention layers, so only those few hold a per-token KV cache.
+  Measure it with `--status` on the first real install before quoting a number.
+- **Both servers loaded:** Replay uses the 2B and Tell it uses the agent. A Tell-it session wakes only the
+  agent server. Worst case, with both awake, is about 0.8 GB + 2.7 GB with the 4B, or 0.8 GB + 5.7 GB with the
+  9B. That is why the installer never picks the 9B by itself and only suggests it on 16 GB+ Macs.
+- **Waking from sleep:** expect a few seconds more than the 2B's 5.6 s, because there are more weights to
+  map. Tell it waits up to 120 s per step, which covers that. Not yet checked: whether `/v1/models`, which Tell it
+  probes with a 2.5 s timeout before starting, answers while the server is asleep, as `/health` does.
+
+**Logs:** `~/.awos/replay/model-server.log` and `~/.awos/replay/agent-server.log`. On each install, a log is
+reset if it has grown past 20 MB.
 
 ---
 

@@ -11,6 +11,7 @@
     <a href="options.html" target="_blank" id="opts">Options</a>
   </header>
   <p id="brainwarn" class="warn" hidden></p>
+  <p id="phoneline" class="meta" hidden></p>
 
   <section id="importpanel" hidden>
     <h3>Import this recipe?</h3>
@@ -25,6 +26,59 @@
     <p class="muted">Pay / send / delete / submit clicks always wait for your Approve click. Passwords and "ask" fields are typed by you.</p>
     <button id="imp-ok" class="primary">Import</button>
     <button id="imp-no">Discard</button>
+  </section>
+
+  <section id="tellbar">
+    <h3>Tell it</h3>
+    <textarea id="tellgoal" rows="2" placeholder="Tell it what to do…"></textarea>
+    <div class="muted" id="tellexample"></div>
+    <div class="acts">
+      <input id="tellurl" placeholder="Start page (optional: it finds the site itself)">
+      <button id="tellgo" class="primary">Start</button>
+    </div>
+    <div id="tellsuggest" hidden>
+      <p id="tellsuggestmsg"></p>
+      <p class="muted" id="tellsuggestwhy"></p>
+      <div class="acts"><button id="tellrunrec" class="primary">Run it</button><button id="tellexplore">No, work it out from scratch</button></div>
+    </div>
+    <div class="muted" id="tellbrain"></div>
+  </section>
+
+  <section id="tellpanel" hidden>
+    <div class="row"><span id="tellgoalshow"></span><span id="tellstatus" class="badge"></span></div>
+    <ol id="tellfeed" class="steps"></ol>
+    <div id="tellpending" hidden>
+      <p id="tellpendingmsg"></p>
+      <button id="tellapprove" class="danger" hidden>Approve</button>
+      <button id="telldecline" hidden>No, don't</button>
+      <button id="tellcontinue" hidden>Continue</button>
+      <div id="telldraft" hidden>
+        <label for="telldrafttext" id="telldraftlabel">Draft</label>
+        <textarea id="telldrafttext" rows="7"></textarea>
+        <div class="muted" id="telldraftcount"></div>
+        <input id="telldraftnote" placeholder="What to change (optional), then Rewrite">
+        <div class="acts"><button id="telldraftuse" class="primary">Use this text</button><button id="telldraftrewrite">Rewrite</button><button id="telldraftstop">Stop</button></div>
+      </div>
+    </div>
+    <div id="tellconfirm" hidden>
+      <p id="tellanswer"></p>
+      <p id="tellverifier" class="muted"></p>
+      <label>Recipe name</label><input id="tellname">
+      <label>Check: ends at (origin + path, * allowed)</label><input id="tellcheckurl">
+      <label>Check: the final page shows (comma separated)</label><input id="tellchecktext">
+      <div class="acts"><button id="tellyes" class="primary">Yes, that's it: save as recipe</button><button id="tellno">No</button></div>
+    </div>
+    <div class="acts" id="tellctl">
+      <button id="tellpause">Pause</button><button id="tellresume" hidden>Resume</button>
+      <button id="telltakeover">Take over</button><button id="tellstop">Stop</button>
+      <button id="tellclose" hidden>Close</button>
+    </div>
+    <div class="acts" id="tellnotebar">
+      <input id="tellnote" placeholder="Correct it (e.g. use the Settings tab, not Profile)">
+      <button id="tellnotego">Send</button>
+    </div>
+    <p id="tellreason"></p>
+    <div id="tellchipat"></div>
   </section>
 
   <section id="recbar">
@@ -42,7 +96,18 @@
       <button id="continue" hidden>Continue</button>
       <button id="reject">Stop run</button>
     </div>
+    <div id="updateoffer" hidden>
+      <p id="updatemsg"></p>
+      <button id="updateyes" class="primary">Use the new step from now on</button>
+      <button id="updateno">Keep the recorded step</button>
+    </div>
     <p id="reason"></p>
+    <div class="acts" id="runnotebar" hidden>
+      <input id="runnote" placeholder="What should it have done? (e.g. Billing is under Settings, not Profile)">
+      <button id="runnotego">Send</button>
+    </div>
+    <div id="runchipat"></div>
+    <p class="meta"><a id="shotlink" target="_blank" hidden>Screenshot of the failure (kept on this computer only)</a><span id="shotnote"></span></p>
     <ul id="checks"></ul>
     <details><summary>Log</summary><ol id="log"></ol></details>
   </section>
@@ -52,6 +117,28 @@
     <p id="empty" class="muted">None yet. Press Record, do the task once, press Stop.</p>
     <ul id="recordings"></ul>
   </section>
+  <section id="collsec">
+    <h3>Collections: monthly checklist</h3>
+    <p id="collempty" class="muted">Group recipes into a checklist, e.g. "Month-end supplier docs": one portal per recipe, each with its expected download (use {{month}} / {{year}} in the name pattern).</p>
+    <p id="collrun" class="meta"></p>
+    <ul id="collections"></ul>
+    <details id="collnew"><summary>New collection</summary>
+      <input id="collname" placeholder="Name (e.g. Month-end supplier docs)">
+      <div id="collpick" class="meta"></div>
+      <label class="meta"><input type="checkbox" id="collprev"> Collect last month's documents (the period is the previous month)</label>
+      <button id="collcreate" class="primary">Create collection</button>
+    </details>
+  </section>
+  <section id="lessonsec" hidden>
+    <details id="lessonbox"><summary id="lessonsum">Lessons</summary>
+      <p class="muted">Corrections you asked AWOS to remember. At most 2 are given to the model per step; ones that keep failing switch off.</p>
+      <ul id="lessons"></ul>
+    </details>
+  </section>
+  <div id="lessonchip" class="chip" hidden>
+    <span id="lessonchipmsg"></span>
+    <button id="lessonyes" class="primary">Remember</button><button id="lessonno">Just this run</button>
+  </div>
   <section>
     <h3>Import a recipe</h3>
     <div class="acts">
@@ -64,8 +151,13 @@
     <button id="export">Export run log</button>
     <span class="muted">redacted: no typed values, no URL queries</span>
   </section>
+  <section>
+    <button id="exporttraining">Export training data</button>
+    <span class="muted">your Tell-it runs, saved to a file on this computer; nothing is uploaded</span>
+  </section>
   <p id="notice" class="ok"></p>
   <p id="error" class="error"></p>
+<script src="lib/heal.js"></script>
 <script src="popup.js"></script>
 </body>
 </html>

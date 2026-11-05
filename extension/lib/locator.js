@@ -169,6 +169,20 @@
     return parts.join(' > ');
   }
 
+  /** v0.9.1: the text of the repeated list / table row el sits in (an invoice row: date, amount, number), or ''.
+   *  Same rule as the recorder's `variable`: a tr / li / article / row-like ancestor (<= 6 up) with >= 3 siblings of its kind. */
+  function rowText(el) {
+    var n = el;
+    for (var k = 0; k < 6 && n && n.parentElement; k++, n = n.parentElement) {
+      var tag = n.tagName, role = n.getAttribute && n.getAttribute('role');
+      if (!/^(TR|LI|ARTICLE)$/.test(tag) && !/^(row|listitem|article)$/.test(role || '')) continue;
+      var same = 0, kids = n.parentElement.children;
+      for (var j = 0; j < kids.length; j++) if (kids[j].tagName === tag && (kids[j].getAttribute('role') || '') === (role || '')) same++;
+      if (same >= 3) return norm(n.innerText || n.textContent).slice(0, 160);
+    }
+    return '';
+  }
+
   function describe(el, page) {
     var r = el.getBoundingClientRect();
     var form = el.form || closestDeep(el, 'form');
@@ -195,6 +209,7 @@
       title: norm(el.getAttribute('title')),
       formId: form ? (form.id || form.getAttribute('name') || '') : '',
       pos: { x: Math.round(r.left + scrollX), y: Math.round(r.top + scrollY), w: Math.round(r.width), h: Math.round(r.height) },
+      row: rowText(el),
     };
   }
 
@@ -299,14 +314,20 @@
     });
     var status = !best || best.score < FLOOR ? 'not_found'
       : (best.score >= ACCEPT && margin >= MARGIN && best.anchor) ? 'found' : 'ambiguous';
+    // v0.9.1: every control with the recorded name that sits in a list row (identical "Download PDF" links, one per
+    // invoice), in document order with its row text: the worker picks the row by its period / text, never by position
+    var want = low(rec.name), twins = [];
+    if (want) scored.forEach(function (c) { if (low(c.desc.name) === want && c.desc.row) twins.push({ index: c.index, row: c.desc.row }); });
+    twins.sort(function (a, b) { return a.index - b.index; });
     return { status: status, index: best ? best.index : -1, score: best ? r3(best.score) : 0,
-             anchor: !!(best && best.anchor), margin: r3(margin), dupes: dupes, shortlist: shortlist };
+             anchor: !!(best && best.anchor), margin: r3(margin), dupes: dupes, shortlist: shortlist,
+             twins: twins.length >= 2 ? twins.slice(0, 40) : [] };
   }
 
   function brief(d) {
     return { tag: d.tag, type: d.type, role: d.role, name: d.name, text: d.text.slice(0, 60), id: d.id,
              nameAttr: d.nameAttr, label: d.label, placeholder: d.placeholder, neighbor: d.neighbor, href: d.href,
-             context: d.context || '', block: d.block || '', siblings: d.siblings || [] };
+             context: d.context || '', block: d.block || '', siblings: d.siblings || [], row: d.row || '' };
   }
 
   function element(index) { return lastScan[index] || null; }
@@ -316,6 +337,15 @@
   // dialog = an open dialog's name; text = visible page text; controls = every visible control in
   // document order. Values of sensitive fields (passwords, card numbers, codes) are always masked.
   function textOf(el, n) { return norm(el.innerText || el.textContent).slice(0, n || 600); }
+  /** a window's title the way lib/portal.js titleOf gives it (the recorder's step.dialog.name). */
+  function dialogTitle(d) {
+    var P = root.AWOSPortal;
+    if (P && P.dialogOf) { try { var r = P.dialogOf(d); if (r && r.name) return r.name; } catch (e) {} }
+    var lab = d.getAttribute('aria-label') || '', by = d.getAttribute('aria-labelledby');
+    if (!lab && by) lab = by.split(/\s+/).map(function (id) { var n = document.getElementById(id); return n ? n.textContent : ''; }).join(' ');
+    if (!lab) { var h = deepAll('h1, h2, h3, h4, [role=heading]', d)[0]; if (h) lab = h.textContent; }
+    return norm(lab).slice(0, 120) || textOf(d, 60);
+  }
   function observe() {
     var q = function (sel) { return deepAll(sel).filter(visible); };
     var alerts = q('[role=alert]').map(function (e) { return textOf(e); }).filter(Boolean);
@@ -326,9 +356,17 @@
     }).filter(Boolean);
     var dlg = q('dialog[open], [role=dialog], [role=alertdialog]')[0];
     var lines = String(document.body ? document.body.innerText : '').split('\n').map(norm).filter(Boolean);
-    var controls = allControls().map(function (el) {
+    var formEls = deepAll('form'), els = allControls();
+    lastObserved = els;
+    var controls = els.map(function (el) {
       var role = roleOf(el), d = { role: role === 'radio' ? 'radiogroup' : role, name: accName(el), context: contextOf(el),
                                    inDialog: !!closestDeep(el, 'dialog, [role=dialog], [role=alertdialog]') };
+      var rw = rowText(el); if (rw) d.row = rw;                   // v0.9.1: the list row it sits in (guided row choice)
+      // Tell-it fields (not used by the verifier outline): enclosing form index, autocomplete, sensitive-field reason
+      var fm = el.form || closestDeep(el, 'form'), fi = fm ? formEls.indexOf(fm) : -1;
+      if (fi >= 0) d.form = fi;
+      var ac = low(el.getAttribute('autocomplete')); if (ac) d.ac = ac;
+      if (/^(input|textarea)$/i.test(el.tagName) && root.AWOSSafety) { var sr = root.AWOSSafety.sensitiveField(el); if (sr) d.sensitive = sr; }
       if (el.tagName === 'SELECT') {
         d.role = 'combobox';
         d.options = Array.prototype.slice.call(el.options).map(function (o) { return norm(o.text); }).slice(0, 12);
@@ -339,20 +377,34 @@
         var sens = root.AWOSSafety && root.AWOSSafety.sensitiveField(el);
         var v = el.isContentEditable ? norm(el.innerText) : String(el.value == null ? '' : el.value);
         d.value = (role === 'password' || sens) && v ? '••••••••' : v.slice(0, 120);
+        if (el.tagName === 'TEXTAREA' || el.isContentEditable) d.multi = true;   // v0.11: a text area (Tell it drafts compose fields)
       } else if (role === 'tab') {
         d.value = el.getAttribute('aria-selected') === 'true' ? '1' : '0';
       }
       return d;
     });
     var nav = performance.getEntriesByType && performance.getEntriesByType('navigation')[0];
-    return { url: location.href, status: (nav && nav.responseStatus) || 0, title: norm(document.title), alerts: alerts, statuses: statuses, regions: regions,
+    var out = { url: location.href, status: (nav && nav.responseStatus) || 0, title: norm(document.title), alerts: alerts, statuses: statuses, regions: regions,
              dialog: dlg ? (contextOf(dlg.firstElementChild || dlg) || norm(dlg.getAttribute('aria-label')) || textOf(dlg, 120)) : '',
-             text: lines.join('\n'), controls: controls };
+             text: lines.join('\n'), controls: controls,
+             headings: q('h1, h2, h3, h4, h5, h6').map(function (e) { return textOf(e, 200); }).filter(Boolean),
+             forms: formEls.map(function (f) { return { label: norm(f.getAttribute('aria-label') || '') }; }) };
+    // v0.10: the window's title as the recorder names it (lib/portal.js dialogOf: aria-label, labelledby, first
+    // heading), so a live state key matches the one a recording gave the same window (lib/sitemap.js stateParts).
+    // `dialog` above stays as it is (the micro-agent contract prints it).
+    if (dlg) out.dialogName = dialogTitle(dlg);
+    // v0.10: the page's areas (landmarks, menus, windows, tabs, lists) for the entity view (lib/pageview.js); a failure
+    // there never costs the observation itself
+    if (root.AWOSPageView) { try { out.structure = root.AWOSPageView.structure(els); } catch (e) { out.structure = null; } }
+    return out;
   }
+  var lastObserved = [];
+  /** the element behind control number n (1-based) of the last observe(). */
+  function observed(n) { return lastObserved[n - 1] || null; }
 
   root.AWOSLocator = {
     ACCEPT: ACCEPT, MARGIN: MARGIN, FLOOR: FLOOR, WEIGHTS: WEIGHTS, KIND_SELECTOR: KIND_SELECTOR,
-    describe: describe, score: score, find: find, element: element, brief: brief, observe: observe,
+    describe: describe, score: score, find: find, element: element, brief: brief, observe: observe, observed: observed,
     accName: accName, roleOf: roleOf, strSim: strSim, kindOf: kindOf,
     deepAll: deepAll, closestDeep: closestDeep, deepText: deepText, sameControl: sameControl,
   };

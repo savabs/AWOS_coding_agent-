@@ -15,7 +15,8 @@ ul { list-style: none; padding: 0; margin: 0; }
 .badge.VERIFIED { background: #dafbe1; color: #116329; }
 .badge.UNVERIFIED { background: #fff8c5; color: #7d4e00; }
 .badge.FAILED { background: #ffebe9; color: #a40e26; }
-.badge.CHECK { background: #fff1e5; color: #953800; }   /* checks passed, the local verifier disagrees: look */
+.badge.CHECK { background: #fff1e5; color: #953800; }
+.badge.MISSING, .badge.WRONG_PERIOD { background: #ffebe9; color: #a40e26; }   /* v0.7 goal-guided verdicts */   /* checks passed, the local verifier disagrees: look */
 #pending { border: 2px solid #cf222e; border-radius: 6px; padding: 6px 8px; margin: 6px 0; }
 #checks li.ok::before { content: "ok  "; color: #116329; }
 #checks li.bad::before { content: "no  "; color: #a40e26; }
@@ -41,3 +42,41 @@ button.small { padding: 2px 8px; font-size: 12px; }
 #importpanel .meta { color: #59636e; font-size: 12px; margin: 2px 0; }
 .steps { max-height: 160px; overflow: auto; font-size: 12px; padding-left: 20px; margin: 4px 0; }
 .warnlist li { color: #953800; font-size: 12px; }
+#tellbar textarea { width: 100%; box-sizing: border-box; font: inherit; resize: vertical; }
+#tellpanel { border: 2px solid #8250df; border-radius: 6px; padding: 6px 8px; }
+#tellpanel input { width: 100%; box-sizing: border-box; font: inherit; }
+#tellpanel .acts input { width: auto; }
+#tellpanel label { display: block; font-size: 12px; margin-top: 4px; }
+#tellfeed li .why { color: #59636e; display: block; }
+#tellfeed li.bad, #tellfeed li.warn { color: #953800; }
+#tellfeed li.approve, #tellfeed li.wait { color: #a40e26; }
+#tellpending { border: 2px solid #cf222e; border-radius: 6px; padding: 6px 8px; margin: 6px 0; }
+#tellconfirm { border: 2px solid #1a7f37; border-radius: 6px; padding: 6px 8px; margin: 6px 0; }
+#collections li.coll { border: 1px solid #d0d7de; border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; }
+#collections .portal { display: flex; justify-content: space-between; gap: 6px; font-size: 12px; padding: 2px 0; border-top: 1px solid #eaeef2; }
+#collections .portal .st { text-align: right; }
+#collections .st.got { color: #116329; }
+#collections .st.missing, #collections .st.failed, #collections .st.wrong_period, #collections .st.not_document { color: #a40e26; }
+#collections .st.needs_you { color: #953800; font-weight: 600; }
+#collections .acts { margin-top: 4px; display: flex; gap: 6px; flex-wrap: wrap; }
+#collsec input:not([type=checkbox]) { width: 100%; box-sizing: border-box; font: inherit; margin-top: 4px; }
+#collpick label { display: block; }
+
+/* v0.7 period templating */
+.tplrow { font-size: 12px; margin: 3px 0; }
+.tplrow .tplfield { color: #57606a; margin-right: 4px; }
+.tplrow.off .tplmap { text-decoration: line-through; color: #8c959f; }
+#updateoffer { background: #ddf4ff; border-radius: 6px; padding: 6px 8px; margin: 6px 0; }
+
+/* v0.10 learning: "Remember for <site>?" chip, learned fixes, lessons */
+.chip { background: #fbefff; border: 1px solid #c297ff; border-radius: 14px; padding: 4px 10px; margin: 6px 0; font-size: 12px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.chip[hidden] { display: none; }
+.chip span { flex: 1 1 140px; }
+.fixrow, #lessons li { font-size: 12px; display: flex; gap: 6px; align-items: flex-start; justify-content: space-between; padding: 2px 0; border-top: 1px solid #eaeef2; }
+#lessons li.off { color: #8c959f; }
+#lessons .host { font-weight: 600; border-top: none; padding-top: 6px; }
+
+/* v0.11 Tell it: the writer's draft, editable before anything is typed */
+#telldraft textarea { width: 100%; box-sizing: border-box; font: inherit; resize: vertical; margin-top: 2px; }
+#telldraft input { width: 100%; box-sizing: border-box; font: inherit; margin: 4px 0; }
+#telldraftcount { font-size: 11px; text-align: right; }

@@ -1,5 +1,8 @@
 /* AWOS Replay popup: record/stop, recordings list (run with params, checks, params, schedule, share, delete),
- * live run panel with the approval / needs-user prompt and the verdict, and the import confirmation.
+ * live run panel with the approval / needs-user prompt and the verdict, the import confirmation, and (v0.6)
+ * collections: the monthly checklist (Got / Missing / Needs you / Failed per portal, run, skip, schedule).
+ * v0.7: per recipe the period templating ("September 2026 -> {{month_name}} {{year}}", undo per field, which month a
+ * run uses), what changed (rec.history), and after a VERIFIED run with model-decided steps the update offer.
  * The target tab is the active tab, or ?tab=<id> when the popup is opened as a
  * page (handy for testing and for pinning it in its own window).
  * Approve and Import are only ever sent from click handlers on those buttons.
@@ -67,9 +70,9 @@ function fieldRow(r, s, k) {
   make.onclick = function () {
     make.remove();
     var guess = stepLabel(s).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').replace(/^(\d)/, 'p$1').slice(0, 32) || 'value';
-    var name = el('input', { class: 'pname', placeholder: 'name (e.g. month)', value: guess });
-    var label = el('input', { class: 'plabel', placeholder: 'Question (e.g. Which month)', value: stepLabel(s) });
-    var example = el('input', { class: 'pexample', placeholder: 'Example shown to others (e.g. October 2026)' });
+    var name = el('input', { class: 'pname', placeholder: 'name (e.g. customer)', value: guess });
+    var label = el('input', { class: 'plabel', placeholder: 'Question (e.g. Which customer)', value: stepLabel(s) });
+    var example = el('input', { class: 'pexample', placeholder: 'Example shown to others (e.g. Grace Hopper)' });
     var save = el('button', { class: 'psave small primary' }, 'Save param');
     save.onclick = function () {
       call({ type: 'set_param', id: r.id, step: k, param: { name: name.value.trim(), label: label.value.trim(), example: example.value.trim(), kind: 'text' } })
@@ -80,6 +83,58 @@ function fieldRow(r, s, k) {
   };
   row.appendChild(make);
   return row;
+}
+
+// ---- v0.7: period templating per recipe ------------------------------------------------------------------
+var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+function periodLabel(p) { var m = /^(\d{4})-(\d{2})$/.exec(p || ''); return m ? MONTHS[+m[2] - 1] + ' ' + m[1] : (p || '?'); }
+function tplField(path) {
+  var m = /^steps\.(\d+)\.(.+)$/.exec(path);
+  var names = { 'loc.name': 'target', 'loc.text': 'target text', 'loc.href': 'link', 'loc.label': 'label', 'loc.title': 'title', 'loc.id': 'id',
+                'loc.placeholder': 'placeholder', 'loc.neighbor': 'nearby text', 'loc.block': 'row text', 'loc.context': 'section', url: 'page',
+                value: 'typed value', optionText: 'option', 'download.name': 'download name' };
+  if (m) return 'step ' + (+m[1] + 1) + ' ' + (names[m[2]] || m[2]);
+  if (/^expect\.texts\./.test(path)) return 'expected text';
+  return { goal: 'goal', 'expect.urlPattern': 'final page', 'expectDownload.nameRegex': 'download pattern' }[path] || path;
+}
+function periodBox(r) {
+  var tpl = r.tpl || {}, keys = Object.keys(tpl), on = keys.filter(function (k) { return tpl[k].on !== false; }).length;
+  // v0.9.3: a step that picks its row by date (one of several identical "Download PDF") follows the month too
+  var rows = (r.steps || []).filter(function (s) { return s.loc && s.loc.row; }).length;
+  var follows = [keys.length ? on + ' of ' + keys.length + ' fields' : '', rows ? rows + (rows > 1 ? ' row picks' : ' row pick') : ''].filter(Boolean).join(' and ');
+  var d = details(r.id + ':period', 'Period: recorded for ' + periodLabel(r.period) + (follows ? ', ' + follows + (!keys.length && rows === 1 ? ' follows' : ' follow') + ' the month' : ', nothing to template'));
+  d.classList.add('periodbox');
+  var row = el('div', { class: 'meta' }, 'Each run uses ');
+  var mode = el('select', { class: 'pmode' });
+  [['previous', 'the previous month'], ['this', 'this month']].forEach(function (o) { mode.appendChild(el('option', { value: o[0] }, o[1])); });
+  mode.value = r.periodMode === 'this' ? 'this' : 'previous';
+  mode.onchange = function () { call({ type: 'set_period', id: r.id, mode: mode.value }).then(function () { lastSig = ''; refresh(); }); };
+  row.appendChild(mode);
+  row.appendChild(document.createTextNode(' (a collection uses its own month).'));
+  d.appendChild(row);
+  if (keys.length || rows) {                 // run once for a chosen month (a missed month, a re-run)
+    var r2 = el('div', { class: 'meta' }), mon = el('input', { class: 'prun', type: 'month', value: periodOf(Date.now(), r.periodMode === 'this' ? 0 : -1) });
+    var go = el('button', { class: 'prungo small' }, 'Run for this month');
+    go.disabled = !!(state.run && /^(running|awaiting_approval|needs_user)$/.test(state.run.status)) || !!state.recState;
+    go.onclick = function () { call({ type: 'run', recId: r.id, tabId: targetTab, period: mon.value }).then(function () { lastSig = ''; refresh(); }); };
+    [mon, go].forEach(function (x) { r2.appendChild(x); });
+    d.appendChild(r2);
+  }
+  keys.forEach(function (k) {
+    var e = tpl[k], tr = el('div', { class: 'tplrow' + (e.on === false ? ' off' : ''), 'data-path': k });
+    tr.appendChild(el('span', { class: 'tplfield' }, tplField(k) + ':'));
+    tr.appendChild(el('span', { class: 'tplmap' }, '"' + e.example + '" \u2192 "' + e.template + '"'));
+    var b = el('button', { class: 'tplundo small' }, e.on === false ? 'Redo' : 'Undo');
+    b.title = e.on === false ? 'Follow the month again' : 'Keep this field exactly as recorded';
+    b.onclick = function () { call({ type: 'set_template', id: r.id, path: k, on: e.on === false }).then(function () { lastSig = ''; refresh(); }); };
+    tr.appendChild(b);
+    d.appendChild(tr);
+  });
+  (r.history || []).slice(-5).reverse().forEach(function (h) {
+    d.appendChild(el('div', { class: 'meta histrow' }, new Date(h.at).toLocaleDateString() + ' (' + periodLabel(h.period) + ') step ' + (h.step + 1) + ': '
+      + (h.accepted ? h.from + ' \u2192 ' + h.to : 'offered a new step, kept ' + h.from)));
+  });
+  return d;
 }
 
 function scheduleBox(r) {
@@ -171,16 +226,26 @@ function renderRecordings() {
     li.appendChild(row);
 
     var chk = details(r.id + ':checks', 'Goal + checks');
-    var goal = el('input', { class: 'goal', placeholder: 'Goal: what must be true at the end (e.g. October statement downloaded)', value: r.goal || '' });
+    var goal = el('input', { class: 'goal', placeholder: r.goalProposed ? 'Goal (proposed): ' + r.goalProposed : 'Goal: what must be true at the end (e.g. marketing e-mails are off)', value: r.goal || '' });
     var texts = el('input', { class: 'texts', placeholder: 'Expect text on final page (comma separated)', value: (r.expect.texts || []).join(', ') });
     var url = el('input', { class: 'url', placeholder: 'Final URL (origin+path, * allowed; blank = no check)', value: r.expect.urlPattern || '' });
-    var dl = el('input', { class: 'dl', placeholder: 'Expect a download named like (regex, e.g. statement.*\\.pdf)', value: (r.expectDownload && r.expectDownload.nameRegex) || '' });
+    var dl = el('input', { class: 'dl', placeholder: 'Expect a download named like (regex, e.g. report.*\\.csv)', value: (r.expectDownload && r.expectDownload.nameRegex) || '' });
+    if (!r.expectDownload && r.expectDownloadProposed) {      // v0.9.1: proposed from the file the recording downloaded
+      dl.value = r.expectDownloadProposed; dl.classList.add('proposed'); dl.title = 'Proposed from the recorded download; Save to keep it';
+    }
+    var nrl = el('label', { class: 'newestrow' }), nr = el('input', { type: 'checkbox', class: 'newest' });
+    nr.checked = !!r.newestRow;
+    nrl.appendChild(nr); nrl.appendChild(document.createTextNode(' Always the newest row (e.g. "download the latest invoice")'));
     var save = el('button', { class: 'save' }, 'Save goal + checks');
     save.onclick = function () {
-      call({ type: 'save_recording', id: r.id, goal: goal.value.trim(), expectDownload: { nameRegex: dl.value.trim() },
+      call({ type: 'save_recording', id: r.id, goal: goal.value.trim(), expectDownload: { nameRegex: dl.value.trim() }, newestRow: nr.checked,
              expect: { urlPattern: url.value.trim(), texts: texts.value.split(',').map(function (s) { return s.trim(); }).filter(Boolean) } }).then(refresh);
     };
-    [goal, texts, url, dl, save].forEach(function (x) { chk.appendChild(x); });
+    var lockl = el('label', { class: 'cloudlock' }), lock = el('input', { type: 'checkbox', class: 'nocloud' });
+    lock.checked = !!r.noCloud;
+    lock.onchange = function () { call({ type: 'set_recipe_cloud_lock', id: r.id, on: lock.checked }).then(refresh); };
+    lockl.appendChild(lock); lockl.appendChild(document.createTextNode(' Never use cloud for this recipe (repair / verify stay on this computer)'));
+    [goal, texts, url, dl, nrl, save, lockl].forEach(function (x) { chk.appendChild(x); });
     li.appendChild(chk);
 
     var typed = r.steps.map(function (s, k) { return [s, k]; }).filter(function (p) { return p[0].action === 'fill' || p[0].action === 'select'; });
@@ -189,6 +254,9 @@ function renderRecordings() {
       typed.forEach(function (p) { fields.appendChild(fieldRow(r, p[0], p[1])); });
       li.appendChild(fields);
     }
+    li.appendChild(periodBox(r));
+    var fx = fixesBox(r);                     // v0.10: controls learned for moved / renamed steps
+    if (fx) li.appendChild(fx);
     var sch = details(r.id + ':sched', 'Schedule' + (r.schedule ? ' (on)' : ''));
     sch.appendChild(scheduleBox(r));
     li.appendChild(sch);
@@ -221,12 +289,38 @@ function renderRun() {
     }
   } else { $('needparams').textContent = ''; lastNeedSig = ''; }
   $('reason').textContent = run.result && run.result.reason ? (run.result.code ? run.result.code + ': ' : '') + run.result.reason : '';
+  $('runnotebar').hidden = !(run.status === 'failed' && run.result && run.result.verdict === 'FAILED');   // v0.10: a correction
+  var uo = run.updateOffer;                 // v0.7: the portal changed and the model found the way: keep it?
+  $('updateoffer').hidden = !(uo && !uo.done);
+  if (uo && !uo.done) {
+    $('updatemsg').textContent = 'The portal changed. ' + uo.steps.map(function (o) {
+      return 'Step ' + (o.step + 1) + ': the recipe clicked ' + o.from + '; this run the model chose the ' + (o.to.role || 'control') + ' "' + o.to.name + '"';
+    }).join('. ') + '. The run was VERIFIED. Use the new step from now on?';
+  }
+  var sh = run.shot || {};                  // v0.8: a screenshot of the failing step, stored locally only
+  $('shotlink').hidden = !sh.id;
+  if (sh.id) $('shotlink').href = 'shot.html?id=' + encodeURIComponent(sh.id);
+  $('shotnote').textContent = !sh.id && sh.note ? 'No screenshot: ' + sh.note : '';
   var ch = $('checks'); ch.textContent = '';
   ((run.result && run.result.checks) || []).forEach(function (c) {
-    ch.appendChild(el('li', { class: c.ok ? 'ok' : 'bad' }, c.kind + ': ' + c.expected + (c.kind === 'download' && c.actual ? ' (' + c.actual + ')' : '')));
+    ch.appendChild(el('li', { class: c.ok ? 'ok' : 'bad' }, c.kind + ': ' + c.expected + (c.kind === 'download' && c.actual ? ' (' + c.actual + ')' : '')
+      + (c.content ? (c.notDocument ? ' - NOT a document: ' : ' - ') + c.content.why : '')));
   });
   var log = $('log'); log.textContent = '';
   run.log.slice(-40).forEach(function (l) { log.appendChild(el('li', null, l.text)); });
+}
+
+/** v0.8: the phone link's state in one line (paired? relay reachable? waiting on the phone?). */
+function renderPhone() {
+  var ph = state.phone || {}, line = $('phoneline');
+  line.hidden = !ph.paired;
+  if (!ph.paired) return;
+  var rl = ph.relay || ph.register || {}, bits = ['Phone paired'];
+  if (rl.status === 503) bits.push('the relay is not configured (503): handoffs stay here on the Mac');
+  else if (rl.error) bits.push('relay problem: ' + rl.error + ' (handoffs stay here on the Mac)');
+  if (ph.need) bits.push('waiting for your phone (' + ph.need.kind + (ph.need.seen ? ', seen' : '') + ')');
+  line.textContent = bits.join('; ');
+  line.className = 'meta' + (rl.error ? ' warn' : '');
 }
 
 function describeStep(s) {
@@ -263,15 +357,407 @@ function renderImport() {
 function render() {
   var rs = state.recState, mine = rs && rs.tabId === targetTab;
   $('rec').hidden = !!rs; $('stop').hidden = !rs;
-  $('recinfo').textContent = rs ? (mine ? 'Recording: ' : 'Recording another tab: ') + (rs.rec.steps.length - 1) + ' actions' : '';
-  renderImport(); renderRecordings(); renderRun();
+  $('recinfo').textContent = rs ? (mine ? 'Recording: ' : 'Recording another tab: ') + (rs.rec.steps.length - 1) + ' actions'
+    + (rs.followed ? '. The invoice opened in a new tab; recording continues there (' + rs.followed.url + ').' : '') : '';
+  renderImport(); renderRecordings(); renderRun(); renderCollections(); renderPhone(); renderLessons();
 }
 
-async function refresh() { state = await call({ type: 'get_state' }); render(); }
+// ---- v0.10 learning: fixes per step, "Remember for <site>?", the lessons list ----------------------------------------
+/** per recipe: the steps that learned another control (lib/heal.js), each with Undo fix. null when none. */
+function fixesBox(r) {
+  var steps = (r.steps || []).map(function (s, k) { return [s, k]; }).filter(function (p) { return (p[0].alternates || []).length; });
+  if (!steps.length) return null;
+  var box = details(r.id + ':fixes', 'Learned fixes (' + steps.length + ')');
+  steps.forEach(function (p) {
+    var row = el('div', { class: 'fixrow', 'data-step': String(p[1]) });
+    row.appendChild(el('span', null, AWOSHeal.describeHeal(p[0], p[1])));
+    var undo = el('button', { class: 'small undofix' }, 'Undo fix');
+    undo.onclick = function () { call({ type: 'heal_revert', id: r.id, step: p[1] }).then(function () { notice('Step ' + (p[1] + 1) + ' uses only the recorded control again.'); lastSig = ''; refresh(); }); };
+    row.appendChild(undo);
+    box.appendChild(row);
+  });
+  return box;
+}
+var lastLessonSig = '';
+function renderLessons() {
+  var o = state.lessonOffer, chip = $('lessonchip');
+  var showChip = !!(o && !o.done && ((o.from === 'tell' && tell) || (o.from === 'run' && state.run && state.run.id === o.runId)));
+  chip.hidden = !showChip;
+  if (showChip) {
+    var at = $(o.from === 'tell' ? 'tellchipat' : 'runchipat');
+    if (chip.parentNode !== at) at.appendChild(chip);
+    $('lessonchipmsg').textContent = 'Remember for ' + o.host + '? "' + o.text.slice(0, 80) + '"';
+  }
+  var ls = state.lessons || [];
+  $('lessonsec').hidden = !ls.length;
+  var sig = JSON.stringify(ls.map(function (it) { return [it.id, it.disabled, it.wins, it.losses, it.do, it.avoid]; }));
+  if (sig === lastLessonSig) return;
+  lastLessonSig = sig;
+  $('lessonsum').textContent = 'Lessons (' + ls.length + ')';
+  var ul = $('lessons'), host = ''; ul.textContent = '';
+  ls.forEach(function (it) {
+    if (it.host !== host) { host = it.host; ul.appendChild(el('li', { class: 'host' }, host)); }
+    var li = el('li', { class: it.disabled ? 'off' : '', 'data-lesson': it.id });
+    var txt = [it.do ? 'do ' + it.do : '', it.avoid ? 'avoid ' + it.avoid : ''].filter(Boolean).join('; ')
+      + (it.disabled ? ' (off: ' + (it.why || 'turned off') + ')' : it.hits ? ' (' + it.wins + ' of ' + it.hits + ' runs went well)' : '');
+    li.appendChild(el('span', null, txt));
+    var del = el('button', { class: 'small dellesson' }, 'Delete');
+    del.onclick = function () { call({ type: 'lesson_delete', id: it.id }).then(refresh); };
+    li.appendChild(del);
+    ul.appendChild(li);
+  });
+}
+function answerLesson(yes) {
+  var o = state.lessonOffer; if (!o) return;
+  call({ type: 'lesson_answer', nonce: o.nonce, remember: yes }).then(function (r) {
+    notice(yes ? (r.lesson ? 'Remembered for ' + o.host + '.' : 'Could not turn that into a rule.') : 'Used for this run only.');
+    refresh();
+  });
+}
+$('lessonyes').onclick = function () { answerLesson(true); };
+$('lessonno').onclick = function () { answerLesson(false); };
+$('runnotego').onclick = function () {
+  var v = $('runnote').value.trim(), run = state.run; if (!v || !run) return;
+  call({ type: 'run_note', runId: run.id, text: v }).then(function () { $('runnote').value = ''; refresh(); });
+};
 
-$('rec').onclick = function () { call({ type: 'start_recording', tabId: targetTab }).then(refresh); };
+// ---- Collections: the monthly checklist (v0.6) -------------------------------------------------------------
+var lastCollSig = '', lastPickSig = '';
+function periodOf(t, offset) {
+  var d = new Date(t); d.setDate(1); d.setMonth(d.getMonth() + (offset || 0));
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+/** v0.6.1: a portal the last login check found logged out shows "Login needed" until it is got this period. */
+function loginNeeded(r, p) { return !(r && r.status === 'got') && ((p && p.status === 'login') || !!(r && r.loginNeeded)); }
+function collStatusText(r, p) {
+  if (loginNeeded(r, p)) {
+    var when = p && p.at ? ' (checked ' + new Date(p.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + ')' : '';
+    return 'Login needed' + (r && r.waiting ? ' (waiting for you)' : '') + (r && r.loginNeeded && !r.waiting && r.reason ? ': ' + r.reason.replace(/^Login needed: /, '') : when);
+  }
+  if (!r) return 'Not run yet';
+  if (r.status === 'got') {
+    return (r.caughtUp ? 'Got (caught up' + (r.file ? ': ' + r.file : '') + ')' : r.file ? 'Got (' + r.file + ')' : 'Got')
+      + (r.contentNote ? ' - ' + r.contentNote : '');
+  }
+  if (r.status === 'not_document') return 'Not a document' + (r.file ? ' (' + r.file + ')' : '') + (r.reason ? ': ' + r.reason : '');
+  if (r.status === 'missing') return 'Missing' + (r.reason ? ': ' + r.reason : '');
+  if (r.status === 'wrong_period') return 'Wrong period' + (r.file ? ' (' + r.file + ')' : '') + (r.reason ? ': ' + r.reason : '');
+  if (r.status === 'needs_you') return 'Needs you' + (r.waiting ? ' (waiting)' : '') + (r.reason ? ': ' + r.reason : '');
+  return 'Failed' + (r.reason ? ' (' + r.reason + ')' : '');
+}
+function collSchedBox(col) {
+  var box = el('div', { class: 'sched' });
+  var on = el('select', { class: 'cskind' });
+  [['', 'No schedule'], ['monthly', 'Monthly on day']].forEach(function (o) { on.appendChild(el('option', { value: o[0] }, o[1])); });
+  var date = el('input', { class: 'csdate', type: 'number', min: '1', max: '28', value: String((col.schedule && col.schedule.date) || 1) });
+  var time = el('input', { class: 'cstime', type: 'time', value: (col.schedule && col.schedule.time) || '09:00' });
+  on.value = col.schedule ? 'monthly' : '';
+  function vis() { date.hidden = time.hidden = !on.value; }
+  on.onchange = vis; vis();
+  var save = el('button', { class: 'cssave small' }, 'Save schedule');
+  save.onclick = function () {
+    var sc = on.value ? { kind: 'monthly', date: parseInt(date.value, 10), time: time.value } : null;
+    call({ type: 'coll_save', id: col.id, schedule: sc }).then(function (res) {
+      notice(res.next ? 'Next collection run: ' + new Date(res.next).toLocaleString() : 'Schedule off.'); lastCollSig = ''; refresh();
+    });
+  };
+  [on, date, time, save].forEach(function (x) { box.appendChild(x); });
+  box.appendChild(el('div', { class: 'muted' }, 'A scheduled collection opens one background tab per portal; a login, code or check notifies you.'));
+  return box;
+}
+function collKeepBox(col) {
+  var box = el('div', { class: 'sched keep' });
+  var lab = el('label', { class: 'meta' }), on = el('input', { type: 'checkbox', class: 'kaon' }); on.checked = col.keepAlive !== false;
+  lab.appendChild(on); lab.appendChild(document.createTextNode(' Keep logins alive: visit each portal every '));
+  var days = el('input', { class: 'kadays', type: 'number', min: '1', max: '30', value: String(col.keepAliveDays || 3) });
+  lab.appendChild(days); lab.appendChild(document.createTextNode(' days (a background tab; nothing is clicked or typed)'));
+  var lab2 = el('label', { class: 'meta' }, 'Check logins ');
+  var hours = el('input', { class: 'kahours', type: 'number', min: '0', max: '168', value: String(col.preflightHours == null ? 24 : col.preflightHours) });
+  lab2.appendChild(hours); lab2.appendChild(document.createTextNode(' hours before a scheduled run (0 = off; every run also checks at its start)'));
+  var save = el('button', { class: 'kasave small' }, 'Save');
+  save.onclick = function () {
+    call({ type: 'coll_save', id: col.id, keepAlive: on.checked, keepAliveDays: parseInt(days.value, 10) || 3,
+           preflightHours: Math.max(0, parseInt(hours.value, 10) || 0) }).then(function (r) {
+      notice(r.keepNext ? 'Next login check: ' + new Date(r.keepNext).toLocaleString() : 'Keep-alive off.'); lastCollSig = ''; refresh();
+    });
+  };
+  [lab, lab2, save].forEach(function (x) { box.appendChild(x); });
+  return box;
+}
+/** v0.9: catch up on missed months (per collection: on/off, how many months back). */
+function collCatchBox(col) {
+  var box = el('div', { class: 'sched catch' });
+  var lab = el('label', { class: 'meta' }), on = el('input', { type: 'checkbox', class: 'cuon' }); on.checked = col.catchUp !== false;
+  lab.appendChild(on); lab.appendChild(document.createTextNode(' After getting this month, also fetch up to '));
+  var n = el('input', { class: 'cumonths', type: 'number', min: '0', max: '12', value: String(col.catchUpMonths == null ? 3 : col.catchUpMonths) });
+  lab.appendChild(n); lab.appendChild(document.createTextNode(' earlier months still listed on the page and not got yet (each is checked like the main file)'));
+  var save = el('button', { class: 'cusave small' }, 'Save');
+  save.onclick = function () {
+    call({ type: 'coll_save', id: col.id, catchUp: on.checked, catchUpMonths: Math.max(0, Math.min(12, parseInt(n.value, 10) || 0)) }).then(function () {
+      notice(on.checked ? 'Catch-up on.' : 'Catch-up off.'); lastCollSig = ''; refresh();
+    });
+  };
+  [lab, save].forEach(function (x) { box.appendChild(x); });
+  return box;
+}
+function renderCollections() {
+  var cols = Object.values(state.collections || {}).sort(function (a, b) { return a.createdAt - b.createdAt; });
+  var recs = state.recordings || {}, results = state.collResults || {}, c = state.coll, run = state.run;
+  $('collempty').hidden = cols.length > 0;
+  // the "New collection" picker: one checkbox per recording
+  var pickSig = JSON.stringify(Object.keys(recs).map(function (k) { return [k, recs[k].name]; }));
+  if (pickSig !== lastPickSig) {
+    lastPickSig = pickSig;
+    var pick = $('collpick'), was = {};
+    pick.querySelectorAll('input').forEach(function (i) { was[i.value] = i.checked; });
+    pick.textContent = '';
+    Object.values(recs).sort(function (a, b) { return a.createdAt - b.createdAt; }).forEach(function (r) {
+      var l = el('label'), i = el('input', { type: 'checkbox', value: r.id, class: 'collrec' });
+      i.checked = !!was[r.id];
+      l.appendChild(i); l.appendChild(document.createTextNode(' ' + r.name + (r.expectDownload && r.expectDownload.nameRegex ? '' : ' (no expected download yet)')));
+      pick.appendChild(l);
+    });
+    if (!Object.keys(recs).length) pick.textContent = 'Record each portal first (one recipe per portal).';
+  }
+  $('collrun').textContent = c ? (c.status === 'running' ? 'Running "' + c.name + '" for ' + c.period + ' (' + Math.min(c.idx + 1, c.queue.length) + ' of ' + c.queue.length + ')'
+                                                        : 'Last run of "' + c.name + '" (' + c.period + '): ' + (c.summary || '')) : '';
+  var list = $('collections'), ae = document.activeElement;
+  if (list.contains(ae) && /^(INPUT|SELECT)$/.test(ae.tagName)) return;
+  var busy = (run && /^(running|awaiting_approval|needs_user)$/.test(run.status)) || (c && c.status === 'running') || !!state.recState;
+  var waiting = run && run.collection && /^(needs_user|awaiting_approval)$/.test(run.status) ? run : null;
+  var sig = JSON.stringify([cols, results, c, !!busy, waiting && waiting.id, Object.keys(recs), state.portalStatus]);
+  if (sig === lastCollSig) return;
+  lastCollSig = sig;
+  list.textContent = '';
+  cols.forEach(function (col) {
+    var period = c && c.collId === col.id ? c.period : (col.last ? col.last.period : periodOf(Date.now(), col.monthOffset || 0));
+    var res = (results[col.id] || {})[period] || {};
+    var li = el('li', { class: 'coll', 'data-coll': col.id });
+    var head = el('div', { class: 'row' }); head.appendChild(el('strong', null, col.name)); head.appendChild(el('span', { class: 'badge' }, period));
+    li.appendChild(head);
+    col.recIds.forEach(function (id) {
+      var r = res[id], row = el('div', { class: 'portal', 'data-rec': id });
+      row.appendChild(el('span', null, recs[id] ? recs[id].name : (r && r.recName) || '(deleted recipe)'));
+      var p = (state.portalStatus || {})[id];
+      row.appendChild(el('span', { class: 'st ' + (loginNeeded(r, p) ? 'needs_you login' : r ? r.status : 'notrun') }, collStatusText(r, p)));
+      li.appendChild(row);
+    });
+    if (col.last && !(c && c.collId === col.id && c.status === 'running')) li.appendChild(el('div', { class: 'meta' }, 'Last: ' + col.last.summary));
+    var acts = el('div', { class: 'acts' });
+    var go = el('button', { class: 'collgo primary' }, 'Run collection'); go.disabled = !!busy;
+    go.onclick = function () { call({ type: 'coll_run', id: col.id }).then(function () { lastCollSig = ''; refresh(); }); };
+    acts.appendChild(go);
+    if (waiting && waiting.collection.id === col.id) {
+      var skip = el('button', { class: 'collskip' }, 'Skip this portal (leave it for me)');
+      skip.onclick = function () { call({ type: 'coll_skip', runId: waiting.id }).then(function () { lastCollSig = ''; refresh(); }); };
+      acts.appendChild(skip);
+    }
+    var ps = state.portalStatus || {};
+    var nNeed = col.recIds.filter(function (id) { return loginNeeded(res[id], ps[id]) && ps[id] && ps[id].status === 'login'; }).length;
+    if (nNeed) {
+      var open = el('button', { class: 'collopen primary' }, 'Open the ones that need me (' + nNeed + ')');
+      open.onclick = function () { call({ type: 'coll_open_logins', id: col.id }).then(function (r) { notice('Opened ' + r.opened + ' login tab(s). Log in there; AWOS notices.'); }); };
+      acts.appendChild(open);
+    }
+    var chk = el('button', { class: 'collcheck' }, 'Check logins now'); chk.disabled = !!busy;
+    chk.onclick = function () {
+      notice('Checking each portal in a background tab (nothing is clicked or typed)...');
+      call({ type: 'coll_check_logins', id: col.id }).then(function (r) {
+        var bad = (r.results || []).filter(function (x) { return x.status === 'login'; }).length;
+        notice(bad ? bad + ' portal(s) need a login.' : 'All portals are logged in.'); lastCollSig = ''; refresh();
+      });
+    };
+    acts.appendChild(chk);
+    var del = el('button', { class: 'colldel' }, 'Delete');
+    del.onclick = function () { if (confirm('Delete the collection "' + col.name + '"? The recipes stay.')) call({ type: 'coll_delete', id: col.id }).then(refresh); };
+    acts.appendChild(del);
+    li.appendChild(acts);
+    var sch = details(col.id + ':csched', 'Schedule' + (col.schedule ? ' (monthly, day ' + col.schedule.date + ' ' + col.schedule.time + ')' : ''));
+    sch.appendChild(collSchedBox(col));
+    li.appendChild(sch);
+    var ka = details(col.id + ':ckeep', 'Logins' + (col.keepAlive === false ? ' (keep-alive off)' : ' (keep-alive every ' + (col.keepAliveDays || 3) + ' days)'));
+    ka.appendChild(collKeepBox(col));
+    li.appendChild(ka);
+    var cu = details(col.id + ':ccatch', 'Missed months' + (col.catchUp === false ? ' (catch-up off)' : ' (catch up ' + (col.catchUpMonths == null ? 3 : col.catchUpMonths) + ' back)'));
+    cu.appendChild(collCatchBox(col));
+    li.appendChild(cu);
+    list.appendChild(li);
+  });
+}
+$('collcreate').onclick = function () {
+  var ids = []; document.querySelectorAll('#collpick .collrec').forEach(function (i) { if (i.checked) ids.push(i.value); });
+  call({ type: 'coll_save', name: $('collname').value.trim(), recIds: ids, monthOffset: $('collprev').checked ? -1 : 0 }).then(function (col) {
+    notice('Created "' + col.name + '" with ' + col.recIds.length + ' portal(s).'); $('collname').value = ''; $('collnew').open = false;
+    lastCollSig = ''; lastPickSig = ''; refresh();
+  });
+};
+
+// ---- Tell it ---------------------------------------------------------------------------------------------
+var EXAMPLES = [
+  'Compare the price of the same product in two shops and tell me the cheaper one',
+  'Fill this job application up to, not including, Submit',
+  'Book the first free appointment slot next week, stop before confirming',
+  'Turn off marketing e-mails in my profile settings',
+  'Add Grace Hopper (grace@example.com) as a new lead in the CRM',
+  'Look up order 4417 in the admin table and tell me its status',
+  'Check whether train IC 512 is on time today',
+  'Collect the opening hours, phone number and address from this site',
+  'Draft a listing for a used bike, do not post it',
+  'Unsubscribe me from this newsletter',
+];
+var tell = null, tellCfg = null, lastTellSig = '', tellConfirmFor = '', tellDraftFor = '';
+$('tellexample').textContent = 'e.g. ' + EXAMPLES[Math.floor(Math.random() * EXAMPLES.length)];
+
+function renderTell() {
+  var t = tell, busy = t && t.status !== 'ended';
+  $('tellbar').hidden = !!busy;
+  $('tellpanel').hidden = !t;
+  if (tellCfg) {
+    $('tellbrain').textContent = tellCfg.agentBrain === 'claude'
+      ? 'Brain: Claude (' + tellCfg.agentClaudeModel + ', your key). Each step sends the page text and button names to Anthropic. Change in Options.'
+      : 'Brain: local model on this computer (' + tellCfg.agentModel + '). Page data never leaves this Mac.';
+  }
+  if (!t) return;
+  var sig = JSON.stringify([t.status, t.feed.length, t.pending && t.pending.nonce, t.takeover]);
+  if (sig === lastTellSig) return;
+  lastTellSig = sig;
+  $('tellgoalshow').textContent = t.goal;
+  var label = t.status === 'ended' ? (t.outcome || 'ended').toUpperCase() : t.status.replace('_', ' ').toUpperCase();
+  $('tellstatus').textContent = label; $('tellstatus').className = 'badge ' + (t.outcome === 'verified' ? 'VERIFIED' : t.status === 'ended' ? 'FAILED' : '');
+  var ol = $('tellfeed'); ol.textContent = '';
+  t.feed.slice(-30).forEach(function (f) {
+    var li = el('li', { class: f.kind }, f.kind === 'step' ? 'step ' + f.k + ': ' + f.text : f.text);
+    if (f.reason) li.appendChild(el('span', { class: 'why' }, f.reason));
+    ol.appendChild(li);
+  });
+  ol.scrollTop = ol.scrollHeight;
+  var p = t.pending, isConfirm = t.status === 'confirm';
+  $('tellpending').hidden = !p || isConfirm;
+  if (p && !isConfirm) {
+    $('tellpendingmsg').textContent = p.message;
+    $('tellapprove').hidden = $('telldecline').hidden = t.status !== 'awaiting_approval';
+    $('tellapprove').textContent = 'Approve "' + (p.target || '').slice(0, 40) + '"';
+    $('tellcontinue').hidden = t.status !== 'needs_user';
+  }
+  // v0.11: the writer's draft for a compose field: editable; only the text in the box is typed (filled once per draft,
+  // so the owner's edits survive the refresh)
+  var isDraft = !!(p && t.status === 'awaiting_draft');
+  $('telldraft').hidden = !isDraft;
+  if (isDraft && tellDraftFor !== p.nonce) {
+    tellDraftFor = p.nonce;
+    $('telldraftlabel').textContent = (p.fieldKind === 'title' ? 'Title' : 'Text') + ' for "' + (p.field || 'the field').slice(0, 60) + '"';
+    $('telldrafttext').value = p.draft || '';
+    $('telldrafttext').rows = p.fieldKind === 'title' ? 2 : 8;
+    $('telldraftnote').value = '';
+    draftCount();
+  }
+  $('tellconfirm').hidden = !isConfirm;
+  if (isConfirm && tellConfirmFor !== p.nonce) {            // fill the editable proposal once per confirmation
+    tellConfirmFor = p.nonce;
+    var r = t.result || {}, pr = r.proposed || {};
+    $('tellanswer').textContent = 'It says: ' + (r.answer || 'done');
+    $('tellverifier').textContent = r.verifier ? (r.verifier.label ? 'Verifier: ' + r.verifier.label + ' ' + (r.verifier.reason || '') : 'Verifier: ' + (r.verifier.error || '')) : '';
+    $('tellname').value = t.goal.slice(0, 80);
+    $('tellcheckurl').value = pr.urlPattern || '';
+    $('tellchecktext').value = (pr.texts || []).join(', ');
+  }
+  var live = /^(running|paused|awaiting_approval|awaiting_draft|needs_user)$/.test(t.status);
+  $('tellpause').hidden = t.status !== 'running';
+  $('tellresume').hidden = t.status !== 'paused';
+  $('telltakeover').hidden = !live || !!t.takeover;
+  $('tellstop').hidden = !live && !isConfirm;
+  $('tellclose').hidden = t.status !== 'ended';
+  $('tellnotebar').hidden = !live;
+  $('tellreason').textContent = t.status === 'ended' ? t.reason || '' : '';
+}
+function tellDecideMsg(kind) {
+  var p = tell && tell.pending; if (!p) return;
+  var m = { type: kind, nonce: p.nonce };
+  var note = $('tellnote').value.trim(); if (note && kind !== 'tell_approve') { m.note = note; $('tellnote').value = ''; }
+  call(m).then(refresh);
+}
+var tellFit = null;
+function tellBegin(explore) {
+  $('tellsuggest').hidden = true; tellFit = null;
+  return call({ type: 'tell_start', tabId: targetTab, goal: $('tellgoal').value.trim(), startUrl: $('tellurl').value.trim(), explore: !!explore })
+    .then(function (r) {
+      if (r && r.suggest) {               // v0.9.4: a saved recipe fits the request: run it for the month the words name
+        tellFit = r.suggest;
+        $('tellsuggestmsg').textContent = 'I know this one: your recipe "' + r.suggest.name + '" on ' + r.suggest.site
+          + ', for ' + r.suggest.periodLabel + '.';
+        $('tellsuggestwhy').textContent = 'Month from ' + r.suggest.periodFrom + '; the recipe ' + r.suggest.why
+          + (r.suggest.lastOk ? '; its last run was verified.' : '.');
+        $('tellsuggest').hidden = false;
+        return;
+      }
+      $('tellgoal').value = ''; lastTellSig = ''; return refresh();
+    });
+}
+$('tellgo').onclick = function () { tellBegin(false); };
+$('tellexplore').onclick = function () { tellBegin(true); };
+$('tellrunrec').onclick = function () {
+  if (!tellFit) return;
+  var f = tellFit;
+  call({ type: 'run', recId: f.recId, tabId: targetTab, period: f.period })
+    .then(function () { $('tellsuggest').hidden = true; tellFit = null; $('tellgoal').value = ''; lastSig = ''; refresh(); });
+};
+$('tellpause').onclick = function () { call({ type: 'tell_pause' }).then(refresh); };
+$('tellresume').onclick = function () { call({ type: 'tell_resume' }).then(refresh); };
+$('telltakeover').onclick = function () { call({ type: 'tell_takeover' }).then(refresh); };
+$('tellstop').onclick = function () { call({ type: 'tell_stop' }).then(refresh); };
+$('tellclose').onclick = function () { call({ type: 'tell_clear' }).then(function () { lastTellSig = ''; refresh(); }); };
+$('tellapprove').onclick = function () { tellDecideMsg('tell_approve'); };
+$('telldecline').onclick = function () { tellDecideMsg('tell_decline'); };
+$('tellcontinue').onclick = function () { tellDecideMsg('tell_continue'); };
+function draftCount() { $('telldraftcount').textContent = $('telldrafttext').value.length + ' characters'; }
+$('telldrafttext').oninput = draftCount;
+$('telldraftuse').onclick = function () {
+  var p = tell && tell.pending; if (!p || tell.status !== 'awaiting_draft') return;
+  var v = $('telldrafttext').value; if (!v.trim()) return notice('The text is empty: write it, or Rewrite.');
+  call({ type: 'tell_draft_use', nonce: p.nonce, text: v }).then(refresh);
+};
+$('telldraftrewrite').onclick = function () {
+  var p = tell && tell.pending; if (!p || tell.status !== 'awaiting_draft') return;
+  var m = { type: 'tell_draft_rewrite', nonce: p.nonce, note: $('telldraftnote').value.trim() };
+  if ($('telldrafttext').value !== (p.draft || '')) m.text = $('telldrafttext').value;    // the owner's edits are the base
+  call(m).then(refresh);
+};
+$('telldraftstop').onclick = function () { call({ type: 'tell_stop' }).then(refresh); };
+$('tellnotego').onclick = function () {
+  var v = $('tellnote').value.trim(); if (!v) return;
+  if (tell && tell.status === 'needs_user') return tellDecideMsg('tell_continue');
+  call({ type: 'tell_note', text: v }).then(function () { $('tellnote').value = ''; refresh(); });
+};
+$('tellyes').onclick = function () {
+  var p = tell && tell.pending; if (!p) return;
+  call({ type: 'tell_confirm', nonce: p.nonce, yes: true, name: $('tellname').value.trim(),
+         expect: { urlPattern: $('tellcheckurl').value.trim(), texts: $('tellchecktext').value.split(',').map(function (x) { return x.trim(); }).filter(Boolean) } })
+    .then(function (rec) { notice('Saved "' + rec.name + '". Run it from Recordings any time.'); lastSig = ''; refresh(); });
+};
+$('tellno').onclick = function () { var p = tell && tell.pending; if (p) call({ type: 'tell_confirm', nonce: p.nonce, yes: false }).then(refresh); };
+$('exporttraining').onclick = function () {
+  if (!confirm('Save your Tell-it runs as a file on this computer? It contains the page text the agent saw on each step. Nothing is uploaded.')) return;
+  call({ type: 'tell_export_training' }).then(function (d) {
+    download('awos-tellit-training-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(d, null, 1));
+  });
+};
+
+async function refresh() {
+  state = await call({ type: 'get_state' });
+  var ts = await call({ type: 'tell_state' });
+  tell = ts.tell; tellCfg = ts.settings;
+  render(); renderTell(); renderLessons();
+}
+
+$('rec').onclick = function () {
+  call({ type: 'start_recording', tabId: targetTab }).then(function (rec) { if (rec && rec.startWarning) notice(rec.startWarning); return refresh(); });
+};
 $('stop').onclick = function () {
-  call({ type: 'stop_recording' }).then(function (rec) { if (rec && rec.warning) notice(rec.warning); return refresh(); });
+  call({ type: 'stop_recording' }).then(function (rec) {
+    var t = rec ? [rec.warning, rec.followNote].filter(Boolean).join(' ') : '';
+    if (t) notice(t);
+    return refresh();
+  });
 };
 function decide(kind) {
   var run = state.run; if (!run || !run.pending) return;
@@ -283,10 +769,19 @@ function decide(kind) {
   call(msg).then(refresh);
 }
 $('approve').onclick = function () { decide('approve'); };
+function updateDecision(yes) {
+  var run = state.run; if (!run || !run.updateOffer) return;
+  call({ type: 'guided_update', runId: run.id, nonce: run.updateOffer.nonce, accept: yes }).then(function () {
+    notice(yes ? 'Saved: the recipe uses the new step from now on.' : 'Kept the recorded step.'); lastSig = ''; refresh();
+  });
+}
+$('updateyes').onclick = function () { updateDecision(true); };
+$('updateno').onclick = function () { updateDecision(false); };
 $('continue').onclick = function () { decide('continue'); };
 $('reject').onclick = function () { decide('reject'); };
 $('export').onclick = function () {
   call({ type: 'export_log' }).then(function (log) {
+    if (log.sinkSaved) { notice('Run log saved to the project folder (runlogs/).'); return; }
     download('awos-runlog-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(log, null, 1));
   });
 };
@@ -322,6 +817,8 @@ async function brainCheck() {
 }
 
 (async function () {
+  // start loading the local agent model now: it unloads when idle, and a cold load takes seconds to minutes
+  call({ type: 'tell_warm' }).catch(function () {});
   targetTab = await resolveTab();
   await refresh();
   brainCheck();

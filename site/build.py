@@ -13,10 +13,12 @@ Each page starts with a front-matter comment:
   <!--meta
   title: Quickstart · AWOS docs
   description: One sentence for search results.
-  layout: docs          (docs = sidebar + pager; default = plain)
+  layout: docs          (docs = sidebar + pager; app = no site header/footer; default = plain)
   section: docs         (header link to mark as current: docs, security, access)
   script: /assets/access.js   (optional, a same-origin script)
   module: yes           (optional: load the script as an ES module)
+  manifest: /assets/phone/manifest.webmanifest   (optional: installable web app;
+                        adds the manifest, theme colour and iOS home-screen icon)
   -->
 
 Pages may also use {{replay_install}} (the AWOS Replay install command from
@@ -159,6 +161,21 @@ def recipe_cards(items: list[dict], ids: bool) -> str:
     return "\n".join(out)
 
 
+APP_FOOTER = "</body>\n</html>\n"
+
+
+def app_head(manifest: str) -> str:
+    """Head tags for an installable page (Android reads the manifest, iOS the apple-* tags)."""
+    return (f'<link rel="manifest" href="{html.escape(manifest)}">\n'
+            '<meta name="theme-color" content="#1f6b52">\n'
+            '<meta name="mobile-web-app-capable" content="yes">\n'
+            '<meta name="apple-mobile-web-app-capable" content="yes">\n'
+            '<meta name="apple-mobile-web-app-title" content="AWOS">\n'
+            '<meta name="apple-mobile-web-app-status-bar-style" content="default">\n'
+            '<link rel="apple-touch-icon" href="/assets/phone/icon-180.png">\n'
+            '<link rel="icon" type="image/png" sizes="192x192" href="/assets/phone/icon-192.png">\n')
+
+
 CARDS_RE = re.compile(r"<!--RECIPE_CARDS(?::(\d+))?-->")
 
 
@@ -203,7 +220,12 @@ def build() -> list[str]:
                 .replace("{{description}}", html.escape(meta["description"]))
                 .replace("{{canonical}}", SITE_URL + url)
                 .replace("{{robots}}", "noindex" if is_404 else "index,follow"))
+        if meta.get("manifest"):
+            head = head.replace("</head>", app_head(meta["manifest"]) + "</head>", 1)
         header = mark_section(header_t, meta.get("section", ""))
+        footer = footer_t
+        if meta.get("layout") == "app":
+            header, footer = "", APP_FOOTER
         if meta.get("layout") == "docs":
             main = docs_shell(url, body)
         else:
@@ -214,7 +236,7 @@ def build() -> list[str]:
             script = f'<script type="module" src="{meta["script"]}"></script>\n'
         else:
             script = f'<script src="{meta["script"]}" defer></script>\n'
-        doc = head + header + main + script + footer_t
+        doc = head + header + main + script + footer
         dest = out_path(url)
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(doc, encoding="utf-8")

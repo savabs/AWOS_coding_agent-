@@ -4,7 +4,7 @@
 #     bash scripts/awos_model.sh            # G7: Qwen3.5 2B trained for repair + verify, round 2 (default)
 #     bash scripts/awos_model.sh g6         # G6: round 1
 #     bash scripts/awos_model.sh base2b     # untrained Qwen3.5 2B (for an A/B)
-#     bash scripts/awos_model.sh --check    # is it up? (one tiny repair prompt)
+#     bash scripts/awos_model.sh --check    # is it up? (one tiny repair prompt) + is the Tell-it agent server up?
 #
 # Downloads the GGUF once into ~/.awos/models (sha256-checked), then serves it with llama.cpp on
 # 127.0.0.1:8080 ONLY (the extension refuses any non-loopback endpoint; nothing leaves the machine).
@@ -23,6 +23,24 @@ check() {
     "grammar": "root ::= (\"PICK \" [1-5] | \"NOT_FOUND\") \": \" [^\\n]{0,160}",
     "messages": [{"role": "user", "content": "The step used: button named '"'"'Save'"'"'\n\nCandidates on the page now:\n1. button named '"'"'Cancel'"'"'\n\nWhich candidate is the same control? '"'"'PICK <n>: reason'"'"' or '"'"'NOT_FOUND: reason'"'"'."}]
   }' | python3 -c "import json,sys; print('model server: UP; sample answer:', json.load(sys.stdin)['choices'][0]['message']['content'])"
+  check_agent
+}
+
+# the Tell-it agent server (install_replay.sh --agent 4b|9b) on AWOS_AGENT_PORT (8081): must list an agent model,
+# not the 2B repair/verify model. Not running is only a note (Replay works without it); the 2B there is an error.
+check_agent() {
+  local aport="${AWOS_AGENT_PORT:-8081}" ids
+  if ! curl -s -m 5 "http://127.0.0.1:$aport/health" | grep -q ok; then
+    echo "agent server: DOWN on 127.0.0.1:$aport (only Tell it needs it: bash scripts/install_replay.sh --agent 4b, or --agent 9b on 16 GB+)"
+    return 0
+  fi
+  ids=$(curl -s -m 5 "http://127.0.0.1:$aport/v1/models" | python3 -c "import json,sys; print(' '.join(str(m.get('id','')) for m in json.load(sys.stdin).get('data',[])))" 2>/dev/null || true)
+  if python3 -c "import re,sys; ids=sys.argv[1:]; sys.exit(0 if any(i!='local' and not re.search(r'(^|[^0-9.])2b\b|g6|g7|verif|repair', i, re.I) for i in ids) else 1)" $ids; then
+    echo "agent server: UP on 127.0.0.1:$aport; serves ${ids}"
+  else
+    echo "agent server: 127.0.0.1:$aport answers but serves '${ids:-nothing}', not an agent model (the 2B cannot drive a page): bash scripts/install_replay.sh --agent 4b"
+    return 1
+  fi
 }
 
 case "${1:-g7}" in

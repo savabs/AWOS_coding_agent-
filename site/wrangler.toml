@@ -23,6 +23,18 @@ id = "7ed8feebbe6147499b5b705d0d25d19f"
 # binding = "LICENSES"     # AWOS Pro licences: functions/api/paddle/webhook.js, api/license/*.js
 # id = "<id from: npx wrangler kv namespace create LICENSES>"
 
+# RELAY is OPTIONAL and not bound yet (same reason: a placeholder id breaks deploys).
+# Without it /api/relay/* answers 503 {"error":"relay not configured"} and the
+# /phone/ page says "Relay not set up yet". To turn the AWOS phone link on:
+#   npx wrangler kv namespace create RELAY
+# then add the binding in the dashboard (Pages -> awos -> Settings -> Bindings ->
+# KV namespace, variable name RELAY) or uncomment this block with the real id.
+# Protocol and limits: docs/launch/phone_link.md
+#
+[[kv_namespaces]]
+binding = "RELAY"        # phone relay: functions/api/relay/[[path]].js (created 2026-11-02)
+id = "03986d22c71248fb9ef691af87b814ad"
+
 [vars]
 # sandbox -> sandbox-api.paddle.com + Paddle.Environment "sandbox"; live -> api.paddle.com.
 PADDLE_ENV = "sandbox"

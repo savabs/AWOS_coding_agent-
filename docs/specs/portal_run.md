@@ -1,0 +1,353 @@
+# Portal runs (AWOS Replay 0.6)
+
+> 0.7 (`goal_guided.md`): a portal's recipe now follows the month by itself (period templating: "Invoice September
+> 2026" in the recording becomes "Invoice {{month_name}} {{year}}"), steps that changed are decided by the agent
+> brain from the goal, and the checklist gained **Wrong period**; a portal whose document is not posted yet ends as
+> **Missing** with the model's reason, without downloading anything.
+
+> 0.9 (P0 of `docs/product/portal_runs_plan.md`): wait until the target is usable (section 6), real file checks
+> (section 7, **Not a document**), unknown pop-ups read by the agent brain (section 8), catch-up of missed months
+> (`goal_guided.md` section 5). Tests: `tests/extension/test_portal_p0.py`.
+
+Status: built (extension 0.6.1). Code: `extension/background.js` (driver, collections, logins), `extension/lib/portal.js`
+(page classification, pop-up dismissal, remember me, autofill sign-in), `extension/content.js` (messages),
+`extension/popup.js` (checklist), `extension/options.html` (login Options).
+Tests: `tests/extension/test_portal_run.py`, `tests/extension/test_fewer_handoffs.py` (0.6.1); fixture portals in
+`tests/extension/pages/portal/`.
+
+## Why
+
+Five of six people who answered our Reddit discovery post log into several supplier, vendor, partner or payout
+portals every month to download invoices, statements or payout CSVs. What breaks their automation, in their words:
+
+1. a login expiring, or a 2FA code / captcha appearing halfway: "pause, let me handle that bit, and resume without
+   downloading everything twice; that handoff matters more than a perfect first-run demo"
+2. "new feature" / maintenance pop-ups right after login
+3. the PDF opening in a new tab the script never caught
+4. silent green runs; "flag anything missing"
+
+0.6 builds exactly these four for recorded replays. Nothing here changes the safety rules: risky clicks wait for
+Approve, passwords and codes are typed by the user, bot checks are never solved or bypassed, there is no stealth.
+
+## 1. Handoff and resume
+
+**Detection.** Before every non-goto step the content script classifies the page (`AWOSPortal.pageKind`):
+
+| kind | signal |
+|---|---|
+| `captcha` | a visible challenge frame (reCAPTCHA, hCaptcha, Turnstile, ... by `src` / `title`, >= 60x40 px, not the invisible-reCAPTCHA corner badge), a visible captcha container (`.g-recaptcha`, `[data-sitekey]`, `[class*=captcha]`, ...), or a text such as "verify you are human", "I'm not a robot", "checking your browser" |
+| `otp` | a visible field `AWOSSafety.sensitiveField` flags as a one-time code (`autocomplete=one-time-code`, "verification code", "2FA", "OTP", ...) |
+| `login` | a visible password field, or a text such as "your session has expired", "please sign in again" |
+
+The worker hands off when:
+- `captcha`: always (AWOS never touches a bot check), except right after the user's Continue on the very page the
+  step was recorded on (a solved widget can stay on a form);
+- `login` / `otp`: only when the recording was not on that page for this step: the tab's origin + path differs from the
+  step's recorded `url`. A recording that includes its own login (password fill on the login page) is not a handoff;
+  its password step pauses for the user as before.
+
+A goto that the site redirects (an expired session sends you to `/login`) is accepted and logged; the next step's
+check sees the login page.
+
+**Pause.** `needs_user` with `pending.handoff = login | otp | captcha`, the message "Log in / Enter the code / Solve the
+check in this tab, then click Continue", the in-page banner and a notification (always, not only for scheduled runs).
+Nothing on the page is clicked or typed while paused.
+
+**Continue.** `decide('continue')` sets `run.resume`. The driver then re-observes:
+- if the tab is not on the recorded page of the first step not yet done (a re-login usually lands on a dashboard),
+  it navigates back to that step's recorded `url` (not when the URL matches the danger vocabulary, or leaves an
+  imported recipe's site), logs it, and continues from that step;
+- if a human is still needed, it pauses again ("Still waiting: ...").
+
+**No work twice.** `run.done[i]` marks every completed step, and `run.i` is the first step not done, so a resume never
+repeats a step. A click step that downloads (recorded with `download: {name}`, or a link whose path is a file such as
+`.pdf` / `.csv`) is skipped and logged when a matching download already completed in this run
+(`chrome.downloads.search` since the run started; matched by the link's file path, else by the recorded file name,
+the same names `expect_download` checks; Chrome's `name (1).pdf` counts as the same file). The key must be unique in
+the recipe: two `statement.pdf` links on two accounts are two files and are never deduplicated.
+
+**Worker restarts.** Everything a pause needs (`run`, `pending`, `run.done`, `run.resume`, the collection queue) lives
+in `chrome.storage.session`. On start, `restoreAfterRestart()` keeps a paused run paused (a run that was actively
+driving is failed as INTERRUPTED, as before: its last click may have half-run). The test stops the worker for real
+(CDP `Target.closeTarget`) during a handoff pause and resumes afterwards.
+
+## 2. Collections: the monthly checklist
+
+A collection (`collections` in `chrome.storage.local`) groups recipes, one portal each, each with its expected
+download. The download pattern may use `{{year}}`, `{{month}}` (two digits) and `{{month_name}}`, the period's
+values (a recipe's own param of the same name wins); e.g. `statement-{{year}}-{{month}}\.pdf$`. `monthOffset: -1`
+collects last month's documents. Since 0.7 the pattern is written for you when the recorded file name names the month
+(`invoice-2026-09.pdf` -> `invoice-{{year}}-{{month}}.pdf`), all period placeholders are available, and the recipe's
+steps follow the collection's period too (`goal_guided.md`). A recipe run on its own uses its own default month
+(previous month unless set to this month).
+
+**Run collection** (`coll_run`): the period is `YYYY-MM` (this month, or last month with the offset). Portals already
+**Got** in that period are skipped; the others run one after another, each in its own background tab, through the
+normal replay driver (handoffs, pop-ups, new-tab files, approval gates). A user-started collection uses the normal
+gate vocabulary; a scheduled one the strict one, like scheduled recipes.
+
+Per portal and period (`collResults[collId][period][recId]`):
+
+| status | when |
+|---|---|
+| `got` (file) | the download check passed (file name shown); or no download is expected and the run verified |
+| `missing` | the portal ran to the end but no file matched the pattern, or the download link itself is gone (NOT_FOUND on a download step), or (0.7) the agent brain said this period's document is not there (verdict MISSING, its reason shown; nothing was downloaded) |
+| `wrong_period` (file) | (0.7) the run downloaded a file whose name matches the pattern for another period, e.g. September's invoice in the October run (verdict WRONG_PERIOD); never counted as got |
+| `needs_you` | the portal paused (login, code, check, approval, pop-up). While it waits it shows "Needs you (waiting)"; **Skip this portal** in the popup, or nobody answering within `settings.collectionWaitMin` (default 10 min, a `chrome.alarms` alarm), leaves its tab open for the user and moves on |
+| `failed` (reason) | anything else (the reason is the run's code and message) |
+
+At the end: a summary notification, e.g. "4 of 6 got, 1 missing, 1 needs you", and `collection.last`. The popup's
+**Collections** section shows the checklist for the current period, the running portal, Run / Skip / Delete, and a
+monthly schedule (day 1-28 + time, `chrome.alarms` like recipe schedules; `nextFire` gained `kind: 'monthly'`).
+Results are kept for 24 periods.
+
+## 3. Pop-ups after login
+
+When a step's target is not found, or is found but drawn under an overlay (`AWOSPortal.coveredBy`: the topmost
+element at the target's centre belongs to a dialog / `aria-modal` / fixed-position box that does not contain the
+target), the driver runs one unblock pass (`AWOSPortal.unblock`) and retries the step once.
+
+Blockers: open dialogs / `[role=dialog]` / `[aria-modal=true]`, fixed or sticky overlays covering >= 25% of the
+viewport, and cookie / consent banners (id / class / label / text mentions cookie, consent, GDPR, ...). For each, at
+most one control is clicked:
+- pop-ups: close / x / dismiss / not now / maybe later / skip / got it / no thanks / remind me later / continue to site
+- cookie / consent banners: only reject / decline / deny / necessary-only / essential-only / close (reject preferred)
+- never: anything with accept, agree, allow all, consent, subscribe, sign up, upgrade, trial, buy, pay, enable, yes;
+  anything the strict danger vocabulary matches in the control's own name (submit, confirm, accept, order, ...);
+  anything whose context (form / dialog) matches the danger vocabulary (a "Not now" inside "Delete your account?").
+
+A blocker with no allowed control (e.g. a terms modal that only offers "Accept and continue") is not touched: the
+run pauses `needs_user` (`pending.popup`) and names the controls it saw; the user deals with it and clicks Continue.
+Every dismissal is logged ("dismissed a pop-up (...) with "Not now"") and kept in `run.dismissed`.
+
+## 4. Files that open in a new tab
+
+After every replayed click the driver looks for a tab whose `openerTabId` is the run tab and that did not exist
+before the click (it waits up to 5 s when the recording marked the click `opensTab`). If that tab shows a file (the
+path has a file extension such as `.pdf`, `.csv`, `.xlsx`, or the page script reports a non-HTML `document.contentType`,
+or no page script runs and the title names a file), it is downloaded with `chrome.downloads.download` (the browser's
+cookies apply, so the portal session is used), the tab is closed, and the file counts for `expect_download` like any
+other download. A file the browser already started downloading itself in this run is not downloaded again.
+
+Auto-download only for the same origin as the portal page, or HTTPS on the same registrable site
+(`files.portal.example` from `portal.example`). Any other file pauses `awaiting_approval`: Approve downloads it,
+Stop ends the run. A new tab that is not a file is left open and logged.
+
+The recorder marks a click that opened a tab (`opensTab: true`) and the file it showed or downloaded
+(`download: {name}`); recipes export these as `opens_tab` / `downloads` booleans without the file name.
+
+## 5. Fewer handoffs: logins (0.6.1)
+
+Most handoffs left in a monthly run are expired logins. 0.6.1 finds them early and puts them in one short sitting.
+
+**Login check (`probePortal`).** Opens the recipe's recorded start URL in a background tab, waits for it to load and go
+quiet, classifies it with `AWOSPortal.pageKind` and closes the tab. `login` / `otp` -> **Login needed**; nothing ->
+logged in (`ok`); `captcha` and `error` are recorded but are not "Login needed". It clicks nothing and types nothing
+(not even the pop-up dismissals the rules would allow). Not opened: a start URL matching the danger vocabulary, or a
+recipe that signs in by itself (it has a password step: `self_login`). The result goes to `portalStatus[recId]`
+(`chrome.storage.local`: status, why, landed URL without query, time, source). One check at a time (a shared lock),
+`keepAliveSpacingMs` (default 8 s) between portals.
+
+**Keep-alive.** Per collection, on by default (`keepAlive`, `keepAliveDays` = 3; popup: Collections -> Logins). An
+alarm `awos-keep:<id>` checks every portal of the collection every N days. Skipped, and retried in 30 min, while a
+replay, collection, recording or Tell-it run is in progress; a sweep stops before its next portal if one starts. A
+portal newly found logged out is notified once (one notification per sweep: "Supplier X logged you out; log in any
+time before the month-end run", button **Open the ones that need me**); it is notified again only after it was seen
+logged in in between. The checklist shows "Login needed (checked <time>)" until the portal is got for the period.
+**Check logins now** runs the same sweep by hand.
+
+**Pre-flight before a scheduled run.** `preflightHours` (default 24, 0 = off) before a monthly scheduled run, an alarm
+`awos-pre:<id>` checks the portals not yet got for that period and sends ONE notification naming those that need a
+login ("Log in to A and B any time before then"), with **Open the ones that need me**. Busy: retried in 30 min while
+the run is more than an hour away.
+
+**Pre-flight at the start of every collection run.** `coll_run` returns at once; the run first checks every portal
+in its queue (`preflightSpacingMs`, default 1 s apart). The logged-out ones move to the end of the queue, show "Login
+needed (waiting for you)", and ONE notification names them ("1 portal is ready and running now. Log in to A and AWOS
+picks it up as soon as you are in."). The ready portals run first, without interruption. When only logged-out
+portals are left, the run waits for a login, polling every `loginPollMs` (5 s; a `chrome.alarms` backup wakes the
+worker): a login tab the user opened from **Open the ones that need me** is asked for its page kind (a page on the
+portal's site that is not a login page counts as logged in; its load also triggers a look right away), otherwise the
+start page is checked in a background tab at most every `loginProbeMs` (60 s). The first portal whose login is seen
+runs next (`coll.pickedUp`). Nobody logging in within `collectionWaitMin` (10 min, the existing collection wait,
+counted from when the run starts waiting) leaves those portals as **Needs you** ("Login needed: still logged out
+after 10 min"); a re-run skips the ones got. A portal whose start page is fine but that logs out later still hands
+off as in section 1. A worker restart during the pre-flight redoes it; during the wait it resumes the wait.
+
+**Open the ones that need me** (`coll_open_logins`: the notification's button or a click on it, or the popup button):
+one tab per portal of the collection whose last check said Login needed and that is not got this period, the first
+in front, nothing else. On each, the two helpers below run once.
+
+**Remember me** (Option `rememberMe`, default on). On a login handoff (section 1) and on the tabs opened above, before
+the user logs in, `AWOSPortal.rememberMe` ticks ONE visible, unchecked checkbox whose whole label (case-insensitive,
+trailing punctuation dropped) is: remember me / keep me signed (logged) in / stay signed (logged) in, optionally "on
+this device"; remember this device / trust this device / don't ask (for a code) again (on this device); optionally
+"for N days". Anything else (newsletter, terms, "remember me and send me offers", cookie choices) is never touched; a
+ticked box is never unticked. Logged: `ticked "keep me signed in" on the login page ...`.
+
+**Chrome-autofilled logins** (experimental; Option `autofillSignin`, "Use Chrome's saved passwords to sign in", default
+on). On a login handoff, if the page has exactly one visible password field, a username field (email / text / tel)
+before it in the same form, and BOTH match `:autofill` / `:-webkit-autofill` and not `:placeholder-shown`,
+`AWOSPortal.autofillSignin` clicks that form's sign-in button (named sign in / log in / log on / continue / next /
+submit) once per step, logs it, and the run continues as after the user's Continue (back to the step's page; still a
+login page -> the normal handoff, no second click). Anything else -> the normal handoff, with the reason logged
+("Chrome has not autofilled the username").
+- AWOS never reads, logs, stores, types or sends the password, nor the username: the page script looks only at the
+  fields' type and pseudo-classes, and returns only whether it clicked and why. The tests assert the fixture's
+  password string appears nowhere in the run log, run state, storage or notifications.
+- **Chrome may not let this fire.** Chrome often shows a saved password only as a preview, or keeps the value back
+  from the page until a real user gesture (a click or key press in the page); a script's click is not one. Then the
+  fields are not `:autofill`, or the form submits without the password and the login page comes back; either way the
+  run hands off as before. Two-step logins (username page, then password page) and logins inside iframes are not
+  handled. Whether it fires on a given portal has to be found out on real sites; it is not proven.
+- Testing: Playwright cannot make Chrome autofill a saved password. The decision logic is tested with
+  `pages/portal/login_autofill.html`, which fills its own fields and marks them `data-awos-test-autofill`. The
+  extension honours that attribute only when the worker passes `testHook`, which it reads from
+  `chrome.storage.session.testAutofillHook` (set by the test through the worker; web pages and content scripts cannot
+  read or write session storage). In normal use it is never set.
+
+Settings (Options; `chrome.storage.local.settings`): `rememberMe`, `autofillSignin`, plus the tuning knobs
+`keepAliveSpacingMs`, `preflightSpacingMs`, `loginPollMs`, `loginProbeMs` (no UI). Collection fields: `keepAlive`,
+`keepAliveDays`, `preflightHours`, `preflightAtStart` (default true), `lastKeepAlive`, `lastPreflight`.
+
+## 6. Wait until usable (0.9)
+
+Before a replayed click / Enter / typing / choice, the content script waits (polling 100 ms, at most
+`settings.usableWaitMs`, default 8 s, the settle-cap style) until the target is usable:
+- visible (clicks and Enter only: a box with a size, not `display:none` / `visibility:hidden`),
+- enabled (not `disabled`, not `aria-disabled="true"`, not in a disabled fieldset; a field to type into not read-only),
+- no `aria-busy="true"` on it or around it,
+- not covered: the top element at its centre (`elementFromPoint`, through open shadow roots) is the target, inside it,
+  or not an overlay / spinner; and no visible spinner (`role=progressbar`, `aria-busy`, `spinner` / `loading` /
+  `loader` classes) overlaps it.
+The wait goes to `run.timings` (`{step, what: 'wait_usable', ms, why}`) and the log ("waited 2.1 s for "Download" to
+be usable (disabled)"). A target that never becomes usable falls through to the existing path: one pop-up pass
+(section 3) and a retry, then a pause for the user ("stays disabled ... make it usable, then Continue"; Continue retries
+the step). A full-page loading overlay (spinner / progress bar, no controls, little text) is not treated as a pop-up:
+it is waited out.
+Deviation from a strict "elementFromPoint must hit it": a cover that is neither an overlay (fixed / sticky / dialog)
+nor a spinner (a "stretched link" card) does not count, because the synthetic click reaches the target anyway and
+counting it would stall working recipes.
+
+## 7. Real file checks: never trust a green run (0.9)
+
+A download counts as **Got** only when the completed file (`chrome.downloads`) passes `lib/filecheck.js`:
+- more than 0 bytes (`fileSize` / `bytesReceived`): an empty file is **Not a document**;
+- not a web page under a document's name: Chrome's mime for the download is `text/html`, or its first bytes start like
+  HTML (`<!doctype html`, `<html`, ...) -> **Not a document**, "probably a login or error page saved under the file's
+  name";
+- content matches the name: `.pdf` has `%PDF-` in its first 1 KB; `.csv` / `.tsv` is text (no NUL bytes) with a
+  delimiter (`,` `;` tab `|`) in its first line; `.xlsx` / `.xlsm` / `.docx` / `.ods` / `.zip` start with `PK`. Other
+  kinds: only the size and the "not a web page" checks.
+The first bytes are read by the run tab's content script with `fetch(url, {credentials: 'include'})` and
+`Range: bytes=0-1023`, **only when the file's URL is on the portal page's own origin** (or a `blob:` of it; a `data:`
+URL is decoded in the worker). When that is not possible (another origin, the portal refuses a second read, or it
+answers the re-read with a web page while the download itself was a document type), the result is **content not
+checked** with the reason: still Got, and the verdict / checklist say so instead of pretending. No new permission.
+Where it shows: the run's download check (`content: {state: ok | bad | unchecked, why, size, mime}`), the verdict
+(`FAILED`, code `NOT_A_DOCUMENT`, reason "Not a document: ..."), the collection checklist (**Not a document (file):
+why**, or "Got (file) - content not checked (...)"), the summary ("1 not a document") and the phone status.
+Limits: the re-read is a second GET of the document (a one-time download link then gives "content not checked");
+a PDF that is a valid header plus garbage passes; an HTML page saved as `.txt` / `.json` is only caught by its mime /
+first bytes.
+
+## 8. Unknown pop-ups read by the agent brain (0.9)
+
+When a pop-up blocks a step and none of the known rules (section 3) can close it, the agent brain reads it: the same
+endpoint, consent and cloud-lock rules as goal-guided steps (`goal_guided.md` 2: local loopback model by default,
+Claude only with consent + key, never for a cloud-locked recipe / site). ONE call per pop-up, at most 2 per run
+(`POPUP_CAP`); Options key `popupAI: false` turns it off (no UI yet). The prompt carries the pop-up's title, text
+(<= 800 chars, secrets masked) and numbered controls inside `<popup untrusted="true">`; the reply is one line:
+- `HARMLESS n # reason`: control n closes it. It is clicked only if its name is a close / dismiss word
+  (`AWOSPortal.HARMLESS_RE`: close, x, dismiss, not now, later, skip, got it, no thanks, continue to site, ok) and none
+  of the deny rules match (`NEVER_RE` accept / agree / subscribe / pay ..., the strict danger vocabulary, the danger
+  context): those win. Otherwise the run pauses.
+- `NEEDS_DECISION # reason` (terms, consent, agreeing, payments, data sharing, account changes, deletions,
+  subscriptions) or `UNKNOWN`: never clicked; the run pauses (`needs_user`, `pending.popup` + `pending.decision`
+  `{verdict, title, reason}`), the Mac gets a notification and the popup shows "a pop-up needs your decision: <title>",
+  and a paired phone gets an approve-style need ("Approve = I dealt with it at the Mac, try the step again; Decline =
+  stop the run"). AWOS never clicks the pop-up on either answer.
+- A pop-up whose title / text / controls name terms, conditions, agree / accept, consent, privacy policy, data sharing,
+  payment / billing / card, subscription / plan / upgrade / trial / renewal, deletion, closing / cancelling the
+  account, verifying identity, password, permissions, signature (`AWOSPortal.DECISION_RE`) is NEEDS_DECISION whatever
+  the model says ("accept new terms" always stops); the override is logged.
+Every classification is logged ("the local agent model read the pop-up "Quick survey": HARMLESS (control 2): ...") and
+kept in `run.popups` `{step, title, rule, model, modelReason, verdict, reason, control, brain}`; the call is in
+`run.modelCalls` (`kind: 'popup'`).
+Limits: the decision words are English; a harmless pop-up that mentions "plan" or "card" pauses (the safe side); a
+pop-up whose close control has no name and no "close" / "dismiss" in its id / class / label cannot be closed by AWOS.
+
+## 9. Apps with their own windows; downloads made by the page (0.9.1)
+
+The first real-portal runs (an AI-chat app's billing invoices: profile menu -> Settings dialog -> Billing tab ->
+"Download PDF" on each invoice row) failed in five ways; each has a fixture test (`tests/extension/test_realportal.py`,
+fixture app `tests/extension/pages/app/home.html` + `hosted.html`).
+
+1. **The app's own windows are never dismissed** (`AWOSPortal.appDialogWhy`). The unblock pass and the pop-up reader
+   skip a blocker that is (in this order) the window the step was recorded in (`step.dialog.name`, or the start step's
+   window), a window holding a control with the step's target name, a window an earlier step of THIS run opened
+   (`run.ownDialogs`: windows open after a click that were not open before it), or (unless the step's control was
+   found UNDER it, `keep.covered`) a window with the app's own tabs / menus / navigation or a Settings / Account /
+   Billing / Preferences / Profile title. Cookie / consent banners never qualify by tabs or title. Skipped windows are
+   logged ("kept the "Settings" window open (...); it is part of the app, not a pop-up") and reported in `unblock().kept`.
+   A Settings window the app reopened over the page a step needs is closed like a pop-up (its control was covered).
+2. **Identical controls in list rows.** The locator returns `twins`: every control with the recorded name inside a
+   repeated row, with the row's text (`loc.row`, recorded too). For a `variable` step with >= 2 twins the worker picks
+   the row (`pickRow`, guided.js): "always the newest row" (`rec.newestRow`, a checkbox) = the first row in page order;
+   else the row naming the recorded row's period shifted to the run's period (`AWOSPeriod.rowPeriods`: full dates with
+   a day, "Nov 1, 2026" / "1 November 2026" / "2026-11-01", give their month + year; the day is free), exactly one;
+   else the row with the recorded row's exact text. Never by position alone. No single row -> the goal-guided model
+   decides, and its prompt lists the rows ("21 = row "Nov 1, 2026 · $200.00 · Paid ...""). A picked row skips the
+   per-field period-consistency check (its row named the period).
+3. **Recording that starts inside a window.** `start_recording` asks the page (`rec_context`) for an open modal
+   window; if there is one the popup warns "A window is already open. For a reliable recipe, close it and start
+   recording from the normal page, then open it while recording.", the start step keeps `dialog: {name, tab}`, and
+   stopping repeats the warning. Every recorded step keeps `dialog` when its control sat in a window. Such steps are
+   goal-guided-eligible: when the control is missing, the model walks back in (goal_guided.md section 6).
+4. **Downloads.** (a) Any `chrome.downloads` item created <= 8 s after a recorded click (the latest click, even if an
+   address change was recorded after it) belongs to that click, including `blob:` / `data:` files built in the page;
+   the final file name is taken when the browser settles it (`downloads.onChanged`, and again at Stop), and the name a
+   page gives its temporary `<a download>` is learnt from the page (`dl_hint`, used by recording and by the replay's
+   name check). A blob cannot be read again: its file check is size + type only, "content not checked (generated in
+   the page)", never a failure. (b) A recorded click that opens a WEB PAGE in a new tab (a payment provider's hosted
+   invoice) is followed: the recording moves to that tab (`followTab` on the click, banners on both tabs, the popup
+   says "recording continues there"), and replay switches `run.tabId` to the tab the click opens. A file in a new tab
+   is not followed (it stays a new-tab file; another origin asks for Approve and then counts for the check).
+   (c) Stop proposes a download check from the recorded file name, numbers generalised (`expectDownloadProposed`,
+   prefilled in Goal + checks). (d) A download chore (goal says "download", or the last click is "Download PDF" /
+   "Export CSV" / ...) whose recording saved no file warns at Stop; its replay, with no download check and no file
+   downloaded, ends UNVERIFIED ("this is a download chore ..., but no file was downloaded in this run"), never VERIFIED /
+   CHECK.
+5. **Lists that scroll inside a window.** The lazy-target scroll search first scrolls up to 2 inner scroll boxes
+   (`overflow-y: auto | scroll`, content taller than the box; the open dialog's first), from the recorded
+   `step.innerScroll` then in box-height steps, re-scanning after each, stopping on a confident or anchored match, and
+   puts each box back when nothing turns up; then the window as before (its own time budget).
+
+Limits: windows are recognised by role (`dialog`, `alertdialog`, `aria-modal`) only: an app window drawn as a plain
+`div` is a "fixed overlay" and follows the old rules. Recording follows ONE new tab and stays there (going back to the
+first tab is not recorded). Shared recipes do not carry `dialog`, `followTab`, `innerScroll` or the row text yet
+(local recordings only). Row periods need month names or ISO dates; "11/01/2026" (day vs month) is not read.
+
+## Permissions
+
+None added in 0.6, 0.6.1, 0.7, 0.9 or 0.9.1 (0.9 re-reads file heads with the content script's own fetch on the portal's
+origin). The keep-alive and pre-flight use `tabs` (background tabs on the recipe's own start
+page), `alarms`, and `notifications` (now with a button), all already requested. `downloads` (0.4) now also starts downloads (`chrome.downloads.download`) for files that opened in a new
+tab; its store justification already says "Replay starts that download and checks it finished".
+
+## Known gaps
+
+(0.7 limits of templating and step decisions: `goal_guided.md`, Known limits.)
+
+- A login page that appears after the last step (before the final checks) is not handed off; the checks fail.
+- A file shown by a viewer that runs no page script and whose URL and title do not name a file is not recognised.
+- Page-kind detection is heuristic: a page with an unrelated password field (change-password settings) at a URL other
+  than the recorded one hands off unnecessarily; an invisible bot check is not seen (it needs nothing from the user).
+- A portal left as "Needs you" restarts from its first step on the next collection run (the dedupe is per run).
+- Pop-ups inside cross-origin iframes are not seen (main frame only, as before).
+- Keep-alive only helps where visiting a page extends the session. Sites with a hard session lifetime (log in again
+  every 24 h whatever you do) still log the user out; the keep-alive then only reports it early. A background tab
+  briefly appears in the tab strip during each check.
+- Login detection is the same heuristic as the handoff: the username-only first page of a two-step login does not
+  look like a login page, so a waiting run may start such a portal too early (it then hands off as usual).
+- The autofill sign-in is unproven on real sites (section 5); "remember me" only helps where the portal honours it.

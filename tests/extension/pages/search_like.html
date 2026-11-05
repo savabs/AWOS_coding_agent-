@@ -1,0 +1,11 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Search</title></head><body>
+<h1>Search the web</h1>
+<form id="f" action="search_results.html" method="get" role="search">
+  <input id="q" name="q" aria-label="Search the web" type="text">
+</form>
+<script>
+// like DuckDuckGo's home page: Enter is handled (cancelled) by page code that only acts on a trusted key press
+document.getElementById('q').addEventListener('keydown', function (e) {
+  if (e.key === 'Enter') { e.preventDefault(); if (e.isTrusted) document.getElementById('f').submit(); }
+});
+</script></body></html>

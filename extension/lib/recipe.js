@@ -7,7 +7,13 @@
  *  toRecording(recipe, id) -> an untrusted internal recording (imported:true, domain-locked to start_url's site)
  *  encodeLink(recipe) / decodeLink(linkOrFragment)   share link: base64url(deflate-raw(JSON)) in the fragment
  *  registrableDomain(host), sameSite(url, domain), substitute(text, values), paramTokens(text)
- * Plain script: defines globalThis.AWOSRecipe (service worker, popup, test pages). Needs AWOSSafety for export.
+ * v0.7 goal-guided runs (docs/specs/goal_guided.md): the period placeholders ({{year}}, {{month}}, {{month_name}}, ...,
+ * lib/period.js) are built in: they need no params entry and may appear in loc strings, step URLs, expected texts /
+ * download names, and as a whole fill value ("{{month_name}} {{year}}"); `period: {recorded, mode}` says which month
+ * the recipe was recorded for and which month a run uses by default; click / press steps may be `variable` (a
+ * control inside a repeated list / table row, decided by meaning when it does not match confidently).
+ * Plain script: defines globalThis.AWOSRecipe (service worker, popup, test pages). Needs AWOSSafety for export,
+ * AWOSPeriod (lib/period.js) for period placeholders.
  */
 (function (root) {
   'use strict';
@@ -22,6 +28,15 @@
   var LOC_STR = ['tag', 'type', 'role', 'name', 'context', 'block', 'text', 'id', 'nameAttr', 'placeholder', 'label',
                  'href', 'css', 'classes', 'neighbor', 'title', 'formId'];
   var MIN_SCRUB = 3;          // typed values shorter than this are dropped from the step but not hunted elsewhere
+  var BUILTIN = { year: 1, month: 1, month_n: 1, month_name: 1, month_name_lower: 1, month_name_upper: 1,
+                  month_short: 1, month_short_lower: 1, month_short_upper: 1, quarter: 1 };
+  /** a fill value made only of period placeholders and separators: "{{month_name}} {{year}}", "{{month}}/{{year}}". */
+  function periodValue(v) {
+    var s = str(v), any = false;
+    var rest = s.replace(TOKEN_G, function (all, n) { if (BUILTIN[n]) { any = true; return ''; } return all; });
+    return any && /^[\s\-\/.,_]*$/.test(rest);
+  }
+  var MODES = { previous: 1, this: 1 };
 
   function str(v) { return v == null ? '' : String(v); }
   function isObj(v) { return !!v && typeof v === 'object' && !Array.isArray(v); }
@@ -116,8 +131,10 @@
     });
 
     var used = {};
+    /** the value is exactly one DECLARED param ("{{month}}" with a params entry "month" stays that param). */
+    function declaredParam(v) { var m = TOKEN_RE.exec(str(v)); return !!(m && declared[m[1]]); }
     function useTokens(text, where) {
-      paramTokens(text).forEach(function (t) { if (!declared[t]) errors.push(where + ' uses undeclared param {{' + t + '}}'); used[t] = 1; });
+      paramTokens(text).forEach(function (t) { if (!declared[t] && !BUILTIN[t]) errors.push(where + ' uses undeclared param {{' + t + '}}'); used[t] = 1; });
     }
 
     var steps = [];
@@ -130,6 +147,9 @@
       if (s.url != null) { var su = cleanUrlField(s.url, w + '.url', errors); if (su) out.url = su; }
       if (s.action === 'click') {
         if (s.navigates != null) out.navigates = !!s.navigates;
+        if (s.opens_tab != null) out.opens_tab = !!s.opens_tab;      // v0.6: the click opens a new tab (a file viewer)
+        if (s.downloads != null) out.downloads = !!s.downloads;      // v0.6: the click downloads a file (no file name is shared)
+        if (s.variable != null) out.variable = !!s.variable;         // v0.7: a control inside a repeated list / table row
       } else if (s.action === 'press') {                         // Enter in a field (submits its form / search box)
         if (s.key != null && s.key !== 'Enter') errors.push(w + '.key must be "Enter"');
         out.key = 'Enter';
@@ -137,7 +157,10 @@
       } else if (s.action === 'fill') {
         var hasVal = s.value != null, ask = s.ask === true;
         if (hasVal === ask) errors.push(w + ': a fill has exactly one of value "{{param}}" or ask: true');
-        else if (hasVal) {
+        else if (hasVal && !declaredParam(s.value) && periodValue(s.value) && capStr(s.value, 200)) {   // v0.7: "{{month_name}} {{year}}"
+          out.value = s.value;
+          if (s.sensitive) errors.push(w + ': a sensitive field must be ask: true');
+        } else if (hasVal) {
           var m = TOKEN_RE.exec(typeof s.value === 'string' ? s.value : '');
           if (!m) errors.push(w + '.value must be "{{param}}" (a fill never carries a literal value)');
           else { useTokens(s.value, w + '.value'); out.value = s.value; }
@@ -178,11 +201,20 @@
         else checks.expect_download = { name_regex: d.name_regex };
       }
     }
+    var period = null;
+    if (obj.period != null) {
+      var pd = obj.period;
+      if (!isObj(pd) || !/^\d{4}-(0[1-9]|1[0-2])$/.test(str(pd.recorded)) || (pd.mode != null && !MODES[pd.mode]))
+        errors.push('period must be {recorded: "YYYY-MM", mode: "previous" | "this"}');
+      else period = { recorded: pd.recorded, mode: pd.mode || 'previous' };
+    }
     params.forEach(function (p) { if (!used[p.name]) warnings.push('param "' + p.name + '" is not used by any step or check'); });
     if (errors.length) return { ok: false, errors: errors };
-    return { ok: true, warnings: warnings, recipe: {
+    var outR = {
       awos_recipe: VERSION, name: obj.name.trim(), description: str(obj.description), start_url: start, params: params,
-      steps: steps, checks: checks, created_with: str(obj.created_with || '') } };
+      steps: steps, checks: checks, created_with: str(obj.created_with || '') };
+    if (period) outR.period = period;
+    return { ok: true, warnings: warnings, recipe: outR };
   }
 
   // ---- export from a recording ---------------------------------------------------------------------------
@@ -190,13 +222,14 @@
 
   /** rec: {name, description, goal, startUrl, steps[], expect:{urlPattern, texts[]}, params[], expectDownload:{nameRegex}} */
   function fromRecording(rec) {
-    var S = root.AWOSSafety, warnings = [];
+    var S = root.AWOSSafety, warnings = [], Pd = root.AWOSPeriod;
+    if (Pd && rec.tpl) rec = Pd.templatedView(rec);       // v0.7: period expressions travel as placeholders
     var params = (rec.params || []).filter(function (p) { return p && PARAM_RE.test(p.name || ''); });
     var pnames = {}; params.forEach(function (p) { pnames[p.name] = p; });
     // typed values and what replaces them elsewhere: the param token, or nothing
     var typed = [];
     (rec.steps || []).forEach(function (s) {
-      if (s.action !== 'fill' || s.value == null || S.isPlaceholder(s.value)) return;
+      if (s.action !== 'fill' || s.value == null || S.isPlaceholder(s.value) || periodValue(s.value)) return;
       var v = String(s.value).trim();
       if (v.length >= MIN_SCRUB) typed.push({ value: v, token: s.param && pnames[s.param] && !s.sensitive ? '{{' + s.param + '}}' : null });
     });
@@ -225,11 +258,15 @@
       if (s.action === 'goto') return { action: 'goto', url: stripUrl(s.url) };
       var out = { action: s.action, loc: scrubLoc(s.loc || {}, s.action === 'fill') };
       var u = stripUrl(s.url); if (u) out.url = u;
-      if (s.action === 'click') { if (s.navigates) out.navigates = true; }
+      if (s.action === 'click') {
+        if (s.navigates) out.navigates = true; if (s.opensTab) out.opens_tab = true; if (s.download) out.downloads = true;
+        if (s.variable) out.variable = true;
+      }
       else if (s.action === 'press') { out.key = 'Enter'; if (s.navigates) out.navigates = true; }
       else if (s.action === 'fill') {
         var secret = s.sensitive || S.isPlaceholder(s.value);
         if (!secret && s.param && pnames[s.param]) { out.value = '{{' + s.param + '}}'; usedParams[s.param] = 1; }
+        else if (!secret && !s.param && periodValue(s.value)) out.value = String(s.value);
         else { out.ask = true; if (secret) out.sensitive = String(s.sensitive || String(s.value).replace(/^\{\{secret:|\}\}$/g, '')); }
         if (secret && s.param) warnings.push('"' + (s.loc && s.loc.name || 'a secret field') + '" is a secret field, so it stays "type it yourself"');
       } else if (s.action === 'select') {
@@ -259,6 +296,7 @@
                 expect_download: rec.expectDownload && rec.expectDownload.nameRegex ? { name_regex: String(rec.expectDownload.nameRegex) } : null },
       created_with: CREATED_WITH,
     };
+    if (rec.period && /^\d{4}-\d{2}$/.test(rec.period)) recipe.period = { recorded: rec.period, mode: MODES[rec.periodMode] ? rec.periodMode : 'previous' };
     var v = validate(recipe);
     if (!v.ok) throw new Error('cannot export: ' + v.errors.join('; '));
     return { recipe: v.recipe, warnings: warnings.concat(v.warnings) };
@@ -273,21 +311,34 @@
         var l = s.loc || {};
         out.danger = S.dangerMatch([l.name, l.text, l.label, l.title, l.id, l.nameAttr, l.formId].join(' | '));
       }
+      if (s.action === 'click') {
+        delete out.opens_tab; delete out.downloads;
+        if (s.opens_tab) out.opensTab = true;
+        if (s.downloads) out.download = { name: '' };
+      }
       if (s.action === 'fill' || s.action === 'select') {
         var m = TOKEN_RE.exec(str(s.value));
-        if (m) out.param = m[1];
+        // a period placeholder is not a param (lib/period.js fills it), unless the recipe declares a param of that name
+        if (m && (!BUILTIN[m[1]] || recipe.params.some(function (p) { return p.name === m[1]; }))) out.param = m[1];
         if (s.ask) out.value = S.placeholderFor(s.sensitive || 'value');
       }
       return out;
     });
     if (!steps.length || steps[0].action !== 'goto') steps.unshift({ action: 'goto', url: recipe.start_url });   // always start at start_url
-    return {
+    var out = {
       id: id, name: recipe.name, description: recipe.description, goal: recipe.checks.goal, createdAt: Date.now(),
       startUrl: recipe.start_url, steps: steps, params: recipe.params.slice(),
       expect: { urlPattern: recipe.checks.expect_url || '', texts: recipe.checks.expect_text.slice() },
       expectDownload: recipe.checks.expect_download ? { nameRegex: recipe.checks.expect_download.name_regex } : null,
       imported: true, site: siteOf(recipe.start_url), approvedDomains: [], importedAt: Date.now(),
     };
+    var Pd = root.AWOSPeriod;
+    if (recipe.period) { out.period = recipe.period.recorded; out.periodMode = recipe.period.mode; }
+    if (Pd) {           // v0.7: placeholders become templates over the recorded period's literal text
+      if (!out.period) out.period = Pd.periodOf(Date.now(), -1);
+      Pd.fromTokens(out, out.period);
+    }
+    return out;
   }
 
   // ---- share link -----------------------------------------------------------------------------------------

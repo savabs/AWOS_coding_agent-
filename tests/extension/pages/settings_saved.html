@@ -1,0 +1,12 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Settings saved</title></head>
+<body>
+<h1>Settings</h1>
+<p role="status" id="msg"></p>
+<p><a href="/account.html">Back to my account</a></p>
+<script>
+  var q = new URLSearchParams(location.search), names = {en: 'English', de: 'Deutsch'};
+  document.getElementById('msg').textContent = 'Settings saved. Marketing e-mails: ' + (q.get('marketing') ? 'on' : 'off')
+    + '. Language: ' + (names[q.get('lang')] || '?');
+</script>
+</body></html>

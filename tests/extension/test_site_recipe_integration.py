@@ -4,6 +4,7 @@ the user confirms in the popup, and the page then says it was added.
 Run:  python3 site/build.py && PYTHONPATH=. ~/.awos/rl-venv/bin/python -m pytest tests/extension -q -k site_recipe
 """
 import functools
+import json
 import http.server
 import re
 import threading
@@ -13,6 +14,7 @@ import pytest
 
 from test_recipe_v04 import _wait
 
+_VERSION = json.loads((Path(__file__).resolve().parents[2] / "extension" / "manifest.json").read_text())["version"]
 pytestmark = pytest.mark.timeout(150)
 PUBLIC = Path(__file__).resolve().parents[2] / "site" / "public"
 
@@ -41,7 +43,7 @@ def test_site_recipe_page_imports_into_extension(x, site_8000):
     page = x.ctx.new_page()
     page.goto(links[0])
     page.wait_for_selector("#r-view:not([hidden])")
-    assert _wait(lambda: page.evaluate("document.documentElement.dataset.awosReplay")) == "0.4.0"
+    assert _wait(lambda: page.evaluate("document.documentElement.dataset.awosReplay")) == _VERSION
     title = page.inner_text("#r-title")
     n_before = len(x.state()["recordings"])
 

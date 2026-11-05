@@ -4,7 +4,10 @@ A **recipe** is a recorded web chore that people can share: what to open, which 
 at the end. It is plain JSON. The extension (`extension/lib/recipe.js`) writes and validates it; the website
 (`site/`, recipe page `https://awos.tirramind.com/r/`) displays it and hands it to the extension. Both code against this file.
 
-Status: v1, shipped with AWOS Replay 0.4. Validator: `AWOSRecipe.validate()` in `extension/lib/recipe.js`, tests in
+Status: v1, shipped with AWOS Replay 0.4; v0.7 added the optional `period`, period placeholders and `variable` steps
+(an older extension drops `period` and `variable` and reads placeholders in loc strings as plain text, but rejects a
+recipe that uses them in `checks.goal` / `expect_text` or as a fill value as "undeclared param": share 0.7 recipes with
+0.7+). Validator: `AWOSRecipe.validate()` in `extension/lib/recipe.js`, tests in
 `tests/extension/test_recipe_v04.py`.
 
 ## 1. Shape
@@ -47,6 +50,7 @@ Status: v1, shipped with AWOS Replay 0.4. Validator: `AWOSRecipe.validate()` in 
 | `steps` | array | 1-200 items, see below |
 | `checks` | object | see below |
 | `created_with` | string | 0-60 chars, e.g. `"awos-replay 0.4"` |
+| `period` | object, optional (v0.7) | `{"recorded": "YYYY-MM", "mode": "previous" \| "this"}`: the month the recipe was recorded for (the period placeholders below stand for it) and which month a run uses by default (`previous` month, the default, or `this` month). See `goal_guided.md` |
 
 Unknown top-level keys are dropped by the validator (not an error).
 
@@ -61,7 +65,20 @@ Unknown top-level keys are dropped by the validator (not an error).
 
 A param is referenced as the exact string `"{{name}}"` in a step's `value`, and may appear inside
 `checks.goal`, `checks.expect_text[]` and `checks.expect_url` (substituted at run time). Every `{{name}}` used must be
-declared in `params`. Params that no step uses are allowed (warning only).
+declared in `params`, except the built-in period placeholders. Params that no step uses are allowed (warning only).
+
+### Period placeholders (v0.7)
+
+Built in, never declared in `params`, filled with the run's period (`goal_guided.md`): `{{year}}` (2026), `{{month}}`
+(09), `{{month_n}}` (9), `{{month_name}}` (September), `{{month_short}}` (Sep), `{{quarter}}` (3), and
+`{{month_name_lower}}`, `{{month_name_upper}}`, `{{month_short_lower}}`, `{{month_short_upper}}`. They may appear in any
+`loc` string (e.g. `"name": "Invoice {{month_name}} {{year}}"`, `"href": "/files/invoice-{{year}}-{{month}}.pdf"`), in
+step URLs (path only: URLs carry no query), in `checks.goal`, `checks.expect_text[]`, `checks.expect_url`,
+`checks.expect_download.name_regex`, in a select `value` / `optionText`, and as a **whole fill value** made only of
+placeholders and separators (`"{{month_name}} {{year}}"`, `"{{month}}/{{year}}"`): that is not a literal value, so it
+is allowed. The extension writes them at export from the recording's templates (each templated field of a recording,
+`goal_guided.md` section 1) and, on import, turns them back into templates over `period.recorded`'s text. A recipe that
+declares a param with a built-in's name (`month`) keeps it as that param.
 
 ### `steps[]`
 
@@ -71,12 +88,12 @@ Every step has `action` (one of `goto`, `click`, `fill`, `select`, `press`). Non
 | action | fields |
 |---|---|
 | `goto` | `url` (http/https, no query, no fragment) |
-| `click` | `loc`, optional `url`, optional `navigates` (bool) |
+| `click` | `loc`, optional `url`, optional `navigates` (bool), optional `opens_tab` (bool: the click opens a new tab, e.g. a PDF viewer; v0.6), optional `downloads` (bool: the click downloads a file; the file name is never shared; v0.6), optional `variable` (bool, v0.7: the control sits in a repeated list / table row, so which row is meant can change; a run that cannot match it confidently decides it from the goal, `goal_guided.md` section 2) |
 | `fill` | `loc`, optional `url`, and **exactly one of** `value: "{{param}}"` or `ask: true`; optional `sensitive` (string reason, e.g. `"password"`, `"one-time-code"`) only with `ask` |
 | `select` | `loc`, optional `url`, `value` (string, may be `"{{param}}"`), optional `optionText` (string) |
 | `press` | `loc` (the field), optional `url`, `key` (only `"Enter"`), optional `navigates` (bool): Enter in a form / search field, replayed as Enter on that field (same approval gate as clicking the form's submit button) |
 
-`fill` steps never carry a literal value. `ask: true` means: at run time AWOS pauses and the user types that field
+`fill` steps never carry a literal value (period placeholders are not literal, see above). `ask: true` means: at run time AWOS pauses and the user types that field
 themselves. Any field with a `sensitive` reason (password, OTP, card, SSN, ...) is always `ask`.
 
 `loc` describes the control (the v0.3 locator fingerprint). All keys are optional; unknown keys are dropped:
@@ -96,7 +113,7 @@ Step URLs (`goto.url`, `step.url`) and `loc.href` never carry query strings or f
 | `goal` | string | 0-300 chars; what must be true at the end (the local verifier reads it) |
 | `expect_text` | array of string | 0-10 items, 1-200 chars each; all must appear on the final page |
 | `expect_url` | string or null | origin + path, `*` wildcard allowed, no `?` or `#` |
-| `expect_download` | object or null | `{"name_regex": "<JS regex source, 1-200 chars>"}`: a download whose file name matches finished during the run |
+| `expect_download` | object or null | `{"name_regex": "<JS regex source, 1-200 chars>"}`: a download whose file name matches finished during the run. May use the period placeholders (v0.6: `{{year}}`, `{{month}}`, `{{month_name}}`; v0.7: all of them, see above); they need no `params` entry. A file this run downloaded that matches the pattern for another period is reported as Wrong period (v0.7) |
 
 ## 2. Limits
 

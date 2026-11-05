@@ -32,6 +32,11 @@
   var SENSITIVE_RE = /(passw|passcode|\bpin\b|\bcvv\b|\bcvc\b|\bcsc\b|security code|card ?(number|no)|\bcc[-_ ]?(num|number|no|exp|csc)\b|credit ?card|expir|\botp\b|one[- ]?time|verification code|auth(entication)? code|2fa|totp|\bmfa\b|\bssn\b|social security|tax ?id|routing|account ?number|\biban\b|secret)/i;
   var SENSITIVE_AUTOCOMPLETE = /^(current-password|new-password|one-time-code|cc-number|cc-csc|cc-exp|cc-exp-month|cc-exp-year)$/;
 
+  // Tell it (the user is watching, the agent chose the control): the click-gate vocabulary plus actions that commit
+  // something on the user's behalf. Narrower than STRICT_RE so ordinary navigation ("Orders", "Cancel" in a dialog
+  // that only closes it is still gated by DANGER/destructive rules where it matters) does not pause every step.
+  var TELL_RE = /\b(submit|confirm|approve|authori[sz]e|accept|agree|(?:place|complete|submit) (?:your |the )?order|order now|book(?: now| it)?|reserve|unsubscribe|publish|post|sign up|register|apply now|finish|complete (?:purchase|booking|application))\b/i;
+
   function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
 
   function dangerMatch(text) {
@@ -39,11 +44,12 @@
     return m ? m[1].toLowerCase() : null;
   }
 
-  /** dangerMatch, plus the stricter vocabulary when `strict` (scheduled run or imported recipe). */
+  /** dangerMatch, plus the stricter vocabulary when `strict` (scheduled run or imported recipe), or the Tell-it
+   *  vocabulary when strict === 'tell'. */
   function dangerMatchStrict(text, strict) {
     var d = dangerMatch(text);
     if (d || !strict) return d;
-    var m = STRICT_RE.exec(norm(text));
+    var m = (strict === 'tell' ? TELL_RE : STRICT_RE).exec(norm(text));
     return m ? m[1].toLowerCase() : null;
   }
 
@@ -99,7 +105,7 @@
   function isPlaceholder(v) { return /^\{\{secret:[a-z0-9-]+\}\}$/i.test(String(v || '')); }
 
   root.AWOSSafety = {
-    DANGER_RE: DANGER_RE, STRICT_RE: STRICT_RE, dangerMatch: dangerMatch, dangerMatchStrict: dangerMatchStrict, urlDanger: urlDanger, dangerContext: dangerContext,
+    DANGER_RE: DANGER_RE, STRICT_RE: STRICT_RE, TELL_RE: TELL_RE, dangerMatch: dangerMatch, dangerMatchStrict: dangerMatchStrict, urlDanger: urlDanger, dangerContext: dangerContext,
     sensitiveField: sensitiveField, labelOf: labelOf, norm: norm,
     placeholderFor: placeholderFor, isPlaceholder: isPlaceholder,
   };

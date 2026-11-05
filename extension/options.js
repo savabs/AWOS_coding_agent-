@@ -1,18 +1,29 @@
-/* AWOS Replay options: brain (local model or Claude with the user's own key), local endpoint / name / on-off,
- * find timeout. The API key goes to chrome.storage.local via save_claude_key and is never shown again. */
+/* AWOS Replay options: brain for repair / verify (local model or Claude with the user's own key), Tell it's agent
+ * brain (local agent model by default; Claude only on opt-in), the never-use-cloud site list, training-data keeping,
+ * local endpoint / name / on-off, find timeout, login helpers on portal runs (remember me, Chrome autofill sign-in). The API key goes to chrome.storage.local via save_claude_key and is never shown again. */
 'use strict';
 var $ = function (id) { return document.getElementById(id); };
 function say(text, bad) { $('status').className = bad ? 'error' : ''; $('status').textContent = text; }
 function brain() { return $('brain-claude').checked ? 'claude' : 'local'; }
-function showBrain() { $('claudebox').hidden = brain() !== 'claude'; }
+function agentBrain() { return $('agent-claude').checked ? 'claude' : 'local'; }
+function showBrain() { $('claudebox').hidden = brain() !== 'claude' && agentBrain() !== 'claude'; }
 
 function load() {
-  chrome.runtime.sendMessage({ type: 'get_state' }).then(function (st) {
-    var s = st.settings;
+  Promise.all([chrome.runtime.sendMessage({ type: 'get_state' }), chrome.runtime.sendMessage({ type: 'tell_state' })]).then(function (both) {
+    var st = both[0], s = Object.assign({}, both[1].settings, st.settings);
     $('endpoint').value = s.endpoint; $('model').value = s.model;
-    $('enabled').checked = !!s.enabled; $('findTimeoutMs').value = s.findTimeoutMs;
+    $('enabled').checked = !!s.enabled; $('findTimeoutMs').value = s.findTimeoutMs; $('collectionWaitMin').value = s.collectionWaitMin || 10;
     $(s.brain === 'claude' ? 'brain-claude' : 'brain-local').checked = true;
     $('cloudConsent').checked = !!s.cloudConsent;
+    $(s.agentBrain === 'claude' ? 'agent-claude' : 'agent-local').checked = true;
+    $('agentEndpoint').value = s.agentEndpoint || 'http://127.0.0.1:8081/v1';
+    $('agentModel').value = s.agentModel || 'qwen3.5-4b';
+    $('searchPage').value = s.searchPage || 'https://duckduckgo.com/?q={goal}';
+    $('agentClaudeModel').value = s.agentClaudeModel || 'claude-haiku-5-5';
+    $('noCloudSites').value = (s.noCloudSites || []).join('\n');
+    $('keepTraining').checked = s.keepTraining !== false;
+    $('immediateNotices').checked = s.immediateNotices === true;
+    $('rememberMe').checked = s.rememberMe !== false; $('autofillSignin').checked = s.autofillSignin !== false;
     $('keystate').textContent = st.claudeKeySet ? 'A key is saved. Leave the box empty to keep it.' : 'No key saved yet.';
     showBrain();
   });
@@ -22,13 +33,21 @@ function load() {
     $('localstatus').textContent = b.ok ? 'Running.' : 'Not running: ' + b.error;
   });
 }
+chrome.runtime.sendMessage({ type: 'agent_status' }).then(function (b) {
+  if (!b || b.brain !== 'local') return;
+  $('agentstatus').className = b.ok ? 'ok' : 'error';
+  $('agentstatus').textContent = b.ok ? 'Agent model answering.' : b.error;
+});
 $('brain-local').onchange = showBrain; $('brain-claude').onchange = showBrain;
+$('agent-local').onchange = showBrain; $('agent-claude').onchange = showBrain;
 
 $('save').onclick = async function () {
   var ep = $('endpoint').value.trim() || AWOSModel.DEFAULTS.endpoint;
   if (!AWOSModel.isLoopback(ep)) return say('Endpoint must be loopback (127.0.0.1 / localhost).', true);
-  var b = brain(), key = $('claudeKey').value.trim();
-  if (b === 'claude' && !$('cloudConsent').checked) return say('Tick the consent box to use Claude, or choose the local model.', true);
+  var b = brain(), ab = agentBrain(), key = $('claudeKey').value.trim();
+  if ((b === 'claude' || ab === 'claude') && !$('cloudConsent').checked) return say('Tick the consent box to use Claude, or choose the local model.', true);
+  var aep = $('agentEndpoint').value.trim() || 'http://127.0.0.1:8081/v1';
+  if (!AWOSModel.isLoopback(aep)) return say('The agent endpoint must be loopback (127.0.0.1 / localhost).', true);
   if (key) {
     var r = await chrome.runtime.sendMessage({ type: 'save_claude_key', key: key });
     if (r && r.error) return say(r.error, true);
@@ -36,9 +55,47 @@ $('save').onclick = async function () {
   }
   var settings = { endpoint: ep, model: $('model').value.trim() || 'local', enabled: $('enabled').checked,
                    findTimeoutMs: Math.max(500, parseInt($('findTimeoutMs').value, 10) || 4000),
-                   brain: b, cloudConsent: b === 'claude' && $('cloudConsent').checked };
+                   collectionWaitMin: Math.min(240, Math.max(1, parseInt($('collectionWaitMin').value, 10) || 10)),
+                   brain: b, cloudConsent: (b === 'claude' || ab === 'claude') && $('cloudConsent').checked,
+                   agentBrain: ab, agentEndpoint: aep, agentModel: $('agentModel').value.trim() || 'qwen3.5-4b',
+                   searchPage: /^https:\/\//.test($('searchPage').value.trim()) ? $('searchPage').value.trim() : 'https://duckduckgo.com/?q={goal}',
+                   agentClaudeModel: $('agentClaudeModel').value, keepTraining: $('keepTraining').checked,
+                   immediateNotices: $('immediateNotices').checked,
+                   rememberMe: $('rememberMe').checked, autofillSignin: $('autofillSignin').checked,
+                   noCloudSites: $('noCloudSites').value.split(/[\s,]+/).filter(Boolean) };
   await chrome.runtime.sendMessage({ type: 'save_settings', settings: settings });
   say('Saved.');
   load();
 };
 load();
+
+// ---- Phone (v0.8, docs/specs/phone_link.md) ----
+function showPhone(ph) {
+  $('phoneon').hidden = !ph.paired; $('phoneoff').hidden = !!ph.paired;
+  $('phoneBase').value = ph.base || 'https://awos.tirramind.com';
+  $('phonestatus').className = 'hint'; $('phonestatus').textContent = '';
+  if (!ph.paired) return;
+  $('phonelink').value = ph.link;
+  try { $('phoneqr').innerHTML = AWOSQR.toSvg(ph.link, { ecc: 'M', scale: 4 }); }
+  catch (e) { $('phoneqr').textContent = 'Could not draw the QR code: ' + e.message; }
+  var reg = ph.register || {};
+  $('phonereg').className = reg.ok ? 'hint ok' : 'hint error';
+  $('phonereg').textContent = reg.ok ? 'Registered with the relay.' : reg.status === 409 ? 'This channel is already registered to another pairing (409): click Unpair, then Pair a phone again (a new channel).' : reg.status === 503 ? 'The relay is not configured yet (503). Runs work as before; the phone gets nothing until it is.'
+    : 'Could not register with the relay' + (reg.error ? ' (' + reg.error + ')' : '') + '. Runs work as before.';
+}
+function loadPhone() { chrome.runtime.sendMessage({ type: 'phone_state' }).then(showPhone); }
+$('phonepair').onclick = async function () {
+  var base = $('phoneBase').value.trim().replace(/\/+$/, '') || 'https://awos.tirramind.com';
+  if (!/^https?:\/\/[^\s/]+/.test(base)) { $('phonestatus').className = 'hint error'; $('phonestatus').textContent = 'The relay address must be http(s)://host'; return; }
+  // the relay sends no CORS headers: the worker reaches it (and ntfy.sh) through the <all_urls> host permission
+  var r = await chrome.runtime.sendMessage({ type: 'phone_pair', base: base });
+  if (r && r.error) { $('phonestatus').className = 'hint error'; $('phonestatus').textContent = r.error; return; }
+  showPhone(r);
+};
+$('phonecopy').onclick = function () {
+  navigator.clipboard.writeText($('phonelink').value).then(function () { $('phonestatus').textContent = 'Copied. Open it on your phone only.'; });
+};
+$('phoneunpair').onclick = function () {
+  chrome.runtime.sendMessage({ type: 'phone_unpair' }).then(function () { $('phoneqr').textContent = ''; $('phonelink').value = ''; loadPhone(); });
+};
+loadPhone();

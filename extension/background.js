@@ -7,20 +7,78 @@
  *                     goal, description, params[], expectDownload:{nameRegex}, schedule, lastParams, lastRun,
  *                     imported, site, approvedDomains[]}}
  *   runs        last 20 finished runs (verdict, log)
+ *   collections {id: {id, name, recIds[], monthOffset, schedule, createdAt, last:{period, summary, at}}}  (v0.6)
+ *   collResults {collId: {'YYYY-MM': {recId: {status: got|missing|needs_you|failed, file, reason, at, runId}}}}
  *   settings    {endpoint, model, enabled, timeoutMs, findTimeoutMs, brain, cloudConsent}
  *   claudeKey   the user's Anthropic API key (only if they chose the Claude brain); never exported
  * Live state (chrome.storage.session, survives worker restarts, not browser restarts):
  *   recState    the recording in progress {tabId, rec}
- *   run         the replay in progress, resumable from run.i
+ *   run         the replay in progress, resumable from run.i; run.done{i} = steps completed in this run
+ *   coll        the collection run in progress {collId, period, queue[], idx, current:{recId, tabId}, status, summary}
  *   pendingImport  a validated recipe waiting for the user's Import click in the popup
  *
  * v0.4: params ({{name}} values asked at run time), schedules (chrome.alarms; a scheduled run opens its own
  * tab, any human-needed step pauses + notifies), download checks (chrome.downloads), recipe share/import
  * (lib/recipe.js; imported recipes are untrusted: domain-locked to start_url's site, stricter gate vocabulary).
  * Permissions added in 0.4, each for one feature: alarms (run a recipe daily / weekly), downloads (read-only
- * chrome.downloads.search to verify expect_download; nothing is downloaded by the extension itself),
+ * chrome.downloads.search to verify expect_download; since 0.6 also .download for a file a click opened in a new tab),
  * notifications (a scheduled run that needs a human, or its verdict). No new host permissions: the Claude call
  * relies on Anthropic's CORS support, and the recipe bridge is a content script on the three /r/ origins only.
+ *
+ * v0.6 portal runs (docs/specs/portal_run.md), no new permissions:
+ *  - handoff: before each step the page is classified (lib/portal.js pageKind). A login / session-expired page or a
+ *    one-time-code field the recording did not have here (the step's recorded page is another one), or any bot
+ *    check, pauses the run (needs_user, notification) and is never touched. Continue re-observes, goes back to the
+ *    recorded page of the first step not yet done, and goes on from there; steps done (run.done) are not repeated,
+ *    and a download step whose file already completed in this run (chrome.downloads, same name rule as the
+ *    expect_download check) is skipped and logged. All of it lives in storage.session, so a worker restart during
+ *    the pause loses nothing.
+ *  - pop-ups: a target that is not found or sits under an overlay gets one unblock pass (close / not now / reject on
+ *    cookie banners only, never accept / agree / danger words), then one retry; a pop-up with no allowed control
+ *    pauses for the user. Every dismissal is logged.
+ *  - new-tab files: a click that opens a tab (openerTabId = the run tab) on a PDF / CSV / ... is downloaded with
+ *    chrome.downloads.download (the browser's cookies apply), the tab closed, and the file counts for
+ *    expect_download. Same origin, or HTTPS on the same site, only; any other file asks first. The recorder marks
+ *    such clicks (opensTab, download) so replay waits for the tab.
+ *  - collections: recipes grouped into a monthly checklist ({{month}} / {{year}} in the download pattern), run one
+ *    after another in their own tabs; results per period YYYY-MM (Got / Missing / Needs you / Failed), a re-run
+ *    skips the portals already Got, a summary notification at the end, optional monthly schedule (chrome.alarms).
+ *
+ * v0.6.1 fewer handoffs (docs/specs/portal_run.md section 5), no new permissions:
+ *  - keep-alive: per collection (on by default, every keepAliveDays = 3), each portal's start page is opened in a
+ *    background tab, one at a time, classified logged in / login page, and closed; nothing is clicked or typed. A
+ *    logout is notified once, early, and shows as "Login needed". Skipped while anything else runs.
+ *  - pre-flight: the same check preflightHours (24) before a scheduled collection run and at the start of every
+ *    collection run: ONE notification naming the logged-out portals, "Open the ones that need me" opens just those;
+ *    the run does the ready portals first and picks the others up as soon as their login is seen.
+ *  - on a login page: tick an unchecked "remember me / keep me signed in / trust this device" checkbox (Option
+ *    rememberMe), and when Chrome autofilled both the username and the password (the :autofill state, the value is
+ *    never read), click the sign-in button once (Option autofillSignin, experimental); else the normal handoff.
+ *  portalStatus (chrome.storage.local), loginTabs / probeTab (chrome.storage.session).
+ *
+ * v0.7 goal-guided runs (docs/specs/goal_guided.md), no new permissions:
+ *  - period templating (lib/period.js): at save / import, period expressions in step targets, typed values, URLs,
+ *    expected texts and download names that name the recording's month become placeholders (rec.tpl, per field,
+ *    undoable in the popup). Each run has a period (the collection's, a `period` given to the run, else the recipe's
+ *    default: previous month, or this month) and replays the recipe with it substituted (AWOSPeriod.view).
+ *  - goal-guided step decision: a templated or `variable` step (a control in a repeated list / table row) that does
+ *    not match confidently, or matches a control naming another period, is decided by the Tell-it agent brain (same
+ *    endpoint, micro-agent contract, consent and cloud-lock rules as tellit.js): ONE action on the current page from
+ *    the goal (period substituted), "last time at this step you clicked ...", the steps done and the observation;
+ *    validated, gated and executed like a Tell-it action. needs_user / done = the recipe ends MISSING with the model's
+ *    reason (never the recorded, old target). At most GUIDED_CAP (8 since 0.9.1) model decisions per run, each logged; v0.9.1: up to GUIDED_NAV (4) moves toward one step's control (guided.js guidedOutcome).
+ *  - result vs goal: the downloaded file must match the period-substituted expectation; a file for another period is
+ *    WRONG_PERIOD (verdict + collection checklist), not Got.
+ *  - skills memory: a VERIFIED run with model-decided steps offers "the portal changed: use the new step from now on?"
+ *    (run.updateOffer -> guided_update); accepting stores the model's control as the step (templated again) and a
+ *    per-recipe history entry (rec.history).
+ *
+ * v0.8 phone link + fewer pings + failure evidence (docs/specs/phone_link.md): phone.js sends handoffs to the user's
+ * paired phone over the end-to-end encrypted relay (codes typed + submitted, approvals, status); keep-alive logouts are
+ * batched into the pre-flight notice (settings.immediateNotices restores per-logout notices); rec.durations flags
+ * "slower than usual" runs; a failing / needs-you step stores a local-only screenshot (storage.local shots, last 20).
+ * New host permission <all_urls> (no new install warning: the content script already runs on every http(s) site):
+ * captureVisibleTab needs it, and the relay / ntfy.sh send no CORS headers.
  *
  * Replay of one step: wait for the tab to load -> content 'locate' (attribute
  * scoring) -> if not confident, ask the local model to pick from the shortlist
@@ -39,9 +97,31 @@
  * verifier model (G7) reads the goal, the actions and the final page; it may only
  * downgrade VERIFIED to CHECK ("look at this one"), and its opinion is logged on
  * every run.
+ *
+ * v0.10 learning from every run (docs/research/experience_reuse_2026-11-05.md; learn only from VERIFIED runs or the
+ * user's own words, inject little, describe controls by meaning):
+ *  - self-healing steps (lib/heal.js): a step is located with its learned alternates in AWOSHeal.candidates order
+ *    (promoted ones, the recording, other verified ones, a demoted recording, unverified ones) before any model call.
+ *    A step the goal-guided model rescued is written back as an alternate of that step (period-templated) when the
+ *    run ends, and confirmed by its verdict (VERIFIED -> verified, FAILED -> dropped); each locate counts one use
+ *    (not found = a failure now, a used control = a success only when the run is VERIFIED). The recorded loc is never
+ *    overwritten; the popup's "Undo fix" removes a step's alternates (heal_revert).
+ *  - lessons (lib/lessons.js, chrome.storage.local 'lessons'): a correction typed after a failed replay (run_note) or
+ *    in Tell it is offered as "Remember for <site>?"; remembered ones are injected (2 at most) into goal-guided and
+ *    Tell-it prompts and scored with the run's verdict (failing ones are switched off).
+ *  - site map (lib/sitemap.js, 'siteMap'): a recording or an import is merged as 'seen', a VERIFIED replay's path as
+ *    'ok', the step a failed replay stopped at as 'fail'.
  */
-importScripts('lib/safety.js', 'lib/model.js', 'lib/recipe.js');
-var S = self.AWOSSafety, M = self.AWOSModel, R = self.AWOSRecipe;
+importScripts('lib/safety.js', 'lib/model.js', 'lib/period.js', 'lib/recipe.js', 'lib/agent.js', 'lib/phone.js', 'lib/filecheck.js', 'lib/portal.js');
+importScripts('lib/pageview.js', 'lib/sitemap.js', 'lib/lessons.js', 'lib/heal.js');   // v0.10: page entities, site map, lessons, healed locators
+var HL = self.AWOSHeal, LS = self.AWOSLessons;
+var S = self.AWOSSafety, M = self.AWOSModel, R = self.AWOSRecipe, PD = self.AWOSPeriod, FC = self.AWOSFile, PP = self.AWOSPortal;
+// "now" for periods only (the default run period, a recording's month). Tests pin it through chrome.storage.session
+// (testNow), which web pages cannot reach; everything else uses the real clock.
+var TEST_NOW = 0;
+chrome.storage.session.get('testNow').then(function (o) { TEST_NOW = +o.testNow || 0; }).catch(function () {});
+chrome.storage.onChanged.addListener(function (ch, area) { if (area === 'session' && ch.testNow) TEST_NOW = +ch.testNow.newValue || 0; });
+function nowMs() { return TEST_NOW || Date.now(); }
 
 // ---- storage helpers --------------------------------------------------------
 async function getLocal(key, dflt) { var o = await chrome.storage.local.get(key); return o[key] === undefined ? dflt : o[key]; }
@@ -49,6 +129,19 @@ async function setLocal(key, val) { var o = {}; o[key] = val; await chrome.stora
 async function getSess(key) { var o = await chrome.storage.session.get(key); return o[key] || null; }
 async function setSess(key, val) { var o = {}; o[key] = val; if (val === null) await chrome.storage.session.remove(key); else await chrome.storage.session.set(o); }
 async function settings() { var s = Object.assign({}, M.DEFAULTS, await getLocal('settings', {})); delete s.claudeKey; return s; }
+/** brainSettings for a replay, with the "never use cloud" lock applied: a locked recipe or a locked site (its start
+ *  page) never goes to Claude; repair / verify use the local model instead. The lock always wins. */
+async function lockedBrain(run, rec) {
+  var cfg = await brainSettings();
+  if (cfg.brain !== 'claude') return cfg;
+  var site = R.siteOf(rec.startUrl || '');
+  var why = rec.noCloud ? 'this recipe' : (site && (cfg.noCloudSites || []).indexOf(site) >= 0 ? site : '');
+  if (why) {
+    cfg.brain = 'local'; delete cfg.claudeKey;
+    if (!run.cloudLockLogged) { run.cloudLockLogged = true; logRun(run, 'cloud is locked off for ' + why + ': repair / verify use the local model only'); }
+  }
+  return cfg;
+}
 /** settings plus the API key, only for the model call itself. */
 async function brainSettings() { var s = await settings(); if (s.brain === 'claude') s.claudeKey = await getLocal('claudeKey', ''); return s; }
 async function getRec(id) { return (await getLocal('recordings', {}))[id] || null; }
@@ -69,18 +162,39 @@ async function waitForLoad(tabId, timeoutMs) {
   throw new Error('page did not finish loading');
 }
 async function sendTab(tabId, msg) { return chrome.tabs.sendMessage(tabId, msg); }
-/** ping the content script until it answers (optionally on a given URL). */
+/** same page: origin + path (no query, no trailing slash). */
+function samePage(a, b) {
+  try { var x = new URL(a), y = new URL(b); return x.origin === y.origin && x.pathname.replace(/\/+$/, '') === y.pathname.replace(/\/+$/, ''); }
+  catch (e) { return false; }
+}
+/** ping the content script until it answers (optionally on a given URL). v0.9.3: a loaded page that has no live copy
+ *  (it was open before the extension was reloaded / updated) gets one injected, once. */
 async function ensureContent(tabId, wantUrl, timeoutMs) {
-  var end = Date.now() + (timeoutMs || 8000), last = '';
+  var start = Date.now(), end = start + (timeoutMs || 8000), last = '', injected = false;
   while (Date.now() < end) {
     try {
       var r = await sendTab(tabId, { type: 'ping' });
       if (r && r.ok && (!wantUrl || sameUrl(r.url, wantUrl))) return r;
       last = r ? 'on ' + r.url : 'no reply';
-    } catch (e) { last = String(e.message || e); }
+      if (!r && !injected && Date.now() - start > 600) injected = await injectContent(tabId);   // only a dead copy is there
+    } catch (e) {
+      last = String(e.message || e);
+      if (!injected && Date.now() - start > 600 && /receiving end/i.test(last)) injected = await injectContent(tabId);
+    }
     await sleep(150);
   }
   throw new Error('page script not ready (' + last + ')');
+}
+var CONTENT_FILES = ['lib/safety.js', 'lib/locator.js', 'lib/pageview.js', 'lib/portal.js', 'content.js'];
+/** put the page script into an already-loaded http(s) tab (true once tried, so callers inject at most once). */
+async function injectContent(tabId) {
+  var tab = await chrome.tabs.get(tabId).catch(function () { return null; });
+  if (!tab || tab.status !== 'complete' || !/^https?:/.test(tab.url || '')) return false;
+  await sleep(250);                                  // a page that just loaded gets its own copy: never add a second one
+  var r = await sendTab(tabId, { type: 'ping' }).catch(function () { return null; });
+  if (r && r.ok) return true;
+  await chrome.scripting.executeScript({ target: { tabId: tabId }, files: CONTENT_FILES }).catch(function (e) { console.warn('inject', e); });
+  return true;
 }
 function stripHash(u) { return String(u || '').split('#')[0]; }
 function sameUrl(a, b) { return stripHash(a) === stripHash(b); }
@@ -100,19 +214,53 @@ async function startRecording(tabId, name) {
   if (!/^https?:/.test(tab.url || '')) throw new Error('can only record http(s) pages');
   var rec = { id: uid('rec'), name: name || ('Recording ' + new Date().toLocaleString()), createdAt: Date.now(),
               startUrl: tab.url, steps: [{ action: 'goto', url: tab.url }], expect: { urlPattern: '', texts: [] } };
+  // v0.9.1: recording that starts inside an open window (the app's Settings dialog over its home page): warn, and keep
+  // the window's name / tab on the start step so replay knows the recipe needs it open (goal-guided navigation)
+  // v0.9.3: the tab may have been open since before the extension was reloaded: make sure a live recorder is in it,
+  // or every click is lost and the recording ends with 0 actions
+  try { await ensureContent(tabId, null, 4000); }
+  catch (e) { throw new Error('AWOS cannot reach this page (' + (e.message || e) + '). Reload the page, then start recording again.'); }
+  var cx = await sendTab(tabId, { type: 'rec_context' }).catch(function () { return null; });
+  if (cx && cx.dialog) {
+    rec.steps[0].dialog = cx.dialog;
+    rec.startWarning = START_IN_DIALOG;
+  }
   await setSess('recState', { tabId: tabId, rec: rec, lastClickAt: 0 });
-  await sendTab(tabId, { type: 'rec_state', on: true }).catch(function () {});
+  await sendTab(tabId, { type: 'rec_state', on: true });
   return rec;
 }
+var START_IN_DIALOG = 'A window is already open. For a reliable recipe, close it and start recording from the normal page, then open it while recording.';
 
 async function stopRecording() {
   var st = await getSess('recState');
   if (!st) throw new Error('not recording');
   var tab = await chrome.tabs.get(st.tabId).catch(function () { return null; });
+  await recQueue;                                   // pending step / download notes land first
+  st = await getSess('recState') || st;
   var rec = st.rec;
+  // v0.9.1: a download whose final name was not known yet when it started (blob: built in the page, a hosted URL)
+  for (var did in (st.dlSteps || {})) {
+    var ds = rec.steps[st.dlSteps[did]], it = (await chrome.downloads.search({ id: +did }).catch(function () { return []; }))[0];
+    var fn = it ? fileName(it) : '';
+    if (ds && ds.download && !ds.download.name && /\.[a-z0-9]{1,5}$/i.test(fn)) ds.download.name = fn;
+  }
   if (tab && tab.url) { var u = new URL(tab.url); rec.expect.urlPattern = u.origin + u.pathname; }
   if (!actionCount(rec)) rec.warning = NO_ACTIONS;
+  else if (rec.startWarning) rec.warning = 'The recording started with the "' + (rec.steps[0].dialog.name || 'a') + '" window already open: replay will have to find its way into it. '
+    + 'For a reliable recipe, record again starting from the normal page and open the window while recording.';
+  var dlLike = downloadGoal(rec);
+  if (actionCount(rec) && dlLike && !(rec.steps || []).some(function (x) { return x.download; })) {
+    rec.noFileWarning = 'No file was downloaded while recording (' + dlLike + '). If the invoice opened in a new tab, click its Download button '
+      + 'there while recording (AWOS follows a page a recorded click opens); otherwise set the expected download under Goal + checks, '
+      + 'or replays cannot be verified.';
+    rec.warning = [rec.warning, rec.noFileWarning].filter(Boolean).join(' ');
+  }
+  if (st.followed) rec.followNote = 'The click on "' + st.followed.name + '" opened a page in a new tab; the recording continued there.';
+  var dl = proposeDownload(rec);
+  if (dl) rec.expectDownloadProposed = dl;
+  applyPeriod(rec, false);
   var all = await getLocal('recordings', {}); all[rec.id] = rec; await setLocal('recordings', all);
+  await siteMapFromRecording(rec, 'seen').catch(function (e) { console.warn('site map', e); });    // v0.10
   await setSess('recState', null);
   if (tab) await sendTab(st.tabId, { type: 'rec_state', on: false }).catch(function () {});
   return rec;
@@ -134,7 +282,7 @@ function onRecStep(tabId, msg) {
       var step = msg.step; if (step.action === 'fill') step.mergeKey = msg.mergeKey;
       steps.push(step);
     }
-    if (msg.step.action === 'click' || msg.step.action === 'press') st.lastClickAt = Date.now();
+    if (msg.step.action === 'click' || msg.step.action === 'press') { st.lastClickAt = Date.now(); st.lastClickIdx = steps.length - 1; }
     await setSess('recState', st);
   }).catch(function (e) { console.warn('rec_step', e); });
   return recQueue;
@@ -144,14 +292,124 @@ chrome.tabs.onUpdated.addListener(function (tabId, info) {
   if (!info.url) return;
   recQueue = recQueue.then(async function () {
     var st = await getSess('recState');
+    if (st && st.newTabs && st.newTabs[tabId] != null && st.tabId !== tabId) {   // a tab a recorded click opened: is it a file?
+      var ns = st.rec.steps[st.newTabs[tabId]];
+      if (ns && fileUrl(info.url) && !(ns.download && ns.download.name)) { ns.download = { name: urlName(info.url) }; await setSess('recState', st); }
+      return;
+    }
     if (!st || st.tabId !== tabId) return;
     var steps = st.rec.steps, last = steps[steps.length - 1];
+    if (last && last.followTab) return;                 // v0.9.1: the followed tab's own load / redirects, not a step
     if (last && last.action === 'goto' && sameUrl(last.url, info.url)) return;
     if (Date.now() - (st.lastClickAt || 0) < 3000 && last && (last.action === 'click' || last.action === 'press')) { last.navigates = true; }
     else steps.push({ action: 'goto', url: info.url });    // typed / bookmark navigation
     await setSess('recState', st);
   });
 });
+
+// ---- recording: downloads and new tabs a recorded click caused (v0.6) ------------------------------------
+var FILE_EXT = /\.(pdf|csv|tsv|xlsx?|xlsm|ods|docx?|odt|zip|txt|xml|json|ofx|qfx|qif|sta|mt940|png|jpe?g)$/i;
+function fileUrl(u) { try { var x = new URL(u); return /^https?:$/.test(x.protocol) && FILE_EXT.test(x.pathname); } catch (e) { return false; } }
+/** the click step that just ran in the recorded tab (<= 8 s ago: a page that builds the file in script, fetch ->
+ *  blob -> <a download>, can take a while), or -1. v0.9.1: the latest recorded click, even when an address change
+ *  (a goto) or a typed value was recorded after it. */
+var REC_DL_WINDOW = 8000;
+function lastClickIndex(st) {
+  if (Date.now() - (st.lastClickAt || 0) >= REC_DL_WINDOW) return -1;
+  var k = st.lastClickIdx != null ? st.lastClickIdx : st.rec.steps.length - 1, s = st.rec.steps[k];
+  return s && s.action === 'click' ? k : -1;
+}
+chrome.downloads.onCreated.addListener(function (d) {
+  setTimeout(function () {                 // the click's rec_step message may still be on its way
+    recQueue = recQueue.then(async function () {
+      var st = await getSess('recState');
+      if (!st) return;
+      var k = lastClickIndex(st);
+      if (k < 0 && st.newTabs) {             // v0.9.1: a download the opened tab started by itself (an invoice host)
+        var kk = Object.keys(st.newTabs).map(function (t) { return st.newTabs[t]; }).pop();
+        if (kk != null && Date.now() - (st.lastClickAt || 0) < 15000) k = kk;
+      }
+      if (k < 0 || (st.rec.steps[k].download && st.rec.steps[k].download.name)) return;
+      // a blob: / data: download (built in the page) has no name yet: the final file name arrives with onChanged
+      var nm = fileName(d) || '';
+      if (/^(blob|data):/i.test(d.finalUrl || d.url || '') && !baseName(d.filename)) nm = DL_HINTS[d.url] || '';
+      st.rec.steps[k].download = { name: /\.[a-z0-9]{1,5}$/i.test(nm) ? nm : '' };
+      if (/^(blob|data):/i.test(d.url || '')) st.rec.steps[k].download.generated = true;
+      (st.dlSteps = st.dlSteps || {})[d.id] = k;
+      var now = (await chrome.downloads.search({ id: d.id }).catch(function () { return []; }))[0];   // its name may be settled already
+      if (now && baseName(now.filename) && /\.[a-z0-9]{1,5}$/i.test(baseName(now.filename))) st.rec.steps[k].download.name = baseName(now.filename);
+      await setSess('recState', st);
+    }).catch(function (e) { console.warn('rec download', e); });
+  }, 300);
+});
+// v0.9.1: a download's final name is often known only later (a hosted invoice URL with no file name, a
+// Content-Disposition header): when the browser settles the file name, the recorded step gets it
+chrome.downloads.onChanged.addListener(function (delta) {
+  if (!delta.filename && !(delta.state && delta.state.current === 'complete')) return;
+  recQueue = recQueue.then(async function () {
+    var st = await getSess('recState');
+    if (!st || !st.dlSteps || st.dlSteps[delta.id] == null) return;
+    var d = (await chrome.downloads.search({ id: delta.id }).catch(function () { return []; }))[0];
+    var step = st.rec.steps[st.dlSteps[delta.id]], n = d ? fileName(d) : '';
+    if (!step || !n || !/\.[a-z0-9]{1,5}$/i.test(n) || (step.download && step.download.name === n)) return;
+    step.download = { name: n };
+    await setSess('recState', st);
+  }).catch(function (e) { console.warn('rec download name', e); });
+});
+chrome.tabs.onCreated.addListener(function (tab) {
+  if (tab.openerTabId == null) return;
+  setTimeout(function () {                 // the click's rec_step message may still be on its way
+    recQueue = recQueue.then(async function () {
+      var st = await getSess('recState');
+      if (!st || st.tabId !== tab.openerTabId) return;
+      var k = lastClickIndex(st);
+      if (k < 0) return;
+      var now = await chrome.tabs.get(tab.id).catch(function () { return tab; });
+      var step = st.rec.steps[k], u = now.url || now.pendingUrl || tab.pendingUrl || tab.url || '';
+      step.opensTab = true;
+      if (fileUrl(u) && !step.download) step.download = { name: urlName(u) };
+      (st.newTabs = st.newTabs || {})[tab.id] = k;
+      await setSess('recState', st);
+      if (!step.download) followIfPage(tab.id, k);        // v0.9.1: a web page (a hosted invoice), not a file?
+    }).catch(function (e) { console.warn('rec new tab', e); });
+  }, 300);
+});
+/** v0.9.1: a recorded click opened a WEB PAGE in a new tab (a payment provider's hosted invoice with its own Download
+ *  button): that tab is the obvious continuation, so the recording moves there (the click is marked followTab; replay
+ *  switches to the tab it opens). A file (PDF viewer, no page script) is not followed: it stays a new-tab file. */
+async function followIfPage(tabId, k) {
+  var ok = null;
+  try { await waitForLoad(tabId, 15000); ok = await ensureContent(tabId, null, 5000); } catch (e) { ok = null; }
+  var t = await chrome.tabs.get(tabId).catch(function () { return null; });
+  recQueue = recQueue.then(async function () {
+    var st = await getSess('recState');
+    if (!st || !t || st.newTabs == null || st.newTabs[tabId] !== k || st.tabId === tabId) return;
+    var step = st.rec.steps[k];
+    if (!step || (step.download && step.download.name)) return;
+    if (!ok || /pdf|octet|csv|excel|spreadsheet/i.test(ok.contentType || '') || !/^https?:/.test(t.url || '')) {
+      if (FILE_EXT.test(t.title || '') || fileUrl(t.url || '')) { step.download = { name: urlName(t.url) || t.title }; await setSess('recState', st); }
+      return;
+    }
+    var from = st.tabId;
+    step.followTab = true;
+    st.followed = { from: from, tabId: tabId, step: k, name: (step.loc && (step.loc.name || step.loc.text)) || 'the link', url: R.stripUrl(t.url) };
+    st.tabId = tabId; st.lastClickAt = 0;
+    await setSess('recState', st);
+    await sendTab(from, { type: 'rec_state', on: false }).catch(function () {});
+    await sendTab(tabId, { type: 'rec_state', on: true }).catch(function () {});
+    await sendTab(from, { type: 'banner', text: 'that opened a new tab; recording continues THERE (in the new tab).' }).catch(function () {});
+    await sendTab(tabId, { type: 'banner', text: 'recording continues in this tab (it was opened by the recorded click). Click what you need here, then Stop in the AWOS popup.' }).catch(function () {});
+  }).catch(function (e) { console.warn('rec follow', e); });
+}
+/** v0.9.1: the download check a recording suggests: its last recorded download's name, digits generalised. */
+function proposeDownload(rec) {
+  var n = '';
+  (rec.steps || []).forEach(function (s) { if (s.download && s.download.name && /\.[a-z0-9]{1,5}$/i.test(s.download.name)) n = s.download.name; });
+  if (!n) return '';
+  var m = /^(.*?)(\.[a-z0-9]{1,5})$/i.exec(n);
+  var stem = m[1].replace(/ \(\d+\)$/, '').split(/(\d+)/).map(function (x, k) { return k % 2 ? '\\d+' : x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }).join('');
+  return '^' + stem + '(?: \\(\\d+\\))?' + m[2].replace('.', '\\.') + '$';
+}
 
 // ---- replay -----------------------------------------------------------------
 function logRun(run, text) { run.log.push({ t: Date.now(), step: run.i, text: text }); }
@@ -161,17 +419,23 @@ async function saveRun(run) {
   chrome.action.setBadgeText({ text: badge }).catch(function () {});
 }
 
-async function busyReason() {
+async function busyReason(inCollection) {
+  if (!inCollection) {
+    var co = await getSess('coll');
+    if (co && co.status === 'running') return 'a collection is running ("' + co.name + '")';
+  }
   var cur = await getSess('run');
   if (cur && /^(running|awaiting_approval|needs_user)$/.test(cur.status)) return 'a replay is already in progress';
   if (await getSess('recState')) return 'stop the recording before running a replay';
+  var tl = await getSess('tell');
+  if (tl && /^(running|paused|awaiting_approval|awaiting_draft|needs_user|confirm)$/.test(tl.status)) return 'a Tell-it run is in progress';
   return '';
 }
 
 /** opts: {params: {name: value}, scheduled: bool}. Param values given here become the recipe's last-used values. */
 async function startRun(recId, tabId, opts) {
   opts = opts || {};
-  var busy = await busyReason();
+  var busy = await busyReason(!!opts.collection);
   if (busy) throw new Error(busy);
   var rec = await getRec(recId);
   if (!rec) throw new Error('no such recording');
@@ -179,12 +443,71 @@ async function startRun(recId, tabId, opts) {
   if (opts.params && Object.keys(params).length) { rec.lastParams = Object.assign({}, rec.lastParams || {}, params); await putRec(rec); }
   var run = { id: uid('run'), recId: recId, recName: rec.name, tabId: tabId, i: 0, status: 'running', startedAt: Date.now(),
               pending: null, approval: null, userDone: {}, log: [], resolved: [], result: null,
-              params: Object.assign({}, rec.lastParams || {}, params), scheduled: !!opts.scheduled, imported: !!rec.imported };
-  logRun(run, 'start "' + rec.name + '" (' + rec.steps.length + ' steps)' + (run.scheduled ? ' [scheduled]' : '') + (run.imported ? ' [imported recipe]' : ''));
+              params: Object.assign({}, rec.lastParams || {}, params), scheduled: !!opts.scheduled, imported: !!rec.imported,
+              done: {}, unblocked: {}, period: (opts.collection && opts.collection.period) || (PD.valid(opts.period) ? opts.period : '') || defaultPeriod(rec),
+              collection: opts.collection || null, recPeriod: rec.period || '', guided: [], history: [] };
+  // the newest download before this run: a wrong-period file must be one THIS run downloaded (v0.7)
+  run.dlMark = ((await chrome.downloads.search({ orderBy: ['-startTime'], limit: 1 }).catch(function () { return []; }))[0] || {}).id || 0;
+  logRun(run, 'start "' + rec.name + '" (' + rec.steps.length + ' steps)' + (run.scheduled ? ' [scheduled]' : '') + (run.imported ? ' [imported recipe]' : '')
+              + (run.collection ? ' [collection, ' + run.period + ']' : ''));
   if (!actionCount(rec)) logRun(run, 'note: this recording has no clicks or typing, only page addresses; nothing will be done on the page');
+  var nt = Object.keys(rec.tpl || {}).filter(function (k) { return rec.tpl[k].on !== false; }).length;
+  if (nt) logRun(run, 'period ' + PD.label(run.period) + ': ' + nt + ' templated field' + (nt === 1 ? '' : 's') + ' (recorded for ' + PD.label(rec.period)
+                      + ') replayed with ' + PD.label(run.period) + (run.collection ? ' (the collection\'s period)' : opts.period ? ' (chosen for this run)'
+                      : ' (' + (rec.periodMode === 'this' ? 'this' : 'previous') + ' month)'));
   await saveRun(run);
   drive(run.id);
   return run;
+}
+
+// ---- v0.10 self-healing steps: locate with the step's learned alternates (lib/heal.js) ------------------------------
+/** a locate result that names the step's control: confident, or identical copies one per row (pickRow decides). */
+function located(res) { return !!res && (res.status === 'found' || (res.twins || []).length >= 2); }
+/** an alternate learned in one month names that month as {{tokens}}: this run's period goes back in. */
+function periodLoc(loc, period) {
+  var out = {};
+  Object.keys(loc || {}).forEach(function (k) {
+    var v = loc[k];
+    out[k] = typeof v === 'string' ? PD.substitute(v, period) : Array.isArray(v) ? v.map(function (x) { return typeof x === 'string' ? PD.substitute(x, period) : x; }) : v;
+  });
+  return out;
+}
+/** the step's control: its candidates in AWOSHeal order, the first one found wins. A step without alternates is
+ *  located exactly as before. run.heal[i] = {used, source, tried: [{key, found}]} (the last locate of the step counts;
+ *  learnFromRun turns it into AWOSHeal.outcome calls). Nothing found -> the recorded control's result. */
+async function locateHealed(run, base, step, i, timeoutMs) {
+  var bs = base.steps[i] || {};
+  if (!(bs.alternates || []).length) {         // as before; the recorded control's misses are counted (demotion needs both)
+    var r0 = await sendRetry(run.tabId, { type: 'locate', step: step, timeoutMs: timeoutMs });
+    (run.heal = run.heal || {})[i] = { used: located(r0) ? 'primary' : '', source: 'primary', tried: [{ key: 'primary', found: located(r0) }] };
+    return r0;
+  }
+  var cands = HL.candidates({ loc: step.loc, alternates: bs.alternates, primaryFails: bs.primaryFails });
+  var tried = [], primaryAt = -1;
+  for (var k = 0; k < cands.length; k++) {
+    var c = cands[k], st = c.source === 'primary' ? step : Object.assign({}, step, { loc: periodLoc(c.loc, run.period) });
+    var res = await sendRetry(run.tabId, { type: 'locate', step: st, timeoutMs: k === 0 ? timeoutMs : Math.min(timeoutMs || 1500, 1500) });
+    var ok = located(res);
+    tried.push({ key: c.key, found: ok });
+    if (c.source === 'primary') primaryAt = k;
+    if (ok) {
+      (run.heal = run.heal || {})[i] = { used: c.key, source: c.source, tried: tried };
+      if (c.source === 'alternate') {
+        var alt = bs.alternates.filter(function (a) { return a.key === c.key; })[0];
+        logRun(run, 'step ' + (i + 1) + ': ' + (primaryAt >= 0 ? 'the recorded control was not found; ' : '') + 'used a learned fix: '
+                    + HL.describeHeal({ alternates: [alt] }, i));
+      }
+      return res;
+    }
+  }
+  (run.heal = run.heal || {})[i] = { used: '', source: '', tried: tried };
+  // nothing found: the recorded control's own scan again (no scroll search: that ran already), for the pop-up pass,
+  // the goal-guided model and the messages, which all speak about the recorded step
+  var rf = await sendRetry(run.tabId, { type: 'locate', step: step, timeoutMs: 1, noScroll: true });
+  // the page settled after the candidate loop and the recorded control is there now: the recording worked (it is
+  // not a miss of the primary, which would count toward demoting it)
+  if (located(rf)) run.heal[i] = { used: 'primary', source: 'primary', tried: tried.filter(function (t) { return t.key !== 'primary'; }).concat([{ key: 'primary', found: true }]) };
+  return rf;
 }
 
 var driving = null;           // run id currently inside drive(); one driver at a time
@@ -201,10 +524,12 @@ async function drive(runId) {
 async function driveInner(runId) {
   var run = await getSess('run');
   if (!run || run.id !== runId || run.status !== 'running') return;
-  var rec = await getRec(run.recId);
-  if (!rec) return fail(run, 'ERROR', 'the recording was deleted');
-  var cfg = await brainSettings();
+  var base = await getRec(run.recId);
+  if (!base) return fail(run, 'ERROR', 'the recording was deleted');
+  var rec = PD.view(base, run.period);          // v0.7: the recipe with this run's period substituted
+  var cfg = await lockedBrain(run, rec);
   var strict = run.scheduled || !!rec.imported;      // nobody watching / someone else's recipe: stricter gate vocabulary
+  run.done = run.done || {}; run.unblocked = run.unblocked || {};
   while (run.i < rec.steps.length) {
     var i = run.i;
     var missing = missingParams(rec, rec.steps[i], run.params);
@@ -232,22 +557,130 @@ async function driveInner(runId) {
       }
       logRun(run, 'goto ' + step.url);
       await chrome.tabs.update(run.tabId, { url: step.url });
-      await sleep(150); await waitForLoad(run.tabId); await ensureContent(run.tabId, step.url);
-      run.i++; run.approval = null; await saveRun(run); continue;
+      await sleep(150); await waitForLoad(run.tabId);
+      try { await ensureContent(run.tabId, step.url, 4000); }
+      catch (e) {                       // the site redirected (an expired session sends you to its login page)
+        var landed = (await chrome.tabs.get(run.tabId).catch(function () { return {}; })).url || '';
+        if (!landed || sameUrl(landed, step.url)) throw e;
+        await ensureContent(run.tabId);
+        logRun(run, 'the site redirected to ' + R.stripUrl(landed));
+      }
+      run.resume = null;                // a goto puts the run where it should be by itself
+      (run.history = run.history || []).push('opened ' + R.stripUrl(step.url));
+      run.done[i] = true; run.i++; run.approval = null; await saveRun(run); continue;
     }
     await waitForLoad(run.tabId); await ensureContent(run.tabId);
+    // handoff (v0.6): after a Continue, first get back to this step's page; then is a human needed here?
+    var again = !!run.resume && !run.resume.auto;
+    if (run.resume) await resumeAfterHandoff(run, rec, step, i);
+    var hk = await handoffNeeded(run, step, i);
+    // v0.6.1: on a login page, tick "remember me", and sign in once if Chrome autofilled both fields; else hand off
+    if (hk && hk.kind === 'login' && await assistLogin(run, i)) continue;
+    if (hk) return pause(run, 'needs_user', handoffPending(hk, i, again));
     if (step.action === 'fill' && (step.ask || S.isPlaceholder(step.value))) {
-      if (run.userDone[i]) { logRun(run, 'user typed ' + (step.sensitive ? step.value : 'the value') + ' themselves'); run.i++; await saveRun(run); continue; }
+      if (run.userDone[i]) { logRun(run, 'user typed ' + (step.sensitive ? step.value : 'the value') + ' themselves'); run.done[i] = true; run.i++; await saveRun(run); continue; }
       return pause(run, 'needs_user', { message: 'Type the ' + (step.sensitive || (step.ask ? 'value' : 'secret')) + ' for "' + (step.loc.name || step.loc.label || 'this field')
         + '" yourself, then press Continue. AWOS never stores it.' });
     }
-    var loc = await sendRetry(run.tabId, { type: 'locate', step: step, timeoutMs: cfg.findTimeoutMs });
-    var index = -1, how = '';
+    if (downloadStep(step) && !step.navigates) {          // its file already arrived in this run: never download it twice
+      var dup = await alreadyDownloaded(run, rec, step);
+      if (dup) {
+        logRun(run, 'step ' + (i + 1) + ': ' + dup + ' was already downloaded in this run; skipped (not downloaded again)');
+        run.done[i] = true; run.i++; run.approval = null; await saveRun(run); continue;
+      }
+    }
+    var dBefore = step.action === 'click' || step.action === 'press' ? await openTitles(run) : [];   // v0.9.1: windows already open
+    var loc = await locateHealed(run, base, step, i, cfg.findTimeoutMs);
     if (loc.scrolled) logRun(run, 'scrolled ' + loc.scrolled.steps + ' step(s) looking for a lazy-loaded target (' + loc.scrolled.ms + ' ms, '
                                  + (loc.status === 'found' ? 'found' : 'not found') + ')');
-    if (loc.status === 'found') {
-      index = loc.index; how = 'score ' + loc.score + ' (margin ' + loc.margin + ')' + (loc.dupes ? ' [' + (loc.dupes + 1) + ' identical copies, picked by position]' : '');
+    // pop-ups (v0.6): a target that is not found, or is drawn under an overlay, gets one unblock pass + one retry
+    if ((loc.covered || loc.status !== 'found' || run.forceUnblock === i) && !run.unblocked[i]) {
+      run.unblocked[i] = true; run.forceUnblock = null;
+      // v0.9.1: the app's own windows are never closed: the one this step was recorded in, one holding its control,
+      // one an earlier step of this run opened, or one with the app's tabs / menus (lib/portal.js appDialogWhy)
+      var keep = { name: step.loc.name || step.loc.text || '', role: step.loc.role || '', dialog: step.dialog || (rec.steps[0] || {}).dialog || null, own: run.ownDialogs || [], covered: !!loc.covered };
+      var ub = await sendRetry(run.tabId, { type: 'unblock', keep: keep }, 2).catch(function () { return null; });
+      if (ub && ub.blocked) ub.blocked.keep = keep;
+      (ub && ub.kept || []).forEach(function (k) {
+        logRun(run, 'step ' + (i + 1) + ': kept the "' + k.title + '" window open (' + k.why + '); it is part of the app, not a pop-up');
+      });
+      if (ub && ub.dismissed && ub.dismissed.length) {
+        ub.dismissed.forEach(function (d) {
+          logRun(run, 'step ' + (i + 1) + ': dismissed a ' + (d.kind === 'consent' ? 'cookie / consent banner' : 'pop-up') + ' ("' + d.text.slice(0, 60) + '") with "' + d.name + '"');
+          (run.dismissed = run.dismissed || []).push({ step: i, kind: d.kind, control: d.name });
+        });
+        await saveRun(run);
+        await sleep(300); await waitQuiet(run.tabId, 1500);
+        loc = await locateHealed(run, base, step, i, cfg.findTimeoutMs);
+        logRun(run, 'step ' + (i + 1) + ': retried after the dismissal: ' + (loc.status === 'found' && !loc.covered ? 'found' : loc.status + (loc.covered ? ', still covered' : '')));
+      }
+      if (ub && ub.blocked && (loc.covered || loc.status !== 'found')) {
+        // v0.9: a pop-up the known rules cannot close is read by the agent brain (popupRead, guided.js)
+        var pr = await popupRead(run, base, ub.blocked, i);
+        if (pr.closed) {
+          await sleep(300); await waitQuiet(run.tabId, 1500);
+          loc = await locateHealed(run, base, step, i, cfg.findTimeoutMs);
+          logRun(run, 'step ' + (i + 1) + ': retried after closing the pop-up: ' + (loc.status === 'found' && !loc.covered ? 'found' : loc.status + (loc.covered ? ', still covered' : '')));
+        } else {
+          var b = ub.blocked, what = b.kind === 'consent' ? 'cookie / consent banner' : 'pop-up';
+          var dec = pr.verdict === 'NEEDS_DECISION', ttl = String(b.title || b.text).slice(0, 80);
+          return pause(run, 'needs_user', { popup: b.kind, decision: { verdict: pr.verdict || 'UNKNOWN', title: ttl, reason: pr.reason || '' },
+            message: 'Step ' + (i + 1) + ': ' + (dec ? 'a pop-up needs your decision: "' + ttl + '"' : 'a ' + what + ' ("' + ttl + '") is in the way')
+              + '. AWOS never accepts, agrees or decides for you; it only clicks close / not now' + (b.kind === 'consent' ? ' / reject' : '') + ' on these'
+              + (b.controls.length ? ', and this one only offers: ' + b.controls.join(', ') : '')
+              + '. Deal with it yourself in this tab, then press Continue (or Stop).' });
+        }
+      }
     }
+    var index = -1, how = '', ge = null, gWhy = '';
+    var gEl = guidedEligible(base, i), gp = run.guidedPending && run.guidedPending.step === i ? run.guidedPending : null;
+    var pr0 = !gp && !loc.covered ? pickRow(run, base, i, loc) : null;     // v0.9.1: identical controls, one per list row
+    if (pr0 && pr0.index != null) {
+      var twin = (loc.shortlist.find(function (c) { return c.index === pr0.index; }) || {}).desc;
+      loc.status = 'found'; loc.index = pr0.index; loc.rowPick = pr0.how;
+      if (!twin) loc.shortlist.push({ index: pr0.index, score: loc.score, desc: { name: step.loc.name || '', role: step.loc.role || '' } });
+      logRun(run, 'step ' + (i + 1) + ': picked ' + pr0.how);
+    }
+    if (gp) gWhy = 'resume';                                      // approved model decision: no new model call
+    else if (pr0 && pr0.none) gWhy = 'which row: ' + pr0.none;
+    else if (loc.status === 'found') {
+      index = loc.index; how = loc.rowPick ? 'row: ' + loc.rowPick : 'score ' + loc.score + ' (margin ' + loc.margin + ')' + (loc.dupes ? ' [' + (loc.dupes + 1) + ' identical copies, picked by position]' : '');
+      if (gEl.templated && !loc.rowPick) {   // found, but does it name THIS run's period (not the recorded one)? (a picked row did)
+        var fd = (loc.shortlist.find(function (c) { return c.index === loc.index; }) || {}).desc || {};
+        var cc = PD.consistent(base.tpl, i, fd, run.period);
+        if (!cc.ok) gWhy = 'the best match "' + (fd.name || fd.text || '') + '" does not name ' + PD.label(run.period) + ' (' + cc.why.join('; ') + ')';
+      }
+    }
+    else if (gEl.any) gWhy = 'no confident match for "' + (step.loc.name || step.loc.text || step.loc.css || '') + '" (' + loc.status + ', best ' + loc.score + ')';
+    if (gWhy) {
+      if (run.heal && run.heal[i]) run.heal[i].overridden = true;     // v0.10: the control found was not the one used
+      var gd = gp || await guidedDecide(run, base, rec, step, i, gWhy);
+      if (!gd) return;                                           // ended (missing / failed) inside
+      ge = await guidedExecute(run, step, i, gd);
+      if (!ge) return;                                           // paused for approval or failed inside
+      // v0.9.1: was that the step, or a move toward its control (open the menu / window / tab it was in)?
+      if (await guidedOutcome(run, base, step, i, gd, ge) === 'nav') {
+        run.guidedNav = run.guidedNav || {};
+        var nn = run.guidedNav[i] = (run.guidedNav[i] || 0) + 1;
+        var lastG = (run.guided || [])[run.guided.length - 1];
+        if (lastG) lastG.nav = true;
+        (run.history = run.history || []).push('clicked "' + (ge.cand.name || '') + '" (a move toward this step\'s control)');
+        (run.actions = run.actions || []).push({ action: 'click(' + (ge.index + 1) + ')', control: (ge.cand.role || '') + ' ' + JSON.stringify(ge.cand.name || '') });
+        await sleep(300); await waitQuiet(run.tabId, 1500);
+        await noteDialogs(run, dBefore);
+        if (nn >= GUIDED_NAV) {
+          var stillLoc = await locateHealed(run, base, step, i, cfg.findTimeoutMs);
+          if (stillLoc.status !== 'found') {
+            return fail(run, 'NOT_FOUND', 'step ' + (i + 1) + ': the model made ' + nn + ' moves toward "' + (step.loc.name || step.loc.text || '') + '" without reaching it (the cap per step).' + expectNote(base, run));
+          }
+        }
+        logRun(run, 'step ' + (i + 1) + ': that was a move toward the step (' + nn + ' of ' + GUIDED_NAV + '); looking for "' + (step.loc.name || step.loc.text || '') + '" again');
+        await saveRun(run);
+        continue;
+      }
+      index = ge.index; how = ge.how;
+    }
+    else if (loc.status === 'found') { /* confident, period-consistent */ }
     else if (!loc.shortlist.length) {
       return fail(run, 'NOT_FOUND', 'step ' + (i + 1) + ': nothing on the page resembles "' + (step.loc.name || step.loc.css) + '"');
     } else {
@@ -261,7 +694,10 @@ async function driveInner(runId) {
       if (ans.notFound) return fail(run, 'NOT_FOUND', 'step ' + (i + 1) + ': local model says the control "' + (step.loc.name || '') + '" is gone');
       index = loc.shortlist[ans.choice].index; how = 'model pick #' + (ans.choice + 1) + ' (score ' + loc.shortlist[ans.choice].score + ')';
     }
-    var cand = (loc.shortlist.find(function (c) { return c.index === index; }) || {}).desc || {};
+    var cand, urlBefore, tabsBefore;
+    if (ge) { cand = ge.cand; urlBefore = ge.urlBefore; tabsBefore = ge.tabsBefore; }
+    else {
+    cand = (loc.shortlist.find(function (c) { return c.index === index; }) || {}).desc || {};
     // the same expression names the target when pausing and when checking the approval,
     // so an approved target whose live name is empty (icon-only button) does not re-pause forever.
     var target = cand.name || step.loc.name || step.loc.label || step.loc.css || '';
@@ -274,14 +710,29 @@ async function driveInner(runId) {
           message: 'Step ' + (i + 1) + ' will ' + verb + ' "' + target + '" (matches "' + danger + '"). Approve to continue.' });
       }
     }
-    var urlBefore = ((await chrome.tabs.get(run.tabId).catch(function () { return {}; })).url) || '';
-    var r = await sendTab(run.tabId, { type: 'act', step: step, index: index, approved: ok, strict: strict });
+    urlBefore = ((await chrome.tabs.get(run.tabId).catch(function () { return {}; })).url) || '';
+    tabsBefore = step.action === 'click' ? (await chrome.tabs.query({}).catch(function () { return []; })).map(function (t) { return t.id; }) : null;
+    var r = await sendTab(run.tabId, { type: 'act', step: step, index: index, approved: ok, strict: strict, usableMs: usableMs(cfg) });
+    if (r && r.waited) noteWait(run, i, target, r.waited);
     if (!r || !r.ok) {
       if (r && r.needsApproval) return pause(run, 'awaiting_approval', { danger: r.danger, target: target,
         message: 'Step ' + (i + 1) + ' will ' + verb + ' "' + target + '" (matches "' + r.danger + '"). Approve to continue.' });
+      if (r && r.unusable) {             // v0.9: never became usable: one pop-up pass + retry, then the user
+        run.unusable = run.unusable || {};
+        if (!run.unusable[i]) {
+          run.unusable[i] = true; delete run.unblocked[i]; run.forceUnblock = i;
+          logRun(run, 'step ' + (i + 1) + ': "' + target + '" was still ' + r.unusable + ' after ' + fmtMs(r.waited.ms) + '; checking for a pop-up and trying again');
+          await saveRun(run); continue;
+        }
+        return pause(run, 'needs_user', { unusable: r.unusable, message: 'Step ' + (i + 1) + ': "' + target + '" stays ' + r.unusable + ' (waited ' + fmtMs(r.waited.ms)
+          + ' twice). Make it usable in this tab (or wait for the page), then press Continue; AWOS tries the step again.' });
+      }
       return fail(run, 'ERROR', 'step ' + (i + 1) + ': ' + (r ? r.error : 'no reply'));
     }
+    }
     run.resolved.push({ step: i, how: how, name: cand.name || '' });
+    (run.history = run.history || []).push((step.action === 'press' ? 'pressed Enter in' : step.action === 'fill' ? 'typed into' : step.action === 'select' ? 'chose in' : 'clicked')
+                                            + ' "' + (cand.name || step.loc.name || '') + '"');
     // the verifier's action list, in the agent's own syntax (verifier_data.action_list)
     var q = function (v) { return JSON.stringify(String(v == null ? '' : v)); };
     var an = step.action === 'fill' ? 'fill(' + (index + 1) + ', ' + (step.sensitive || step.ask || S.isPlaceholder(step.value) ? '{secret}' : q(step.value)) + ')'
@@ -290,15 +741,230 @@ async function driveInner(runId) {
       : 'click(' + (index + 1) + ')';
     (run.actions = run.actions || []).push({ action: an, control: (cand.role || step.loc.role || '') + ' ' + q(cand.name || step.loc.name || '') });
     logRun(run, (step.action === 'press' ? 'press Enter in' : step.action) + ' "' + (cand.name || '') + '" via ' + how);
-    run.i++; run.approval = null; await saveRun(run);
+    run.done[i] = true; run.i++; run.approval = null; await saveRun(run);
     if (step.action === 'click' || step.action === 'press') {
       if (step.navigates) {
         var nav = await settleNavigation(run.tabId, urlBefore, 3000);
         logRun(run, nav.changed ? 'page changed to ' + R.stripUrl(nav.url) + ' (' + nav.ms + ' ms)' : 'recorded as navigating, but the address did not change within 3 s');
       } else { await sleep(400); await waitForLoad(run.tabId); }
     }
+    if (ge && !step.navigates) await waitQuiet(run.tabId, 1000);     // a model-chosen control may navigate though the recorded one did not
+    if (step.action === 'click' || step.action === 'press') await noteDialogs(run, dBefore);
+    if (tabsBefore) {                 // new-tab files (v0.6): did this click open a tab on a PDF / CSV / ...?
+      var nt = await newTabFrom(run.tabId, tabsBefore, step.opensTab ? 5000 : 0);
+      if (nt != null) {
+        var ft = await handleNewTab(run, nt, i);
+        await saveRun(run);
+        if (ft && ft.pause) return pause(run, 'awaiting_approval', ft.pause);
+      }
+    }
   }
   await finish(run, rec);
+}
+
+/** v0.9.1: windows (dialogs) open after a step of this run: the run opened them, so no pop-up pass closes them. */
+async function openTitles(run) {
+  var od = await sendTab(run.tabId, { type: 'open_dialogs' }).catch(function () { return null; });
+  return (od && od.titles) || [];
+}
+/** only windows that were NOT open before the step (`before`) count as opened by it (a pop-up already there does not). */
+async function noteDialogs(run, before) {
+  var own = run.ownDialogs = run.ownDialogs || [];
+  (await openTitles(run)).forEach(function (t) { if ((before || []).indexOf(t) < 0 && own.indexOf(t) < 0 && own.length < 10) own.push(t); });
+}
+
+// ---- handoff: a human is needed (login again, one-time code, bot check) (v0.6) ----------------------------
+var HANDOFF_ASK = { login: 'Log in', otp: 'Enter the code', captcha: 'Solve the check' };
+/** the page kind when a human is needed before step i, else null. A bot check always needs one (AWOS never touches
+ *  it); a login / one-time-code page only when the recording was not on that page for this step. */
+async function handoffNeeded(run, step, i) {
+  var pk = await sendRetry(run.tabId, { type: 'page_kind' }, 2).catch(function () { return null; });
+  if (!pk || !pk.kind) return null;
+  if (pk.kind === 'captcha') {
+    var ack = run.handoffAck;
+    return ack && ack.step === i && samePage(ack.url, pk.url) ? null : pk;
+  }
+  var expected = step.url ? samePage(pk.url, step.url) : (step.action === 'fill' && (!!step.sensitive || S.isPlaceholder(step.value)));
+  return expected ? null : pk;
+}
+function handoffPending(pk, i, again) {
+  var what = pk.kind === 'captcha' ? 'shows a bot check (' + pk.why + '). AWOS never solves or skips these.'
+    : pk.kind === 'otp' ? 'asks for a one-time code (' + pk.why + ').'
+    : 'asks you to log in (' + pk.why + ').';
+  return { handoff: pk.kind, url: R.stripUrl(pk.url),
+    message: (again ? 'Still waiting: ' : '') + 'Step ' + (i + 1) + ': the site ' + what + ' ' + HANDOFF_ASK[pk.kind]
+      + ' in this tab, then click Continue. AWOS picks up at step ' + (i + 1) + ' without redoing earlier steps or downloads.' };
+}
+/** login helpers on a page the user is about to log in on (v0.6.1). Ticks a "remember me" style checkbox (Option
+ *  rememberMe, default on) and, when Chrome has autofilled both the username and the password (Option autofillSignin,
+ *  default on), clicks the form's sign-in button once. The password is never read, typed, stored or logged: the page
+ *  script only checks the fields' :autofill state. -> {ticked, clicked, why} */
+async function assistTab(tabId, cfg, tries) {
+  var out = { ticked: '', clicked: '', why: '' };
+  if (cfg.rememberMe !== false && !tries.remember) {
+    tries.remember = true;
+    var rm = await sendTab(tabId, { type: 'remember_me' }).catch(function () { return null; });
+    if (rm && rm.ticked) out.ticked = rm.ticked;
+  }
+  if (cfg.autofillSignin !== false && !tries.autofill) {
+    tries.autofill = true;
+    var hook = !!(await getSess('testAutofillHook'));           // tests only: set from the worker, pages cannot reach it
+    var af = await sendTab(tabId, { type: 'autofill_signin', testHook: hook }).catch(function () { return null; });
+    out.clicked = (af && af.clicked) || ''; out.why = af ? af.why : 'the page did not answer';
+  }
+  return out;
+}
+/** a login handoff before step i: true when Chrome's autofill signed in (the loop then re-observes the page, as after
+ *  the user's Continue), false when the run must pause for the user. Each helper runs once per step. */
+async function assistLogin(run, i) {
+  var cfg = await settings();
+  run.loginTries = run.loginTries || {};
+  var tries = run.loginTries[i] = run.loginTries[i] || {};
+  if (tries.remember && tries.autofill) return false;
+  var urlBefore = ((await chrome.tabs.get(run.tabId).catch(function () { return {}; })).url) || '';
+  var r = await assistTab(run.tabId, cfg, tries);
+  if (r.ticked) logRun(run, 'step ' + (i + 1) + ': ticked "' + r.ticked + '" on the login page, so the portal keeps you signed in longer (Options can turn this off)');
+  if (cfg.autofillSignin !== false && !r.clicked && r.why) logRun(run, 'step ' + (i + 1) + ': not signing in with Chrome\'s saved password: ' + r.why);
+  if (!r.clicked) { await saveRun(run); return false; }
+  logRun(run, 'step ' + (i + 1) + ': ' + r.why + '; clicked "' + r.clicked + '" once (AWOS never read, typed or stored the password)');
+  run.resume = { step: i, kind: 'login', auto: true };
+  await saveRun(run);
+  try { await settleNavigation(run.tabId, urlBefore, 5000); } catch (e) { /* the loop's own checks follow */ }
+  return true;
+}
+/** after the user's Continue: if the tab is not on step i's recorded page (a re-login lands on a dashboard), go back
+ *  to it. Steps before i are done (run.done) and are not repeated. */
+async function resumeAfterHandoff(run, rec, step, i) {
+  var rs = run.resume; run.resume = null;
+  var pk = await sendRetry(run.tabId, { type: 'page_kind' }, 2).catch(function () { return {}; });
+  if (rs.kind === 'captcha' && pk.kind === 'captcha' && step.url && samePage(pk.url, step.url)) {
+    // the check is part of the very page this step was recorded on (a solved widget stays on a form): go on
+    run.handoffAck = { step: i, url: pk.url };
+    logRun(run, 'continuing on the page with the check as you said it is done; AWOS did not touch the check');
+    return;
+  }
+  var tab = await chrome.tabs.get(run.tabId).catch(function () { return {}; });
+  var doneN = Object.keys(run.done || {}).length;
+  if (!step.url || samePage(tab.url || '', step.url)) { logRun(run, 'after the handoff the tab is on step ' + (i + 1) + "'s page; continuing"); return; }
+  var d = S.urlDanger(step.url);
+  if (d || (rec.imported && !siteAllowed(rec, step.url))) { logRun(run, 'not reopening ' + R.stripUrl(step.url) + (d ? ' (matches "' + d + '")' : ' (another site)')); return; }
+  logRun(run, 'after the handoff the tab is on ' + R.stripUrl(tab.url || '') + '; going back to ' + R.stripUrl(step.url) + ' for step ' + (i + 1)
+              + ' (' + doneN + ' step(s) already done are not repeated)');
+  await chrome.tabs.update(run.tabId, { url: step.url });
+  await sleep(150); await waitForLoad(run.tabId); await ensureContent(run.tabId); await waitQuiet(run.tabId, 1500);
+}
+
+// ---- downloads: never twice in one run; files that open in a new tab (v0.6) -------------------------------
+function urlPath(u) { try { return new URL(u).pathname; } catch (e) { return ''; } }
+/** a click that downloads: recorded as such, or a link to a file. */
+function downloadStep(step) { return !!step && step.action === 'click' && (!!step.download || FILE_EXT.test((step.loc && step.loc.href) || '')); }
+/** chrome renames a repeat "statement (1).pdf": the same file for this check. */
+function sameFile(a, b) {
+  var f = function (s) { return String(s || '').toLowerCase().replace(/ \(\d+\)(?=\.[^.]*$|$)/, ''); };
+  return !!a && !!b && f(a) === f(b);
+}
+/** the name of a download completed in this run that this step would trigger again, else ''. Matched by the link's
+ *  file path when it names a file, else by the recorded download name; only when that key is unique in the recipe
+ *  (two "statement.pdf" links on two accounts are two files). */
+async function alreadyDownloaded(run, rec, step) {
+  var href = (step.loc && step.loc.href) || '', name = (step.download && step.download.name) || '';
+  var byHref = FILE_EXT.test(href);
+  if (!byHref && !name) return '';
+  var twins = rec.steps.filter(function (s) {
+    return downloadStep(s) && (byHref ? (s.loc && s.loc.href) === href : !!(s.download && sameFile(s.download.name, name)));
+  }).length;
+  if (twins > 1) return '';
+  var items = await chrome.downloads.search({ startedAfter: new Date(run.startedAt - 1000).toISOString() }).catch(function () { return []; });
+  var hit = items.find(function (d) {
+    if (d.state !== 'complete') return false;
+    if (byHref) return urlPath(d.url) === href || urlPath(d.finalUrl || '') === href;
+    return downloadNames(d).some(function (n) { return sameFile(n, name); });
+  });
+  return hit ? (fileName(hit) || 'the file') : '';
+}
+/** a tab opened from `opener` that was not there before the click (waits up to waitMs for it). */
+async function newTabFrom(opener, before, waitMs) {
+  var end = Date.now() + (waitMs || 0);
+  for (;;) {
+    var ts = await chrome.tabs.query({}).catch(function () { return []; });
+    var t = ts.find(function (x) { return x.openerTabId === opener && before.indexOf(x.id) < 0; });
+    if (t) return t.id;
+    if (Date.now() >= end) return null;
+    await sleep(200);
+  }
+}
+/** a file opened in a new tab: by its extension, else by the document type the page script reports. */
+async function fileKind(tabId, url, t) {
+  if (FILE_EXT.test(urlPath(url))) return 'file';
+  for (var k = 0; k < 2; k++) {
+    try {
+      var r = await sendTab(tabId, { type: 'ping' });
+      if (r) return r.contentType && !/html|xml|svg/i.test(r.contentType) ? r.contentType : '';
+    } catch (e) { /* no page script: a built-in viewer (PDF) runs none */ }
+    await sleep(800);
+  }
+  return FILE_EXT.test((t && t.title) || '') ? 'viewer' : '';
+}
+/** same origin as the portal page, or HTTPS on the same site (files.portal.example from portal.example). */
+function autoDownloadOk(url, from) {
+  var a, b; try { a = new URL(url); b = new URL(from); } catch (e) { return false; }
+  if (a.origin === b.origin) return true;
+  return a.protocol === 'https:' && !!R.siteOf(url) && R.siteOf(url) === R.siteOf(from);
+}
+async function handleNewTab(run, tabId, i) {
+  var t = null, url = '', end = Date.now() + 8000;
+  while (Date.now() < end) {
+    t = await chrome.tabs.get(tabId).catch(function () { return null; });
+    if (!t) { logRun(run, 'step ' + (i + 1) + ' opened a tab that closed by itself (the browser may have downloaded the file)'); return null; }
+    url = t.url || t.pendingUrl || '';
+    if (/^https?:/.test(url) && t.status === 'complete') break;
+    await sleep(150);
+  }
+  if (!/^https?:/.test(url)) { logRun(run, 'step ' + (i + 1) + ' opened a new tab with no web address; left it open'); return null; }
+  if (!(await fileKind(tabId, url, t))) {
+    var rs = ((await getRec(run.recId)) || { steps: [] }).steps[i] || {};
+    if (rs.followTab) {               // v0.9.1: recorded as the continuation (a hosted invoice page): the run goes on there
+      run.openerTabId = run.openerTabId || run.tabId; run.tabId = tabId;
+      try { await ensureContent(tabId); } catch (e) { /* the next step waits for it */ }
+      logRun(run, 'step ' + (i + 1) + ' opened ' + R.stripUrl(url) + ' in a new tab; the recipe continues in that tab, as recorded');
+      return null;
+    }
+    logRun(run, 'step ' + (i + 1) + ' opened a new tab (' + R.stripUrl(url) + '), not a file; left it open'); return null;
+  }
+  var from = ((await chrome.tabs.get(run.tabId).catch(function () { return {}; })).url) || '';
+  if (!autoDownloadOk(url, from)) {
+    var host = ''; try { host = new URL(url).host; } catch (e) {}
+    return { pause: { fileTab: { tabId: tabId, url: url, step: i }, danger: 'file from another site', target: R.stripUrl(url),
+      message: 'Step ' + (i + 1) + ' opened a file in a new tab from ' + host + ', which is not this portal (or not HTTPS). Approve to download it with your browser, or stop the run.' } };
+  }
+  await downloadFromTab(run, tabId, url, i);
+  return null;
+}
+async function waitDownload(id, ms) {
+  var end = Date.now() + ms, d = null;
+  while (Date.now() < end) {
+    d = (await chrome.downloads.search({ id: id }).catch(function () { return []; }))[0] || null;
+    if (d && d.state !== 'in_progress') return d;
+    await sleep(300);
+  }
+  return d;
+}
+/** download the file the new tab shows (the browser's cookies apply), close the tab, count it for expect_download. */
+async function downloadFromTab(run, tabId, url, i) {
+  var prior = await chrome.downloads.search({ startedAfter: new Date(run.startedAt - 1000).toISOString() }).catch(function () { return []; });
+  var same = prior.find(function (d) { return sameUrl(d.url, url) || sameUrl(d.finalUrl || '', url); }), name;
+  if (same) {
+    name = fileName(same) || urlName(url);
+    logRun(run, 'step ' + (i + 1) + ': the file in the new tab (' + name + ') is already ' + (same.state === 'complete' ? 'downloaded' : 'downloading') + ' in this run; not downloading it again');
+  } else {
+    var id = await chrome.downloads.download({ url: url, conflictAction: 'uniquify' });
+    var d = await waitDownload(id, 30000);
+    name = (d && fileName(d)) || urlName(url);
+    logRun(run, 'step ' + (i + 1) + ' opened ' + name + ' in a new tab: downloaded it with the browser (your login applies)'
+                + (d && d.state === 'complete' ? '' : ' (' + (d ? d.state : 'not started') + ')') + ' and closed the tab');
+  }
+  (run.fileTabs = run.fileTabs || []).push({ step: i, url: R.stripUrl(url), name: name });
+  await chrome.tabs.remove(tabId).catch(function () {});
 }
 
 /** after a click / Enter that navigated when recorded: wait (bounded) for the tab URL to change (a real load or
@@ -324,7 +990,28 @@ async function waitQuiet(tabId, maxMs) {
   catch (e) { return { quiet: false, error: String(e && e.message || e) }; }
 }
 
+/** v0.9 wait-until-usable cap (settings.usableWaitMs, default 8 s, the settle cap style). */
+function usableMs(cfg) { var v = cfg && cfg.usableWaitMs; return v == null ? 8000 : Math.max(0, Math.min(15000, +v || 0)); }
+/** a wait before acting goes to the log and run.timings. */
+function noteWait(run, i, target, w) {
+  (run.timings = run.timings || []).push({ step: i, what: 'wait_usable', ms: w.ms, why: w.why, ok: w.ok !== false });
+  logRun(run, 'step ' + (i + 1) + ': waited ' + fmtMs(w.ms) + ' for "' + target + '" to be usable (' + w.why + ')' + (w.ok === false ? '; still not usable' : ''));
+}
+
 // ---- params / domain lock ------------------------------------------------------------------------------
+var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+/** 'YYYY-MM' of the month `offset` months from the date `t` (local time). */
+function periodOf(t, offset) {
+  var d = new Date(t); d.setDate(1); d.setMonth(d.getMonth() + (offset || 0));
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+/** built-in values for a period: {{year}} 2026, {{month}} 10, {{month_name}} October, {{month_short}} Oct,
+ *  {{quarter}} 4, ... (v0.6 collections; v0.7 lib/period.js). */
+function builtins(period) { return PD.builtins(PD.valid(period) ? period : periodOf(nowMs(), 0)); }
+/** a run's period when nobody chose one: the recipe's mode, previous month by default (v0.7). */
+function defaultPeriod(rec) { return periodOf(nowMs(), rec && rec.periodMode === 'this' ? 0 : -1); }
+/** the run's param values over the built-ins (a recipe's own {{month}} param wins). */
+function runParams(run) { return Object.assign(builtins(run.period), run.params || {}); }
 function cleanParams(rec, given) {
   var out = {};
   (rec.params || []).forEach(function (p) {
@@ -355,10 +1042,14 @@ function approved(run, i, target) { return !!(run.approval && run.approval.step 
 
 async function pause(run, status, pending) {
   run.status = status; run.pending = Object.assign({ nonce: nonce(), step: run.i }, pending);
+  run.pausedAt = Date.now();                     // v0.8: time waiting for a human does not count as run time
   logRun(run, 'paused: ' + pending.message);
+  if (status === 'needs_user') await captureFailure(run, 'NEEDS_YOU');
   await saveRun(run);
   await sendTab(run.tabId, { type: 'banner', text: pending.message + ' (open the AWOS popup)' }).catch(function () {});
-  if (run.scheduled) notify('awos-run-' + run.id, 'AWOS Replay needs you: ' + run.recName, pending.message + ' Open the AWOS popup.');
+  if (run.scheduled || pending.handoff || pending.decision || run.collection) notify('awos-run-' + run.id, 'AWOS Replay needs you: ' + run.recName, pending.message + ' Open the AWOS popup.');
+  if (run.collection) await collOnPause(run);
+  await phoneOnPause(run).catch(function (e) { console.warn('phone', e); });
 }
 
 async function fail(run, code, reason) {
@@ -383,7 +1074,7 @@ function urlMatches(pattern, url) {
 async function pageChecks(run, rec) {
   await waitForLoad(run.tabId);
   var tab = await chrome.tabs.get(run.tabId), checks = [];
-  var ex = rec.expect || {}, P = run.params || {};
+  var ex = rec.expect || {}, P = runParams(run);
   var urlPat = R.substitute(ex.urlPattern || '', P);
   if (urlPat) checks.push({ kind: 'url', expected: urlPat, actual: tab.url, ok: urlMatches(urlPat, tab.url) });
   var texts = (ex.texts || []).filter(Boolean).map(function (t) { return R.substitute(t, P); });
@@ -412,9 +1103,50 @@ async function finish(run, rec) {
     await sleep(1500); await waitQuiet(run.tabId, 2000);
     pc = await pageChecks(run, rec); checks = pc.checks;
   }
-  if (rec.expectDownload && rec.expectDownload.nameRegex) checks.push(await checkDownload(run, rec.expectDownload.nameRegex));
+  var base = await getRec(run.recId), dx = downloadExpectation(base || rec, run, run.period);
+  if (dx.exact) {
+    var dc = await checkDownload(run, dx.exact);
+    if (!dc.ok && !dc.notDocument && dx.generic) {            // v0.7: a file for another period (the recorded one, an older one) is not Got
+      var wrong = await findDownload(run, dx.generic);
+      if (wrong) { dc.wrongPeriod = true; dc.actual = wrong; }
+    }
+    checks.push(dc);
+  }
   var verdict = !checks.length ? 'UNVERIFIED' : checks.every(function (x) { return x.ok; }) ? 'VERIFIED' : 'FAILED';
   var reason = verdict === 'UNVERIFIED' ? 'no expectations recorded' : '';
+  var wp = checks.find(function (x) { return x.wrongPeriod; });
+  if (wp) {
+    var h0 = PD.periodsIn(wp.actual)[0], wper = h0 ? (h0.period ? PD.label(h0.period) : h0.text) : 'another period';
+    verdict = 'WRONG_PERIOD';
+    reason = 'downloaded ' + wp.actual + ', which is for ' + wper + ', not ' + PD.label(run.period) + ' (expected a file matching ' + wp.expected + ')';
+  }
+  var nd = checks.find(function (x) { return x.notDocument; });
+  if (nd) {                                                // v0.9: an empty file / a saved web page is never Got
+    verdict = 'FAILED';
+    reason = 'Not a document: ' + nd.content.why;
+  }
+  // v0.9.1: a download chore with no download check must not look done when no file arrived
+  var dlGoal = downloadGoal(base || rec);
+  var dlStep = (rec.steps || []).some(function (s) { return s.download || s.opensTab; });
+  if ((dlGoal || dlStep) && !dx.exact && /^(VERIFIED|CHECK)$/.test(verdict)) {
+    var mine = (await chrome.downloads.search({ startedAfter: new Date(run.startedAt - 1000).toISOString() }).catch(function () { return []; }))
+      .filter(function (d) { return d.id > (run.dlMark || 0) && d.state === 'complete' && !ownLog(d); });
+    if (!mine.length) {
+      verdict = 'UNVERIFIED'; run.noFile = true;
+      reason = 'this is a download chore (' + (dlGoal || 'its click downloads a file') + '), but no file was downloaded in this run and no download check is set';
+    } else {
+      // v0.9.2: no file-name pattern was set (e.g. a button that starts the download from a tab that closes itself),
+      // but this run did download a file: count the newest one as the download check (real bytes, not a web page)
+      var got = mine[mine.length - 1], gname = baseName(got.filename) || fileName(got) || '(file)';
+      var real = (got.fileSize || got.totalBytes || got.bytesReceived || 0) > 0 && !/html/i.test(got.mime || '');
+      checks.push({ kind: 'download', implicit: true, expected: 'the file this run downloaded (no name pattern set)', actual: gname, ok: real,
+                    notDocument: !real, content: real ? { state: 'unchecked', why: 'no name pattern set; size and type checked' }
+                                                       : { state: 'bad', why: 'the downloaded file is empty or a web page' } });
+      logRun(run, 'counted the download ' + gname + ' as this run\'s file (no name pattern is set; tip: save the suggested download pattern in Goal + checks)');
+      if (real && verdict === 'CHECK') verdict = 'VERIFIED';
+      if (!real) { verdict = 'FAILED'; reason = 'Not a document: the downloaded file is empty or a web page'; }
+    }
+  }
   var noActions = !actionCount(rec);
   if (noActions && verdict === 'VERIFIED') {               // only reopened a URL: the checks passing is not a chore done
     verdict = 'UNVERIFIED';
@@ -424,10 +1156,10 @@ async function finish(run, rec) {
   // second opinion from the local verifier (G7). It may only DOWNGRADE: a VERIFIED it disagrees with
   // becomes CHECK ("look at this one"); it never turns UNVERIFIED / FAILED into a pass. Its opinion is
   // always recorded (shadow mode for the other verdicts), so exported logs show what it would have caught.
-  var cfg = await brainSettings();
+  var cfg = await lockedBrain(run, rec);
   if (cfg.enabled && cfg.verify !== false) {
     var obs = await sendRetry(run.tabId, { type: 'observe' }).catch(function () { return null; });
-    var P = run.params || {};
+    var P = runParams(run);
     var op = obs ? await M.askVerify(cfg, M.buildVerifyMessages(R.substitute(rec.goal || rec.name, P), (run.actions || []).concat([{ action: 'done("Done.")' }]),
                                                           M.outline(obs, checkEvidence(pc.url, checks)), 'done("Done.")'))
                  : { error: 'could not read the final page' };
@@ -443,20 +1175,47 @@ async function finish(run, rec) {
       reason = 'checks passed, but the local verifier says ' + op.label + ': ' + op.reason;
     }
   }
-  run.status = verdict === 'FAILED' ? 'failed' : 'done';
-  run.result = { verdict: verdict, code: verdict === 'FAILED' ? 'CHECK_FAILED' : noActions ? 'NO_ACTIONS' : '', checks: checks, reason: reason,
-                 noActions: noActions };
+  if (run.noFile && verdict !== 'UNVERIFIED' && verdict !== 'FAILED') { verdict = 'UNVERIFIED'; }
+  var unc = checks.find(function (x) { return x.kind === 'download' && x.ok && x.content && x.content.state === 'unchecked'; });
+  if (unc && /^(VERIFIED|CHECK|UNVERIFIED)$/.test(verdict)) reason = [reason, 'download ' + unc.content.why].filter(Boolean).join('; ');
+  run.status = verdict === 'FAILED' || verdict === 'WRONG_PERIOD' ? 'failed' : 'done';
+  run.result = { verdict: verdict, code: nd ? 'NOT_A_DOCUMENT' : verdict === 'FAILED' ? 'CHECK_FAILED' : verdict === 'WRONG_PERIOD' ? 'WRONG_PERIOD' : noActions ? 'NO_ACTIONS' : '',
+                 checks: checks, reason: reason, noActions: noActions };
+  if (run.collection && /^(VERIFIED|CHECK)$/.test(verdict) && checks.some(function (x) { return x.kind === 'download' && x.ok; })) {
+    await catchUp(run, base || rec).catch(function (e) { logRun(run, 'catch-up stopped: ' + String(e && e.message || e)); });   // v0.9 (guided.js)
+  }
+  offerUpdate(run, base, verdict);
   logRun(run, verdict + ' (' + checks.filter(function (x) { return x.ok; }).length + '/' + checks.length + ' checks)');
   await archive(run);
   await sendTab(run.tabId, { type: 'banner', text: '' }).catch(function () {});
   await afterRun(run);
 }
 
+/** v0.9.1: why this recipe is a download chore ('' = it is not): its goal says download, or its last action clicks a
+ *  download-like control ("Download PDF", "Export CSV"). */
+function downloadGoal(rec) {
+  var g = String((rec && (rec.goal || rec.goalProposed)) || '');
+  if (/\bdownload/i.test(g)) return 'the goal says "download"';
+  var acts = ((rec && rec.steps) || []).filter(function (x) { return x.action !== 'goto'; }), last = acts[acts.length - 1];
+  var n = last && last.action === 'click' && last.loc ? String(last.loc.name || last.loc.text || '') : '';
+  return /\b(download|pdf|csv|xlsx?|export)\b/i.test(n) ? 'the last step clicks "' + n.trim().slice(0, 40) + '"' : '';
+}
+
 // ---- download verification ------------------------------------------------------------------------------
 function baseName(p) { return String(p || '').split(/[\\/]/).pop(); }
 function urlName(u) { try { return decodeURIComponent(new URL(u).pathname.split('/').pop()); } catch (e) { return ''; } }
 /** the names a download can be matched by: the saved file name, else the URL's last path segment. */
-function downloadNames(d) { return [baseName(d.filename), urlName(d.finalUrl || d.url), urlName(d.url)].filter(Boolean); }
+function downloadNames(d) { return [DL_HINTS[d.url] || '', baseName(d.filename), urlName(d.finalUrl || d.url), urlName(d.url)].filter(Boolean); }
+/** v0.9.1: blob: / data: address -> the file name the page gave its <a download> (content.js dl_hint), last 50 */
+var DL_HINTS = {}, DL_HINT_KEYS = [];
+function dlHint(msg) {
+  var href = String(msg.href || ''), name = baseName(String(msg.name || '')).slice(0, 200);
+  if (!/^(blob|data):/i.test(href) || !name) return;
+  if (!(href in DL_HINTS)) { DL_HINT_KEYS.push(href); if (DL_HINT_KEYS.length > 50) delete DL_HINTS[DL_HINT_KEYS.shift()]; }
+  DL_HINTS[href] = name;
+}
+/** the name to show for a download: the first candidate that looks like a file name (a temp name has no extension). */
+function fileName(d) { var ns = downloadNames(d); return ns.find(function (n) { return /\.[a-z0-9]{1,5}$/i.test(n); }) || ns[0] || ''; }
 /** a download whose file name matches `nameRegex` finished since the run started. Waits `graceMs` for one to
  *  appear (the last click may start it a moment later) and up to `waitMs` for one in progress to complete. */
 async function checkDownload(run, nameRegex, waitMs, graceMs) {
@@ -465,9 +1224,18 @@ async function checkDownload(run, nameRegex, waitMs, graceMs) {
   for (;;) {
     var items = await chrome.downloads.search({ startedAfter: new Date(run.startedAt - 1000).toISOString() }).catch(function () { return []; });
     var mine = items.filter(function (d) { return downloadNames(d).some(function (n) { return re.test(n); }); });
+    mine.sort(function (a, b) { return (b.id || 0) - (a.id || 0); });            // the newest first
     var done = mine.find(function (d) { return d.state === 'complete'; });
-    if (done) return { kind: 'download', expected: nameRegex, ok: true, actual: downloadNames(done).find(function (n) { return re.test(n); }) };
-    var going = mine.some(function (d) { return d.state === 'in_progress'; });
+    if (done) {
+      var out = { kind: 'download', expected: nameRegex, ok: true, actual: downloadNames(done).find(function (n) { return re.test(n); }) };
+      var fc = await fileCheck(run, done, out.actual);                          // v0.9: never trust a green run
+      out.content = { state: fc.state, why: fc.why, size: fc.size, mime: fc.mime };
+      if (fc.state === 'bad') { out.ok = false; out.notDocument = true; }
+      logRun(run, 'file check of ' + out.actual + ': ' + (fc.state === 'bad' ? 'NOT a document: ' : '') + fc.why + (fc.size >= 0 ? ' (' + fc.size + ' bytes)' : ''));
+      return out;
+    }
+    // any download of this run still in progress may be the one (its temporary name matches nothing yet)
+    var going = items.some(function (d) { return d.state === 'in_progress'; });
     seen = items.map(function (d) { return downloadNames(d).join(' / ') || '(unnamed)'; }).slice(0, 5).join(', ');
     if ((!going && Date.now() >= grace) || Date.now() >= end) {
       return { kind: 'download', expected: nameRegex, ok: false, actual: going ? 'still downloading' : (seen ? 'other downloads: ' + seen : 'no download') };
@@ -476,11 +1244,199 @@ async function checkDownload(run, nameRegex, waitMs, graceMs) {
   }
 }
 
+// ---- file checks (v0.9, lib/filecheck.js): size, then the first bytes, read again on the portal's own origin ------
+/** -> AWOSFile.classify result for a completed chrome.downloads item. The first 1 KB is re-read by the run tab's
+ *  content script (same origin only, Range request, the portal's cookies); a data: URL is decoded here. */
+async function fileCheck(run, d, name) {
+  name = name || fileName(d);
+  var size = Math.max(d.fileSize == null ? -1 : +d.fileSize, d.bytesReceived == null ? -1 : +d.bytesReceived);
+  var o = { name: name, size: size, mime: d.mime || '' };
+  if (size !== 0) {
+    var url = d.finalUrl || d.url || '';
+    if (/^blob:/i.test(url)) o.peekWhy = 'generated in the page';     // v0.9.1: a blob cannot be read again; size + type only
+    else if (/^data:/i.test(url)) {
+      try {
+        var m = /^data:([^;,]*)(;base64)?,(.*)$/i.exec(url), raw = m[2] ? atob(m[3].slice(0, 1400)) : decodeURIComponent(m[3]).slice(0, 1024);
+        o.head = raw.slice(0, 1024); o.peekType = m[1];
+      } catch (e) { o.peekWhy = 'could not decode the data address'; }
+    } else {
+      var pk = await sendTab(run.tabId, { type: 'peek', url: url }).catch(function (e) { return { ok: false, why: 'the portal page did not answer (' + String(e && e.message || e).slice(0, 60) + ')' }; });
+      if (pk && pk.ok && pk.head != null) { o.head = pk.head; o.peekType = pk.type || ''; }
+      else o.peekWhy = (pk && pk.why) || 'could not read it again';
+    }
+  }
+  return FC.classify(o);
+}
+
 // ---- after a run: last verdict on the recipe, scheduled-run notice --------------------------------------
+// v0.9.5: every finished run saves the run log (the same file as "Export run log") into Downloads/AWOS-Replay-logs/.
+// On by default for a developer (unpacked) install, off for a store install; the setting autoSaveLog overrides.
+var LOG_DIR = 'AWOS-Replay-logs';
+async function autoSaveLog(run) {
+  var cfg = await settings(), on = cfg.autoSaveLog;
+  if (on === undefined) on = (await chrome.management.getSelf().catch(function () { return {}; })).installType === 'development';
+  if (!on) return;
+  var stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+  var v = String(run.result ? run.result.verdict : 'FAILED').toLowerCase();
+  var log = await exportLog();
+  if (await sinkLog(log, v)) return;                // the local log service (scripts/awos_logsink.py) writes it into a folder
+  var url = 'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(log, null, 1));
+  await chrome.downloads.download({ url: url, filename: LOG_DIR + '/runlog-' + stamp + '-' + v + '.json', conflictAction: 'uniquify', saveAs: false });
+}
+// v0.10.1: macOS keeps ~/Downloads away from terminal tools (and Chrome does not write through a symlink there), so a
+// developer runs scripts/awos_logsink.py: a loopback-only service that writes each posted log into the project folder.
+// The setting logSink overrides the address ('' = off; tests use that so they never write into the owner's folder).
+var LOG_SINK = 'http://127.0.0.1:8099/runlog';
+async function sinkLog(log, tag) {
+  var cfg = await settings(), url = cfg.logSink == null ? LOG_SINK : String(cfg.logSink);
+  if (!url || !M.isLoopback(url)) return false;     // loopback only: a run log never leaves this computer
+  var ctl = new AbortController(), timer = setTimeout(function () { ctl.abort(); }, 2500);
+  try {
+    var r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctl.signal,
+                                    body: JSON.stringify(Object.assign({}, log, { tag: tag })) });
+    return r.ok;
+  } catch (e) { return false; } finally { clearTimeout(timer); }
+}
+function ownLog(d) { return !!d && (/^data:application\/json/.test(d.url || '') || /AWOS-Replay-logs[\/\\]runlog-/.test(d.filename || '')); }
+
+// ---- v0.10 learning from the run that just ended (heal, site map, lessons); called by archive() -------------------
+/** an alternate the model found for a period-templated step names this run's month: stored as {{tokens}}. */
+function templLoc(loc, rec, i, period) {
+  if (!PD.stepTemplated(rec.tpl, i)) return loc;
+  var out = {};
+  Object.keys(loc || {}).forEach(function (k) {
+    var v = loc[k];
+    out[k] = typeof v === 'string' && v ? PD.detect(v, period, k === 'href' ? 'url' : 'text').template : v;
+  });
+  return out;
+}
+async function learnFromRun(run) {
+  if (run.learned) return;
+  run.learned = true;
+  var v = run.result ? run.result.verdict : 'FAILED', ok = v === 'VERIFIED', now = Date.now();
+  var base = await getRec(run.recId);
+  if (base) {
+    // the step a run failed AT (its control was not found / did not work); a stop by the user or a restart is not that
+    var code = (run.result && run.result.code) || '';
+    var rec = base, failedAt = run.status === 'failed' && v === 'FAILED' && /^(NOT_FOUND|ERROR)$/.test(code) ? run.i : -1, fixed = [];
+    // 1. every locate: a candidate not found failed now; the one used counts once the run is VERIFIED (or it failed there)
+    Object.keys(run.heal || {}).forEach(function (k) {
+      var h = run.heal[k], i = +k;
+      (h.tried || []).forEach(function (t) { if (!t.found) rec = HL.outcome(rec, i, t.key, false); });
+      if (h.used && !h.overridden) {
+        if (ok) rec = HL.outcome(rec, i, h.used, true);
+        else if (failedAt === i) rec = HL.outcome(rec, i, h.used, false);
+      }
+    });
+    // 2. a step the goal-guided model did (not a move toward it) becomes an alternate of that step, kept by the verdict
+    (run.guided || []).forEach(function (g) {
+      var s = rec.steps[g.step];
+      if (!g.loc || g.nav || !s || !s.loc || !sameKind(s.action, g.verb)) return;
+      var loc = templLoc(g.loc, rec, g.step, run.period);
+      if (HL.keyOf(loc) === HL.keyOf(s.loc)) return;                 // the recorded control itself
+      rec = HL.record(rec, g.step, loc, { by: g.brain === 'claude' ? 'claude' : '4b', runId: run.id, at: now });
+      if (fixed.indexOf(g.step) < 0) fixed.push(g.step);
+    });
+    rec = HL.confirm(rec, run.id, v);
+    fixed.forEach(function (i) {
+      var mine = (rec.steps[i].alternates || []).filter(function (a) { return a.runId === run.id || a.verified; });
+      if (!mine.length) logRun(run, 'step ' + (i + 1) + ': the model\'s control was not kept (the run was ' + v + ')');
+      else logRun(run, 'fixed: ' + HL.describeHeal(rec.steps[i], i) + (ok ? '; the next run tries it before asking the model' : ''));
+    });
+    if (JSON.stringify(rec.steps) !== JSON.stringify(base.steps)) await putRec(rec);
+    // 3. the site map: a VERIFIED path is 'ok'; a failed run's step is 'fail' (its control did not get there)
+    var edges = SM.fromRecording(rec);
+    if (ok && edges.length) await siteMapMerge(edges, 'ok');
+    else if (failedAt >= 0 && rec.steps[failedAt] && rec.steps[failedAt].loc) {
+      var fl = rec.steps[failedAt].loc, nm = SM.clean(fl.name || fl.text || '').toLowerCase();
+      var bad = edges.filter(function (e) { return e.control.role === fl.role && String(e.control.name || '').toLowerCase() === nm; });
+      if (bad.length) await siteMapMerge(bad.slice(0, 1), 'fail');
+    }
+  }
+  // 4. lessons injected into this run's model calls are scored with its verdict; failing ones are switched off. A run
+  // the user stopped / declined or a worker restart says nothing about the lessons (v0.10 review): not scored
+  if ((run.lessonIds || []).length && lessonVerdict(run)) await lessonsScore(run.lessonIds, lessonVerdict(run));
+}
+/** the verdict a replay's lessons are scored with: VERIFIED; FAILED only when the run itself failed (its control
+ *  was not found / did not work, the check failed, the wrong period); '' (not scored) for a user stop, a declined
+ *  approval or a restart; anything else (MISSING, CHECK, UNVERIFIED) scores hits only. */
+function lessonVerdict(run) {
+  var v = run.result ? run.result.verdict : 'FAILED', code = (run.result && run.result.code) || '';
+  if (v === 'VERIFIED') return v;
+  if (/^(INTERRUPTED|REJECTED)$/.test(code)) return '';
+  if (v === 'WRONG_PERIOD' || (v === 'FAILED' && /^(NOT_FOUND|ERROR|CHECK_FAILED|NOT_A_DOCUMENT)$/.test(code))) return 'FAILED';
+  return 'UNVERIFIED';
+}
+/** score + prune the lessons a run / episode was told (verdict: VERIFIED, FAILED, halted, ...). */
+async function lessonsScore(ids, verdict) {
+  var now = Date.now();
+  await setLocal('lessons', LS.prune(LS.score(await getLocal('lessons', []), ids, verdict, now), now));
+}
+/** the remembered rules for a model prompt on this site / state (2 at most) -> {text, ids}. */
+async function lessonsFor(host, stateKey, goal) {
+  if (!host) return { text: '', ids: [] };
+  var items = LS.retrieve(await getLocal('lessons', []), { host: host, stateKey: stateKey || '', goal: goal || '' }, LS.K);
+  return { text: LS.render(items), ids: items.map(function (it) { return it.id; }) };
+}
+
+/** Tell it's lessons hook (tellit.js calls it per step on the v0.10 prompt): the rules for this state; the episode
+ *  remembers which it was told (t.lessonIds), scored when it ends (tellLessonsEnd). */
+async function tellRulesText(t, host, stateKey) {
+  t.lastKey = stateKey || t.lastKey || '';
+  var lz = await lessonsFor(host, stateKey, t.goal);
+  t.lessonIds = t.lessonIds || [];
+  lz.ids.forEach(function (id) { if (t.lessonIds.indexOf(id) < 0) t.lessonIds.push(id); });
+  return lz.text;
+}
+async function tellLessonsEnd(t, verdict) {
+  if (t.lessonsScored || !(t.lessonIds || []).length) return;
+  t.lessonsScored = true;
+  await lessonsScore(t.lessonIds, verdict).catch(function (e) { console.warn('lessons', e); });
+}
+/** a correction the user typed (Tell it, or after a failed replay) -> the "Remember for <site>?" offer (one at a time,
+ *  chrome.storage.session 'lessonOffer'); nothing is kept until the user presses Remember. */
+async function offerLesson(from, text, ctx) {
+  text = String(text || '').trim().slice(0, 300);
+  if (!text || !ctx.host) return null;
+  var o = { nonce: nonce(), from: from, text: text, host: ctx.host, stateKey: ctx.stateKey || '', goal: String(ctx.goal || '').slice(0, 200),
+            runId: ctx.runId || '', at: Date.now(), done: '' };
+  await setSess('lessonOffer', o);
+  return o;
+}
+async function answerLesson(msg) {
+  var o = await getSess('lessonOffer');
+  if (!o || o.nonce !== msg.nonce || o.done) throw new Error('stale or unknown offer');
+  var item = null;
+  if (msg.remember) {
+    item = LS.fromCorrection(o.text, { host: o.host, stateKey: o.stateKey, stateLabel: o.stateKey ? SM.stateLabel(o.stateKey) : '', goal: o.goal, now: Date.now() });
+    if (item) await setLocal('lessons', LS.add(await getLocal('lessons', []), item));
+  }
+  o.done = msg.remember ? (item ? 'remembered' : 'not understood') : 'this run only';
+  await setSess('lessonOffer', o);
+  return { offer: o, lesson: item };
+}
+/** the replay's failing step on its site: host + state key (its window / tab) for a lesson. */
+async function runLessonCtx(run) {
+  var rec = await getRec(run.recId), step = rec ? (rec.steps[run.i] || rec.steps[rec.steps.length - 1] || {}) : {};
+  var url = step.url || (rec && rec.startUrl) || '';
+  return { host: SM.hostOf(url), stateKey: SM.stateKey({ url: url, dialog: step.dialog || null }),
+           goal: rec ? PD.substitute(rec.goal || rec.goalProposed || rec.name || '', run.period) : '', runId: run.id };
+}
+/** a recording / import: what its clicks did goes into the site map as 'seen' (a VERIFIED replay makes it 'ok'). */
+async function siteMapFromRecording(rec, outcome) {
+  var edges = SM.fromRecording(rec);
+  if (edges.length) await siteMapMerge(edges, outcome);
+  var done = await getLocal('siteMapRecs', {}); done[rec.id] = 1; await setLocal('siteMapRecs', done);
+}
+
 async function afterRun(run) {
+  await autoSaveLog(run).catch(function (e) { console.warn('auto log', e); });
   var rec = await getRec(run.recId);
   var v = run.result ? run.result.verdict : 'FAILED';
   if (rec) { rec.lastRun = { verdict: v, at: Date.now(), scheduled: !!run.scheduled, reason: run.result && run.result.reason || '' }; await putRec(rec); }
+  await phoneCheckResolved().catch(function () {});
+  await phoneRunStatus(run).catch(function (e) { console.warn('phone status', e); });
+  if (run.collection) return collAfterRun(run, rec);
   if (!run.scheduled) return;
   notify('awos-run-' + run.id, 'AWOS Replay: ' + run.recName + ' ' + v,
          v === 'VERIFIED' ? 'Done and verified.' : (run.result && run.result.reason) || 'Open the AWOS popup for details.');
@@ -489,14 +1445,25 @@ async function afterRun(run) {
 
 // ---- notifications --------------------------------------------------------------------------------------
 var NOTICES = [];            // the last few notices (tests and the popup read them; nothing else)
-function notify(id, title, message) {
-  NOTICES.unshift({ id: id, title: title, message: message, at: Date.now() }); NOTICES.length = Math.min(NOTICES.length, 20);
+function notify(id, title, message, buttons) {
+  NOTICES.unshift({ id: id, title: title, message: message, at: Date.now(), buttons: (buttons || []).map(function (b) { return b.title; }) });
+  NOTICES.length = Math.min(NOTICES.length, 20);
   try {
-    chrome.notifications.create(id, { type: 'basic', iconUrl: 'icons/icon128.png', title: title, message: String(message).slice(0, 300),
-                                      priority: 2, requireInteraction: /needs you/.test(title) }).catch(function () {});
+    var opt = { type: 'basic', iconUrl: 'icons/icon128.png', title: title, message: String(message).slice(0, 300),
+                priority: 2, requireInteraction: /needs you/.test(title) };
+    if (buttons && buttons.length) opt.buttons = buttons.slice(0, 2);
+    chrome.notifications.create(id, opt).catch(function () {});
   } catch (e) { /* notifications unavailable */ }
 }
+/** a login notice (keep-alive / pre-flight): its button, or a click on it, opens just the portals that need a login. */
+function loginNoticeColl(id) { var m = /^awos-(?:keep|pre)-(.+)$/.exec(id || ''); return m ? m[1] : ''; }
+chrome.notifications.onButtonClicked.addListener(function (id) {
+  var cid = loginNoticeColl(id);
+  if (cid) openLogins(cid).catch(function (e) { console.warn('open logins', e); });
+});
 chrome.notifications.onClicked.addListener(async function (id) {
+  var cid = loginNoticeColl(id);
+  if (cid) return openLogins(cid).catch(function (e) { console.warn('open logins', e); });
   var run = await getSess('run');
   if (run && id === 'awos-run-' + run.id && run.tabId != null) {
     var t = await chrome.tabs.update(run.tabId, { active: true }).catch(function () { return null; });
@@ -506,12 +1473,18 @@ chrome.notifications.onClicked.addListener(async function (id) {
 
 // ---- schedules (chrome.alarms) --------------------------------------------------------------------------
 var ALARM = 'awos-sched:';
-/** next fire time (ms) for {kind:'daily'|'weekly', time:'HH:MM', day:0-6 (weekly, 0 = Sunday)} after `now`. */
+/** next fire time (ms) for {kind:'daily'|'weekly'|'monthly', time:'HH:MM', day:0-6 (weekly, 0 = Sunday),
+ *  date:1-28 (monthly)} after `now`. */
 function nextFire(sc, now) {
   var m = /^(\d{1,2}):(\d{2})$/.exec(String(sc && sc.time || ''));
   if (!m || +m[1] > 23 || +m[2] > 59) return null;
   var d = new Date(now); d.setHours(+m[1], +m[2], 0, 0);
-  if (sc.kind === 'weekly') {
+  if (sc.kind === 'monthly') {
+    var dom = +sc.date;
+    if (!(dom >= 1 && dom <= 28)) return null;
+    d.setDate(dom);
+    if (d.getTime() <= now) d.setMonth(d.getMonth() + 1, dom);
+  } else if (sc.kind === 'weekly') {
     d.setDate(d.getDate() + ((+sc.day - d.getDay() + 7) % 7));
     if (d.getTime() <= now) d.setDate(d.getDate() + 7);
   } else if (d.getTime() <= now) d.setDate(d.getDate() + 1);
@@ -530,6 +1503,14 @@ async function armAll(onlyMissing) {
     if (!recs[id].schedule) continue;
     if (onlyMissing && await chrome.alarms.get(ALARM + id)) continue;
     await armSchedule(recs[id]);
+  }
+  var cols = await getLocal('collections', {});
+  for (var cid in cols) {
+    if (!(onlyMissing && await chrome.alarms.get(KEEP_ALARM + cid))) await armKeepAlive(cols[cid]);
+    if (!cols[cid].schedule) continue;
+    var ca = onlyMissing && await chrome.alarms.get(COLL_ALARM + cid);
+    if (!ca) { await armColl(cols[cid]); continue; }
+    if (!(await chrome.alarms.get(PRE_ALARM + cid))) await armPreflight(cols[cid], ca.scheduledTime);
   }
 }
 /** a scheduled run: its own background tab, last-used param values, every human step pauses + notifies. */
@@ -552,12 +1533,534 @@ async function fireSchedule(recId) {
 }
 chrome.alarms.onAlarm.addListener(function (a) {
   if (a.name.indexOf(ALARM) === 0) fireSchedule(a.name.slice(ALARM.length)).catch(function (e) { console.warn('schedule', e); });
+  else if (a.name.indexOf(COLL_ALARM) === 0) fireColl(a.name.slice(COLL_ALARM.length)).catch(function (e) { console.warn('collection schedule', e); });
+  else if (a.name.indexOf(COLL_WAIT) === 0) collSkip(a.name.slice(COLL_WAIT.length), 'nobody answered in time').catch(function () {});
+  else if (a.name.indexOf(KEEP_ALARM) === 0) keepAliveSweep(a.name.slice(KEEP_ALARM.length)).catch(function (e) { console.warn('keep-alive', e); });
+  else if (a.name.indexOf(PRE_ALARM) === 0) firePreflight(a.name.slice(PRE_ALARM.length)).catch(function (e) { console.warn('pre-flight', e); });
+  else if (a.name.indexOf(LOGIN_POLL) === 0) collNext().catch(function () {});          // backup wake-up while waiting for logins
 });
 chrome.runtime.onStartup.addListener(function () { armAll(true); });
-chrome.runtime.onInstalled.addListener(function () { armAll(true); });
+chrome.runtime.onInstalled.addListener(function (d) {
+  armAll(true);
+  if (d && d.reason === 'chrome_update') return;
+  // v0.9.3: tabs open before an install / reload / update have no live page script: give each one a fresh copy
+  chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] }).then(function (tabs) {
+    tabs.forEach(function (t) { if (!t.discarded) injectContent(t.id); });
+  }).catch(function () {});
+});
+
+// ---- collections: a monthly checklist of portals (v0.6) -------------------------------------------------
+// A collection groups recipes (one portal each, with its expected download). Running it runs them one after another,
+// each in its own background tab, and records per period (YYYY-MM) what happened: got (file name), missing (the
+// portal ran but no matching file), needs_you (a login / code / check / approval nobody answered in time, or the
+// user pressed Skip) or failed (reason). A re-run in the same period skips the portals already got.
+var COLL_ALARM = 'awos-coll-sched:', COLL_WAIT = 'awos-coll-wait:', COLL_STATUS = { got: 1, missing: 1, wrong_period: 1, not_document: 1, needs_you: 1, failed: 1 };
+async function getColl(id) { return (await getLocal('collections', {}))[id] || null; }
+async function periodResults(collId, period) { return ((await getLocal('collResults', {}))[collId] || {})[period] || {}; }
+async function setCollResult(collId, period, recId, val) {
+  var all = await getLocal('collResults', {}), byP = all[collId] = all[collId] || {};
+  (byP[period] = byP[period] || {})[recId] = Object.assign({ at: Date.now() }, val);
+  Object.keys(byP).sort().reverse().slice(24).forEach(function (k) { delete byP[k]; });       // keep two years
+  await setLocal('collResults', all);
+}
+function collSummary(col, res) {
+  var n = { got: 0, missing: 0, wrong_period: 0, not_document: 0, needs_you: 0, failed: 0, notrun: 0 };
+  col.recIds.forEach(function (id) { var r = res[id]; n[r && COLL_STATUS[r.status] ? r.status : 'notrun']++; });
+  var bits = [n.got + ' of ' + col.recIds.length + ' got'];
+  if (n.missing) bits.push(n.missing + ' missing');
+  if (n.wrong_period) bits.push(n.wrong_period + ' wrong period');
+  if (n.not_document) bits.push(n.not_document + ' not a document');
+  if (n.needs_you) bits.push(n.needs_you + (n.needs_you === 1 ? ' needs you' : ' need you'));
+  if (n.failed) bits.push(n.failed + ' failed');
+  if (n.notrun) bits.push(n.notrun + ' not run');
+  return { counts: n, text: bits.join(', ') };
+}
+
+async function collStart(collId, opts) {
+  opts = opts || {};
+  var col = await getColl(collId);
+  if (!col) throw new Error('no such collection');
+  if (!col.recIds.length) throw new Error('this collection has no portals yet');
+  var busy = await busyReason();
+  if (busy) throw new Error(busy);
+  var period = opts.period || periodOf(nowMs(), col.monthOffset || 0);
+  if (!/^\d{4}-\d{2}$/.test(period)) throw new Error('period must be YYYY-MM');
+  var res = await periodResults(collId, period);
+  var queue = col.recIds.filter(function (id) { return !(res[id] && res[id].status === 'got'); });
+  var c = { id: uid('coll'), collId: collId, name: col.name, period: period, queue: queue, idx: 0, status: 'running',
+            scheduled: !!opts.scheduled, startedAt: Date.now(), alreadyGot: col.recIds.length - queue.length, current: null,
+            phase: 'preflight', deferred: {}, needLogin: [] };
+  await setSess('coll', c);
+  collBegin(c.id).catch(function (e) { console.warn('collection', e); });
+  return c;
+}
+
+/** pre-flight at the start of a collection run (v0.6.1): check which portals are logged out (a background tab per
+ *  portal, nothing clicked or typed), send ONE notification naming them with "Open the ones that need me", then run the
+ *  ready portals first; the logged-out ones wait at the end of the queue and are picked up as soon as their login is
+ *  seen (collNext). */
+async function collBegin(cId) {
+  var c = await getSess('coll');
+  if (!c || c.id !== cId || c.status !== 'running' || c.phase !== 'preflight') return;
+  var col = await getColl(c.collId), cfg = await settings();
+  if (col && col.preflightAtStart !== false && c.queue.length) {
+    var pf = await withProbeLock(function () { return checkPortals(c.queue, { source: 'run start', spacingMs: cfg.preflightSpacingMs }); });
+    var need = pf.results.filter(function (r) { return r.status === 'login'; }).map(function (r) { return r.recId; });
+    c = await getSess('coll');
+    if (!c || c.id !== cId || c.status !== 'running') return;
+    if (need.length) {
+      c.queue = c.queue.filter(function (id) { return need.indexOf(id) < 0; }).concat(need);
+      need.forEach(function (id) { c.deferred[id] = true; });
+      c.needLogin = need;
+      for (var k = 0; k < need.length; k++) {
+        await setCollResult(c.collId, c.period, need[k], { status: 'needs_you', loginNeeded: true, waiting: true, recName: (await getRec(need[k]) || {}).name,
+          reason: 'Login needed: AWOS picks this portal up as soon as you are logged in' });
+      }
+      var names = await recNames(need), ready = c.queue.length - need.length;
+      notify('awos-pre-' + c.collId, 'AWOS Replay: ' + c.name + ': log in to ' + need.length + ' portal' + (need.length === 1 ? '' : 's'),
+             (ready ? ready + ' portal' + (ready === 1 ? ' is' : 's are') + ' ready and running now. ' : '') + 'Log in to ' + names
+             + ' and AWOS picks ' + (need.length === 1 ? 'it' : 'them') + ' up as soon as you are in.', [{ title: 'Open the ones that need me' }]);
+      await markNotified(need);
+      await phoneLoginNotice(c.name, await recNameList(need), need.length).catch(function () {});
+    }
+  }
+  c.phase = 'run'; await setSess('coll', c);
+  await collNext();
+}
+
+var collChain = Promise.resolve();
+/** start the next portal in the queue, or wait for a login, or finish. Serialised: timers, tab events and run ends
+ *  may all ask at once. */
+function collNext() { var p = collChain.then(collNextInner); collChain = p.catch(function () {}); return p; }
+async function collNextInner() {
+  var c = await getSess('coll');
+  if (!c || c.status !== 'running' || c.phase === 'preflight' || c.current) return;
+  while (c.idx < c.queue.length) {
+    var recId = c.queue[c.idx], rec = await getRec(recId);
+    if (!rec) { await setCollResult(c.collId, c.period, recId, { status: 'failed', reason: 'the recipe was deleted' }); c.idx++; continue; }
+    var res = (await periodResults(c.collId, c.period))[recId];
+    if (res && res.status === 'got') { c.idx++; continue; }
+    if (c.deferred && c.deferred[recId]) {             // only logged-out portals are left: wait for a login
+      var pick = await firstLoggedIn(c);
+      if (pick < 0) {
+        var cfg = await settings(), waitMs = Math.max(0.05, +cfg.collectionWaitMin || 10) * 60000;
+        c.loginDeadline = c.loginDeadline || Date.now() + waitMs;
+        if (Date.now() < c.loginDeadline) {
+          c.waitingLogin = true; await setSess('coll', c);
+          var poll = Math.max(200, +cfg.loginPollMs || 5000);
+          setTimeout(function () { collNext().catch(function () {}); }, poll);
+          chrome.alarms.create(LOGIN_POLL + c.collId, { when: Date.now() + Math.max(30000, poll) }).catch(function () {});
+          return;
+        }
+        for (var k = c.idx; k < c.queue.length; k++) {
+          if (!c.deferred[c.queue[k]]) continue;
+          await setCollResult(c.collId, c.period, c.queue[k], { status: 'needs_you', loginNeeded: true, recName: ((await getRec(c.queue[k])) || {}).name,
+            reason: 'Login needed: still logged out after ' + Math.round(waitMs / 60000) + ' min. Log in, then Run collection again (portals already got are skipped)' });
+        }
+        c.waitingLogin = false; c.idx = c.queue.length; await setSess('coll', c);
+        break;
+      }
+      var tmp = c.queue[c.idx]; c.queue[c.idx] = c.queue[pick]; c.queue[pick] = tmp;
+      recId = c.queue[c.idx]; rec = await getRec(recId);
+      delete c.deferred[recId]; c.waitingLogin = false;
+      (c.pickedUp = c.pickedUp || []).push(recId);
+      chrome.alarms.clear(LOGIN_POLL + c.collId).catch(function () {});
+    }
+    var tab = await chrome.tabs.create({ url: 'about:blank', active: false });
+    c.current = { recId: recId, tabId: tab.id }; await setSess('coll', c);
+    try {
+      await startRun(recId, tab.id, { scheduled: c.scheduled, collection: { id: c.collId, period: c.period } });
+      return;
+    } catch (e) {
+      await setCollResult(c.collId, c.period, recId, { status: 'failed', reason: String(e && e.message || e) });
+      chrome.tabs.remove(tab.id).catch(function () {});
+      c = await getSess('coll'); c.idx++; c.current = null; await setSess('coll', c);
+    }
+  }
+  await collFinish(c);
+}
+/** the queue index (from c.idx) of the first deferred portal whose login is now seen, or -1. A login tab the user
+ *  opened from "Open the ones that need me" is asked first (no new tab); otherwise the portal's start page is checked
+ *  in a background tab, at most every loginProbeMs (default 60 s) per portal. */
+async function firstLoggedIn(c) {
+  var cfg = await settings(), tabs = (await getSess('loginTabs')) || {}, every = Math.max(500, +cfg.loginProbeMs || 60000);
+  c.lastProbe = c.lastProbe || {};
+  for (var k = c.idx; k < c.queue.length; k++) {
+    var id = c.queue[k];
+    if (!c.deferred[id]) continue;
+    var rec = await getRec(id);
+    if (!rec) continue;
+    if (tabs[id] != null) {
+      var pk = await sendTab(tabs[id], { type: 'page_kind' }).catch(function () { return null; });
+      if (pk && pk.url && R.siteOf(pk.url) === R.siteOf(rec.startUrl)) {
+        if (!pk.kind) { await setPortalStatus(id, { status: 'ok', why: 'logged in (seen in the tab you opened)', url: R.stripUrl(pk.url) }, 'login tab'); return k; }
+        continue;                                      // still on its login page: the user is not done yet
+      }
+    }
+    if (Date.now() - (c.lastProbe[id] || 0) < every) continue;
+    c.lastProbe[id] = Date.now(); await setSess('coll', c);
+    var r = await withProbeLock(function () { return probePortal(rec); });
+    await setPortalStatus(id, r, 'waiting for login');
+    if (r.status === 'ok') return k;
+  }
+  return -1;
+}
+
+async function collFinish(c) {
+  var cols = await getLocal('collections', {}), col = cols[c.collId];
+  var sum = col ? collSummary(col, await periodResults(c.collId, c.period)) : { text: 'collection deleted', counts: {} };
+  c.status = 'done'; c.current = null; c.endedAt = Date.now(); c.summary = sum.text; c.counts = sum.counts; c.waitingLogin = false;
+  chrome.alarms.clear(LOGIN_POLL + c.collId).catch(function () {});
+  await setSess('coll', c);
+  if (col) { col.last = { period: c.period, summary: sum.text, at: Date.now() }; await setLocal('collections', cols); }
+  var cu = c.caughtUp || [];
+  if (cu.length) { c.summary += '; caught up ' + cu.map(function (x) { return PD.label(x.period); }).join(', '); await setSess('coll', c); }
+  notify('awos-coll-' + c.collId, 'AWOS Replay: ' + c.name + ' (' + c.period + ')', sum.text + (c.alreadyGot ? ' (' + c.alreadyGot + ' already got earlier)' : '')
+         + (cu.length ? '. Caught up: ' + cu.map(function (x) { return PD.label(x.period) + ' (' + x.recName + ')'; }).join(', ') : ''));
+  await phoneCollStatus(c, col).catch(function (e) { console.warn('phone status', e); });
+}
+
+/** what one portal's run means for the checklist. */
+function collStatusOf(run, rec) {
+  var res = run.result || {}, checks = res.checks || [];
+  var dl = checks.find(function (x) { return x.kind === 'download'; });
+  if (run.leftForUser) return { status: 'needs_you', reason: run.leftForUser };
+  if (dl && dl.notDocument) return { status: 'not_document', file: dl.actual || '', reason: (dl.content && dl.content.why) || res.reason || '' };
+  if (dl && dl.wrongPeriod) return { status: 'wrong_period', file: dl.actual || '', reason: res.reason || '' };
+  if (res.code === 'MISSING') return { status: 'missing', reason: res.reason || '' };
+  if (dl && dl.ok) {
+    var cs = (dl.content && dl.content.state) || '';
+    return { status: 'got', file: dl.actual || '', content: cs, contentNote: cs === 'unchecked' ? dl.content.why : '' };
+  }
+  if (!dl && /^(VERIFIED|CHECK|UNVERIFIED)$/.test(res.verdict || '')) {
+    var last = (run.fileTabs || []).slice(-1)[0];
+    return { status: 'got', file: last ? last.name : '', note: rec && !rec.expectDownload ? 'no expected download set for this portal' : '' };
+  }
+  if (dl && !dl.ok && res.code === 'CHECK_FAILED') return { status: 'missing', reason: 'no file matching ' + dl.expected + ' (' + (dl.actual || 'no download') + ')' };
+  if (res.code === 'NOT_FOUND' && rec && downloadStep(rec.steps[run.i])) return { status: 'missing', reason: res.reason || 'the download link is not there' };
+  return { status: 'failed', reason: (res.code ? res.code + ': ' : '') + (res.reason || 'stopped') };
+}
+
+async function collAfterRun(run, rec) {
+  var st = collStatusOf(run, rec);
+  st.runId = run.id; st.recName = run.recName;
+  await setCollResult(run.collection.id, run.collection.period, run.recId, st);
+  await chrome.alarms.clear(COLL_WAIT + run.id).catch(function () {});
+  if (st.status === 'got') { await sleep(300); chrome.tabs.remove(run.tabId).catch(function () {}); }   // others stay open to look at
+  var c = await getSess('coll');
+  if (!c || c.status !== 'running' || !c.current || c.current.recId !== run.recId) return;
+  c.idx++; c.current = null; await setSess('coll', c);
+  collNext().catch(function (e) { console.warn('collection', e); });
+}
+
+/** a portal of the collection paused: it shows as Needs you; nobody answering within collectionWaitMin moves on. */
+async function collOnPause(run) {
+  var res = (await periodResults(run.collection.id, run.collection.period))[run.recId];
+  if (!res || res.status !== 'got') {
+    await setCollResult(run.collection.id, run.collection.period, run.recId,
+                        { status: 'needs_you', reason: run.pending && run.pending.message || '', runId: run.id, waiting: true, recName: run.recName });
+  }
+  var cfg = await settings(), mins = Math.max(0.05, +cfg.collectionWaitMin || 10);
+  await chrome.alarms.create(COLL_WAIT + run.id, { when: Date.now() + mins * 60000 });
+}
+
+/** leave the waiting portal for the user (popup "Skip this portal", or the wait alarm) and go on with the next. */
+async function collSkip(runId, why) {
+  var run = await getSess('run');
+  if (!run || !run.collection || (runId && run.id !== runId) || !/^(needs_user|awaiting_approval)$/.test(run.status)) throw new Error('no portal of a collection is waiting for you');
+  var msg = (run.pending && run.pending.message) || 'it needed you';
+  run.leftForUser = msg; run.pending = null;
+  logRun(run, 'collection moved on (' + (why || 'skipped by the user') + '); this portal is left for you');
+  await fail(run, 'NEEDS_YOU', 'left for you, the collection moved on: ' + msg);
+  return { ok: true };
+}
+
+async function armColl(col) {
+  await chrome.alarms.clear(COLL_ALARM + col.id);
+  var when = col.schedule ? nextFire(col.schedule, Date.now()) : null;
+  if (when) await chrome.alarms.create(COLL_ALARM + col.id, { when: when });
+  await armPreflight(col, when);
+  return when;
+}
+async function fireColl(collId) {
+  var col = await getColl(collId);
+  if (!col || !col.schedule) return null;
+  await armColl(col);
+  var busy = await busyReason();
+  if (busy) { notify('awos-coll-skip-' + collId, 'AWOS Replay skipped: ' + col.name, busy); return null; }
+  return collStart(collId, { scheduled: true });
+}
+
+async function saveColl(msg) {
+  var cols = await getLocal('collections', {}), recs = await getLocal('recordings', {});
+  var col = msg.id ? cols[msg.id] : { id: uid('col'), createdAt: Date.now(), recIds: [], monthOffset: 0, schedule: null };
+  if (!col) throw new Error('no such collection');
+  if (typeof msg.name === 'string') col.name = msg.name.trim().slice(0, 100);
+  if (!col.name) throw new Error('give the collection a name (e.g. Month-end supplier docs)');
+  if (Array.isArray(msg.recIds)) {
+    col.recIds = msg.recIds.map(String).filter(function (id, k, a) { return recs[id] && a.indexOf(id) === k; }).slice(0, 50);
+  }
+  if (msg.monthOffset != null) col.monthOffset = +msg.monthOffset === -1 ? -1 : 0;
+  if (msg.schedule !== undefined) col.schedule = cleanSchedule(msg.schedule);
+  // logins (v0.6.1): keep-alive every N days (on by default), pre-flight N hours before a scheduled run (24, 0 = off)
+  if (msg.keepAlive !== undefined) col.keepAlive = msg.keepAlive !== false;
+  if (msg.keepAliveDays != null) { var kd = parseInt(msg.keepAliveDays, 10); if (!(kd >= 1 && kd <= 30)) throw new Error('keep-alive: every 1-30 days'); col.keepAliveDays = kd; }
+  if (msg.preflightHours != null) { var ph = parseInt(msg.preflightHours, 10); if (!(ph >= 0 && ph <= 168)) throw new Error('pre-flight: 0-168 hours before the run'); col.preflightHours = ph; }
+  if (msg.preflightAtStart !== undefined) col.preflightAtStart = msg.preflightAtStart !== false;
+  // v0.9 catch-up of missed months: on by default, lookback 3 months (0-12)
+  if (msg.catchUp !== undefined) col.catchUp = msg.catchUp !== false;
+  if (msg.catchUpMonths != null) { var cm = parseInt(msg.catchUpMonths, 10); if (!(cm >= 0 && cm <= 12)) throw new Error('catch-up: 0-12 months back'); col.catchUpMonths = cm; }
+  cols[col.id] = col; await setLocal('collections', cols);
+  var next = await armColl(col);
+  var keepNext = await armKeepAlive(col);
+  return Object.assign({}, col, { next: next, keepNext: keepNext });
+}
+
+// ---- logins: keep-alive, pre-flight, "Open the ones that need me" (v0.6.1) ----------------------------------
+// Most handoffs in a monthly run are expired logins. A keep-alive visits each portal's recorded start page every few
+// days in a background tab, one portal at a time, and only looks: logged in, or a login page (lib/portal.js
+// pageKind). Nothing on the page is clicked or typed (stricter than the pop-up rules allow), the tab is closed. A
+// portal that logged the user out is reported early, once, and shows as "Login needed" in the checklist. The same
+// check runs `preflightHours` before a scheduled collection run and at the start of every collection run.
+// portalStatus (chrome.storage.local) {recId: {status: ok|login|captcha|error|self_login, kind, why, url, at, source, notified}}
+var KEEP_ALARM = 'awos-keep:', PRE_ALARM = 'awos-pre:', LOGIN_POLL = 'awos-coll-login:';
+var probeChain = Promise.resolve();
+/** one portal check at a time (keep-alive, pre-flight and a waiting collection share it). */
+function withProbeLock(fn) { var p = probeChain.then(fn, fn); probeChain = p.catch(function () {}); return p; }
+/** the recording signs in by itself (it has a password step): its start page is a login page by design. */
+function selfLogin(rec) { return (rec.steps || []).some(function (s) { return s.action === 'fill' && /password/i.test(String(s.sensitive || '')); }); }
+async function recNameList(ids) { var recs = await getLocal('recordings', {}); return ids.map(function (id) { return (recs[id] && recs[id].name) || 'a portal'; }); }
+async function recNames(ids) {
+  var recs = await getLocal('recordings', {}), n = ids.map(function (id) { return (recs[id] && recs[id].name) || 'a portal'; });
+  return n.length <= 1 ? n.join('') : n.slice(0, -1).join(', ') + ' and ' + n[n.length - 1];
+}
+/** open the portal's start page in a background tab, classify it, close the tab. Looks only: no click, no typing. */
+async function probePortal(rec) {
+  var start = rec.startUrl || '';
+  if (!/^https?:/.test(start)) return { status: 'error', why: 'no web start page' };
+  if (selfLogin(rec)) return { status: 'self_login', why: 'this recipe signs in by itself (you type the password during the run)' };
+  if (S.urlDanger(start)) return { status: 'error', why: 'its start page matches "' + S.urlDanger(start) + '"; not opened unattended' };
+  var tab = null;
+  try {
+    tab = await chrome.tabs.create({ url: start, active: false });
+    await setSess('probeTab', tab.id);
+    await sleep(150); await waitForLoad(tab.id, 20000);
+    await ensureContent(tab.id, null, 8000);
+    await waitQuiet(tab.id, 1500);
+    var pk = await sendTab(tab.id, { type: 'page_kind' });
+    var landed = ((await chrome.tabs.get(tab.id).catch(function () { return {}; })).url) || pk.url || '';
+    var st = !pk.kind ? 'ok' : (pk.kind === 'login' || pk.kind === 'otp') ? 'login' : pk.kind;
+    return { status: st, kind: pk.kind || '', why: pk.why || (st === 'ok' ? 'logged in' : ''), url: R.stripUrl(landed) };
+  } catch (e) {
+    return { status: 'error', why: String(e && e.message || e) };
+  } finally {
+    if (tab) await chrome.tabs.remove(tab.id).catch(function () {});
+    await setSess('probeTab', null);
+  }
+}
+/** record a portal's login status; -> the new entry with `wasNotified` (a logout already reported). */
+async function setPortalStatus(recId, r, source) {
+  var all = await getLocal('portalStatus', {}), prev = all[recId] || {};
+  var cur = { status: r.status, kind: r.kind || '', why: r.why || '', url: r.url || '', at: Date.now(), source: source || '' };
+  cur.notified = cur.status === 'login' && prev.status === 'login' && !!prev.notified;    // a new logout is reported again
+  all[recId] = cur; await setLocal('portalStatus', all);
+  return cur;
+}
+async function markNotified(ids) {
+  var all = await getLocal('portalStatus', {});
+  ids.forEach(function (id) { if (all[id]) all[id].notified = true; });
+  await setLocal('portalStatus', all);
+}
+/** check portals one after another (spacingMs apart, default 8 s: polite to the sites). abortIfBusy: stop before the
+ *  next portal when a replay / collection / recording / Tell it run started (keep-alive never gets in the way). */
+async function checkPortals(recIds, opts) {
+  var cfg = await settings(), out = { results: [], aborted: '' };
+  var gap = opts.spacingMs != null ? +opts.spacingMs : (cfg.keepAliveSpacingMs != null ? +cfg.keepAliveSpacingMs : 8000);
+  var ids = recIds.filter(function (id, k, a) { return a.indexOf(id) === k; });
+  for (var k = 0; k < ids.length; k++) {
+    if (opts.abortIfBusy) { var busy = await busyReason(); if (busy) { out.aborted = busy; break; } }
+    var rec = await getRec(ids[k]);
+    if (!rec) continue;
+    if (k > 0 && gap > 0) await sleep(gap);
+    var r = await probePortal(rec);
+    var cur = await setPortalStatus(ids[k], r, opts.source);
+    out.results.push(Object.assign({ recId: ids[k], name: rec.name }, cur));
+  }
+  return out;
+}
+async function armKeepAlive(col) {
+  if (!col) return null;
+  await chrome.alarms.clear(KEEP_ALARM + col.id);
+  if (col.keepAlive === false || !(col.recIds || []).length) return null;
+  var every = (col.keepAliveDays || 3) * 86400000;
+  var when = Math.max(Date.now() + 60000, (col.lastKeepAlive || Date.now()) + every);
+  await chrome.alarms.create(KEEP_ALARM + col.id, { when: when });
+  return when;
+}
+/** the keep-alive sweep of one collection (the alarm, or the popup's "Check logins now"). Notifies once per logout. */
+async function keepAliveSweep(collId, opts) {
+  opts = opts || {};
+  var col = await getColl(collId);
+  if (!col) return null;
+  if (!opts.manual && col.keepAlive === false) return null;
+  var busy = await busyReason();
+  if (busy) {
+    if (opts.manual) throw new Error(busy);
+    await chrome.alarms.create(KEEP_ALARM + collId, { when: Date.now() + 30 * 60000 });     // the user is mid-run: later
+    return { skipped: busy };
+  }
+  var out = await withProbeLock(function () { return checkPortals(col.recIds, { source: opts.manual ? 'check now' : 'keep-alive', abortIfBusy: true }); });
+  var cols = await getLocal('collections', {});
+  if (cols[collId]) { cols[collId].lastKeepAlive = Date.now(); await setLocal('collections', cols); }
+  if (out.aborted) await chrome.alarms.create(KEEP_ALARM + collId, { when: Date.now() + 30 * 60000 });
+  else await armKeepAlive(cols[collId]);
+  var fresh = out.results.filter(function (r) { return r.status === 'login' && !r.notified; }).map(function (r) { return r.recId; });
+  // v0.8 batching (default): a logout found by keep-alive is shown in the checklist and summarised ONCE at the
+  // pre-flight / run-start moment, not notified now. Options "Notify each logout right away" restores this notice.
+  if (fresh.length && (await settings()).immediateNotices !== true) return { results: out.results, aborted: out.aborted, notified: [], batched: fresh };
+  if (fresh.length) {
+    var names = await recNames(fresh);
+    notify('awos-keep-' + collId, 'AWOS Replay: login needed for ' + col.name,
+           names + ' logged you out; log in any time before the month-end run.', [{ title: 'Open the ones that need me' }]);
+    await markNotified(fresh);
+  }
+  return { results: out.results, aborted: out.aborted, notified: fresh };
+}
+/** the advance check before a scheduled run: `preflightHours` (default 24, 0 = off) before it. */
+async function armPreflight(col, runAt) {
+  await chrome.alarms.clear(PRE_ALARM + col.id);
+  var h = col.preflightHours == null ? 24 : +col.preflightHours;
+  if (!runAt || !col.schedule || !(h > 0)) return null;
+  var when = runAt - h * 3600000;
+  if (when < Date.now() + 60000) return null;            // too close: the run's own start check does it
+  await chrome.alarms.create(PRE_ALARM + col.id, { when: when });
+  return when;
+}
+/** the portals of the collection's next scheduled period that still need a login: ONE notification naming them. */
+async function firePreflight(collId) {
+  var col = await getColl(collId);
+  if (!col) return null;
+  var runAlarm = await chrome.alarms.get(COLL_ALARM + collId), runAt = runAlarm ? runAlarm.scheduledTime : Date.now();
+  var busy = await busyReason();
+  if (busy) {                                           // mid-run: try again in 30 min if the run is still far enough away
+    if (runAt - Date.now() > 3600000) await chrome.alarms.create(PRE_ALARM + collId, { when: Date.now() + 30 * 60000 });
+    return { skipped: busy };
+  }
+  var period = periodOf(runAt, col.monthOffset || 0), res = await periodResults(collId, period);
+  var ids = col.recIds.filter(function (id) { return !(res[id] && res[id].status === 'got'); });
+  var out = await withProbeLock(function () { return checkPortals(ids, { source: 'pre-flight', abortIfBusy: true }); });
+  var need = out.results.filter(function (r) { return r.status === 'login'; }).map(function (r) { return r.recId; });
+  var cols = await getLocal('collections', {});
+  if (cols[collId]) { cols[collId].lastPreflight = { at: Date.now(), need: need, period: period }; await setLocal('collections', cols); }
+  if (need.length) {
+    notify('awos-pre-' + collId, 'AWOS Replay: ' + col.name + ' runs ' + new Date(runAt).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }),
+           need.length + ' portal' + (need.length === 1 ? ' needs' : 's need') + ' a login. Log in to ' + (await recNames(need))
+           + ' any time before then, all in one go; the other portals are ready.', [{ title: 'Open the ones that need me' }]);
+    await markNotified(need);
+    await phoneLoginNotice(col.name, await recNameList(need), need.length).catch(function () {});
+  }
+  return { results: out.results, need: need, aborted: out.aborted };
+}
+/** "Open the ones that need me": a tab per portal of the collection whose login is needed (not already got this
+ *  period), the first one in front. On each, "remember me" is ticked and Chrome's autofill may sign in (Options);
+ *  the user does the rest. A waiting collection run notices the login in these tabs and picks the portal up. */
+async function openLogins(collId) {
+  var col = await getColl(collId);
+  if (!col) throw new Error('no such collection');
+  var c = await getSess('coll'), period = c && c.collId === collId ? c.period : periodOf(nowMs(), col.monthOffset || 0);
+  var res = await periodResults(collId, period), ps = await getLocal('portalStatus', {}), tabs = (await getSess('loginTabs')) || {};
+  var ids = col.recIds.filter(function (id) { return ps[id] && ps[id].status === 'login' && !(res[id] && res[id].status === 'got'); });
+  var opened = [];
+  for (var k = 0; k < ids.length; k++) {
+    var rec = await getRec(ids[k]);
+    if (!rec || !/^https?:/.test(rec.startUrl || '') || S.urlDanger(rec.startUrl)) continue;
+    var old = tabs[ids[k]] != null ? await chrome.tabs.get(tabs[ids[k]]).catch(function () { return null; }) : null;
+    var tab = old || await chrome.tabs.create({ url: rec.startUrl, active: opened.length === 0 });
+    if (old && opened.length === 0) await chrome.tabs.update(old.id, { active: true }).catch(function () {});
+    tabs[ids[k]] = tab.id; opened.push({ recId: ids[k], tabId: tab.id });
+  }
+  await setSess('loginTabs', tabs);
+  if (opened.length) {
+    var t0 = await chrome.tabs.get(opened[0].tabId).catch(function () { return null; });
+    if (t0) chrome.windows.update(t0.windowId, { focused: true }).catch(function () {});
+  }
+  helpLoginTabs(opened).catch(function (e) { console.warn('login tabs', e); });
+  return { opened: opened.length, recIds: opened.map(function (o) { return o.recId; }) };
+}
+/** on each opened login tab: "remember me", and Chrome's autofill sign-in (once per tab); noted on portalStatus. */
+async function helpLoginTabs(opened) {
+  var cfg = await settings();
+  for (var k = 0; k < opened.length; k++) {
+    try {
+      await sleep(150); await waitForLoad(opened[k].tabId, 20000); await ensureContent(opened[k].tabId, null, 8000);
+      var pk = await sendTab(opened[k].tabId, { type: 'page_kind' });
+      if (pk.kind !== 'login') continue;
+      var r = await assistTab(opened[k].tabId, cfg, {});
+      var all = await getLocal('portalStatus', {});
+      if (all[opened[k].recId]) {
+        all[opened[k].recId].assist = { ticked: r.ticked, clicked: r.clicked, why: r.why, at: Date.now() };
+        await setLocal('portalStatus', all);
+      }
+    } catch (e) { /* the user may already be typing there; nothing else to do */ }
+  }
+}
+// a login tab the user opened finished loading: a collection waiting for logins looks right away
+chrome.tabs.onUpdated.addListener(function (tabId, info) {
+  if (info.status !== 'complete') return;
+  Promise.all([getSess('coll'), getSess('loginTabs')]).then(function (both) {
+    var c = both[0], tabs = both[1] || {};
+    if (!c || c.status !== 'running' || !c.waitingLogin) return;
+    if (Object.keys(tabs).some(function (id) { return tabs[id] === tabId; })) setTimeout(function () { collNext().catch(function () {}); }, 300);
+  }).catch(function () {});
+});
+
+// ---- failure evidence (v0.8): slow runs, a screenshot when a step fails ------------------------------------------
+var SHOTS_MAX = 20, SHOTS_BYTES = 5 * 1024 * 1024;
+function fmtMs(ms) { return ms >= 60000 ? Math.round(ms / 6000) / 10 + ' min' : Math.round(ms / 100) / 10 + ' s'; }
+function median(a) { var b = a.slice().sort(function (x, y) { return x - y; }), m = b.length >> 1; return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2; }
+/** the end of a run: a screenshot for a failure, and its duration against the recipe's last 10 (slow-run alert). */
+async function runEvidence(run) {
+  var v = run.result && run.result.verdict;
+  if (/^(FAILED|MISSING|WRONG_PERIOD)$/.test(v || '')) await captureFailure(run, run.result.code === 'NEEDS_YOU' ? 'NEEDS_YOU' : v);
+  if (!/^(VERIFIED|CHECK|UNVERIFIED)$/.test(v || '')) return;           // a run that stopped early says nothing about speed
+  var rec = await getRec(run.recId);
+  if (!rec) return;
+  var ms = Math.max(0, (run.endedAt || Date.now()) - run.startedAt - (run.pausedMs || 0)), prev = rec.durations || [];
+  if (prev.length >= 3) {
+    var cfg = await settings(), med = median(prev), extra = cfg.slowRunExtraMs == null ? 180000 : +cfg.slowRunExtraMs;
+    var limit = Math.max(2 * med, med + extra);
+    if (ms > limit) {
+      run.result.slow = { ms: ms, median: med, text: 'slower than usual: ' + fmtMs(ms) + ' (usually ' + fmtMs(med) + '); the portal may be getting slower or changing' };
+      run.result.reason = [run.result.reason, run.result.slow.text].filter(Boolean).join('; ');
+      logRun(run, run.result.slow.text);
+    }
+  }
+  rec.durations = prev.concat([ms]).slice(-10);
+  await putRec(rec);
+}
+/** a picture of the run tab when a step fails / needs the user, kept ONLY in chrome.storage.local (last 20): never sent
+ *  to the phone, the relay or a model. Only possible when the run tab is the visible tab of its window; a background
+ *  tab (scheduled / collection runs) gets the note "tab not visible" instead. */
+async function captureFailure(run, why) {
+  if (run.shot && run.shot.step === run.i && run.shot.why === why) return;
+  var entry = { id: uid('shot'), runId: run.id, recName: run.recName, step: run.i, at: Date.now(), why: why }, note = '';
+  try {
+    var tab = await chrome.tabs.get(run.tabId), win = await chrome.windows.get(tab.windowId);
+    if (!tab.active || win.state === 'minimized') note = 'tab not visible';
+    else entry.dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 60 });
+  } catch (e) { note = 'screenshot not possible (' + String(e && e.message || e).slice(0, 160) + ')'; }
+  run.shot = { step: run.i, why: why, id: entry.dataUrl ? entry.id : '', note: note };
+  if (!entry.dataUrl) { logRun(run, 'no screenshot of step ' + (run.i + 1) + ': ' + note); return; }
+  var shots = [entry].concat(await getLocal('shots', [])).slice(0, SHOTS_MAX), total = 0;
+  shots = shots.filter(function (x) { total += (x.dataUrl || '').length; return total <= SHOTS_BYTES || x === entry; });
+  await setLocal('shots', shots);
+  logRun(run, 'screenshot of step ' + (run.i + 1) + ' (' + why + ') saved on this computer only (popup: Screenshot); it is never sent to your phone or anywhere else');
+}
 
 async function archive(run) {
   run.pending = null; run.endedAt = Date.now();
+  await learnFromRun(run).catch(function (e) { console.warn('learn', e); logRun(run, 'learning from this run failed: ' + String(e && e.message || e)); });
+  await runEvidence(run).catch(function (e) { console.warn('evidence', e); });
   await saveRun(run);
   var runs = await getLocal('runs', []); runs.unshift(run); await setLocal('runs', runs.slice(0, 20));
 }
@@ -568,7 +2071,11 @@ async function decide(kind, runId, n, params) {
   if (!run || run.id !== runId || !run.pending || run.pending.nonce !== n) throw new Error('stale or unknown request');
   if (kind === 'approve') {
     if (run.status !== 'awaiting_approval') throw new Error('nothing to approve');
-    if (run.pending.domain) {                 // an imported recipe leaving its site: remember this domain for this recipe
+    if (run.pending.fileTab) {                // a file opened in a new tab from another site: download it as the user asked
+      var ftp = run.pending.fileTab;
+      logRun(run, 'user approved downloading ' + R.stripUrl(ftp.url));
+      try { await downloadFromTab(run, ftp.tabId, ftp.url, ftp.step); } catch (e) { logRun(run, 'download failed: ' + String(e && e.message || e)); }
+    } else if (run.pending.domain) {          // an imported recipe leaving its site: remember this domain for this recipe
       var rec = await getRec(run.recId);
       if (rec) { rec.approvedDomains = (rec.approvedDomains || []).concat([run.pending.domain]); await putRec(rec); }
       logRun(run, 'user approved the site ' + run.pending.domain + ' for this recipe');
@@ -585,13 +2092,26 @@ async function decide(kind, runId, n, params) {
       Object.assign(run.params, got);
       if (rec2) { rec2.lastParams = Object.assign({}, rec2.lastParams || {}, got); await putRec(rec2); }
       logRun(run, 'user entered ' + Object.keys(got).join(', '));
+    } else if (run.pending.handoff) {         // login / code / check handled: re-observe and resume at the first step not done
+      run.resume = { step: run.pending.step, kind: run.pending.handoff };
+      logRun(run, 'user handled the ' + ({ login: 'login', otp: 'one-time code', captcha: 'bot check' })[run.pending.handoff] + '; checking where the run is');
+    } else if (run.pending.popup) {           // the user closed the pop-up: one more unblock pass if it is back
+      if (run.unblocked) delete run.unblocked[run.pending.step];
+      logRun(run, 'user dealt with the pop-up');
+    } else if (run.pending.unusable) {        // v0.9: the control stayed disabled / covered / busy: try the step again
+      if (run.unusable) delete run.unusable[run.pending.step];
+      if (run.unblocked) delete run.unblocked[run.pending.step];
+      logRun(run, 'user says the control is usable now; trying the step again');
     } else run.userDone[run.pending.step] = true;
   } else {                                    // reject / abort
     run.pending = null;
     return fail(run, 'REJECTED', 'user stopped the run at step ' + (run.i + 1));
   }
   run.status = 'running'; run.pending = null;
+  if (run.pausedAt) { run.pausedMs = (run.pausedMs || 0) + (Date.now() - run.pausedAt); run.pausedAt = 0; }
   await saveRun(run);
+  phoneCheckResolved().catch(function () {});
+  await chrome.alarms.clear(COLL_WAIT + run.id).catch(function () {});
   await sendTab(run.tabId, { type: 'banner', text: '' }).catch(function () {});
   drive(run.id);
 }
@@ -602,6 +2122,40 @@ async function decide(kind, runId, n, params) {
 // length), never URL queries or fragments, never anything from a sensitive field.
 function redactUrl(u) { try { var x = new URL(u); return x.origin + x.pathname; } catch (e) { return ''; } }
 function redactText(s) { return String(s || '').replace(/https?:\/\/[^\s"')]+/g, function (u) { return redactUrl(u); }); }
+/** v0.10 run-log summaries: counts and the role / name of learned controls only (no other locator text). */
+function healSummary(r) {
+  var out = { steps: 0, alternates: 0, verified: 0, promoted: 0, demotedPrimary: 0, fixes: [] };
+  (r.steps || []).forEach(function (s, k) {
+    var alts = s.alternates || [];
+    if (!alts.length) return;
+    out.steps++; out.alternates += alts.length;
+    var cands = HL.candidates(s);
+    if (cands.length && cands[0].source === 'alternate' && alts.some(function (a) { return a.key === cands[0].key && a.verified; })) out.promoted++;
+    if ((s.primaryFails || 0) >= 2 && alts.some(function (a) { return a.verified; })) out.demotedPrimary++;
+    alts.forEach(function (a) {
+      if (a.verified) out.verified++;
+      out.fixes.push({ step: k, role: (a.loc && a.loc.role) || '', name: String((a.loc && a.loc.name) || '').slice(0, 60), by: a.by,
+                       verified: !!a.verified, ok: a.ok || 0, fail: a.fail || 0 });
+    });
+  });
+  return out;
+}
+function siteMapSize(map) {
+  var out = {};
+  Object.keys((map && map.hosts) || {}).forEach(function (h) {
+    var x = map.hosts[h] || {};
+    out[h] = { edges: Object.keys(x.edges || {}).length, states: Object.keys(x.states || {}).length };
+  });
+  return out;
+}
+function lessonCounts(ledger) {
+  var out = {};
+  (ledger || []).forEach(function (it) {
+    var c = out[it.host] = out[it.host] || { lessons: 0, disabled: 0, wins: 0, losses: 0 };
+    c.lessons++; if (it.disabled) c.disabled++; c.wins += it.wins || 0; c.losses += it.losses || 0;
+  });
+  return out;
+}
 async function exportLog() {
   var recs = await getLocal('recordings', {}), runs = await getLocal('runs', []), cfg = await settings();
   var recOut = Object.values(recs).map(function (r) {
@@ -609,27 +2163,47 @@ async function exportLog() {
       expect: { url: !!(r.expect && r.expect.urlPattern), texts: ((r.expect && r.expect.texts) || []).length,
                 download: !!(r.expectDownload && r.expectDownload.nameRegex) },
       params: (r.params || []).length, imported: !!r.imported, schedule: r.schedule ? r.schedule.kind : '',
+      period: r.period || '', periodMode: r.periodMode || '', templated: Object.keys(r.tpl || {}).length, changes: (r.history || []).length,
       steps: r.steps.map(function (s) {
         if (s.action === 'goto') return { action: 'goto', url: redactUrl(s.url) };
         var l = s.loc || {};
         return { action: s.action, role: l.role, name: l.name, context: l.context || '', danger: s.danger || '',
                  sensitive: s.sensitive || '', valueLen: s.value != null && !s.param ? String(s.value).length : null,
-                 param: !!s.param, ask: !!s.ask, navigates: !!s.navigates };
-      }) };
+                 param: !!s.param, ask: !!s.ask, navigates: !!s.navigates,
+                 // v0.9.2: what the recorder linked to the step (flags only; no file names or row text)
+                 download: !!s.download, downloadNamed: !!(s.download && s.download.name), generated: !!(s.download && s.download.generated),
+                 opensTab: !!s.opensTab, followTab: !!s.followTab, inDialog: !!s.dialog, rowText: !!(l.row), variable: !!s.variable };
+      }),
+      heals: healSummary(r) };
   });
   var runOut = runs.map(function (r) {
     return { recId: r.recId, recName: r.recName, status: r.status, startedAt: r.startedAt, endedAt: r.endedAt,
       scheduled: !!r.scheduled, imported: !!r.imported,
       verdict: r.result && r.result.verdict, code: r.result && r.result.code, reason: redactText(r.result && r.result.reason),
       checks: ((r.result && r.result.checks) || []).map(function (c) { return { kind: c.kind, ok: c.ok }; }),
-      resolved: r.resolved, modelCalls: r.modelCalls || [],
+      resolved: r.resolved, modelCalls: r.modelCalls || [], period: r.period || '',
+      guided: (r.guided || []).map(function (g) { return { step: g.step, action: g.action, control: g.control, reason: redactText(g.reason), why: redactText(g.why) }; }),
+      // v0.10: per step which candidate located it (primary / a learned alternate) and how many were tried; lessons told
+      heal: Object.keys(r.heal || {}).map(function (k) { var h = r.heal[k]; return { step: +k, used: h.source || 'none', tried: (h.tried || []).length, overridden: !!h.overridden }; }),
+      lessons: (r.lessonIds || []).slice(),
       verifier: r.verifier ? { label: r.verifier.label || '', reason: redactText(r.verifier.reason || ''),
                                error: r.verifier.error || '', ms: r.verifier.ms || 0 } : null,
       log: r.log.map(function (l) { return { t: l.t, step: l.step, text: redactText(l.text) }; }) };
   });
   return { kind: 'awos-replay-runlog/1', exportedAt: Date.now(), version: chrome.runtime.getManifest().version,
            model: { brain: cfg.brain, endpoint: redactUrl(cfg.endpoint), name: cfg.brain === 'claude' ? cfg.claudeModel : cfg.model, enabled: cfg.enabled },
-           recordings: recOut, runs: runOut };
+           recordings: recOut, runs: runOut,
+           siteMap: siteMapSize(await getLocal('siteMap', { hosts: {} })),         // v0.10: edges / states per site (sizes only)
+           lessons: lessonCounts(await getLocal('lessons', [])),                   // v0.10: per site, counts only
+           tellit: await getLocal('tellLog', []),        // v0.9.7: Tell it episodes (stopped ones too), model replies included
+           // episodes kept before 0.9.7 (the training trajectories): goal, outcome and each model reply, not the page text
+           tellitEarlier: (await getLocal('tellTraj', [])).map(function (tr) {
+             return { goal: redactText(tr.goal), outcome: tr.outcome, reason: redactText(tr.reason || ''), brain: tr.brain, model: tr.model,
+                      createdAt: tr.createdAt, seconds: tr.seconds, recording: tr.recording || '',
+                      steps: (tr.steps || []).map(function (s) { return { i: s.i, url: redactUrl(s.url), ms: s.ms, action: s.action || '', valid: !!s.valid,
+                                                                       reply: redactText(String(s.reply || '').slice(0, 800)) }; }),
+                      events: (tr.events || []).slice(-40) };
+           }) };
 }
 
 // ---- recipes: export / share / import ---------------------------------------------------------------------
@@ -680,7 +2254,9 @@ async function confirmImport(n) {
   var v = R.validate(p.recipe);                    // validate again: storage.session is ours, but cheap insurance
   if (!v.ok) throw new Error(v.errors.join('; '));
   var rec = R.toRecording(v.recipe, uid('rec'));
+  applyPeriod(rec, !!v.recipe.period);          // v0.7: literal period expressions in a shared recipe become templates too
   await putRec(rec);
+  await siteMapFromRecording(rec, 'unproven').catch(function (e) { console.warn('site map', e); });  // v0.10: someone else's path: no route until a VERIFIED replay
   await setSess('pendingImport', null);
   chrome.action.setBadgeText({ text: '' }).catch(function () {});
   await answerPage(p, true);
@@ -690,8 +2266,9 @@ async function confirmImport(n) {
 function cleanSchedule(sc) {
   if (!sc) return null;
   var out = { kind: sc.kind, time: String(sc.time || '') };
-  if (out.kind !== 'daily' && out.kind !== 'weekly') throw new Error('schedule must be daily or weekly');
+  if (out.kind !== 'daily' && out.kind !== 'weekly' && out.kind !== 'monthly') throw new Error('schedule must be daily or weekly (or monthly)');
   if (out.kind === 'weekly') { out.day = parseInt(sc.day, 10); if (!(out.day >= 0 && out.day <= 6)) throw new Error('pick a weekday'); }
+  if (out.kind === 'monthly') { out.date = parseInt(sc.date, 10); if (!(out.date >= 1 && out.date <= 28)) throw new Error('pick a day of the month (1-28)'); }
   if (nextFire(out, Date.now()) == null) throw new Error('time must be HH:MM (24h)');
   return out;
 }
@@ -705,10 +2282,15 @@ var HANDLERS = {
     return { recording: !!(st && sender.tab && st.tabId === sender.tab.id) };
   },
   rec_step: async function (msg, sender) { if (sender.tab) await onRecStep(sender.tab.id, msg); return { ok: true }; },
+  dl_hint: async function (msg, sender) { if (sender.tab) dlHint(msg); return { ok: true }; },
   get_state: async function () {
     return { recState: await getSess('recState'), run: await getSess('run'), recordings: await getLocal('recordings', {}),
              runs: await getLocal('runs', []), settings: await settings(), claudeKeySet: !!(await getLocal('claudeKey', '')),
-             pendingImport: await getSess('pendingImport'), version: chrome.runtime.getManifest().version };
+             pendingImport: await getSess('pendingImport'), version: chrome.runtime.getManifest().version,
+             collections: await getLocal('collections', {}), collResults: await getLocal('collResults', {}), coll: await getSess('coll'),
+             portalStatus: await getLocal('portalStatus', {}),
+             lessons: LS.list(await getLocal('lessons', [])), lessonOffer: await getSess('lessonOffer'),     // v0.10
+             phone: await phoneSummary(), shots: (await getLocal('shots', [])).map(function (x) { return { id: x.id, runId: x.runId, recName: x.recName, at: x.at, why: x.why }; }) };
   },
   start_recording: async function (msg) { return startRecording(msg.tabId, msg.name); },
   stop_recording: async function () { return stopRecording(); },
@@ -721,11 +2303,35 @@ var HANDLERS = {
     if (typeof msg.description === 'string') rec.description = msg.description.slice(0, 2000);
     if (msg.expectDownload !== undefined) {
       var rx = msg.expectDownload && String(msg.expectDownload.nameRegex || '').trim();
-      if (rx) { try { new RegExp(rx); } catch (e) { throw new Error('download name pattern is not a valid regex'); } }
+      if (rx) { try { new RegExp(rx); new RegExp(R.substitute(rx, builtins())); } catch (e) { throw new Error('download name pattern is not a valid regex'); } }
       rec.expectDownload = rx ? { nameRegex: rx.slice(0, 200) } : null;
     }
+    if (msg.newestRow !== undefined) rec.newestRow = !!msg.newestRow;    // v0.9.1: "always the newest row" (latest invoice chores)
+    applyPeriod(rec, true);                   // v0.7: new goal / checks are templated against the recorded period
     await setLocal('recordings', all); return rec;
   },
+  /** v0.7: undo / redo the templating of one field ("September 2026 -> {{month_name}} {{year}}"). */
+  set_template: async function (msg) {
+    var rec = await getRec(msg.id);
+    if (!rec) throw new Error('no such recording');
+    var e = (rec.tpl || {})[msg.path];
+    if (!e) throw new Error('that field is not templated');
+    e.on = msg.on !== false;
+    await putRec(rec); return rec;
+  },
+  /** v0.7: which month a run uses by default (previous / this), and which month the recording was made for. */
+  set_period: async function (msg) {
+    var rec = await getRec(msg.id);
+    if (!rec) throw new Error('no such recording');
+    if (msg.mode != null) { if (msg.mode !== 'this' && msg.mode !== 'previous') throw new Error('period mode: this or previous month'); rec.periodMode = msg.mode; }
+    if (msg.recorded != null && msg.recorded !== rec.period) {
+      if (!PD.valid(msg.recorded)) throw new Error('recorded period must be YYYY-MM');
+      rec.period = msg.recorded; rec.periodInferred = false;
+    }
+    applyPeriod(rec, true);
+    await putRec(rec); return rec;
+  },
+  guided_update: async function (msg) { return guidedUpdate(msg); },
   /** turn a typed field (fill / select step) into a param, or back (param: null). Secret fields never become params. */
   set_param: async function (msg) {
     var rec = await getRec(msg.id);
@@ -759,14 +2365,22 @@ var HANDLERS = {
     var all = await getLocal('recordings', {}); delete all[msg.id]; await setLocal('recordings', all);
     await chrome.alarms.clear(ALARM + msg.id); return { ok: true };
   },
-  run: async function (msg) { return startRun(msg.recId, msg.tabId, { params: msg.params }); },
+  run: async function (msg) { return startRun(msg.recId, msg.tabId, { params: msg.params, period: msg.period }); },
   approve: async function (msg) { await decide('approve', msg.runId, msg.nonce); return { ok: true }; },
   continue: async function (msg) { await decide('continue', msg.runId, msg.nonce, msg.params); return { ok: true }; },
   reject: async function (msg) { await decide('reject', msg.runId, msg.nonce); return { ok: true }; },
   save_settings: async function (msg) {
     var s = Object.assign({}, msg.settings || {}); delete s.claudeKey;
     if (s.brain !== 'claude') s.brain = 'local';
-    s.cloudConsent = s.brain === 'claude' && s.cloudConsent === true;     // consent only means something with the Claude brain
+    if (s.agentBrain !== 'claude') s.agentBrain = 'local';                 // Tell it: local unless the user opts in
+    s.cloudConsent = (s.brain === 'claude' || s.agentBrain === 'claude') && s.cloudConsent === true;   // consent only means something with a Claude brain
+    if (s.agentEndpoint != null && !M.isLoopback(s.agentEndpoint)) throw new Error('the agent endpoint must be loopback (127.0.0.1 / localhost)');
+    if (s.agentClaudeModel != null && ['claude-haiku-5-5', 'claude-sonnet-5-5'].indexOf(s.agentClaudeModel) < 0) s.agentClaudeModel = 'claude-haiku-5-5';
+    if (s.searchPage != null && !/^https?:\/\/[^\s]+$/i.test(String(s.searchPage))) delete s.searchPage;   // Tell it's start when no site is open
+    if (s.autoSaveLog != null) s.autoSaveLog = s.autoSaveLog === true;     // v0.9.5: each run's log -> Downloads/AWOS-Replay-logs
+    if (s.noCloudSites != null) s.noCloudSites = (Array.isArray(s.noCloudSites) ? s.noCloudSites : String(s.noCloudSites).split(/[\s,]+/))
+      .map(function (x) { x = String(x).trim().toLowerCase(); return /^https?:/.test(x) ? R.siteOf(x) : R.registrableDomain(x.replace(/\/.*$/, '')); })
+      .filter(Boolean).filter(function (x, i, a) { return a.indexOf(x) === i; }).slice(0, 200);
     await setLocal('settings', s); return settings();
   },
   save_claude_key: async function (msg) {
@@ -780,7 +2394,11 @@ var HANDLERS = {
     var r = await M.pingLocal(cfg, 1500);
     return { brain: 'local', ok: r.ok, error: r.error || '' };
   },
-  export_log: async function () { return exportLog(); },
+  export_log: async function () {
+    var log = await exportLog();
+    log.sinkSaved = await sinkLog(log, 'export');      // v0.10.1: also into the project folder when the log service runs
+    return log;
+  },
   export_recipe: async function (msg) { return exportRecipe(msg.id); },
   import_offer: async function (msg, sender) { return offerImport(msg, sender); },
   import_confirm: async function (msg) { return confirmImport(msg.nonce); },
@@ -790,9 +2408,47 @@ var HANDLERS = {
     await answerPage(p, false, 'cancelled'); return { ok: true };
   },
   run_schedule_now: async function (msg) { return fireSchedule(msg.id); },     // the popup's "test the schedule" button
+  // collections (v0.6)
+  coll_save: async function (msg) { return saveColl(msg); },
+  coll_delete: async function (msg) {
+    var cols = await getLocal('collections', {}); delete cols[msg.id]; await setLocal('collections', cols);
+    var res = await getLocal('collResults', {}); delete res[msg.id]; await setLocal('collResults', res);
+    await chrome.alarms.clear(COLL_ALARM + msg.id); await chrome.alarms.clear(KEEP_ALARM + msg.id); await chrome.alarms.clear(PRE_ALARM + msg.id);
+    return { ok: true };
+  },
+  // logins (v0.6.1)
+  coll_check_logins: async function (msg) { return keepAliveSweep(msg.id, { manual: true }); },     // "Check logins now"
+  coll_open_logins: async function (msg) { return openLogins(msg.id); },                           // "Open the ones that need me"
+  coll_run: async function (msg) { return collStart(msg.id, { period: msg.period }); },
+  coll_skip: async function (msg) { return collSkip(msg.runId, 'skipped by the user'); },
+  coll_stop: async function () {               // stop the collection after the current portal (it is not interrupted)
+    var c = await getSess('coll');
+    if (!c || c.status !== 'running') throw new Error('no collection is running');
+    c.queue = c.queue.slice(0, c.idx + 1); await setSess('coll', c); return c;
+  },
+  // v0.10 learning: undo a step's learned fixes; remember a correction; the lessons list
+  heal_revert: async function (msg) {
+    var rec = await getRec(msg.id);
+    if (!rec) throw new Error('no such recording');
+    if (!rec.steps[msg.step]) throw new Error('no such step');
+    rec = HL.revert(rec, msg.step);
+    await putRec(rec); return rec;
+  },
+  run_note: async function (msg) {
+    var cur = await getSess('run'), run = cur && cur.id === msg.runId ? cur : (await getLocal('runs', [])).find(function (r) { return r.id === msg.runId; });
+    if (!run) throw new Error('no such run');
+    if (!/^(failed|done)$/.test(run.status)) throw new Error('the run is still going');
+    var o = await offerLesson('run', msg.text, await runLessonCtx(run));
+    if (!o) throw new Error('type what it should have done');
+    return o;
+  },
+  lesson_answer: async function (msg) { return answerLesson(msg); },
+  lesson_delete: async function (msg) { await setLocal('lessons', LS.remove(await getLocal('lessons', []), msg.id)); return { ok: true }; },
+  get_shot: async function (msg) { return (await getLocal('shots', [])).find(function (x) { return x.id === msg.id; }) || { error: 'that screenshot is gone (only the last 20 are kept)' }; },
+  coll_clear: async function () { var c = await getSess('coll'); if (c && c.status !== 'running') await setSess('coll', null); return { ok: true }; },
 };
 // the only messages a content script may send; import_offer checks the sender is the recipe page itself
-var PAGE_ONLY = { hello: 1, rec_step: 1, import_offer: 1 };
+var PAGE_ONLY = { hello: 1, rec_step: 1, import_offer: 1, dl_hint: 1 };
 
 chrome.runtime.onMessage.addListener(function (msg, sender, reply) {
   var h = msg && HANDLERS[msg.type];
@@ -806,10 +2462,26 @@ chrome.runtime.onMessage.addListener(function (msg, sender, reply) {
 // a worker restart mid-run: a paused run stays paused (resumes on the user's click).
 // A run that was actively driving is NOT resumed: the last step may have half-run
 // (a click sent but not yet recorded), and repeating it could pay or send twice.
-(async function onWorkerStart() {
+// Everything a pause needs (pending, run.done, run.resume, the collection queue) is in storage.session, so a
+// Continue after a restart resumes exactly where the pause was.
+async function restoreAfterRestart() {
   var run = await getSess('run');
   if (run && run.status === 'running' && driving !== run.id) {
     await fail(run, 'INTERRUPTED', 'the extension restarted during step ' + (run.i + 1) + '; check the page, then run again');
   }
+  var pt = await getSess('probeTab');         // a login check the restart cut short: its background tab goes
+  if (pt != null) { await chrome.tabs.remove(pt).catch(function () {}); await setSess('probeTab', null); }
+  var co = await getSess('coll');             // a collection whose current portal ended while the worker was gone
+  if (co && co.status === 'running' && co.current) {
+    var cur = await getSess('run');
+    if (!cur || cur.recId !== co.current.recId || /^(done|failed)$/.test(cur.status)) { co.idx++; co.current = null; await setSess('coll', co); await collNext(); }
+  } else if (co && co.status === 'running' && co.phase === 'preflight') await collBegin(co.id);
+  else if (co && co.status === 'running' && co.waitingLogin) await collNext();     // still waiting for a login
   await armAll(true);                 // alarms normally persist; re-arm any that went missing
-})();
+  return { run: await getSess('run'), coll: await getSess('coll') };
+}
+restoreAfterRestart();
+
+importScripts('tellit.js');          // Tell it (v0.5): goal -> agent loop -> recipe; uses the helpers above
+importScripts('guided.js');          // goal-guided runs (v0.7): period templating + model-decided steps; uses both
+importScripts('phone.js');           // phone link (v0.8): handoffs to the user's phone over the encrypted relay
