@@ -755,6 +755,7 @@ $('continue').onclick = function () { decide('continue'); };
 $('reject').onclick = function () { decide('reject'); };
 $('export').onclick = function () {
   call({ type: 'export_log' }).then(function (log) {
+    if (log.sinkSaved) { notice('Run log saved to the project folder (runlogs/).'); return; }
     download('awos-runlog-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(log, null, 1));
   });
 };

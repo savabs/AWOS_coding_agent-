@@ -1278,8 +1278,21 @@ async function autoSaveLog(run) {
   if (!on) return;
   var stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
   var v = String(run.result ? run.result.verdict : 'FAILED').toLowerCase();
-  var url = 'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(await exportLog(), null, 1));
+  var log = await exportLog();
+  if (await sinkLog(log, v)) return;                // the local log service (scripts/awos_logsink.py) writes it into a folder
+  var url = 'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(log, null, 1));
   await chrome.downloads.download({ url: url, filename: LOG_DIR + '/runlog-' + stamp + '-' + v + '.json', conflictAction: 'uniquify', saveAs: false });
+}
+// v0.10.1: macOS keeps ~/Downloads away from terminal tools (and Chrome does not write through a symlink there), so a
+// developer runs scripts/awos_logsink.py: a loopback-only service that writes each posted log into the project folder.
+var LOG_SINK = 'http://127.0.0.1:8099/runlog';
+async function sinkLog(log, tag) {
+  var ctl = new AbortController(), timer = setTimeout(function () { ctl.abort(); }, 2500);
+  try {
+    var r = await fetch(LOG_SINK, { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctl.signal,
+                                    body: JSON.stringify(Object.assign({}, log, { tag: tag })) });
+    return r.ok;
+  } catch (e) { return false; } finally { clearTimeout(timer); }
 }
 function ownLog(d) { return !!d && (/^data:application\/json/.test(d.url || '') || /AWOS-Replay-logs[\/\\]runlog-/.test(d.filename || '')); }
 
@@ -2378,7 +2391,11 @@ var HANDLERS = {
     var r = await M.pingLocal(cfg, 1500);
     return { brain: 'local', ok: r.ok, error: r.error || '' };
   },
-  export_log: async function () { return exportLog(); },
+  export_log: async function () {
+    var log = await exportLog();
+    log.sinkSaved = await sinkLog(log, 'export');      // v0.10.1: also into the project folder when the log service runs
+    return log;
+  },
   export_recipe: async function (msg) { return exportRecipe(msg.id); },
   import_offer: async function (msg, sender) { return offerImport(msg, sender); },
   import_confirm: async function (msg) { return confirmImport(msg.nonce); },
