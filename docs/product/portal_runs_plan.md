@@ -36,15 +36,29 @@ missing, and never fails silently.
 | Who to sell to first: solo users stick (the chore is pure dead time); teams need a shared destination + a record of what ran and changed, plus procurement and security review (1, strong, competitor) | decision: start solo / small bookkeeping practices; team features later |
 | Logins stay on the user's computer (an incumbent storing logins on its servers made the finance person nervous) (1, strong) | by design: runs in the user's own browser |
 
-## Priorities
-- **P0** (before a real tester) **- done in 0.9** (tests: `tests/extension/test_portal_p0.py`; untested on a real portal): real file checks (bytes, PDF/CSV by content, not a saved login/error page); AI-read
-  unknown pop-ups (close if harmless, stop if it asks for a decision; "accept terms" always stops); catch up on missed
-  months; wait until the target is enabled/visible.
-- **P1** (after a real tester confirms the core): e-mail route (codes + e-mailed documents); finish the job (rename,
-  folder, accountant hand-off); recipe setup from one sentence via Tell it.
-- **P2**: keyboard fallback; network-level downloads; locked-screen runs.
-- **Not code**: switch on the relay; test end to end on one real portal; get the Reddit test-case user running it;
-  ask about Dext/Hubdoc and price.
+## Priorities (updated 2026-11-05 from 28 discovery conversations)
+- **Done in 0.9** (tests: `tests/extension/test_portal_p0.py`; untested on a real portal): real file checks (bytes,
+  PDF/CSV by content, not a saved login/error page); AI-read unknown pop-ups ("accept terms" always stops); catch-up of
+  missed months; wait until the target is usable.
+- **P0 now (blocks every tester, pilot and try-date):**
+  1. Switch on the phone code relay and test a run end to end on one real portal, ideally a bank site (text-message
+     codes are the top blocker: 8 people; also our main edge over Tailride / GetMyInvoices, which only do
+     authenticator apps).
+  2. Read back every output before saying done: the file opens, is for the right period, and its contents look sane
+     (row count / balances). A competitor's biggest lesson: a half-expired session gives a stale file and a green check.
+  3. A safe first run: start on a low-stakes portal and stop and ask the first time a page doesn't match.
+- **P1 (what the first users will hit next):**
+  - Bank sites as the main use case: when a bank feed breaks or skips cards, download each card's / account's
+    statement every month with a per-card missing checklist (bookkeepers; QuickBooks / Xero read PDFs themselves, so
+    converting is solved, getting the files is the job).
+  - Finish the job: rename files and save them into the user's own accountant / bookkeeper folder (2 users + trust).
+  - Machine-readable door first: e-mailed / scheduled reports, the data request behind the page (4 practitioners + 4).
+  - Check after every step (expected result, read the error / warning that appeared instead) and never double-submit
+    on a retry.
+- **P2:** move portal values into a sheet (3 users; Mac desktop apps out of reach); last day of month in date ranges;
+  keyboard fallback; recipe setup from one sentence via Tell it; network-level downloads; locked-screen runs.
+- **Not code:** price (ask; competitors charge EUR 19-179/mo); get the 12-portal user and one bookkeeper running it on
+  a real date; start with solo users and small bookkeeping practices, not teams.
 
 ## Competitors (discovery + desk research 2026-11-04)
 | Who | What it is | Where it falls short for our user |
