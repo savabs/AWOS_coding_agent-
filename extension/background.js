@@ -1939,7 +1939,16 @@ async function exportLog() {
   });
   return { kind: 'awos-replay-runlog/1', exportedAt: Date.now(), version: chrome.runtime.getManifest().version,
            model: { brain: cfg.brain, endpoint: redactUrl(cfg.endpoint), name: cfg.brain === 'claude' ? cfg.claudeModel : cfg.model, enabled: cfg.enabled },
-           recordings: recOut, runs: runOut };
+           recordings: recOut, runs: runOut,
+           tellit: await getLocal('tellLog', []),        // v0.9.7: Tell it episodes (stopped ones too), model replies included
+           // episodes kept before 0.9.7 (the training trajectories): goal, outcome and each model reply, not the page text
+           tellitEarlier: (await getLocal('tellTraj', [])).map(function (tr) {
+             return { goal: redactText(tr.goal), outcome: tr.outcome, reason: redactText(tr.reason || ''), brain: tr.brain, model: tr.model,
+                      createdAt: tr.createdAt, seconds: tr.seconds, recording: tr.recording || '',
+                      steps: (tr.steps || []).map(function (s) { return { i: s.i, url: redactUrl(s.url), ms: s.ms, action: s.action || '', valid: !!s.valid,
+                                                                       reply: redactText(String(s.reply || '').slice(0, 800)) }; }),
+                      events: (tr.events || []).slice(-40) };
+           }) };
 }
 
 // ---- recipes: export / share / import ---------------------------------------------------------------------

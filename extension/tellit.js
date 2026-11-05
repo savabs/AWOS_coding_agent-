@@ -79,9 +79,29 @@ async function tellEnd(t, outcome, reason) {
   stopClock(t);
   t.status = 'ended'; t.outcome = outcome; t.reason = reason; t.pending = null;
   feed(t, 'end', outcome + (reason ? ': ' + reason : ''));
-  await keepTrajectory(t, null);
+  await keepTrajectory(t, null); await tellLogEnd(t);
   await saveTell(t);
   await sendTab(t.tabId, { type: 'banner', text: '' }).catch(function () {});
+}
+
+/** v0.9.7: every ended episode (stopped, failed, confirmed or not) goes into the run log, model replies included, and
+ *  the log is saved like a replay's (autoSaveLog). Local only; the page text the model saw is not kept here. */
+var TELL_LOG_MAX = 20;
+async function tellLogEnd(t) {
+  if (t.logged) return;
+  t.logged = true;
+  var entry = { id: t.id, goal: redactText(t.goal), brain: t.brain, model: t.model, startedAt: t.startedAt, endedAt: Date.now(),
+    outcome: t.outcome || (t.status === 'ended' ? 'ended' : t.status), reason: redactText(t.reason || ''), steps: t.step,
+    recipeCheck: t.recipeCheck || null, savedRecipe: t.savedRecId || '',
+    model_steps: (t.traj.steps || []).map(function (s) {
+      return { i: s.i, url: redactUrl(s.url), ms: s.ms, reply: redactText(String(s.reply || '').slice(0, 800)), action: s.action || '',
+               valid: !!s.valid, repaired: !!s.repaired, note: s.note ? redactText(String(s.note).slice(0, 300)) : '' };
+    }),
+    events: (t.traj.events || []).slice(-40),
+    feed: (t.feed || []).map(function (f) { return { t: f.t, kind: f.kind, k: f.k, text: redactText(f.text), reason: f.reason ? redactText(f.reason) : '' }; }) };
+  var all = await getLocal('tellLog', []);
+  all.unshift(entry); await setLocal('tellLog', all.slice(0, TELL_LOG_MAX));
+  await autoSaveLog({ result: { verdict: 'tellit-' + entry.outcome } }).catch(function (e) { console.warn('auto log', e); });
 }
 
 async function keepTrajectory(t, confirmed) {
@@ -161,13 +181,16 @@ function recipeSite(rec) {
   try { var h = new URL(rec.startUrl || ((rec.steps || [])[0] || {}).url || '').hostname.replace(/^www\./, ''); return { host: h, name: h.split('.')[0] }; }
   catch (e) { return { host: '', name: '' }; }
 }
+var lastMatch = null;
 async function matchRecipe(goal, tabUrl) {
   var recs = await getLocal('recordings', {}), runs = await getLocal('runs', []);
   var g = String(goal).toLowerCase(), gw = matchWords(goal), gDoc = DOC_WORDS.test(g), best = null;
   var here = ''; try { here = new URL(tabUrl || '').hostname.replace(/^www\./, ''); } catch (e) {}
+  lastMatch = { goal: redactText(goal), tab: here, considered: [] };       // v0.9.7: why each recipe did / did not fit (run log)
   Object.keys(recs).forEach(function (id) {
-    var rec = recs[id];
-    if (!actionCount(rec)) return;
+    var rec = recs[id], seen = { name: rec.goal || rec.name, site: recipeSite(rec).host };
+    lastMatch.considered.push(seen);
+    if (!actionCount(rec)) { seen.skipped = 'no clicks or typing recorded'; return; }
     var site = recipeSite(rec), score = 0, why = [];
     // the site: named in the words ("Claude"), or the tab you are on (a recipe called "Recording 05/11/2026" still fits)
     var named = site.name.length >= 3 && (gw[site.name] || g.indexOf(site.host) >= 0), onIt = !!site.host && here === site.host;
@@ -179,14 +202,19 @@ async function matchRecipe(goal, tabUrl) {
     if (doc) { score += 2; why.push('it downloads a document'); }
     // the site alone is not enough ("change my Claude theme" is not the invoice chore): it needs the document or a
     // word of the recipe's name / goal; without the site, two such words
-    if (!((named || onIt) && (doc || common.length)) && common.length < 2) return;
+    seen.score = score; seen.why = why.join(', ');
+    if (!((named || onIt) && (doc || common.length)) && common.length < 2) {
+      seen.skipped = named || onIt ? 'the site fits, but nothing else in the words does' : 'neither the site nor 2 words of its name / goal are in the request';
+      return;
+    }
     var last = runs.filter(function (r) { return r.recId === id; })[0];
     var ok = !!(last && last.result && last.result.verdict === 'VERIFIED');
     var key = [score, ok ? 1 : 0, rec.createdAt || 0];
     if (!best || key[0] > best.key[0] || (key[0] === best.key[0] && (key[1] > best.key[1] || (key[1] === best.key[1] && key[2] > best.key[2]))))
       best = { rec: rec, key: key, why: why, site: site.host, ok: ok };
   });
-  if (!best || best.key[0] < 3) return null;
+  if (!best || best.key[0] < 3) { lastMatch.fit = null; return null; }
+  lastMatch.fit = best.rec.goal || best.rec.name;
   var named = PD.fromText(goal, nowMs()), period = named || defaultPeriod(best.rec);
   return { recId: best.rec.id, name: best.rec.goal || best.rec.name, site: best.site, period: period, periodLabel: PD.label(period),
            periodFrom: named ? 'your words' : 'the recipe\'s default (' + (best.rec.periodMode === 'this' ? 'this' : 'last') + ' month)',
@@ -245,6 +273,7 @@ async function tellStart(msg) {
             steps: [{ action: 'goto', url: start }], feed: [], pending: null, pendingHist: null, guardSkip: {}, flagSeen: {},
             traj: { task_id: '', model: '', steps: [], outcome: '', reason: '', events: [], flags: [], seconds: 0, error: '' } };
   t.traj.task_id = t.id; t.traj.model = t.model;
+  t.recipeCheck = msg.explore ? { skipped: 'you chose to work it out from scratch' } : lastMatch;
   feed(t, 'info', 'Goal: ' + goal + ' | brain: ' + (t.brain === 'claude' ? 'Claude (' + cfg.agentClaudeModel + '; page text of each step goes to Anthropic)'
                                                                        : 'local model (nothing leaves this computer)'));
   if (recipeNote) feed(t, 'info', recipeNote);
@@ -531,7 +560,7 @@ async function tellConfirm(msg) {
     t.outcome = 'completed_unverified'; t.reason = 'the owner said it is not done';
     feed(t, 'end', 'Not saved: you said it is not done.');
     t.status = 'ended'; t.pending = null;
-    await keepTrajectory(t, false); await saveTell(t);
+    await keepTrajectory(t, false); await tellLogEnd(t); await saveTell(t);
     await sendTab(t.tabId, { type: 'banner', text: '' }).catch(function () {});
     return { saved: false };
   }
@@ -545,7 +574,7 @@ async function tellConfirm(msg) {
   t.savedRecId = rec.id; t.outcome = 'verified'; t.reason = 'the owner confirmed';
   t.status = 'ended'; t.pending = null;
   feed(t, 'end', 'Saved as the recipe "' + rec.name + '". It now replays like any recording.');
-  await keepTrajectory(t, true); await saveTell(t);
+  await keepTrajectory(t, true); await tellLogEnd(t); await saveTell(t);
   await sendTab(t.tabId, { type: 'banner', text: '' }).catch(function () {});
   return rec;
 }

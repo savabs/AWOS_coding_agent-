@@ -346,6 +346,11 @@ def test_tell_it_on_the_recipes_site_fits_without_naming_it(x):
     assert "suggest" not in out, out
     assert any("None of your" in f["text"] for f in out["feed"]), out["feed"]
     x.call("tell_stop")
+    # v0.9.7: the stopped episode is in the run log, with why the recipe did not fit
+    ep = x.call("export_log")["tellit"][0]
+    assert ep["goal"] == "switch the theme to dark" and ep["outcome"] == "halted", ep
+    seen = ep["recipeCheck"]["considered"]
+    assert seen and "nothing else in the words" in seen[0]["skipped"], ep["recipeCheck"]
 
 
 def test_every_run_saves_its_log_when_auto_save_is_on(x):
