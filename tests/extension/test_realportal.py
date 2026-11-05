@@ -336,6 +336,34 @@ def test_tell_it_in_plain_words_runs_the_saved_recipe_for_the_named_month(x):
     pop.close()
 
 
+def test_tell_it_on_the_recipes_site_fits_without_naming_it(x):
+    # the owner's case: a recipe called "Recording 05/11/2026, 11:35:14" (no goal), the request does not name the site
+    page, tab, rec, _ = _record(x, _full_route, name="Recording 05/11/2026, 11:35:14")
+    page.goto(x.server.base + HOME)                                   # the tab is on the recipe's site
+    fit = x.call("tell_start", tabId=tab, goal="download the invoice for September")["suggest"]
+    assert fit["recId"] == rec["id"] and fit["period"] == "2026-09" and "you are on" in fit["why"], fit
+    out = x.call("tell_start", tabId=tab, goal="switch the theme to dark", caps={"steps": 1})   # the site alone: not the chore
+    assert "suggest" not in out, out
+    assert any("None of your" in f["text"] for f in out["feed"]), out["feed"]
+    x.call("tell_stop")
+
+
+def test_every_run_saves_its_log_when_auto_save_is_on(x):
+    x.set_settings(autoSaveLog=True)
+    page, tab, rec, _ = _record(x, _full_route)
+    run = _run(x, page, tab, rec)
+    assert run["result"]["verdict"] == "VERIFIED", _logs(run)
+    assert not [c for c in run["result"]["checks"] if c["kind"] == "download" and "runlog" in str(c.get("actual"))]
+    end = time.time() + 10
+    while time.time() < end:
+        # (headless Chromium saves downloads under random names: the log is the data: JSON download)
+        logs = x.sw.evaluate("chrome.downloads.search({}).then(ds => ds.filter(d => d.url.startsWith('data:application/json') && d.state === 'complete').length)")
+        if logs:
+            break
+        time.sleep(0.3)
+    assert logs == 1, logs
+
+
 def test_tell_it_with_no_fitting_recipe_explores_as_before(x):
     page, tab, rec, _ = _record(x, _full_route)
     out = x.call("tell_start", tabId=tab, goal="download the wikipedia logo", startUrl=x.server.base + "/help.html", caps={"steps": 1})

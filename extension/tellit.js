@@ -161,20 +161,25 @@ function recipeSite(rec) {
   try { var h = new URL(rec.startUrl || ((rec.steps || [])[0] || {}).url || '').hostname.replace(/^www\./, ''); return { host: h, name: h.split('.')[0] }; }
   catch (e) { return { host: '', name: '' }; }
 }
-async function matchRecipe(goal) {
+async function matchRecipe(goal, tabUrl) {
   var recs = await getLocal('recordings', {}), runs = await getLocal('runs', []);
   var g = String(goal).toLowerCase(), gw = matchWords(goal), gDoc = DOC_WORDS.test(g), best = null;
+  var here = ''; try { here = new URL(tabUrl || '').hostname.replace(/^www\./, ''); } catch (e) {}
   Object.keys(recs).forEach(function (id) {
     var rec = recs[id];
     if (!actionCount(rec)) return;
     var site = recipeSite(rec), score = 0, why = [];
-    var siteHit = site.name.length >= 3 && (gw[site.name] || g.indexOf(site.host) >= 0);
-    if (siteHit) { score += 3; why.push('the site ' + site.host); }
+    // the site: named in the words ("Claude"), or the tab you are on (a recipe called "Recording 05/11/2026" still fits)
+    var named = site.name.length >= 3 && (gw[site.name] || g.indexOf(site.host) >= 0), onIt = !!site.host && here === site.host;
+    if (named || onIt) { score += 3; why.push(named ? 'the site ' + site.host : 'you are on ' + site.host); }
     var rw = matchWords([rec.name, rec.goal, rec.goalProposed].join(' '));
     var common = Object.keys(gw).filter(function (w) { return rw[w] && w !== site.name; });
     if (common.length) { score += common.length; why.push('"' + common.join('", "') + '"'); }
-    if (gDoc && downloadGoal(rec)) { score += 2; why.push('it downloads a document'); }
-    if (!siteHit && common.length < 2) return;                  // the site, or two words of its name / goal, must fit
+    var doc = gDoc && downloadGoal(rec);
+    if (doc) { score += 2; why.push('it downloads a document'); }
+    // the site alone is not enough ("change my Claude theme" is not the invoice chore): it needs the document or a
+    // word of the recipe's name / goal; without the site, two such words
+    if (!((named || onIt) && (doc || common.length)) && common.length < 2) return;
     var last = runs.filter(function (r) { return r.recId === id; })[0];
     var ok = !!(last && last.result && last.result.verdict === 'VERIFIED');
     var key = [score, ok ? 1 : 0, rec.createdAt || 0];
@@ -194,11 +199,14 @@ async function tellStart(msg) {
   if (await tellBusy()) throw new Error('a Tell-it run is already in progress: stop it first');
   var goal = String(msg.goal || '').trim().slice(0, 500);
   if (!goal) throw new Error('type what it should do');
+  var tab = await chrome.tabs.get(msg.tabId), recipeNote = '';
   if (!msg.explore) {                                // a chore you showed it already: offer the recipe, for the month named
-    var fit = await matchRecipe(goal);
+    var fit = await matchRecipe(goal, tab.url);
     if (fit) return { suggest: fit };
+    var nRecs = Object.keys(await getLocal('recordings', {})).length;
+    recipeNote = nRecs ? 'None of your ' + nRecs + ' saved recipes fits this request, so I am working it out from scratch. '
+      + 'Tip: name a recipe after its chore (e.g. "Claude invoice") or start from its site, and Tell it reuses it.' : '';
   }
-  var tab = await chrome.tabs.get(msg.tabId);
   var cfg = await tellSettings();
   // start: the typed start page, else this tab if it is a web page, else a site named in the goal, else the search
   // page (the agent searches or goto()s from there, like a person opening a new tab). No start page is required.
@@ -239,6 +247,7 @@ async function tellStart(msg) {
   t.traj.task_id = t.id; t.traj.model = t.model;
   feed(t, 'info', 'Goal: ' + goal + ' | brain: ' + (t.brain === 'claude' ? 'Claude (' + cfg.agentClaudeModel + '; page text of each step goes to Anthropic)'
                                                                        : 'local model (nothing leaves this computer)'));
+  if (recipeNote) feed(t, 'info', recipeNote);
   await saveTell(t);
   await chrome.tabs.update(t.tabId, { url: start });
   await sleep(150);

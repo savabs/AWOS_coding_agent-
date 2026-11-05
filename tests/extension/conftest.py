@@ -266,7 +266,8 @@ class Ext:
     def set_settings(self, **kw):
         # the agent brain (Tell it, goal-guided steps) is the fake server too: never a real model on this machine
         s = {"endpoint": self.server.base + "/v1", "model": "fake", "enabled": True, "findTimeoutMs": 1500,
-             "agentEndpoint": self.server.base + "/v1", "agentModel": "fake-agent"}
+             "agentEndpoint": self.server.base + "/v1", "agentModel": "fake-agent",
+             "autoSaveLog": False}   # (a test install is a developer install: its runs would each save a log file)
         s.update(kw)
         return self.call("save_settings", settings=s)
 

@@ -1062,7 +1062,7 @@ async function finish(run, rec) {
   var dlStep = (rec.steps || []).some(function (s) { return s.download || s.opensTab; });
   if ((dlGoal || dlStep) && !dx.exact && /^(VERIFIED|CHECK)$/.test(verdict)) {
     var mine = (await chrome.downloads.search({ startedAfter: new Date(run.startedAt - 1000).toISOString() }).catch(function () { return []; }))
-      .filter(function (d) { return d.id > (run.dlMark || 0) && d.state === 'complete'; });
+      .filter(function (d) { return d.id > (run.dlMark || 0) && d.state === 'complete' && !ownLog(d); });
     if (!mine.length) {
       verdict = 'UNVERIFIED'; run.noFile = true;
       reason = 'this is a download chore (' + (dlGoal || 'its click downloads a file') + '), but no file was downloaded in this run and no download check is set';
@@ -1201,7 +1201,22 @@ async function fileCheck(run, d, name) {
 }
 
 // ---- after a run: last verdict on the recipe, scheduled-run notice --------------------------------------
+// v0.9.5: every finished run saves the run log (the same file as "Export run log") into Downloads/AWOS-Replay-logs/.
+// On by default for a developer (unpacked) install, off for a store install; the setting autoSaveLog overrides.
+var LOG_DIR = 'AWOS-Replay-logs';
+async function autoSaveLog(run) {
+  var cfg = await settings(), on = cfg.autoSaveLog;
+  if (on === undefined) on = (await chrome.management.getSelf().catch(function () { return {}; })).installType === 'development';
+  if (!on) return;
+  var stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+  var v = String(run.result ? run.result.verdict : 'FAILED').toLowerCase();
+  var url = 'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(await exportLog(), null, 1));
+  await chrome.downloads.download({ url: url, filename: LOG_DIR + '/runlog-' + stamp + '-' + v + '.json', conflictAction: 'uniquify', saveAs: false });
+}
+function ownLog(d) { return !!d && (/^data:application\/json/.test(d.url || '') || /AWOS-Replay-logs[\/\\]runlog-/.test(d.filename || '')); }
+
 async function afterRun(run) {
+  await autoSaveLog(run).catch(function (e) { console.warn('auto log', e); });
   var rec = await getRec(run.recId);
   var v = run.result ? run.result.verdict : 'FAILED';
   if (rec) { rec.lastRun = { verdict: v, at: Date.now(), scheduled: !!run.scheduled, reason: run.result && run.result.reason || '' }; await putRec(rec); }
@@ -2096,6 +2111,7 @@ var HANDLERS = {
     if (s.agentEndpoint != null && !M.isLoopback(s.agentEndpoint)) throw new Error('the agent endpoint must be loopback (127.0.0.1 / localhost)');
     if (s.agentClaudeModel != null && ['claude-haiku-5-5', 'claude-sonnet-5-5'].indexOf(s.agentClaudeModel) < 0) s.agentClaudeModel = 'claude-haiku-5-5';
     if (s.searchPage != null && !/^https?:\/\/[^\s]+$/i.test(String(s.searchPage))) delete s.searchPage;   // Tell it's start when no site is open
+    if (s.autoSaveLog != null) s.autoSaveLog = s.autoSaveLog === true;     // v0.9.5: each run's log -> Downloads/AWOS-Replay-logs
     if (s.noCloudSites != null) s.noCloudSites = (Array.isArray(s.noCloudSites) ? s.noCloudSites : String(s.noCloudSites).split(/[\s,]+/))
       .map(function (x) { x = String(x).trim().toLowerCase(); return /^https?:/.test(x) ? R.siteOf(x) : R.registrableDomain(x.replace(/\/.*$/, '')); })
       .filter(Boolean).filter(function (x, i, a) { return a.indexOf(x) === i; }).slice(0, 200);
