@@ -18,12 +18,22 @@
  * recording keeps a {{secret:...}} placeholder (replay asks for it).
  * State: chrome.storage.session 'tell' (the live episode); chrome.storage.local 'tellTraj' (last 20 episodes in
  * the micro-agent Trajectory format, scaffold/rl/contract.py; exported only on the user's click).
+ * v0.10 (settings.pageView, default on): the prompt is AWOSAgent.buildPromptV2 (the page as typed entities, goal-ranked,
+ * capped at 40, grammar = only the shown numbers), with "Known paths" from the site map (chrome.storage.local
+ * 'siteMap', learned from recordings and from each action's effect), plan-then-act (one plan call at the start when a
+ * known route or a multi-hop goal; one replan after two clicks that changed nothing) and clicks that changed nothing
+ * set aside for that page state. traj.promptVersion says which prompt an episode used. Lessons: background.js
+ * tellRulesText(t, host, stateKey) fills the "Rules learned on this site" block (2 rules at most, ids kept in
+ * t.lessonIds and scored when the episode ends); a correction (tell_note, or a note with Continue) is offered to the
+ * popup as "Remember for <site>?" (offerLesson).
  */
 var AG = self.AWOSAgent;
 var TELL_MAX_TRAJ = 20;
 var TELL_DEFAULTS = { agentBrain: 'local', agentEndpoint: 'http://127.0.0.1:8081/v1', agentModel: 'qwen3.5-4b',
                       agentClaudeModel: 'claude-haiku-5-5', noCloudSites: [], keepTraining: true,
-                      searchPage: 'https://duckduckgo.com/?q={goal}' };
+                      searchPage: 'https://duckduckgo.com/?q={goal}',
+                      pageView: true,          // v0.10: the page as typed entities + site map + plan (false = the v0.5 prompt)
+                      agentPlan: true };       // v0.10: one plan call (2-5 subgoals) when a known path or a multi-step goal
 /** a site the goal names ("... on wikipedia.org", "https://..."), as an https URL; not e-mail addresses. */
 function siteInGoal(goal) {
   var m = /(?:^|[\s("'])((?:https?:\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,24})(\/[^\s"')]*)?/i.exec(String(goal || ''));
@@ -74,11 +84,17 @@ async function tellPause(t, status, pending) {
   await sendTab(t.tabId, { type: 'banner', text: pending.message + ' (open the AWOS popup)' }).catch(function () {});
 }
 
-/** the episode ends (any outcome but the user's confirmation): keep the trajectory, clear the banner. */
-async function tellEnd(t, outcome, reason) {
+/** the episode ends (any outcome but the user's confirmation): keep the trajectory, clear the banner.
+ *  byModel: the model ran out (step / time cap) - only then is it evidence against the site map path and the rules it
+ *  was told (v0.10 review). A stop by the owner, a worker restart or a thrown error teaches nothing: not scored. */
+async function tellEnd(t, outcome, reason, byModel) {
   stopClock(t);
   t.status = 'ended'; t.outcome = outcome; t.reason = reason; t.pending = null;
   feed(t, 'end', outcome + (reason ? ': ' + reason : ''));
+  if (outcome === 'halted' && byModel) {
+    await tellMapOutcome(t, false);                                // v0.10: the path it took did not lead to the goal
+    await tellLessonsEnd(t, 'halted');                             // v0.10: the rules it was told
+  } else if (outcome !== 'halted') await tellLessonsEnd(t, String(outcome || ''));
   await keepTrajectory(t, null); await tellLogEnd(t);
   await saveTell(t);
   await sendTab(t.tabId, { type: 'banner', text: '' }).catch(function () {});
@@ -93,6 +109,8 @@ async function tellLogEnd(t) {
   var entry = { id: t.id, goal: redactText(t.goal), brain: t.brain, model: t.model, startedAt: t.startedAt, endedAt: Date.now(),
     outcome: t.outcome || (t.status === 'ended' ? 'ended' : t.status), reason: redactText(t.reason || ''), steps: t.step,
     recipeCheck: t.recipeCheck || null, savedRecipe: t.savedRecId || '',
+    promptVersion: t.traj.promptVersion || 'v1', plan: t.plan ? t.plan.steps.map(redactText) : null,     // v0.10
+    lessons: (t.lessonIds || []).slice(),                                                                   // v0.10: ids told
     model_steps: (t.traj.steps || []).map(function (s) {
       return { i: s.i, url: redactUrl(s.url), ms: s.ms, reply: redactText(String(s.reply || '').slice(0, 800)), action: s.action || '',
                valid: !!s.valid, repaired: !!s.repaired, note: s.note ? redactText(String(s.note).slice(0, 300)) : '' };
@@ -113,6 +131,163 @@ async function keepTrajectory(t, confirmed) {
     answer: t.result && t.result.answer || '', recording: t.savedRecId || '', createdAt: t.startedAt });
   var all = await getLocal('tellTraj', []);
   all.unshift(tr); await setLocal('tellTraj', all.slice(0, TELL_MAX_TRAJ));
+}
+
+// ---- v0.10: the site map (lib/sitemap.js): what clicks did on each site, learned by watching ------------------------
+// chrome.storage.local 'siteMap' = {hosts: {host: {edges, states}}}: per site, which control in which state opened which
+// menu / window / tab, went where or downloaded. Fed by the user's recordings ('seen': their own demonstration,
+// merged once per recording: 'siteMapRecs'), by every Tell-it action and imported recipe ('unproven': stored, but no
+// route or prompt line until proven), by a confirmed episode ('ok' for its whole path) and by a failed one ('fail' for
+// every edge of it). Only roles, accessible names, contexts and generic item
+// words are kept (lib/sitemap.js merge): never a value, a row's text or a file name. Local only.
+var SM = self.AWOSSiteMap, PV = self.AWOSPageView;
+function recHost(rec) { return SM.hostOf((rec && (rec.startUrl || ((rec.steps || [])[0] || {}).url)) || ''); }
+async function siteMapLoad(host) {
+  var map = await getLocal('siteMap', { hosts: {} });
+  if (!host) return map;
+  var recs = await getLocal('recordings', {}), done = await getLocal('siteMapRecs', {}), add = [];
+  Object.keys(recs).forEach(function (id) { if (!done[id] && recHost(recs[id]) === host) add.push(id); });
+  if (!add.length) return map;
+  // v0.10: a recording is the user's own path but not yet a proof ('seen'); one whose last replay was VERIFIED is 'ok'
+  // (recordings made since 0.10 were merged when they were saved: background.js siteMapFromRecording)
+  add.forEach(function (id) {
+    var lr = recs[id].lastRun;
+    map = SM.merge(map, SM.fromRecording(recs[id]), lr && lr.verdict === 'VERIFIED' ? 'ok' : recs[id].imported ? 'unproven' : 'seen', Date.now()); done[id] = 1;
+  });
+  await setLocal('siteMap', map); await setLocal('siteMapRecs', done);
+  return map;
+}
+async function siteMapMerge(edges, outcome) {
+  if (!edges || !edges.length) return;
+  await setLocal('siteMap', SM.merge(await getLocal('siteMap', { hosts: {} }), edges, outcome, Date.now()));
+}
+/** what effectOf needs of an observation: no field values (only tab / checkbox state), no page text (a hash of it). */
+function slimObs(o, ents) {
+  var txt = (o.alerts || []).concat(o.statuses || [], [o.dialog || '', o.text || '']).join('\n'), h = 5381;
+  for (var i = 0; i < txt.length; i++) h = ((h << 5) + h + txt.charCodeAt(i)) | 0;
+  return { url: o.url, dialog: o.dialog || '', dialogName: o.dialogName || '', sig: h,
+           controls: (o.controls || []).map(function (c) {
+             var x = { role: c.role, name: c.name };
+             if (c.role === 'tab' || c.role === 'checkbox') x.value = c.value;
+             if (c.inDialog) x.inDialog = true;
+             if (c.row) x.row = c.row;
+             return x;
+           }),
+           entities: (ents || []).map(function (e) { return { type: e.type, label: e.label || '', count: e.count || e.items.length }; }) };
+}
+/** the state the page is in: its key, with the menu an earlier click opened while that menu still shows. */
+function tellStateKey(t, obs) {
+  var k = SM.stateKey(obs), mk = t.menuKey || '';
+  var menuOpen = (obs.controls || []).some(function (c) { return /^menuitem/.test(c.role || ''); });
+  return mk && menuOpen && mk.split('|menu:')[0] === k ? mk : k;
+}
+var EFFECT_TEXT = {
+  opened_menu: function (l) { return 'it opened the menu of "' + l + '"; if nothing in it fits the goal, click "' + l + '" again to close it'; },
+  opened_dialog: function (l) { return 'it opened the "' + l + '" window'; },
+  closed_dialog: function (l) { return 'it closed the "' + l + '" window'; },
+  switched_tab: function (l) { return 'it switched to the "' + l + '" tab'; },
+  navigated: function (l) { return 'it went to ' + l; },
+  downloaded: function (l) { return 'a ' + (l || 'file') + ' file downloaded'; },
+  new_tab: function () { return 'it opened a new tab'; },
+  showed_items: function (l) { return 'it showed more ' + (l || 'list') + ' rows'; },
+};
+var PLAN_GENERIC = { click: 1, tab: 1, window: 1, button: 1, link: 1, page: 1, select: 1, choos: 1, choose: 1, then: 1, it: 1 };
+/** the plan moves on when an action's effect names its current subgoal (or a later one: the model went ahead). */
+function planAdvance(t, la, eff) {
+  var pl = t.plan;
+  if (!pl || pl.at >= pl.steps.length) return false;
+  var cw = SM.words([la.name, eff.label, la.items || ''].join(' '));
+  function fits(sg) {
+    var w = SM.words(sg).filter(function (x) { return !PLAN_GENERIC[x]; });
+    return w.some(function (x) { return cw.indexOf(x) >= 0; }) || (eff.kind === 'opened_menu' && /\b(menu|profile|account|avatar)\b/i.test(sg))
+      || (eff.kind === 'downloaded' && /\bdownload/i.test(sg));
+  }
+  for (var j = pl.steps.length - 1; j >= pl.at; j--) {
+    if (fits(pl.steps[j])) { pl.at = j + 1; return true; }
+  }
+  return false;
+}
+/** the effect of the last action, now that the page settled: learned into the site map, told to the model.
+ *  -> the phrase for its history line ('' when nothing is known). */
+async function tellEffect(t, obs, ents) {
+  var la = t.lastAct;
+  t.lastAct = null;
+  if (!la || !la.before) return '';
+  var dl = null, nt = false;
+  if (la.verb !== 'fill_enter') {
+    dl = ((await chrome.downloads.search({ orderBy: ['-startTime'], limit: 5 }).catch(function () { return []; })) || [])
+      .filter(function (d) { return d.id > (la.dlMark || 0); })[0] || null;
+    nt = ((await chrome.tabs.query({}).catch(function () { return []; })) || [])
+      .some(function (x) { return (la.tabsBefore || []).indexOf(x.id) < 0 && x.openerTabId === t.tabId; });
+  }
+  var after = slimObs(obs, ents);
+  var eff = SM.effectOf(la.before, after, { role: la.role, name: la.name, download: dl ? { name: String(dl.filename || '').split(/[\\/]/).pop() } : null, newTab: nt });
+  t.menuKey = eff.kind === 'opened_menu' ? eff.to : '';
+  t.traj.events.push({ step: la.step, effect: eff.kind, label: SM.clean(eff.label, 40) });
+  if (eff.kind === 'nothing') {
+    var noHash = function (u) { return String(u || '').split('#')[0]; };    // a bare #anchor is no change (a #/route changes the text)
+    var changed = la.before.sig !== after.sig || noHash(la.before.url) !== noHash(after.url);
+    if (la.verb === 'click' && !changed && !/^(checkbox|radiogroup|switch|textbox|combobox|password)$/.test(la.role || '')) {
+      var tr = t.tried[la.fromKey] = (t.tried[la.fromKey] || []);
+      if (!tr.some(function (x) { return x.role === la.role && x.name === la.name; })) tr.push({ role: la.role, name: la.name });
+      if (tr.length > 12) tr.shift();
+      t.nothing = (t.nothing || 0) + 1;
+      return 'nothing visible changed, so it is set aside on this page';
+    }
+    t.nothing = 0;
+    return '';
+  }
+  t.nothing = 0;
+  var edge = { host: SM.hostOf(la.url), from: la.fromKey, to: eff.to, effect: { kind: eff.kind, label: eff.label },
+               control: { role: la.role, name: la.name, context: la.context || '', row: !!la.row, items: la.items || '' } };
+  t.edges.push(edge);
+  if (t.edges.length > 40) t.edges.shift();
+  await siteMapMerge([edge], 'unproven');          // the model's own click: kept, but no route until the user confirms
+  if (planAdvance(t, la, eff)) feed(t, 'info', t.plan.at < t.plan.steps.length ? 'Plan: now "' + t.plan.steps[t.plan.at] + '"' : 'Plan: every subgoal reached');
+  var f = EFFECT_TEXT[eff.kind];
+  return f ? f(SM.clean(eff.label, 50).replace(/"/g, "'")) : '';
+}
+/** the episode's path into the site map: the whole path 'ok' once the user confirmed it, every edge of it 'fail' when
+ *  it ended without reaching the goal (the user said not done, or the model ran out). Once per episode. */
+async function tellMapOutcome(t, ok) {
+  if (t.mapDone || !(t.edges || []).length) return;
+  t.mapDone = true;
+  await siteMapMerge(t.edges, ok ? 'ok' : 'fail').catch(function (e) { console.warn('site map', e); });
+}
+
+/** v0.10: a correction typed in Tell it is offered as a lesson for the page's site (background.js offerLesson). */
+async function tellOfferLesson(t, text) {
+  var url = ((await chrome.tabs.get(t.tabId).catch(function () { return {}; })).url) || '';
+  var host = SM.hostOf(url), key = t.lastKey && t.lastKey.split('|')[0] === SM.pagePattern(url) ? t.lastKey : (host ? SM.stateKey({ url: url }) : '');
+  return offerLesson('tell', text, { host: host, stateKey: key, goal: t.goal });
+}
+
+// ---- v0.10 plan-then-act --------------------------------------------------------------------------------------------
+var PLAN_VERBS = /\b(open|go|click|download|find|change|turn|switch|select|search|fill|save|send|export|set|update|look|check|copy|add|remove|cancel|upload)\b/g;
+/** a goal that needs more than one hop: "... then ...", or two different action verbs. */
+function multiHop(goal) {
+  var g = String(goal || '').toLowerCase(), seen = {};
+  if (/\b(then|after that|afterwards)\b/.test(g)) return true;
+  (g.match(PLAN_VERBS) || []).forEach(function (v) { seen[v] = 1; });
+  return Object.keys(seen).length >= 2;
+}
+/** ONE model call -> t.plan = {steps: [2-5 subgoals], at: 0} (kept in the trajectory; a bad reply = no plan). */
+async function tellPlan(t, cfg, obs, paths, again) {
+  var user = AG.buildPlanPrompt({ goal: t.goal, obs: obs, paths: paths, history: again ? t.history : null, replan: again && !!t.plan, now: nowMs() });
+  var t0 = Date.now(), r = await tellChat(t, cfg)([{ role: 'system', content: AG.PLAN_SYSTEM }, { role: 'user', content: user }], AG.PLAN_GRAMMAR);
+  var steps = r.error ? [] : AG.parsePlan(r.text);
+  t.traj.plans = (t.traj.plans || []).concat([{ step: t.step, again: !!again, system: AG.PLAN_SYSTEM, user: user, grammar: AG.PLAN_GRAMMAR,
+    reply: r.error ? '' : String(r.text || '').slice(0, 600), steps: steps, ms: Date.now() - t0, error: r.error || '' }]);
+  var bad = steps.length ? AG.planCheck(steps, t.goal) : '';
+  if (bad) {                                       // v0.10 review: the plan is page-derived; a suspicious one is dropped
+    t.traj.plans[t.traj.plans.length - 1].dropped = bad;
+    feed(t, 'warn', 'The plan was not used: ' + bad + '.');
+    return;
+  }
+  if (steps.length) {
+    t.plan = { steps: steps, at: 0 };
+    feed(t, 'info', (again ? 'New plan: ' : 'Plan: ') + steps.join(' → '));
+  }
 }
 
 // ---- the brain ---------------------------------------------------------------------------------------------
@@ -271,6 +446,7 @@ async function tellStart(msg) {
             maxSeconds: Math.max(1, Math.min(AG.MAX_SECONDS, caps.seconds || AG.MAX_SECONDS)),
             step: 0, activeMs: 0, segStart: Date.now(), window: 0, visited: [], history: [], invalid: 0, note: startNote,
             steps: [{ action: 'goto', url: start }], feed: [], pending: null, pendingHist: null, guardSkip: {}, flagSeen: {},
+            edges: [], tried: {}, nothing: 0, plan: null, menuKey: '', lastAct: null, expand: false,   // v0.10 (site map, plan)
             traj: { task_id: '', model: '', steps: [], outcome: '', reason: '', events: [], flags: [], seconds: 0, error: '' } };
   t.traj.task_id = t.id; t.traj.model = t.model;
   t.recipeCheck = msg.explore ? { skipped: 'you chose to work it out from scratch' } : lastMatch;
@@ -296,10 +472,11 @@ async function tellDrive(id) {
   } finally { if (tellDriving === id) tellDriving = null; }
 }
 
-function histOk(t, obs) {
+function histOk(t, obs, effect) {
   if (!t.pendingHist) return;
   var lt = AG.liveText(obs);
-  t.history.push(t.pendingHist.step + '. ' + t.pendingHist.show + ' -> ok; now on "' + obs.title + '"' + (lt ? ' (' + lt.slice(0, 160) + ')' : ''));
+  t.history.push(t.pendingHist.step + '. ' + t.pendingHist.show + ' -> ok; now on "' + obs.title + '"' + (lt ? ' (' + lt.slice(0, 160) + ')' : '')
+                 + (effect ? '; ' + effect : ''));          // v0.10: what the action did (opened a menu, nothing visible ...)
   t.pendingHist = null;
 }
 
@@ -315,16 +492,17 @@ async function tellLoop(id) {
     var cfg = await tellSettings();
     if (t.brain === 'claude') cfg.claudeKey = await getLocal('claudeKey', '');    // only for the call itself; consent re-checked per call
     if (t.resumeAct) { var ra = t.resumeAct; t.resumeAct = null; await tellExecute(t, cfg, ra.act, ra.ctx, true); continue; }
-    if (t.step >= t.maxSteps) return tellEnd(t, 'halted', 'step cap ' + t.maxSteps + ' reached');
-    if (elapsed(t) > t.maxSeconds * 1000) return tellEnd(t, 'halted', 'time cap ' + t.maxSeconds + 's reached');
+    if (t.step >= t.maxSteps) return tellEnd(t, 'halted', 'step cap ' + t.maxSteps + ' reached', true);
+    if (elapsed(t) > t.maxSeconds * 1000) return tellEnd(t, 'halted', 'time cap ' + t.maxSeconds + 's reached', true);
     await waitForLoad(t.tabId); await ensureContent(t.tabId);
     var raw = await sendRetry(t.tabId, { type: 'agent_observe' });
     if (t.brain === 'claude') {
       var lock = cloudLockedFor(cfg, raw.url);
       if (lock) return tellEnd(t, 'needs_user', 'this page is on ' + lock + ', where the cloud is locked off; stopped before sending anything');
     }
-    var obs = AG.maskObs(raw);
-    histOk(t, obs);
+    var obs = AG.maskObs(raw), v2 = cfg.pageView !== false;
+    var ents = v2 ? PV.entities(obs) : null, effect = v2 ? await tellEffect(t, obs, ents) : '';
+    histOk(t, obs, effect);
     var hits = AG.detectInjection(obs), path = String(raw.url).replace(/^https?:\/\/[^/]+/, '').split('?')[0];
     hits.forEach(function (h) {
       if (t.flagSeen[path + h]) return;
@@ -341,12 +519,59 @@ async function tellLoop(id) {
       return tellPause(t, 'needs_user', { kind: 'guard', guard: g.kind, guardKey: path + ':' + g.kind, message: gm });
     }
     if (!t.visited.length || t.visited[t.visited.length - 1] !== obs.title) t.visited.push(obs.title);
+    var v2c = null;
+    if (v2) {
+      // v0.10: the page as entities, the site's known paths, the plan (one extra call at the start, one replan after two
+      // clicks in a row that changed nothing), controls tried without effect set aside for this state
+      var host = SM.hostOf(raw.url), key = tellStateKey(t, obs), map = await siteMapLoad(host);
+      var pathsFor = function () {
+        var sg = t.plan && t.plan.at < t.plan.steps.length ? ' ' + t.plan.steps[t.plan.at] : '';
+        return SM.describe(map, host, { targetWords: t.goal + sg, from: key, max: 4 });
+      };
+      // the plan is made at the start only (a known route to the goal, or a goal of several hops); the replan is once
+      var wantPlan = cfg.agentPlan !== false && ((!t.planTried && t.step === 0 && (multiHop(t.goal) || SM.route(map, host, key, t.goal).length > 0))
+                                                 || (t.nothing >= 2 && !t.replanned));
+      // v0.10 review: a plan is written from the page; on a page with text addressed to AI agents it would carry that
+      // text into every later prompt as the agent's own plan: no plan (or replan) there
+      if (wantPlan && hits.length) {
+        t.planTried = true; if (t.step > 0) { t.replanned = true; t.nothing = 0; }
+        if (!t.planSkipNoted) { t.planSkipNoted = true; feed(t, 'warn', 'No plan on this page: it has text addressed to AI agents.'); }
+        wantPlan = false;
+      }
+      if (wantPlan) {
+        var again = t.step > 0, f0 = t.feed.length;
+        t.planTried = true; if (again) { t.replanned = true; t.nothing = 0; }
+        await saveTell(t);
+        await tellPlan(t, cfg, obs, pathsFor(), again);
+        var tp = await getSess('tell');
+        if (!tp || tp.id !== id || tp.status !== 'running') return;     // stopped while it planned
+        // only what the plan call added: a note / pause typed meanwhile (tell_note) keeps its feed line
+        tp.plan = t.plan; tp.traj.plans = t.traj.plans; tp.feed = tp.feed.concat(t.feed.slice(f0));
+        if (tp.feed.length > 80) tp.feed.splice(0, tp.feed.length - 80);
+        t = tp;
+      }
+      var tried = t.tried[key] || [], skip = [];
+      (obs.controls || []).forEach(function (c, i) { if (tried.some(function (x) { return x.role === c.role && x.name === c.name; })) skip.push(i + 1); });
+      var rules = typeof tellRulesText === 'function' ? await tellRulesText(t, host, key) : '';   // lessons (lib/lessons.js), when wired
+      v2c = { key: key, skip: skip, tried: tried, expand: !!t.expand, paths: pathsFor(), rules: rules || '', slim: slimObs(obs, ents) };
+      t.expand = false;
+    }
     t.step += 1;
     var note = t.note; t.note = '';
-    var system = AG.SYSTEM + AG.SYSTEM_WEB;
-    var prompt = AG.buildPrompt({ goal: t.goal, step: t.step, maxSteps: t.maxSteps, visited: t.visited, history: t.history,
-                                  obs: obs, window: t.window, injected: hits.length > 0, note: note });
-    var grammar = AG.buildGrammar((obs.controls || []).length);
+    var system = AG.SYSTEM + AG.SYSTEM_WEB, prompt, grammar, pv2 = null;
+    if (v2c) {
+      pv2 = AG.buildPromptV2({ goal: t.goal, step: t.step, maxSteps: t.maxSteps, visited: t.visited, history: t.history, obs: obs,
+                               injected: hits.length > 0, note: note, rules: v2c.rules, paths: v2c.paths, plan: t.plan,
+                               expand: v2c.expand, skip: v2c.skip, tried: v2c.tried, now: nowMs() });
+      prompt = pv2.text;
+      grammar = AG.buildGrammarFor(pv2.shown, true, { scroll: v2c.expand ? 'up' : pv2.hidden > 0 ? 'down' : false });
+      t.traj.promptVersion = AG.PROMPT_V2;
+    } else {
+      prompt = AG.buildPrompt({ goal: t.goal, step: t.step, maxSteps: t.maxSteps, visited: t.visited, history: t.history,
+                                obs: obs, window: t.window, injected: hits.length > 0, note: note });
+      grammar = AG.buildGrammar((obs.controls || []).length);
+      t.traj.promptVersion = 'v1';
+    }
     await saveTell(t);
     var t0 = Date.now(), r = await AG.decide(tellChat(t, cfg), system, prompt, grammar, t.brain === 'claude');
     t = await getSess('tell');
@@ -373,8 +598,9 @@ async function tellLoop(id) {
     var reason = (String(r.reply).split('\n').filter(function (l) { return l.indexOf('# ') === 0; })[0] || '').slice(2);
     feed(t, 'step', show, { k: k, reason: reason });
     var ctrl = act.n ? (raw.controls || [])[act.n - 1] : null;
-    await tellExecute(t, cfg, act, { k: k, show: show, obs: obs, url: raw.url,
-                                     expectName: ctrl ? ctrl.name : null, nControls: (obs.controls || []).length }, false);
+    var ctx = { k: k, show: show, obs: obs, url: raw.url, expectName: ctrl ? ctrl.name : null, nControls: (obs.controls || []).length };
+    if (pv2) Object.assign(ctx, { v2: true, shown: pv2.shown, hidden: pv2.hidden, expanded: v2c.expand, fromKey: v2c.key, slim: v2c.slim });
+    await tellExecute(t, cfg, act, ctx, false);
   }
 }
 
@@ -435,7 +661,7 @@ async function tellExecute(t, cfg, act, ctx, approved) {
     return tellPause(t, 'needs_user', { kind: 'agent', message: 'The agent needs you: ' + (act.text || 'no reason given')
       + '. Do it in the page or type a correction below, then press Continue.' });
   }
-  var v = AG.validate(act, ctx.obs);
+  var v = ctx.v2 ? AG.validateV2(act, ctx.obs, ctx.shown, ctx.hidden, ctx.expanded) : AG.validate(act, ctx.obs);
   if (v.error) { tellReject(t, ctx, v.error); if (!(await tellInvalid(t))) await saveTell(t); return; }
   if (v.secret) return tellSecretPause(t, ctx, v.secret.sensitive, v.secret.name);
   var tabUrl = ((await chrome.tabs.get(t.tabId).catch(function () { return {}; })).url) || '';
@@ -464,6 +690,11 @@ async function tellExecute(t, cfg, act, ctx, approved) {
   }
   if (danger && !approved) return tellAskApproval(t, act, ctx, danger, gateName);
 
+  if (act.verb === 'scroll' && ctx.v2) {             // v0.10: scroll(down) = every control on the next step, up = the short list
+    t.expand = act.direction === 'down';
+    await sendTab(t.tabId, { type: 'agent_act', act: act }).catch(function () {});
+    return tellOk(t, ctx);
+  }
   if (act.verb === 'scroll') {
     var n = ctx.nControls;
     t.window = Math.max(0, t.window + (act.direction === 'down' ? AG.WINDOW : -AG.WINDOW));
@@ -480,8 +711,17 @@ async function tellExecute(t, cfg, act, ctx, approved) {
     t.window = 0;
     return tellOk(t, ctx);
   }
+  // v0.10: what the page looked like before a click / Enter, to learn its effect once the page settled (tellEffect)
+  var la = null;
+  if (ctx.v2 && ctx.slim && v.control && (act.verb === 'click' || act.verb === 'fill_enter' || (act.verb === 'select' && isRadio(v.control)))) {
+    la = { verb: act.verb, role: v.control.role || '', name: v.control.name || '', context: v.control.context || '', row: !!v.control.row,
+           items: v.control.row ? SM.itemWord([v.control.row]) : '', fromKey: ctx.fromKey, url: tabUrl, step: k, before: ctx.slim,
+           dlMark: ((await chrome.downloads.search({ orderBy: ['-startTime'], limit: 1 }).catch(function () { return []; }))[0] || {}).id || 0,
+           tabsBefore: (await chrome.tabs.query({}).catch(function () { return []; })).map(function (x) { return x.id; }) };
+  }
   var r = await sendTab(t.tabId, { type: 'agent_act', act: act, approved: approved, expectName: ctx.expectName })
     .catch(function (e) { return { ok: false, error: 'the page did not answer (' + (e.message || e) + ')' }; });
+  if (r && r.ok && la) t.lastAct = la;
   if (!r || !r.ok) {
     if (r && r.needsApproval && !approved) return tellAskApproval(t, act, ctx, r.danger, ctx.expectName || '');
     if (r && r.secret) return tellSecretPause(t, ctx, r.secret, ctx.expectName || '');
@@ -519,7 +759,9 @@ async function tellOk(t, ctx) {
 }
 async function tellAskApproval(t, act, ctx, danger, target) {
   t.traj.events.push({ step: ctx.k, action: ctx.show, approval_asked: danger });
-  return tellPause(t, 'awaiting_approval', { kind: 'approval', act: act, ctx: { k: ctx.k, show: ctx.show, obs: ctx.obs, url: ctx.url, expectName: ctx.expectName, nControls: ctx.nControls },
+  var keep = { k: ctx.k, show: ctx.show, obs: ctx.obs, url: ctx.url, expectName: ctx.expectName, nControls: ctx.nControls };
+  if (ctx.v2) Object.assign(keep, { v2: true, shown: ctx.shown, hidden: ctx.hidden, expanded: ctx.expanded, fromKey: ctx.fromKey, slim: ctx.slim });
+  return tellPause(t, 'awaiting_approval', { kind: 'approval', act: act, ctx: keep,
     danger: danger, target: target,
     message: 'Step ' + ctx.k + ' wants to ' + (act.verb === 'goto' ? 'open ' + act.value : act.verb === 'fill_enter' ? 'press Enter in "' + target + '"' : 'click "' + target + '"')
            + ' (matches "' + danger + '"). Approve, or tell it no.' });
@@ -559,6 +801,8 @@ async function tellConfirm(msg) {
   if (!msg.yes) {
     t.outcome = 'completed_unverified'; t.reason = 'the owner said it is not done';
     feed(t, 'end', 'Not saved: you said it is not done.');
+    await tellMapOutcome(t, false);
+    await tellLessonsEnd(t, 'FAILED');
     t.status = 'ended'; t.pending = null;
     await keepTrajectory(t, false); await tellLogEnd(t); await saveTell(t);
     await sendTab(t.tabId, { type: 'banner', text: '' }).catch(function () {});
@@ -572,6 +816,9 @@ async function tellConfirm(msg) {
   if (!actionCount(rec)) rec.warning = NO_ACTIONS;
   await putRec(rec);
   t.savedRecId = rec.id; t.outcome = 'verified'; t.reason = 'the owner confirmed';
+  await tellMapOutcome(t, true);                                    // v0.10: the confirmed path is the site map's 'ok'
+  await tellLessonsEnd(t, 'VERIFIED');
+  var smr = await getLocal('siteMapRecs', {}); smr[rec.id] = 1; await setLocal('siteMapRecs', smr);   // (not merged twice)
   t.status = 'ended'; t.pending = null;
   feed(t, 'end', 'Saved as the recipe "' + rec.name + '". It now replays like any recording.');
   await keepTrajectory(t, true); await tellLogEnd(t); await saveTell(t);
@@ -598,7 +845,7 @@ async function tellDecide(kind, msg) {
     if (t.pendingHistRaw) { t.history.push(t.pendingHistRaw); t.pendingHistRaw = null; }
     if (p.kind === 'invalid') t.invalid = 0;
   } else throw new Error('unknown decision');
-  if (msg.note) t.note = String(msg.note).slice(0, 300);
+  if (msg.note) { t.note = String(msg.note).slice(0, 300); await tellOfferLesson(t, t.note); }
   t.status = 'running'; t.pending = null; t.segStart = Date.now();
   await saveTell(t);
   await sendTab(t.tabId, { type: 'banner', text: '' }).catch(function () {});
@@ -724,7 +971,8 @@ async function exportTraining() {
       var t = await getSess('tell'); if (!t || t.status === 'ended') throw new Error('no Tell-it run');
       t.note = String(msg.text || '').trim().slice(0, 300);
       feed(t, 'info', 'Your correction goes into the next step: ' + t.note);
-      await saveTell(t); return { ok: true };
+      var offer = await tellOfferLesson(t, t.note);                  // v0.10: "Remember for <site>?" in the popup
+      await saveTell(t); return { ok: true, offer: offer };
     },
     tell_approve: async function (msg) { return tellDecide('approve', msg); },
     tell_decline: async function (msg) { return tellDecide('decline', msg); },

@@ -67,3 +67,11 @@ button.small { padding: 2px 8px; font-size: 12px; }
 .tplrow .tplfield { color: #57606a; margin-right: 4px; }
 .tplrow.off .tplmap { text-decoration: line-through; color: #8c959f; }
 #updateoffer { background: #ddf4ff; border-radius: 6px; padding: 6px 8px; margin: 6px 0; }
+
+/* v0.10 learning: "Remember for <site>?" chip, learned fixes, lessons */
+.chip { background: #fbefff; border: 1px solid #c297ff; border-radius: 14px; padding: 4px 10px; margin: 6px 0; font-size: 12px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.chip[hidden] { display: none; }
+.chip span { flex: 1 1 140px; }
+.fixrow, #lessons li { font-size: 12px; display: flex; gap: 6px; align-items: flex-start; justify-content: space-between; padding: 2px 0; border-top: 1px solid #eaeef2; }
+#lessons li.off { color: #8c959f; }
+#lessons .host { font-weight: 600; border-top: none; padding-top: 6px; }

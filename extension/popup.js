@@ -255,6 +255,8 @@ function renderRecordings() {
       li.appendChild(fields);
     }
     li.appendChild(periodBox(r));
+    var fx = fixesBox(r);                     // v0.10: controls learned for moved / renamed steps
+    if (fx) li.appendChild(fx);
     var sch = details(r.id + ':sched', 'Schedule' + (r.schedule ? ' (on)' : ''));
     sch.appendChild(scheduleBox(r));
     li.appendChild(sch);
@@ -287,6 +289,7 @@ function renderRun() {
     }
   } else { $('needparams').textContent = ''; lastNeedSig = ''; }
   $('reason').textContent = run.result && run.result.reason ? (run.result.code ? run.result.code + ': ' : '') + run.result.reason : '';
+  $('runnotebar').hidden = !(run.status === 'failed' && run.result && run.result.verdict === 'FAILED');   // v0.10: a correction
   var uo = run.updateOffer;                 // v0.7: the portal changed and the model found the way: keep it?
   $('updateoffer').hidden = !(uo && !uo.done);
   if (uo && !uo.done) {
@@ -356,8 +359,67 @@ function render() {
   $('rec').hidden = !!rs; $('stop').hidden = !rs;
   $('recinfo').textContent = rs ? (mine ? 'Recording: ' : 'Recording another tab: ') + (rs.rec.steps.length - 1) + ' actions'
     + (rs.followed ? '. The invoice opened in a new tab; recording continues there (' + rs.followed.url + ').' : '') : '';
-  renderImport(); renderRecordings(); renderRun(); renderCollections(); renderPhone();
+  renderImport(); renderRecordings(); renderRun(); renderCollections(); renderPhone(); renderLessons();
 }
+
+// ---- v0.10 learning: fixes per step, "Remember for <site>?", the lessons list ----------------------------------------
+/** per recipe: the steps that learned another control (lib/heal.js), each with Undo fix. null when none. */
+function fixesBox(r) {
+  var steps = (r.steps || []).map(function (s, k) { return [s, k]; }).filter(function (p) { return (p[0].alternates || []).length; });
+  if (!steps.length) return null;
+  var box = details(r.id + ':fixes', 'Learned fixes (' + steps.length + ')');
+  steps.forEach(function (p) {
+    var row = el('div', { class: 'fixrow', 'data-step': String(p[1]) });
+    row.appendChild(el('span', null, AWOSHeal.describeHeal(p[0], p[1])));
+    var undo = el('button', { class: 'small undofix' }, 'Undo fix');
+    undo.onclick = function () { call({ type: 'heal_revert', id: r.id, step: p[1] }).then(function () { notice('Step ' + (p[1] + 1) + ' uses only the recorded control again.'); lastSig = ''; refresh(); }); };
+    row.appendChild(undo);
+    box.appendChild(row);
+  });
+  return box;
+}
+var lastLessonSig = '';
+function renderLessons() {
+  var o = state.lessonOffer, chip = $('lessonchip');
+  var showChip = !!(o && !o.done && ((o.from === 'tell' && tell) || (o.from === 'run' && state.run && state.run.id === o.runId)));
+  chip.hidden = !showChip;
+  if (showChip) {
+    var at = $(o.from === 'tell' ? 'tellchipat' : 'runchipat');
+    if (chip.parentNode !== at) at.appendChild(chip);
+    $('lessonchipmsg').textContent = 'Remember for ' + o.host + '? "' + o.text.slice(0, 80) + '"';
+  }
+  var ls = state.lessons || [];
+  $('lessonsec').hidden = !ls.length;
+  var sig = JSON.stringify(ls.map(function (it) { return [it.id, it.disabled, it.wins, it.losses, it.do, it.avoid]; }));
+  if (sig === lastLessonSig) return;
+  lastLessonSig = sig;
+  $('lessonsum').textContent = 'Lessons (' + ls.length + ')';
+  var ul = $('lessons'), host = ''; ul.textContent = '';
+  ls.forEach(function (it) {
+    if (it.host !== host) { host = it.host; ul.appendChild(el('li', { class: 'host' }, host)); }
+    var li = el('li', { class: it.disabled ? 'off' : '', 'data-lesson': it.id });
+    var txt = [it.do ? 'do ' + it.do : '', it.avoid ? 'avoid ' + it.avoid : ''].filter(Boolean).join('; ')
+      + (it.disabled ? ' (off: ' + (it.why || 'turned off') + ')' : it.hits ? ' (' + it.wins + ' of ' + it.hits + ' runs went well)' : '');
+    li.appendChild(el('span', null, txt));
+    var del = el('button', { class: 'small dellesson' }, 'Delete');
+    del.onclick = function () { call({ type: 'lesson_delete', id: it.id }).then(refresh); };
+    li.appendChild(del);
+    ul.appendChild(li);
+  });
+}
+function answerLesson(yes) {
+  var o = state.lessonOffer; if (!o) return;
+  call({ type: 'lesson_answer', nonce: o.nonce, remember: yes }).then(function (r) {
+    notice(yes ? (r.lesson ? 'Remembered for ' + o.host + '.' : 'Could not turn that into a rule.') : 'Used for this run only.');
+    refresh();
+  });
+}
+$('lessonyes').onclick = function () { answerLesson(true); };
+$('lessonno').onclick = function () { answerLesson(false); };
+$('runnotego').onclick = function () {
+  var v = $('runnote').value.trim(), run = state.run; if (!v || !run) return;
+  call({ type: 'run_note', runId: run.id, text: v }).then(function () { $('runnote').value = ''; refresh(); });
+};
 
 // ---- Collections: the monthly checklist (v0.6) -------------------------------------------------------------
 var lastCollSig = '', lastPickSig = '';
@@ -658,7 +720,7 @@ async function refresh() {
   state = await call({ type: 'get_state' });
   var ts = await call({ type: 'tell_state' });
   tell = ts.tell; tellCfg = ts.settings;
-  render(); renderTell();
+  render(); renderTell(); renderLessons();
 }
 
 $('rec').onclick = function () {

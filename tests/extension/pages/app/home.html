@@ -24,7 +24,8 @@ ul.inv{list-style:none;padding:0} ul.inv li{padding:6px 0;border-bottom:1px soli
               origin in a new tab, with its own Download button) | 'hostedpdf' (opens the PDF itself, other origin, new tab)
               | 'none' (the link downloads nothing) | 'blob' ("Download PDF" BUTTONS: page script builds a PDF Blob ~0.7 s later, saved via a temporary <a download>)
        lazy   true                  Billing: plan details first; the invoice list renders only once the dialog's inner
-                                    scroll box is scrolled to its end (the window itself does not scroll) -->
+                                    scroll box is scrolled to its end (the window itself does not scroll)
+       chats  N                     v0.10: the sidebar lists N past chats under "Recents" (claude.ai's chat history noise) -->
 <header><strong>Chat app</strong>
   <button id="prof" aria-haspopup="menu">S Saurabh · Max</button></header>
 <div id="menu" role="menu" aria-label="Profile">
@@ -105,6 +106,15 @@ function show(t) {
       }
     };
   }
+}
+if (st.chats) {
+  var aside = document.querySelector('aside'), hh = document.createElement('h3'), ul = document.createElement('ul');
+  hh.textContent = 'Recents'; ul.className = 'recents';
+  for (var c = 1; c <= st.chats; c++) {
+    var li = document.createElement('li'), a = document.createElement('a');
+    a.href = '#chat-' + c; a.textContent = 'Chat about topic ' + c; li.appendChild(a); ul.appendChild(li);
+  }
+  aside.appendChild(hh); aside.appendChild(ul);
 }
 if (st.open) openSettings(st.open);
 if (st.promo) document.getElementById('promo').hidden = false;

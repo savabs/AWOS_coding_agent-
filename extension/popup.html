@@ -71,6 +71,7 @@
       <button id="tellnotego">Send</button>
     </div>
     <p id="tellreason"></p>
+    <div id="tellchipat"></div>
   </section>
 
   <section id="recbar">
@@ -94,6 +95,11 @@
       <button id="updateno">Keep the recorded step</button>
     </div>
     <p id="reason"></p>
+    <div class="acts" id="runnotebar" hidden>
+      <input id="runnote" placeholder="What should it have done? (e.g. Billing is under Settings, not Profile)">
+      <button id="runnotego">Send</button>
+    </div>
+    <div id="runchipat"></div>
     <p class="meta"><a id="shotlink" target="_blank" hidden>Screenshot of the failure (kept on this computer only)</a><span id="shotnote"></span></p>
     <ul id="checks"></ul>
     <details><summary>Log</summary><ol id="log"></ol></details>
@@ -116,6 +122,16 @@
       <button id="collcreate" class="primary">Create collection</button>
     </details>
   </section>
+  <section id="lessonsec" hidden>
+    <details id="lessonbox"><summary id="lessonsum">Lessons</summary>
+      <p class="muted">Corrections you asked AWOS to remember. At most 2 are given to the model per step; ones that keep failing switch off.</p>
+      <ul id="lessons"></ul>
+    </details>
+  </section>
+  <div id="lessonchip" class="chip" hidden>
+    <span id="lessonchipmsg"></span>
+    <button id="lessonyes" class="primary">Remember</button><button id="lessonno">Just this run</button>
+  </div>
   <section>
     <h3>Import a recipe</h3>
     <div class="acts">
@@ -134,6 +150,7 @@
   </section>
   <p id="notice" class="ok"></p>
   <p id="error" class="error"></p>
+<script src="lib/heal.js"></script>
 <script src="popup.js"></script>
 </body>
 </html>

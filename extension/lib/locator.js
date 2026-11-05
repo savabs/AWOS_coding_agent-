@@ -337,6 +337,15 @@
   // dialog = an open dialog's name; text = visible page text; controls = every visible control in
   // document order. Values of sensitive fields (passwords, card numbers, codes) are always masked.
   function textOf(el, n) { return norm(el.innerText || el.textContent).slice(0, n || 600); }
+  /** a window's title the way lib/portal.js titleOf gives it (the recorder's step.dialog.name). */
+  function dialogTitle(d) {
+    var P = root.AWOSPortal;
+    if (P && P.dialogOf) { try { var r = P.dialogOf(d); if (r && r.name) return r.name; } catch (e) {} }
+    var lab = d.getAttribute('aria-label') || '', by = d.getAttribute('aria-labelledby');
+    if (!lab && by) lab = by.split(/\s+/).map(function (id) { var n = document.getElementById(id); return n ? n.textContent : ''; }).join(' ');
+    if (!lab) { var h = deepAll('h1, h2, h3, h4, [role=heading]', d)[0]; if (h) lab = h.textContent; }
+    return norm(lab).slice(0, 120) || textOf(d, 60);
+  }
   function observe() {
     var q = function (sel) { return deepAll(sel).filter(visible); };
     var alerts = q('[role=alert]').map(function (e) { return textOf(e); }).filter(Boolean);
@@ -374,11 +383,19 @@
       return d;
     });
     var nav = performance.getEntriesByType && performance.getEntriesByType('navigation')[0];
-    return { url: location.href, status: (nav && nav.responseStatus) || 0, title: norm(document.title), alerts: alerts, statuses: statuses, regions: regions,
+    var out = { url: location.href, status: (nav && nav.responseStatus) || 0, title: norm(document.title), alerts: alerts, statuses: statuses, regions: regions,
              dialog: dlg ? (contextOf(dlg.firstElementChild || dlg) || norm(dlg.getAttribute('aria-label')) || textOf(dlg, 120)) : '',
              text: lines.join('\n'), controls: controls,
              headings: q('h1, h2, h3, h4, h5, h6').map(function (e) { return textOf(e, 200); }).filter(Boolean),
              forms: formEls.map(function (f) { return { label: norm(f.getAttribute('aria-label') || '') }; }) };
+    // v0.10: the window's title as the recorder names it (lib/portal.js dialogOf: aria-label, labelledby, first
+    // heading), so a live state key matches the one a recording gave the same window (lib/sitemap.js stateParts).
+    // `dialog` above stays as it is (the micro-agent contract prints it).
+    if (dlg) out.dialogName = dialogTitle(dlg);
+    // v0.10: the page's areas (landmarks, menus, windows, tabs, lists) for the entity view (lib/pageview.js); a failure
+    // there never costs the observation itself
+    if (root.AWOSPageView) { try { out.structure = root.AWOSPageView.structure(els); } catch (e) { out.structure = null; } }
+    return out;
   }
   var lastObserved = [];
   /** the element behind control number n (1-based) of the last observe(). */

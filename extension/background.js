@@ -97,8 +97,24 @@
  * verifier model (G7) reads the goal, the actions and the final page; it may only
  * downgrade VERIFIED to CHECK ("look at this one"), and its opinion is logged on
  * every run.
+ *
+ * v0.10 learning from every run (docs/research/experience_reuse_2026-11-05.md; learn only from VERIFIED runs or the
+ * user's own words, inject little, describe controls by meaning):
+ *  - self-healing steps (lib/heal.js): a step is located with its learned alternates in AWOSHeal.candidates order
+ *    (promoted ones, the recording, other verified ones, a demoted recording, unverified ones) before any model call.
+ *    A step the goal-guided model rescued is written back as an alternate of that step (period-templated) when the
+ *    run ends, and confirmed by its verdict (VERIFIED -> verified, FAILED -> dropped); each locate counts one use
+ *    (not found = a failure now, a used control = a success only when the run is VERIFIED). The recorded loc is never
+ *    overwritten; the popup's "Undo fix" removes a step's alternates (heal_revert).
+ *  - lessons (lib/lessons.js, chrome.storage.local 'lessons'): a correction typed after a failed replay (run_note) or
+ *    in Tell it is offered as "Remember for <site>?"; remembered ones are injected (2 at most) into goal-guided and
+ *    Tell-it prompts and scored with the run's verdict (failing ones are switched off).
+ *  - site map (lib/sitemap.js, 'siteMap'): a recording or an import is merged as 'seen', a VERIFIED replay's path as
+ *    'ok', the step a failed replay stopped at as 'fail'.
  */
 importScripts('lib/safety.js', 'lib/model.js', 'lib/period.js', 'lib/recipe.js', 'lib/agent.js', 'lib/phone.js', 'lib/filecheck.js', 'lib/portal.js');
+importScripts('lib/pageview.js', 'lib/sitemap.js', 'lib/lessons.js', 'lib/heal.js');   // v0.10: page entities, site map, lessons, healed locators
+var HL = self.AWOSHeal, LS = self.AWOSLessons;
 var S = self.AWOSSafety, M = self.AWOSModel, R = self.AWOSRecipe, PD = self.AWOSPeriod, FC = self.AWOSFile, PP = self.AWOSPortal;
 // "now" for periods only (the default run period, a recording's month). Tests pin it through chrome.storage.session
 // (testNow), which web pages cannot reach; everything else uses the real clock.
@@ -169,7 +185,7 @@ async function ensureContent(tabId, wantUrl, timeoutMs) {
   }
   throw new Error('page script not ready (' + last + ')');
 }
-var CONTENT_FILES = ['lib/safety.js', 'lib/locator.js', 'lib/portal.js', 'content.js'];
+var CONTENT_FILES = ['lib/safety.js', 'lib/locator.js', 'lib/pageview.js', 'lib/portal.js', 'content.js'];
 /** put the page script into an already-loaded http(s) tab (true once tried, so callers inject at most once). */
 async function injectContent(tabId) {
   var tab = await chrome.tabs.get(tabId).catch(function () { return null; });
@@ -244,6 +260,7 @@ async function stopRecording() {
   if (dl) rec.expectDownloadProposed = dl;
   applyPeriod(rec, false);
   var all = await getLocal('recordings', {}); all[rec.id] = rec; await setLocal('recordings', all);
+  await siteMapFromRecording(rec, 'seen').catch(function (e) { console.warn('site map', e); });    // v0.10
   await setSess('recState', null);
   if (tab) await sendTab(st.tabId, { type: 'rec_state', on: false }).catch(function () {});
   return rec;
@@ -443,6 +460,56 @@ async function startRun(recId, tabId, opts) {
   return run;
 }
 
+// ---- v0.10 self-healing steps: locate with the step's learned alternates (lib/heal.js) ------------------------------
+/** a locate result that names the step's control: confident, or identical copies one per row (pickRow decides). */
+function located(res) { return !!res && (res.status === 'found' || (res.twins || []).length >= 2); }
+/** an alternate learned in one month names that month as {{tokens}}: this run's period goes back in. */
+function periodLoc(loc, period) {
+  var out = {};
+  Object.keys(loc || {}).forEach(function (k) {
+    var v = loc[k];
+    out[k] = typeof v === 'string' ? PD.substitute(v, period) : Array.isArray(v) ? v.map(function (x) { return typeof x === 'string' ? PD.substitute(x, period) : x; }) : v;
+  });
+  return out;
+}
+/** the step's control: its candidates in AWOSHeal order, the first one found wins. A step without alternates is
+ *  located exactly as before. run.heal[i] = {used, source, tried: [{key, found}]} (the last locate of the step counts;
+ *  learnFromRun turns it into AWOSHeal.outcome calls). Nothing found -> the recorded control's result. */
+async function locateHealed(run, base, step, i, timeoutMs) {
+  var bs = base.steps[i] || {};
+  if (!(bs.alternates || []).length) {         // as before; the recorded control's misses are counted (demotion needs both)
+    var r0 = await sendRetry(run.tabId, { type: 'locate', step: step, timeoutMs: timeoutMs });
+    (run.heal = run.heal || {})[i] = { used: located(r0) ? 'primary' : '', source: 'primary', tried: [{ key: 'primary', found: located(r0) }] };
+    return r0;
+  }
+  var cands = HL.candidates({ loc: step.loc, alternates: bs.alternates, primaryFails: bs.primaryFails });
+  var tried = [], primaryAt = -1;
+  for (var k = 0; k < cands.length; k++) {
+    var c = cands[k], st = c.source === 'primary' ? step : Object.assign({}, step, { loc: periodLoc(c.loc, run.period) });
+    var res = await sendRetry(run.tabId, { type: 'locate', step: st, timeoutMs: k === 0 ? timeoutMs : Math.min(timeoutMs || 1500, 1500) });
+    var ok = located(res);
+    tried.push({ key: c.key, found: ok });
+    if (c.source === 'primary') primaryAt = k;
+    if (ok) {
+      (run.heal = run.heal || {})[i] = { used: c.key, source: c.source, tried: tried };
+      if (c.source === 'alternate') {
+        var alt = bs.alternates.filter(function (a) { return a.key === c.key; })[0];
+        logRun(run, 'step ' + (i + 1) + ': ' + (primaryAt >= 0 ? 'the recorded control was not found; ' : '') + 'used a learned fix: '
+                    + HL.describeHeal({ alternates: [alt] }, i));
+      }
+      return res;
+    }
+  }
+  (run.heal = run.heal || {})[i] = { used: '', source: '', tried: tried };
+  // nothing found: the recorded control's own scan again (no scroll search: that ran already), for the pop-up pass,
+  // the goal-guided model and the messages, which all speak about the recorded step
+  var rf = await sendRetry(run.tabId, { type: 'locate', step: step, timeoutMs: 1, noScroll: true });
+  // the page settled after the candidate loop and the recorded control is there now: the recording worked (it is
+  // not a miss of the primary, which would count toward demoting it)
+  if (located(rf)) run.heal[i] = { used: 'primary', source: 'primary', tried: tried.filter(function (t) { return t.key !== 'primary'; }).concat([{ key: 'primary', found: true }]) };
+  return rf;
+}
+
 var driving = null;           // run id currently inside drive(); one driver at a time
 async function drive(runId) {
   if (driving === runId) return;
@@ -523,7 +590,7 @@ async function driveInner(runId) {
       }
     }
     var dBefore = step.action === 'click' || step.action === 'press' ? await openTitles(run) : [];   // v0.9.1: windows already open
-    var loc = await sendRetry(run.tabId, { type: 'locate', step: step, timeoutMs: cfg.findTimeoutMs });
+    var loc = await locateHealed(run, base, step, i, cfg.findTimeoutMs);
     if (loc.scrolled) logRun(run, 'scrolled ' + loc.scrolled.steps + ' step(s) looking for a lazy-loaded target (' + loc.scrolled.ms + ' ms, '
                                  + (loc.status === 'found' ? 'found' : 'not found') + ')');
     // pop-ups (v0.6): a target that is not found, or is drawn under an overlay, gets one unblock pass + one retry
@@ -544,7 +611,7 @@ async function driveInner(runId) {
         });
         await saveRun(run);
         await sleep(300); await waitQuiet(run.tabId, 1500);
-        loc = await sendRetry(run.tabId, { type: 'locate', step: step, timeoutMs: cfg.findTimeoutMs });
+        loc = await locateHealed(run, base, step, i, cfg.findTimeoutMs);
         logRun(run, 'step ' + (i + 1) + ': retried after the dismissal: ' + (loc.status === 'found' && !loc.covered ? 'found' : loc.status + (loc.covered ? ', still covered' : '')));
       }
       if (ub && ub.blocked && (loc.covered || loc.status !== 'found')) {
@@ -552,7 +619,7 @@ async function driveInner(runId) {
         var pr = await popupRead(run, base, ub.blocked, i);
         if (pr.closed) {
           await sleep(300); await waitQuiet(run.tabId, 1500);
-          loc = await sendRetry(run.tabId, { type: 'locate', step: step, timeoutMs: cfg.findTimeoutMs });
+          loc = await locateHealed(run, base, step, i, cfg.findTimeoutMs);
           logRun(run, 'step ' + (i + 1) + ': retried after closing the pop-up: ' + (loc.status === 'found' && !loc.covered ? 'found' : loc.status + (loc.covered ? ', still covered' : '')));
         } else {
           var b = ub.blocked, what = b.kind === 'consent' ? 'cookie / consent banner' : 'pop-up';
@@ -586,6 +653,7 @@ async function driveInner(runId) {
     }
     else if (gEl.any) gWhy = 'no confident match for "' + (step.loc.name || step.loc.text || step.loc.css || '') + '" (' + loc.status + ', best ' + loc.score + ')';
     if (gWhy) {
+      if (run.heal && run.heal[i]) run.heal[i].overridden = true;     // v0.10: the control found was not the one used
       var gd = gp || await guidedDecide(run, base, rec, step, i, gWhy);
       if (!gd) return;                                           // ended (missing / failed) inside
       ge = await guidedExecute(run, step, i, gd);
@@ -601,7 +669,7 @@ async function driveInner(runId) {
         await sleep(300); await waitQuiet(run.tabId, 1500);
         await noteDialogs(run, dBefore);
         if (nn >= GUIDED_NAV) {
-          var stillLoc = await sendRetry(run.tabId, { type: 'locate', step: step, timeoutMs: cfg.findTimeoutMs });
+          var stillLoc = await locateHealed(run, base, step, i, cfg.findTimeoutMs);
           if (stillLoc.status !== 'found') {
             return fail(run, 'NOT_FOUND', 'step ' + (i + 1) + ': the model made ' + nn + ' moves toward "' + (step.loc.name || step.loc.text || '') + '" without reaching it (the cap per step).' + expectNote(base, run));
           }
@@ -1214,6 +1282,136 @@ async function autoSaveLog(run) {
   await chrome.downloads.download({ url: url, filename: LOG_DIR + '/runlog-' + stamp + '-' + v + '.json', conflictAction: 'uniquify', saveAs: false });
 }
 function ownLog(d) { return !!d && (/^data:application\/json/.test(d.url || '') || /AWOS-Replay-logs[\/\\]runlog-/.test(d.filename || '')); }
+
+// ---- v0.10 learning from the run that just ended (heal, site map, lessons); called by archive() -------------------
+/** an alternate the model found for a period-templated step names this run's month: stored as {{tokens}}. */
+function templLoc(loc, rec, i, period) {
+  if (!PD.stepTemplated(rec.tpl, i)) return loc;
+  var out = {};
+  Object.keys(loc || {}).forEach(function (k) {
+    var v = loc[k];
+    out[k] = typeof v === 'string' && v ? PD.detect(v, period, k === 'href' ? 'url' : 'text').template : v;
+  });
+  return out;
+}
+async function learnFromRun(run) {
+  if (run.learned) return;
+  run.learned = true;
+  var v = run.result ? run.result.verdict : 'FAILED', ok = v === 'VERIFIED', now = Date.now();
+  var base = await getRec(run.recId);
+  if (base) {
+    // the step a run failed AT (its control was not found / did not work); a stop by the user or a restart is not that
+    var code = (run.result && run.result.code) || '';
+    var rec = base, failedAt = run.status === 'failed' && v === 'FAILED' && /^(NOT_FOUND|ERROR)$/.test(code) ? run.i : -1, fixed = [];
+    // 1. every locate: a candidate not found failed now; the one used counts once the run is VERIFIED (or it failed there)
+    Object.keys(run.heal || {}).forEach(function (k) {
+      var h = run.heal[k], i = +k;
+      (h.tried || []).forEach(function (t) { if (!t.found) rec = HL.outcome(rec, i, t.key, false); });
+      if (h.used && !h.overridden) {
+        if (ok) rec = HL.outcome(rec, i, h.used, true);
+        else if (failedAt === i) rec = HL.outcome(rec, i, h.used, false);
+      }
+    });
+    // 2. a step the goal-guided model did (not a move toward it) becomes an alternate of that step, kept by the verdict
+    (run.guided || []).forEach(function (g) {
+      var s = rec.steps[g.step];
+      if (!g.loc || g.nav || !s || !s.loc || !sameKind(s.action, g.verb)) return;
+      var loc = templLoc(g.loc, rec, g.step, run.period);
+      if (HL.keyOf(loc) === HL.keyOf(s.loc)) return;                 // the recorded control itself
+      rec = HL.record(rec, g.step, loc, { by: g.brain === 'claude' ? 'claude' : '4b', runId: run.id, at: now });
+      if (fixed.indexOf(g.step) < 0) fixed.push(g.step);
+    });
+    rec = HL.confirm(rec, run.id, v);
+    fixed.forEach(function (i) {
+      var mine = (rec.steps[i].alternates || []).filter(function (a) { return a.runId === run.id || a.verified; });
+      if (!mine.length) logRun(run, 'step ' + (i + 1) + ': the model\'s control was not kept (the run was ' + v + ')');
+      else logRun(run, 'fixed: ' + HL.describeHeal(rec.steps[i], i) + (ok ? '; the next run tries it before asking the model' : ''));
+    });
+    if (JSON.stringify(rec.steps) !== JSON.stringify(base.steps)) await putRec(rec);
+    // 3. the site map: a VERIFIED path is 'ok'; a failed run's step is 'fail' (its control did not get there)
+    var edges = SM.fromRecording(rec);
+    if (ok && edges.length) await siteMapMerge(edges, 'ok');
+    else if (failedAt >= 0 && rec.steps[failedAt] && rec.steps[failedAt].loc) {
+      var fl = rec.steps[failedAt].loc, nm = SM.clean(fl.name || fl.text || '').toLowerCase();
+      var bad = edges.filter(function (e) { return e.control.role === fl.role && String(e.control.name || '').toLowerCase() === nm; });
+      if (bad.length) await siteMapMerge(bad.slice(0, 1), 'fail');
+    }
+  }
+  // 4. lessons injected into this run's model calls are scored with its verdict; failing ones are switched off. A run
+  // the user stopped / declined or a worker restart says nothing about the lessons (v0.10 review): not scored
+  if ((run.lessonIds || []).length && lessonVerdict(run)) await lessonsScore(run.lessonIds, lessonVerdict(run));
+}
+/** the verdict a replay's lessons are scored with: VERIFIED; FAILED only when the run itself failed (its control
+ *  was not found / did not work, the check failed, the wrong period); '' (not scored) for a user stop, a declined
+ *  approval or a restart; anything else (MISSING, CHECK, UNVERIFIED) scores hits only. */
+function lessonVerdict(run) {
+  var v = run.result ? run.result.verdict : 'FAILED', code = (run.result && run.result.code) || '';
+  if (v === 'VERIFIED') return v;
+  if (/^(INTERRUPTED|REJECTED)$/.test(code)) return '';
+  if (v === 'WRONG_PERIOD' || (v === 'FAILED' && /^(NOT_FOUND|ERROR|CHECK_FAILED|NOT_A_DOCUMENT)$/.test(code))) return 'FAILED';
+  return 'UNVERIFIED';
+}
+/** score + prune the lessons a run / episode was told (verdict: VERIFIED, FAILED, halted, ...). */
+async function lessonsScore(ids, verdict) {
+  var now = Date.now();
+  await setLocal('lessons', LS.prune(LS.score(await getLocal('lessons', []), ids, verdict, now), now));
+}
+/** the remembered rules for a model prompt on this site / state (2 at most) -> {text, ids}. */
+async function lessonsFor(host, stateKey, goal) {
+  if (!host) return { text: '', ids: [] };
+  var items = LS.retrieve(await getLocal('lessons', []), { host: host, stateKey: stateKey || '', goal: goal || '' }, LS.K);
+  return { text: LS.render(items), ids: items.map(function (it) { return it.id; }) };
+}
+
+/** Tell it's lessons hook (tellit.js calls it per step on the v0.10 prompt): the rules for this state; the episode
+ *  remembers which it was told (t.lessonIds), scored when it ends (tellLessonsEnd). */
+async function tellRulesText(t, host, stateKey) {
+  t.lastKey = stateKey || t.lastKey || '';
+  var lz = await lessonsFor(host, stateKey, t.goal);
+  t.lessonIds = t.lessonIds || [];
+  lz.ids.forEach(function (id) { if (t.lessonIds.indexOf(id) < 0) t.lessonIds.push(id); });
+  return lz.text;
+}
+async function tellLessonsEnd(t, verdict) {
+  if (t.lessonsScored || !(t.lessonIds || []).length) return;
+  t.lessonsScored = true;
+  await lessonsScore(t.lessonIds, verdict).catch(function (e) { console.warn('lessons', e); });
+}
+/** a correction the user typed (Tell it, or after a failed replay) -> the "Remember for <site>?" offer (one at a time,
+ *  chrome.storage.session 'lessonOffer'); nothing is kept until the user presses Remember. */
+async function offerLesson(from, text, ctx) {
+  text = String(text || '').trim().slice(0, 300);
+  if (!text || !ctx.host) return null;
+  var o = { nonce: nonce(), from: from, text: text, host: ctx.host, stateKey: ctx.stateKey || '', goal: String(ctx.goal || '').slice(0, 200),
+            runId: ctx.runId || '', at: Date.now(), done: '' };
+  await setSess('lessonOffer', o);
+  return o;
+}
+async function answerLesson(msg) {
+  var o = await getSess('lessonOffer');
+  if (!o || o.nonce !== msg.nonce || o.done) throw new Error('stale or unknown offer');
+  var item = null;
+  if (msg.remember) {
+    item = LS.fromCorrection(o.text, { host: o.host, stateKey: o.stateKey, stateLabel: o.stateKey ? SM.stateLabel(o.stateKey) : '', goal: o.goal, now: Date.now() });
+    if (item) await setLocal('lessons', LS.add(await getLocal('lessons', []), item));
+  }
+  o.done = msg.remember ? (item ? 'remembered' : 'not understood') : 'this run only';
+  await setSess('lessonOffer', o);
+  return { offer: o, lesson: item };
+}
+/** the replay's failing step on its site: host + state key (its window / tab) for a lesson. */
+async function runLessonCtx(run) {
+  var rec = await getRec(run.recId), step = rec ? (rec.steps[run.i] || rec.steps[rec.steps.length - 1] || {}) : {};
+  var url = step.url || (rec && rec.startUrl) || '';
+  return { host: SM.hostOf(url), stateKey: SM.stateKey({ url: url, dialog: step.dialog || null }),
+           goal: rec ? PD.substitute(rec.goal || rec.goalProposed || rec.name || '', run.period) : '', runId: run.id };
+}
+/** a recording / import: what its clicks did goes into the site map as 'seen' (a VERIFIED replay makes it 'ok'). */
+async function siteMapFromRecording(rec, outcome) {
+  var edges = SM.fromRecording(rec);
+  if (edges.length) await siteMapMerge(edges, outcome);
+  var done = await getLocal('siteMapRecs', {}); done[rec.id] = 1; await setLocal('siteMapRecs', done);
+}
 
 async function afterRun(run) {
   await autoSaveLog(run).catch(function (e) { console.warn('auto log', e); });
@@ -1845,6 +2043,7 @@ async function captureFailure(run, why) {
 
 async function archive(run) {
   run.pending = null; run.endedAt = Date.now();
+  await learnFromRun(run).catch(function (e) { console.warn('learn', e); logRun(run, 'learning from this run failed: ' + String(e && e.message || e)); });
   await runEvidence(run).catch(function (e) { console.warn('evidence', e); });
   await saveRun(run);
   var runs = await getLocal('runs', []); runs.unshift(run); await setLocal('runs', runs.slice(0, 20));
@@ -1907,6 +2106,40 @@ async function decide(kind, runId, n, params) {
 // length), never URL queries or fragments, never anything from a sensitive field.
 function redactUrl(u) { try { var x = new URL(u); return x.origin + x.pathname; } catch (e) { return ''; } }
 function redactText(s) { return String(s || '').replace(/https?:\/\/[^\s"')]+/g, function (u) { return redactUrl(u); }); }
+/** v0.10 run-log summaries: counts and the role / name of learned controls only (no other locator text). */
+function healSummary(r) {
+  var out = { steps: 0, alternates: 0, verified: 0, promoted: 0, demotedPrimary: 0, fixes: [] };
+  (r.steps || []).forEach(function (s, k) {
+    var alts = s.alternates || [];
+    if (!alts.length) return;
+    out.steps++; out.alternates += alts.length;
+    var cands = HL.candidates(s);
+    if (cands.length && cands[0].source === 'alternate' && alts.some(function (a) { return a.key === cands[0].key && a.verified; })) out.promoted++;
+    if ((s.primaryFails || 0) >= 2 && alts.some(function (a) { return a.verified; })) out.demotedPrimary++;
+    alts.forEach(function (a) {
+      if (a.verified) out.verified++;
+      out.fixes.push({ step: k, role: (a.loc && a.loc.role) || '', name: String((a.loc && a.loc.name) || '').slice(0, 60), by: a.by,
+                       verified: !!a.verified, ok: a.ok || 0, fail: a.fail || 0 });
+    });
+  });
+  return out;
+}
+function siteMapSize(map) {
+  var out = {};
+  Object.keys((map && map.hosts) || {}).forEach(function (h) {
+    var x = map.hosts[h] || {};
+    out[h] = { edges: Object.keys(x.edges || {}).length, states: Object.keys(x.states || {}).length };
+  });
+  return out;
+}
+function lessonCounts(ledger) {
+  var out = {};
+  (ledger || []).forEach(function (it) {
+    var c = out[it.host] = out[it.host] || { lessons: 0, disabled: 0, wins: 0, losses: 0 };
+    c.lessons++; if (it.disabled) c.disabled++; c.wins += it.wins || 0; c.losses += it.losses || 0;
+  });
+  return out;
+}
 async function exportLog() {
   var recs = await getLocal('recordings', {}), runs = await getLocal('runs', []), cfg = await settings();
   var recOut = Object.values(recs).map(function (r) {
@@ -1924,7 +2157,8 @@ async function exportLog() {
                  // v0.9.2: what the recorder linked to the step (flags only; no file names or row text)
                  download: !!s.download, downloadNamed: !!(s.download && s.download.name), generated: !!(s.download && s.download.generated),
                  opensTab: !!s.opensTab, followTab: !!s.followTab, inDialog: !!s.dialog, rowText: !!(l.row), variable: !!s.variable };
-      }) };
+      }),
+      heals: healSummary(r) };
   });
   var runOut = runs.map(function (r) {
     return { recId: r.recId, recName: r.recName, status: r.status, startedAt: r.startedAt, endedAt: r.endedAt,
@@ -1933,6 +2167,9 @@ async function exportLog() {
       checks: ((r.result && r.result.checks) || []).map(function (c) { return { kind: c.kind, ok: c.ok }; }),
       resolved: r.resolved, modelCalls: r.modelCalls || [], period: r.period || '',
       guided: (r.guided || []).map(function (g) { return { step: g.step, action: g.action, control: g.control, reason: redactText(g.reason), why: redactText(g.why) }; }),
+      // v0.10: per step which candidate located it (primary / a learned alternate) and how many were tried; lessons told
+      heal: Object.keys(r.heal || {}).map(function (k) { var h = r.heal[k]; return { step: +k, used: h.source || 'none', tried: (h.tried || []).length, overridden: !!h.overridden }; }),
+      lessons: (r.lessonIds || []).slice(),
       verifier: r.verifier ? { label: r.verifier.label || '', reason: redactText(r.verifier.reason || ''),
                                error: r.verifier.error || '', ms: r.verifier.ms || 0 } : null,
       log: r.log.map(function (l) { return { t: l.t, step: l.step, text: redactText(l.text) }; }) };
@@ -1940,6 +2177,8 @@ async function exportLog() {
   return { kind: 'awos-replay-runlog/1', exportedAt: Date.now(), version: chrome.runtime.getManifest().version,
            model: { brain: cfg.brain, endpoint: redactUrl(cfg.endpoint), name: cfg.brain === 'claude' ? cfg.claudeModel : cfg.model, enabled: cfg.enabled },
            recordings: recOut, runs: runOut,
+           siteMap: siteMapSize(await getLocal('siteMap', { hosts: {} })),         // v0.10: edges / states per site (sizes only)
+           lessons: lessonCounts(await getLocal('lessons', [])),                   // v0.10: per site, counts only
            tellit: await getLocal('tellLog', []),        // v0.9.7: Tell it episodes (stopped ones too), model replies included
            // episodes kept before 0.9.7 (the training trajectories): goal, outcome and each model reply, not the page text
            tellitEarlier: (await getLocal('tellTraj', [])).map(function (tr) {
@@ -2001,6 +2240,7 @@ async function confirmImport(n) {
   var rec = R.toRecording(v.recipe, uid('rec'));
   applyPeriod(rec, !!v.recipe.period);          // v0.7: literal period expressions in a shared recipe become templates too
   await putRec(rec);
+  await siteMapFromRecording(rec, 'unproven').catch(function (e) { console.warn('site map', e); });  // v0.10: someone else's path: no route until a VERIFIED replay
   await setSess('pendingImport', null);
   chrome.action.setBadgeText({ text: '' }).catch(function () {});
   await answerPage(p, true);
@@ -2033,6 +2273,7 @@ var HANDLERS = {
              pendingImport: await getSess('pendingImport'), version: chrome.runtime.getManifest().version,
              collections: await getLocal('collections', {}), collResults: await getLocal('collResults', {}), coll: await getSess('coll'),
              portalStatus: await getLocal('portalStatus', {}),
+             lessons: LS.list(await getLocal('lessons', [])), lessonOffer: await getSess('lessonOffer'),     // v0.10
              phone: await phoneSummary(), shots: (await getLocal('shots', [])).map(function (x) { return { id: x.id, runId: x.runId, recName: x.recName, at: x.at, why: x.why }; }) };
   },
   start_recording: async function (msg) { return startRecording(msg.tabId, msg.name); },
@@ -2165,6 +2406,24 @@ var HANDLERS = {
     if (!c || c.status !== 'running') throw new Error('no collection is running');
     c.queue = c.queue.slice(0, c.idx + 1); await setSess('coll', c); return c;
   },
+  // v0.10 learning: undo a step's learned fixes; remember a correction; the lessons list
+  heal_revert: async function (msg) {
+    var rec = await getRec(msg.id);
+    if (!rec) throw new Error('no such recording');
+    if (!rec.steps[msg.step]) throw new Error('no such step');
+    rec = HL.revert(rec, msg.step);
+    await putRec(rec); return rec;
+  },
+  run_note: async function (msg) {
+    var cur = await getSess('run'), run = cur && cur.id === msg.runId ? cur : (await getLocal('runs', [])).find(function (r) { return r.id === msg.runId; });
+    if (!run) throw new Error('no such run');
+    if (!/^(failed|done)$/.test(run.status)) throw new Error('the run is still going');
+    var o = await offerLesson('run', msg.text, await runLessonCtx(run));
+    if (!o) throw new Error('type what it should have done');
+    return o;
+  },
+  lesson_answer: async function (msg) { return answerLesson(msg); },
+  lesson_delete: async function (msg) { await setLocal('lessons', LS.remove(await getLocal('lessons', []), msg.id)); return { ok: true }; },
   get_shot: async function (msg) { return (await getLocal('shots', [])).find(function (x) { return x.id === msg.id; }) || { error: 'that screenshot is gone (only the last 20 are kept)' }; },
   coll_clear: async function () { var c = await getSess('coll'); if (c && c.status !== 'running') await setSess('coll', null); return { ok: true }; },
 };

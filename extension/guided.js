@@ -178,15 +178,21 @@ async function guidedDecide(run, base, rec, step, i, why) {
   if (brain === 'claude' && cloudLockedFor(cfg, raw.url, base)) { brain = 'local'; delete cfg.claudeKey; logRun(run, 'step ' + n1 + ': this page is cloud-locked; the local agent model decides'); }
   var obs = AG.maskObs(raw), hits = AG.detectInjection(obs);
   var rh = routeHint(base, i), nav = ((run.guidedNav || {})[i]) || 0, rowsHint = '';
+  var goal = rec.goal || PD.substitute(base.goalProposed || ('Repeat the saved chore "' + base.name + '"'), run.period);
+  goal = R.substitute(goal, runParams(run));
+  // v0.10 (settings.pageView, default on): the page as entities, ranked for the goal and the recorded route's words
+  // (the step's control, the window / tab it was in, the controls before it), with the site's known paths; the grammar
+  // then offers only the controls that were shown
+  var v2 = cfg.pageView !== false ? guidedView(base, i, step, obs, raw.url, goal) : null;
   var tname = String((step.loc && step.loc.name) || '').toLowerCase().trim();
-  var twins = tname ? (obs.controls || []).map(function (c, k) { return [c, k + 1]; }).filter(function (p) { return String(p[0].name || '').toLowerCase().trim() === tname && p[0].row; }) : [];
+  var twins = tname ? (obs.controls || []).map(function (c, k) { return [c, k + 1]; }).filter(function (p) {
+    return String(p[0].name || '').toLowerCase().trim() === tname && p[0].row && (!v2 || v2.shownSet[p[1]]);
+  }) : [];
   if (twins.length >= 2) {
     rowsHint = '\nThe page has ' + twins.length + ' controls named "' + step.loc.name + '", one per row; pick the row by its text (date, amount, number) for the goal, never just the first: '
       + twins.slice(0, 10).map(function (p) { return p[1] + ' = row "' + AG.maskSecrets(String(p[0].row)).slice(0, 80) + '"'; }).join('; ') + '.'
       + (base.steps[i].loc && base.steps[i].loc.row ? ' Last time the row was "' + AG.maskSecrets(base.steps[i].loc.row).slice(0, 80) + '".' : '');
   }
-  var goal = rec.goal || PD.substitute(base.goalProposed || ('Repeat the saved chore "' + base.name + '"'), run.period);
-  goal = R.substitute(goal, runParams(run));
   var hint = 'This is a saved recipe replayed for ' + PD.label(run.period) + (base.period ? ' (it was recorded for ' + PD.label(base.period) + ')' : '')
     + ': give ONE action for this step only, the recipe does the rest. If the page does not have what the goal needs for '
     + PD.label(run.period) + ' (for example it is not posted yet), reply needs_user("why"). Never pick something for another period.\n'
@@ -196,9 +202,21 @@ async function guidedDecide(run, base, rec, step, i, why) {
     + 'leads toward it (open the menu, window or tab it was in); you will be asked again after it' + (nav ? ' (' + nav + ' of ' + GUIDED_NAV + ' such moves used for this step)' : '') + '.'
     + rowsHint;
   var history = (run.history || []).slice(-6).map(function (h, k, a) { return (k + 1 + Math.max(0, (run.history || []).length - a.length)) + '. ' + h + ' -> ok'; });
-  var prompt = AG.buildPrompt({ goal: goal, step: run.guidedCalls + 1, maxSteps: GUIDED_CAP, visited: [], history: history, obs: obs, window: 0,
-                                injected: hits.length > 0, hint: hint });
-  var grammar = AG.buildGrammar((obs.controls || []).length), system = AG.SYSTEM + AG.SYSTEM_WEB;
+  var prompt, grammar, system = AG.SYSTEM + AG.SYSTEM_WEB, pv2 = null;
+  if (v2) {
+    var map = await siteMapLoad(v2.host);
+    var lz = await lessonsFor(v2.host, v2.key, goal);            // v0.10: rules the user taught on this site (2 at most)
+    lz.ids.forEach(function (id) { run.lessonIds = run.lessonIds || []; if (run.lessonIds.indexOf(id) < 0) run.lessonIds.push(id); });
+    pv2 = AG.buildPromptV2({ goal: goal, step: run.guidedCalls + 1, maxSteps: GUIDED_CAP, visited: [], history: history, obs: obs,
+                             injected: hits.length > 0, hint: hint, words: v2.words, now: nowMs(), rules: lz.text, noScroll: true,
+                             paths: SM.describe(map, v2.host, { targetWords: goal + ' ' + (step.loc && step.loc.name || ''), from: v2.key, max: 4 }) });
+    prompt = pv2.text;
+    grammar = AG.buildGrammarFor(pv2.shown, true, { scroll: false });
+  } else {
+    prompt = AG.buildPrompt({ goal: goal, step: run.guidedCalls + 1, maxSteps: GUIDED_CAP, visited: [], history: history, obs: obs, window: 0,
+                              injected: hits.length > 0, hint: hint });
+    grammar = AG.buildGrammar((obs.controls || []).length);
+  }
   logRun(run, 'step ' + n1 + ': ' + why + '; asking the ' + (brain === 'claude' ? 'Claude' : 'local') + ' agent model to decide by meaning');
   run.guidedCalls++;
   await saveRun(run);
@@ -206,7 +224,8 @@ async function guidedDecide(run, base, rec, step, i, why) {
   var p = r.error ? null : AG.tryParse(r.reply);
   var act = p && !p.error ? p.action : null;
   var reason = (String(r.reply || '').split('\n').filter(function (l) { return l.indexOf('# ') === 0; })[0] || '').slice(2);
-  (run.modelCalls = run.modelCalls || []).push({ step: i, kind: 'guided', brain: brain, ms: Date.now() - t0, why: why,
+  (run.modelCalls = run.modelCalls || []).push({ step: i, kind: 'guided', brain: brain, ms: Date.now() - t0, why: why, promptVersion: pv2 ? AG.PROMPT_V2 : 'v1',
+    lessons: pv2 && lz ? lz.ids.length : 0,
     answer: r.error ? '' : String(r.reply || '').slice(0, 300), outcome: r.error ? 'error' : act ? AG.show(act) : 'invalid' });
   if (r.error) { await fail(run, 'NOT_FOUND', 'step ' + n1 + ': ' + why + '; the agent model could not answer: ' + r.error + expectNote(base, run)); return null; }
   if (!act || r.invalid) { await fail(run, 'NOT_FOUND', 'step ' + n1 + ': ' + why + '; the agent model gave no usable action (' + ((p && p.error) || r.firstError || 'invalid') + ').' + expectNote(base, run)); return null; }
@@ -221,10 +240,23 @@ async function guidedDecide(run, base, rec, step, i, why) {
     await fail(run, 'NOT_FOUND', 'step ' + n1 + ': the agent model answered ' + AG.show(act) + ', not an action on this page.' + expectNote(base, run));
     return null;
   }
-  var v = AG.validate(act, obs);
+  var v = pv2 ? AG.validateV2(act, obs, pv2.shown, 0, false) : AG.validate(act, obs);
   if (v.error) { await fail(run, 'NOT_FOUND', 'step ' + n1 + ': the agent model chose ' + AG.show(act) + ', which does not fit the page: ' + v.error + expectNote(base, run)); return null; }
   if (v.secret) { await fail(run, 'NEEDS_YOU', 'step ' + n1 + ': the agent model wanted to type into a password / code field; AWOS never does that.'); return null; }
-  return { step: i, act: act, expectName: v.control.name || '', role: v.control.role || '', show: AG.show(act), reason: reason, why: why };
+  return { step: i, act: act, expectName: v.control.name || '', role: v.control.role || '', show: AG.show(act), reason: reason, why: why, brain: brain };
+}
+
+/** v0.10: what the entity view of a guided step is ranked for: the recorded control, its window / tab and the route
+ *  to it (the controls clicked before it), never values typed. -> {words, host, key, shownSet (filled by the caller)} */
+function guidedView(base, i, step, obs, url, goal) {
+  var s = base.steps[i] || {}, words = [];
+  var add = function (x) { x = String(x || '').trim(); if (x && words.indexOf(x) < 0) words.push(x.slice(0, 80)); };
+  add(step.loc && (step.loc.name || step.loc.text)); add(s.loc && (s.loc.name || s.loc.text));
+  if (s.dialog) { add(s.dialog.name); add(s.dialog.tab); }
+  base.steps.slice(0, i).filter(function (x) { return x.action === 'click'; }).slice(-4).forEach(function (x) { add(x.loc && (x.loc.name || x.loc.text)); });
+  var v = { words: words, host: SM.hostOf(url), key: SM.stateKey(obs), shownSet: {} };
+  AG.pageView(obs, { goal: goal, words: words, now: nowMs() }).shown.forEach(function (n) { v.shownSet[n] = 1; });
+  return v;
 }
 
 /** the Tell-it gate words for an observed control (strict vocabulary + the micro-agent's destructive list). */
@@ -279,7 +311,7 @@ async function guidedExecute(run, step, i, gd) {
   run.guidedPending = null;
   run.guided = run.guided || [];
   run.guided.push({ step: i, why: gd.why, reason: gd.reason, action: gd.show, control: { role: c.role || '', name: c.name || '' }, loc: r.loc || null,
-                    verb: act.verb, period: run.period, recDanger: r.recDanger || null, approved: ok });
+                    verb: act.verb, period: run.period, recDanger: r.recDanger || null, approved: ok, brain: gd.brain || 'local' });
   logRun(run, 'step ' + n1 + ': decided by the model: ' + gd.show + ' = ' + (c.role || 'control') + ' "' + (c.name || '') + '"'
               + (gd.reason ? ' (' + gd.reason + ')' : '') + (ok ? ' [approved by you]' : ''));
   return { cand: { name: c.name || '', role: c.role || '' }, how: 'model decision (goal-guided)', index: act.n ? act.n - 1 : -1, dlMark: dlMark,
@@ -352,6 +384,10 @@ async function guidedUpdate(msg) {
     if (msg.accept) {
       s.loc = g.loc;
       s.hint = describeLoc(s);
+      // v0.10: the new control is the step now: its own alternate goes, and the old control's misses no longer count
+      if (s.alternates) s.alternates = s.alternates.filter(function (a) { return a.key !== HL.keyOf(templLoc(g.loc, rec, o.step, run.period)) && a.key !== HL.keyOf(g.loc); });
+      if (s.alternates && !s.alternates.length) delete s.alternates;
+      delete s.primaryFails;
       s.learnedAt = Date.now();
       if (s.action === 'click') s.danger = g.recDanger || null;
       rec.tpl = PD.scan(rec, run.period, rec.tpl || {}, 'steps.' + o.step + '.loc.');   // the new target, templated for its period

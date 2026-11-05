@@ -91,11 +91,17 @@ def _check_trajectory(ep):
     tf = {f.name for f in dataclasses.fields(Trajectory)}
     tr = Trajectory(**{**{k: ep[k] for k in tf if k != "steps"}, "steps": [Step(**{k: s[k] for k in sf}) for s in ep["steps"]]})
     assert tr.steps and tr.model and tr.task_id
+    v2 = ep.get("promptVersion") == "v2"          # v0.10 entity view (settings.pageView, the default)
     for s in tr.steps:
         assert s.system == AGENT_SYSTEM
         assert s.user.startswith("Goal: ") and f"Step {s.i} of " in s.user and '<observation untrusted="true">' in s.user
         n = int(re.search(r"^Controls \((\d+) total", s.user, re.M)[1])
-        assert s.grammar == MA.build_grammar(n, web=True)
+        if v2:   # the grammar offers exactly the controls the prompt shows
+            obs = s.user.split("<observation", 1)[1]
+            shown = sorted(int(m) for m in re.findall(r"^\[(\d+)\] ", obs, re.M))
+            assert re.search(r"^num ::= (.*)$", s.grammar, re.M)[1] == " | ".join(f'"{k}"' for k in (shown or [1]))
+        else:
+            assert s.grammar == MA.build_grammar(n, web=True)
         if s.valid:
             assert T.grammar_error(s.reply, s.grammar) == "", s.reply
             assert MA.parse_text_action(s.reply).show() == s.action

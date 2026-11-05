@@ -230,11 +230,13 @@ def test_cloud_agent_only_with_consent_and_recipe_lock_wins(x):
     assert any("uses the local agent model (Claude brain not enabled" in l["text"] for l in run["log"]), run["log"]
     x.set_settings(agentBrain="claude", cloudConsent=True)
     x.call("set_recipe_cloud_lock", id=rec["id"], on=True)    # consent, key, but this recipe never goes to the cloud
+    x.call("heal_revert", id=rec["id"], step=k)               # v0.10: else the learned fix finds it with no model call
     run = _run(x, page, rec, tab)
     assert run["result"]["verdict"] == "VERIFIED", run["log"]
     assert x.sw.evaluate("self.__claudeCalls.length") == 0 and len(brain.requests) == 2
     assert any("cloud is locked off for this recipe" in l["text"] for l in run["log"]), run["log"]
     x.call("set_recipe_cloud_lock", id=rec["id"], on=False)
+    x.call("heal_revert", id=rec["id"], step=k)
     run = _run(x, page, rec, tab)
     assert run["result"]["verdict"] == "VERIFIED", run["log"]
     calls = [c for c in x.sw.evaluate("self.__claudeCalls") if c["body"]["system"].startswith("You operate")]

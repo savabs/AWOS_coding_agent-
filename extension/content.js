@@ -26,6 +26,8 @@
  *          the recording expected it; nothing on the page is touched)
  *   unblock -> AWOSPortal.unblock(): dismiss a pop-up / consent banner in the way (close / not now / reject only)
  *   locate also reports `covered` when the found target sits under an overlay or dialog
+ *   v0.10: locate {noScroll: true} skips the lazy-target scroll search (the worker re-scans for the recorded control
+ *          after trying a step's learned alternates)
  *   v0.9: act first waits (<= usableMs, 8 s) until the target is usable: visible, enabled, not under an overlay or a
  *          loading spinner, no aria-busy; the reply carries `waited` {ms, why}, or `unusable` when it never became so
  *   peek {url} -> the first 1 KB of a downloaded file, re-read on this page's origin only (file content check)
@@ -254,14 +256,14 @@
     return null;
   }
 
-  async function locate(step, timeoutMs) {
+  async function locate(step, timeoutMs, noScroll) {
     var deadline = Date.now() + (timeoutMs || 4000), res;
     for (;;) {
       res = L.find(step.loc, step.action);
       if (res.status === 'found' || Date.now() >= deadline) break;
       await sleep(200);
     }
-    if (res.status !== 'found' && !(res.status === 'ambiguous' && res.anchor)) res = await scrollSearch(step, res);
+    if (!noScroll && res.status !== 'found' && !(res.status === 'ambiguous' && res.anchor)) res = await scrollSearch(step, res);
     res.dangers = {};
     res.shortlist.forEach(function (c) {
       var d = dangerOf(step.action, L.element(c.index), c.desc.name);
@@ -529,7 +531,7 @@
       case 'remember_me': reply(P.rememberMe()); return;                      // v0.6.1, login handoffs only
       case 'autofill_signin': reply(P.autofillSignin(!!msg.testHook)); return; // v0.6.1, never reads a field value
       case 'rec_state': recording = !!msg.on; lastFillKey = null; reply({ ok: true }); return;
-      case 'locate': locate(msg.step, msg.timeoutMs).then(reply); return true;
+      case 'locate': locate(msg.step, msg.timeoutMs, !!msg.noScroll).then(reply); return true;   // v0.10 noScroll: a re-scan
       case 'act':                                                             // async since 0.9 (wait until usable): always replies
         act(msg.step, msg.index, msg.approved, msg.strict, reply, msg.usableMs)
           .catch(function (e) { try { reply({ ok: false, error: 'page script error: ' + String(e && e.message || e) }); } catch (x) {} });
