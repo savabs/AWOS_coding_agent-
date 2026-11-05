@@ -99,7 +99,10 @@ function tplField(path) {
 }
 function periodBox(r) {
   var tpl = r.tpl || {}, keys = Object.keys(tpl), on = keys.filter(function (k) { return tpl[k].on !== false; }).length;
-  var d = details(r.id + ':period', 'Period: recorded for ' + periodLabel(r.period) + (keys.length ? ', ' + on + ' of ' + keys.length + ' fields follow the month' : ', nothing to template'));
+  // v0.9.3: a step that picks its row by date (one of several identical "Download PDF") follows the month too
+  var rows = (r.steps || []).filter(function (s) { return s.loc && s.loc.row; }).length;
+  var follows = [keys.length ? on + ' of ' + keys.length + ' fields' : '', rows ? rows + (rows > 1 ? ' row picks' : ' row pick') : ''].filter(Boolean).join(' and ');
+  var d = details(r.id + ':period', 'Period: recorded for ' + periodLabel(r.period) + (follows ? ', ' + follows + (!keys.length && rows === 1 ? ' follows' : ' follow') + ' the month' : ', nothing to template'));
   d.classList.add('periodbox');
   var row = el('div', { class: 'meta' }, 'Each run uses ');
   var mode = el('select', { class: 'pmode' });
@@ -109,7 +112,7 @@ function periodBox(r) {
   row.appendChild(mode);
   row.appendChild(document.createTextNode(' (a collection uses its own month).'));
   d.appendChild(row);
-  if (keys.length) {                         // run once for a chosen month (a missed month, a re-run)
+  if (keys.length || rows) {                 // run once for a chosen month (a missed month, a re-run)
     var r2 = el('div', { class: 'meta' }), mon = el('input', { class: 'prun', type: 'month', value: periodOf(Date.now(), r.periodMode === 'this' ? 0 : -1) });
     var go = el('button', { class: 'prungo small' }, 'Run for this month');
     go.disabled = !!(state.run && /^(running|awaiting_approval|needs_user)$/.test(state.run.status)) || !!state.recState;

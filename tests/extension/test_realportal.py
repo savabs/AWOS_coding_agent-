@@ -295,3 +295,16 @@ def test_row_periods_and_app_window_rule(x, server):
     assert kept["dismissed"] == [] and kept["kept"] and "tabs" in kept["kept"][0]["why"], kept
     shut = x.sw.evaluate("(t) => chrome.tabs.sendMessage(t, {type: 'unblock', keep: {name: 'S Saurabh · Max', covered: true}})", tab)
     assert shut["dismissed"] and shut["dismissed"][0]["name"] == "Close", shut
+
+
+# ---- v0.9.3: the popup offers "Run for this month" for a recipe that picks its row by date (no templated text) --------
+
+def test_popup_offers_run_for_a_month_when_the_row_is_picked_by_date(x):
+    page, tab, rec, _ = _record(x, _full_route)
+    assert [s for s in rec["steps"] if s["action"] == "click"][-1]["loc"]["row"]
+    pop = x.popup(tab)
+    pop.wait_for_selector(".periodbox", state="attached", timeout=5000)
+    box = pop.locator(".periodbox").first
+    assert "1 row pick follow" in box.inner_text(), box.inner_text()
+    assert box.locator("input.prun").count() == 1 and box.locator("button.prungo").count() == 1
+    pop.close()
