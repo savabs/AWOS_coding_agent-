@@ -52,6 +52,13 @@
       <button id="tellapprove" class="danger" hidden>Approve</button>
       <button id="telldecline" hidden>No, don't</button>
       <button id="tellcontinue" hidden>Continue</button>
+      <div id="telldraft" hidden>
+        <label for="telldrafttext" id="telldraftlabel">Draft</label>
+        <textarea id="telldrafttext" rows="7"></textarea>
+        <div class="muted" id="telldraftcount"></div>
+        <input id="telldraftnote" placeholder="What to change (optional), then Rewrite">
+        <div class="acts"><button id="telldraftuse" class="primary">Use this text</button><button id="telldraftrewrite">Rewrite</button><button id="telldraftstop">Stop</button></div>
+      </div>
     </div>
     <div id="tellconfirm" hidden>
       <p id="tellanswer"></p>

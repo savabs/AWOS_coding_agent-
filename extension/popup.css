@@ -75,3 +75,8 @@ button.small { padding: 2px 8px; font-size: 12px; }
 .fixrow, #lessons li { font-size: 12px; display: flex; gap: 6px; align-items: flex-start; justify-content: space-between; padding: 2px 0; border-top: 1px solid #eaeef2; }
 #lessons li.off { color: #8c959f; }
 #lessons .host { font-weight: 600; border-top: none; padding-top: 6px; }
+
+/* v0.11 Tell it: the writer's draft, editable before anything is typed */
+#telldraft textarea { width: 100%; box-sizing: border-box; font: inherit; resize: vertical; margin-top: 2px; }
+#telldraft input { width: 100%; box-sizing: border-box; font: inherit; margin: 4px 0; }
+#telldraftcount { font-size: 11px; text-align: right; }

@@ -267,7 +267,8 @@ class Ext:
         # the agent brain (Tell it, goal-guided steps) is the fake server too: never a real model on this machine
         s = {"endpoint": self.server.base + "/v1", "model": "fake", "enabled": True, "findTimeoutMs": 1500,
              "agentEndpoint": self.server.base + "/v1", "agentModel": "fake-agent",
-             "autoSaveLog": False}   # (a test install is a developer install: its runs would each save a log file)
+             "autoSaveLog": False,   # (a test install is a developer install: its runs would each save a log file)
+             "logSink": ""}          # never the owner's real log service on 127.0.0.1:8099 (it writes into runlogs/)
         s.update(kw)
         return self.call("save_settings", settings=s)
 

@@ -377,6 +377,7 @@
         var sens = root.AWOSSafety && root.AWOSSafety.sensitiveField(el);
         var v = el.isContentEditable ? norm(el.innerText) : String(el.value == null ? '' : el.value);
         d.value = (role === 'password' || sens) && v ? '••••••••' : v.slice(0, 120);
+        if (el.tagName === 'TEXTAREA' || el.isContentEditable) d.multi = true;   // v0.11: a text area (Tell it drafts compose fields)
       } else if (role === 'tab') {
         d.value = el.getAttribute('aria-selected') === 'true' ? '1' : '0';
       }

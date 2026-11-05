@@ -1,0 +1,25 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Create post - r/aiagents</title></head>
+<body>
+<header><h1>r/aiagents</h1><p>Agents that run on your own computer: local models, computer use, tools.</p>
+<form id="search" role="search" onsubmit="document.getElementById('found').textContent = 'Results for: ' + document.getElementById('q').value; return false">
+  <input id="q" name="q" aria-label="Search the community"></form>
+<p id="found"></p></header>
+<main>
+<h2>New thread</h2>
+<form id="compose" aria-label="New thread" onsubmit="return false">
+  <div><label for="title">Title</label> <input id="title" name="title"></div>
+  <div><label for="body">Body</label> <textarea id="body" name="body" rows="6"></textarea></div>
+  <div><button type="button" id="post">Post</button> <button type="button" id="draft">Save draft</button></div>
+</form>
+<p id="out" role="status"></p>
+</main>
+<script>
+  document.getElementById('post').onclick = function () {
+    document.getElementById('out').textContent = 'Posted: ' + document.getElementById('title').value;
+  };
+  document.getElementById('draft').onclick = function () {
+    document.getElementById('out').textContent = 'Draft saved';
+  };
+</script>
+</body></html>

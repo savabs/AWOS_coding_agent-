@@ -605,7 +605,7 @@ var EXAMPLES = [
   'Draft a listing for a used bike, do not post it',
   'Unsubscribe me from this newsletter',
 ];
-var tell = null, tellCfg = null, lastTellSig = '', tellConfirmFor = '';
+var tell = null, tellCfg = null, lastTellSig = '', tellConfirmFor = '', tellDraftFor = '';
 $('tellexample').textContent = 'e.g. ' + EXAMPLES[Math.floor(Math.random() * EXAMPLES.length)];
 
 function renderTell() {
@@ -639,6 +639,18 @@ function renderTell() {
     $('tellapprove').textContent = 'Approve "' + (p.target || '').slice(0, 40) + '"';
     $('tellcontinue').hidden = t.status !== 'needs_user';
   }
+  // v0.11: the writer's draft for a compose field: editable; only the text in the box is typed (filled once per draft,
+  // so the owner's edits survive the refresh)
+  var isDraft = !!(p && t.status === 'awaiting_draft');
+  $('telldraft').hidden = !isDraft;
+  if (isDraft && tellDraftFor !== p.nonce) {
+    tellDraftFor = p.nonce;
+    $('telldraftlabel').textContent = (p.fieldKind === 'title' ? 'Title' : 'Text') + ' for "' + (p.field || 'the field').slice(0, 60) + '"';
+    $('telldrafttext').value = p.draft || '';
+    $('telldrafttext').rows = p.fieldKind === 'title' ? 2 : 8;
+    $('telldraftnote').value = '';
+    draftCount();
+  }
   $('tellconfirm').hidden = !isConfirm;
   if (isConfirm && tellConfirmFor !== p.nonce) {            // fill the editable proposal once per confirmation
     tellConfirmFor = p.nonce;
@@ -649,7 +661,7 @@ function renderTell() {
     $('tellcheckurl').value = pr.urlPattern || '';
     $('tellchecktext').value = (pr.texts || []).join(', ');
   }
-  var live = /^(running|paused|awaiting_approval|needs_user)$/.test(t.status);
+  var live = /^(running|paused|awaiting_approval|awaiting_draft|needs_user)$/.test(t.status);
   $('tellpause').hidden = t.status !== 'running';
   $('tellresume').hidden = t.status !== 'paused';
   $('telltakeover').hidden = !live || !!t.takeover;
@@ -697,6 +709,20 @@ $('tellclose').onclick = function () { call({ type: 'tell_clear' }).then(functio
 $('tellapprove').onclick = function () { tellDecideMsg('tell_approve'); };
 $('telldecline').onclick = function () { tellDecideMsg('tell_decline'); };
 $('tellcontinue').onclick = function () { tellDecideMsg('tell_continue'); };
+function draftCount() { $('telldraftcount').textContent = $('telldrafttext').value.length + ' characters'; }
+$('telldrafttext').oninput = draftCount;
+$('telldraftuse').onclick = function () {
+  var p = tell && tell.pending; if (!p || tell.status !== 'awaiting_draft') return;
+  var v = $('telldrafttext').value; if (!v.trim()) return notice('The text is empty: write it, or Rewrite.');
+  call({ type: 'tell_draft_use', nonce: p.nonce, text: v }).then(refresh);
+};
+$('telldraftrewrite').onclick = function () {
+  var p = tell && tell.pending; if (!p || tell.status !== 'awaiting_draft') return;
+  var m = { type: 'tell_draft_rewrite', nonce: p.nonce, note: $('telldraftnote').value.trim() };
+  if ($('telldrafttext').value !== (p.draft || '')) m.text = $('telldrafttext').value;    // the owner's edits are the base
+  call(m).then(refresh);
+};
+$('telldraftstop').onclick = function () { call({ type: 'tell_stop' }).then(refresh); };
 $('tellnotego').onclick = function () {
   var v = $('tellnote').value.trim(); if (!v) return;
   if (tell && tell.status === 'needs_user') return tellDecideMsg('tell_continue');

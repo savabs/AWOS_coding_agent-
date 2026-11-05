@@ -428,7 +428,7 @@ async function busyReason(inCollection) {
   if (cur && /^(running|awaiting_approval|needs_user)$/.test(cur.status)) return 'a replay is already in progress';
   if (await getSess('recState')) return 'stop the recording before running a replay';
   var tl = await getSess('tell');
-  if (tl && /^(running|paused|awaiting_approval|needs_user|confirm)$/.test(tl.status)) return 'a Tell-it run is in progress';
+  if (tl && /^(running|paused|awaiting_approval|awaiting_draft|needs_user|confirm)$/.test(tl.status)) return 'a Tell-it run is in progress';
   return '';
 }
 
@@ -1285,11 +1285,14 @@ async function autoSaveLog(run) {
 }
 // v0.10.1: macOS keeps ~/Downloads away from terminal tools (and Chrome does not write through a symlink there), so a
 // developer runs scripts/awos_logsink.py: a loopback-only service that writes each posted log into the project folder.
+// The setting logSink overrides the address ('' = off; tests use that so they never write into the owner's folder).
 var LOG_SINK = 'http://127.0.0.1:8099/runlog';
 async function sinkLog(log, tag) {
+  var cfg = await settings(), url = cfg.logSink == null ? LOG_SINK : String(cfg.logSink);
+  if (!url || !M.isLoopback(url)) return false;     // loopback only: a run log never leaves this computer
   var ctl = new AbortController(), timer = setTimeout(function () { ctl.abort(); }, 2500);
   try {
-    var r = await fetch(LOG_SINK, { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctl.signal,
+    var r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctl.signal,
                                     body: JSON.stringify(Object.assign({}, log, { tag: tag })) });
     return r.ok;
   } catch (e) { return false; } finally { clearTimeout(timer); }
