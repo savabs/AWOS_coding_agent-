@@ -282,10 +282,33 @@
     return Object.keys(tpl || {}).some(function (path) { return path.indexOf(pre) === 0 && tpl[path].on !== false; });
   }
 
+  /** v0.9.4: the month a person names in plain words ("September", "sept 2026", "last month", "2026-09", "09/2026")
+   *  -> 'YYYY-MM', or '' when the text names none. A month without a year is its latest one that has begun. */
+  function fromText(text, now) {
+    var t = String(text || '').toLowerCase(), cur = periodOf(now || Date.now(), 0);
+    if (/\b(last|previous|past)\s+month\b/.test(t)) return shift(cur, -1);
+    if (/\b(this|current)\s+month\b/.test(t)) return cur;
+    var m = t.match(/\b(20\d\d)[-\/.](0?[1-9]|1[0-2])\b/);
+    if (m) return m[1] + '-' + pad(+m[2]);
+    m = t.match(/\b(0?[1-9]|1[0-2])[\/.-](20\d\d)\b/);
+    if (m) return m[2] + '-' + pad(+m[1]);
+    for (var i = 0; i < 12; i++) {
+      var re = new RegExp('\\b(' + MONTHS[i].toLowerCase() + '|' + SHORT[i].toLowerCase() + (i === 8 ? '|sept' : '') + ')\\.?(?:\\s*,?\\s*(20\\d\\d|\'\\d\\d)\\b)?');   // a 2-digit year needs its apostrophe ("Oct 25" is a day)
+      var mm = t.match(re);
+      if (!mm) continue;
+      if (i === 4 && !mm[2] && !/\b(?:in|for|of|from)\s+may\b/.test(t)) continue;      // "may" is also a verb
+      var y = mm[2] ? (mm[2].charAt(0) === "'" ? 2000 + +mm[2].slice(1) : +mm[2]) : +cur.slice(0, 4);
+      var p = y + '-' + pad(i + 1);
+      if (!mm[2] && p > cur) p = (y - 1) + '-' + pad(i + 1);
+      return p;
+    }
+    return '';
+  }
+
   root.AWOSPeriod = {
     MONTHS: MONTHS, SHORT: SHORT, BUILTIN: BUILTIN, BUILTIN_SET: BUILTIN_SET,
     periodOf: periodOf, shift: shift, valid: valid, label: label, builtins: builtins, substitute: substitute, hasTokens: hasTokens,
     detect: detect, periodsIn: periodsIn, rowPeriods: rowPeriods, names: names, fields: fields, scan: scan, view: view, templatedView: templatedView,
-    fromTokens: fromTokens, infer: infer, consistent: consistent, stepTemplated: stepTemplated, getPath: getPath, setPath: setPath,
+    fromTokens: fromTokens, fromText: fromText, infer: infer, consistent: consistent, stepTemplated: stepTemplated, getPath: getPath, setPath: setPath,
   };
 })(typeof globalThis !== 'undefined' ? globalThis : self);

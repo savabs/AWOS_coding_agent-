@@ -141,12 +141,63 @@ async function checkLocalAgent(cfg) {
 // ---- start / drive -----------------------------------------------------------------------------------------
 async function tellBusy() { var t = await getSess('tell'); return t && /^(running|paused|awaiting_approval|needs_user|confirm)$/.test(t.status) ? t : null; }
 
+// ---- v0.9.4: a request that fits a saved recipe runs the recipe ------------------------------------------------------
+// "get my September Claude invoice" -> the recipe recorded on claude.ai that downloads a PDF, for September 2026. Plain
+// matching on this computer (site name, the recipe's name / goal, document words), no model call: a known chore is
+// done the way it was shown, for the month the words name; only a request no recipe fits is explored from scratch.
+var DOC_WORDS = /\b(invoices?|statements?|receipts?|bills?|billing|payouts?|remittances?|reports?|pdfs?|csvs?|exports?|documents?|docs?)\b/;
+var MATCH_STOP = { the: 1, and: 1, for: 1, from: 1, get: 1, got: 1, my: 1, our: 1, me: 1, please: 1, download: 1, fetch: 1,
+  grab: 1, pull: 1, save: 1, open: 1, find: 1, last: 1, this: 1, month: 1, months: 1, previous: 1, current: 1, recording: 1,
+  with: 1, into: 1, can: 1, you: 1, all: 1, new: 1, www: 1, com: 1, https: 1, http: 1 };
+function matchWords(text) {
+  var out = {}, months = PD.MONTHS.concat(PD.SHORT).map(function (m) { return m.toLowerCase(); }).concat(['sept']);
+  String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(' ').forEach(function (w) {
+    if (w.length < 3 || MATCH_STOP[w] || /^\d+$/.test(w) || months.indexOf(w) >= 0) return;
+    out[w.replace(/s$/, '')] = 1;
+  });
+  return out;
+}
+function recipeSite(rec) {
+  try { var h = new URL(rec.startUrl || ((rec.steps || [])[0] || {}).url || '').hostname.replace(/^www\./, ''); return { host: h, name: h.split('.')[0] }; }
+  catch (e) { return { host: '', name: '' }; }
+}
+async function matchRecipe(goal) {
+  var recs = await getLocal('recordings', {}), runs = await getLocal('runs', []);
+  var g = String(goal).toLowerCase(), gw = matchWords(goal), gDoc = DOC_WORDS.test(g), best = null;
+  Object.keys(recs).forEach(function (id) {
+    var rec = recs[id];
+    if (!actionCount(rec)) return;
+    var site = recipeSite(rec), score = 0, why = [];
+    var siteHit = site.name.length >= 3 && (gw[site.name] || g.indexOf(site.host) >= 0);
+    if (siteHit) { score += 3; why.push('the site ' + site.host); }
+    var rw = matchWords([rec.name, rec.goal, rec.goalProposed].join(' '));
+    var common = Object.keys(gw).filter(function (w) { return rw[w] && w !== site.name; });
+    if (common.length) { score += common.length; why.push('"' + common.join('", "') + '"'); }
+    if (gDoc && downloadGoal(rec)) { score += 2; why.push('it downloads a document'); }
+    if (!siteHit && common.length < 2) return;                  // the site, or two words of its name / goal, must fit
+    var last = runs.filter(function (r) { return r.recId === id; })[0];
+    var ok = !!(last && last.result && last.result.verdict === 'VERIFIED');
+    var key = [score, ok ? 1 : 0, rec.createdAt || 0];
+    if (!best || key[0] > best.key[0] || (key[0] === best.key[0] && (key[1] > best.key[1] || (key[1] === best.key[1] && key[2] > best.key[2]))))
+      best = { rec: rec, key: key, why: why, site: site.host, ok: ok };
+  });
+  if (!best || best.key[0] < 3) return null;
+  var named = PD.fromText(goal, nowMs()), period = named || defaultPeriod(best.rec);
+  return { recId: best.rec.id, name: best.rec.goal || best.rec.name, site: best.site, period: period, periodLabel: PD.label(period),
+           periodFrom: named ? 'your words' : 'the recipe\'s default (' + (best.rec.periodMode === 'this' ? 'this' : 'last') + ' month)',
+           why: 'fits ' + best.why.join(', '), lastOk: best.ok };
+}
+
 async function tellStart(msg) {
   var busy = await busyReason();
   if (busy) throw new Error(busy);
   if (await tellBusy()) throw new Error('a Tell-it run is already in progress: stop it first');
   var goal = String(msg.goal || '').trim().slice(0, 500);
   if (!goal) throw new Error('type what it should do');
+  if (!msg.explore) {                                // a chore you showed it already: offer the recipe, for the month named
+    var fit = await matchRecipe(goal);
+    if (fit) return { suggest: fit };
+  }
   var tab = await chrome.tabs.get(msg.tabId);
   var cfg = await tellSettings();
   // start: the typed start page, else this tab if it is a web page, else a site named in the goal, else the search

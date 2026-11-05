@@ -308,3 +308,36 @@ def test_popup_offers_run_for_a_month_when_the_row_is_picked_by_date(x):
     assert "1 row pick follow" in box.inner_text(), box.inner_text()
     assert box.locator("input.prun").count() == 1 and box.locator("button.prungo").count() == 1
     pop.close()
+
+
+# ---- v0.9.4: Tell it in plain words runs the saved recipe for the month the words name --------------------------------
+
+def test_tell_it_in_plain_words_runs_the_saved_recipe_for_the_named_month(x):
+    page, tab, rec, _ = _record(x, _full_route)
+    fit = x.call("tell_start", tabId=tab, goal="download my September chat app invoice")["suggest"]
+    assert fit["recId"] == rec["id"] and fit["period"] == "2026-09" and fit["periodFrom"] == "your words", fit
+    default = x.call("tell_start", tabId=tab, goal="get the chat app invoice")["suggest"]
+    assert default["period"] == "2026-10" and "default" in default["periodFrom"], default      # no month named: last month
+    assert x.state().get("run") is None                                          # only offered, nothing ran yet
+
+    pop = x.popup(tab)
+    pop.fill("#tellgoal", "download my September chat app invoice")
+    pop.click("#tellgo")
+    pop.wait_for_selector("#tellsuggest:not([hidden])", timeout=5000)
+    assert "September 2026" in pop.inner_text("#tellsuggestmsg"), pop.inner_text("#tellsuggestmsg")
+    x.server.state.clear()
+    page.goto(x.server.base + "/help.html")
+    x.server.hits.clear()
+    pop.click("#tellrunrec")
+    run = x.wait_run(statuses=("done", "failed", "needs_user", "awaiting_approval"), timeout=90)
+    assert run["result"]["verdict"] == "VERIFIED", _logs(run)
+    assert any("picked the row for September 2026" in t for t in _logs(run)), _logs(run)
+    assert "/files/doc/invoice-2026-09.pdf" in x.server.hits and "/files/doc/invoice-2026-10.pdf" not in x.server.hits, x.server.hits
+    pop.close()
+
+
+def test_tell_it_with_no_fitting_recipe_explores_as_before(x):
+    page, tab, rec, _ = _record(x, _full_route)
+    out = x.call("tell_start", tabId=tab, goal="download the wikipedia logo", startUrl=x.server.base + "/help.html", caps={"steps": 1})
+    assert "suggest" not in out and out.get("goal") == "download the wikipedia logo", out
+    x.call("tell_stop")

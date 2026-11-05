@@ -602,9 +602,30 @@ function tellDecideMsg(kind) {
   var note = $('tellnote').value.trim(); if (note && kind !== 'tell_approve') { m.note = note; $('tellnote').value = ''; }
   call(m).then(refresh);
 }
-$('tellgo').onclick = function () {
-  call({ type: 'tell_start', tabId: targetTab, goal: $('tellgoal').value.trim(), startUrl: $('tellurl').value.trim() })
-    .then(function () { $('tellgoal').value = ''; lastTellSig = ''; refresh(); });
+var tellFit = null;
+function tellBegin(explore) {
+  $('tellsuggest').hidden = true; tellFit = null;
+  return call({ type: 'tell_start', tabId: targetTab, goal: $('tellgoal').value.trim(), startUrl: $('tellurl').value.trim(), explore: !!explore })
+    .then(function (r) {
+      if (r && r.suggest) {               // v0.9.4: a saved recipe fits the request: run it for the month the words name
+        tellFit = r.suggest;
+        $('tellsuggestmsg').textContent = 'I know this one: your recipe "' + r.suggest.name + '" on ' + r.suggest.site
+          + ', for ' + r.suggest.periodLabel + '.';
+        $('tellsuggestwhy').textContent = 'Month from ' + r.suggest.periodFrom + '; the recipe ' + r.suggest.why
+          + (r.suggest.lastOk ? '; its last run was verified.' : '.');
+        $('tellsuggest').hidden = false;
+        return;
+      }
+      $('tellgoal').value = ''; lastTellSig = ''; return refresh();
+    });
+}
+$('tellgo').onclick = function () { tellBegin(false); };
+$('tellexplore').onclick = function () { tellBegin(true); };
+$('tellrunrec').onclick = function () {
+  if (!tellFit) return;
+  var f = tellFit;
+  call({ type: 'run', recId: f.recId, tabId: targetTab, period: f.period })
+    .then(function () { $('tellsuggest').hidden = true; tellFit = null; $('tellgoal').value = ''; lastSig = ''; refresh(); });
 };
 $('tellpause').onclick = function () { call({ type: 'tell_pause' }).then(refresh); };
 $('tellresume').onclick = function () { call({ type: 'tell_resume' }).then(refresh); };
