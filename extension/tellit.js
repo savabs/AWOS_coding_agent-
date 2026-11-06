@@ -39,6 +39,26 @@
  * 'awaiting_draft' and the popup shows the draft, editable, with Use this text / Rewrite (an optional note: another
  * writer call) / Stop. Only the text the owner approved is typed; the Post / Send click still needs its Approve.
  * traj.drafts keeps every writer call, the draft, the final text and whether the owner edited it (run log: tellLogEnd).
+ * v0.12 loop upgrades (docs/research/raising_the_agent_2026-11-05.md, "next loop upgrades"):
+ *   U1 a fill / fill_enter / select is read back from the page (content agent_act readback; sensitive fields never) and
+ *      its history line says what the field holds: '7. fill(17) "Body" -> field now: "Local AI for…" (212 chars)'.
+ *      Verdicts: ok / no visible effect / REFUSED BY OWNER / rejected: <why>. The owner's lines (refusals, rejected
+ *      declined picks, answers, take-overs: t.pinned) stay in the history block after they leave the 6-line window.
+ *   U2 before asking the owner to approve a risky submit (post / send / publish / submit / reply / save ...) on a compose
+ *      page: ONE validator call (VALIDATOR_GRAMMAR 'yes' | 'no: ...', thinking off, temperature 0) with the goal, the
+ *      owner's instructions and the form's field values read back from the page (agent_fields, masked). 'no' -> no
+ *      approval asked: "Not ready: <why>" in the history (counts toward the invalid cap); 'yes' (or no verdict) -> the
+ *      Approve card shows the values (pending.fields). traj.checks keeps every check.
+ *   U3 note gate: after a new owner note (t.noteGate) the risky submit controls are left out of the prompt and grammar
+ *      (and refused if picked) until a non-risky action ran; a note about the text (body / title / ask / rewrite ...)
+ *      also needs a newly approved draft (drafts on, compose goal).
+ *   U4 a note, Pause, Take over or Stop while the action call is in flight aborts that request (AbortController in
+ *      tellChat) and bumps t.cancelSeq: the stale reply is dropped and the step is asked again (with the note).
+ *   U5 the v2 grammar has no backslash in strings (AWOSAgent.STR_V2_RULE, decideV2); typographic quotes in a v2 fill
+ *      value become plain ones before typing. The legacy grammar is unchanged.
+ *   U6 (settings.agentClarify, default on): a writing goal that does not say what the text should say or ask pauses once
+ *      at the start with an editable "What should it say or ask?" line pre-filled with the model's guess (one small
+ *      call); the answer is the first owner instruction; Skip goes on without one.
  */
 var AG = self.AWOSAgent;
 var TELL_MAX_TRAJ = 20;
@@ -47,7 +67,8 @@ var TELL_DEFAULTS = { agentBrain: 'local', agentEndpoint: 'http://127.0.0.1:8081
                       searchPage: 'https://duckduckgo.com/?q={goal}',
                       pageView: true,          // v0.10: the page as typed entities + site map + plan (false = the v0.5 prompt)
                       agentPlan: true,         // v0.10: one plan call (2-5 subgoals) when a known path or a multi-step goal
-                      agentDraft: true };      // v0.11: compose fields are drafted by a writer call and approved by the owner
+                      agentDraft: true,        // v0.11: compose fields are drafted by a writer call and approved by the owner
+                      agentClarify: true };    // v0.12: a vague writing goal asks "What should it say or ask?" once at the start
 /** a site the goal names ("... on wikipedia.org", "https://..."), as an https URL; not e-mail addresses. */
 function siteInGoal(goal) {
   var m = /(?:^|[\s("'])((?:https?:\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,24})(\/[^\s"')]*)?/i.exec(String(goal || ''));
@@ -134,6 +155,11 @@ async function tellLogEnd(t) {
                final: d.final == null ? null : redactText(AG.maskSecrets(String(d.final).slice(0, 1500))),
                edited: !!d.edited, outcome: d.outcome || 'not used' };
     }),
+    checks: (t.traj.checks || []).map(function (c) {                                                       // v0.12 (U2)
+      return { step: c.step, control: redactText(c.control || ''), verdict: c.verdict, why: redactText(c.why || ''), ms: c.ms, error: c.error || '' };
+    }),
+    clarify: t.traj.clarify ? { guess: redactText(AG.maskSecrets(t.traj.clarify.guess || '')), answer: redactText(t.traj.clarify.answer || ''),
+                                skipped: !!t.traj.clarify.skipped } : null,                                // v0.12 (U6)
     model_steps: (t.traj.steps || []).map(function (s) {
       return { i: s.i, url: redactUrl(s.url), ms: s.ms, reply: redactText(String(s.reply || '').slice(0, 800)), action: s.action || '',
                valid: !!s.valid, repaired: !!s.repaired, note: s.note ? redactText(String(s.note).slice(0, 300)) : '' };
@@ -255,7 +281,7 @@ async function tellEffect(t, obs, ents) {
       if (!tr.some(function (x) { return x.role === la.role && x.name === la.name; })) tr.push({ role: la.role, name: la.name });
       if (tr.length > 12) tr.shift();
       t.nothing = (t.nothing || 0) + 1;
-      return 'nothing visible changed, so it is set aside on this page';
+      return NOTHING_EFFECT;
     }
     t.nothing = 0;
     return '';
@@ -294,12 +320,17 @@ function reEsc(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 /** an owner note joins the episode's notes (5 at most, latest last; "(new)" on the next step). A later note that names
  *  a declined control with a go-ahead and without "don't" / "before" ... ("ok, now click Post") lifts that decline;
  *  the note that came with the decline itself never does. */
-function tellAddNote(t, text, withDecline) {
+function tellAddNote(t, text, withDecline, noGate) {
   text = String(text || '').trim().slice(0, AG.NOTE_CHARS || 300);
   if (!text) return;
   t.notes = (t.notes || []).concat([{ id: (t.noteSeq = (t.noteSeq || 0) + 1), text: text, step: t.step, fresh: true }]).slice(-(AG.NOTES_MAX || 5));
+  // v0.12 (U3): the risky submit controls wait until something was done about this note (the clarify answer at the
+  // start of a goal gates nothing: there is nothing stale to submit yet)
+  // v0.12 review: a plain go-ahead ("yes", "ok, now click Post") asks for no change: it holds nothing back (else the
+  // owner's own "click Post" would hide Post until some other action ran)
+  var low = text.toLowerCase(), goAhead = !withDecline && (NOTE_GO.test(low) || AG.isSubmitName(low)) && !NOTE_NEG.test(low) && !NOTE_CHANGE.test(low);
+  if (!noGate && !goAhead) t.noteGate = { seq: t.noteSeq, step: t.step, text: AG.noteAboutText(text), acted: false, drafted: false };
   if (withDecline || !(t.declined || []).length) return;
-  var low = text.toLowerCase();
   t.declined = t.declined.filter(function (d) {
     var nm = String(d.verb === 'goto' ? d.url : d.name || '').toLowerCase().trim();
     var named = nm.length >= 2 && new RegExp('(^|[^a-z0-9])' + reEsc(nm) + '($|[^a-z0-9])(?!\\s*(body|title|text|content|draft|field|box)\\b)').test(low);
@@ -307,6 +338,39 @@ function tellAddNote(t, text, withDecline) {
     feed(t, 'info', 'Your note names "' + (d.name || d.url) + '": it may be proposed again (it still needs your Approve).');
     return false;
   });
+}
+// v0.12 review: a note that asks for a change (it gates the submit controls even with an "ok" / "now" in it)
+var NOTE_CHANGE = /\b(rewrite|reword|change|edit|fix|make|add|remove|delete|replace|mention|include|shorten|shorter|longer|ask|say|use|put|write|first|instead|but|also|then)\b/i;
+// ---- v0.12 (U3) the note gate, (U1) history verdicts and the owner's pinned lines -----------------------------------
+var STRICT_DM = /\b(delete|remove|revoke|rotate|regenerate|roll|reset|wipe|destroy|erase|purge|deactivate|disable|empty|permanently|discard|clear all|terminate|suspend|upgrade|downgrade|purchase|buy|pay|transfer|close account|cancel (plan|subscription)|sign out|log ?out|leave)\b/i;
+/** the danger word of clicking control c (the safety gate's own test) or null. */
+function tellDangerOf(c) {
+  var txt = (c.name || '') + ' | ' + (c.context || ''), dm = STRICT_DM.exec(txt);
+  return S.dangerMatchStrict(txt, 'tell') || (dm ? dm[1].toLowerCase() : null);
+}
+/** a control that sends what was written and needs the owner's Approve (Post, Send, Publish, Submit ...). */
+function tellRiskySubmit(c) {
+  return !!(c && !/^(textbox|password|combobox)$/.test(c.role || '') && AG.isSubmitName(c.name) && tellDangerOf(c));
+}
+/** is the note gate open? (no new note, or a non-risky action ran since, and a new draft was approved for a note about
+ *  the text when drafts are on). Closes nothing; clears the gate once it is open. */
+function tellGateOpen(t, cfg) {
+  var g = t.noteGate;
+  if (!g) return true;
+  var needDraft = g.text && cfg.agentDraft !== false && AG.composeGoal(t.goal);
+  if (!g.acted || (needDraft && !g.drafted)) return false;
+  t.noteGate = null;
+  return true;
+}
+function tellGateWhy(t, cfg) {
+  var g = t.noteGate || {}, needDraft = g.text && cfg.agentDraft !== false && AG.composeGoal(t.goal);
+  return 'the owner gave a new instruction at step ' + (g.step || t.step) + '; act on it first'
+    + (needDraft ? ' (write the text again: fill the field, the owner approves the new draft)' : ' (another action)') + ', then submit';
+}
+/** a history line; pin = an owner line kept in the history block after it leaves the 6-line window. */
+function tellHist(t, line, pin) {
+  t.history.push(line);
+  if (pin) t.pinned = (t.pinned || []).concat([line]).slice(-8);
 }
 /** the owner said no to a pending approval: kept for the rest of the episode (verb, control, page state). */
 function tellRecordDecline(t, p) {
@@ -374,7 +438,21 @@ async function tellPlan(t, cfg, obs, paths, again) {
 }
 
 // ---- the brain ---------------------------------------------------------------------------------------------
-function tellChat(t, cfg) {
+// v0.12 (U4): the action calls in flight; a note / Pause / Take over / Stop aborts them (the reply would be stale)
+var tellInflight = [];
+function tellAbortInflight(why) {
+  var all = tellInflight; tellInflight = [];
+  all.forEach(function (c) { c.byOwner = why || 'cancelled'; try { c.abort(); } catch (e) {} });
+  return all.length;
+}
+/** the owner acted while the model may be thinking: the reply in flight (if any) is dropped and the step asked again.
+ *  Marks t (cancelSeq); the caller SAVES t first and then calls tellAbortInflight, so the loop that wakes up from the
+ *  aborted call already reads the owner's change (and its own step undo is not overwritten by the handler's save). */
+function tellCancelInflight(t) {
+  t.cancelSeq = (t.cancelSeq || 0) + 1;
+}
+/** kind 'action' = the step's action call (abortable by the owner, U4); the plan / writer / validator calls are not. */
+function tellChat(t, cfg, kind) {
   if (t.brain === 'claude') {
     var s = Object.assign({}, cfg, { claudeModel: cfg.agentClaudeModel });
     return function (messages, grammar, opts) { return M.claudeChat(s, messages, (opts && opts.maxTokens) || 300, 60000); };
@@ -383,6 +461,7 @@ function tellChat(t, cfg) {
   return async function (messages, grammar, opts) {
     if (!M.isLoopback(cfg.agentEndpoint)) return { error: 'agent endpoint is not loopback; refusing to send page data: ' + cfg.agentEndpoint };
     var ctl = new AbortController(), timer = setTimeout(function () { ctl.abort(); }, 120000);
+    if (kind === 'action') tellInflight.push(ctl);
     try {
       var resp = await fetch(cfg.agentEndpoint.replace(/\/+$/, '') + '/chat/completions', {
         method: 'POST', signal: ctl.signal, headers: { 'Content-Type': 'application/json' },
@@ -394,8 +473,9 @@ function tellChat(t, cfg) {
       var c = j && j.choices && j.choices[0];
       return { text: c ? (c.message ? c.message.content : c.text) || '' : '' };
     } catch (e) {
+      if (ctl.byOwner) return { error: 'cancelled: ' + ctl.byOwner, cancelled: true };
       return { error: localAgentHint(cfg.agentEndpoint), localDown: true };
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer); tellInflight = tellInflight.filter(function (c) { return c !== ctl; }); }
   };
 }
 
@@ -557,11 +637,25 @@ async function tellDrive(id) {
   } finally { if (tellDriving === id) tellDriving = null; }
 }
 
+var NOTHING_EFFECT = 'nothing visible changed, so it is set aside on this page';
 function histOk(t, obs, effect) {
   if (!t.pendingHist) return;
-  var lt = AG.liveText(obs);
-  t.history.push(t.pendingHist.step + '. ' + t.pendingHist.show + ' -> ok; now on "' + obs.title + '"' + (lt ? ' (' + lt.slice(0, 160) + ')' : '')
-                 + (effect ? '; ' + effect : ''));          // v0.10: what the action did (opened a menu, nothing visible ...)
+  var ph = t.pendingHist, lt = AG.liveText(obs), now = 'now on "' + obs.title + '"' + (lt ? ' (' + lt.slice(0, 160) + ')' : '');
+  if (ph.readback && ph.verb === 'select') {
+    // v0.12 ladder fix: a select keeps the 0.11 line ('select(1, "Canada") -> ok; now on ...'); the read-back is added only
+    // when the page shows another option. ('select(1) "" -> chosen: "Canada"' made the 4B re-select until the loop guard:
+    // MiniWoB choose-list 3/3 -> 0/3.)
+    var sq = function (s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim().toLowerCase(); };
+    var same = sq(ph.chosen) === sq(ph.want);
+    t.history.push(ph.step + '. ' + ph.show + ' -> ok; ' + (same ? '' : ph.readback + '; ') + now + (effect ? '; ' + effect : ''));
+  } else if (ph.readback) {
+    // v0.12 (U1): what the field holds now, read back from the page; a fill_enter also says where it went
+    t.history.push(ph.step + '. ' + ph.short + ' -> ' + ph.readback + (ph.verb === 'fill_enter' ? '; ' + now : '') + (effect ? '; ' + effect : ''));
+  } else if (effect === NOTHING_EFFECT) {
+    t.history.push(ph.step + '. ' + ph.show + ' -> no visible effect; ' + now + '; it is set aside on this page');
+  } else {
+    t.history.push(ph.step + '. ' + ph.show + ' -> ok; ' + now + (effect ? '; ' + effect : ''));   // v0.10: what the action did
+  }
   t.pendingHist = null;
 }
 
@@ -582,6 +676,11 @@ async function tellLoop(id) {
     if (t.draftReq) { var dr = t.draftReq; t.draftReq = null; await saveTell(t); await tellWriteDraft(t, cfg, dr); continue; }   // v0.11 Rewrite
     if (t.step >= t.maxSteps) return tellEnd(t, 'halted', 'step cap ' + t.maxSteps + ' reached', true);
     if (elapsed(t) > t.maxSeconds * 1000) return tellEnd(t, 'halted', 'time cap ' + t.maxSeconds + 's reached', true);
+    // v0.12 (U6): a vague writing goal asks once, before anything else, what the text should say or ask
+    if (!t.clarifyDone && t.step === 0) {
+      t.clarifyDone = true;
+      if (cfg.agentClarify !== false && AG.vagueWritingGoal(t.goal) && !(t.notes || []).length) return tellClarify(t, cfg);
+    }
     await waitForLoad(t.tabId); await ensureContent(t.tabId);
     var raw = await sendRetry(t.tabId, { type: 'agent_observe' });
     if (t.brain === 'claude') {
@@ -641,8 +740,18 @@ async function tellLoop(id) {
       var tried = t.tried[key] || [], skip = [];
       (obs.controls || []).forEach(function (c, i) { if (tried.some(function (x) { return x.role === c.role && x.name === c.name; })) skip.push(i + 1); });
       tellDeclinedSkip(t, key, obs).forEach(function (n) { if (skip.indexOf(n) < 0) skip.push(n); });   // v0.11: the owner said no
+      // v0.12 (U3): after a new owner note the submit controls wait (left out of the list and the grammar)
+      var held = [];
+      if (!tellGateOpen(t, cfg)) {
+        (obs.controls || []).forEach(function (c, i) {
+          if (!tellRiskySubmit(c) || skip.indexOf(i + 1) >= 0) return;            // (declined / tried: not shown anyway)
+          skip.push(i + 1); if (held.indexOf(c.name) < 0) held.push(c.name);
+        });
+      }
       var rules = typeof tellRulesText === 'function' ? await tellRulesText(t, host, key) : '';   // lessons (lib/lessons.js), when wired
-      v2c = { key: key, skip: skip, tried: tried, expand: !!t.expand, paths: pathsFor(), rules: rules || '', slim: slimObs(obs, ents) };
+      v2c = { key: key, skip: skip, tried: tried, expand: !!t.expand, paths: pathsFor(), rules: rules || '', slim: slimObs(obs, ents),
+              hint: held.length ? 'Held back until you act on the owner\'s newest instruction: "' + held.slice(0, 3).join('", "').replace(/\s+/g, ' ').slice(0, 120)
+                                  + '" (' + (t.noteGate && t.noteGate.text && cfg.agentDraft !== false && AG.composeGoal(t.goal) ? 'write the text again first' : 'do another step first') + ').' : '' };
       t.expand = false;
     }
     t.step += 1;
@@ -654,7 +763,8 @@ async function tellLoop(id) {
       pv2 = AG.buildPromptV2({ goal: t.goal, step: t.step, maxSteps: t.maxSteps, visited: t.visited, history: t.history, obs: obs,
                                injected: hits.length > 0, note: note, rules: v2c.rules, paths: v2c.paths, plan: t.plan,
                                expand: v2c.expand, skip: v2c.skip, tried: v2c.tried, now: nowMs(),
-                               notes: t.notes, declined: t.declined });
+                               notes: t.notes, declined: t.declined,
+                               pinned: t.pinned, held: v2c.hint });                             // v0.12 (U1, U3)
       prompt = pv2.text;
       grammar = AG.buildGrammarFor(pv2.shown, true, { scroll: v2c.expand ? 'up' : pv2.hidden > 0 ? 'down' : false });
       t.traj.promptVersion = AG.PROMPT_V2;
@@ -665,10 +775,19 @@ async function tellLoop(id) {
       t.traj.promptVersion = 'v1';
     }
     await saveTell(t);
-    var t0 = Date.now(), r = await AG.decide(tellChat(t, cfg), system, prompt, grammar, t.brain === 'claude');
+    // v0.12 (U4): the owner's note / Pause during this call bumps cancelSeq (and aborts the request): the reply is dropped
+    var cseq = t.cancelSeq || 0, decideFn = v2c ? AG.decideV2 : AG.decide;    // (U5: no backslash in a v2 string)
+    var t0 = Date.now(), r = await decideFn(tellChat(t, cfg, 'action'), system, prompt, grammar, t.brain === 'claude');
     t = await getSess('tell');
     if (!t || t.id !== id) return;
     if (t.status !== 'running') return;                     // stopped while the model was thinking: do nothing
+    if ((t.cancelSeq || 0) !== cseq || r.cancelled || /^cancelled:/.test(r.error || '')) {
+      t.step -= 1;
+      if (note && !t.note) t.note = note;                   // the dropped step's own note is not lost
+      t.traj.events.push({ step: t.step + 1, cancelled: true, ms: Date.now() - t0 });
+      feed(t, 'info', 'You stepped in while the model was thinking: that answer is dropped' + (t.pauseRequested ? '.' : ' and the step is asked again with your note.'));
+      await saveTell(t); continue;
+    }
     if (r.error) {
       t.step -= 1; t.note = note;
       return tellPause(t, 'needs_user', { kind: 'brain', message: 'The model could not answer: ' + r.error });
@@ -693,6 +812,7 @@ async function tellLoop(id) {
     var ctrl = act.n ? (raw.controls || [])[act.n - 1] : null;
     var ctx = { k: k, show: show, obs: obs, url: raw.url, expectName: ctrl ? ctrl.name : null, nControls: (obs.controls || []).length };
     if (pv2) Object.assign(ctx, { v2: true, shown: pv2.shown, hidden: pv2.hidden, expanded: v2c.expand, fromKey: v2c.key, slim: v2c.slim });
+    if (pv2 && AG.hasBackslash(r.reply)) ctx.backslash = true;   // v0.12 (U5): a reply the v2 grammar would not allow
     await tellExecute(t, cfg, act, ctx, false);
   }
 }
@@ -706,12 +826,19 @@ async function tellInvalid(t) {
   await tellPause(t, 'needs_user', { kind: 'invalid', message: 'The model kept producing actions that do not fit this page. Type a correction below and press Continue, or Stop.' + hint });
   return true;
 }
-function tellReject(t, ctx, err, cancelled) {
-  t.history.push(ctx.k + '. ' + ctx.show + ' -> REJECTED: ' + err);
+function tellReject(t, ctx, err, cancelled, pin) {
+  tellHist(t, ctx.k + '. ' + ctx.show + ' -> rejected: ' + err, pin);    // v0.12 (U1): pin = an owner line
   t.traj.events.push({ step: ctx.k, action: ctx.show, rejected: err });
   var st = t.traj.steps[t.traj.steps.length - 1]; if (st && st.i === ctx.k) st.valid = false;
   feed(t, 'bad', 'rejected: ' + err);
   return cancelled;
+}
+/** the owner said no to the pending action: its history line (pinned: it never leaves the prompt). */
+function tellRefused(t, ctx) {
+  tellHist(t, ctx.k + '. ' + ctx.show + ' -> REFUSED BY OWNER', true);
+  t.traj.events.push({ step: ctx.k, action: ctx.show, rejected: 'the owner did not approve this' });
+  var st = t.traj.steps[t.traj.steps.length - 1]; if (st && st.i === ctx.k) st.valid = false;
+  feed(t, 'bad', 'refused by you');
 }
 function markValid(t, ctx, ev) {
   var st = t.traj.steps[t.traj.steps.length - 1]; if (st && st.i === ctx.k) st.valid = true;
@@ -757,7 +884,11 @@ async function tellExecute(t, cfg, act, ctx, approved) {
   // v0.11: the owner already said no to this here: rejected without asking again (before validateV2, so the model is
   // told why even though the control is no longer shown)
   var dh = approved ? '' : tellDeclinedHit(t, act, ctx);
-  if (dh) { tellReject(t, ctx, dh); if (!(await tellInvalid(t))) await saveTell(t); return; }
+  if (dh) { tellReject(t, ctx, dh, false, true); if (!(await tellInvalid(t))) await saveTell(t); return; }
+  // v0.12 (U3): a submit picked before anything was done about the owner's newest note (the control is not shown then;
+  // a model that remembers its number, or the legacy prompt, still gets here)
+  var gc = !approved && act.n && /^(click|select)$/.test(act.verb) ? ((ctx.obs && ctx.obs.controls) || [])[act.n - 1] : null;
+  if (gc && tellRiskySubmit(gc) && !tellGateOpen(t, cfg)) { tellReject(t, ctx, tellGateWhy(t, cfg)); if (!(await tellInvalid(t))) await saveTell(t); return; }
   // (v0.11: the text the owner approved may be longer than an action's 200 characters: checked on its start)
   var vact = ctx.drafted ? Object.assign({}, act, { value: String(act.value || '').slice(0, 200) }) : act;
   var v = ctx.v2 ? AG.validateV2(vact, ctx.obs, ctx.shown, ctx.hidden, ctx.expanded) : AG.validate(vact, ctx.obs);
@@ -779,6 +910,15 @@ async function tellExecute(t, cfg, act, ctx, approved) {
   // v0.11: junk values (the model's scratch text, the goal pasted into a body, nothing at all) are never typed
   var junk = approved || ctx.drafted ? '' : AG.junkValue(act, v.control, t.goal);
   if (junk) { tellReject(t, ctx, junk); if (!(await tellInvalid(t))) await saveTell(t); return; }
+  // v0.12 (U5): the v2 grammar allows no backslash in a string (a model whose server ignores the grammar is refused
+  // here); typographic quotes stand in for plain ones and are typed as plain ones
+  if (ctx.v2 && !approved && !ctx.drafted && /^(fill|fill_enter|select)$/.test(act.verb)) {
+    if (ctx.backslash) {
+      tellReject(t, ctx, 'a backslash is not allowed in the text; write plain words (use \u201c \u201d for quotes)');
+      if (!(await tellInvalid(t))) await saveTell(t); return;
+    }
+    if (act.verb !== 'select') act = Object.assign({}, act, { value: AG.mapQuotes(act.value) });
+  }
   var tabUrl = ((await chrome.tabs.get(t.tabId).catch(function () { return {}; })).url) || '';
   // loop guard: the same click on the same page a 3rd time in a row (a 4B model toggling one checkbox for all 25
   // steps on a real run) pauses and asks instead of using up the step budget. micro_agent.py never counts clicks as
@@ -803,8 +943,22 @@ async function tellExecute(t, cfg, act, ctx, approved) {
     danger = S.dangerMatchStrict(act.verb === 'fill_enter' ? '' : txt, 'tell') || (dm && act.verb !== 'fill_enter' ? dm[1].toLowerCase() : null);
     gateName = c.name || '';
   }
-  if (danger && !approved) return tellAskApproval(t, act, ctx, danger, gateName);
+  if (danger && !approved) {
+    // v0.12 (U2): a submit on a compose page is checked first (one validator call); 'no' = not asked, the model fixes it
+    var chk = v.control && (act.verb === 'click' || (act.verb === 'select' && v.control.role !== 'combobox')) && tellRiskySubmit(v.control) && AG.composePage(ctx.obs, t.goal)
+      ? await tellPreSubmit(t, cfg, act, ctx, v.control) : null;
+    if (chk && chk.stale) return;
+    if (chk && chk.notReady) {
+      tellHist(t, ctx.k + '. ' + ctx.show + ' "' + String(v.control.name || '').replace(/"/g, "'").slice(0, 40) + '" -> Not ready: ' + chk.notReady);
+      var st0 = t.traj.steps[t.traj.steps.length - 1]; if (st0 && st0.i === ctx.k) st0.valid = false;
+      feed(t, 'warn', 'Not ready to ' + (v.control.name || 'submit') + ': ' + chk.notReady);
+      if (!(await tellInvalid(t))) await saveTell(t);
+      return;
+    }
+    return tellAskApproval(t, act, ctx, danger, gateName, chk && chk.fields);
+  }
 
+  if (t.noteGate && act.verb !== 'scroll' && /^(goto|go_back)$/.test(act.verb)) t.noteGate.acted = true;   // (U3)
   if (act.verb === 'scroll' && ctx.v2) {             // v0.10: scroll(down) = every control on the next step, up = the short list
     t.expand = act.direction === 'down';
     await sendTab(t.tabId, { type: 'agent_act', act: act }).catch(function () {});
@@ -845,6 +999,13 @@ async function tellExecute(t, cfg, act, ctx, approved) {
     return;
   }
   if (approved) t.traj.events.push({ step: k, approved: true, control: ctx.expectName || '' });
+  // v0.12 (U1): the read-back of a fill / fill_enter / select goes into its history line; (U3) a non-risky action ran
+  if (t.noteGate && !(approved && danger) && act.verb !== 'scroll') t.noteGate.acted = true;
+  var rbx = r.readback && /^(fill|fill_enter|select)$/.test(act.verb) && !(act.verb === 'select' && r.asClick)
+    ? { readback: AG.readbackText(r.readback, act.verb === 'select' ? null : act.value, act.verb), verb: act.verb,
+        short: act.verb + '(' + act.n + ') "' + String((v.control && v.control.name) || ctx.expectName || '').replace(/"/g, "'").slice(0, 40) + '"'
+               + (ctx.drafted ? ' [the owner approved this text]' : ''),
+        want: act.option, chosen: r.readback.value } : null;        // (select: the line is plain when these match)
   if (act.verb === 'fill') { addStep(t, { action: 'fill', loc: r.loc, url: tabUrl, value: act.value, sensitive: null }); await sleep(150); }
   else if (act.verb === 'select' && !r.asClick) { addStep(t, { action: 'select', loc: r.loc, url: tabUrl, value: r.value, optionText: r.optionText }); await sleep(150); }
   else if (act.verb === 'fill_enter') {
@@ -857,7 +1018,7 @@ async function tellExecute(t, cfg, act, ctx, approved) {
     if (await tellSettle(t.tabId, tabUrl)) { click.navigates = true; t.window = 0; }
     t.steps.push(click);
   }
-  return tellOk(t, ctx);
+  return tellOk(t, ctx, rbx);
 }
 /** the agent wanted to type into a password / code field: the user types it, the agent waits. */
 function tellSecretPause(t, ctx, reason, name) {
@@ -866,10 +1027,10 @@ function tellSecretPause(t, ctx, reason, name) {
   return tellPause(t, 'needs_user', { kind: 'secret', message: 'Type the ' + (reason || 'password / code') + ' for "' + name
     + '" into the page yourself (AWOS never reads or stores it), then press Continue.' });
 }
-async function tellOk(t, ctx) {
+async function tellOk(t, ctx, rb) {
   markValid(t, ctx);
   t.invalid = 0;
-  t.pendingHist = { step: ctx.k, show: ctx.show };
+  t.pendingHist = Object.assign({ step: ctx.k, show: ctx.show }, rb || {});
   await saveTell(t);
 }
 /** what a pause keeps of a step's context to run its action later (approval, v0.11 draft). */
@@ -879,12 +1040,68 @@ function keepCtx(ctx) {
   if (ctx.drafted) keep.drafted = true;
   return keep;
 }
-async function tellAskApproval(t, act, ctx, danger, target) {
+async function tellAskApproval(t, act, ctx, danger, target, fields) {
   t.traj.events.push({ step: ctx.k, action: ctx.show, approval_asked: danger });
+  var what = act.verb === 'goto' ? 'open ' + act.value : act.verb === 'fill_enter' ? 'press Enter in "' + target + '"' : 'click "' + target + '"';
+  var message = 'Step ' + ctx.k + ' wants to ' + what + ' (matches "' + danger + '"). Approve, or tell it no.';
+  if (fields && fields.length) {
+    // v0.12 (U2): what would be sent, so the owner approves the text and not only the button
+    var short = function (v) { v = String(v || '').replace(/\s+/g, ' ').trim(); return v ? '"' + (v.length > 60 ? v.slice(0, 60) + '…' : v) + '"' : '(empty)'; };
+    message = 'You are about to ' + what + ' on "' + String((ctx.obs && ctx.obs.title) || '').slice(0, 80) + '": '
+      + fields.map(function (f) { return f.name + ' ' + (f.sensitive ? '(protected)' : short(f.value)); }).join(' / ') + '. Approve, or tell it no.';
+  }
   return tellPause(t, 'awaiting_approval', { kind: 'approval', act: act, ctx: keepCtx(ctx),
-    danger: danger, target: target,
-    message: 'Step ' + ctx.k + ' wants to ' + (act.verb === 'goto' ? 'open ' + act.value : act.verb === 'fill_enter' ? 'press Enter in "' + target + '"' : 'click "' + target + '"')
-           + ' (matches "' + danger + '"). Approve, or tell it no.' });
+    danger: danger, target: target, fields: fields && fields.length ? fields : null, message: message });
+}
+/** v0.12 (U2): the pre-submit check -> {notReady: why} | {fields} (ask the owner, showing them) | {stale} (the run
+ *  stopped or the owner stepped in meanwhile). One small call: the goal, the owner's notes, the field values read back
+ *  from the page (masked; protected fields by name only). No verdict (an error, a reply that is neither) = ask. */
+async function tellPreSubmit(t, cfg, act, ctx, c) {
+  var fr = await sendTab(t.tabId, { type: 'agent_fields', n: act.n }).catch(function () { return null; });
+  var fields = ((fr && fr.fields) || []).filter(function (f) { return f && (f.name || f.value || f.sensitive); }).map(function (f) {
+    return f.sensitive ? { name: String(f.name || 'field').slice(0, 60), sensitive: true }
+                       : { name: String(f.name || 'field').slice(0, 60), value: AG.maskSecrets(String(f.value || '')).slice(0, 2000) };
+  });
+  if (!fields.length) {                                            // the page did not answer: the observed values (cut)
+    fields = ((ctx.obs && ctx.obs.controls) || []).filter(function (x) { return x.role === 'textbox' && (c.form == null || x.form === c.form); })
+      .slice(0, 8).map(function (x) { return x.sensitive ? { name: x.name || 'field', sensitive: true } : { name: x.name || x.context || 'field', value: x.value || '' }; });
+  }
+  if (t.brain === 'claude') {
+    var lock = cloudLockedFor(cfg, ctx.url || '');
+    if (lock) return { fields: fields };                          // (never sent: the owner sees the values and decides)
+  }
+  var user = AG.buildValidatorPrompt({ goal: t.goal, notes: t.notes, action: 'click "' + (c.name || '') + '"', where: (ctx.obs && ctx.obs.title) || '', fields: fields });
+  var cseq = t.cancelSeq || 0, t0 = Date.now();
+  var r = await tellChat(t, cfg)([{ role: 'system', content: AG.VALIDATOR_SYSTEM }, { role: 'user', content: user }], AG.VALIDATOR_GRAMMAR, { maxTokens: 60 });
+  var verdict = r.error ? null : AG.parseVerdict(r.text);
+  var tp = await getSess('tell');
+  if (!tp || tp.id !== t.id || tp.status !== 'running' || (tp.cancelSeq || 0) !== cseq || tp.pauseRequested) {
+    if (tp && tp.id === t.id && tp.status === 'running') { tp.step -= 1; await saveTell(tp); }   // asked again (with the note)
+    return { stale: true };
+  }
+  t.traj.checks = (t.traj.checks || []).concat([{ step: ctx.k, control: c.name || '', system: AG.VALIDATOR_SYSTEM, user: user,
+    grammar: AG.VALIDATOR_GRAMMAR, reply: r.error ? '' : String(r.text || '').slice(0, 300), verdict: verdict ? (verdict.ok ? 'yes' : 'no') : 'none',
+    why: verdict && !verdict.ok ? verdict.why : '', error: r.error || '', ms: Date.now() - t0 }]);
+  if (verdict && !verdict.ok) return { notReady: verdict.why };
+  if (!verdict) feed(t, 'info', 'The pre-submit check gave no answer' + (r.error ? ' (' + String(r.error).slice(0, 80) + ')' : '') + '; check the values yourself.');
+  return { fields: fields };
+}
+
+// ---- v0.12 (U6) clarify a writing goal ----------------------------------------------------------------------------
+/** ONE small call guesses what the text should say or ask (from the goal only: no page data), then the episode waits
+ *  in needs_user (kind 'clarify') with that guess, editable, in the popup. */
+async function tellClarify(t, cfg) {
+  var r = { error: 'no call' }, t0 = Date.now();
+  if (t.brain !== 'claude' || !cloudLockedFor(cfg, t.startUrl)) {
+    r = await tellChat(t, cfg)([{ role: 'system', content: AG.CLARIFY_SYSTEM }, { role: 'user', content: AG.buildClarifyPrompt(t.goal) }], undefined, { maxTokens: 60 });
+  }
+  var guess = r.error ? '' : AG.cleanGuess(r.text);
+  var tp = await getSess('tell');
+  if (!tp || tp.id !== t.id || tp.status !== 'running') return;
+  tp.clarifyDone = true;
+  tp.traj.clarify = { goal: t.goal, reply: r.error ? '' : String(r.text || '').slice(0, 300), guess: guess, error: r.error || '', ms: Date.now() - t0 };
+  return tellPause(tp, 'needs_user', { kind: 'clarify', guess: guess,
+    message: 'What should it say or ask? Edit the line below (or write your own) and press Use this, or Skip.' });
 }
 
 // ---- v0.11 draft-and-approve writing ----------------------------------------------------------------------------
@@ -942,7 +1159,7 @@ async function tellWriteDraft(t, cfg, req) {
   if (tp.takeover) {
     if (idx < 0) { ds.push({ step: ctx.k, field: name, kind: req.kind, where: '', writes: [], rewrites: 0, draft: '', final: null, edited: false, outcome: 'interrupted' }); idx = ds.length - 1; }
     writes.forEach(function (w) { ds[idx].writes.push(w); }); ds[idx].draft = text; ds[idx].outcome = 'interrupted';
-    tp.history.push(ctx.k + '. ' + ctx.show + ' -> not typed: the owner took the page; continue from what is there.');
+    tellHist(tp, ctx.k + '. ' + ctx.show + ' -> not typed: the owner took the page; continue from what is there.', true);
     await saveTell(tp); return;
   }
   if (idx < 0) { ds.push({ step: ctx.k, field: name, kind: req.kind, where: where.join(' | '), writes: [], rewrites: 0, draft: '', final: null, edited: false, outcome: '' }); idx = ds.length - 1; }
@@ -981,6 +1198,7 @@ async function tellDraftUse(msg) {
     lifted.push(x.name); return false;
   });
   if (lifted.length) feed(t, 'info', 'With the new text, "' + lifted.join('", "') + '" may be proposed again (it still needs your Approve).');
+  if (t.noteGate) t.noteGate.drafted = true;                       // v0.12 (U3): a new draft after the owner's note
   var act = Object.assign({}, p.act, { value: text });
   // the history shows the approved text (cut), not the model's own words
   var ctx = Object.assign({}, p.ctx, { drafted: true,
@@ -1081,17 +1299,23 @@ async function tellDecide(kind, msg) {
     feed(t, 'info', 'You approved "' + (p.target || '') + '".');
   } else if (kind === 'decline') {
     if (t.status !== 'awaiting_approval') throw new Error('nothing to decline');
-    tellReject(t, p.ctx, 'the owner did not approve this');
+    tellRefused(t, p.ctx);                                          // v0.12 (U1): REFUSED BY OWNER, pinned
     tellRecordDecline(t, p);                                       // v0.11: it stays declined for the episode
   } else if (kind === 'continue') {
     if (t.status !== 'needs_user') throw new Error('nothing to continue');
     if (p.kind === 'guard') t.guardSkip[p.guardKey] = 1;
     if (p.kind === 'guard' || p.kind === 'secret') await recordTypedSecrets(t);
-    if (t.pendingHistRaw) { t.history.push(t.pendingHistRaw); t.pendingHistRaw = null; }
+    if (t.pendingHistRaw) { tellHist(t, t.pendingHistRaw, true); t.pendingHistRaw = null; }
     if (p.kind === 'invalid') t.invalid = 0;
   } else throw new Error('unknown decision');
   var offer = null;
-  if (msg.note) {
+  if (p.kind === 'clarify') {
+    // v0.12 (U6): the answer is the first owner instruction (no one-step note, no lesson offer, no note gate)
+    var ans = String(msg.note || '').trim().slice(0, AG.NOTE_CHARS || 300);
+    if (ans) { tellAddNote(t, ans, false, true); feed(t, 'info', 'It will write: ' + ans); }
+    else feed(t, 'info', 'No answer: it works the text out from the goal.');
+    t.traj.clarify = Object.assign(t.traj.clarify || {}, { answer: ans ? AG.maskSecrets(ans) : '', edited: !!ans && ans !== p.guess, skipped: !ans });
+  } else if (msg.note) {
     t.note = String(msg.note).trim().slice(0, 300);
     tellAddNote(t, t.note, kind === 'decline');                    // v0.11: kept for every later step
     if (msg.viaNote) feed(t, 'info', 'Your correction goes into the next step: ' + t.note);
@@ -1121,7 +1345,8 @@ async function tellTakeover() {
   var t = await getSess('tell');
   if (!t || !/^(running|paused|needs_user|awaiting_approval|awaiting_draft)$/.test(t.status)) throw new Error('no Tell-it run to take over');
   t.takeover = true; t.lastClickAt = 0;
-  if (t.status === 'running') t.pauseRequested = true;
+  var abort = t.status === 'running';
+  if (abort) { t.pauseRequested = true; tellCancelInflight(t); }      // v0.12 (U4)
   else {
     // v0.11 review: a draft waiting is dropped (the owner types by hand now)
     if (t.status === 'awaiting_draft' && t.pending) { var dd = (t.traj.drafts || [])[t.pending.draftIdx]; if (dd && !dd.outcome) dd.outcome = 'taken over'; }
@@ -1129,6 +1354,7 @@ async function tellTakeover() {
   }
   feed(t, 'info', 'You have the page: what you click and type is recorded into the recipe. Press Resume to hand it back.');
   await saveTell(t);
+  if (abort) tellAbortInflight('take over');
   await sendTab(t.tabId, { type: 'rec_state', on: true }).catch(function () {});
   return t;
 }
@@ -1138,7 +1364,7 @@ async function tellResume() {
   if (t.takeover) {
     t.takeover = false;
     await sendTab(t.tabId, { type: 'rec_state', on: false }).catch(function () {});
-    t.history.push(t.step + '. (the owner acted on the page by hand; continue from this page)');
+    tellHist(t, t.step + '. (the owner acted on the page by hand; continue from this page)', true);
     t.pendingHist = null;
     // v0.11 review: an approved action / approved text / rewrite queued before the owner took the page is stale now (the
     // page changed by hand): it is not run on Resume
@@ -1216,14 +1442,18 @@ async function exportTraining() {
     },
     tell_pause: async function () {
       var t = await getSess('tell'); if (!t || t.status !== 'running') throw new Error('not running');
-      t.pauseRequested = true; await saveTell(t); return { ok: true };
+      t.pauseRequested = true; tellCancelInflight(t); await saveTell(t); tellAbortInflight('pause');   // v0.12 (U4)
+      return { ok: true };
     },
     tell_resume: async function () { return tellResume(); },
     tell_takeover: async function () { return tellTakeover(); },
     tell_stop: async function () {
       var t = await getSess('tell'); if (!t || t.status === 'ended') throw new Error('no Tell-it run');
       if (t.takeover) { t.takeover = false; await sendTab(t.tabId, { type: 'rec_state', on: false }).catch(function () {}); }
-      await tellEnd(t, 'halted', 'stopped by the owner'); return { ok: true };
+      tellCancelInflight(t);
+      await tellEnd(t, 'halted', 'stopped by the owner');
+      tellAbortInflight('stop');                                     // v0.12 (U4): nothing waits on a stopped run's call
+      return { ok: true };
     },
     tell_note: async function (msg) {
       var t = await getSess('tell'); if (!t || t.status === 'ended') throw new Error('no Tell-it run');
@@ -1236,9 +1466,14 @@ async function exportTraining() {
         return tellDraftRewrite({ nonce: t.pending.nonce, note: msg.text });
       t.note = String(msg.text || '').trim().slice(0, 300);
       tellAddNote(t, t.note, false);                                 // v0.11: kept for every later step
+      // v0.12 (U4): the action the model is choosing right now was chosen without this note: abort it, ask again
+      var abort = t.status === 'running' && !!t.note;
+      if (abort) tellCancelInflight(t);
       feed(t, 'info', 'Your correction goes into the next step: ' + t.note);
       var offer = await tellOfferLesson(t, t.note);                  // v0.10: "Remember for <site>?" in the popup
-      await saveTell(t); return { ok: true, offer: offer };
+      await saveTell(t);
+      if (abort) tellAbortInflight('note');
+      return { ok: true, offer: offer };
     },
     tell_approve: async function (msg) { return tellDecide('approve', msg); },
     tell_decline: async function (msg) { return tellDecide('decline', msg); },

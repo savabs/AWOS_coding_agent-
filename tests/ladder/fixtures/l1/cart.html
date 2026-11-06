@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Basket</title>
+<style>body{font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;margin:0;color:#1d2330;background:#f6f7f9}
+header{background:#24324a;color:#fff;padding:10px 18px;display:flex;gap:16px;align-items:center}
+header a{color:#cfe0ff;text-decoration:none}main{padding:18px 22px;max-width:860px}
+.card{background:#fff;border:1px solid #dde1e8;border-radius:8px;padding:14px 16px;margin:12px 0}
+button{padding:6px 12px;border-radius:6px;border:1px solid #9aa6b8;background:#fff;cursor:pointer;margin:2px}
+button.primary{background:#2f6fde;color:#fff;border-color:#2f6fde}label{display:block;margin:8px 0 2px;font-size:14px}
+input,select,textarea{padding:5px 8px;border:1px solid #aab3c2;border-radius:5px}table{border-collapse:collapse;width:100%}
+td,th{border-bottom:1px solid #e3e6ec;padding:6px 8px;text-align:left}.muted{color:#6b7385;font-size:13px}
+[role=tablist]{display:flex;gap:4px;border-bottom:1px solid #ccd}[role=tab]{border:0;border-bottom:2px solid transparent;border-radius:0}
+[role=tab][aria-selected=true]{border-bottom-color:#2f6fde;font-weight:600}
+.overlay{position:fixed;inset:0;background:rgba(10,15,30,.45);display:flex;align-items:center;justify-content:center}
+.overlay[hidden]{display:none}.modal{background:#fff;border-radius:10px;padding:18px 20px;width:380px}
+footer{padding:18px 22px;border-top:1px solid #dde1e8;font-size:13px}footer a{margin-right:12px}</style>
+<script src="/_ladder.js"></script></head>
+<body>
+<header><strong>Northwind</strong><span class="muted" style="color:#cfe0ff">Workspace</span></header>
+<main>
+<h1>Basket</h1><div class="card"><table><tr><th>Item</th><th>Price</th><th>Qty</th></tr>
+<tr><td>Notebook, A5 dotted</td><td>6.50</td><td><input type="number" id="qty-notebook" aria-label="Quantity, Notebook" value="2" min="0" style="width:60px"></td></tr>
+<tr><td>Desk lamp, brass</td><td>39.00</td><td><input type="number" id="qty-lamp" aria-label="Quantity, Desk lamp" value="1" min="0" style="width:60px"></td></tr>
+<tr><td>Pen set</td><td>12.00</td><td><input type="number" id="qty-pens" aria-label="Quantity, Pen set" value="1" min="0" style="width:60px"></td></tr></table>
+<button class="primary" data-ev="checkout">Checkout</button></div>
+</main>
+</body></html>

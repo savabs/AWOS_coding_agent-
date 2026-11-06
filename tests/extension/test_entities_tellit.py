@@ -223,7 +223,7 @@ def test_ineffective_click_is_marked_tried_and_triggers_a_replan(x):
     t = _wait_tell(x, ("confirm", "ended", "needs_user"))
     assert t["status"] == "confirm", t["feed"]
     p = [r["messages"][1]["content"] for r in brain.requests]
-    assert "1. click(" in p[1] and "nothing visible changed, so it is set aside on this page" in p[1], p[1]
+    assert "1. click(" in p[1] and "-> no visible effect; now on " in p[1] and "it is set aside on this page" in p[1], p[1]
     assert 'Tried on this page with no visible effect (not shown again): link "Customize".' in p[1], p[1]
     assert _num(p[1].split("<observation", 1)[1], "link", "Customize") is None and _num(p[0].split("<observation", 1)[1], "link", "Customize")
     assert 'link "Customize", button "Chats and tasks"' in p[2], p[2]

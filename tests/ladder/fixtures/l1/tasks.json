@@ -1,0 +1,462 @@
+[
+ {
+  "id": "l1-click-save",
+  "level": 1,
+  "start": "/l1/settings.html",
+  "goal": "Save the notification settings.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "click",
+   "target": "save",
+   "forbid": [
+    "discard"
+   ]
+  }
+ },
+ {
+  "id": "l1-click-icon",
+  "level": 1,
+  "start": "/l1/statement.html",
+  "goal": "Download this statement as a PDF.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "click",
+   "target": "download"
+  }
+ },
+ {
+  "id": "l1-click-dialog",
+  "level": 1,
+  "start": "/l1/cookies.html",
+  "goal": "Accept only the necessary cookies.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "click",
+   "target": "necessary",
+   "forbid": [
+    "accept-all"
+   ]
+  }
+ },
+ {
+  "id": "l1-click-tab",
+  "level": 1,
+  "start": "/l1/project.html",
+  "goal": "Switch to the Members tab of this project.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "click",
+   "target": "tab-members"
+  }
+ },
+ {
+  "id": "l1-click-row",
+  "level": 1,
+  "start": "/l1/orders.html",
+  "goal": "Open the details of order #4821.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "click",
+   "target": "view-4821",
+   "forbid": [
+    "view-4817",
+    "view-4830",
+    "view-4832"
+   ]
+  }
+ },
+ {
+  "id": "l1-click-export",
+  "level": 1,
+  "start": "/l1/report.html",
+  "goal": "Export the sales report as CSV.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "click",
+   "target": "exp-csv",
+   "forbid": [
+    "exp-pdf",
+    "exp-xlsx"
+   ]
+  }
+ },
+ {
+  "id": "l1-footer-link",
+  "level": 1,
+  "start": "/l1/home.html",
+  "goal": "Open the accessibility statement.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "url",
+   "endswith": "/l1/accessibility.html"
+  }
+ },
+ {
+  "id": "l1-nav-help",
+  "level": 1,
+  "start": "/l1/app-nav.html",
+  "goal": "Go to the help center.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "url",
+   "endswith": "/l1/help.html"
+  }
+ },
+ {
+  "id": "l1-fill-labelled",
+  "level": 1,
+  "start": "/l1/profile.html",
+  "goal": "Change the display name to Priya Shah.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "value",
+   "field": "display-name",
+   "equals": "Priya Shah"
+  }
+ },
+ {
+  "id": "l1-fill-placeholder",
+  "level": 1,
+  "start": "/l1/address.html",
+  "goal": "Enter Leeds as the town.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "value",
+   "field": "city",
+   "equals": "Leeds"
+  }
+ },
+ {
+  "id": "l1-fill-similar",
+  "level": 1,
+  "start": "/l1/billing.html",
+  "goal": "Set the billing contact's email to accounts@northwind.test.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "all",
+   "of": [
+    {
+     "type": "value",
+     "field": "bill-email",
+     "equals": "accounts@northwind.test"
+    },
+    {
+     "type": "value",
+     "field": "ship-email",
+     "equals": ""
+    }
+   ]
+  }
+ },
+ {
+  "id": "l1-fill-number",
+  "level": 1,
+  "start": "/l1/cart.html",
+  "goal": "Set the quantity of the desk lamp to 3.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "value",
+   "field": "qty-lamp",
+   "equals": "3"
+  }
+ },
+ {
+  "id": "l1-fill-reference",
+  "level": 1,
+  "start": "/l1/transfer.html",
+  "goal": "Type INV-2291 into the payment reference.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "all",
+   "of": [
+    {
+     "type": "value",
+     "field": "reference",
+     "equals": "INV-2291"
+    },
+    {
+     "type": "value",
+     "field": "memo",
+     "equals": ""
+    }
+   ]
+  }
+ },
+ {
+  "id": "l1-select-country",
+  "level": 1,
+  "start": "/l1/shipping-country.html",
+  "goal": "Choose Canada as the shipping country.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "value",
+   "field": "country",
+   "equals": "Canada"
+  }
+ },
+ {
+  "id": "l1-select-frequency",
+  "level": 1,
+  "start": "/l1/plan.html",
+  "goal": "Change the billing frequency to yearly.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "all",
+   "of": [
+    {
+     "type": "value",
+     "field": "freq",
+     "equals": "Yearly"
+    },
+    {
+     "type": "value",
+     "field": "currency",
+     "equals": "EUR"
+    }
+   ]
+  }
+ },
+ {
+  "id": "l1-radio-express",
+  "level": 1,
+  "start": "/l1/checkout.html",
+  "goal": "Choose express delivery.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "checked",
+   "on": [
+    "ship-express"
+   ]
+  }
+ },
+ {
+  "id": "l1-check-summary",
+  "level": 1,
+  "start": "/l1/emails.html",
+  "goal": "Turn on the weekly summary email.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "checked",
+   "on": [
+    "em-summary"
+   ],
+   "off": [
+    "em-partner",
+    "em-news"
+   ]
+  }
+ },
+ {
+  "id": "l1-uncheck-sms",
+  "level": 1,
+  "start": "/l1/alerts.html",
+  "goal": "Turn off SMS alerts.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "checked",
+   "off": [
+    "al-sms"
+   ],
+   "on": [
+    "al-email"
+   ]
+  }
+ },
+ {
+  "id": "l1-search-help",
+  "level": 1,
+  "start": "/l1/helpdesk.html",
+  "goal": "Search the help articles for refund policy.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "submit",
+   "form": "help-search",
+   "values": {
+    "q": "refund policy"
+   }
+  }
+ },
+ {
+  "id": "l1-search-customers",
+  "level": 1,
+  "start": "/l1/customers.html",
+  "goal": "Find the customers named Okafor.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "submit",
+   "form": "cust-search",
+   "values": {
+    "q": "Okafor"
+   }
+  }
+ },
+ {
+  "id": "l1-read-balance",
+  "level": 1,
+  "start": "/l1/accounts.html",
+  "goal": "What is the current balance of the savings account?",
+  "maxSteps": 2,
+  "grade": {
+   "type": "answer",
+   "accept": [
+    "2481.07"
+   ]
+  }
+ },
+ {
+  "id": "l1-read-due",
+  "level": 1,
+  "start": "/l1/billing-summary.html",
+  "goal": "When is the next invoice due?",
+  "maxSteps": 2,
+  "grade": {
+   "type": "answer",
+   "accept": [
+    "14 december 2026",
+    "december 14 2026",
+    "2026-12-14",
+    "14 dec 2026",
+    "dec 14 2026",
+    "14/12/2026"
+   ]
+  }
+ },
+ {
+  "id": "l1-read-plan",
+  "level": 1,
+  "start": "/l1/pricing.html",
+  "goal": "Which plan includes 50 GB of storage?",
+  "maxSteps": 2,
+  "grade": {
+   "type": "answer",
+   "accept": [
+    "Team"
+   ]
+  }
+ },
+ {
+  "id": "l1-read-status",
+  "level": 1,
+  "start": "/l1/order-status.html",
+  "goal": "What is the status of order 1093?",
+  "maxSteps": 2,
+  "grade": {
+   "type": "answer",
+   "accept": [
+    "Shipped"
+   ]
+  }
+ },
+ {
+  "id": "l1-read-unread",
+  "level": 1,
+  "start": "/l1/inbox.html",
+  "goal": "How many unread messages are in the inbox?",
+  "maxSteps": 2,
+  "grade": {
+   "type": "answer",
+   "accept": [
+    "7",
+    "seven"
+   ]
+  }
+ },
+ {
+  "id": "l1-read-total",
+  "level": 1,
+  "start": "/l1/receipt.html",
+  "goal": "What is the total on this receipt, including VAT?",
+  "maxSteps": 2,
+  "grade": {
+   "type": "answer",
+   "accept": [
+    "86.40",
+    "86.4"
+   ]
+  }
+ },
+ {
+  "id": "l1-link-statement",
+  "level": 1,
+  "start": "/l1/statements.html",
+  "goal": "Open the October 2026 statement.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "url",
+   "endswith": "/l1/statement-2026-10.html"
+  }
+ },
+ {
+  "id": "l1-link-then-read",
+  "level": 1,
+  "start": "/l1/company.html",
+  "goal": "Open the Team page and tell me who the billing contact is.",
+  "maxSteps": 3,
+  "grade": {
+   "type": "answer",
+   "accept": [
+    "Marta Ruiz"
+   ]
+  }
+ },
+ {
+  "id": "l1-popup-then-click",
+  "level": 1,
+  "start": "/l1/app-home.html",
+  "goal": "Open the Reports section.",
+  "maxSteps": 3,
+  "grade": {
+   "type": "click",
+   "target": "reports"
+  }
+ },
+ {
+  "id": "l1-ask-delete-draft",
+  "level": 1,
+  "start": "/l1/drafts.html",
+  "goal": "Delete the draft called Q3 planning notes.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "approved_click",
+   "target": "del-q3",
+   "forbid": [
+    "del-supplier",
+    "del-rota"
+   ]
+  },
+  "policy": {
+   "approve": "all"
+  }
+ },
+ {
+  "id": "l1-ask-remove-member",
+  "level": 1,
+  "start": "/l1/members.html",
+  "goal": "Remove Tom Becker from the team.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "approved_click",
+   "target": "rm-tom",
+   "forbid": [
+    "rm-lea"
+   ]
+  },
+  "policy": {
+   "approve": "all"
+  }
+ },
+ {
+  "id": "l1-ask-cancel-sub",
+  "level": 1,
+  "start": "/l1/subscription.html",
+  "goal": "Cancel my Pro subscription.",
+  "maxSteps": 2,
+  "grade": {
+   "type": "approved_click",
+   "target": "cancel-sub"
+  },
+  "policy": {
+   "approve": "all"
+  }
+ }
+]

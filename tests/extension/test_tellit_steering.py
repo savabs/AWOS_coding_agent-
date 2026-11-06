@@ -22,6 +22,16 @@ pick a control the prompt no longer shows, like a model that remembers it):
        owner's (edited) text; Rewrite with a note makes a second writer call carrying the note; a junk draft is retried
        once; the Post click still needs its Approve; a search box (fill_enter) never drafts.
   The A / B / D tests type the model's inline text, so they run with drafts off (_setup's writer=None).
+v0.12 loop upgrades (end of this file):
+  - U1 a fill's history line reads the field back ('-> field now: "..." (N chars)'); verdicts ok / no visible effect /
+       REFUSED BY OWNER / rejected: <why>; the owner's lines stay in the history block after the 6-line window
+  - U2 the pre-submit validator (Fake.validator) blocks a Post with a missing body ("Not ready: ..." in the history, no
+       approval asked); when it passes, the Approve card (pending.fields, popup #tellfields) shows Title and Body
+  - U3 after a new owner note, Post is left out of the prompt and grammar until a non-risky action ran, and for a note
+       about the text until a newly approved draft
+  - U4 a note typed while the action call is in flight (Fake item (reply, delay)) aborts it; the stale action never runs
+  - U5 the v2 grammar has no backslash in strings; typographic quotes are typed as plain ones
+  - U6 a vague writing goal pauses once with "What should it say or ask?" pre-filled with the model's guess (Fake.clarify)
 Run:  PYTHONPATH=. ~/.awos/rl-venv/bin/python -m pytest tests/extension/test_tellit_steering.py -q
 """
 import re
@@ -42,18 +52,29 @@ class Fake:
     """The fake local agent model. Each script item is a reply; {Name} becomes the number of the control called Name
     as it was first shown (remembered across steps). A repair call repeats the same reply (a stubborn model)."""
 
-    def __init__(self, script, delay=0.0, writer=()):
+    def __init__(self, script, delay=0.0, writer=(), validator=None, clarify=None):
         self.script, self.requests, self.nums, self.delay = list(script), [], {}, delay
         self.writer, self.writer_requests = list(writer), []    # v0.11 writer calls (drafts): scripted replies
+        # v0.12: the pre-submit check and the clarify guess (None = no script: an answer that is no verdict / no guess)
+        self.validator, self.validator_requests = None if validator is None else list(validator), []
+        self.clarify, self.clarify_requests = None if clarify is None else list(clarify), []
+        self.repairs = 0
 
     def __call__(self, body):
         msgs = body["messages"]
         if msgs[0]["content"].startswith("You write texts"):
             self.writer_requests.append(body)
             return self.writer.pop(0) if self.writer else "NOT_FOUND: writer script exhausted"
+        if msgs[0]["content"].startswith("You check a form"):
+            self.validator_requests.append(body)
+            return self.validator.pop(0) if self.validator else "NOT_FOUND: fake"
+        if msgs[0]["content"].startswith("You suggest"):
+            self.clarify_requests.append(body)
+            return self.clarify.pop(0) if self.clarify else "NOT_FOUND: fake"
         if not msgs[0]["content"].startswith("You operate a web dashboard"):
             return "NOT_FOUND: fake"                       # plan / verify / repair-model calls
         if len(msgs) > 2:                                  # the one repair call: the same reply again
+            self.repairs += 1
             return msgs[2]["content"]
         self.requests.append(body)
         if self.delay:
@@ -63,7 +84,11 @@ class Fake:
             self.nums.setdefault(m[2].lower(), int(m[1]))
         if not self.script:
             return 'needs_user("script exhausted")'
-        return re.sub(r"\{([A-Za-z][A-Za-z ]*)\}", lambda m: str(self.nums.get(m[1].lower(), 999)), self.script.pop(0))
+        item = self.script.pop(0)
+        if isinstance(item, tuple):                        # v0.12: (reply, seconds): a slow reply (a model thinking)
+            item, wait = item
+            time.sleep(wait)
+        return re.sub(r"\{([A-Za-z][A-Za-z ]*)\}", lambda m: str(self.nums.get(m[1].lower(), 999)), item)
 
     def prompt(self, i):
         return self.requests[i]["messages"][1]["content"]
@@ -72,10 +97,10 @@ class Fake:
         return self.writer_requests[i]["messages"][1]["content"]
 
 
-def _setup(x, script, delay=0.0, writer=None, **settings):
+def _setup(x, script, delay=0.0, writer=None, validator=None, clarify=None, **settings):
     if writer is None:                     # the inline-text tests: drafts off (the default is on)
         settings.setdefault("agentDraft", False)
-    fake = Fake(script, delay, writer or ())
+    fake = Fake(script, delay, writer or (), validator, clarify)
     x.server.model_answer = fake
     x.set_settings(**settings)
     return fake
@@ -118,9 +143,9 @@ def test_declined_post_is_never_proposed_again(x, page_view):
     assert any(e.get("declined") for e in t["traj"]["events"])
     post = fake.nums["post"]
     p4, p5 = fake.prompt(3), fake.prompt(4)
-    rej = '4. click(%d) -> REJECTED: the owner declined click "Post" at step 3; do not try it again' % post
+    rej = '4. click(%d) -> rejected: the owner declined click "Post" at step 3; do not try it again' % post
     assert rej in p5, p5
-    assert "3. click(%d) -> REJECTED: the owner did not approve this" % post in p4, p4
+    assert "3. click(%d) -> REFUSED BY OWNER" % post in p4, p4
     if page_view:
         # the declined line in every later prompt; the Post button is no longer shown, nor offered by the grammar
         for i in (3, 4, 5):
@@ -157,7 +182,7 @@ def test_note_while_approval_waits_declines_it_and_steers(x):
     assert lines[2] == "Note from the owner: " + note, lines[:6]
     assert lines[3] == "Owner's instructions (follow these first):" and lines[4] == "- " + note + " (new)", lines[:6]
     assert lines[5] == DECLINED_LINE, lines[:7]
-    assert "2. click(%d) -> REJECTED: the owner did not approve this" % fake.nums["post"] in p3
+    assert "2. click(%d) -> REFUSED BY OWNER" % fake.nums["post"] in p3
     p4 = fake.prompt(3)
     assert "- " + note + "\n" in p4 and "(new)" not in p4 and "Note from the owner" not in p4 and DECLINED_LINE in p4
     assert [n["text"] for n in t["notes"]] == [note]
@@ -259,8 +284,8 @@ def test_junk_values_are_rejected_with_a_reason(x):
     assert "talks about the controls or your own steps" in rejected[3]
     assert "your own notes after a closing quote" in rejected[4]
     # each reason is fed back to the model on the next step, as REJECTED
-    assert "1. fill(%d, " % fake.nums["body"] in fake.prompt(1) and "-> REJECTED: the text has your own notes" in fake.prompt(1)
-    assert "-> REJECTED: this copies the goal" in fake.prompt(3)
+    assert "1. fill(%d, " % fake.nums["body"] in fake.prompt(1) and "-> rejected: the text has your own notes" in fake.prompt(1)
+    assert "-> rejected: this copies the goal" in fake.prompt(3)
     # rejected steps are invalid in the trajectory; nothing junk reached the recording
     assert [s["valid"] for s in t["traj"]["steps"]] == [False, True, False, True, False, True, False, True, False, True]
     assert not any("# Filling" in str(s.get("value", "")) or s.get("value") == goal_copy for s in t["steps"])
@@ -352,7 +377,7 @@ def test_draft_title_and_body_edit_in_popup_then_post_needs_approve(x):
     assert page.input_value("#body") == BODY_EDITED, t["history"]   # exactly the owner's text
     assert page.inner_text("#out") == ""
     p4 = fake.prompt(3)
-    assert "[the owner approved this text]" in p4 and "REJECTED" not in p4, p4
+    assert "[the owner approved this text]" in p4 and "rejected" not in p4, p4
     x.call("tell_approve", nonce=t["pending"]["nonce"])
     t = _wait_tell(x, ("confirm", "ended", "needs_user", "awaiting_approval", "awaiting_draft"))
     assert t["status"] == "confirm" and page.inner_text("#out") == "Posted: " + TITLE_DRAFT, t["feed"]
@@ -532,3 +557,266 @@ def test_takeover_while_draft_waits_drops_it(x):
     t = _wait_tell(x, ("confirm", "ended", "needs_user", "awaiting_approval", "awaiting_draft"))
     assert page.input_value("#body") == "", t["feed"]                       # the unapproved draft was never typed
     assert t["status"] == "confirm", t["feed"]
+
+
+# ---- v0.12 loop upgrades ---------------------------------------------------------------------------------------------
+
+def _history(prompt):
+    block = prompt.split("Your previous actions and results:\n", 1)[1]
+    return [ln for ln in block.split("\n") if re.match(r"^\d+\. ", ln)]
+
+
+def test_u1_history_reads_fields_back_and_keeps_owner_lines(x):
+    t1 = "Local AI for computer use: what works?"
+    titles = ["Local AI, try %d" % i for i in range(2, 8)] + ["Local “AI” for computer use"]
+    fake = _setup(x, ['fill({Title}, "%s")' % t1, "click({Post})"] + ['fill({Title}, "%s")' % v for v in titles]
+                  + ['done("Title written")'])
+    page = _start(x)
+    t = _wait_tell(x, ANY)
+    assert t["status"] == "awaiting_approval" and t["pending"]["target"] == "Post", t["feed"]
+    x.call("tell_decline", nonce=t["pending"]["nonce"])
+    t = _wait_tell(x, ("confirm", "ended", "needs_user", "awaiting_approval"))
+    assert t["status"] == "confirm", t["feed"]
+    title, post = fake.nums["title"], fake.nums["post"]
+    # the field as the page holds it (read back), not the action's own words
+    assert '1. fill(%d) "Title" -> field now: "%s" (%d chars)' % (title, t1, len(t1)) in fake.prompt(1), fake.prompt(1)
+    refused = "2. click(%d) -> REFUSED BY OWNER" % post
+    assert refused in fake.prompt(2)
+    # step 10: the 6-line window holds steps 4-9; the owner's refusal at step 2 is still in the block, first
+    h = _history(fake.prompt(9))
+    assert h[0] == refused and [ln.split(".")[0] for ln in h] == ["2", "4", "5", "6", "7", "8", "9"], h
+    assert "1. fill(" not in fake.prompt(9) and "3. fill(" not in fake.prompt(9)
+    assert h[-1] == '9. fill(%d) "Title" -> field now: "Local \'AI\' for computer use" (27 chars)' % title, h
+    # typographic quotes are typed as plain ones (the v2 grammar has no \" escape)
+    assert page.input_value("#title") == 'Local "AI" for computer use'
+    assert t["pinned"] == [refused]
+
+
+def test_u1_read_back_shows_what_the_page_did(x):
+    out = x.sw.evaluate("""() => [
+      AWOSAgent.readbackText({ value: 'abc', len: 3 }, 'abc', 'fill'),
+      AWOSAgent.readbackText({ value: 'ab', len: 2 }, 'abc', 'fill'),
+      AWOSAgent.readbackText({ value: '', len: 0 }, '', 'fill'),
+      AWOSAgent.readbackText({ sensitive: true }, 'x', 'fill'),
+      AWOSAgent.readbackText({ value: 'Newest', len: 6 }, null, 'select'),
+      AWOSAgent.readbackText({ value: 'key sk-ant-api03-AbCdEf0123456789XYZ', len: 36 }, 'key sk-ant-api03-AbCdEf0123456789XYZ', 'fill')]""")
+    assert out[0] == 'field now: "abc" (3 chars)'
+    assert out[1] == 'field now: "ab" (2 chars); that is not what was typed: the page changed it'
+    assert out[2] == 'field now: "" (empty)' and out[3] == "typed into a protected field (not read back)"
+    assert out[4] == 'chosen: "Newest"' and "AbCdEf" not in out[5] and "masked" in out[5]
+
+
+def test_u2_validator_blocks_missing_body_then_approve_card_shows_fields(x):
+    title = "Local AI for computer use: what works for you?"
+    body = "Which browser chores does your local model finish on its own, and where does it break?"
+    fake = _setup(x, ['fill({Title}, "%s")' % title, "click({Post})",              # body empty: not ready, not asked
+                      'fill({Body}, "%s")' % body, "click({Post})",                 # ready: asked, the values shown
+                      'done("Posted")'],
+                  validator=["no: the body is empty", "yes"])
+    page = _start(x)
+    t = _wait_tell(x, ("awaiting_approval", "confirm", "ended", "needs_user"))
+    assert t["status"] == "awaiting_approval" and t["pending"]["target"] == "Post", t["feed"]
+    assert len(_asked(t)) == 1 and t["step"] == 4                                  # the first Post was never asked
+    post = fake.nums["post"]
+    assert '2. click(%d) "Post" -> Not ready: the body is empty' % post in fake.prompt(2), fake.prompt(2)
+    v0 = fake.validator_requests[0]
+    assert v0["grammar"] == 'root ::= "yes" | "no: " [^\\n]{3,160}\n' and v0["max_tokens"] == 60
+    assert v0["temperature"] == 0 and v0["chat_template_kwargs"] == {"enable_thinking": False}
+    u0 = v0["messages"][1]["content"]
+    assert u0.startswith("Owner's goal: " + GOAL) and '- Title: "%s"' % title in u0 and "- Body: (empty)" in u0, u0
+    assert 'About to: click "Post" on "Create post - r/aiagents".' in u0
+    assert '- Body: "%s"' % body in fake.validator_requests[1]["messages"][1]["content"]
+    # the Approve card: what would be sent
+    p = t["pending"]
+    assert [(f["name"], f["value"]) for f in p["fields"]] == [("Title", title), ("Body", body)], p["fields"]
+    assert p["message"].startswith('You are about to click "Post" on "Create post - r/aiagents": Title "%s" / Body "' % title), p["message"]
+    popup = x.popup(x.tab_id(page))
+    popup.wait_for_selector("#tellfields:visible", timeout=15000)
+    shown = popup.inner_text("#tellfields")
+    assert "Title" in shown and title in shown and body in shown, shown
+    assert page.inner_text("#out") == ""
+    popup.click("#tellapprove")
+    t = _wait_tell(x, ("confirm", "ended", "needs_user"))
+    assert t["status"] == "confirm" and page.inner_text("#out") == "Posted: " + title, t["feed"]
+    checks = t["traj"]["checks"]
+    assert [(c["verdict"], c["why"]) for c in checks] == [("no", "the body is empty"), ("yes", "")]
+    assert [s["valid"] for s in t["traj"]["steps"]] == [True, False, True, True, True]
+    x.call("tell_confirm", nonce=t["pending"]["nonce"], yes=False)
+    _check_trajectory(x.call("tell_export_training")["episodes"][0])
+    log = x.sw.evaluate("() => getLocal('tellLog', [])")[0]
+    assert [c["verdict"] for c in log["checks"]] == ["no", "yes"]
+
+
+def test_u3_note_gate_masks_post_until_a_new_approved_draft(x):
+    title1, title2 = "Local AI for computer use", "Which browser chores does your local model finish on its own?"
+    note = "make the title ask about browser chores"
+    fake = _setup(x, ['fill({Title}, "x")', 'needs_user("Anything to change before posting?")',
+                      "click({Post})",                                  # held back: refused without asking
+                      'fill({Title}, "x")',                             # the writer drafts again; the owner approves
+                      "click({Post})",                                  # shown again; checked; asked
+                      'done("posted")'],
+                  writer=[title1, title2], validator=["yes"])
+    page = _start(x)
+    t = _wait_tell(x, ANY)
+    assert t["status"] == "awaiting_draft", t["feed"]
+    x.call("tell_draft_use", nonce=t["pending"]["nonce"], text=title1)
+    t = _wait_tell(x, ANY)
+    assert t["status"] == "needs_user", t["feed"]
+    assert "Post" in _shown(fake.prompt(1))
+    x.call("tell_continue", nonce=t["pending"]["nonce"], note=note)
+    t = _wait_tell(x, ANY)
+    assert t["status"] == "awaiting_draft" and t["pending"]["draft"] == title2, t["feed"]
+    post = fake.nums["post"]
+    p3 = fake.prompt(2)
+    assert "Post" not in _shown(p3) and "Save draft" in _shown(p3), p3
+    assert 'Held back until you act on the owner\'s newest instruction: "Post" (write the text again first).' in p3, p3
+    nums = re.findall(r'"(\d+)"', re.search(r"^num ::= (.*)$", fake.requests[2]["grammar"], re.M)[1])
+    assert str(post) not in nums, nums
+    assert "3. click(%d) -> rejected: the owner gave a new instruction at step 2; act on it first" % post in fake.prompt(3)
+    assert "Post" not in _shown(fake.prompt(3))                        # a rejected step is not an action
+    x.call("tell_draft_use", nonce=t["pending"]["nonce"], text=title2)
+    t = _wait_tell(x, ("awaiting_approval", "confirm", "ended", "needs_user"))
+    assert t["status"] == "awaiting_approval" and t["pending"]["target"] == "Post", t["feed"]
+    assert "Post" in _shown(fake.prompt(4)) and "Held back" not in fake.prompt(4)
+    assert page.input_value("#title") == title2 and t.get("noteGate") is None
+    x.call("tell_stop")
+
+
+def test_u3_note_gate_plain_note_needs_one_action(x):
+    fake = _setup(x, ['needs_user("Post it now?")', "click({Save draft})", "click({Post})", 'done("posted")'])
+    _start(x)
+    t = _wait_tell(x, ANY)
+    assert t["status"] == "needs_user", t["feed"]
+    x.call("tell_continue", nonce=t["pending"]["nonce"], note="save a draft first")
+    t = _wait_tell(x, ("awaiting_approval", "confirm", "ended", "needs_user"))
+    assert t["status"] == "awaiting_approval" and t["pending"]["target"] == "Post", t["feed"]
+    assert "Post" not in _shown(fake.prompt(1)) and "(do another step first)" in fake.prompt(1), fake.prompt(1)
+    assert "Post" in _shown(fake.prompt(2)) and "Held back" not in fake.prompt(2)
+    x.call("tell_stop")
+
+
+def test_u3_go_ahead_note_holds_nothing_back(x):
+    # v0.12 review: the owner's own "ok, now click Post" (or a bare "yes") must not hide Post behind the note gate;
+    # a note that asks for a change, a "don't" or the note that came with a decline still gates
+    out = x.sw.evaluate("""() => {
+      var gate = function (text, withDecline) { var t = { step: 2, notes: [], feed: [], traj: { events: [] }, declined: [] };
+                                                tellAddNote(t, text, withDecline); return !!t.noteGate; };
+      return ['yes', 'ok, now click Post', 'Post it', 'ok, the body is good now: click Post',
+              'ok but make the title shorter', "don't post yet", 'save a draft first', 'Post it'].map(function (s, i) {
+        return gate(s, i === 7); });
+    }""")
+    assert out == [False, False, False, False, True, True, True, True], out
+
+
+def test_u4_note_during_inflight_call_aborts_it(x):
+    note = "do not save a draft; just stop"
+    fake = _setup(x, [("click({Save draft})", 6.0), 'done("Stopped as asked")'])
+    page = _start(x)
+    end = time.time() + 30
+    while len(fake.requests) < 1 and time.time() < end:
+        time.sleep(0.05)
+    assert fake.requests, "no action call"
+    time.sleep(0.3)
+    t0 = time.time()
+    x.call("tell_note", text=note)
+    t = _wait_tell(x, ("confirm", "ended", "needs_user", "awaiting_approval"))
+    assert t["status"] == "confirm", t["feed"]
+    assert time.time() - t0 < 5.0                                       # aborted, not waited out (6 s)
+    assert page.inner_text("#out") == ""                                # the stale click never ran
+    assert len(fake.requests) == 2
+    p2 = fake.prompt(1)
+    assert "Step 1 of" in p2 and "Note from the owner: " + note in p2 and "- " + note + " (new)" in p2, p2
+    assert any(e.get("cancelled") for e in t["traj"]["events"]), t["traj"]["events"]
+    assert [s["action"] for s in t["traj"]["steps"]] == ['done("Stopped as asked")']
+    assert any("dropped" in f["text"] for f in t["feed"])
+
+
+def test_u4_pause_during_inflight_call_drops_it(x):
+    fake = _setup(x, [("click({Save draft})", 6.0), 'done("ok")'])
+    page = _start(x)
+    end = time.time() + 30
+    while len(fake.requests) < 1 and time.time() < end:
+        time.sleep(0.05)
+    time.sleep(0.3)
+    x.call("tell_pause")
+    t = _wait_tell(x, ("paused", "confirm", "ended"), timeout=5)
+    assert t["status"] == "paused" and t["step"] == 0, t["feed"]
+    time.sleep(1.0)
+    assert page.inner_text("#out") == ""
+    x.call("tell_resume")
+    t = _wait_tell(x, ("confirm", "ended", "needs_user"))
+    assert t["status"] == "confirm" and page.inner_text("#out") == "", t["feed"]
+
+
+def test_u5_v2_grammar_rejects_a_backslash(x):
+    bad = 'fill(2, "say \\"hi\\"")'
+    out = x.sw.evaluate("""(bad) => {
+      var A = AWOSAgent, g = A.buildGrammarFor([1, 2], true, {}), legacy = A.buildGrammar(2);
+      var str = function (gr) { return gr.split('\\n').filter(function (l) { return l.indexOf('str ::=') === 0; })[0]; };
+      return { v2: str(g), legacy: str(legacy), rule: A.STR_V2_RULE, e2: A.grammarErrorV2(bad, g), e1: A.grammarError(bad, g),
+               eLegacy: A.grammarErrorV2(bad, legacy), ok: A.grammarErrorV2('fill(2, "say “hi”")', g),
+               q: A.mapQuotes('say “hi”, it’s') };
+    }""", bad)
+    assert out["v2"] == out["rule"] == r'str ::= "\"" [^"\\\n]{0,200} "\""', out
+    assert out["legacy"] == r'str ::= "\"" ( [^"\\\n] | "\\" ["\\] ){0,200} "\""', out         # unchanged
+    assert out["e2"] == "a backslash is not allowed in a quoted string" and out["e1"] == "" and out["eLegacy"] == ""
+    assert out["ok"] == "" and out["q"] == 'say "hi", it\'s'
+    # in the loop: a reply with \" is repaired once, then refused; typographic quotes are typed as plain ones
+    fake = _setup(x, ['fill_enter({Search the community}, "local \\"AI\\" agents")',
+                      'fill_enter({Search the community}, "local “AI” agents")', 'done("searched")'])
+    page = _start(x, "search r/aiagents for threads about local AI agents")
+    t = _wait_tell(x, ANY)
+    assert t["status"] == "confirm", t["feed"]
+    assert fake.repairs == 1 and page.input_value("#q") == 'local "AI" agents'
+    rejected = [e["rejected"] for e in t["traj"]["events"] if e.get("rejected")]
+    assert len(rejected) == 1 and "a backslash is not allowed" in rejected[0], rejected
+    assert "-> rejected: a backslash is not allowed" in fake.prompt(1)
+
+
+def test_u6_clarify_pause_for_a_vague_writing_goal(x):
+    guess = "Ask which local models people use for computer use"
+    answer = "Ask which small local models people trust with browser chores"
+    fake = _setup(x, ['done("ready to write")'], clarify=[guess])
+    page = _start(x, "write a post on r/aiagents")
+    t = _wait_tell(x, ANY)
+    assert t["status"] == "needs_user" and t["pending"]["kind"] == "clarify" and t["pending"]["guess"] == guess, t["feed"]
+    assert fake.requests == [] and len(fake.clarify_requests) == 1                 # asked before the first step
+    assert "write a post on r/aiagents" in fake.clarify_requests[0]["messages"][1]["content"]
+    popup = x.popup(x.tab_id(page))
+    popup.wait_for_selector("#tellclarify:visible", timeout=15000)
+    assert popup.input_value("#tellclarifytext") == guess and not popup.is_visible("#tellcontinue")
+    popup.fill("#tellclarifytext", answer)
+    popup.click("#tellclarifyuse")
+    t = _wait_tell(x, ("confirm", "ended", "needs_user", "awaiting_approval"))
+    assert t["status"] == "confirm", t["feed"]
+    p1 = fake.prompt(0)
+    assert "Owner's instructions (follow these first):\n- " + answer in p1 and "Note from the owner" not in p1, p1
+    assert t["notes"][0]["text"] == answer and t.get("noteGate") is None
+    assert t["traj"]["clarify"]["guess"] == guess and t["traj"]["clarify"]["edited"] is True
+    x.call("tell_confirm", nonce=t["pending"]["nonce"], yes=False)
+    popup.close()
+    page.close()
+    # a goal that says what to ask: no pause; agentClarify off: no pause either
+    for goal, kw in (("write a post on r/aiagents asking which local models people use for computer use", {}),
+                     ("write a post on r/aiagents", {"agentClarify": False})):
+        fake = _setup(x, ['done("ok")'], clarify=["unused"], **kw)
+        page = _start(x, goal)
+        t = _wait_tell(x, ANY)
+        assert t["status"] == "confirm" and fake.clarify_requests == [], (goal, t["feed"])
+        x.call("tell_confirm", nonce=t["pending"]["nonce"], yes=False)
+        page.close()
+    units = x.sw.evaluate("""() => [
+      'write a post on r/aiagents', 'reply to Bob', 'post: Hello all, a quick question here', 'write a comment saying thanks for the help',
+      'email the landlord about the leak in the kitchen', 'find my October invoices', 'Turn off marketing emails'].map(AWOSAgent.vagueWritingGoal)""")
+    assert units == [True, True, False, False, False, False, False], units
+
+
+def test_u6_skip_goes_on_without_an_instruction(x):
+    fake = _setup(x, ['done("ok")'], clarify=["Ask what people think"])
+    _start(x, "write a post on r/aiagents")
+    t = _wait_tell(x, ANY)
+    assert t["pending"]["kind"] == "clarify", t["feed"]
+    x.call("tell_continue", nonce=t["pending"]["nonce"])
+    t = _wait_tell(x, ("confirm", "ended", "needs_user", "awaiting_approval"))
+    assert t["status"] == "confirm" and t["notes"] == [] and t["traj"]["clarify"]["skipped"] is True, t["feed"]
+    assert "Owner's instructions" not in fake.prompt(0)

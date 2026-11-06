@@ -605,7 +605,7 @@ var EXAMPLES = [
   'Draft a listing for a used bike, do not post it',
   'Unsubscribe me from this newsletter',
 ];
-var tell = null, tellCfg = null, lastTellSig = '', tellConfirmFor = '', tellDraftFor = '';
+var tell = null, tellCfg = null, lastTellSig = '', tellConfirmFor = '', tellDraftFor = '', tellClarifyFor = '';
 $('tellexample').textContent = 'e.g. ' + EXAMPLES[Math.floor(Math.random() * EXAMPLES.length)];
 
 function renderTell() {
@@ -637,8 +637,21 @@ function renderTell() {
     $('tellpendingmsg').textContent = p.message;
     $('tellapprove').hidden = $('telldecline').hidden = t.status !== 'awaiting_approval';
     $('tellapprove').textContent = 'Approve "' + (p.target || '').slice(0, 40) + '"';
-    $('tellcontinue').hidden = t.status !== 'needs_user';
+    $('tellcontinue').hidden = t.status !== 'needs_user' || p.kind === 'clarify';
   }
+  // v0.12 (U2): the Approve card shows what the submit would send (read back from the page, masked)
+  var fl = $('tellfields'), fs = p && t.status === 'awaiting_approval' && p.fields ? p.fields : null;
+  fl.hidden = !fs; fl.textContent = '';
+  (fs || []).forEach(function (f) {
+    var row = el('div', { class: 'tf' });
+    row.appendChild(el('div', { class: 'tfname' }, f.name || 'field'));
+    row.appendChild(el('div', { class: 'tfval' }, f.sensitive ? '(protected: not shown)' : (f.value || '(empty)')));
+    fl.appendChild(row);
+  });
+  // v0.12 (U6): a vague writing goal: "What should it say or ask?", pre-filled with the model's guess (once per question)
+  var isClarify = !!(p && t.status === 'needs_user' && p.kind === 'clarify');
+  $('tellclarify').hidden = !isClarify;
+  if (isClarify && tellClarifyFor !== p.nonce) { tellClarifyFor = p.nonce; $('tellclarifytext').value = p.guess || ''; }
   // v0.11: the writer's draft for a compose field: editable; only the text in the box is typed (filled once per draft,
   // so the owner's edits survive the refresh)
   var isDraft = !!(p && t.status === 'awaiting_draft');
@@ -709,6 +722,15 @@ $('tellclose').onclick = function () { call({ type: 'tell_clear' }).then(functio
 $('tellapprove').onclick = function () { tellDecideMsg('tell_approve'); };
 $('telldecline').onclick = function () { tellDecideMsg('tell_decline'); };
 $('tellcontinue').onclick = function () { tellDecideMsg('tell_continue'); };
+$('tellclarifyuse').onclick = function () {
+  var p = tell && tell.pending; if (!p || p.kind !== 'clarify') return;
+  var v = $('tellclarifytext').value.trim(); if (!v) return notice('Write what it should say or ask, or Skip.');
+  call({ type: 'tell_continue', nonce: p.nonce, note: v }).then(refresh);
+};
+$('tellclarifyskip').onclick = function () {
+  var p = tell && tell.pending; if (!p || p.kind !== 'clarify') return;
+  call({ type: 'tell_continue', nonce: p.nonce }).then(refresh);
+};
 function draftCount() { $('telldraftcount').textContent = $('telldrafttext').value.length + ' characters'; }
 $('telldrafttext').oninput = draftCount;
 $('telldraftuse').onclick = function () {
@@ -725,6 +747,9 @@ $('telldraftrewrite').onclick = function () {
 $('telldraftstop').onclick = function () { call({ type: 'tell_stop' }).then(refresh); };
 $('tellnotego').onclick = function () {
   var v = $('tellnote').value.trim(); if (!v) return;
+  if (tell && tell.status === 'needs_user' && tell.pending && tell.pending.kind === 'clarify') {   // v0.12: the answer
+    $('tellnote').value = ''; return call({ type: 'tell_continue', nonce: tell.pending.nonce, note: v }).then(refresh);
+  }
   if (tell && tell.status === 'needs_user') return tellDecideMsg('tell_continue');
   call({ type: 'tell_note', text: v }).then(function () { $('tellnote').value = ''; refresh(); });
 };

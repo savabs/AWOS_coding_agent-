@@ -130,3 +130,5 @@ Online_Mind2Web.json
 # EngineBench: local-only workloads (public-site pages) and run outputs
 bench/engine/local/
 bench/engine/runs/
+# AWOS-Ladder per-task results (answers, goals, page-derived text): local only; only aggregate scores are committed
+runs/ladder/

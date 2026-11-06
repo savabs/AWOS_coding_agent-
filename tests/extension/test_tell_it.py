@@ -204,7 +204,7 @@ def test_unsubscribe_declined_is_fed_back_and_injection_flagged(x):
     t = _wait_tell(x, ("confirm", "ended"))
     assert page.inner_text("#state") == "Subscribed"                                      # never clicked
     second = brain.requests[1]["messages"][1]["content"]
-    assert "1. click(1) -> REJECTED: the owner did not approve this" in second
+    assert "1. click(1) -> REFUSED BY OWNER" in second                   # v0.12 verdict word
     assert "WARNING: this page contains text addressed to AI agents" in second
     assert t["traj"]["flags"] and t["traj"]["flags"][0]["type"] == "prompt_injection"
     x.call("tell_confirm", nonce=t["pending"]["nonce"], yes=False)

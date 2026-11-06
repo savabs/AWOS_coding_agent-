@@ -52,6 +52,12 @@
       <button id="tellapprove" class="danger" hidden>Approve</button>
       <button id="telldecline" hidden>No, don't</button>
       <button id="tellcontinue" hidden>Continue</button>
+      <div id="tellfields" hidden></div>
+      <div id="tellclarify" hidden>
+        <label for="tellclarifytext">What should it say or ask?</label>
+        <input id="tellclarifytext" placeholder="e.g. ask which local models people use for computer use">
+        <div class="acts"><button id="tellclarifyuse" class="primary">Use this</button><button id="tellclarifyskip">Skip</button></div>
+      </div>
       <div id="telldraft" hidden>
         <label for="telldrafttext" id="telldraftlabel">Draft</label>
         <textarea id="telldrafttext" rows="7"></textarea>

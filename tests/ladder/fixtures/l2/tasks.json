@@ -1,0 +1,306 @@
+[
+ {
+  "id": "l2-click-button",
+  "level": 2,
+  "env": "click-button",
+  "seed": 1000,
+  "start": "/mw/miniwob/click-button.html?seed=1000",
+  "goal": "#query",
+  "maxSteps": 3,
+  "policy": {
+   "approve": "all"
+  },
+  "grade": {
+   "type": "miniwob"
+  }
+ },
+ {
+  "id": "l2-click-link",
+  "level": 2,
+  "env": "click-link",
+  "seed": 1001,
+  "start": "/mw/miniwob/click-link.html?seed=1001",
+  "goal": "#query",
+  "maxSteps": 3,
+  "policy": {
+   "approve": "all"
+  },
+  "grade": {
+   "type": "miniwob"
+  }
+ },
+ {
+  "id": "l2-click-tab",
+  "level": 2,
+  "env": "click-tab",
+  "seed": 1002,
+  "start": "/mw/miniwob/click-tab.html?seed=1002",
+  "goal": "#query",
+  "maxSteps": 3,
+  "policy": {
+   "approve": "all"
+  },
+  "grade": {
+   "type": "miniwob"
+  }
+ },
+ {
+  "id": "l2-click-dialog",
+  "level": 2,
+  "env": "click-dialog",
+  "seed": 1003,
+  "start": "/mw/miniwob/click-dialog.html?seed=1003",
+  "goal": "#query",
+  "maxSteps": 3,
+  "policy": {
+   "approve": "all"
+  },
+  "grade": {
+   "type": "miniwob"
+  }
+ },
+ {
+  "id": "l2-click-option",
+  "level": 2,
+  "env": "click-option",
+  "seed": 1004,
+  "start": "/mw/miniwob/click-option.html?seed=1004",
+  "goal": "#query",
+  "maxSteps": 3,
+  "policy": {
+   "approve": "all"
+  },
+  "grade": {
+   "type": "miniwob"
+  }
+ },
+ {
+  "id": "l2-focus-text",
+  "level": 2,
+  "env": "focus-text",
+  "seed": 1005,
+  "start": "/mw/miniwob/focus-text.html?seed=1005",
+  "goal": "#query",
+  "maxSteps": 2,
+  "policy": {
+   "approve": "all"
+  },
+  "grade": {
+   "type": "miniwob"
+  }
+ },
+ {
+  "id": "l2-enter-text",
+  "level": 2,
+  "env": "enter-text",
+  "seed": 1006,
+  "start": "/mw/miniwob/enter-text.html?seed=1006",
+  "goal": "#query",
+  "maxSteps": 4,
+  "policy": {
+   "approve": "all"
+  },
+  "grade": {
+   "type": "miniwob"
+  }
+ },
+ {
+  "id": "l2-enter-text-2",
+  "level": 2,
+  "env": "enter-text-2",
+  "seed": 1007,
+  "start": "/mw/miniwob/enter-text-2.html?seed=1007",
+  "goal": "#query",
+  "maxSteps": 4,
+  "policy": {
+   "approve": "all"
+  },
+  "grade": {
+   "type": "miniwob"
+  }
+ },
+ {
+  "id": "l2-login-user",
+  "level": 2,
+  "env": "login-user",
+  "seed": 1008,
+  "start": "/mw/miniwob/login-user.html?seed=1008",
+  "goal": "#query",
+  "maxSteps": 5,
+  "policy": {
+   "approve": "all",
+   "owner_types": {
+    "css": "#password",
+    "from_goal": "password \"([^\"]+)\""
+   }
+  },
+  "grade": {
+   "type": "miniwob"
+  }
+ },
+ {
+  "id": "l2-click-checkboxes",
+  "level": 2,
+  "env": "click-checkboxes",
+  "seed": 1009,
+  "start": "/mw/miniwob/click-checkboxes.html?seed=1009",
+  "goal": "#query",
+  "maxSteps": 6,
+  "policy": {
+   "approve": "all"
+  },
+  "grade": {
+   "type": "miniwob"
+  }
+ },
+ {
+  "id": "l2-choose-list",
+  "level": 2,
+  "env": "choose-list",
+  "seed": 1010,
+  "start": "/mw/miniwob/choose-list.html?seed=1010",
+  "goal": "#query",
+  "maxSteps": 3,
+  "policy": {
+   "approve": "all"
+  },
+  "grade": {
+   "type": "miniwob"
+  }
+ },
+ {
+  "id": "l2-use-autocomplete",
+  "level": 2,
+  "env": "use-autocomplete-nodelay",
+  "seed": 1011,
+  "start": "/mw/miniwob/use-autocomplete-nodelay.html?seed=1011",
+  "goal": "#query",
+  "maxSteps": 5,
+  "policy": {
+   "approve": "all"
+  },
+  "grade": {
+   "type": "miniwob"
+  }
+ },
+ {
+  "id": "l2-navigate-tree",
+  "level": 2,
+  "env": "navigate-tree",
+  "seed": 1012,
+  "start": "/mw/miniwob/navigate-tree.html?seed=1012",
+  "goal": "#query",
+  "maxSteps": 6,
+  "policy": {
+   "approve": "all"
+  },
+  "grade": {
+   "type": "miniwob"
+  }
+ },
+ {
+  "id": "l2-search-engine",
+  "level": 2,
+  "env": "search-engine",
+  "seed": 1013,
+  "start": "/mw/miniwob/search-engine.html?seed=1013",
+  "goal": "#query",
+  "maxSteps": 6,
+  "policy": {
+   "approve": "all"
+  },
+  "grade": {
+   "type": "miniwob"
+  }
+ },
+ {
+  "id": "l2-email-inbox-delete",
+  "level": 2,
+  "env": "email-inbox-delete",
+  "seed": 1014,
+  "start": "/mw/miniwob/email-inbox-delete.html?seed=1014",
+  "goal": "#query",
+  "maxSteps": 5,
+  "policy": {
+   "approve": "all"
+  },
+  "grade": {
+   "type": "miniwob"
+  }
+ },
+ {
+  "id": "l2-social-media",
+  "level": 2,
+  "env": "social-media",
+  "seed": 1015,
+  "start": "/mw/miniwob/social-media.html?seed=1015",
+  "goal": "#query",
+  "maxSteps": 4,
+  "policy": {
+   "approve": "all"
+  },
+  "grade": {
+   "type": "miniwob"
+  }
+ },
+ {
+  "id": "l2-enter-date",
+  "level": 2,
+  "env": "enter-date",
+  "seed": 1016,
+  "start": "/mw/miniwob/enter-date.html?seed=1016",
+  "goal": "#query",
+  "maxSteps": 4,
+  "policy": {
+   "approve": "all"
+  },
+  "grade": {
+   "type": "miniwob"
+  }
+ },
+ {
+  "id": "l2-form-sequence",
+  "level": 2,
+  "env": "form-sequence",
+  "seed": 1017,
+  "start": "/mw/miniwob/form-sequence.html?seed=1017",
+  "goal": "#query",
+  "maxSteps": 5,
+  "policy": {
+   "approve": "all"
+  },
+  "grade": {
+   "type": "miniwob"
+  }
+ },
+ {
+  "id": "l2-simple-algebra",
+  "level": 2,
+  "env": "simple-algebra",
+  "seed": 1018,
+  "start": "/mw/miniwob/simple-algebra.html?seed=1018",
+  "goal": "#query",
+  "maxSteps": 3,
+  "policy": {
+   "approve": "all"
+  },
+  "grade": {
+   "type": "miniwob"
+  }
+ },
+ {
+  "id": "l2-click-collapsible",
+  "level": 2,
+  "env": "click-collapsible-nodelay",
+  "seed": 1019,
+  "start": "/mw/miniwob/click-collapsible-nodelay.html?seed=1019",
+  "goal": "#query",
+  "maxSteps": 3,
+  "policy": {
+   "approve": "all"
+  },
+  "grade": {
+   "type": "miniwob"
+  }
+ }
+]

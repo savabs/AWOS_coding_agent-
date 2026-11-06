@@ -80,3 +80,10 @@ button.small { padding: 2px 8px; font-size: 12px; }
 #telldraft textarea { width: 100%; box-sizing: border-box; font: inherit; resize: vertical; margin-top: 2px; }
 #telldraft input { width: 100%; box-sizing: border-box; font: inherit; margin: 4px 0; }
 #telldraftcount { font-size: 11px; text-align: right; }
+
+/* v0.12 Tell it: the values a submit would send (Approve card), the clarifying question of a writing goal */
+#tellfields { margin: 4px 0; }
+#tellfields .tf { margin: 3px 0; font-size: 12px; }
+#tellfields .tfname { font-weight: 600; }
+#tellfields .tfval { white-space: pre-wrap; max-height: 120px; overflow: auto; background: #f6f8fa; border-radius: 4px; padding: 3px 5px; }
+#tellclarify input { width: 100%; box-sizing: border-box; font: inherit; margin: 4px 0; }

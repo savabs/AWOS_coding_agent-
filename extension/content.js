@@ -34,6 +34,9 @@
  *   popup_close {n, name} -> AWOSPortal.closeBlocked: close a pop-up the agent brain read as harmless
  *   agent_observe / agent_act {act, approved, expectName} / agent_secrets -> Tell it (lib/agent.js contract):
  *          act on control n of the last observation, with the same danger / sensitive-field gates
+ *   v0.12: agent_act's fill / fill_enter / select reply carries `readback` {value, len} (what the field holds now, read
+ *          from the page; a sensitive field is never read: {sensitive}); agent_fields {n} -> the fields of control n's
+ *          form (or of the page) with their values, for the pre-submit check (sensitive fields: name only)
  * v0.7: a recorded click inside a repeated list / table row is marked `variable` (goal-guided replay).
  * v0.9.1: every recorded step carries `dialog` {name, tab} when its control sat in a dialog (the app's Settings window),
  *   and `innerScroll` (the scrollTop of the inner scroll box it sat in); the lazy-target scroll search scrolls inner
@@ -472,8 +475,10 @@
         if (pd && msg.approved !== true) return reply({ ok: false, needsApproval: true, danger: pd, loc: loc });
       }
       setValue(el, String(a.value == null ? '' : a.value));
-      if (a.verb === 'fill') return reply({ ok: true, loc: loc });
-      reply({ ok: true, loc: loc, url: location.href, recDanger: pressDanger(el, name, false) });
+      // v0.12: what the field holds now (a page may cut, reformat or refuse the text); a plain fill is read after the
+      // page's own input handlers ran, a fill_enter before its Enter
+      if (a.verb === 'fill') { setTimeout(function () { reply({ ok: true, loc: loc, readback: readBack(el) }); }, 60); return; }
+      reply({ ok: true, loc: loc, url: location.href, recDanger: pressDanger(el, name, false), readback: readBack(el) });
       setTimeout(function () { pressEnter(el); }, 0);
       return;
     }
@@ -482,9 +487,40 @@
       var o = Array.prototype.slice.call(el.options).find(function (x) { return S.norm(x.text).toLowerCase() === want; });
       if (!o) return reply({ ok: false, error: '"' + a.option + '" is not an option here' });
       setValue(el, o.value);
-      return reply({ ok: true, loc: loc, value: o.value, optionText: S.norm(o.text) });
+      return reply({ ok: true, loc: loc, value: o.value, optionText: S.norm(o.text), readback: readBack(el) });
     }
     reply({ ok: false, error: 'unknown action' });
+  }
+  /** v0.12: a field's text as the page holds it now (300 characters, with its full length); never a sensitive one. */
+  function readBack(el) {
+    if (!el || !el.isConnected) return null;
+    if (S.sensitiveField(el) || String(el.type || '').toLowerCase() === 'password') return { sensitive: true };
+    var v;
+    if (el.tagName === 'SELECT') { var so = el.options[el.selectedIndex]; v = so ? S.norm(so.text) : ''; }
+    else v = el.isContentEditable ? (el.innerText || '') : String(el.value == null ? '' : el.value);
+    return { value: v.slice(0, 300), len: v.length };
+  }
+  /** v0.12: the text fields of control n's form (every text field of the page when it sits in no form), with the
+   *  values they hold now, for the pre-submit check. A sensitive field gives its name only. */
+  function agentFields(n) {
+    var btn = L.observed(n), all = [];
+    for (var i = 1; L.observed(i); i++) all.push(L.observed(i));
+    var formOf = function (e) { return e && (e.form || L.closestDeep(e, 'form')) || null; };
+    var fm = formOf(btn);
+    var fields = all.filter(function (e) {
+      if (!e.isConnected) return false;
+      var text = /^(textarea|select)$/i.test(e.tagName) || e.isContentEditable
+        || (e.tagName === 'INPUT' && /^(text|search|email|url|tel|number|password|)$/i.test(e.type || ''));
+      return text && (!fm || formOf(e) === fm);
+    }).slice(0, 8);
+    return fields.map(function (e) {
+      var nm = L.accName(e) || (e.getAttribute('placeholder') || '') || (e.name || ''), rb = readBack(e) || {};
+      return rb.sensitive ? { name: nm, sensitive: true } : { name: nm, value: fullValue(e), len: rb.len || 0 };
+    });
+  }
+  function fullValue(e) {
+    var v = e.tagName === 'SELECT' ? ((e.options[e.selectedIndex] || {}).text || '') : e.isContentEditable ? (e.innerText || '') : String(e.value == null ? '' : e.value);
+    return v.slice(0, 2000);
   }
   /** sensitive fields the user has typed into (values never leave the page: only the locator and the reason). */
   function agentSecrets() {
@@ -547,7 +583,8 @@
       case 'page_text': reply({ url: location.href, text: S.norm(document.body ? document.body.innerText : '').slice(0, 2000) }); return;
       case 'observe': reply(L.observe()); return;             // the final page for the local verifier
       case 'agent_observe': reply(L.observe()); return;       // Tell it: the page, numbered as the agent sees it
-      case 'agent_act': agentAct(msg, reply); return;
+      case 'agent_act': agentAct(msg, reply); return true;     // (v0.12: a fill replies after its read-back)
+      case 'agent_fields': reply({ fields: agentFields(msg.n) }); return;    // v0.12 pre-submit check
       case 'agent_secrets': reply({ fields: agentSecrets() }); return;
       case 'banner': banner(msg.text); reply({ ok: true }); return;
       case 'phone_code': phoneCode(msg.code, reply); return;   // v0.8: the user's own code, sent from their phone
